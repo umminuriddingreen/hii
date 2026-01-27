@@ -4,6 +4,9 @@ import { loadConfig } from './config.js';
 import { agentLoop } from './agent.js';
 import { VectorStore } from './store/vectordb.js';
 import { ingestPath } from './rag/ingest.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { buildVaultGraph } from './graph.js';
 
 type ServeOpts = {
   port?: number;
@@ -73,6 +76,39 @@ export async function startServer(opts: ServeOpts = {}) {
         return send(res, 200, { ok: true, chunks: count });
       }
 
+      if (u.pathname === '/graph' && req.method === 'GET') {
+        if (!cfg.obsidianVaultPath) return send(res, 400, { error: 'vault not configured' });
+        try {
+          const graph = buildVaultGraph(cfg.obsidianVaultPath);
+          return send(res, 200, graph);
+        } catch (e: any) {
+          return send(res, 500, { error: e?.message || String(e) });
+        }
+      }
+
+      if (u.pathname === '/view' && req.method === 'GET') {
+        const p = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../public/index.html');
+        try {
+          const html = fs.readFileSync(p, 'utf-8');
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(html);
+        } catch {
+          return send(res, 500, { error: 'viewer not found' });
+        }
+        return;
+      }
+
+      if (u.pathname.startsWith('/static/')) {
+        const rel = u.pathname.replace('/static/', '');
+        const p = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../public', rel);
+        if (!fs.existsSync(p)) return send(res, 404, { error: 'static not found' });
+        const ext = path.extname(p).toLowerCase();
+        const type = ext === '.js' ? 'application/javascript' : ext === '.css' ? 'text/css' : 'text/plain';
+        res.writeHead(200, { 'Content-Type': type });
+        fs.createReadStream(p).pipe(res);
+        return;
+      }
+
       return send(res, 404, { error: 'not found' });
     } catch (e: any) {
       return send(res, 500, { error: e?.message || String(e) });
@@ -82,4 +118,3 @@ export async function startServer(opts: ServeOpts = {}) {
   await new Promise<void>((resolve) => server.listen(port, resolve));
   return { port, close: () => new Promise<void>((r) => server.close(() => r())) };
 }
-

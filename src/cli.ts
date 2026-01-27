@@ -190,9 +190,7 @@ program.command('papers')
     console.log(`Total chunks ingested: ${total}`);
   });
 
-program.parseAsync(process.argv);
-
-// Serve command (must be defined before parse if moved)
+// Serve command (define before parse)
 program.command('serve')
   .description('Start local HTTP server for hii APIs')
   .option('-p, --port <n>', 'Port to listen on', '8787')
@@ -216,3 +214,5 @@ program.command('serve')
     });
     console.log(`hii server listening on http://127.0.0.1:${srv.port}`);
   });
+
+program.parseAsync(process.argv);

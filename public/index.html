@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>hii Vault Viewer</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>hii Vault Viewer</h1>
+      <div>
+        <button id="reload">Reload</button>
+        <span id="status"></span>
+      </div>
+    </header>
+    <main>
+      <section class="sidebar">
+        <h3>Notes</h3>
+        <input id="filter" placeholder="Filter notes..." />
+        <ul id="notes"></ul>
+      </section>
+      <section class="content">
+        <canvas id="graph" width="800" height="600"></canvas>
+        <div id="info"></div>
+      </section>
+    </main>
+    <script src="/static/viewer.js"></script>
+  </body>
+</html>
+
