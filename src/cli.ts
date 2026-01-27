@@ -51,19 +51,29 @@ program.command('models')
   .option('--set-base <name>', 'Set base model')
   .option('--set-coder <name>', 'Set coder model')
   .option('--set-embed <name>', 'Set embed model')
+  .option('--set-vault <path>', 'Set Obsidian vault path')
+  .option('--set-memory <onoff>', 'Enable/disable memory (on|off)')
+  .option('--set-memory-entries <n>', 'Set default memory recall entries')
   .action((opts) => {
     const cfg = loadConfig();
-    if (opts.setBase || opts.setCoder || opts.setEmbed) {
-      saveConfig({
+    if (opts.setBase || opts.setCoder || opts.setEmbed || opts.setVault || opts.setMemory || opts.setMemoryEntries) {
+      const updates: any = {
         baseModel: opts.setBase ?? cfg.baseModel,
         coderModel: opts.setCoder ?? cfg.coderModel,
         embedModel: opts.setEmbed ?? cfg.embedModel,
-      });
-      console.log('Updated models.');
+      };
+      if (opts.setVault) updates.obsidianVaultPath = opts.setVault;
+      if (opts.setMemory) updates.memoryEnabled = String(opts.setMemory).toLowerCase() === 'on';
+      if (opts.setMemoryEntries) updates.memoryMaxEntries = Number(opts.setMemoryEntries) || cfg.memoryMaxEntries;
+      saveConfig(updates);
+      console.log('Updated configuration.');
     } else {
       console.log('Base:', cfg.baseModel);
       console.log('Coder:', cfg.coderModel);
       console.log('Embed:', cfg.embedModel);
+      if (cfg.obsidianVaultPath) console.log('Vault:', cfg.obsidianVaultPath);
+      console.log('Memory enabled:', cfg.memoryEnabled);
+      console.log('Memory entries:', cfg.memoryMaxEntries);
     }
   });
 
@@ -88,6 +98,23 @@ program.command('tool')
       console.error('Failed to create tool:', e?.message || e);
       process.exit(1);
     }
+  });
+
+program.command('memory')
+  .description('Memory utilities')
+  .command('test')
+  .option('--vault <path>', 'Override vault path for test')
+  .action(async (opts) => {
+    const cfg = loadConfig();
+    const vault = opts.vault || cfg.obsidianVaultPath;
+    if (!vault) {
+      console.error('No vault path configured. Use: hii models --set-vault <path>');
+      process.exit(1);
+    }
+    const { appendChat } = await import('./memory.js');
+    const ts = new Date().toISOString();
+    appendChat(vault, `Memory test at ${ts}`, 'OK: wrote to Obsidian vault');
+    console.log('Wrote test entry to vault:', vault);
   });
 
 program.command('papers')

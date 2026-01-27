@@ -29,8 +29,11 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
   - `--memory-entries <n>`: recall this many entries
 - `hii papers "query" [--max N]`: Fetch OA PDFs for a query and ingest
 - `hii models [--set-base <m>] [--set-coder <m>] [--set-embed <m>]`
+- `hii models --set-vault "/Users/ummi/Library/Mobile Documents/iCloud~md~obsidian/Documents/hii/hii"`
+- `hii models --set-memory on --set-memory-entries 30`
 - `hii config`: print effective config
 - `hii tool new <name>`: scaffold a new tool file
+ - `hii memory test [--vault <path>]`: write a test entry to the vault
 
 ## Configuration
 
@@ -70,6 +73,8 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
   - Disable per call: `--no-memory`
   - Size: `--memory-entries <n>` or set in config
   - Change vault via `HII_OBSIDIAN_VAULT` or `agent.config.json`
+  - Set vault via CLI: `hii models --set-vault "<path>"`
+  - Test write: `hii memory test`
 - Best Practices (see `docs/obsidian.md`): tags, templates, backlinks/MOCs, periodic reviews
 
 ## Safety
@@ -88,4 +93,3 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
 ## License
 
 Private repository by request; no license header added.
-
