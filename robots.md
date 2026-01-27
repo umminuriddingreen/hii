@@ -89,7 +89,7 @@ cli/
 ## Limitations / TODOs
 
 - Tool-calling: heuristic; no structured function-call loop yet.
-- Web search: no real provider; add SerpAPI or local scraping.
+- Web search: implemented; add caching, allowlists, and rate limiting.
 - Filetypes: PDF/DOCX/CSV not yet supported.
 - Guardrails: no interactive confirmations for destructive shell actions.
 - REPL: `chat` is single-turn; add multi-turn interactive mode.
@@ -98,26 +98,19 @@ cli/
 ## Planned Roadmap
 
 1. Structured Tool-Calling
-   - Define tool schema (rag.search, shell.run, web.search).
-   - Implement controller loop: model suggests tool calls -> execute -> feed results -> final answer.
-
-2. Web Search Provider
-   - SerpAPI (implemented) and DuckDuckGo fallback (implemented).
-   - Option: headless browser for scraping with rate limiting (future).
-3. Structured Tool-Calling
    - Current: heuristic triggers. Next: schema-driven calls with confirmation for shell/download.
 
-3. RAG Enhancements
+2. RAG Enhancements
    - PDF via `pdf-parse`, DOCX via `docx`, CSV parsing.
    - Hybrid retrieval (BM25 + vector) and metadata filters.
    - Smarter chunking for code (by function/class) and markdown sections.
 
-4. Safety & UX
+3. Safety & UX
    - Shell confirmations for write/destructive commands.
    - Dry-run patches for file edits.
    - Sandboxed working directory and allowlist.
 
-5. Developer Experience
+4. Developer Experience
    - Interactive REPL (`hii chat` without args).
    - Session logs and resume.
    - Optional React TUI.

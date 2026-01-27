@@ -87,7 +87,6 @@ program.command('tool')
     }
   });
 
-program.parseAsync(process.argv);
 program.command('papers')
   .description('Fetch and ingest open-access PDFs for a scholarly query')
   .argument('<query...>', 'Academic query')
@@ -111,3 +110,5 @@ program.command('papers')
     }
     console.log(`Total chunks ingested: ${total}`);
   });
+
+program.parseAsync(process.argv);

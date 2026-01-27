@@ -44,7 +44,14 @@ export async function agentLoop(cfg: Config, prompt: string, opts?: { interactiv
     const items = await academicSearch(prompt, 10);
     toolResults.push({ name: 'academic', content: formatAcademic(items) });
     if (opts?.downloadPdfs) {
-      const oaLinks = items.map(it => ({ title: it.title, url: it.url })).filter(x => x.url && /\.pdf($|\?)/i.test(x.url));
+      const oaLinks = items.map(it => {
+        let url = it.url;
+        if (it.source === 'arxiv') {
+          const m = (it.id || it.url).match(/arxiv\.org\/abs\/([^<\s]+)/);
+          if (m) url = `https://arxiv.org/pdf/${m[1]}.pdf`;
+        }
+        return { title: it.title, url };
+      }).filter(x => x.url && /\.pdf($|\?)/i.test(x.url));
       const db = new VectorStore(cfg.dbPath);
       for (const oa of oaLinks.slice(0, 3)) {
         try {
