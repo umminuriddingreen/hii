@@ -3,11 +3,12 @@ import { VectorStore } from './store/vectordb.js';
 import { ragSearch } from './tools/rag.js';
 import { runShell } from './tools/shell.js';
 import { webSearch } from './tools/search.js';
+import { academicSearch, formatAcademic } from './tools/academic.js';
 import { Config } from './config.js';
 
 type ToolResult = { name: string; content: string };
 
-export async function agentLoop(cfg: Config, prompt: string, opts?: { interactive?: boolean }) {
+export async function agentLoop(cfg: Config, prompt: string, opts?: { interactive?: boolean, webProvider?: 'serpapi'|'duckduckgo', scholarly?: boolean }) {
   const messages: OllamaMessage[] = [
     { role: 'system', content: 'You are a local agent. Use tools when user asks for file lookup, shell, or web. Keep answers concise.' },
     { role: 'user', content: prompt }
@@ -31,8 +32,14 @@ export async function agentLoop(cfg: Config, prompt: string, opts?: { interactiv
 
   if (cfg.allowSearch && (lower.includes('search web') || lower.includes('web:'))) {
     const q = prompt.replace(/^.*?(search web|web:)\s*/i, '');
-    const content = await webSearch(q || prompt);
+    const content = await webSearch(q || prompt, opts?.webProvider);
     toolResults.push({ name: 'web', content });
+  }
+
+  const scholarlyIntent = opts?.scholarly || /(peer[- ]?review|paper|citation|doi|arxiv|openalex|crossref|literature review|systematic review|journal|conference|book)/i.test(prompt);
+  if (cfg.allowSearch && scholarlyIntent) {
+    const items = await academicSearch(prompt, 10);
+    toolResults.push({ name: 'academic', content: formatAcademic(items) });
   }
 
   if (toolResults.length) {
@@ -42,4 +49,3 @@ export async function agentLoop(cfg: Config, prompt: string, opts?: { interactiv
   const { text } = await chat(cfg.baseModel, messages, { temperature: 0.2 });
   return text;
 }
-

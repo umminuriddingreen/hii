@@ -1,4 +1,5 @@
 import fetch from 'node-fetch';
+import { duckduckgoSearch } from './duckduckgo.js';
 
 type SerpResult = {
   title: string;
@@ -6,15 +7,16 @@ type SerpResult = {
   snippet?: string;
 };
 
-export async function webSearch(query: string): Promise<string> {
+export async function webSearch(query: string, provider?: 'serpapi' | 'duckduckgo'): Promise<string> {
+  const selected = provider || (process.env.SERPAPI_KEY ? 'serpapi' : 'duckduckgo');
+  if (selected === 'duckduckgo') return duckduckgoSearch(query, 5);
   const key = process.env.SERPAPI_KEY;
-  if (!key) return `Web search disabled: missing SERPAPI_KEY. Query: ${query}`;
+  if (!key) return duckduckgoSearch(query, 5);
   const url = new URL('https://serpapi.com/search.json');
   url.searchParams.set('engine', 'google');
   url.searchParams.set('q', query);
   url.searchParams.set('num', '5');
   url.searchParams.set('api_key', key);
-
   const res = await fetch(url.toString());
   if (!res.ok) return `Web search error: ${res.status} ${await res.text()}`;
   const data: any = await res.json();

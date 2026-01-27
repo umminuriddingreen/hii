@@ -31,11 +31,14 @@ program.command('chat')
   .argument('<prompt...>', 'Prompt text')
   .option('--shell', 'Allow shell tool')
   .option('--web', 'Allow web search tool')
+  .option('--web-provider <name>', 'Web provider: serpapi|duckduckgo', 'auto')
+  .option('--scholarly', 'Use academic search (arXiv/OpenAlex/Crossref)')
   .option('--online', 'Disable offline mode')
   .action(async (promptParts, opts) => {
     const cfg = loadConfig();
     const merged = { ...cfg, allowShell: !!opts.shell, allowSearch: !!opts.web, offline: !opts.online };
-    const text = await agentLoop(merged, promptParts.join(' '));
+    const provider = opts.webProvider === 'auto' ? undefined : opts.webProvider;
+    const text = await agentLoop(merged, promptParts.join(' '), { webProvider: provider, scholarly: !!opts.scholarly });
     console.log(text);
   });
 

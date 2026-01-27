@@ -73,8 +73,13 @@ cli/
 - Chat with local LLM via Ollama.
 - RAG over local files (text/code) via LanceDB.
 - Optional shell execution tool (`--shell`).
-- Web search placeholder (disabled/offline default).
+- Web search via SerpAPI (with `SERPAPI_KEY`) or DuckDuckGo (no key) using `--web` and optional `--web-provider`.
 - Configurable models and flags; local JSON persisted.
+
+### Academic Search
+- Sources: arXiv (API), OpenAlex, Crossref.
+- Trigger: `--scholarly` flag or intent keywords (paper, DOI, arXiv, peer reviewed, literature review, journal, conference, book).
+- Output: Title, authors, venue/year, DOI/URL, short abstract.
 
 ## Limitations / TODOs
 
@@ -92,7 +97,7 @@ cli/
    - Implement controller loop: model suggests tool calls -> execute -> feed results -> final answer.
 
 2. Web Search Provider
-   - SerpAPI integration implemented via `SERPAPI_KEY` env and `--web` flag.
+   - SerpAPI (implemented) and DuckDuckGo fallback (implemented).
    - Option: headless browser for scraping with rate limiting (future).
 
 3. RAG Enhancements
