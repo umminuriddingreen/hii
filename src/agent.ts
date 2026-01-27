@@ -5,10 +5,13 @@ import { runShell } from './tools/shell.js';
 import { webSearch } from './tools/search.js';
 import { academicSearch, formatAcademic } from './tools/academic.js';
 import { Config } from './config.js';
+import { ingestPdfToRag, downloadPdf } from './tools/papers.js';
 
 type ToolResult = { name: string; content: string };
 
-export async function agentLoop(cfg: Config, prompt: string, opts?: { interactive?: boolean, webProvider?: 'serpapi'|'duckduckgo', scholarly?: boolean }) {
+type StructuredToolCall = { name: string; args: any };
+
+export async function agentLoop(cfg: Config, prompt: string, opts?: { interactive?: boolean, webProvider?: 'serpapi'|'duckduckgo', scholarly?: boolean, downloadPdfs?: boolean }) {
   const messages: OllamaMessage[] = [
     { role: 'system', content: 'You are a local agent. Use tools when user asks for file lookup, shell, or web. Keep answers concise.' },
     { role: 'user', content: prompt }
@@ -40,6 +43,16 @@ export async function agentLoop(cfg: Config, prompt: string, opts?: { interactiv
   if (cfg.allowSearch && scholarlyIntent) {
     const items = await academicSearch(prompt, 10);
     toolResults.push({ name: 'academic', content: formatAcademic(items) });
+    if (opts?.downloadPdfs) {
+      const oaLinks = items.map(it => ({ title: it.title, url: it.url })).filter(x => x.url && /\.pdf($|\?)/i.test(x.url));
+      const db = new VectorStore(cfg.dbPath);
+      for (const oa of oaLinks.slice(0, 3)) {
+        try {
+          const p = await downloadPdf(oa.url, oa.title);
+          await ingestPdfToRag(db, cfg.embedModel, p);
+        } catch {}
+      }
+    }
   }
 
   if (toolResults.length) {

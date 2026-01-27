@@ -80,6 +80,11 @@ cli/
 - Sources: arXiv (API), OpenAlex, Crossref.
 - Trigger: `--scholarly` flag or intent keywords (paper, DOI, arXiv, peer reviewed, literature review, journal, conference, book).
 - Output: Title, authors, venue/year, DOI/URL, short abstract.
+ - PDFs: `--download-pdfs` auto-fetches OA PDFs (size <= 25MB) and ingests to RAG; or use `hii papers fetch "<query>"`.
+
+### Tool Builder
+- `hii tool new <name>` scaffolds `src/tools/<name>.ts` with a minimal template.
+- After creating a tool, run `npm run build`.
 
 ## Limitations / TODOs
 
@@ -99,6 +104,8 @@ cli/
 2. Web Search Provider
    - SerpAPI (implemented) and DuckDuckGo fallback (implemented).
    - Option: headless browser for scraping with rate limiting (future).
+3. Structured Tool-Calling
+   - Current: heuristic triggers. Next: schema-driven calls with confirmation for shell/download.
 
 3. RAG Enhancements
    - PDF via `pdf-parse`, DOCX via `docx`, CSV parsing.

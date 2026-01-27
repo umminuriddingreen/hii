@@ -33,12 +33,13 @@ program.command('chat')
   .option('--web', 'Allow web search tool')
   .option('--web-provider <name>', 'Web provider: serpapi|duckduckgo', 'auto')
   .option('--scholarly', 'Use academic search (arXiv/OpenAlex/Crossref)')
+  .option('--download-pdfs', 'Download open-access PDFs and ingest into RAG (with --scholarly)')
   .option('--online', 'Disable offline mode')
   .action(async (promptParts, opts) => {
     const cfg = loadConfig();
     const merged = { ...cfg, allowShell: !!opts.shell, allowSearch: !!opts.web, offline: !opts.online };
     const provider = opts.webProvider === 'auto' ? undefined : opts.webProvider;
-    const text = await agentLoop(merged, promptParts.join(' '), { webProvider: provider, scholarly: !!opts.scholarly });
+    const text = await agentLoop(merged, promptParts.join(' '), { webProvider: provider as any, scholarly: !!opts.scholarly, downloadPdfs: !!opts.downloadPdfs });
     console.log(text);
   });
 
@@ -70,4 +71,43 @@ program.command('config')
     console.log(JSON.stringify(cfg, null, 2));
   });
 
+program.command('tool')
+  .description('Tool builder utilities')
+  .command('new')
+  .argument('<name>', 'Tool name (file will be created)')
+  .action(async (name) => {
+    try {
+      const { scaffoldTool } = await import('./tools/builder.js');
+      const file = scaffoldTool(name);
+      console.log(`Created tool: ${file}`);
+      console.log('Run: npm run build to compile.');
+    } catch (e: any) {
+      console.error('Failed to create tool:', e?.message || e);
+      process.exit(1);
+    }
+  });
+
 program.parseAsync(process.argv);
+program.command('papers')
+  .description('Fetch and ingest open-access PDFs for a scholarly query')
+  .argument('<query...>', 'Academic query')
+  .option('--max <n>', 'Max papers to fetch', '3')
+  .action(async (qParts, opts) => {
+    const query = qParts.join(' ');
+    const cfg = loadConfig();
+    const items = await (await import('./tools/academic.js')).academicSearch(query, Number(opts.max) || 3);
+    const oa = items.map(it => ({ title: it.title, url: it.url })).filter(x => x.url && /\.pdf($|\?)/i.test(x.url)).slice(0, Number(opts.max) || 3);
+    const db = new (await import('./store/vectordb.js')).VectorStore(cfg.dbPath);
+    let total = 0;
+    for (const r of oa) {
+      try {
+        const p = await (await import('./tools/papers.js')).downloadPdf(r.url, r.title);
+        const n = await (await import('./tools/papers.js')).ingestPdfToRag(db, cfg.embedModel, p);
+        total += n;
+        console.log(`Fetched ${r.title} -> ${p} (${n} chunks)`);
+      } catch (e: any) {
+        console.error(`Failed ${r.title}: ${e?.message || e}`);
+      }
+    }
+    console.log(`Total chunks ingested: ${total}`);
+  });
