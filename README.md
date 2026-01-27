@@ -34,6 +34,7 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
 - `hii config`: print effective config
 - `hii tool new <name>`: scaffold a new tool file
  - `hii memory test [--vault <path>]`: write a test entry to the vault
+ - `hii memory check [--vault <path>]`: verify vault path and .obsidian presence
 
 ## Configuration
 

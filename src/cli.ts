@@ -67,6 +67,20 @@ program.command('models')
       if (opts.setMemoryEntries) updates.memoryMaxEntries = Number(opts.setMemoryEntries) || cfg.memoryMaxEntries;
       saveConfig(updates);
       console.log('Updated configuration.');
+      if (updates.obsidianVaultPath) {
+        import('./memory.js').then(({ checkVault }) => {
+          const status = checkVault(updates.obsidianVaultPath);
+          if (!status.exists) {
+            console.warn('Warning: vault path does not exist:', updates.obsidianVaultPath);
+            console.warn('Create this folder as an Obsidian vault or set a different path.');
+          } else if (!status.hasObsidian) {
+            console.warn('Warning: path exists but is not an Obsidian vault (.obsidian missing):', updates.obsidianVaultPath);
+            console.warn('Open this folder in Obsidian to initialize the vault, or choose an existing vault path.');
+          } else {
+            console.log('Vault check: OK (.obsidian found).');
+          }
+        });
+      }
     } else {
       console.log('Base:', cfg.baseModel);
       console.log('Coder:', cfg.coderModel);
@@ -111,10 +125,45 @@ program.command('memory')
       console.error('No vault path configured. Use: hii models --set-vault <path>');
       process.exit(1);
     }
-    const { appendChat } = await import('./memory.js');
+    const { appendChat, checkVault } = await import('./memory.js');
+    const status = checkVault(vault);
+    if (!status.exists) {
+      console.error('Vault path does not exist:', vault);
+      console.error('Create this folder as a vault in Obsidian (or set a different path).');
+      process.exit(2);
+    }
+    if (!status.hasObsidian) {
+      console.warn('Note: path exists but is not an Obsidian vault (.obsidian missing).');
+      console.warn('Proceeding to write the chat log; add this folder as a vault in Obsidian to see files.');
+    }
     const ts = new Date().toISOString();
     appendChat(vault, `Memory test at ${ts}`, 'OK: wrote to Obsidian vault');
     console.log('Wrote test entry to vault:', vault);
+  });
+
+program.command('memory')
+  .description('Memory utilities')
+  .command('check')
+  .option('--vault <path>', 'Override vault path for check')
+  .action(async (opts) => {
+    const cfg = loadConfig();
+    const vault = opts.vault || cfg.obsidianVaultPath;
+    if (!vault) {
+      console.error('No vault path configured. Use: hii models --set-vault <path>');
+      process.exit(1);
+    }
+    const { checkVault } = await import('./memory.js');
+    const status = checkVault(vault);
+    console.log('Vault path:', vault);
+    console.log('Exists:', status.exists);
+    console.log('Obsidian (.obsidian) present:', status.hasObsidian);
+    if (!status.exists) {
+      console.log('Action: Create this folder as an Obsidian vault or set a different path.');
+    } else if (!status.hasObsidian) {
+      console.log('Action: Open this folder in Obsidian to initialize it as a vault.');
+    } else {
+      console.log('Status: OK');
+    }
   });
 
 program.command('papers')

@@ -9,6 +9,13 @@ export function isVaultUsable(vaultPath?: string): boolean {
   return !!(vaultPath && typeof vaultPath === 'string' && vaultPath.length > 1);
 }
 
+export function checkVault(vaultPath: string): { exists: boolean; hasObsidian: boolean; obsidianDir: string } {
+  const exists = fs.existsSync(vaultPath);
+  const obsidianDir = path.join(vaultPath, '.obsidian');
+  const hasObsidian = exists && fs.existsSync(obsidianDir);
+  return { exists, hasObsidian, obsidianDir };
+}
+
 export function entryFileForDate(vaultPath: string, d = new Date()): string {
   const dir = path.join(vaultPath, 'Chats');
   ensureDir(dir);
@@ -45,4 +52,3 @@ export function loadRecentEntries(vaultPath: string, maxEntries = 20): { role: '
   const content = entries.slice(0, maxEntries).reverse().join('\n\n---\n\n');
   return { role: 'memory', content };
 }
-
