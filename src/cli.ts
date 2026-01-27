@@ -191,3 +191,28 @@ program.command('papers')
   });
 
 program.parseAsync(process.argv);
+
+// Serve command (must be defined before parse if moved)
+program.command('serve')
+  .description('Start local HTTP server for hii APIs')
+  .option('-p, --port <n>', 'Port to listen on', '8787')
+  .option('--shell', 'Allow shell tool by default')
+  .option('--web', 'Allow web search by default')
+  .option('--web-provider <name>', 'Web provider: serpapi|duckduckgo', 'auto')
+  .option('--scholarly', 'Enable scholarly tool by default')
+  .option('--download-pdfs', 'Enable OA PDF download in scholarly mode by default')
+  .option('--no-memory', 'Disable memory by default')
+  .action(async (opts) => {
+    const provider = opts.webProvider === 'auto' ? undefined : opts.webProvider;
+    const { startServer } = await import('./server.js');
+    const srv = await startServer({
+      port: Number(opts.port) || 8787,
+      allowShell: !!opts.shell,
+      allowSearch: !!opts.web,
+      webProvider: provider,
+      scholarly: !!opts.scholarly,
+      downloadPdfs: !!opts.downloadPdfs,
+      memory: !opts.noMemory,
+    });
+    console.log(`hii server listening on http://127.0.0.1:${srv.port}`);
+  });

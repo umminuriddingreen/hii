@@ -35,6 +35,11 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
 - `hii tool new <name>`: scaffold a new tool file
  - `hii memory test [--vault <path>]`: write a test entry to the vault
  - `hii memory check [--vault <path>]`: verify vault path and .obsidian presence
+ - `hii serve [--port 8787] [--web] [--scholarly] [--download-pdfs] [--no-memory]`:
+   Start a local HTTP server that exposes:
+   - POST /chat { prompt, allowShell?, allowSearch?, webProvider?, scholarly?, downloadPdfs?, memory? }
+   - POST /ingest { path }
+   - GET /healthz
 
 ## Configuration
 
@@ -77,6 +82,14 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
   - Set vault via CLI: `hii models --set-vault "<path>"`
   - Test write: `hii memory test`
 - Best Practices (see `docs/obsidian.md`): tags, templates, backlinks/MOCs, periodic reviews
+
+### Calling from Obsidian via HTTP
+
+- Start server: `hii serve --port 8787 --web --scholarly`
+- Example call (Templater/HTTP plugin):
+  - POST http://127.0.0.1:8787/chat
+  - Body: `{ "prompt": "Summarize this note: {{selection}}", "allowSearch": true, "scholarly": false }`
+  - Response: `{ "text": "..." }`
 
 ## Safety
 
