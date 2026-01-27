@@ -1,0 +1,30 @@
+{
+  "name": "hii",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "hii": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "ts-node src/cli.ts",
+    "start": "node dist/cli.js",
+    "ingest": "node dist/cli.js ingest",
+    "chat": "node dist/cli.js chat"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "eventemitter3": "^5.0.1",
+    "lancedb": "^0.8.14",
+    "node-fetch": "^3.3.2",
+    "pdf-parse": "^1.1.1",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}
