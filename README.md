@@ -113,3 +113,12 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
 ## License
 
 Private repository by request; no license header added.
+## Updates, Ideas, and Releases
+
+- Log an idea/update:
+  - `hii updates add --title "Vector search hybrid" --body "Add BM25 + vector" --tags retrieval,ranking --to-vault`
+  - Writes to `docs/updates.md` and (optionally) to `<vault>/Updates/YYYY-MM.md`.
+- Bump version and update CHANGELOG:
+  - `hii release bump --type minor --notes "Add HTTP server and viewer"`
+  - Or set explicit version: `hii release bump --version 0.2.0 --notes "…"`
+  - Updates `package.json` and `CHANGELOG.md`.

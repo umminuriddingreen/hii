@@ -114,6 +114,42 @@ program.command('tool')
     }
   });
 
+program.command('updates')
+  .description('Track updates and ideas')
+  .command('add')
+  .option('--title <text>', 'Title of the update/idea')
+  .option('--body <text>', 'Body/notes')
+  .option('--tags <csv>', 'Tags, comma-separated')
+  .option('--to-vault', 'Also append to Obsidian vault under Updates/YYYY-MM.md')
+  .action(async (opts) => {
+    const title = opts.title || 'Untitled';
+    const body = opts.body || '';
+    const tags = typeof opts.tags === 'string' ? opts.tags.split(',').map((t: string)=>t.trim()).filter(Boolean) : [];
+    const cfg = loadConfig();
+    const { appendIdea, appendIdeaToVault } = await import('./logs.js');
+    appendIdea(process.cwd(), title, body, tags);
+    if (opts.toVault && cfg.obsidianVaultPath) appendIdeaToVault(cfg.obsidianVaultPath, title, body, tags);
+    console.log('Logged update/idea:', title);
+  });
+
+program.command('release')
+  .description('Manage releases and CHANGELOG')
+  .command('bump')
+  .option('--type <t>', 'major|minor|patch', 'patch')
+  .option('--version <v>', 'Explicit version (overrides --type)')
+  .option('--notes <text>', 'Release notes text')
+  .action(async (opts) => {
+    const pkgPath = path.resolve(process.cwd(), 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    const { bumpSemver, updateChangelog } = await import('./logs.js');
+    const next = bumpSemver(pkg.version, opts.type, opts.version);
+    pkg.version = next;
+    fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
+    const notes = opts.notes || '- Misc updates';
+    updateChangelog(process.cwd(), next, notes);
+    console.log(`Bumped version to ${next} and updated CHANGELOG.`);
+  });
+
 program.command('memory')
   .description('Memory utilities')
   .command('test')
