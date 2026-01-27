@@ -5,13 +5,14 @@ import { runShell } from './tools/shell.js';
 import { webSearch } from './tools/search.js';
 import { academicSearch, formatAcademic } from './tools/academic.js';
 import { Config } from './config.js';
+import { isVaultUsable, loadRecentEntries, appendChat } from './memory.js';
 import { ingestPdfToRag, downloadPdf } from './tools/papers.js';
 
 type ToolResult = { name: string; content: string };
 
 type StructuredToolCall = { name: string; args: any };
 
-export async function agentLoop(cfg: Config, prompt: string, opts?: { interactive?: boolean, webProvider?: 'serpapi'|'duckduckgo', scholarly?: boolean, downloadPdfs?: boolean }) {
+export async function agentLoop(cfg: Config, prompt: string, opts?: { interactive?: boolean, webProvider?: 'serpapi'|'duckduckgo', scholarly?: boolean, downloadPdfs?: boolean, useMemory?: boolean }) {
   const messages: OllamaMessage[] = [
     { role: 'system', content: 'You are a local agent. Use tools when user asks for file lookup, shell, or web. Keep answers concise.' },
     { role: 'user', content: prompt }
@@ -20,6 +21,16 @@ export async function agentLoop(cfg: Config, prompt: string, opts?: { interactiv
   // very simple loop: check for tool keywords and call directly
   const lower = prompt.toLowerCase();
   const toolResults: ToolResult[] = [];
+
+  // Memory recall from Obsidian vault
+  if ((opts?.useMemory ?? cfg.memoryEnabled) && isVaultUsable(cfg.obsidianVaultPath)) {
+    try {
+      const mem = loadRecentEntries(cfg.obsidianVaultPath!, cfg.memoryMaxEntries || 20);
+      if (mem) {
+        toolResults.push({ name: 'memory', content: mem.content });
+      }
+    } catch {}
+  }
 
   if (lower.includes('search files') || lower.includes('rag') || lower.includes('lookup')) {
     const db = new VectorStore(cfg.dbPath);
@@ -67,5 +78,14 @@ export async function agentLoop(cfg: Config, prompt: string, opts?: { interactiv
   }
 
   const { text } = await chat(cfg.baseModel, messages, { temperature: 0.2 });
+
+  // Persist chat to Obsidian vault
+  if ((opts?.useMemory ?? cfg.memoryEnabled) && isVaultUsable(cfg.obsidianVaultPath)) {
+    try {
+      const usedTools = toolResults.map(t => t.name);
+      appendChat(cfg.obsidianVaultPath!, prompt, text, usedTools);
+    } catch {}
+  }
+
   return text;
 }

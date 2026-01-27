@@ -8,6 +8,9 @@ export type Config = {
   dbPath: string;
   workspacePath: string;
   sessionsPath: string;
+  obsidianVaultPath?: string;
+  memoryEnabled?: boolean;
+  memoryMaxEntries?: number;
   allowShell: boolean;
   allowSearch: boolean;
   offline: boolean;
@@ -20,6 +23,9 @@ const defaultConfig: Config = {
   dbPath: path.resolve(process.cwd(), 'data'),
   workspacePath: path.resolve(process.cwd(), 'workspace'),
   sessionsPath: path.resolve(process.cwd(), 'sessions'),
+  obsidianVaultPath: process.env.HII_OBSIDIAN_VAULT || '/Users/ummi/Library/Mobile Documents/iCloud~md~obsidian/Documents/hii/hii',
+  memoryEnabled: true,
+  memoryMaxEntries: 20,
   allowShell: false,
   allowSearch: false,
   offline: true
@@ -40,4 +46,3 @@ export function saveConfig(cfg: Partial<Config>): void {
   const configPath = path.resolve(process.cwd(), 'agent.config.json');
   fs.writeFileSync(configPath, JSON.stringify(merged, null, 2));
 }
-

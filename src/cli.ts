@@ -34,12 +34,15 @@ program.command('chat')
   .option('--web-provider <name>', 'Web provider: serpapi|duckduckgo', 'auto')
   .option('--scholarly', 'Use academic search (arXiv/OpenAlex/Crossref)')
   .option('--download-pdfs', 'Download open-access PDFs and ingest into RAG (with --scholarly)')
+  .option('--no-memory', 'Disable memory recall and logging to Obsidian vault')
+  .option('--memory-entries <n>', 'Max memory entries to recall', 'auto')
   .option('--online', 'Disable offline mode')
   .action(async (promptParts, opts) => {
     const cfg = loadConfig();
     const merged = { ...cfg, allowShell: !!opts.shell, allowSearch: !!opts.web, offline: !opts.online };
     const provider = opts.webProvider === 'auto' ? undefined : opts.webProvider;
-    const text = await agentLoop(merged, promptParts.join(' '), { webProvider: provider as any, scholarly: !!opts.scholarly, downloadPdfs: !!opts.downloadPdfs });
+    if (opts.memoryEntries !== 'auto') merged.memoryMaxEntries = Number(opts.memoryEntries) || merged.memoryMaxEntries;
+    const text = await agentLoop(merged, promptParts.join(' '), { webProvider: provider as any, scholarly: !!opts.scholarly, downloadPdfs: !!opts.downloadPdfs, useMemory: !opts.noMemory });
     console.log(text);
   });
 

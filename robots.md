@@ -86,6 +86,15 @@ cli/
 - `hii tool new <name>` scaffolds `src/tools/<name>.ts` with a minimal template.
 - After creating a tool, run `npm run build`.
 
+### Memory (Obsidian)
+- Logs each chat to an Obsidian vault (markdown), default vault path:
+  `/Users/ummi/Library/Mobile Documents/iCloud~md~obsidian/Documents/hii/hii`
+- Recalls the last N entries (default 20) and feeds as context.
+- Controls:
+  - Disable per-call: `--no-memory`
+  - Adjust recall size: `--memory-entries <n>`
+  - Configure path via `HII_OBSIDIAN_VAULT` env or `agent.config.json`.
+
 ## Limitations / TODOs
 
 - Tool-calling: heuristic; no structured function-call loop yet.
