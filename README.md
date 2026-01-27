@@ -40,6 +40,10 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
    - POST /chat { prompt, allowShell?, allowSearch?, webProvider?, scholarly?, downloadPdfs?, memory? }
    - POST /ingest { path }
    - GET /healthz
+   - GET /graph — vault note/tag graph
+   - GET /view — simple graph viewer UI
+   - GET /note?id=<rel-path> — fetch note content
+   - GET /open?id=<rel-path> — open note in your default editor/Finder
 
 ## Configuration
 
@@ -83,13 +87,15 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
   - Test write: `hii memory test`
 - Best Practices (see `docs/obsidian.md`): tags, templates, backlinks/MOCs, periodic reviews
 
-### Calling from Obsidian via HTTP
+### Calling from Obsidian via HTTP + Viewing Graph
 
 - Start server: `hii serve --port 8787 --web --scholarly`
 - Example call (Templater/HTTP plugin):
   - POST http://127.0.0.1:8787/chat
   - Body: `{ "prompt": "Summarize this note: {{selection}}", "allowSearch": true, "scholarly": false }`
   - Response: `{ "text": "..." }`
+- Graph viewer: open http://127.0.0.1:8787/view
+  - Filter notes, run full‑text search, preview note content, show link/backlink counts, open notes in your editor.
 
 ## Safety
 

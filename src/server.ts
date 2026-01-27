@@ -7,6 +7,7 @@ import { ingestPath } from './rag/ingest.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildVaultGraph } from './graph.js';
+import { execFile } from 'node:child_process';
 
 type ServeOpts = {
   port?: number;
@@ -84,6 +85,66 @@ export async function startServer(opts: ServeOpts = {}) {
         } catch (e: any) {
           return send(res, 500, { error: e?.message || String(e) });
         }
+      }
+
+      if (u.pathname === '/note' && req.method === 'GET') {
+        if (!cfg.obsidianVaultPath) return send(res, 400, { error: 'vault not configured' });
+        const id = u.searchParams.get('id');
+        if (!id) return send(res, 400, { error: 'id required' });
+        const abs = path.resolve(cfg.obsidianVaultPath, id);
+        if (!abs.startsWith(cfg.obsidianVaultPath)) return send(res, 400, { error: 'invalid path' });
+        if (!fs.existsSync(abs) || !abs.toLowerCase().endsWith('.md')) return send(res, 404, { error: 'not found' });
+        const text = fs.readFileSync(abs, 'utf-8');
+        return send(res, 200, { id, path: abs, text });
+      }
+
+      if (u.pathname === '/open' && req.method === 'GET') {
+        if (!cfg.obsidianVaultPath) return send(res, 400, { error: 'vault not configured' });
+        const id = u.searchParams.get('id');
+        if (!id) return send(res, 400, { error: 'id required' });
+        const abs = path.resolve(cfg.obsidianVaultPath, id);
+        if (!abs.startsWith(cfg.obsidianVaultPath)) return send(res, 400, { error: 'invalid path' });
+        if (!fs.existsSync(abs)) return send(res, 404, { error: 'not found' });
+        // macOS: use 'open' to reveal in default app / Finder
+        execFile('open', [abs], (err) => {
+          if (err) return send(res, 500, { error: String(err) });
+          return send(res, 200, { ok: true });
+        });
+        return;
+      }
+
+      if (u.pathname === '/search' && req.method === 'POST') {
+        if (!cfg.obsidianVaultPath) return send(res, 400, { error: 'vault not configured' });
+        const body = await readJson(req);
+        const q: string = (body?.q || '').toString();
+        if (!q || q.length < 2) return send(res, 400, { error: 'query too short' });
+        const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+        const results: { id: string; title: string; snippet: string; score: number }[] = [];
+        const walk = (dir: string) => {
+          for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (e.name === '.obsidian') continue;
+            const full = path.join(dir, e.name);
+            if (e.isDirectory()) walk(full);
+            else if (e.isFile() && e.name.toLowerCase().endsWith('.md')) {
+              const rel = path.relative(cfg.obsidianVaultPath!, full);
+              const title = path.basename(full).replace(/\.md$/i, '');
+              const text = fs.readFileSync(full, 'utf-8');
+              const lower = text.toLowerCase();
+              let score = 0;
+              for (const t of terms) score += (lower.match(new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+              if (score > 0) {
+                const idx = lower.indexOf(terms[0]);
+                const start = Math.max(0, idx - 80);
+                const end = Math.min(text.length, (idx >= 0 ? idx : 0) + 160);
+                const snippet = text.slice(start, end).replace(/\n/g, ' ');
+                results.push({ id: rel, title, snippet, score });
+              }
+            }
+          }
+        };
+        walk(cfg.obsidianVaultPath);
+        results.sort((a, b) => b.score - a.score);
+        return send(res, 200, { results: results.slice(0, 50) });
       }
 
       if (u.pathname === '/view' && req.method === 'GET') {

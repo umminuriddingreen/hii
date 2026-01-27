@@ -62,6 +62,8 @@ async function main() {
   const reload = document.getElementById('reload');
   const canvas = document.getElementById('graph');
   const info = document.getElementById('info');
+  const search = document.getElementById('search');
+  const searchBtn = document.getElementById('searchBtn');
 
   async function load() {
     try {
@@ -70,6 +72,14 @@ async function main() {
       status.textContent = `${graph.nodes.length} nodes, ${graph.edges.length} edges`;
       const view = await drawGraph(canvas, graph);
       // populate list
+      const outCounts = new Map();
+      const inCounts = new Map();
+      for (const e of graph.edges) {
+        if (e.kind === 'link') {
+          outCounts.set(e.source, (outCounts.get(e.source) || 0) + 1);
+          inCounts.set(e.target, (inCounts.get(e.target) || 0) + 1);
+        }
+      }
       function applyFilter() {
         const q = (filter.value||'').toLowerCase();
         list.innerHTML='';
@@ -77,7 +87,9 @@ async function main() {
           .sort((a,b)=> a.title.localeCompare(b.title))
           .forEach(n=>{
             const li=document.createElement('li');
-            li.textContent=n.title; li.dataset.id=n.id;
+            const oc=outCounts.get(n.id)||0, ic=inCounts.get(n.id)||0;
+            li.innerHTML = `${n.title} <span class="note-meta">(→${oc} ←${ic})</span>`;
+            li.dataset.id=n.id;
             li.onclick=()=> select(n.id);
             list.appendChild(li);
           });
@@ -90,7 +102,19 @@ async function main() {
         const inEdges = graph.edges.filter(e=>e.target===id);
         if (outEdges.length) out.push('<h4>Links</h4><ul>'+outEdges.map(e=>`<li>${graph.nodes.find(n=>n.id===e.target)?.title||e.target}</li>`).join('')+'</ul>');
         if (inEdges.length) out.push('<h4>Backlinks</h4><ul>'+inEdges.map(e=>`<li>${graph.nodes.find(n=>n.id===e.source)?.title||e.source}</li>`).join('')+'</ul>');
-        info.innerHTML=out.join('\n');
+        // fetch preview
+        fetch(`/note?id=${encodeURIComponent(id)}`).then(r=>r.json()).then(n=>{
+          if (n && n.text) {
+            const preview = n.text.split('\n').slice(0, 40).join('\n');
+            out.push(`<h4>Preview</h4><pre class="snippet">${preview.replace(/[&<>]/g, s=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[s]))}</pre>`);
+            out.push(`<div class="actions"><button id="openNote">Open in Editor</button></div>`);
+            info.innerHTML=out.join('\n');
+            const openBtn = document.getElementById('openNote');
+            openBtn.onclick = ()=> fetch(`/open?id=${encodeURIComponent(id)}`).then(()=>{});
+          } else {
+            info.innerHTML=out.join('\n');
+          }
+        }).catch(()=>{ info.innerHTML=out.join('\n'); });
         drawGraph(canvas, graph, id); // redraw with highlight
       }
       filter.oninput=applyFilter; applyFilter();
@@ -105,7 +129,34 @@ async function main() {
   }
 
   reload.onclick=load; await load();
+
+  async function runSearch(){
+    const q = (search.value||'').trim();
+    if (q.length<2) return;
+    status.textContent = 'Searching…';
+    const res = await fetch('/search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ q }) });
+    if (!res.ok) { status.textContent='Search error'; return; }
+    const data = await res.json();
+    const results = data.results||[];
+    const out = [`<h3>Search results (${results.length})</h3>`];
+    out.push('<ul>'+results.map(r=>`<li data-id="${r.id}"><strong>${r.title}</strong> <span class="note-meta">(score ${r.score})</span><div class="snippet">${r.snippet.replace(/[&<>]/g, s=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[s]))}</div></li>`).join('')+'</ul>');
+    info.innerHTML = out.join('\n');
+    info.querySelectorAll('li[data-id]').forEach(li=>{
+      li.addEventListener('click', ()=>{
+        const id = li.getAttribute('data-id');
+        // show note via /note
+        fetch(`/note?id=${encodeURIComponent(id)}`).then(r=>r.json()).then(n=>{
+          const content = `<h3>${n.path}</h3><pre class="snippet">${(n.text||'').replace(/[&<>]/g, s=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[s]))}</pre><div class="actions"><button id="openNote">Open in Editor</button></div>`;
+          info.innerHTML = content;
+          const openBtn = document.getElementById('openNote');
+          openBtn.onclick = ()=> fetch(`/open?id=${encodeURIComponent(id)}`).then(()=>{});
+        });
+      });
+    });
+    status.textContent = 'Search complete';
+  }
+  searchBtn.onclick = runSearch;
+  search.addEventListener('keydown', (e)=>{ if (e.key==='Enter') runSearch(); });
 }
 
 main();
-
