@@ -92,8 +92,8 @@ cli/
    - Implement controller loop: model suggests tool calls -> execute -> feed results -> final answer.
 
 2. Web Search Provider
-   - SerpAPI integration via `SERPAPI_KEY` env and `--web` flag.
-   - Option: headless browser for scraping with rate limiting.
+   - SerpAPI integration implemented via `SERPAPI_KEY` env and `--web` flag.
+   - Option: headless browser for scraping with rate limiting (future).
 
 3. RAG Enhancements
    - PDF via `pdf-parse`, DOCX via `docx`, CSV parsing.
@@ -117,4 +117,3 @@ cli/
   - Ollama chat + embeddings.
   - LanceDB vector store.
   - Basic tools: RAG search, shell, web stub.
-
