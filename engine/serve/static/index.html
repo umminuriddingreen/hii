@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hii</title>
+<style>
+  :root {
+    --bg: #0a0a0a; --surface: #141414; --border: #222; --text: #e0e0e0;
+    --dim: #666; --accent: #4ecdc4; --warn: #ff6b6b; --ok: #51cf66;
+    --purple: #9775fa; --orange: #ffa94d;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    background: var(--bg); color: var(--text);
+    min-height: 100vh; padding: 20px;
+  }
+  h1 { font-size: 14px; color: var(--accent); letter-spacing: 4px; text-transform: uppercase; margin-bottom: 4px; }
+  .subtitle { font-size: 11px; color: var(--dim); margin-bottom: 24px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px; overflow: hidden;
+  }
+  .card h2 { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 12px; }
+  .card.full { grid-column: 1 / -1; }
+  .tag {
+    display: inline-block; font-size: 10px; padding: 2px 8px;
+    border-radius: 4px; margin: 2px; background: #1a1a2e; color: var(--accent);
+  }
+  .tag.warn { background: #2a1515; color: var(--warn); }
+  .tag.ok { background: #152a15; color: var(--ok); }
+  .tag.purple { background: #1a152a; color: var(--purple); }
+  .tag.orange { background: #2a2015; color: var(--orange); }
+  .stat { font-size: 28px; font-weight: 700; color: var(--accent); }
+  .stat-label { font-size: 10px; color: var(--dim); margin-top: 2px; }
+  .list-item {
+    padding: 6px 0; border-bottom: 1px solid var(--border);
+    font-size: 12px; display: flex; justify-content: space-between; align-items: center;
+  }
+  .list-item:last-child { border-bottom: none; }
+  .prompt-block {
+    font-size: 11px; line-height: 1.6; color: var(--text);
+    white-space: pre-wrap; max-height: 300px; overflow-y: auto;
+    background: #0d0d0d; padding: 12px; border-radius: 4px;
+  }
+  .commit-hash { color: var(--purple); font-size: 11px; }
+  .commit-msg { color: var(--text); font-size: 11px; margin-left: 8px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .status-dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .status-dot.off { background: var(--warn); }
+  .skill-grid { display: flex; flex-wrap: wrap; gap: 4px; }
+  .pulse { animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+  .loading { color: var(--dim); font-size: 11px; }
+  #observe-input {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 8px 12px; border-radius: 4px;
+    font-family: inherit; font-size: 12px; margin-top: 8px;
+  }
+  #observe-input:focus { outline: none; border-color: var(--accent); }
+  .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .refresh-btn {
+    background: none; border: 1px solid var(--border); color: var(--dim);
+    padding: 4px 12px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 11px;
+  }
+  .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <h1>hii</h1>
+    <div class="subtitle">human information interface — the mind in the machine</div>
+  </div>
+  <div>
+    <span id="clock" style="color:var(--dim);font-size:11px;margin-right:12px"></span>
+    <button class="refresh-btn" onclick="load()">refresh</button>
+  </div>
+</div>
+
+<div class="grid-3">
+  <div class="card">
+    <h2>Identity</h2>
+    <div id="identity" class="loading pulse">loading...</div>
+  </div>
+  <div class="card">
+    <h2>Status</h2>
+    <div id="status" class="loading pulse">loading...</div>
+  </div>
+  <div class="card">
+    <h2>Stats</h2>
+    <div id="stats" class="loading pulse">loading...</div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>What HII Knows — System Prompt</h2>
+    <div id="system-prompt" class="prompt-block loading">loading...</div>
+  </div>
+  <div class="card">
+    <h2>What There Is To Do — Tasks</h2>
+    <div id="tasks" class="loading">loading...</div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Skills — What HII Can Do</h2>
+    <div id="skills" class="skill-grid loading">loading...</div>
+  </div>
+  <div class="card">
+    <h2>What We've Done — History</h2>
+    <div id="history" class="loading">loading...</div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Agents</h2>
+    <div id="agents" class="loading">loading...</div>
+  </div>
+  <div class="card">
+    <h2>Observe — Teach HII Something</h2>
+    <p style="font-size:11px;color:var(--dim);margin-bottom:8px">Type an observation, correction, or preference. HII remembers.</p>
+    <form onsubmit="observe(event)">
+      <input id="observe-input" placeholder="e.g. I prefer dark themes, I work best at night, always use tailscale..." autocomplete="off">
+    </form>
+    <div id="observe-status" style="font-size:10px;color:var(--ok);margin-top:4px"></div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let state = null;
+
+async function load() {
+  try {
+    const r = await fetch(API + '/api/state');
+    state = await r.json();
+    render();
+  } catch (e) {
+    document.getElementById('identity').textContent = 'error: ' + e.message;
+  }
+}
+
+function render() {
+  if (!state) return;
+  const p = state.psyche;
+
+  // Identity
+  document.getElementById('identity').innerHTML = `
+    <div style="font-size:20px;font-weight:700;color:var(--accent)">${p.name || 'unknown'}</div>
+    <div style="margin-top:6px">${(p.roles||[]).map(r => `<span class="tag">${r}</span>`).join('')}</div>
+    <div style="margin-top:4px">${(p.values||[]).map(v => `<span class="tag purple">${v}</span>`).join('')}</div>
+  `;
+
+  // Status
+  const v = state.version;
+  const d = state.daemon;
+  document.getElementById('status').innerHTML = `
+    <div class="list-item"><span><span class="status-dot ${d.running?'on':'off'}"></span>Daemon</span><span>${d.running?'pid='+d.pid:'stopped'}</span></div>
+    <div class="list-item"><span>Branch</span><span style="color:var(--purple)">${v.branch}</span></div>
+    <div class="list-item"><span>Version</span><span>${v.version}</span></div>
+    <div class="list-item"><span>Dirty</span><span class="tag ${v.dirty?'warn':'ok'}">${v.dirty?'yes':'clean'}</span></div>
+  `;
+
+  // Stats
+  document.getElementById('stats').innerHTML = `
+    <div style="display:flex;gap:20px">
+      <div><div class="stat">${state.skills_count}</div><div class="stat-label">skills</div></div>
+      <div><div class="stat">${state.tasks.length}</div><div class="stat-label">tasks</div></div>
+      <div><div class="stat">${state.agents.length}</div><div class="stat-label">agents</div></div>
+      <div><div class="stat">${p.total_observations||0}</div><div class="stat-label">observations</div></div>
+    </div>
+    <div style="margin-top:8px">${(state.skills_categories||[]).map(c => `<span class="tag orange">${c}</span>`).join('')}</div>
+  `;
+
+  // System prompt
+  document.getElementById('system-prompt').textContent = state.system_prompt || '(empty)';
+
+  // Tasks
+  const tasksEl = document.getElementById('tasks');
+  if (state.tasks.length === 0) {
+    tasksEl.innerHTML = '<div style="color:var(--dim);font-size:11px">no tasks in queue</div>';
+  } else {
+    tasksEl.innerHTML = state.tasks.map(t => `
+      <div class="list-item">
+        <span>${t.name}</span>
+        <span><span class="tag ${t.status==='done'?'ok':t.status==='failed'?'warn':''}">${t.status}</span> <span class="tag ${t.target==='architect'?'purple':'orange'}">${t.target}</span></span>
+      </div>
+    `).join('');
+  }
+
+  // Skills
+  document.getElementById('skills').innerHTML = (state.skills_categories||[]).map(cat => {
+    return `<span class="tag orange" title="${cat}">${cat}</span>`;
+  }).join('') + `<div style="width:100%;margin-top:8px;font-size:11px;color:var(--dim)">${state.skills_count} skills across ${(state.skills_categories||[]).length} categories</div>`;
+
+  // History
+  document.getElementById('history').innerHTML = (state.history||[]).map(h => `
+    <div class="list-item"><span class="commit-hash">${h.hash}</span><span class="commit-msg">${h.message}</span></div>
+  `).join('') || '<div style="color:var(--dim);font-size:11px">no history</div>';
+
+  // Agents
+  const agentsEl = document.getElementById('agents');
+  if (state.agents.length === 0) {
+    agentsEl.innerHTML = '<div style="color:var(--dim);font-size:11px">no agents registered</div>';
+  } else {
+    agentsEl.innerHTML = state.agents.map(a => `
+      <div class="list-item">
+        <span><span class="status-dot ${a.active?'on':'off'}"></span>${a.name}</span>
+        <span class="tag">${a.type}</span>
+      </div>
+    `).join('');
+  }
+}
+
+async function observe(e) {
+  e.preventDefault();
+  const input = document.getElementById('observe-input');
+  const val = input.value.trim();
+  if (!val) return;
+  try {
+    await fetch(API + '/api/observe', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({kind: 'observation', content: val, source: 'dashboard'})
+    });
+    document.getElementById('observe-status').textContent = 'observed: ' + val;
+    input.value = '';
+    setTimeout(load, 500);
+  } catch (e) {
+    document.getElementById('observe-status').textContent = 'error: ' + e.message;
+  }
+}
+
+// Clock
+setInterval(() => {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+}, 1000);
+
+// Auto-refresh every 30s
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>
