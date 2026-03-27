@@ -112,6 +112,7 @@ class HiiHandler(SimpleHTTPRequestHandler):
             "version": version_current(),
             "history": version_log(10),
             "daemon": {"running": running, "pid": pid},
+            "observations": [{"timestamp": o.timestamp, "kind": o.kind, "content": o.content, "source": o.source} for o in p.observations[-50:]],
         }
 
     def _json(self, data, code=200):
