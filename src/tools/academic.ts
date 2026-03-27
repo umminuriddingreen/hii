@@ -49,18 +49,27 @@ async function searchOpenAlex(query: string, max = 5): Promise<AcademicItem[]> {
   url.searchParams.set('mailto', 'hii-cli@example.com');
   const res = await fetch(url.toString());
   if (!res.ok) return [];
-  const data: any = await res.json();
-  const items: AcademicItem[] = (data.results || []).map((w: any) => ({
-    source: 'openalex',
-    id: w.id,
-    title: w.title,
-    authors: (w.authorships || []).map((a: any) => a.author?.display_name).filter(Boolean),
-    year: w.publication_year,
-    venue: w.host_venue?.display_name,
-    doi: w.doi,
-    url: w.open_access?.oa_url || w.host_venue?.url || w.doi || w.id,
-    abstract: w.abstract_inverted_index ? Object.entries(w.abstract_inverted_index).sort((a,b)=> (a[1][0]-b[1][0])).map(([word])=>word).join(' ') : undefined,
-  }));
+  const data = await res.json() as any;
+  const items: AcademicItem[] = (data.results || []).map((w: any) => {
+    const abstractIndex = w.abstract_inverted_index as Record<string, number[]> | undefined;
+    const abstract = abstractIndex
+      ? Object.entries(abstractIndex)
+        .sort((a, b) => (a[1]?.[0] ?? 0) - (b[1]?.[0] ?? 0))
+        .map(([word]) => word)
+        .join(' ')
+      : undefined;
+    return {
+      source: 'openalex',
+      id: w.id,
+      title: w.title,
+      authors: (w.authorships || []).map((a: any) => a.author?.display_name).filter(Boolean),
+      year: w.publication_year,
+      venue: w.host_venue?.display_name,
+      doi: w.doi,
+      url: w.open_access?.oa_url || w.host_venue?.url || w.doi || w.id,
+      abstract,
+    };
+  });
   return items;
 }
 
@@ -70,7 +79,7 @@ async function searchCrossref(query: string, max = 5): Promise<AcademicItem[]> {
   url.searchParams.set('rows', String(max));
   const res = await fetch(url.toString());
   if (!res.ok) return [];
-  const data: any = await res.json();
+  const data = await res.json() as any;
   const items: AcademicItem[] = (data.message?.items || []).map((it: any) => ({
     source: 'crossref',
     id: it.DOI || it.URL,
@@ -106,4 +115,3 @@ export function formatAcademic(items: AcademicItem[]): string {
     return `${i + 1}. ${it.title}${year}${venue}\n${authors}${tail}\n${src} ${it.url}${doi}\n${it.abstract ? it.abstract.slice(0, 400) + (it.abstract.length > 400 ? '…' : '') : ''}`;
   }).join('\n\n');
 }
-

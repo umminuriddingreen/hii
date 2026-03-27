@@ -14,6 +14,11 @@ export type Config = {
   allowShell: boolean;
   allowSearch: boolean;
   offline: boolean;
+  lmStudioUrl: string;
+  lmStudioApiKey?: string;
+  lmStudioChatModel: string;
+  lmStudioTranscribeModel: string;
+  notesPath: string;
 };
 
 const defaultConfig: Config = {
@@ -28,7 +33,12 @@ const defaultConfig: Config = {
   memoryMaxEntries: 20,
   allowShell: false,
   allowSearch: false,
-  offline: true
+  offline: true,
+  lmStudioUrl: process.env.LM_STUDIO_URL || 'http://127.0.0.1:1234/v1',
+  lmStudioApiKey: process.env.LM_STUDIO_API_KEY,
+  lmStudioChatModel: process.env.LM_STUDIO_CHAT_MODEL || 'lmstudio-community/Meta-Llama-3-8B-Instruct',
+  lmStudioTranscribeModel: process.env.LM_STUDIO_TRANSCRIBE_MODEL || 'whisper-large-v3',
+  notesPath: process.env.HII_NOTES_PATH || path.resolve(process.cwd(), 'notes')
 };
 
 export function loadConfig(): Config {

@@ -9,7 +9,7 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
   - `ollama pull deepseek-coder-v2:16b`
   - `ollama pull nomic-embed-text`
 - Install/build:
-  - `cd cli && npm install && npm run build && npm link`
+  - `cd hii && npm install && npm run build && npm link`
 - Ingest your files: `hii ingest --path ./workspace`
 - Ask with RAG: `hii chat "search files for auth middleware and explain"`
 - Web search: `export SERPAPI_KEY=... && hii chat --web "web: compare vector DBs"`
@@ -33,6 +33,7 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
 - `hii models --set-memory on --set-memory-entries 30`
 - `hii config`: print effective config
 - `hii tool new <name>`: scaffold a new tool file
+ - `hii notes audio --file ./recording.wav [--title "Standup"] [--out-dir ./notes] [--keep-transcript]`: Send audio to LM Studio for transcription + Markdown note (supports `--chat-model`, `--transcribe-model`, `--lm-url`).
  - `hii memory test [--vault <path>]`: write a test entry to the vault
  - `hii memory check [--vault <path>]`: verify vault path and .obsidian presence
  - `hii serve [--port 8787] [--web] [--scholarly] [--download-pdfs] [--no-memory]`:
@@ -52,10 +53,17 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
   - `OLLAMA_URL`: default `http://127.0.0.1:11434`
   - `SERPAPI_KEY`: enable Google results via SerpAPI
   - `HII_OBSIDIAN_VAULT`: override Obsidian vault path
+  - `LM_STUDIO_URL`: OpenAI-compatible LM Studio base URL (default `http://127.0.0.1:1234/v1`)
+  - `LM_STUDIO_API_KEY`: Optional LM Studio API key
+  - `LM_STUDIO_CHAT_MODEL`: Model to use for Markdown note writing
+  - `LM_STUDIO_TRANSCRIBE_MODEL`: Model to use for transcription
+  - `HII_NOTES_PATH`: Default output folder for generated notes
 - Defaults (see `src/config.ts`):
   - Base: `qwen2.5:32b`, Coder: `deepseek-coder-v2:16b`, Embed: `nomic-embed-text`
   - DB path: `./data`, Workspace: `./workspace`, Sessions: `./sessions`
   - Memory: enabled, max 20 entries
+  - LM Studio: `http://127.0.0.1:1234/v1`, Chat model `lmstudio-community/Meta-Llama-3-8B-Instruct`, Transcription `whisper-large-v3`
+  - Notes path: `./notes`
 
 ## RAG (Local Files)
 

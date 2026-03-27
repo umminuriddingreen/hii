@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { connect, Table } from 'lancedb';
+import { connect, Table } from '@lancedb/lancedb';
 
 export type DocChunk = {
   id: string;
@@ -13,7 +13,7 @@ export type DocChunk = {
 export class VectorStore {
   private dbPath: string;
   private tableName = 'chunks';
-  private table?: Table<DocChunk>;
+  private table?: Table;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
@@ -25,7 +25,7 @@ export class VectorStore {
     if (!names.includes(this.tableName)) {
       this.table = await db.createTable(this.tableName, [] as DocChunk[]);
     } else {
-      this.table = await db.openTable<DocChunk>(this.tableName);
+      this.table = await db.openTable(this.tableName);
     }
   }
 
@@ -36,8 +36,7 @@ export class VectorStore {
 
   async search(queryEmbedding: number[], k = 5): Promise<DocChunk[]> {
     if (!this.table) throw new Error('VectorStore not initialized');
-    const result = await this.table.search(queryEmbedding).limit(k).execute();
+    const result = await this.table.search(queryEmbedding).limit(k).toArray();
     return result as unknown as DocChunk[];
   }
 }
-

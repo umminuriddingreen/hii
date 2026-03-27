@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import fetch from 'node-fetch';
 import pdfParse from 'pdf-parse';
 import { VectorStore } from '../store/vectordb.js';
@@ -23,18 +24,19 @@ export async function downloadPdf(url: string, title = 'paper', root = process.c
   const file = path.join(papersDir, `${safeName(title)}.pdf`);
   const res = await fetch(url);
   if (!res.ok || !res.body) throw new Error(`Download failed: ${res.status}`);
+  const body = res.body as unknown as Readable;
   const ws = fs.createWriteStream(file);
   let total = 0;
   await new Promise<void>((resolve, reject) => {
-    res.body.on('data', (chunk: Buffer) => {
+    body.on('data', (chunk: Buffer) => {
       total += chunk.length;
       if (total > maxBytes) {
-        res.body?.destroy(new Error('PDF too large'));
+        body.destroy(new Error('PDF too large'));
         ws.destroy(new Error('PDF too large'));
         reject(new Error('PDF too large'));
       }
     });
-    res.body.pipe(ws);
+    body.pipe(ws);
     ws.on('finish', () => resolve());
     ws.on('error', reject);
   });
@@ -63,4 +65,3 @@ export async function ingestPdfToRag(db: VectorStore, embedModel: string, pdfPat
   await db.upsert(items);
   return items.length;
 }
-

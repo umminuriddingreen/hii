@@ -150,9 +150,9 @@ program.command('release')
     console.log(`Bumped version to ${next} and updated CHANGELOG.`);
   });
 
-program.command('memory')
-  .description('Memory utilities')
-  .command('test')
+const memory = program.command('memory').description('Memory utilities');
+
+memory.command('test')
   .option('--vault <path>', 'Override vault path for test')
   .action(async (opts) => {
     const cfg = loadConfig();
@@ -177,9 +177,7 @@ program.command('memory')
     console.log('Wrote test entry to vault:', vault);
   });
 
-program.command('memory')
-  .description('Memory utilities')
-  .command('check')
+memory.command('check')
   .option('--vault <path>', 'Override vault path for check')
   .action(async (opts) => {
     const cfg = loadConfig();
@@ -226,6 +224,34 @@ program.command('papers')
     console.log(`Total chunks ingested: ${total}`);
   });
 
+const notes = program.command('notes').description('Note-taking helpers');
+
+notes.command('audio')
+  .description('Transcribe audio via LM Studio and summarize to Markdown')
+  .requiredOption('-f, --file <path>', 'Audio file to process')
+  .option('-t, --title <text>', 'Title for the generated note')
+  .option('-o, --out-dir <path>', 'Directory to write the Markdown note')
+  .option('--chat-model <name>', 'LM Studio chat model for summarization')
+  .option('--transcribe-model <name>', 'LM Studio model for transcription')
+  .option('--lm-url <url>', 'LM Studio base URL (OpenAI-compatible)')
+  .option('--lm-api-key <key>', 'LM Studio API key if required')
+  .option('--keep-transcript', 'Also save the raw transcript')
+  .action(async (opts) => {
+    const cfg = loadConfig();
+    const { createAudioNote } = await import('./tools/notetaker.js');
+    const res = await createAudioNote(cfg, opts.file, {
+      title: opts.title,
+      outputDir: opts.outDir,
+      chatModel: opts.chatModel,
+      transcribeModel: opts.transcribeModel,
+      baseUrl: opts.lmUrl,
+      apiKey: opts.lmApiKey,
+      keepTranscript: !!opts.keepTranscript
+    });
+    console.log('Note saved to:', res.notePath);
+    if (res.transcriptPath) console.log('Transcript saved to:', res.transcriptPath);
+  });
+
 // Serve command (define before parse)
 program.command('serve')
   .description('Start local HTTP server for hii APIs')
@@ -251,4 +277,51 @@ program.command('serve')
     console.log(`hii server listening on http://127.0.0.1:${srv.port}`);
   });
 
+
+// ── comfyui ──────────────────────────────────────────────────────────────────
+const comfyui = program.command('comfyui').description('Manage ComfyUI + MCP server');
+
+comfyui.command('start')
+  .description('Spawn the ComfyUI MCP server in the background')
+  .option('--no-mcp', 'Skip MCP server (only ping remote ComfyUI)')
+  .action(async (opts) => {
+    const { comfyuiStart } = await import('./tools/comfyui.js');
+    await comfyuiStart({ noMcp: !opts.mcp });
+  });
+
+comfyui.command('stop')
+  .description('Stop the ComfyUI MCP server')
+  .action(async () => {
+    const { comfyuiStop } = await import('./tools/comfyui.js');
+    comfyuiStop();
+  });
+
+comfyui.command('status')
+  .description('Show ComfyUI + MCP server status')
+  .action(async () => {
+    const { comfyuiStatus } = await import('./tools/comfyui.js');
+    await comfyuiStatus();
+  });
+
+comfyui.command('logs')
+  .description('Tail ComfyUI or MCP server logs')
+  .option('-n, --lines <n>', 'Lines to show', '80')
+  .option('--mcp', 'Show MCP server logs instead of ComfyUI')
+  .action(async (opts) => {
+    const { comfyuiLogs } = await import('./tools/comfyui.js');
+    comfyuiLogs(Number(opts.lines) || 80, opts.mcp ? 'mcp' : 'comfyui');
+  });
+
+comfyui.command('models')
+  .description('List checkpoint models available in ComfyUI')
+  .action(async () => {
+    const { comfyuiModels } = await import('./tools/comfyui.js');
+    await comfyuiModels();
+  });
+
+// default: `hii comfyui` alone → start
+comfyui.action(async () => {
+  const { comfyuiStart } = await import('./tools/comfyui.js');
+  await comfyuiStart();
+});
 program.parseAsync(process.argv);

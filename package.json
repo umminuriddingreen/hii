@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "commander": "^12.1.0",
-    "lancedb": "^0.8.14",
+    "@lancedb/lancedb": "^0.23.0",
     "node-fetch": "^3.3.2",
     "pdf-parse": "^1.1.1"
   },
