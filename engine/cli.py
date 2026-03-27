@@ -7,6 +7,8 @@ Usage:
     python -m engine.cli psyche show|init|export
     python -m engine.cli task add|list|run|purge
     python -m engine.cli agent register|list|run|deactivate
+    python -m engine.cli version [current|snap|auto|log|diff]
+    python -m engine.cli skill [list|search|run]
 """
 
 import sys
@@ -17,6 +19,8 @@ from .core.daemon import is_running, read_logs
 from .psyche.profile import PsycheProfile
 from .tasks.queue import add as add_task, list_tasks, claim_next, complete, purge_done, Target
 from .agents.delegator import register as register_agent, list_agents, run as run_agent, deactivate
+from .core.version import current as version_current, snap, auto_snap, log as version_log, diff as version_diff
+from .skills.registry import list_all as skills_list_all, search as skills_search, get as skills_get, render_script
 
 
 def main():
@@ -44,6 +48,19 @@ def main():
     task_p.add_argument("--script", default=None)
     task_p.add_argument("--prompt", default=None)
     task_p.add_argument("--status", default=None)
+
+    # ── version ──
+    ver_p = sub.add_parser("version")
+    ver_p.add_argument("action", choices=["current", "snap", "auto", "log", "diff"], nargs="?", default="current")
+    ver_p.add_argument("--message", "-m", default=None)
+    ver_p.add_argument("-n", "--lines", type=int, default=20)
+
+    # ── skill ──
+    skill_p = sub.add_parser("skill")
+    skill_p.add_argument("action", choices=["list", "search", "run"])
+    skill_p.add_argument("--query", "-q", default=None)
+    skill_p.add_argument("--id", default=None)
+    skill_p.add_argument("--category", default=None)
 
     # ── agent ──
     agent_p = sub.add_parser("agent")
@@ -118,6 +135,42 @@ def main():
                 print("--id required"); sys.exit(1)
             deactivate(args.id)
             print(f"Deactivated {args.id}")
+
+    elif args.command == "version":
+        if args.action == "current":
+            print(json.dumps(version_current(), indent=2))
+        elif args.action == "snap":
+            msg = args.message or f"snap {__import__('datetime').datetime.now().strftime('%H:%M')}"
+            print(snap(msg))
+        elif args.action == "auto":
+            print(auto_snap())
+        elif args.action == "log":
+            for entry in version_log(args.lines):
+                print(f"  {entry['hash']} {entry['message']}")
+        elif args.action == "diff":
+            print(version_diff())
+
+    elif args.command == "skill":
+        if args.action == "list":
+            for s in skills_list_all(args.category if hasattr(args, 'category') and args.category else None):
+                print(f"  [{s['category']}] {s['id']}: {s['description']}")
+        elif args.action == "search":
+            if not args.query:
+                print("--query required"); sys.exit(1)
+            for s in skills_search(args.query):
+                print(f"  [{s.category}] {s.id}: {s.name}")
+        elif args.action == "run":
+            if not args.id:
+                print("--id required"); sys.exit(1)
+            skill = skills_get(args.id)
+            if not skill:
+                print(f"Skill {args.id} not found"); sys.exit(1)
+            if skill.script:
+                import subprocess
+                print(f"Running: {skill.script}")
+                subprocess.run(skill.script, shell=True)
+            else:
+                print(f"Architect skill — prompt template:\n{skill.template}")
 
     else:
         parser.print_help()
