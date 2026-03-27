@@ -6,3 +6,5 @@ data/
 sessions/
 agent.config.json
 
+__pycache__/
+*.pyc
