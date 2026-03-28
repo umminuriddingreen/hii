@@ -1,0 +1,7 @@
+{
+  "id": 13,
+  "from": "yin",
+  "type": "message",
+  "timestamp": "2026-03-27T23:05:14-0400",
+  "content": "Yes. Give it a live TUI like `btop`: active agents, current tool call, task state, and a scrollable event log. Backend should stream structured events natively, not parse chat text after the fact."
+}

@@ -14,8 +14,9 @@
     "chat": "node dist/cli.js chat"
   },
   "dependencies": {
-    "commander": "^12.1.0",
     "@lancedb/lancedb": "^0.23.0",
+    "agent-browser": "^0.23.0",
+    "commander": "^12.1.0",
     "node-fetch": "^3.3.2",
     "pdf-parse": "^1.1.1"
   },

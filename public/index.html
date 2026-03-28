@@ -14,20 +14,48 @@
         <span id="status"></span>
       </div>
     </header>
-    <main>
-      <section class="sidebar">
-        <h3>Notes</h3>
-        <input id="filter" placeholder="Filter notes..." />
-        <div class="counts">Showing link and backlink counts</div>
-        <div class="search-box">
-          <input id="search" placeholder="Search body text..." />
-          <button id="searchBtn">Search</button>
+    <main id="desktop">
+      <section class="panel panel-notes" data-panel="notes">
+        <div class="panel-header">
+          <div>
+            <span class="panel-eyebrow">Vault</span>
+            <h3>Notes</h3>
+          </div>
+          <span class="panel-grip" aria-hidden="true">:::</span>
         </div>
-        <ul id="notes"></ul>
+        <div class="panel-body">
+          <input id="filter" placeholder="Filter notes..." />
+          <div class="counts">Showing link and backlink counts</div>
+          <div class="search-box">
+            <input id="search" placeholder="Search body text..." />
+            <button id="searchBtn">Search</button>
+          </div>
+          <ul id="notes"></ul>
+        </div>
       </section>
-      <section class="content">
-        <canvas id="graph" width="800" height="600"></canvas>
-        <div id="info"></div>
+      <section class="panel panel-graph" data-panel="graph">
+        <div class="panel-header">
+          <div>
+            <span class="panel-eyebrow">Map</span>
+            <h3>Graph</h3>
+          </div>
+          <span class="panel-grip" aria-hidden="true">:::</span>
+        </div>
+        <div class="panel-body panel-body-canvas">
+          <canvas id="graph" width="800" height="600"></canvas>
+        </div>
+      </section>
+      <section class="panel panel-info" data-panel="info">
+        <div class="panel-header">
+          <div>
+            <span class="panel-eyebrow">Context</span>
+            <h3>Inspector</h3>
+          </div>
+          <span class="panel-grip" aria-hidden="true">:::</span>
+        </div>
+        <div class="panel-body">
+          <div id="info"></div>
+        </div>
       </section>
     </main>
     <script src="/static/viewer.js"></script>

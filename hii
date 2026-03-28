@@ -1,0 +1,209 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────
+# hii — Unified CLI for the Human Information Interface
+#
+# Wraps both the Python engine (daemon, psyche, tasks, agents,
+# skills, version) and the TypeScript CLI (RAG, chat, serve,
+# comfyui, memory, etc.) behind a single command.
+#
+# Usage:
+#   hii serve            — start the dashboard server
+#   hii daemon <action>  — daemon management
+#   hii skill <action>   — skill registry
+#   hii task <action>    — task queue
+#   hii bridge <action>  — bridge chat
+#   hii observe <args>   — add observation
+#   hii version          — version info
+#   hii chat <prompt>    — RAG chat
+#   hii ingest <path>    — ingest files
+#   hii psyche <action>  — psyche profile
+#   hii agent <action>   — agent management
+#   hii wm <layout>      — window manager layouts
+#   hii docgen <cmd>     — document generation
+#   hii seed-skills      — seed built-in skills
+#   hii help             — show this help
+# ─────────────────────────────────────────────────────────────
+
+set -euo pipefail
+
+# Resolve HII_ROOT to the directory containing this script
+HII_ROOT="$(cd "$(dirname "$0")" && pwd)"
+export HII_ROOT
+
+# ── Helpers ──────────────────────────────────────────────────
+
+py_engine() {
+    cd "$HII_ROOT" && python3 -m engine.cli "$@"
+}
+
+ts_cli() {
+    cd "$HII_ROOT" && node dist/cli.js "$@"
+}
+
+py_module() {
+    cd "$HII_ROOT" && python3 -m "$@"
+}
+
+show_help() {
+    cat <<'HELP'
+hii — Human Information Interface CLI
+
+PYTHON ENGINE:
+  hii daemon start|stop|status|logs   Daemon management
+  hii psyche show|init|export         Psyche profile
+  hii task add|list|run|purge         Task queue
+  hii agent register|list|run         Agent management
+  hii skill list|search|run           Skill registry
+  hii version [current|snap|log|diff] Version tracking
+
+DASHBOARD & SERVER:
+  hii serve [--port N]                Start HII dashboard (default: 8888)
+  hii api [--port N]                  Start TypeScript API server (default: 8787)
+
+BRIDGE:
+  hii bridge send <from> <message>    Send a bridge message
+  hii bridge read [--after N]         Read bridge messages
+
+OBSERVATIONS:
+  hii observe <kind> <content>        Add a psyche observation
+
+RAG & CHAT:
+  hii chat <prompt>                   Chat with RAG context
+  hii ingest [--path <dir>]           Ingest files into vector store
+  hii papers <query>                  Fetch academic papers
+
+TOOLS:
+  hii wm <layout>                     Window manager layouts
+  hii docgen <subcommand>             Document generation
+  hii comfyui start|stop|status       ComfyUI management
+  hii space health|snapshot           Desktop integration
+
+SETUP:
+  hii seed-skills                     Seed all built-in skills
+  hii models                          Show/set active models
+  hii config                          Show configuration
+
+META:
+  hii version                         Show version info
+  hii help                            Show this help
+HELP
+}
+
+# ── Routing ──────────────────────────────────────────────────
+
+cmd="${1:-help}"
+shift 2>/dev/null || true
+
+case "$cmd" in
+    # ── Python engine commands ──
+    daemon)   py_engine daemon "$@" ;;
+    psyche)   py_engine psyche "$@" ;;
+    task)     py_engine task "$@" ;;
+    agent)    py_engine agent "$@" ;;
+    skill)    py_engine skill "$@" ;;
+
+    # ── Version (special: no-arg = current) ──
+    version)
+        if [ $# -eq 0 ]; then
+            py_engine version current
+        else
+            py_engine version "$@"
+        fi
+        ;;
+
+    # ── Dashboard server (Python) ──
+    serve)
+        cd "$HII_ROOT" && python3 -m engine.serve.server "$@"
+        ;;
+
+    # ── TypeScript API server ──
+    api)
+        ts_cli serve "$@"
+        ;;
+
+    # ── Bridge ──
+    bridge)
+        action="${1:-read}"
+        shift 2>/dev/null || true
+        case "$action" in
+            send)
+                sender="${1:-ummi}"
+                shift 2>/dev/null || true
+                content="$*"
+                if [ -z "$content" ]; then
+                    echo "Usage: hii bridge send <from> <message>" >&2
+                    exit 1
+                fi
+                curl -s -X POST "http://127.0.0.1:${HII_PORT:-8888}/api/bridge" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"from\":\"$sender\",\"content\":\"$content\"}" | python3 -m json.tool
+                ;;
+            read)
+                after="${1:-0}"
+                curl -s "http://127.0.0.1:${HII_PORT:-8888}/api/bridge?after=$after" | python3 -m json.tool
+                ;;
+            *)
+                echo "Usage: hii bridge send|read" >&2
+                exit 1
+                ;;
+        esac
+        ;;
+
+    # ── Observe ──
+    observe)
+        kind="${1:-observation}"
+        shift 2>/dev/null || true
+        content="$*"
+        if [ -z "$content" ]; then
+            echo "Usage: hii observe <kind> <content>" >&2
+            exit 1
+        fi
+        curl -s -X POST "http://127.0.0.1:${HII_PORT:-8888}/api/observe" \
+            -H "Content-Type: application/json" \
+            -d "{\"kind\":\"$kind\",\"content\":\"$content\",\"source\":\"cli\"}" | python3 -m json.tool
+        ;;
+
+    # ── TypeScript CLI passthrough ──
+    chat)     ts_cli chat "$@" ;;
+    ingest)   ts_cli ingest "$@" ;;
+    papers)   ts_cli papers "$@" ;;
+    comfyui)  ts_cli comfyui "$@" ;;
+    models)   ts_cli models "$@" ;;
+    config)   ts_cli config "$@" ;;
+    memory)   ts_cli memory "$@" ;;
+    space)    ts_cli space "$@" ;;
+    duality)  ts_cli duality "$@" ;;
+    apps)     ts_cli apps "$@" ;;
+    notes)    ts_cli notes "$@" ;;
+    browser)  ts_cli browser "$@" ;;
+    tool)     ts_cli tool "$@" ;;
+    release)  ts_cli release "$@" ;;
+    updates)  ts_cli updates "$@" ;;
+
+    # ── Window Manager ──
+    wm)
+        py_module engine.tools.wm "$@"
+        ;;
+
+    # ── Document Generator ──
+    docgen)
+        py_module engine.tools.docgen "$@"
+        ;;
+
+    # ── Seed Skills ──
+    seed-skills)
+        py_module engine.skills.seed
+        ;;
+
+    # ── Help ──
+    help|-h|--help)
+        show_help
+        ;;
+
+    # ── Unknown ──
+    *)
+        echo "Unknown command: $cmd" >&2
+        echo "Run 'hii help' for usage." >&2
+        exit 1
+        ;;
+esac

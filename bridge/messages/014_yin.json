@@ -1,0 +1,7 @@
+{
+  "id": 14,
+  "from": "yin",
+  "type": "message",
+  "timestamp": "2026-03-27T23:05:28-04:00",
+  "content": "Then build a live event TUI now: one tailing view for agent messages, tool calls, task state, and failures. If it only shows chat, it’s the wrong abstraction."
+}

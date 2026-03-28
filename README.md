@@ -28,17 +28,33 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
   - `--no-memory`: disable Obsidian memory for this call
   - `--memory-entries <n>`: recall this many entries
 - `hii papers "query" [--max N]`: Fetch OA PDFs for a query and ingest
+- `hii browser <agent-browser args...>`: Run the locally installed `agent-browser` CLI through `hii`
+- `hii space health`: Report whether the desktop backend is installed and running
+- `hii space snapshot`: Return monitors, workspaces, and windows from the desktop backend
+- `hii space focus-window --id <windowId>`: Focus a window by backend id
+- `hii space switch-workspace --name <workspace>`: Switch to a workspace by name
 - `hii models [--set-base <m>] [--set-coder <m>] [--set-embed <m>]`
 - `hii models --set-vault "/Users/ummi/Library/Mobile Documents/iCloud~md~obsidian/Documents/hii/hii"`
 - `hii models --set-memory on --set-memory-entries 30`
 - `hii config`: print effective config
 - `hii tool new <name>`: scaffold a new tool file
  - `hii notes audio --file ./recording.wav [--title "Standup"] [--out-dir ./notes] [--keep-transcript]`: Send audio to LM Studio for transcription + Markdown note (supports `--chat-model`, `--transcribe-model`, `--lm-url`).
- - `hii memory test [--vault <path>]`: write a test entry to the vault
- - `hii memory check [--vault <path>]`: verify vault path and .obsidian presence
- - `hii serve [--port 8787] [--web] [--scholarly] [--download-pdfs] [--no-memory]`:
+- `hii memory test [--vault <path>]`: write a test entry to the vault
+- `hii memory check [--vault <path>]`: verify vault path and .obsidian presence
+- `hii duality init [--yin-name Yin] [--codex-name Codex]`: initialize the Yin/Codex bridge
+- `hii apps add --name "<app>" [--path /abs/path] [--stack vite,react,ts] [--status building] [--mvp-ready]`: register an app in the local product catalog
+- `hii apps list`: list tracked apps and MVP readiness
+- `hii apps show <name>`: inspect one app record
+- `hii apps set <name> [--status mvp] [--mvp-ready true]`: update app status and MVP readiness
+- `hii duality post --from yin --to codex --kind handoff --topic "next step" --message "..." [--tags memory,plan]`: write a structured handoff
+- `hii duality read [--for yin|codex] [--limit 20]`: read recent bridge messages
+- `hii serve [--port 8787] [--web] [--scholarly] [--download-pdfs] [--no-memory]`:
    Start a local HTTP server that exposes:
    - POST /chat { prompt, allowShell?, allowSearch?, webProvider?, scholarly?, downloadPdfs?, memory? }
+   - POST /browser { args: string[] }
+   - GET /space/healthz
+   - GET /space/snapshot
+   - POST /space/action { action, ... }
    - POST /ingest { path }
    - GET /healthz
    - GET /graph — vault note/tag graph
@@ -79,7 +95,32 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
 - Academic:
   - Sources: arXiv (API), OpenAlex, Crossref
   - Flags: `--scholarly`, optionally `--download-pdfs`
-  - PDF ingest: OA PDFs are downloaded (<= 25 MB) → parsed → added to RAG
+- PDF ingest: OA PDFs are downloaded (<= 25 MB) → parsed → added to RAG
+
+## Browser Automation
+
+- Installed as a project dependency: `npm install agent-browser`
+- One-time browser setup: `hii browser install`
+- Example usage:
+  - `hii browser open https://example.com`
+  - `hii browser snapshot`
+  - `hii browser screenshot page.png`
+- This forwards arguments directly to the locally installed `agent-browser` binary under `node_modules/.bin`, so `hii` does not require a separate global install.
+
+## Desktop Integration
+
+- `hii space` is the first slice of desktop integration and is intentionally `hii`-centric, not Codex-centric.
+- Current backend:
+  - AeroSpace window manager when installed and running
+- Current capabilities:
+  - health check
+  - desktop snapshot
+  - focus window by id
+  - switch workspace
+- Planned next capabilities:
+  - UI inspection through Accessibility
+  - typed desktop actions
+  - screenshot/vision fallback when Accessibility is unavailable
 
 ## Obsidian Memory (Human + AI Augmentation)
 
@@ -94,6 +135,31 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
   - Set vault via CLI: `hii models --set-vault "<path>"`
   - Test write: `hii memory test`
 - Best Practices (see `docs/obsidian.md`): tags, templates, backlinks/MOCs, periodic reviews
+
+## Yin / Yang Duality
+
+- `Yin` is the reflective side: context, continuity, pattern recognition, and long-memory framing.
+- `Yang` is the execution side: implementation, verification, and delivery.
+- The bridge persists to `~/.hii/bridge/yin-codex.jsonl`.
+- If an Obsidian vault is configured, each bridge message is also mirrored into the existing chat log for durable recall.
+
+Example flow:
+
+- `hii duality init --yin-name Yin --codex-name Yang`
+- `hii duality post --from yin --to yang --kind context --topic "user model" --message "Prefer simpler solutions and iterative refinement." --tags memory,identity`
+- `hii duality post --from yang --to yin --kind reflection --topic "implementation result" --message "Bridge command compiled and validated." --tags build,verification`
+- `hii duality read --for yang --limit 10`
+
+## App Catalog
+
+- Every app should be tracked in `~/.hii/apps.json`.
+- Each record should carry at minimum:
+  - name
+  - path
+  - stack
+  - status
+  - MVP readiness
+- Use the app catalog as the source of truth for whether a project is still just an idea, actively building, or ready to ship as an MVP.
 
 ### Calling from Obsidian via HTTP + Viewing Graph
 

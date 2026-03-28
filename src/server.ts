@@ -8,6 +8,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { buildVaultGraph } from './graph.js';
 import { execFile } from 'node:child_process';
+import { runAgentBrowser } from './tools/browser.js';
+import { focusSpaceWindow, getSpaceHealth, getSpaceSnapshot, switchSpaceWorkspace } from './tools/space.js';
 
 type ServeOpts = {
   port?: number;
@@ -28,6 +30,64 @@ function send(res: http.ServerResponse, code: number, data: any) {
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
   });
   res.end(body);
+}
+
+const HOME_DIR = process.env.HOME || '/Users/ummi';
+
+function latestMtimeMs(target: string): number {
+  try {
+    const stat = fs.statSync(target);
+    if (!stat.isDirectory()) return stat.mtimeMs;
+    let newest = stat.mtimeMs;
+    for (const entry of fs.readdirSync(target, { withFileTypes: true })) {
+      if (entry.name.startsWith('.git')) continue;
+      const full = path.join(target, entry.name);
+      newest = Math.max(newest, latestMtimeMs(full));
+    }
+    return newest;
+  } catch {
+    return 0;
+  }
+}
+
+function contentTypeFor(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.html') return 'text/html; charset=utf-8';
+  if (ext === '.js' || ext === '.mjs') return 'application/javascript; charset=utf-8';
+  if (ext === '.css') return 'text/css; charset=utf-8';
+  if (ext === '.json') return 'application/json; charset=utf-8';
+  if (ext === '.svg') return 'image/svg+xml';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.webp') return 'image/webp';
+  return 'text/plain; charset=utf-8';
+}
+
+function injectLiveReload(html: string, watchPath: string): string {
+  const script = `
+<script>
+(() => {
+  const watchPath = ${JSON.stringify(watchPath)};
+  let lastSeen = 0;
+  async function poll() {
+    try {
+      const res = await fetch('/__hii/watch?path=' + encodeURIComponent(watchPath), { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!lastSeen) {
+        lastSeen = data.mtimeMs || 0;
+        return;
+      }
+      if ((data.mtimeMs || 0) > lastSeen) {
+        window.location.reload();
+      }
+    } catch {}
+  }
+  setInterval(poll, 700);
+})();
+</script>`;
+  if (html.includes('</body>')) return html.replace('</body>', `${script}\n</body>`);
+  return html + script;
 }
 
 async function readJson(req: http.IncomingMessage): Promise<any> {
@@ -54,6 +114,22 @@ export async function startServer(opts: ServeOpts = {}) {
         return send(res, 200, { ok: true });
       }
 
+      if (u.pathname === '/live' && req.method === 'GET') {
+        if (!cfg.obsidianVaultPath) return send(res, 200, { enabled: false, mtimeMs: 0 });
+        return send(res, 200, {
+          enabled: true,
+          mtimeMs: latestMtimeMs(cfg.obsidianVaultPath)
+        });
+      }
+
+      if (u.pathname === '/__hii/watch' && req.method === 'GET') {
+        const raw = u.searchParams.get('path');
+        if (!raw) return send(res, 400, { error: 'path required' });
+        const abs = path.resolve(raw);
+        if (!abs.startsWith(HOME_DIR)) return send(res, 400, { error: 'invalid path' });
+        return send(res, 200, { path: abs, mtimeMs: latestMtimeMs(abs) });
+      }
+
       if (u.pathname === '/chat' && req.method === 'POST') {
         const body = await readJson(req);
         const prompt: string = body?.prompt ?? '';
@@ -75,6 +151,43 @@ export async function startServer(opts: ServeOpts = {}) {
         const db = new VectorStore(cfg.dbPath);
         const count = await ingestPath(db, cfg.embedModel, p);
         return send(res, 200, { ok: true, chunks: count });
+      }
+
+      if (u.pathname === '/browser' && req.method === 'POST') {
+        const body = await readJson(req);
+        const args = Array.isArray(body?.args) ? body.args.map(String) : [];
+        const result = await runAgentBrowser(args);
+        return send(res, result.code === 0 ? 200 : 500, result);
+      }
+
+      if (u.pathname === '/space/healthz' && req.method === 'GET') {
+        return send(res, 200, await getSpaceHealth());
+      }
+
+      if (u.pathname === '/space/snapshot' && req.method === 'GET') {
+        try {
+          return send(res, 200, await getSpaceSnapshot());
+        } catch (e: any) {
+          return send(res, 500, { error: e?.message || String(e) });
+        }
+      }
+
+      if (u.pathname === '/space/action' && req.method === 'POST') {
+        const body = await readJson(req);
+        const action = String(body?.action || '');
+        try {
+          if (action === 'focus-window') {
+            if (!body?.windowId) return send(res, 400, { error: 'windowId required' });
+            return send(res, 200, await focusSpaceWindow(String(body.windowId)));
+          }
+          if (action === 'switch-workspace') {
+            if (!body?.workspace) return send(res, 400, { error: 'workspace required' });
+            return send(res, 200, await switchSpaceWorkspace(String(body.workspace)));
+          }
+          return send(res, 400, { error: 'unsupported action' });
+        } catch (e: any) {
+          return send(res, 500, { error: e?.message || String(e) });
+        }
       }
 
       if (u.pathname === '/graph' && req.method === 'GET') {
@@ -165,6 +278,32 @@ export async function startServer(opts: ServeOpts = {}) {
         if (!fs.existsSync(p)) return send(res, 404, { error: 'static not found' });
         const ext = path.extname(p).toLowerCase();
         const type = ext === '.js' ? 'application/javascript' : ext === '.css' ? 'text/css' : 'text/plain';
+        res.writeHead(200, { 'Content-Type': type });
+        fs.createReadStream(p).pipe(res);
+        return;
+      }
+
+      if (u.pathname.startsWith('/workspace/')) {
+        const rel = u.pathname.replace('/workspace/', '');
+        const p = path.resolve(HOME_DIR, rel);
+        if (!p.startsWith(HOME_DIR)) return send(res, 400, { error: 'invalid path' });
+        if (!fs.existsSync(p)) return send(res, 404, { error: 'workspace file not found' });
+        const stat = fs.statSync(p);
+        if (stat.isDirectory()) {
+          const indexPath = path.join(p, 'index.html');
+          if (!fs.existsSync(indexPath)) return send(res, 404, { error: 'index.html not found' });
+          const html = injectLiveReload(fs.readFileSync(indexPath, 'utf-8'), p);
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end(html);
+          return;
+        }
+        const type = contentTypeFor(p);
+        if (p.toLowerCase().endsWith('.html')) {
+          const html = injectLiveReload(fs.readFileSync(p, 'utf-8'), path.dirname(p));
+          res.writeHead(200, { 'Content-Type': type });
+          res.end(html);
+          return;
+        }
         res.writeHead(200, { 'Content-Type': type });
         fs.createReadStream(p).pipe(res);
         return;

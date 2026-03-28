@@ -6,9 +6,25 @@ import { loadConfig, saveConfig } from './config.js';
 import { VectorStore } from './store/vectordb.js';
 import { ingestPath } from './rag/ingest.js';
 import { agentLoop } from './agent.js';
+import { addApp, appsSummary, getApp, listApps, updateApp } from './apps.js';
+import { formatDualMessages, initDuality, postDualMessage, readDualMessages } from './duality.js';
+import { runAgentBrowser } from './tools/browser.js';
+import { focusSpaceWindow, getSpaceHealth, getSpaceSnapshot, switchSpaceWorkspace } from './tools/space.js';
 
 const program = new Command();
 program.name('hii').description('Local agentic CLI powered by Ollama').version('0.1.0');
+
+async function maybeHandleBrowserPassthrough() {
+  if (process.argv[2] !== 'browser') return false;
+  const args = process.argv.slice(3);
+  try {
+    const result = await runAgentBrowser(args, { stdio: 'inherit' });
+    process.exit(result.code ?? 1);
+  } catch (error: any) {
+    console.error(error?.message || String(error));
+    process.exit(1);
+  }
+}
 
 program.command('ingest')
   .description('Ingest files into local vector store')
@@ -44,6 +60,14 @@ program.command('chat')
     if (opts.memoryEntries !== 'auto') merged.memoryMaxEntries = Number(opts.memoryEntries) || merged.memoryMaxEntries;
     const text = await agentLoop(merged, promptParts.join(' '), { webProvider: provider as any, scholarly: !!opts.scholarly, downloadPdfs: !!opts.downloadPdfs, useMemory: !opts.noMemory });
     console.log(text);
+  });
+
+program.command('browser')
+  .description('Pass through to the locally installed agent-browser CLI')
+  .addHelpText('after', '\nExamples:\n  hii browser install\n  hii browser open https://example.com\n  hii browser snapshot\n')
+  .action(() => {
+    console.error('Usage: hii browser <agent-browser args...>');
+    process.exit(1);
   });
 
 program.command('models')
@@ -200,6 +224,119 @@ memory.command('check')
     }
   });
 
+const duality = program.command('duality').description('Persistent Yin <-> Codex interaction layer');
+
+duality.command('init')
+  .description('Initialize Yin/Codex bridge state')
+  .option('--yin-name <name>', 'Name for the reflective side', 'Yin')
+  .option('--codex-name <name>', 'Name for the execution side', 'Yang')
+  .action((opts) => {
+    const state = initDuality(opts.yinName, opts.codexName);
+    console.log(JSON.stringify(state, null, 2));
+  });
+
+duality.command('post')
+  .description('Post a structured message between Yin and Codex')
+  .requiredOption('--from <agent>', 'yin|codex')
+  .requiredOption('--to <agent>', 'yin|codex|both')
+  .requiredOption('--kind <kind>', 'context|plan|handoff|reflection|decision')
+  .requiredOption('--topic <text>', 'Short topic for the message')
+  .requiredOption('--message <text>', 'Message body')
+  .option('--tags <csv>', 'Comma-separated tags')
+  .action((opts) => {
+    const tags = typeof opts.tags === 'string'
+      ? opts.tags.split(',').map((tag: string) => tag.trim()).filter(Boolean)
+      : [];
+    const entry = postDualMessage({
+      from: opts.from,
+      to: opts.to,
+      kind: opts.kind,
+      topic: opts.topic,
+      message: opts.message,
+      tags,
+    } as any);
+    console.log(JSON.stringify(entry, null, 2));
+  });
+
+duality.command('read')
+  .description('Read recent Yin/Yang messages')
+  .option('--for <agent>', 'Filter for yin|yang')
+  .option('--limit <n>', 'Number of messages to show', '20')
+  .action((opts) => {
+    const messages = readDualMessages({
+      forAgent: opts.for,
+      limit: Number(opts.limit) || 20,
+    } as any);
+    console.log(formatDualMessages(messages));
+  });
+
+const apps = program.command('apps').description('Track product apps and MVP readiness');
+
+apps.command('add')
+  .description('Register an app in the local product catalog')
+  .requiredOption('--name <name>', 'App name')
+  .option('--path <path>', 'Absolute or repo path')
+  .option('--stack <csv>', 'Comma-separated stack')
+  .option('--summary <text>', 'Short summary')
+  .option('--status <status>', 'idea|building|mvp|paused|archived', 'idea')
+  .option('--mvp-ready', 'Mark app as MVP-ready now')
+  .option('--entry <path>', 'Primary entry file or route')
+  .option('--tags <csv>', 'Comma-separated tags')
+  .action((opts) => {
+    const stack = typeof opts.stack === 'string' ? opts.stack.split(',').map((x: string) => x.trim()).filter(Boolean) : [];
+    const tags = typeof opts.tags === 'string' ? opts.tags.split(',').map((x: string) => x.trim()).filter(Boolean) : [];
+    const app = addApp({
+      name: opts.name,
+      path: opts.path,
+      stack,
+      summary: opts.summary,
+      status: opts.status,
+      mvpReady: !!opts.mvpReady,
+      entry: opts.entry,
+      tags,
+    } as any);
+    console.log(JSON.stringify(app, null, 2));
+  });
+
+apps.command('list')
+  .description('List tracked apps')
+  .action(() => {
+    console.log(appsSummary());
+  });
+
+apps.command('show')
+  .description('Show one tracked app')
+  .argument('<name>', 'App name or slug')
+  .action((name) => {
+    const app = getApp(name);
+    if (!app) {
+      console.error(`App not found: ${name}`);
+      process.exit(1);
+    }
+    console.log(JSON.stringify(app, null, 2));
+  });
+
+apps.command('set')
+  .description('Update app status and MVP readiness')
+  .argument('<name>', 'App name or slug')
+  .option('--status <status>', 'idea|building|mvp|paused|archived')
+  .option('--mvp-ready <value>', 'true|false')
+  .option('--summary <text>', 'Updated summary')
+  .option('--entry <path>', 'Primary entry file or route')
+  .option('--stack <csv>', 'Comma-separated stack')
+  .option('--tags <csv>', 'Comma-separated tags')
+  .action((name, opts) => {
+    const patch: any = {};
+    if (opts.status) patch.status = opts.status;
+    if (opts.mvpReady !== undefined) patch.mvpReady = String(opts.mvpReady).toLowerCase() === 'true';
+    if (opts.summary !== undefined) patch.summary = opts.summary;
+    if (opts.entry !== undefined) patch.entry = opts.entry;
+    if (opts.stack) patch.stack = opts.stack.split(',').map((x: string) => x.trim()).filter(Boolean);
+    if (opts.tags) patch.tags = opts.tags.split(',').map((x: string) => x.trim()).filter(Boolean);
+    const app = updateApp(name, patch);
+    console.log(JSON.stringify(app, null, 2));
+  });
+
 program.command('papers')
   .description('Fetch and ingest open-access PDFs for a scholarly query')
   .argument('<query...>', 'Academic query')
@@ -250,6 +387,34 @@ notes.command('audio')
     });
     console.log('Note saved to:', res.notePath);
     if (res.transcriptPath) console.log('Transcript saved to:', res.transcriptPath);
+  });
+
+const space = program.command('space').description('Desktop and window-manager integration');
+
+space.command('health')
+  .description('Report the desktop backend status')
+  .action(async () => {
+    console.log(JSON.stringify(await getSpaceHealth(), null, 2));
+  });
+
+space.command('snapshot')
+  .description('Return monitors, workspaces, and windows from the active desktop backend')
+  .action(async () => {
+    console.log(JSON.stringify(await getSpaceSnapshot(), null, 2));
+  });
+
+space.command('focus-window')
+  .description('Focus a specific window by backend window id')
+  .requiredOption('--id <windowId>', 'Backend window id')
+  .action(async (opts) => {
+    console.log(JSON.stringify(await focusSpaceWindow(String(opts.id)), null, 2));
+  });
+
+space.command('switch-workspace')
+  .description('Switch to a workspace by name')
+  .requiredOption('--name <workspace>', 'Workspace name')
+  .action(async (opts) => {
+    console.log(JSON.stringify(await switchSpaceWorkspace(String(opts.name)), null, 2));
   });
 
 // Serve command (define before parse)
@@ -324,4 +489,14 @@ comfyui.action(async () => {
   const { comfyuiStart } = await import('./tools/comfyui.js');
   await comfyuiStart();
 });
-program.parseAsync(process.argv);
+
+async function main() {
+  const handled = await maybeHandleBrowserPassthrough();
+  if (handled) return;
+  await program.parseAsync(process.argv);
+}
+
+main().catch((error: any) => {
+  console.error(error?.message || String(error));
+  process.exit(1);
+});

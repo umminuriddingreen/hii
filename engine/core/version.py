@@ -12,12 +12,13 @@ Usage:
     hii-engine version auto         # auto-commit if there are changes (for cron/daemon)
 """
 
+import os
 import subprocess
 import json
 from pathlib import Path
 from datetime import datetime
 
-HII_ROOT = Path.home() / "hii"
+HII_ROOT = Path(os.environ.get("HII_ROOT", str(Path.home() / "hii")))
 HII_DIR = Path.home() / ".hii"
 VERSION_LOG = HII_DIR / "versions.json"
 
