@@ -301,6 +301,17 @@
     border-color: var(--accent);
     color: var(--accent);
   }
+  .ui-select {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border);
+    color: var(--dim);
+    padding: 6px 10px;
+    border-radius: 2px;
+    font-family: inherit;
+    font-size: 11px;
+    min-width: 180px;
+  }
+  .ui-select:focus { outline: none; border-color: var(--accent); color: var(--text); }
   #terminal-container { height: 350px; }
   #terminal-container .xterm { height: 100%; }
 
@@ -585,6 +596,10 @@
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <a id="nav-dashboard" class="nav-link" href="/">dashboard</a>
     <a id="nav-graph" class="nav-link" href="/graph">graph</a>
+    <select id="ui-version-select" class="ui-select" onchange="openUiVersion(this.value)">
+      <option value="">current ui</option>
+    </select>
+    <button class="refresh-btn" onclick="saveCurrentUiVersion()">save ui</button>
     <span id="clock" style="color:var(--dim);font-size:11px;margin-right:12px"></span>
     <button class="refresh-btn" onclick="load()">refresh</button>
   </div>

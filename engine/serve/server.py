@@ -8,7 +8,9 @@ what we've done together, and what there is to do.
 Exposes:
     GET  /              — dashboard UI
     GET  /graph         — graph UI
+    GET  /?ui=<slug>    — load a saved dashboard UI version
     GET  /api/state     — full system state (psyche, tasks, agents, skills, version)
+    GET  /api/ui-versions — list saved UI versions
     GET  /api/psyche    — psyche profile + system prompt
     GET  /api/graph     — HII graph data for dashboard graph view
     GET  /api/tasks     — task queue
@@ -19,6 +21,7 @@ Exposes:
     GET  /api/health    — health check
     POST /api/task      — add a task
     POST /api/observe   — add psyche observation
+    POST /api/ui-version-save — save current UI as a named version
 """
 
 import asyncio
@@ -49,6 +52,8 @@ from engine.core.version import current as version_current, log as version_log
 from engine.core.daemon import is_running, read_logs
 
 STATIC_DIR = Path(__file__).parent / "static"
+UI_VERSIONS_DIR = STATIC_DIR / "versions"
+UI_VERSIONS_FILE = UI_VERSIONS_DIR / "registry.json"
 PORT = int(os.environ.get("HII_PORT", "8888"))
 HII_ROOT = Path(__file__).resolve().parent.parent.parent
 BRIDGE_DIR = HII_ROOT / "bridge" / "messages"
@@ -60,6 +65,60 @@ import time
 from datetime import datetime
 
 chat_clients: set = set()  # websocket connections for live chat
+
+
+def _slugify(text: str) -> str:
+    return "".join(ch.lower() if ch.isalnum() else "-" for ch in (text or "")).strip("-")
+
+
+def _ensure_ui_versions():
+    UI_VERSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    if not UI_VERSIONS_FILE.exists():
+      UI_VERSIONS_FILE.write_text("[]")
+
+
+def _load_ui_versions() -> list[dict]:
+    _ensure_ui_versions()
+    try:
+        return json.loads(UI_VERSIONS_FILE.read_text())
+    except json.JSONDecodeError:
+        return []
+
+
+def _save_ui_versions(registry: list[dict]):
+    _ensure_ui_versions()
+    UI_VERSIONS_FILE.write_text(json.dumps(registry, indent=2))
+
+
+def _snapshot_ui_version(name: str, source_file: Path, description: str = "") -> dict:
+    _ensure_ui_versions()
+    slug = _slugify(name)
+    if not slug:
+        raise ValueError("invalid version name")
+    target = UI_VERSIONS_DIR / f"{slug}.html"
+    target.write_text(source_file.read_text())
+    registry = [item for item in _load_ui_versions() if item.get("slug") != slug]
+    entry = {
+        "name": name,
+        "slug": slug,
+        "file": target.name,
+        "description": description,
+        "saved_at": datetime.now().isoformat(),
+    }
+    registry.append(entry)
+    registry.sort(key=lambda item: item.get("saved_at", ""), reverse=True)
+    _save_ui_versions(registry)
+    return entry
+
+
+def _maybe_seed_default_ui_version():
+    _ensure_ui_versions()
+    registry = _load_ui_versions()
+    if registry:
+        return
+    index_file = STATIC_DIR / "index.html"
+    if index_file.exists():
+        _snapshot_ui_version("Current Dashboard", index_file, "Baseline saved dashboard surface")
 
 
 def _ensure_bridge_dir():
@@ -290,11 +349,20 @@ class HiiHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
+        _maybe_seed_default_ui_version()
 
         if path == "" or path == "/":
+            ui_slug = parse_qs(parsed.query).get("ui", [""])[0].strip()
+            if ui_slug:
+                registry = _load_ui_versions()
+                match = next((item for item in registry if item.get("slug") == ui_slug), None)
+                if match:
+                    return self._serve_file(f"versions/{match['file']}", "text/html")
             return self._serve_file("index.html", "text/html")
         elif path == "/graph":
             return self._serve_file("index.html", "text/html")
+        elif path == "/api/ui-versions":
+            return self._json(_load_ui_versions())
         elif path == "/api/state":
             return self._json(self._full_state())
         elif path == "/api/psyche":
@@ -355,6 +423,15 @@ class HiiHandler(SimpleHTTPRequestHandler):
             p = PsycheProfile.load()
             p.observe(body.get("kind", "observation"), body.get("content", ""), body.get("source", "dashboard"))
             return self._json({"ok": True})
+        elif path == "/api/ui-version-save":
+            name = (body.get("name") or "").strip()
+            if not name:
+                return self._json({"error": "name required"}, 400)
+            try:
+                entry = _snapshot_ui_version(name, STATIC_DIR / "index.html", body.get("description", ""))
+            except Exception as e:
+                return self._json({"error": str(e)}, 400)
+            return self._json(entry)
         elif path == "/api/bridge":
             sender = body.get("from", "ummi")
             content = body.get("content", "")

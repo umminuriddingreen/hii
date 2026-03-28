@@ -55,7 +55,7 @@ BUILTIN_SKILLS = [
         category="psyche",
         target="local",
         inputs={"name": "str", "roles": "space-separated", "domains": "space-separated", "values": "space-separated"},
-        script="cd "${HII_ROOT:-~/hii}" && python3 -m engine.cli psyche init --name '{name}' --roles {roles} --domains {domains} --values {values}",
+        script="cd ${HII_ROOT:-~/hii} &&python3 -m engine.cli psyche init --name '{name}' --roles {roles} --domains {domains} --values {values}",
         tags=["psyche", "identity", "init"],
         examples=["hii skill run psyche-init --name 'Ummi Green' --roles builder architect"],
     ),
@@ -66,7 +66,7 @@ BUILTIN_SKILLS = [
         category="psyche",
         target="local",
         inputs={},
-        script="cd "${HII_ROOT:-~/hii}" && python3 -m engine.cli psyche show",
+        script="cd ${HII_ROOT:-~/hii} &&python3 -m engine.cli psyche show",
         tags=["psyche", "show", "summary"],
     ),
     Skill(
@@ -76,7 +76,7 @@ BUILTIN_SKILLS = [
         category="psyche",
         target="local",
         inputs={},
-        script="cd "${HII_ROOT:-~/hii}" && python3 -m engine.cli psyche export",
+        script="cd ${HII_ROOT:-~/hii} &&python3 -m engine.cli psyche export",
         tags=["psyche", "export", "prompt"],
     ),
     Skill(
@@ -98,7 +98,7 @@ BUILTIN_SKILLS = [
         category="task",
         target="local",
         inputs={"name": "str", "script": "str - exact command to run"},
-        script="cd "${HII_ROOT:-~/hii}" && python3 -m engine.cli task add --name '{name}' --target local --script '{script}'",
+        script="cd ${HII_ROOT:-~/hii} &&python3 -m engine.cli task add --name '{name}' --target local --script '{script}'",
         tags=["task", "queue", "local"],
     ),
     Skill(
@@ -108,7 +108,7 @@ BUILTIN_SKILLS = [
         category="task",
         target="local",
         inputs={"name": "str", "prompt": "str - the reasoning intent"},
-        script="cd "${HII_ROOT:-~/hii}" && python3 -m engine.cli task add --name '{name}' --target architect --prompt '{prompt}'",
+        script="cd ${HII_ROOT:-~/hii} &&python3 -m engine.cli task add --name '{name}' --target architect --prompt '{prompt}'",
         tags=["task", "queue", "architect"],
     ),
     Skill(
@@ -118,7 +118,7 @@ BUILTIN_SKILLS = [
         category="task",
         target="local",
         inputs={"status": "str (optional) - queued|running|done|failed"},
-        script="cd "${HII_ROOT:-~/hii}" && python3 -m engine.cli task list",
+        script="cd ${HII_ROOT:-~/hii} &&python3 -m engine.cli task list",
         tags=["task", "list", "status"],
     ),
     Skill(
@@ -128,7 +128,7 @@ BUILTIN_SKILLS = [
         category="task",
         target="local",
         inputs={},
-        script="cd "${HII_ROOT:-~/hii}" && python3 -m engine.cli task purge",
+        script="cd ${HII_ROOT:-~/hii} &&python3 -m engine.cli task purge",
         tags=["task", "purge", "clean"],
     ),
 
@@ -140,7 +140,7 @@ BUILTIN_SKILLS = [
         category="agent",
         target="local",
         inputs={"name": "str", "type": "runner|watcher|syncer", "command": "str - exact command"},
-        script="cd "${HII_ROOT:-~/hii}" && python3 -m engine.cli agent register --name '{name}' --type {type} --command '{command}'",
+        script="cd ${HII_ROOT:-~/hii} &&python3 -m engine.cli agent register --name '{name}' --type {type} --command '{command}'",
         tags=["agent", "register", "spawn"],
     ),
     Skill(
@@ -150,7 +150,7 @@ BUILTIN_SKILLS = [
         category="agent",
         target="local",
         inputs={},
-        script="cd "${HII_ROOT:-~/hii}" && python3 -m engine.cli agent list",
+        script="cd ${HII_ROOT:-~/hii} &&python3 -m engine.cli agent list",
         tags=["agent", "list"],
     ),
     Skill(
@@ -160,7 +160,7 @@ BUILTIN_SKILLS = [
         category="agent",
         target="local",
         inputs={"id": "str - agent ID"},
-        script="cd "${HII_ROOT:-~/hii}" && python3 -m engine.cli agent run --id {id}",
+        script="cd ${HII_ROOT:-~/hii} &&python3 -m engine.cli agent run --id {id}",
         tags=["agent", "run", "execute"],
     ),
 
@@ -194,7 +194,7 @@ BUILTIN_SKILLS = [
         category="rag",
         target="local",
         inputs={"path": "str - folder path to ingest"},
-        script="cd "${HII_ROOT:-~/hii}" && node dist/cli.js ingest --path '{path}'",
+        script="cd ${HII_ROOT:-~/hii} &&node dist/cli.js ingest --path '{path}'",
         tags=["rag", "ingest", "index", "files"],
     ),
     Skill(
@@ -204,7 +204,7 @@ BUILTIN_SKILLS = [
         category="rag",
         target="local",
         inputs={"prompt": "str"},
-        script="cd "${HII_ROOT:-~/hii}" && node dist/cli.js chat '{prompt}'",
+        script="cd ${HII_ROOT:-~/hii} &&node dist/cli.js chat '{prompt}'",
         tags=["rag", "chat", "search", "ask"],
     ),
     Skill(
@@ -214,7 +214,7 @@ BUILTIN_SKILLS = [
         category="web",
         target="local",
         inputs={"prompt": "str"},
-        script="cd "${HII_ROOT:-~/hii}" && node dist/cli.js chat --web --online '{prompt}'",
+        script="cd ${HII_ROOT:-~/hii} &&node dist/cli.js chat --web --online '{prompt}'",
         tags=["web", "search", "online"],
     ),
     Skill(
@@ -224,7 +224,7 @@ BUILTIN_SKILLS = [
         category="web",
         target="local",
         inputs={"query": "str"},
-        script="cd "${HII_ROOT:-~/hii}" && node dist/cli.js chat --web --scholarly --online '{query}'",
+        script="cd ${HII_ROOT:-~/hii} &&node dist/cli.js chat --web --scholarly --online '{query}'",
         tags=["academic", "papers", "scholarly", "research"],
     ),
     Skill(
@@ -234,7 +234,7 @@ BUILTIN_SKILLS = [
         category="server",
         target="local",
         inputs={"port": "int (default 8787)"},
-        script="cd "${HII_ROOT:-~/hii}" && node dist/cli.js serve --port {port} --web --scholarly",
+        script="cd ${HII_ROOT:-~/hii} &&node dist/cli.js serve --port {port} --web --scholarly",
         tags=["server", "http", "api"],
     ),
 
@@ -246,7 +246,7 @@ BUILTIN_SKILLS = [
         category="git",
         target="local",
         inputs={},
-        script="cd "${HII_ROOT:-~/hii}" && git status --short",
+        script="cd ${HII_ROOT:-~/hii} &&git status --short",
         tags=["git", "status"],
     ),
     Skill(
@@ -256,7 +256,7 @@ BUILTIN_SKILLS = [
         category="git",
         target="local",
         inputs={"message": "str - commit message"},
-        script="cd "${HII_ROOT:-~/hii}" && git add -A && git commit -m '{message}'",
+        script="cd ${HII_ROOT:-~/hii} &&git add -A && git commit -m '{message}'",
         tags=["git", "commit", "save"],
     ),
     Skill(
@@ -266,7 +266,7 @@ BUILTIN_SKILLS = [
         category="git",
         target="local",
         inputs={"n": "int (default 10)"},
-        script="cd "${HII_ROOT:-~/hii}" && git log --oneline -{n}",
+        script="cd ${HII_ROOT:-~/hii} &&git log --oneline -{n}",
         tags=["git", "log", "history"],
     ),
 
@@ -278,7 +278,7 @@ BUILTIN_SKILLS = [
         category="comfyui",
         target="local",
         inputs={},
-        script="cd "${HII_ROOT:-~/hii}" && node dist/cli.js comfyui start",
+        script="cd ${HII_ROOT:-~/hii} &&node dist/cli.js comfyui start",
         tags=["comfyui", "image", "generation"],
     ),
     Skill(
@@ -288,7 +288,7 @@ BUILTIN_SKILLS = [
         category="comfyui",
         target="local",
         inputs={},
-        script="cd "${HII_ROOT:-~/hii}" && node dist/cli.js comfyui status",
+        script="cd ${HII_ROOT:-~/hii} &&node dist/cli.js comfyui status",
         tags=["comfyui", "status"],
     ),
 
@@ -402,7 +402,7 @@ BUILTIN_SKILLS = [
         category="notes",
         target="local",
         inputs={"file": "str - path to audio file", "title": "str (optional)"},
-        script="cd "${HII_ROOT:-~/hii}" && node dist/cli.js notes audio --file '{file}' --title '{title}'",
+        script="cd ${HII_ROOT:-~/hii} &&node dist/cli.js notes audio --file '{file}' --title '{title}'",
         tags=["audio", "transcribe", "notes", "voice"],
     ),
 
@@ -414,7 +414,7 @@ BUILTIN_SKILLS = [
         category="memory",
         target="local",
         inputs={},
-        script="cd "${HII_ROOT:-~/hii}" && node dist/cli.js memory check",
+        script="cd ${HII_ROOT:-~/hii} &&node dist/cli.js memory check",
         tags=["memory", "obsidian", "vault", "check"],
     ),
 ]
