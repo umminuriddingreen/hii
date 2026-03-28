@@ -8,3 +8,4 @@ agent.config.json
 
 __pycache__/
 *.pyc
+cli/target/
