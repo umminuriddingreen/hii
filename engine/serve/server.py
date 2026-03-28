@@ -35,6 +35,7 @@ import pty
 import select
 import signal
 import struct
+import subprocess
 import termios
 import threading
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -52,7 +53,8 @@ from engine.tasks.queue import list_tasks, add as add_task
 from engine.agents.delegator import list_agents
 from engine.skills.registry import list_all as skills_list
 from engine.core.version import current as version_current, log as version_log
-from engine.core.daemon import is_running, read_logs
+from engine.core.daemon import is_running, read_logs, start_background
+from engine.tools.api_registry import CATALOG, _load_registry as load_api_registry, search_catalog
 
 STATIC_DIR = Path(__file__).parent / "static"
 UI_VERSIONS_DIR = STATIC_DIR / "versions"
@@ -483,9 +485,31 @@ class HiiHandler(SimpleHTTPRequestHandler):
         elif path == "/api/logs":
             n = int(parse_qs(parsed.query).get("n", ["50"])[0])
             return self._json({"logs": read_logs(n)})
+        elif path == "/api/intents":
+            from engine.core.intent import IntentEngine
+            from dataclasses import asdict as _asdict
+            ie = IntentEngine()
+            return self._json({
+                "pending": [_asdict(i) for i in ie.intents],
+                "history": [_asdict(i) for i in ie.history[-20:]],
+                "cycle_count": ie.cycle_count,
+            })
         elif path == "/api/health":
             running, pid = is_running()
             return self._json({"daemon": running, "pid": pid, "server": True})
+        elif path == "/api/apis/search":
+            q = parse_qs(parsed.query).get("q", [""])[0].strip()
+            if not q:
+                return self._json([])
+            results = search_catalog(q, limit=20)
+            return self._json([
+                {"name": e.name, "description": e.description, "category": e.category,
+                 "auth_type": e.auth_type, "free_tier": e.free_tier, "score": score}
+                for score, e in results
+            ])
+        elif path == "/api/apis":
+            registry = load_api_registry()
+            return self._json(list(registry.values()))
         elif path == "/api/bridge":
             after = int(parse_qs(parsed.query).get("after", ["0"])[0])
             return self._json({"messages": _read_bridge_messages(after_id=after)})
@@ -532,6 +556,18 @@ class HiiHandler(SimpleHTTPRequestHandler):
             except Exception as e:
                 return self._json({"error": str(e)}, 400)
             return self._json(entry)
+        elif path == "/api/daemon/start":
+            running, pid = is_running()
+            if running:
+                return self._json({"ok": True, "pid": pid, "already": True})
+            new_pid = start_background()
+            return self._json({"ok": True, "pid": new_pid})
+        elif path == "/api/daemon/stop":
+            running, pid = is_running()
+            if not running:
+                return self._json({"ok": True, "already_stopped": True})
+            os.kill(pid, signal.SIGTERM)
+            return self._json({"ok": True})
         elif path == "/api/bridge":
             sender = body.get("from", "ummi")
             content = body.get("content", "")
@@ -699,6 +735,20 @@ def run_ws_server():
 
 def main():
     port = PORT
+
+    # Auto-start daemon if not running
+    running, pid = is_running()
+    if not running:
+        import subprocess as _sp
+        _sp.Popen(
+            [sys.executable, "-m", "engine.core.daemon", "start"],
+            cwd=str(HII_ROOT),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        print("daemon started in background")
+
     # Start WebSocket terminal server in background thread
     ws_thread = threading.Thread(target=run_ws_server, daemon=True)
     ws_thread.start()

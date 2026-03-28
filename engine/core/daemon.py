@@ -61,6 +61,8 @@ class Daemon:
         self.workers: dict[str, WorkerState] = {}
         self.procs: dict[str, subprocess.Popen] = {}
         self.running = False
+        self._intent_engine = None
+        self._last_intent_cycle: float = 0
 
     def start(self):
         """Write PID, register signals, enter heartbeat loop."""
@@ -122,6 +124,19 @@ class Daemon:
             state.alive = False
 
     def _heartbeat(self):
+        # Intent engine cycle (time-gated)
+        intent_interval = int(os.environ.get("HII_INTENT_INTERVAL", "60"))
+        now = time.time()
+        if now - self._last_intent_cycle >= intent_interval:
+            self._last_intent_cycle = now
+            try:
+                if self._intent_engine is None:
+                    from engine.core.intent import IntentEngine
+                    self._intent_engine = IntentEngine()
+                self._intent_engine.cycle()
+            except Exception as e:
+                log.error(f"intent engine error: {e}")
+
         for wid, state in self.workers.items():
             proc = self.procs.get(wid)
             if proc is None or proc.poll() is not None:
@@ -153,14 +168,29 @@ class Daemon:
         WORKERS_FILE.write_text(json.dumps(specs, indent=2))
 
     def _load_workers(self):
+        loaded = False
         if WORKERS_FILE.exists():
             try:
                 specs = json.loads(WORKERS_FILE.read_text())
+                if specs:
+                    loaded = True
                 for raw in specs:
                     spec = WorkerSpec(**raw)
                     self.spawn(spec)
             except Exception as e:
                 log.error(f"failed to load workers: {e}")
+        # Auto-register default dashboard worker if nothing configured
+        if not loaded and "hii-dashboard" not in self.workers:
+            hii_root = str(Path(__file__).resolve().parent.parent.parent)
+            default_spec = WorkerSpec(
+                id="hii-dashboard",
+                command="python3",
+                args=["-m", "engine.serve.server"],
+                restart_on_crash=True,
+                max_restarts=10,
+                cwd=hii_root,
+            )
+            self.spawn(default_spec)
 
 
 def is_running() -> tuple[bool, Optional[int]]:
@@ -171,6 +201,59 @@ def is_running() -> tuple[bool, Optional[int]]:
         return True, pid
     except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
         return False, None
+
+
+def start_background() -> int:
+    """Fork the daemon into the background and return its PID.
+
+    Redirects stdout/stderr to the daemon log file. If the daemon is
+    already running, returns the existing PID without spawning a second
+    instance.
+    """
+    running, pid = is_running()
+    if running:
+        return pid
+
+    child = os.fork()
+    if child > 0:
+        # Parent — wait briefly for PID file to appear, then return child PID
+        for _ in range(20):
+            time.sleep(0.1)
+            r, p = is_running()
+            if r:
+                return p
+        return child
+
+    # First child — new session
+    os.setsid()
+    grandchild = os.fork()
+    if grandchild > 0:
+        os._exit(0)
+
+    # Grandchild — redirect stdio to log, then run daemon
+    sys.stdout.flush()
+    sys.stderr.flush()
+    log_fd = open(str(LOG_FILE), "a")
+    os.dup2(log_fd.fileno(), sys.stdout.fileno())
+    os.dup2(log_fd.fileno(), sys.stderr.fileno())
+    devnull = open(os.devnull, "r")
+    os.dup2(devnull.fileno(), sys.stdin.fileno())
+
+    d = Daemon()
+    # Auto-register default dashboard worker if no workers configured
+    if not WORKERS_FILE.exists() or not json.loads(WORKERS_FILE.read_text() or "[]"):
+        hii_root = str(Path(__file__).resolve().parent.parent.parent)
+        default_spec = WorkerSpec(
+            id="hii-dashboard",
+            command="python3",
+            args=["-m", "engine.serve.server"],
+            restart_on_crash=True,
+            max_restarts=10,
+            cwd=hii_root,
+        )
+        d.workers[default_spec.id] = WorkerState(spec=default_spec)
+    d.start()
+    os._exit(0)
 
 
 def read_logs(lines: int = 50) -> str:
