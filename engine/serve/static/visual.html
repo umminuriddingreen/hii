@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hii — visual</title>
+<style>
+  :root {
+    --bg: #0a0a0a; --surface: #141414; --border: #222; --text: #e0e0e0;
+    --dim: #666; --accent: #4ecdc4; --purple: #9775fa; --orange: #ffa94d;
+    --warn: #ff6b6b; --ok: #51cf66;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    background: var(--bg); color: var(--text);
+    height: 100vh; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+
+  /* ── Top Bar ─────────────────────────────────────────────── */
+  .topbar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    background: var(--surface); flex-shrink: 0; z-index: 100;
+  }
+  .topbar h1 { font-size: 13px; color: var(--accent); letter-spacing: 3px; text-transform: uppercase; }
+  .nav-link {
+    background: none; border: 1px solid var(--border); color: var(--dim);
+    padding: 4px 10px; border-radius: 999px; cursor: pointer;
+    font-family: inherit; font-size: 10px; text-decoration: none;
+  }
+  .nav-link:hover, .nav-link.active { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Layout ──────────────────────────────────────────────── */
+  .workspace { display: flex; flex: 1; overflow: hidden; }
+
+  /* ── Toolbar ─────────────────────────────────────────────── */
+  .toolbar {
+    width: 52px; background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 8px 0; gap: 2px; flex-shrink: 0; overflow-y: auto;
+  }
+  .tool-btn {
+    width: 40px; height: 36px; background: none; border: 1px solid transparent;
+    border-radius: 8px; cursor: pointer; display: flex; align-items: center;
+    justify-content: center; color: var(--dim); font-size: 16px;
+    transition: all 0.15s;
+  }
+  .tool-btn:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+  .tool-btn.active { background: rgba(76,205,196,0.12); border-color: var(--accent); color: var(--accent); }
+  .tool-sep { width: 28px; height: 1px; background: var(--border); margin: 4px 0; }
+
+  /* ── Canvas ──────────────────────────────────────────────── */
+  .canvas-area {
+    flex: 1; position: relative; overflow: hidden;
+    background:
+      radial-gradient(circle at 30% 40%, rgba(76,205,196,0.03), transparent 40%),
+      radial-gradient(circle at 70% 60%, rgba(151,117,250,0.03), transparent 40%),
+      var(--bg);
+  }
+  #canvas {
+    position: absolute; top: 0; left: 0;
+    cursor: crosshair;
+    image-rendering: pixelated;
+  }
+
+  /* ── Properties Panel ────────────────────────────────────── */
+  .props {
+    width: 220px; background: var(--surface); border-left: 1px solid var(--border);
+    padding: 12px; flex-shrink: 0; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .props h3 {
+    font-size: 9px; text-transform: uppercase; letter-spacing: 2px;
+    color: var(--dim); margin-bottom: 6px;
+  }
+  .prop-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .prop-row label { font-size: 10px; color: var(--dim); min-width: 48px; }
+  .prop-row input[type="range"] {
+    flex: 1; accent-color: var(--accent); height: 4px;
+  }
+  .prop-row input[type="number"] {
+    width: 48px; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 2px 4px; border-radius: 4px;
+    font-family: inherit; font-size: 10px; text-align: center;
+  }
+  .prop-row input[type="color"] {
+    width: 32px; height: 24px; border: 1px solid var(--border);
+    border-radius: 4px; background: none; cursor: pointer; padding: 0;
+  }
+  .color-swatches { display: flex; flex-wrap: wrap; gap: 3px; }
+  .swatch {
+    width: 20px; height: 20px; border-radius: 4px; cursor: pointer;
+    border: 1px solid var(--border); transition: transform 0.1s;
+  }
+  .swatch:hover { transform: scale(1.2); }
+  .swatch.active { border-color: var(--accent); box-shadow: 0 0 4px var(--accent); }
+
+  /* ── Status Bar ──────────────────────────────────────────── */
+  .statusbar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 4px 12px; border-top: 1px solid var(--border);
+    background: var(--surface); font-size: 10px; color: var(--dim);
+    flex-shrink: 0;
+  }
+
+  /* ── Layers Panel ────────────────────────────────────────── */
+  .layer-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 6px; border-radius: 6px; font-size: 10px;
+    cursor: pointer; border: 1px solid transparent;
+  }
+  .layer-item:hover { background: rgba(255,255,255,0.03); }
+  .layer-item.active { border-color: var(--accent); background: rgba(76,205,196,0.08); }
+  .layer-vis { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 8px; cursor: pointer; }
+  .layer-vis.on { background: rgba(76,205,196,0.2); color: var(--accent); }
+
+  .btn-sm {
+    background: none; border: 1px solid var(--border); color: var(--dim);
+    padding: 3px 8px; border-radius: 4px; cursor: pointer;
+    font-family: inherit; font-size: 9px;
+  }
+  .btn-sm:hover { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div style="display:flex;align-items:center;gap:12px">
+    <h1>hii visual</h1>
+    <span style="font-size:10px;color:var(--dim)">canvas</span>
+  </div>
+  <div style="display:flex;gap:6px;align-items:center">
+    <a class="nav-link" href="/">dashboard</a>
+    <a class="nav-link" href="/graph">graph</a>
+    <a class="nav-link active" href="/visual">visual</a>
+    <button class="nav-link" onclick="clearCanvas()">clear</button>
+    <button class="nav-link" onclick="exportCanvas()">export</button>
+    <button class="nav-link" onclick="saveToHII()">save to hii</button>
+  </div>
+</div>
+
+<div class="workspace">
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <button class="tool-btn active" data-tool="brush" title="Brush (B)">B</button>
+    <button class="tool-btn" data-tool="pencil" title="Pencil (P)">P</button>
+    <button class="tool-btn" data-tool="eraser" title="Eraser (E)">E</button>
+    <div class="tool-sep"></div>
+    <button class="tool-btn" data-tool="line" title="Line (L)">L</button>
+    <button class="tool-btn" data-tool="rect" title="Rectangle (R)">R</button>
+    <button class="tool-btn" data-tool="circle" title="Circle (C)">C</button>
+    <button class="tool-btn" data-tool="fill" title="Fill (F)">F</button>
+    <div class="tool-sep"></div>
+    <button class="tool-btn" data-tool="text" title="Text (T)">T</button>
+    <button class="tool-btn" data-tool="eyedropper" title="Eyedropper (I)">I</button>
+    <button class="tool-btn" data-tool="move" title="Move (M)">M</button>
+    <div class="tool-sep"></div>
+    <button class="tool-btn" id="undo-btn" title="Undo (Cmd+Z)" onclick="undo()">U</button>
+    <button class="tool-btn" id="redo-btn" title="Redo (Cmd+Shift+Z)" onclick="redo()">Y</button>
+  </div>
+
+  <!-- Canvas -->
+  <div class="canvas-area" id="canvas-area">
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <!-- Properties -->
+  <div class="props">
+    <div>
+      <h3>Brush</h3>
+      <div class="prop-row">
+        <label>Size</label>
+        <input type="range" id="brush-size" min="1" max="100" value="4">
+        <input type="number" id="brush-size-num" min="1" max="100" value="4">
+      </div>
+      <div class="prop-row">
+        <label>Opacity</label>
+        <input type="range" id="brush-opacity" min="1" max="100" value="100">
+        <input type="number" id="brush-opacity-num" min="1" max="100" value="100">
+      </div>
+      <div class="prop-row">
+        <label>Hard</label>
+        <input type="range" id="brush-hardness" min="0" max="100" value="80">
+      </div>
+    </div>
+
+    <div>
+      <h3>Color</h3>
+      <div class="prop-row">
+        <input type="color" id="color-picker" value="#e0e0e0">
+        <span id="color-hex" style="font-size:10px;color:var(--dim)">#e0e0e0</span>
+      </div>
+      <div class="color-swatches" id="swatches"></div>
+    </div>
+
+    <div>
+      <h3>Canvas</h3>
+      <div class="prop-row">
+        <label>W</label>
+        <input type="number" id="canvas-w" value="1920" min="1" max="8192">
+        <label>H</label>
+        <input type="number" id="canvas-h" value="1080" min="1" max="8192">
+      </div>
+      <div style="margin-top:4px">
+        <button class="btn-sm" onclick="resizeCanvas()">resize</button>
+        <button class="btn-sm" onclick="fillBackground()">fill bg</button>
+      </div>
+    </div>
+
+    <div>
+      <h3>Layers</h3>
+      <div id="layers-list"></div>
+      <div style="display:flex;gap:4px;margin-top:6px">
+        <button class="btn-sm" onclick="addLayer()">+ layer</button>
+        <button class="btn-sm" onclick="removeLayer()">- layer</button>
+        <button class="btn-sm" onclick="mergeDown()">merge</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="statusbar">
+  <span id="status-pos">0, 0</span>
+  <span id="status-tool">brush</span>
+  <span id="status-size">1920 x 1080</span>
+</div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+const SWATCHES = [
+  '#ffffff','#e0e0e0','#999999','#666666','#333333','#000000',
+  '#4ecdc4','#9775fa','#ffa94d','#ff6b6b','#51cf66','#67e8f9',
+  '#60a5fa','#fb7185','#a3e635','#f472b6','#facc15','#c084fc',
+];
+
+let currentTool = 'brush';
+let brushSize = 4;
+let brushOpacity = 1.0;
+let brushHardness = 0.8;
+let currentColor = '#e0e0e0';
+let canvasW = 1920;
+let canvasH = 1080;
+
+// Layers: each layer has an offscreen canvas
+let layers = [];
+let activeLayerIdx = 0;
+let undoStack = [];
+let redoStack = [];
+const MAX_UNDO = 40;
+
+// Drawing state
+let drawing = false;
+let lastX = 0, lastY = 0;
+let shapeStartX = 0, shapeStartY = 0;
+
+// Pan/zoom
+let panX = 0, panY = 0, zoom = 1;
+let panning = false, panStartX = 0, panStartY = 0;
+
+const mainCanvas = document.getElementById('canvas');
+const mainCtx = mainCanvas.getContext('2d');
+const canvasArea = document.getElementById('canvas-area');
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+function init() {
+  mainCanvas.width = canvasW;
+  mainCanvas.height = canvasH;
+  addLayer();
+  fillBackground('#0a0a0a');
+  addLayer();
+  renderSwatches();
+  syncSliders();
+  updateCanvasTransform();
+  compositeAll();
+  centerCanvas();
+}
+
+function createLayerCanvas() {
+  const c = document.createElement('canvas');
+  c.width = canvasW; c.height = canvasH;
+  return c;
+}
+
+function addLayer() {
+  const c = createLayerCanvas();
+  layers.push({ canvas: c, visible: true, name: 'Layer ' + (layers.length + 1) });
+  activeLayerIdx = layers.length - 1;
+  renderLayers();
+}
+
+function removeLayer() {
+  if (layers.length <= 1) return;
+  layers.splice(activeLayerIdx, 1);
+  activeLayerIdx = Math.min(activeLayerIdx, layers.length - 1);
+  compositeAll();
+  renderLayers();
+}
+
+function mergeDown() {
+  if (activeLayerIdx === 0 || layers.length < 2) return;
+  const upper = layers[activeLayerIdx];
+  const lower = layers[activeLayerIdx - 1];
+  const ctx = lower.canvas.getContext('2d');
+  ctx.drawImage(upper.canvas, 0, 0);
+  layers.splice(activeLayerIdx, 1);
+  activeLayerIdx--;
+  compositeAll();
+  renderLayers();
+}
+
+function renderLayers() {
+  const el = document.getElementById('layers-list');
+  el.innerHTML = layers.map((l, i) => `
+    <div class="layer-item ${i === activeLayerIdx ? 'active' : ''}" onclick="activeLayerIdx=${i};renderLayers()">
+      <div class="layer-vis ${l.visible ? 'on' : ''}" onclick="event.stopPropagation();layers[${i}].visible=!layers[${i}].visible;compositeAll();renderLayers()">${l.visible ? 'V' : ''}</div>
+      <span>${l.name}</span>
+    </div>
+  `).reverse().join('');
+}
+
+// ── Composite ────────────────────────────────────────────────────────────────
+function compositeAll() {
+  mainCtx.clearRect(0, 0, canvasW, canvasH);
+  for (const l of layers) {
+    if (!l.visible) continue;
+    mainCtx.drawImage(l.canvas, 0, 0);
+  }
+}
+
+// ── Undo/Redo ────────────────────────────────────────────────────────────────
+function saveUndo() {
+  const snapshot = layers.map(l => {
+    const c = createLayerCanvas();
+    c.getContext('2d').drawImage(l.canvas, 0, 0);
+    return { canvas: c, visible: l.visible, name: l.name };
+  });
+  undoStack.push({ layers: snapshot, activeIdx: activeLayerIdx });
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  redoStack = [];
+}
+
+function undo() {
+  if (!undoStack.length) return;
+  const snap = undoStack.pop();
+  const current = layers.map(l => {
+    const c = createLayerCanvas();
+    c.getContext('2d').drawImage(l.canvas, 0, 0);
+    return { canvas: c, visible: l.visible, name: l.name };
+  });
+  redoStack.push({ layers: current, activeIdx: activeLayerIdx });
+  layers = snap.layers;
+  activeLayerIdx = snap.activeIdx;
+  compositeAll();
+  renderLayers();
+}
+
+function redo() {
+  if (!redoStack.length) return;
+  const snap = redoStack.pop();
+  const current = layers.map(l => {
+    const c = createLayerCanvas();
+    c.getContext('2d').drawImage(l.canvas, 0, 0);
+    return { canvas: c, visible: l.visible, name: l.name };
+  });
+  undoStack.push({ layers: current, activeIdx: activeLayerIdx });
+  layers = snap.layers;
+  activeLayerIdx = snap.activeIdx;
+  compositeAll();
+  renderLayers();
+}
+
+// ── Drawing ──────────────────────────────────────────────────────────────────
+function getActiveCtx() {
+  return layers[activeLayerIdx].canvas.getContext('2d');
+}
+
+function canvasCoords(e) {
+  const rect = mainCanvas.getBoundingClientRect();
+  return [
+    (e.clientX - rect.left) / zoom,
+    (e.clientY - rect.top) / zoom
+  ];
+}
+
+function drawBrushStroke(ctx, x0, y0, x1, y1) {
+  const dist = Math.hypot(x1 - x0, y1 - y0);
+  const steps = Math.max(1, Math.floor(dist / (brushSize * 0.2)));
+  ctx.globalAlpha = brushOpacity;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const x = x0 + (x1 - x0) * t;
+    const y = y0 + (y1 - y0) * t;
+    if (currentTool === 'eraser') {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.beginPath();
+      ctx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+    } else if (brushHardness >= 0.9) {
+      ctx.fillStyle = currentColor;
+      ctx.beginPath();
+      ctx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      const grad = ctx.createRadialGradient(x, y, 0, x, y, brushSize / 2);
+      const c = currentColor;
+      grad.addColorStop(0, c);
+      grad.addColorStop(brushHardness, c);
+      grad.addColorStop(1, c.slice(0, 7) + '00');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawPencilStroke(ctx, x0, y0, x1, y1) {
+  ctx.globalAlpha = brushOpacity;
+  ctx.strokeStyle = currentColor;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(Math.floor(x0) + 0.5, Math.floor(y0) + 0.5);
+  ctx.lineTo(Math.floor(x1) + 0.5, Math.floor(y1) + 0.5);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+function floodFill(ctx, startX, startY, fillColor) {
+  const imgData = ctx.getImageData(0, 0, canvasW, canvasH);
+  const data = imgData.data;
+  const sx = Math.floor(startX), sy = Math.floor(startY);
+  if (sx < 0 || sy < 0 || sx >= canvasW || sy >= canvasH) return;
+  const idx = (sy * canvasW + sx) * 4;
+  const targetR = data[idx], targetG = data[idx+1], targetB = data[idx+2], targetA = data[idx+3];
+  // Parse fill color
+  const tmp = document.createElement('canvas').getContext('2d');
+  tmp.fillStyle = fillColor;
+  tmp.fillRect(0,0,1,1);
+  const fc = tmp.getImageData(0,0,1,1).data;
+  if (targetR === fc[0] && targetG === fc[1] && targetB === fc[2] && targetA === fc[3]) return;
+  const stack = [[sx, sy]];
+  const visited = new Uint8Array(canvasW * canvasH);
+  while (stack.length) {
+    const [x, y] = stack.pop();
+    const i = y * canvasW + x;
+    if (x < 0 || y < 0 || x >= canvasW || y >= canvasH || visited[i]) continue;
+    const pi = i * 4;
+    if (Math.abs(data[pi] - targetR) > 32 || Math.abs(data[pi+1] - targetG) > 32 ||
+        Math.abs(data[pi+2] - targetB) > 32 || Math.abs(data[pi+3] - targetA) > 32) continue;
+    visited[i] = 1;
+    data[pi] = fc[0]; data[pi+1] = fc[1]; data[pi+2] = fc[2]; data[pi+3] = 255;
+    stack.push([x-1,y],[x+1,y],[x,y-1],[x,y+1]);
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+// ── Shape Preview ────────────────────────────────────────────────────────────
+let shapePreviewCanvas = null;
+
+function startShapePreview() {
+  shapePreviewCanvas = createLayerCanvas();
+}
+
+function drawShapePreview(x0, y0, x1, y1) {
+  if (!shapePreviewCanvas) return;
+  const ctx = shapePreviewCanvas.getContext('2d');
+  ctx.clearRect(0, 0, canvasW, canvasH);
+  ctx.strokeStyle = currentColor;
+  ctx.lineWidth = brushSize;
+  ctx.globalAlpha = brushOpacity;
+  ctx.beginPath();
+  if (currentTool === 'line') {
+    ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
+  } else if (currentTool === 'rect') {
+    ctx.rect(Math.min(x0,x1), Math.min(y0,y1), Math.abs(x1-x0), Math.abs(y1-y0));
+  } else if (currentTool === 'circle') {
+    const rx = Math.abs(x1-x0)/2, ry = Math.abs(y1-y0)/2;
+    ctx.ellipse(Math.min(x0,x1)+rx, Math.min(y0,y1)+ry, rx, ry, 0, 0, Math.PI*2);
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  // Composite with preview
+  compositeAll();
+  mainCtx.drawImage(shapePreviewCanvas, 0, 0);
+}
+
+function commitShape(x0, y0, x1, y1) {
+  const ctx = getActiveCtx();
+  ctx.strokeStyle = currentColor;
+  ctx.lineWidth = brushSize;
+  ctx.globalAlpha = brushOpacity;
+  ctx.beginPath();
+  if (currentTool === 'line') {
+    ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
+  } else if (currentTool === 'rect') {
+    ctx.rect(Math.min(x0,x1), Math.min(y0,y1), Math.abs(x1-x0), Math.abs(y1-y0));
+  } else if (currentTool === 'circle') {
+    const rx = Math.abs(x1-x0)/2, ry = Math.abs(y1-y0)/2;
+    ctx.ellipse(Math.min(x0,x1)+rx, Math.min(y0,y1)+ry, rx, ry, 0, 0, Math.PI*2);
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  shapePreviewCanvas = null;
+  compositeAll();
+}
+
+// ── Mouse Events ─────────────────────────────────────────────────────────────
+mainCanvas.addEventListener('mousedown', (e) => {
+  if (e.button === 1 || (e.button === 0 && e.altKey)) {
+    panning = true; panStartX = e.clientX - panX; panStartY = e.clientY - panY; return;
+  }
+  const [x, y] = canvasCoords(e);
+  if (currentTool === 'eyedropper') {
+    pickColor(x, y); return;
+  }
+  if (currentTool === 'fill') {
+    saveUndo();
+    floodFill(getActiveCtx(), x, y, currentColor);
+    compositeAll(); return;
+  }
+  if (currentTool === 'text') {
+    const text = prompt('Text:');
+    if (!text) return;
+    saveUndo();
+    const ctx = getActiveCtx();
+    ctx.fillStyle = currentColor;
+    ctx.font = brushSize + 'px "SF Mono", monospace';
+    ctx.globalAlpha = brushOpacity;
+    ctx.fillText(text, x, y);
+    ctx.globalAlpha = 1;
+    compositeAll(); return;
+  }
+  drawing = true;
+  lastX = x; lastY = y;
+  shapeStartX = x; shapeStartY = y;
+  if (['line','rect','circle'].includes(currentTool)) {
+    saveUndo();
+    startShapePreview();
+  } else {
+    saveUndo();
+  }
+});
+
+mainCanvas.addEventListener('mousemove', (e) => {
+  const [x, y] = canvasCoords(e);
+  document.getElementById('status-pos').textContent = Math.floor(x) + ', ' + Math.floor(y);
+  if (panning) {
+    panX = e.clientX - panStartX; panY = e.clientY - panStartY;
+    updateCanvasTransform(); return;
+  }
+  if (!drawing) return;
+  if (['line','rect','circle'].includes(currentTool)) {
+    drawShapePreview(shapeStartX, shapeStartY, x, y);
+  } else {
+    const ctx = getActiveCtx();
+    if (currentTool === 'pencil') drawPencilStroke(ctx, lastX, lastY, x, y);
+    else drawBrushStroke(ctx, lastX, lastY, x, y);
+    compositeAll();
+  }
+  lastX = x; lastY = y;
+});
+
+mainCanvas.addEventListener('mouseup', (e) => {
+  if (panning) { panning = false; return; }
+  if (!drawing) return;
+  drawing = false;
+  const [x, y] = canvasCoords(e);
+  if (['line','rect','circle'].includes(currentTool)) {
+    commitShape(shapeStartX, shapeStartY, x, y);
+  }
+});
+
+mainCanvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? 0.9 : 1.1;
+  zoom = Math.max(0.1, Math.min(10, zoom * delta));
+  updateCanvasTransform();
+}, { passive: false });
+
+function pickColor(x, y) {
+  const data = mainCtx.getImageData(Math.floor(x), Math.floor(y), 1, 1).data;
+  const hex = '#' + [data[0],data[1],data[2]].map(v => v.toString(16).padStart(2,'0')).join('');
+  setColor(hex);
+}
+
+// ── Transform ────────────────────────────────────────────────────────────────
+function updateCanvasTransform() {
+  mainCanvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+  mainCanvas.style.transformOrigin = '0 0';
+}
+
+function centerCanvas() {
+  const area = canvasArea.getBoundingClientRect();
+  const fitZoom = Math.min((area.width - 40) / canvasW, (area.height - 40) / canvasH, 1);
+  zoom = fitZoom;
+  panX = (area.width - canvasW * zoom) / 2;
+  panY = (area.height - canvasH * zoom) / 2;
+  updateCanvasTransform();
+}
+
+// ── UI Sync ──────────────────────────────────────────────────────────────────
+function syncSliders() {
+  const sizeR = document.getElementById('brush-size');
+  const sizeN = document.getElementById('brush-size-num');
+  const opR = document.getElementById('brush-opacity');
+  const opN = document.getElementById('brush-opacity-num');
+  const hardR = document.getElementById('brush-hardness');
+  sizeR.oninput = () => { brushSize = +sizeR.value; sizeN.value = sizeR.value; };
+  sizeN.oninput = () => { brushSize = +sizeN.value; sizeR.value = sizeN.value; };
+  opR.oninput = () => { brushOpacity = opR.value / 100; opN.value = opR.value; };
+  opN.oninput = () => { brushOpacity = opN.value / 100; opR.value = opN.value; };
+  hardR.oninput = () => { brushHardness = hardR.value / 100; };
+}
+
+function setColor(hex) {
+  currentColor = hex;
+  document.getElementById('color-picker').value = hex;
+  document.getElementById('color-hex').textContent = hex;
+  document.querySelectorAll('.swatch').forEach(s => s.classList.toggle('active', s.dataset.color === hex));
+}
+
+function renderSwatches() {
+  const el = document.getElementById('swatches');
+  el.innerHTML = SWATCHES.map(c => `<div class="swatch ${c === currentColor ? 'active' : ''}" style="background:${c}" data-color="${c}" onclick="setColor('${c}')"></div>`).join('');
+}
+
+document.getElementById('color-picker').addEventListener('input', (e) => setColor(e.target.value));
+
+// Tool buttons
+document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    currentTool = btn.dataset.tool;
+    document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('status-tool').textContent = currentTool;
+    mainCanvas.style.cursor = currentTool === 'eyedropper' ? 'crosshair' :
+      currentTool === 'move' ? 'grab' :
+      currentTool === 'text' ? 'text' : 'crosshair';
+  });
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  const map = {b:'brush',p:'pencil',e:'eraser',l:'line',r:'rect',c:'circle',f:'fill',t:'text',i:'eyedropper',m:'move'};
+  if (map[e.key]) { document.querySelector(`[data-tool="${map[e.key]}"]`)?.click(); return; }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey) { e.preventDefault(); redo(); }
+  if (e.key === '[') { brushSize = Math.max(1, brushSize - 1); document.getElementById('brush-size').value = brushSize; document.getElementById('brush-size-num').value = brushSize; }
+  if (e.key === ']') { brushSize = Math.min(100, brushSize + 1); document.getElementById('brush-size').value = brushSize; document.getElementById('brush-size-num').value = brushSize; }
+  if (e.key === '0') centerCanvas();
+});
+
+// ── Actions ──────────────────────────────────────────────────────────────────
+function clearCanvas() {
+  saveUndo();
+  layers.forEach(l => l.canvas.getContext('2d').clearRect(0, 0, canvasW, canvasH));
+  compositeAll();
+}
+
+function fillBackground(color) {
+  const ctx = layers[0].canvas.getContext('2d');
+  ctx.fillStyle = color || currentColor;
+  ctx.fillRect(0, 0, canvasW, canvasH);
+  compositeAll();
+}
+
+function resizeCanvas() {
+  const w = +document.getElementById('canvas-w').value;
+  const h = +document.getElementById('canvas-h').value;
+  if (w < 1 || h < 1 || w > 8192 || h > 8192) return;
+  saveUndo();
+  canvasW = w; canvasH = h;
+  mainCanvas.width = w; mainCanvas.height = h;
+  layers.forEach(l => { l.canvas.width = w; l.canvas.height = h; });
+  document.getElementById('status-size').textContent = w + ' x ' + h;
+  compositeAll();
+  centerCanvas();
+}
+
+function exportCanvas() {
+  const a = document.createElement('a');
+  a.download = 'hii-visual-' + Date.now() + '.png';
+  a.href = mainCanvas.toDataURL('image/png');
+  a.click();
+}
+
+function saveToHII() {
+  mainCanvas.toBlob(async (blob) => {
+    const formData = new FormData();
+    formData.append('file', blob, 'visual-' + Date.now() + '.png');
+    try {
+      await fetch('/api/observe', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({kind: 'artifact', content: 'Visual canvas saved at ' + new Date().toISOString(), source: 'visual'}),
+      });
+      document.querySelector('.statusbar span:first-child').textContent = 'saved to hii';
+      setTimeout(() => document.getElementById('status-pos').textContent = '0, 0', 2000);
+    } catch(e) { console.error(e); }
+  }, 'image/png');
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+init();
+window.addEventListener('resize', centerCanvas);
+</script>
+</body>
+</html>

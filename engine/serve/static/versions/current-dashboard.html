@@ -10,11 +10,11 @@
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js"></script>
 <style>
   :root {
-    --bg: #191919;
-    --surface: #202020;
-    --border: rgba(255,255,255,0.05);
-    --text: #ffffffd9;
-    --dim: #ffffff73;
+    --bg: #060707;
+    --surface: transparent;
+    --border: rgba(255,255,255,0.08);
+    --text: #dbdfde;
+    --dim: #707776;
     --accent: #4ecdc4;
     --warn: #ff6b6b;
     --ok: #51cf66;
@@ -24,318 +24,137 @@
     --blue: #60a5fa;
     --rose: #fb7185;
     --lime: #a3e635;
-    --sidebar-width: 220px;
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    background: var(--bg);
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    background:
+      linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px),
+      radial-gradient(circle at 10% 20%, rgba(76, 205, 196, 0.06), transparent 24%),
+      radial-gradient(circle at 90% 12%, rgba(151, 117, 250, 0.08), transparent 22%),
+      linear-gradient(180deg, #090909 0%, #050505 100%);
+    background-size: 32px 32px, 32px 32px, auto, auto, auto;
     color: var(--text);
     min-height: 100vh;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    display: flex;
+    padding: 14px 18px 28px;
   }
 
-  body.graph-mode { display: flex; }
-
-  /* ── Sidebar Navigation ── */
-  .sidebar {
-    width: var(--sidebar-width);
-    min-height: 100vh;
-    background: var(--bg);
-    border-right: 1px solid var(--border);
-    padding: 24px 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    flex-shrink: 0;
-    position: fixed;
-    top: 0;
-    left: 0;
-    z-index: 100;
-  }
-
-  .sidebar-brand {
-    font-size: 14px;
-    font-weight: 700;
-    color: var(--text);
-    letter-spacing: 0.5px;
-    margin-bottom: 4px;
-    padding: 0 8px;
-  }
-
-  .sidebar-subtitle {
-    font-size: 12px;
-    color: var(--dim);
-    padding: 0 8px;
-    margin-bottom: 20px;
-    line-height: 1.4;
-  }
-
-  .nav-link {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 10px;
-    border-radius: 4px;
-    font-size: 14px;
-    color: var(--dim);
-    text-decoration: none;
-    cursor: pointer;
-    background: none;
-    border: none;
-    font-family: inherit;
-    width: 100%;
-    text-align: left;
-  }
-
-  .nav-link:hover {
-    background: rgba(255,255,255,0.04);
-    color: var(--text);
-  }
-
-  .nav-link.active {
-    background: rgba(255,255,255,0.06);
-    color: var(--text);
-    font-weight: 500;
-  }
-
-  .nav-link .nav-icon {
-    font-size: 16px;
-    width: 20px;
-    text-align: center;
-    opacity: 0.6;
-  }
-
-  .sidebar-divider {
-    height: 1px;
-    background: var(--border);
-    margin: 12px 0;
-  }
-
-  .sidebar-section-label {
-    font-size: 11px;
-    color: var(--dim);
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    padding: 0 10px;
-    margin-bottom: 4px;
-    font-weight: 600;
-  }
-
-  .sidebar-meta {
-    margin-top: auto;
-    padding: 8px;
-    font-size: 12px;
-    color: var(--dim);
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .sidebar-meta .ui-select {
-    width: 100%;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    color: var(--dim);
-    padding: 6px 8px;
-    border-radius: 4px;
-    font-family: inherit;
-    font-size: 12px;
-  }
-  .sidebar-meta .ui-select:focus { outline: none; border-color: rgba(255,255,255,0.15); color: var(--text); }
-
-  .sidebar-meta button {
-    background: none;
-    border: 1px solid var(--border);
-    color: var(--dim);
-    padding: 5px 8px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 12px;
-    text-align: left;
-  }
-  .sidebar-meta button:hover {
-    background: rgba(255,255,255,0.04);
-    color: var(--text);
-  }
-
-  /* ── Main Content ── */
-  .main-content {
-    flex: 1;
-    margin-left: var(--sidebar-width);
-    padding: 32px 40px;
-    max-width: 1200px;
-    min-height: 100vh;
-  }
+  body.graph-mode { padding: 16px; }
 
   h1 {
-    font-size: 32px;
-    font-weight: 700;
-    color: var(--text);
-    margin-bottom: 4px;
-    letter-spacing: -0.02em;
-  }
-
-  .subtitle {
     font-size: 14px;
-    color: var(--dim);
-    margin-bottom: 32px;
-    font-weight: 400;
+    color: var(--accent);
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
   }
 
+  .subtitle { font-size: 11px; color: var(--dim); margin-bottom: 18px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px 24px; margin-bottom: 22px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px 24px; margin-bottom: 22px; }
   .hidden { display: none !important; }
   .full { grid-column: 1 / -1; }
 
-  /* ── Section blocks (Notion-style: space-separated, not boxed) ── */
-  .section {
-    margin-bottom: 36px;
-  }
-
-  .section-header {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text);
-    margin-bottom: 12px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .section-header .section-icon {
-    font-size: 16px;
-    opacity: 0.5;
-  }
-
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-    gap: 24px;
-    margin-bottom: 36px;
-  }
-
-  .grid-3 {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 24px;
-    margin-bottom: 36px;
-  }
-
-  /* ── Cards: very minimal ── */
   .card {
-    padding: 0;
+    background: var(--surface);
+    border: none;
+    border-top: 1px solid var(--border);
+    padding: 14px 0 0;
     overflow: hidden;
   }
 
   .card h2 {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--dim);
     text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 12px;
-    font-weight: 600;
+    letter-spacing: 3px;
+    margin-bottom: 14px;
   }
 
   .card.full { grid-column: 1 / -1; }
 
-  /* ── Hero section ── */
   .hero-card {
     display: grid;
     grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
-    gap: 32px;
-    margin-bottom: 36px;
-    padding-bottom: 36px;
-    border-bottom: 1px solid var(--border);
+    gap: 18px;
+    border-top: none;
+    padding-top: 0;
   }
-
   .hero-kicker {
-    color: var(--dim);
-    font-size: 12px;
-    font-weight: 500;
+    color: var(--accent);
+    font-size: 10px;
+    letter-spacing: 3px;
     text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
   }
-
   .hero-title {
-    font-size: clamp(24px, 4vw, 36px);
-    line-height: 1.1;
-    letter-spacing: -0.03em;
-    margin-bottom: 12px;
-    color: var(--text);
-    font-weight: 700;
+    font-size: clamp(22px, 4vw, 36px);
+    line-height: 1;
+    letter-spacing: -0.04em;
+    margin-bottom: 10px;
+    color: #f4f4f4;
   }
-
   .hero-body {
-    font-size: 15px;
-    line-height: 1.6;
-    color: var(--dim);
-    max-width: 60ch;
+    font-size: 12px;
+    line-height: 1.7;
+    color: #b6b6b6;
+    max-width: 70ch;
   }
-
   .hero-signals {
-    padding-left: 32px;
     border-left: 1px solid var(--border);
+    padding-left: 18px;
   }
-
   .signal-stack {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
   }
-
   .signal-row {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
     gap: 10px;
-    padding-bottom: 12px;
+    padding-bottom: 10px;
     border-bottom: 1px solid var(--border);
   }
   .signal-row:last-child { border-bottom: none; padding-bottom: 0; }
-
   .signal-label {
-    font-size: 12px;
+    font-size: 10px;
     color: var(--dim);
-    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 2px;
   }
-
   .signal-value {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text);
     text-align: right;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    font-size: 12px;
   }
 
-  /* ── Tags ── */
   .tag {
     display: inline-block;
-    font-size: 12px;
-    padding: 2px 8px;
-    border-radius: 3px;
+    font-size: 10px;
+    padding: 2px 8px 3px;
+    border-radius: 2px;
     margin: 2px;
-    background: rgba(255,255,255,0.06);
-    color: var(--text);
+    background: rgba(255,255,255,0.04);
+    color: var(--accent);
+    border: 1px solid rgba(255,255,255,0.05);
   }
-  .tag.warn { background: rgba(255,107,107,0.15); color: var(--warn); }
-  .tag.ok { background: rgba(81,207,102,0.15); color: var(--ok); }
-  .tag.purple { background: rgba(151, 117, 250, 0.12); color: var(--purple); }
-  .tag.orange { background: rgba(255, 169, 77, 0.12); color: var(--orange); }
+  .tag.warn { background: #2a1515; color: var(--warn); }
+  .tag.ok { background: #152a15; color: var(--ok); }
+  .tag.purple { background: rgba(151, 117, 250, 0.10); color: var(--purple); }
+  .tag.orange { background: rgba(255, 169, 77, 0.10); color: var(--orange); }
 
-  /* ── Stats ── */
-  .stat { font-size: 28px; font-weight: 700; color: var(--text); }
-  .stat-label { font-size: 12px; color: var(--dim); margin-top: 2px; }
+  .stat { font-size: 28px; font-weight: 700; color: var(--accent); }
+  .stat-label { font-size: 10px; color: var(--dim); margin-top: 2px; }
 
-  /* ── List items ── */
   .list-item {
-    padding: 8px 0;
+    padding: 6px 0;
     border-bottom: 1px solid var(--border);
-    font-size: 14px;
+    font-size: 12px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -343,30 +162,26 @@
   }
   .list-item:last-child { border-bottom: none; }
 
-  /* ── Prompt block (monospace is OK here) ── */
   .prompt-block {
-    font-size: 13px;
+    font-size: 11px;
     line-height: 1.6;
-    color: var(--dim);
+    color: var(--text);
     white-space: pre-wrap;
     max-height: 300px;
     overflow-y: auto;
-    background: var(--surface);
-    padding: 16px;
-    border-radius: 4px;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    font-size: 12px;
+    background: transparent;
+    padding: 0 0 0 14px;
+    border-left: 1px solid var(--border);
   }
 
   .stream-card {
     min-height: 520px;
   }
 
-  /* ── Task Form ── */
   .task-form {
     display: grid;
     gap: 8px;
-    margin-bottom: 16px;
+    margin-bottom: 14px;
   }
   .task-form-row {
     display: grid;
@@ -376,92 +191,137 @@
   .task-form input,
   .task-form select {
     width: 100%;
-    background: var(--surface);
+    background: rgba(255,255,255,0.02);
     border: 1px solid var(--border);
     color: var(--text);
-    padding: 8px 12px;
-    border-radius: 4px;
+    padding: 8px 10px;
+    border-radius: 2px;
     font-family: inherit;
-    font-size: 14px;
+    font-size: 12px;
   }
   .task-form input:focus,
-  .task-form select:focus { outline: none; border-color: rgba(255,255,255,0.15); }
+  .task-form select:focus { outline: none; border-color: var(--accent); }
   .task-submit {
     justify-self: start;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 8px 16px;
-    border-radius: 4px;
+    background: rgba(76, 205, 196, 0.08);
+    border: 1px solid rgba(76, 205, 196, 0.28);
+    color: var(--accent);
+    padding: 8px 14px;
+    border-radius: 2px;
     font-family: inherit;
-    font-size: 13px;
+    font-size: 11px;
     cursor: pointer;
-    font-weight: 500;
   }
-  .task-submit:hover { background: rgba(255,255,255,0.10); }
+  .task-submit:hover { background: rgba(76, 205, 196, 0.18); }
   .task-status {
-    font-size: 12px;
+    font-size: 10px;
     color: var(--dim);
     min-height: 14px;
   }
 
-  /* ── Context list ── */
   .context-list {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
   }
   .context-item {
-    padding-bottom: 10px;
     border-bottom: 1px solid var(--border);
+    padding-bottom: 10px;
   }
   .context-item:last-child {
     border-bottom: none;
     padding-bottom: 0;
   }
   .context-item-title {
-    font-size: 12px;
+    font-size: 10px;
     color: var(--dim);
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 2px;
     margin-bottom: 4px;
-    font-weight: 600;
   }
   .context-item-body {
-    font-size: 14px;
+    font-size: 12px;
     color: var(--text);
     line-height: 1.55;
   }
 
-  .commit-hash { color: var(--purple); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; }
-  .commit-msg { color: var(--text); font-size: 14px; margin-left: 8px; }
+  .commit-hash { color: var(--purple); font-size: 11px; }
+  .commit-msg { color: var(--text); font-size: 11px; margin-left: 8px; }
   .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
-  .status-dot.on { background: var(--ok); }
+  .status-dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
   .status-dot.off { background: var(--warn); }
   .skill-grid { display: flex; flex-wrap: wrap; gap: 4px; }
-  .loading { color: var(--dim); font-size: 13px; }
+  .pulse { animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  .loading { color: var(--dim); font-size: 11px; }
 
   #observe-input {
     width: 100%;
-    background: var(--surface);
+    background: rgba(255,255,255,0.02);
     border: 1px solid var(--border);
     color: var(--text);
-    padding: 10px 14px;
-    border-radius: 4px;
+    padding: 8px 12px;
+    border-radius: 2px;
     font-family: inherit;
-    font-size: 14px;
+    font-size: 12px;
     margin-top: 8px;
   }
-  #observe-input:focus { outline: none; border-color: rgba(255,255,255,0.15); }
+  #observe-input:focus { outline: none; border-color: var(--accent); }
 
+  .topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 22px;
+    gap: 16px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 12px;
+  }
+  .refresh-btn,
+  .chip-btn,
+  .nav-link {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--dim);
+    padding: 6px 12px;
+    border-radius: 2px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    text-decoration: none;
+  }
+  .refresh-btn:hover,
+  .chip-btn:hover,
+  .nav-link:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .nav-link.active {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .ui-select {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border);
+    color: var(--dim);
+    padding: 6px 10px;
+    border-radius: 2px;
+    font-family: inherit;
+    font-size: 11px;
+    min-width: 180px;
+  }
+  .ui-select:focus { outline: none; border-color: var(--accent); color: var(--text); }
   #terminal-container { height: 350px; }
   #terminal-container .xterm { height: 100%; }
 
-  /* ── Bridge Chat ── */
+  /* Bridge Chat */
   .chat-container {
     display: flex;
     flex-direction: column;
     height: 400px;
+    border-left: 1px solid var(--border);
+    padding-left: 14px;
   }
   .chat-messages {
     flex: 1;
@@ -472,9 +332,9 @@
     gap: 6px;
   }
   .chat-msg {
-    padding: 10px 14px;
-    border-radius: 6px;
-    font-size: 14px;
+    padding: 8px 12px;
+    border-radius: 2px;
+    font-size: 12px;
     line-height: 1.5;
     max-width: 85%;
     word-wrap: break-word;
@@ -482,28 +342,32 @@
   }
   .chat-msg.ummi {
     background: rgba(76, 205, 196, 0.08);
+    border: 1px solid rgba(76, 205, 196, 0.25);
     align-self: flex-end;
-    color: var(--text);
+    color: var(--accent);
   }
   .chat-msg.yang {
     background: rgba(151, 117, 250, 0.08);
+    border: 1px solid rgba(151, 117, 250, 0.25);
     align-self: flex-start;
-    color: var(--text);
+    color: var(--purple);
   }
   .chat-msg.yin {
     background: rgba(255, 169, 77, 0.08);
+    border: 1px solid rgba(255, 169, 77, 0.25);
     align-self: flex-start;
-    color: var(--text);
+    color: var(--orange);
   }
   .chat-msg .chat-sender {
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    opacity: 0.7;
     margin-bottom: 2px;
-    color: var(--dim);
   }
   .chat-msg .chat-time {
-    font-size: 11px;
-    color: var(--dim);
+    font-size: 9px;
+    opacity: 0.4;
     margin-top: 2px;
   }
   .chat-input-row {
@@ -513,35 +377,34 @@
   }
   #chat-input {
     flex: 1;
-    background: var(--surface);
+    background: rgba(255,255,255,0.02);
     border: 1px solid var(--border);
     color: var(--text);
-    padding: 10px 14px;
-    border-radius: 4px;
+    padding: 8px 12px;
+    border-radius: 2px;
     font-family: inherit;
-    font-size: 14px;
+    font-size: 12px;
   }
-  #chat-input:focus { outline: none; border-color: rgba(255,255,255,0.15); }
+  #chat-input:focus { outline: none; border-color: var(--accent); }
   .chat-send-btn {
-    background: rgba(255,255,255,0.06);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 10px 18px;
-    border-radius: 4px;
+    background: rgba(76, 205, 196, 0.08);
+    border: 1px solid rgba(76, 205, 196, 0.3);
+    color: var(--accent);
+    padding: 8px 16px;
+    border-radius: 2px;
     cursor: pointer;
     font-family: inherit;
-    font-size: 13px;
-    font-weight: 500;
+    font-size: 11px;
   }
-  .chat-send-btn:hover { background: rgba(255,255,255,0.10); }
+  .chat-send-btn:hover { background: rgba(76, 205, 196, 0.25); }
   .chat-toggle-row {
     display: flex;
     gap: 12px;
     align-items: center;
-    margin-top: 6px;
+    margin-top: 4px;
   }
   .chat-toggle-row label {
-    font-size: 12px;
+    font-size: 10px;
     color: var(--dim);
     cursor: pointer;
     display: flex;
@@ -549,24 +412,24 @@
     gap: 4px;
   }
 
-  /* ── Graph View ── */
   .graph-toolbar {
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 12px;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
     flex-wrap: wrap;
   }
   .graph-title {
-    font-size: 20px;
-    font-weight: 700;
-    color: var(--text);
+    font-size: 13px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 2px;
   }
   .graph-meta {
     color: var(--dim);
-    font-size: 13px;
-    margin-top: 4px;
+    font-size: 11px;
+    margin-top: 3px;
   }
   .graph-shell {
     display: grid;
@@ -578,15 +441,18 @@
     position: relative;
     height: calc(100vh - 150px);
     min-height: 620px;
-    overflow: hidden;
   }
   .graph-stage canvas {
     width: 100%;
     height: 100%;
     display: block;
     border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface);
+    border-radius: 12px;
+    background:
+      radial-gradient(circle at 20% 20%, rgba(76, 205, 196, 0.12), transparent 25%),
+      radial-gradient(circle at 80% 30%, rgba(151, 117, 250, 0.10), transparent 22%),
+      radial-gradient(circle at 50% 80%, rgba(255, 169, 77, 0.08), transparent 20%),
+      linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0));
   }
   .graph-inspector {
     display: flex;
@@ -598,133 +464,62 @@
   .graph-panel {
     background: transparent;
     border: none;
-    padding: 0;
+    border-top: 1px solid var(--border);
+    padding: 14px 0 0;
     overflow: hidden;
   }
   .graph-panel h2 {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--dim);
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 2px;
     margin-bottom: 10px;
-    font-weight: 600;
   }
   .graph-list {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 6px;
     max-height: 48vh;
     overflow: auto;
   }
   .graph-item {
-    padding: 8px 10px;
+    border-left: 1px solid var(--border);
+    padding: 10px 12px;
     cursor: pointer;
     background: transparent;
-    border-radius: 4px;
   }
-  .graph-item:hover {
-    background: rgba(255,255,255,0.04);
-  }
+  .graph-item:hover,
   .graph-item.selected {
-    background: rgba(255,255,255,0.06);
+    border-left-color: var(--accent);
+    background: rgba(76, 205, 196, 0.08);
   }
   .graph-item .title {
-    font-size: 14px;
+    font-size: 12px;
     color: var(--text);
-    margin-bottom: 2px;
+    margin-bottom: 4px;
   }
   .graph-item .detail {
-    font-size: 12px;
+    font-size: 10px;
     color: var(--dim);
   }
   .graph-detail {
     white-space: pre-wrap;
-    font-size: 14px;
+    font-size: 11px;
     line-height: 1.6;
     color: var(--text);
     min-height: 180px;
   }
   .graph-search {
     width: 100%;
-    background: var(--surface);
+    background: rgba(255,255,255,0.02);
     border: 1px solid var(--border);
     color: var(--text);
     padding: 8px 12px;
-    border-radius: 4px;
+    border-radius: 2px;
     font-family: inherit;
-    font-size: 14px;
+    font-size: 12px;
   }
-  .graph-search:focus { outline: none; border-color: rgba(255,255,255,0.15); }
-
-  .chip-btn,
-  .refresh-btn {
-    background: none;
-    border: 1px solid var(--border);
-    color: var(--dim);
-    padding: 5px 12px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 13px;
-    text-decoration: none;
-  }
-  .chip-btn:hover,
-  .refresh-btn:hover {
-    background: rgba(255,255,255,0.04);
-    color: var(--text);
-  }
-
-  /* ── Responsive: sidebar collapses to top on mobile ── */
-  @media (max-width: 768px) {
-    body { flex-direction: column; }
-
-    .sidebar {
-      position: relative;
-      width: 100%;
-      min-height: auto;
-      flex-direction: row;
-      flex-wrap: wrap;
-      padding: 12px 16px;
-      gap: 4px;
-      border-right: none;
-      border-bottom: 1px solid var(--border);
-      align-items: center;
-    }
-
-    .sidebar-brand { margin-bottom: 0; margin-right: 12px; }
-    .sidebar-subtitle { display: none; }
-    .sidebar-divider { display: none; }
-    .sidebar-section-label { display: none; }
-    .sidebar-meta { margin-top: 0; flex-direction: row; flex-wrap: wrap; gap: 4px; }
-    .sidebar-meta .ui-select { min-width: 140px; }
-
-    .main-content {
-      margin-left: 0;
-      padding: 20px 16px;
-    }
-
-    .hero-card {
-      grid-template-columns: 1fr;
-    }
-    .hero-signals {
-      border-left: none;
-      border-top: 1px solid var(--border);
-      padding-left: 0;
-      padding-top: 16px;
-    }
-    .grid-3 {
-      grid-template-columns: 1fr;
-    }
-    .graph-shell {
-      grid-template-columns: 1fr;
-    }
-    .graph-inspector {
-      min-height: auto;
-    }
-    .task-form-row {
-      grid-template-columns: 1fr;
-    }
-  }
+  .graph-search:focus { outline: none; border-color: var(--accent); }
 
   @media (max-width: 1100px) {
     .hero-card {
@@ -745,95 +540,75 @@
     .task-form-row {
       grid-template-columns: 1fr;
     }
-    .grid-3 {
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    }
-  }
-
-  /* ── Accessibility: kill ALL animations ── */
-  @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
-      animation-duration: 0.01ms !important;
-      animation-iteration-count: 1 !important;
-      transition-duration: 0.01ms !important;
-      scroll-behavior: auto !important;
-    }
-  }
-
-  /* Epilepsy safety: no animations at all */
-  * {
-    animation: none !important;
-    transition: none !important;
-  }
-
-  /* Re-enable only safe, non-flashing transitions for hover states */
-  .nav-link,
-  .chip-btn,
-  .refresh-btn,
-  .task-submit,
-  .chat-send-btn,
-  .graph-item,
-  .sidebar-meta button {
-    transition: background 150ms ease !important;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .nav-link,
-    .chip-btn,
-    .refresh-btn,
-    .task-submit,
-    .chat-send-btn,
-    .graph-item,
-    .sidebar-meta button {
-      transition: none !important;
-    }
   }
 
   #dashboard-view {
     display: flex;
     flex-direction: column;
-    gap: 0;
+    gap: 6px;
+  }
+
+  #space-canvas {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 0;
+    display: block;
+    pointer-events: none;
+  }
+
+  .space-shell {
+    position: relative;
+    z-index: 1;
+    perspective: 1800px;
+    transform-style: preserve-3d;
+  }
+
+  .space-panel {
+    transform-style: preserve-3d;
+    will-change: transform;
+    transition: transform 220ms ease, border-color 220ms ease, background 220ms ease;
+  }
+
+  .space-panel:hover {
+    transform: translate3d(0, -4px, 28px);
+  }
+
+  .depth-1 { transform: translateZ(18px); }
+  .depth-2 { transform: translateZ(42px); }
+  .depth-3 { transform: translateZ(68px); }
+
+  .graph-stage {
+    overflow: hidden;
   }
 </style>
 </head>
 <body>
+<canvas id="space-canvas" aria-hidden="true"></canvas>
+<div class="space-shell">
 
-<!-- Sidebar Navigation -->
-<nav class="sidebar">
-  <div class="sidebar-brand">hii</div>
-  <div class="sidebar-subtitle">human information interface</div>
-  <div class="sidebar-divider"></div>
-  <div class="sidebar-section-label">Views</div>
-  <a id="nav-dashboard" class="nav-link" href="/">
-    <span class="nav-icon">&#9632;</span> Dashboard
-  </a>
-  <a id="nav-graph" class="nav-link" href="/graph">
-    <span class="nav-icon">&#9679;</span> Graph
-  </a>
-  <a class="nav-link" href="/visual">
-    <span class="nav-icon">&#9670;</span> Visual
-  </a>
-  <div class="sidebar-divider"></div>
-  <div class="sidebar-meta">
-    <span id="clock" style="font-size:12px;color:var(--dim)"></span>
+<div class="topbar">
+  <div>
+    <h1>hii</h1>
+    <div class="subtitle">human information interface — the mind in the machine</div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <a id="nav-dashboard" class="nav-link" href="/">dashboard</a>
+    <a id="nav-graph" class="nav-link" href="/graph">graph</a>
     <select id="ui-version-select" class="ui-select" onchange="openUiVersion(this.value)">
       <option value="">current ui</option>
     </select>
-    <button onclick="saveCurrentUiVersion()">snapshot ui</button>
-    <button onclick="load()">refresh</button>
+    <button class="refresh-btn" onclick="saveCurrentUiVersion()">snapshot ui</button>
+    <span id="clock" style="color:var(--dim);font-size:11px;margin-right:12px"></span>
+    <button class="refresh-btn" onclick="load()">refresh</button>
   </div>
-</nav>
-
-<!-- Main Content -->
-<div class="main-content">
+</div>
 
 <div id="dashboard-view">
-  <h1>HII</h1>
-  <div class="subtitle">the mind in the machine</div>
-
-  <div class="hero-card full">
+  <div class="card hero-card full space-panel depth-3" style="margin-bottom:16px">
     <div>
-      <div class="hero-kicker">Control Surface</div>
+      <div class="hero-kicker">:: local builder control surface ::</div>
       <div class="hero-title">Observe. Track. Coordinate. Ship.</div>
       <div id="surface-purpose" class="hero-body loading">loading...</div>
     </div>
@@ -844,23 +619,23 @@
   </div>
 
   <div class="grid-3">
-    <div class="card">
+    <div class="card space-panel depth-1">
       <h2>Identity</h2>
-      <div id="identity" class="loading">loading...</div>
+      <div id="identity" class="loading pulse">loading...</div>
     </div>
-    <div class="card">
+    <div class="card space-panel depth-1">
       <h2>Status</h2>
-      <div id="status" class="loading">loading...</div>
+      <div id="status" class="loading pulse">loading...</div>
     </div>
-    <div class="card">
+    <div class="card space-panel depth-1">
       <h2>Stats</h2>
-      <div id="stats" class="loading">loading...</div>
+      <div id="stats" class="loading pulse">loading...</div>
     </div>
   </div>
 
   <div class="grid">
-    <div class="card stream-card">
-      <h2>Live Bridge</h2>
+    <div class="card stream-card space-panel depth-2">
+      <h2>Live Bridge — Yin + Yang + Ummi</h2>
       <div class="chat-container">
         <div id="chat-messages" class="chat-messages"></div>
         <form onsubmit="sendChat(event)" class="chat-input-row">
@@ -870,11 +645,11 @@
         <div class="chat-toggle-row">
           <label><input type="checkbox" id="chat-notify-yin" checked> ping yin</label>
           <label><input type="checkbox" id="chat-notify-yang" checked> ping yang</label>
-          <span style="font-size:11px;color:var(--dim);margin-left:auto" id="chat-status"></span>
+          <span style="font-size:9px;color:var(--dim);margin-left:auto" id="chat-status"></span>
         </div>
       </div>
     </div>
-    <div class="card">
+    <div class="card space-panel depth-2">
       <h2>Task Queue</h2>
       <form class="task-form" onsubmit="createTask(event)">
         <div class="task-form-row">
@@ -893,44 +668,41 @@
   </div>
 
   <div class="grid">
-    <div class="card">
+    <div class="card space-panel depth-1">
       <h2>Context + Memory</h2>
       <div id="context-summary" class="context-list loading">loading...</div>
     </div>
-    <div class="card">
+    <div class="card space-panel depth-1">
       <h2>Capabilities</h2>
       <div id="skills" class="skill-grid loading">loading...</div>
     </div>
   </div>
 
   <div class="grid">
-    <div class="card">
+    <div class="card space-panel depth-1">
       <h2>Release + Change History</h2>
       <div id="history" class="loading">loading...</div>
     </div>
-    <div class="card">
+    <div class="card space-panel depth-1">
       <h2>Agents + Runtime</h2>
       <div id="agents" class="loading">loading...</div>
     </div>
   </div>
 
-  <div class="section">
-    <div class="card">
-      <h2>Observe</h2>
-      <p style="font-size:14px;color:var(--dim);margin-bottom:8px">Type an observation, correction, or preference. HII remembers.</p>
+  <div class="grid">
+    <div class="card space-panel depth-1">
+      <h2>Observe — Teach HII Something</h2>
+      <p style="font-size:11px;color:var(--dim);margin-bottom:8px">Type an observation, correction, or preference. HII remembers.</p>
       <form onsubmit="observe(event)">
         <input id="observe-input" placeholder="e.g. I prefer dark themes, I work best at night, always use tailscale..." autocomplete="off">
       </form>
-      <div id="observe-status" style="font-size:12px;color:var(--ok);margin-top:6px"></div>
-      <div id="system-prompt" class="prompt-block loading" style="margin-top:14px;max-height:240px"></div>
+      <div id="observe-status" style="font-size:10px;color:var(--ok);margin-top:4px"></div>
+      <div id="system-prompt" class="prompt-block loading" style="margin-top:12px;max-height:240px"></div>
     </div>
-  </div>
 
-  <div class="section">
-    <div class="card">
-      <h2>Operator Terminal</h2>
-      <div id="terminal-container"></div>
-    </div>
+  <div class="card space-panel depth-2" style="margin-bottom:16px">
+    <h2>Operator Terminal</h2>
+    <div id="terminal-container"></div>
   </div>
 </div>
 
@@ -953,19 +725,17 @@
       <canvas id="graph-canvas"></canvas>
     </div>
     <div class="graph-inspector">
-      <div class="graph-panel">
+      <div class="graph-panel space-panel depth-1">
         <h2>Nodes</h2>
         <div id="graph-list" class="graph-list">loading...</div>
       </div>
-      <div class="graph-panel">
+      <div class="graph-panel space-panel depth-2">
         <h2>Selection</h2>
         <div id="graph-detail" class="graph-detail">select a node</div>
       </div>
     </div>
   </div>
 </div>
-
-</div><!-- .main-content -->
 
 <script>
 const API = '';
@@ -975,7 +745,163 @@ let graphView = null;
 let graphNodes = [];
 let graphEdges = [];
 let selectedGraphId = null;
+let hiiSpace = null;
 let uiVersions = [];
+
+function initHiiSpace() {
+  if (hiiSpace) return hiiSpace;
+  const canvas = document.getElementById('space-canvas');
+  if (!canvas) return null;
+  const gl = canvas.getContext('webgl', { alpha: true, antialias: true, premultipliedAlpha: true });
+  if (!gl) return null;
+
+  const vertexSource = `
+    attribute vec2 a_position;
+    attribute float a_size;
+    attribute vec3 a_color;
+    uniform vec2 u_resolution;
+    uniform float u_time;
+    uniform float u_energy;
+    varying vec3 v_color;
+    void main() {
+      vec2 pos = a_position;
+      pos.x += sin(u_time * 0.00035 + a_position.y * 0.008) * 14.0 * u_energy;
+      pos.y += cos(u_time * 0.00028 + a_position.x * 0.007) * 10.0 * u_energy;
+      vec2 zeroToOne = pos / u_resolution;
+      vec2 clip = zeroToOne * 2.0 - 1.0;
+      gl_Position = vec4(clip * vec2(1.0, -1.0), 0.0, 1.0);
+      gl_PointSize = a_size + 3.0 * u_energy;
+      v_color = a_color;
+    }
+  `;
+
+  const fragmentSource = `
+    precision mediump float;
+    varying vec3 v_color;
+    void main() {
+      vec2 c = gl_PointCoord - vec2(0.5);
+      float d = dot(c, c);
+      if (d > 0.25) discard;
+      float alpha = smoothstep(0.25, 0.0, d) * 0.6;
+      gl_FragColor = vec4(v_color, alpha);
+    }
+  `;
+
+  function compile(type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    return shader;
+  }
+
+  const program = gl.createProgram();
+  gl.attachShader(program, compile(gl.VERTEX_SHADER, vertexSource));
+  gl.attachShader(program, compile(gl.FRAGMENT_SHADER, fragmentSource));
+  gl.linkProgram(program);
+  gl.useProgram(program);
+
+  const positionLoc = gl.getAttribLocation(program, 'a_position');
+  const sizeLoc = gl.getAttribLocation(program, 'a_size');
+  const colorLoc = gl.getAttribLocation(program, 'a_color');
+  const resolutionLoc = gl.getUniformLocation(program, 'u_resolution');
+  const timeLoc = gl.getUniformLocation(program, 'u_time');
+  const energyLoc = gl.getUniformLocation(program, 'u_energy');
+
+  const count = 180;
+  const positions = new Float32Array(count * 2);
+  const sizes = new Float32Array(count);
+  const colors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i += 1) {
+    positions[i * 2] = Math.random() * window.innerWidth;
+    positions[i * 2 + 1] = Math.random() * window.innerHeight;
+    sizes[i] = 1.2 + Math.random() * 2.6;
+    const tint = i % 3;
+    colors[i * 3] = tint === 0 ? 0.30 : tint === 1 ? 0.38 : 0.92;
+    colors[i * 3 + 1] = tint === 0 ? 0.80 : tint === 1 ? 0.65 : 0.52;
+    colors[i * 3 + 2] = tint === 0 ? 0.76 : tint === 1 ? 0.98 : 0.98;
+  }
+
+  function bindArray(data, location, size) {
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(location);
+    gl.vertexAttribPointer(location, size, gl.FLOAT, false, 0, 0);
+    return buffer;
+  }
+
+  bindArray(positions, positionLoc, 2);
+  bindArray(sizes, sizeLoc, 1);
+  bindArray(colors, colorLoc, 3);
+
+  const state = {
+    energy: 0.35,
+    targetEnergy: 0.35,
+    rings: 3,
+  };
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.floor(window.innerWidth * dpr);
+    canvas.height = Math.floor(window.innerHeight * dpr);
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+    gl.viewport(0, 0, canvas.width, canvas.height);
+  }
+
+  function drawRings(time) {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.scale(canvas.width / window.innerWidth, canvas.height / window.innerHeight);
+    const cx = window.innerWidth * 0.52;
+    const cy = window.innerHeight * 0.46;
+    for (let i = 0; i < state.rings; i += 1) {
+      const radius = 180 + i * 110 + Math.sin(time * 0.0005 + i) * 8;
+      ctx.beginPath();
+      ctx.strokeStyle = i % 2 === 0 ? 'rgba(78,205,196,0.08)' : 'rgba(151,117,250,0.07)';
+      ctx.lineWidth = 1;
+      ctx.arc(cx, cy, radius * (0.72 + state.energy * 0.12), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function frame(time) {
+    state.energy += (state.targetEnergy - state.energy) * 0.04;
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(program);
+    gl.uniform2f(resolutionLoc, window.innerWidth, window.innerHeight);
+    gl.uniform1f(timeLoc, time);
+    gl.uniform1f(energyLoc, state.energy);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+    gl.drawArrays(gl.POINTS, 0, count);
+    drawRings(time);
+    requestAnimationFrame(frame);
+  }
+
+  resize();
+  window.addEventListener('resize', resize);
+  requestAnimationFrame(frame);
+
+  hiiSpace = {
+    setSignalLevel(level) {
+      state.targetEnergy = Math.max(0.12, Math.min(1.2, level));
+    },
+    setRings(countValue) {
+      state.rings = Math.max(1, Math.min(8, countValue));
+    },
+    pulse() {
+      state.targetEnergy = Math.min(1.2, state.targetEnergy + 0.18);
+    },
+  };
+
+  window.HiiSpace = hiiSpace;
+  return hiiSpace;
+}
 
 function isGraphMode() {
   return location.pathname.replace(/\/$/, '') === '/graph';
@@ -1071,10 +997,10 @@ function renderDashboard() {
   `;
 
   document.getElementById('identity').innerHTML = `
-    <div style="font-size:20px;font-weight:700;color:var(--text)">${p.name || 'unknown'}</div>
-    <div style="margin-top:8px">${(p.roles || []).map((r) => `<span class="tag">${r}</span>`).join('')}</div>
-    <div style="margin-top:10px;font-size:14px;color:var(--dim)">${goals.slice(0, 2).join(' · ') || 'No active goals surfaced.'}</div>
-    <div style="margin-top:10px">${(p.values || []).slice(0, 6).map((v) => `<span class="tag purple">${v}</span>`).join('')}</div>
+    <div style="font-size:20px;font-weight:700;color:var(--accent)">${p.name || 'unknown'}</div>
+    <div style="margin-top:6px">${(p.roles || []).map((r) => `<span class="tag">${r}</span>`).join('')}</div>
+    <div style="margin-top:8px;font-size:11px;color:var(--dim)">${goals.slice(0, 2).join(' · ') || 'No active goals surfaced.'}</div>
+    <div style="margin-top:8px">${(p.values || []).slice(0, 6).map((v) => `<span class="tag purple">${v}</span>`).join('')}</div>
   `;
 
   const v = state.version;
@@ -1087,13 +1013,13 @@ function renderDashboard() {
   `;
 
   document.getElementById('stats').innerHTML = `
-    <div style="display:flex;gap:24px;flex-wrap:wrap">
+    <div style="display:flex;gap:20px;flex-wrap:wrap">
       <div><div class="stat">${state.skills_count}</div><div class="stat-label">skills</div></div>
       <div><div class="stat">${state.tasks.length}</div><div class="stat-label">tasks</div></div>
       <div><div class="stat">${state.agents.length}</div><div class="stat-label">agents</div></div>
       <div><div class="stat">${p.total_observations || 0}</div><div class="stat-label">observations</div></div>
     </div>
-    <div style="margin-top:10px">${(state.skills_categories || []).slice(0, 10).map((c) => `<span class="tag orange">${c}</span>`).join('')}</div>
+    <div style="margin-top:8px">${(state.skills_categories || []).slice(0, 10).map((c) => `<span class="tag orange">${c}</span>`).join('')}</div>
   `;
 
   const obsText = observations.length ? '\n\nRecent observations:\n' + observations.slice(0, 6).map((o) => `  - [${o.kind}] ${o.content}`).join('\n') : '';
@@ -1116,7 +1042,7 @@ function renderDashboard() {
 
   const tasksEl = document.getElementById('tasks');
   if (state.tasks.length === 0) {
-    tasksEl.innerHTML = '<div style="color:var(--dim);font-size:13px">no tasks in queue</div>';
+    tasksEl.innerHTML = '<div style="color:var(--dim);font-size:11px">no tasks in queue</div>';
   } else {
     tasksEl.innerHTML = state.tasks.map((t) => `
       <div class="list-item">
@@ -1126,15 +1052,15 @@ function renderDashboard() {
     `).join('');
   }
 
-  document.getElementById('skills').innerHTML = (state.skills_categories || []).map((cat) => `<span class="tag orange" title="${escapeHtml(cat)}">${escapeHtml(cat)}</span>`).join('') + `<div style="width:100%;margin-top:8px;font-size:13px;color:var(--dim)">${state.skills_count} skills across ${(state.skills_categories || []).length} categories</div>`;
+  document.getElementById('skills').innerHTML = (state.skills_categories || []).map((cat) => `<span class="tag orange" title="${escapeHtml(cat)}">${escapeHtml(cat)}</span>`).join('') + `<div style="width:100%;margin-top:8px;font-size:11px;color:var(--dim)">${state.skills_count} skills across ${(state.skills_categories || []).length} categories</div>`;
 
   document.getElementById('history').innerHTML = (state.history || []).map((h) => `
     <div class="list-item"><span class="commit-hash">${escapeHtml(h.hash)}</span><span class="commit-msg">${escapeHtml(h.message)}</span></div>
-  `).join('') || '<div style="color:var(--dim);font-size:13px">no history</div>';
+  `).join('') || '<div style="color:var(--dim);font-size:11px">no history</div>';
 
   const agentsEl = document.getElementById('agents');
   if (state.agents.length === 0) {
-    agentsEl.innerHTML = '<div style="color:var(--dim);font-size:13px">no agents registered</div>';
+    agentsEl.innerHTML = '<div style="color:var(--dim);font-size:11px">no agents registered</div>';
   } else {
     agentsEl.innerHTML = state.agents.map((a) => `
       <div class="list-item">
@@ -1244,7 +1170,7 @@ function renderGraphList(filterText = '') {
       <div class="title">${escapeHtml(n.title)}</div>
       <div class="detail">${escapeHtml(n.kind)} · ${escapeHtml(n.group || '')}${n.detail ? ' · ' + escapeHtml(n.detail) : ''}</div>
     </div>
-  `).join('') || '<div style="color:var(--dim);font-size:13px">no nodes match</div>';
+  `).join('') || '<div style="color:var(--dim);font-size:11px">no nodes match</div>';
   list.querySelectorAll('.graph-item').forEach((item) => {
     item.onclick = () => selectGraphNode(item.dataset.id);
   });
@@ -1266,7 +1192,7 @@ function selectGraphNode(id) {
   const relatedOut = graphEdges.filter((e) => e.source === id);
   const relatedIn = graphEdges.filter((e) => e.target === id);
   detail.innerHTML = `
-    <div style="font-size:18px;font-weight:700;color:var(--text);margin-bottom:8px">${escapeHtml(node.title)}</div>
+    <div style="font-size:16px;color:var(--accent);margin-bottom:8px">${escapeHtml(node.title)}</div>
     <div><span class="tag">${escapeHtml(node.kind)}</span> <span class="tag purple">${escapeHtml(node.group || 'general')}</span></div>
     <div style="margin-top:10px">${escapeHtml(node.detail || '')}</div>
     <div style="margin-top:12px;color:var(--dim)">outgoing: ${relatedOut.length} · incoming: ${relatedIn.length}</div>
@@ -1446,8 +1372,11 @@ function createGraphView(canvas) {
       const fill = colorFor(node);
       ctx.beginPath();
       ctx.fillStyle = fill;
+      ctx.shadowColor = fill;
+      ctx.shadowBlur = node.id === selectedId ? 16 : 8;
       ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
       ctx.fill();
+      ctx.shadowBlur = 0;
       if (node.id === selectedId) {
         ctx.beginPath();
         ctx.strokeStyle = '#ffffff';
@@ -1458,11 +1387,11 @@ function createGraphView(canvas) {
     }
 
     ctx.fillStyle = 'rgba(224,224,224,0.92)';
-    ctx.font = "13px -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif";
+    ctx.font = '11px SF Mono, monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     for (const node of nodesVisible) {
-      const label = node.title.length > 32 ? node.title.slice(0, 32) + '...' : node.title;
+      const label = node.title.length > 32 ? node.title.slice(0, 32) + '…' : node.title;
       ctx.fillText(label, node.x + radiusFor(node) + 8, node.y);
     }
 
@@ -1671,10 +1600,10 @@ if (!isGraphMode()) {
     const termHost = document.getElementById('terminal-container');
     if (!termHost) return;
     const term = new Terminal({
-      theme: { background: '#191919', foreground: '#e0e0e0', cursor: '#4ecdc4', selectionBackground: '#4ecdc444' },
+      theme: { background: '#0a0a0a', foreground: '#e0e0e0', cursor: '#4ecdc4', selectionBackground: '#4ecdc444' },
       fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
       fontSize: 13,
-      cursorBlink: false,
+      cursorBlink: true,
     });
     const fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
@@ -1715,5 +1644,6 @@ window.addEventListener('popstate', () => {
   load().catch(() => {});
 });
 </script>
+</div>
 </body>
 </html>

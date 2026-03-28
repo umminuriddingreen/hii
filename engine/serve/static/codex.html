@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HII Codex</title>
+  <style>
+    :root {
+      --bg: #050505;
+      --panel: #0b0d0e;
+      --line: rgba(120, 255, 246, 0.16);
+      --bright: #8df7ef;
+      --soft: #7f8b8f;
+      --text: #d7dfdc;
+      --accent: #d4ff61;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: radial-gradient(circle at top left, rgba(82, 255, 205, 0.06), transparent 32%), var(--bg); color: var(--text); font: 14px/1.45 "SF Mono", "IBM Plex Mono", "Cascadia Code", monospace; }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+      background-size: 24px 24px;
+      opacity: 0.3;
+    }
+    .shell {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 360px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+    .rail, .document {
+      padding: 22px 18px 18px;
+    }
+    .rail {
+      border-right: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(11,13,14,0.96), rgba(5,5,5,0.95));
+    }
+    .document {
+      background: linear-gradient(180deg, rgba(5,5,5,0.84), rgba(5,5,5,0.98));
+    }
+    .brand {
+      margin-bottom: 20px;
+      letter-spacing: 0.24em;
+      color: var(--bright);
+      font-weight: 700;
+    }
+    .muted { color: var(--soft); }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 16px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 18px;
+    }
+    .headline {
+      margin: 0 0 4px;
+      font-size: 22px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .subhead {
+      margin: 0;
+      color: var(--soft);
+      max-width: 70ch;
+    }
+    .statline {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      color: var(--soft);
+      font-size: 12px;
+    }
+    .search {
+      width: 100%;
+      margin: 0 0 14px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      background: #070909;
+      color: var(--text);
+      font: inherit;
+      outline: none;
+    }
+    .search:focus { border-color: var(--bright); }
+    .list {
+      display: grid;
+      gap: 10px;
+    }
+    .doc-link {
+      display: block;
+      padding: 12px;
+      border: 1px solid transparent;
+      background: rgba(255,255,255,0.015);
+      text-decoration: none;
+      color: inherit;
+      transition: border-color 120ms ease, background 120ms ease;
+    }
+    .doc-link:hover, .doc-link.active {
+      border-color: var(--bright);
+      background: rgba(141, 247, 239, 0.05);
+    }
+    .doc-kind {
+      color: var(--accent);
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .doc-title {
+      font-size: 15px;
+      margin-bottom: 4px;
+    }
+    .doc-summary {
+      color: var(--soft);
+      font-size: 12px;
+    }
+    .doc-meta {
+      margin-top: 6px;
+      color: var(--soft);
+      font-size: 11px;
+    }
+    .doc-body {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      border-top: 1px solid var(--line);
+      padding-top: 16px;
+      font-size: 13px;
+    }
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 14px 0 18px;
+    }
+    .tag {
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      color: var(--accent);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .empty {
+      color: var(--soft);
+      padding: 20px 0;
+    }
+    @media (max-width: 900px) {
+      .shell { grid-template-columns: 1fr; }
+      .rail { border-right: 0; border-bottom: 1px solid var(--line); }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand">HII CODEX</div>
+      <input id="search" class="search" type="search" placeholder="filter documents">
+      <div id="list" class="list"></div>
+    </aside>
+    <main class="document">
+      <div class="header">
+        <div>
+          <h1 class="headline">Visual Codex</h1>
+          <p class="subhead">Bird's-eye workspace knowledge surface. Durable documents, live memory, local-first.</p>
+        </div>
+        <div id="statline" class="statline"></div>
+      </div>
+      <section id="viewer">
+        <div class="empty">Loading codex…</div>
+      </section>
+    </main>
+  </div>
+  <script>
+    const listEl = document.getElementById('list');
+    const viewerEl = document.getElementById('viewer');
+    const searchEl = document.getElementById('search');
+    const statlineEl = document.getElementById('statline');
+    let docs = [];
+    let activeSlug = '';
+
+    function escapeHtml(value) {
+      return String(value || '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;');
+    }
+
+    function formatDate(value) {
+      try { return new Date(value).toLocaleString(); } catch { return value || ''; }
+    }
+
+    function setStats() {
+      const kinds = new Set(docs.map((doc) => doc.kind).filter(Boolean));
+      statlineEl.innerHTML = `
+        <span>${docs.length} docs</span>
+        <span>${kinds.size} kinds</span>
+        <span>${location.origin}/codex</span>
+      `;
+    }
+
+    function renderList(filter = '') {
+      const q = filter.trim().toLowerCase();
+      const visible = !q ? docs : docs.filter((doc) => {
+        const haystack = `${doc.title} ${doc.summary} ${doc.kind} ${(doc.tags || []).join(' ')}`.toLowerCase();
+        return haystack.includes(q);
+      });
+      if (!visible.length) {
+        listEl.innerHTML = `<div class="empty">No codex documents matched.</div>`;
+        return;
+      }
+      listEl.innerHTML = visible.map((doc) => `
+        <a class="doc-link ${doc.slug === activeSlug ? 'active' : ''}" href="#${doc.slug}" data-slug="${doc.slug}">
+          <div class="doc-kind">${escapeHtml(doc.kind || 'note')}</div>
+          <div class="doc-title">${escapeHtml(doc.title)}</div>
+          <div class="doc-summary">${escapeHtml(doc.summary || '')}</div>
+          <div class="doc-meta">${escapeHtml(formatDate(doc.updatedAt))}</div>
+        </a>
+      `).join('');
+      listEl.querySelectorAll('[data-slug]').forEach((node) => {
+        node.addEventListener('click', (event) => {
+          event.preventDefault();
+          openDoc(node.getAttribute('data-slug'));
+        });
+      });
+    }
+
+    async function openDoc(slug) {
+      if (!slug) return;
+      activeSlug = slug;
+      renderList(searchEl.value);
+      viewerEl.innerHTML = `<div class="empty">Loading ${escapeHtml(slug)}…</div>`;
+      const res = await fetch(`/api/codex/${encodeURIComponent(slug)}`);
+      if (!res.ok) {
+        viewerEl.innerHTML = `<div class="empty">Failed to load codex document.</div>`;
+        return;
+      }
+      const doc = await res.json();
+      const meta = doc.meta || {};
+      viewerEl.innerHTML = `
+        <h2 class="headline" style="font-size:18px">${escapeHtml(meta.title || slug)}</h2>
+        <div class="statline">
+          <span>${escapeHtml(meta.kind || 'note')}</span>
+          <span>${escapeHtml(formatDate(meta.updatedAt))}</span>
+          <span>${escapeHtml(meta.path || '')}</span>
+        </div>
+        <div class="tags">${(meta.tags || []).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</div>
+        <div class="doc-body">${escapeHtml(doc.body || '')}</div>
+      `;
+      history.replaceState(null, '', `#${slug}`);
+    }
+
+    async function loadCodex() {
+      const res = await fetch('/api/codex');
+      docs = await res.json();
+      setStats();
+      renderList();
+      const slug = location.hash.slice(1) || (docs[0] && docs[0].slug);
+      if (slug) openDoc(slug);
+      else viewerEl.innerHTML = `<div class="empty">No codex documents yet.</div>`;
+    }
+
+    searchEl.addEventListener('input', () => renderList(searchEl.value));
+    window.addEventListener('hashchange', () => {
+      const slug = location.hash.slice(1);
+      if (slug) openDoc(slug);
+    });
+
+    loadCodex().catch((error) => {
+      console.error(error);
+      viewerEl.innerHTML = `<div class="empty">Failed to load codex.</div>`;
+    });
+  </script>
+</body>
+</html>

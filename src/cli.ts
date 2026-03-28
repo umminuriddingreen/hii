@@ -7,7 +7,9 @@ import { VectorStore } from './store/vectordb.js';
 import { ingestPath } from './rag/ingest.js';
 import { agentLoop } from './agent.js';
 import { addApp, appsSummary, getApp, listApps, updateApp } from './apps.js';
+import { codexPaths, createCodexDoc, createWorkspaceCodex, getCodexDoc, listCodexDocs, searchCodexDocs } from './codex.js';
 import { formatDualMessages, initDuality, postDualMessage, readDualMessages } from './duality.js';
+import { appendConversationTurn, conversationPaths, conversationSummary, formatConversationEntries, listConversationTranscripts, readConversationTranscript, readRecentConversationEntries } from './conversations.js';
 import { runAgentBrowser } from './tools/browser.js';
 import { focusSpaceWindow, getSpaceHealth, getSpaceSnapshot, switchSpaceWorkspace } from './tools/space.js';
 
@@ -58,7 +60,14 @@ program.command('chat')
     const merged = { ...cfg, allowShell: !!opts.shell, allowSearch: !!opts.web, offline: !opts.online };
     const provider = opts.webProvider === 'auto' ? undefined : opts.webProvider;
     if (opts.memoryEntries !== 'auto') merged.memoryMaxEntries = Number(opts.memoryEntries) || merged.memoryMaxEntries;
-    const text = await agentLoop(merged, promptParts.join(' '), { webProvider: provider as any, scholarly: !!opts.scholarly, downloadPdfs: !!opts.downloadPdfs, useMemory: !opts.noMemory });
+    const prompt = promptParts.join(' ');
+    const text = await agentLoop(merged, prompt, { webProvider: provider as any, scholarly: !!opts.scholarly, downloadPdfs: !!opts.downloadPdfs, useMemory: !opts.noMemory });
+    appendConversationTurn({
+      source: 'hii.chat',
+      prompt,
+      answer: text,
+      tools: [opts.shell ? 'shell' : '', opts.web ? 'web' : '', opts.scholarly ? 'scholarly' : ''].filter(Boolean),
+    });
     console.log(text);
   });
 
@@ -337,6 +346,128 @@ apps.command('set')
     console.log(JSON.stringify(app, null, 2));
   });
 
+const conversations = program.command('conversations').description('Inspect persistent bridge conversation logs');
+
+conversations.command('summary')
+  .description('Show conversation ledger summary')
+  .action(() => {
+    console.log(JSON.stringify(conversationSummary(), null, 2));
+  });
+
+conversations.command('list')
+  .description('List stored conversation transcript files')
+  .action(() => {
+    const paths = conversationPaths();
+    const files = listConversationTranscripts();
+    console.log(`Ledger: ${paths.ledger}`);
+    console.log(`Transcripts: ${paths.transcripts}`);
+    if (!files.length) {
+      console.log('No transcript files found.');
+      return;
+    }
+    for (const file of files) {
+      console.log(file);
+    }
+  });
+
+conversations.command('tail')
+  .description('Show the most recent conversation entries')
+  .option('-n, --limit <n>', 'Number of entries to show', '20')
+  .action((opts) => {
+    const limit = Number(opts.limit) || 20;
+    const entries = readRecentConversationEntries(limit);
+    console.log(formatConversationEntries(entries));
+  });
+
+conversations.command('show')
+  .description('Show a saved transcript file')
+  .argument('<file>', 'Transcript filename, e.g. 2026-03-28.md')
+  .action((file) => {
+    try {
+      console.log(readConversationTranscript(file));
+    } catch (error: any) {
+      console.error(error?.message || String(error));
+      process.exit(1);
+    }
+  });
+
+const codex = program.command('codex').description('Persistent live document database for workspace knowledge');
+
+codex.command('paths')
+  .description('Show codex storage paths')
+  .action(() => {
+    console.log(JSON.stringify(codexPaths(), null, 2));
+  });
+
+codex.command('add')
+  .description('Create or update a codex document')
+  .requiredOption('--title <title>', 'Document title')
+  .option('--kind <kind>', 'Document kind', 'note')
+  .option('--summary <text>', 'Short summary')
+  .option('--tags <csv>', 'Comma-separated tags')
+  .option('--body <text>', 'Document body')
+  .action((opts) => {
+    const tags = typeof opts.tags === 'string'
+      ? opts.tags.split(',').map((tag: string) => tag.trim()).filter(Boolean)
+      : [];
+    const doc = createCodexDoc({
+      title: opts.title,
+      kind: opts.kind,
+      summary: opts.summary,
+      tags,
+      body: opts.body,
+    });
+    console.log(JSON.stringify(doc, null, 2));
+  });
+
+codex.command('workspace')
+  .description('Create a bird\'s-eye codex entry for a workspace path')
+  .option('--path <path>', 'Workspace root path', process.cwd())
+  .option('--title <title>', 'Override document title')
+  .action((opts) => {
+    const doc = createWorkspaceCodex(opts.path, opts.title);
+    console.log(JSON.stringify(doc, null, 2));
+  });
+
+codex.command('list')
+  .description('List codex documents')
+  .action(() => {
+    const docs = listCodexDocs();
+    if (!docs.length) {
+      console.log('No codex documents found.');
+      return;
+    }
+    for (const doc of docs) {
+      console.log(`${doc.updatedAt}  ${doc.kind.padEnd(16)}  ${doc.slug}  ${doc.summary}`);
+    }
+  });
+
+codex.command('show')
+  .description('Show a codex document')
+  .argument('<slugOrTitle>', 'Document slug or title')
+  .action((slugOrTitle) => {
+    const doc = getCodexDoc(slugOrTitle);
+    if (!doc) {
+      console.error(`Codex document not found: ${slugOrTitle}`);
+      process.exit(1);
+    }
+    console.log(doc.body);
+  });
+
+codex.command('search')
+  .description('Search codex documents by title, summary, kind, or tags')
+  .argument('<query...>', 'Search query')
+  .action((queryParts) => {
+    const results = searchCodexDocs(queryParts.join(' '));
+    if (!results.length) {
+      console.log('No codex documents matched.');
+      return;
+    }
+    for (const doc of results) {
+      console.log(`${doc.updatedAt}  ${doc.kind.padEnd(16)}  ${doc.slug}  ${doc.summary}`);
+    }
+  });
+
 program.command('papers')
   .description('Fetch and ingest open-access PDFs for a scholarly query')
   .argument('<query...>', 'Academic query')
@@ -482,6 +613,77 @@ comfyui.command('models')
   .action(async () => {
     const { comfyuiModels } = await import('./tools/comfyui.js');
     await comfyuiModels();
+  });
+
+comfyui.command('plan')
+  .description('Plan a natural-language ComfyUI request into a structured invocation')
+  .argument('<request...>', 'Natural-language creation request')
+  .option('--model <name>', 'Checkpoint model name')
+  .option('--negative <text>', 'Negative prompt override')
+  .option('--width <n>', 'Target width')
+  .option('--height <n>', 'Target height')
+  .option('--steps <n>', 'Sampling steps')
+  .option('--cfg <n>', 'CFG scale')
+  .option('--seed <n>', 'Seed')
+  .option('--batch-size <n>', 'Batch size', '1')
+  .option('--output-prefix <text>', 'SaveImage filename prefix')
+  .option('--json', 'Print plan as JSON')
+  .action(async (requestParts, opts) => {
+    const { comfyuiPlanCommand } = await import('./tools/comfyui-create.js');
+    await comfyuiPlanCommand(requestParts.join(' '), {
+      model: opts.model,
+      negative: opts.negative,
+      width: opts.width ? Number(opts.width) : undefined,
+      height: opts.height ? Number(opts.height) : undefined,
+      steps: opts.steps ? Number(opts.steps) : undefined,
+      cfg: opts.cfg ? Number(opts.cfg) : undefined,
+      seed: opts.seed ? Number(opts.seed) : undefined,
+      batchSize: Number(opts.batchSize) || 1,
+      outputPrefix: opts.outputPrefix,
+      json: !!opts.json,
+    });
+  });
+
+comfyui.command('create')
+  .description('Submit a natural-language image request to ComfyUI')
+  .argument('<request...>', 'Natural-language creation request')
+  .option('--model <name>', 'Checkpoint model name')
+  .option('--negative <text>', 'Negative prompt override')
+  .option('--width <n>', 'Target width')
+  .option('--height <n>', 'Target height')
+  .option('--steps <n>', 'Sampling steps')
+  .option('--cfg <n>', 'CFG scale')
+  .option('--seed <n>', 'Seed')
+  .option('--batch-size <n>', 'Batch size', '1')
+  .option('--output-prefix <text>', 'SaveImage filename prefix')
+  .option('--wait', 'Wait for ComfyUI outputs and print view URLs')
+  .option('--dry-run', 'Only plan and log the request without submitting')
+  .option('--json', 'Print result as JSON')
+  .action(async (requestParts, opts) => {
+    const { comfyuiCreate } = await import('./tools/comfyui-create.js');
+    await comfyuiCreate(requestParts.join(' '), {
+      model: opts.model,
+      negative: opts.negative,
+      width: opts.width ? Number(opts.width) : undefined,
+      height: opts.height ? Number(opts.height) : undefined,
+      steps: opts.steps ? Number(opts.steps) : undefined,
+      cfg: opts.cfg ? Number(opts.cfg) : undefined,
+      seed: opts.seed ? Number(opts.seed) : undefined,
+      batchSize: Number(opts.batchSize) || 1,
+      outputPrefix: opts.outputPrefix,
+      wait: !!opts.wait,
+      dryRun: !!opts.dryRun,
+      json: !!opts.json,
+    });
+  });
+
+comfyui.command('requests')
+  .description('Show recent ComfyUI create requests logged by HII')
+  .option('-n, --limit <n>', 'Number of entries to show', '20')
+  .option('--json', 'Print request log as JSON')
+  .action(async (opts) => {
+    const { comfyuiRequests } = await import('./tools/comfyui-create.js');
+    comfyuiRequests(Number(opts.limit) || 20, !!opts.json);
   });
 
 // default: `hii comfyui` alone → start

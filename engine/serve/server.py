@@ -7,10 +7,13 @@ what we've done together, and what there is to do.
 
 Exposes:
     GET  /              — dashboard UI
+    GET  /codex         — live codex UI
     GET  /graph         — graph UI
     GET  /?ui=<slug>    — load a saved dashboard UI version
     GET  /api/state     — full system state (psyche, tasks, agents, skills, version)
     GET  /api/ui-versions — list saved UI versions
+    GET  /api/codex     — codex document index
+    GET  /api/codex/<slug> — one codex document
     GET  /api/psyche    — psyche profile + system prompt
     GET  /api/graph     — HII graph data for dashboard graph view
     GET  /api/tasks     — task queue
@@ -57,6 +60,12 @@ UI_VERSIONS_FILE = UI_VERSIONS_DIR / "registry.json"
 PORT = int(os.environ.get("HII_PORT", "8888"))
 HII_ROOT = Path(__file__).resolve().parent.parent.parent
 BRIDGE_DIR = HII_ROOT / "bridge" / "messages"
+HOME_HII_DIR = Path.home() / ".hii"
+CONVERSATIONS_DIR = HOME_HII_DIR / "conversations"
+CONVERSATION_LEDGER = CONVERSATIONS_DIR / "bridge.jsonl"
+CONVERSATION_TRANSCRIPTS_DIR = CONVERSATIONS_DIR / "transcripts"
+CODEX_DIR = HOME_HII_DIR / "codex"
+CODEX_INDEX_FILE = CODEX_DIR / "index.json"
 
 
 # ── Bridge Chat ──────────────────────────────────────────────────────────────
@@ -65,6 +74,7 @@ import time
 from datetime import datetime
 
 chat_clients: set = set()  # websocket connections for live chat
+logged_bridge_ids: set[int] = set()
 
 
 def _slugify(text: str) -> str:
@@ -121,8 +131,83 @@ def _maybe_seed_default_ui_version():
         _snapshot_ui_version("Current Dashboard", index_file, "Baseline saved dashboard surface")
 
 
+def _load_codex_index() -> list[dict]:
+    if not CODEX_INDEX_FILE.exists():
+        return []
+    try:
+        docs = json.loads(CODEX_INDEX_FILE.read_text())
+        return docs if isinstance(docs, list) else []
+    except json.JSONDecodeError:
+        return []
+
+
+def _read_codex_doc(slug: str) -> dict | None:
+    match = next((item for item in _load_codex_index() if item.get("slug") == slug), None)
+    if not match:
+        return None
+    body = ""
+    doc_path = Path(match.get("path", ""))
+    if doc_path.exists():
+        body = doc_path.read_text()
+    return {"meta": match, "body": body}
+
+
 def _ensure_bridge_dir():
     BRIDGE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _ensure_conversation_dirs():
+    CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
+    CONVERSATION_TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _conversation_transcript_file() -> Path:
+    _ensure_conversation_dirs()
+    return CONVERSATION_TRANSCRIPTS_DIR / f"{datetime.now().date().isoformat()}.md"
+
+
+def _append_conversation_log(msg: dict):
+    _ensure_conversation_dirs()
+    msg_id = msg.get("id")
+    if isinstance(msg_id, int) and msg_id in logged_bridge_ids:
+        return
+    if isinstance(msg_id, int):
+        logged_bridge_ids.add(msg_id)
+    with CONVERSATION_LEDGER.open("a") as f:
+        f.write(json.dumps(msg) + "\n")
+
+    transcript = _conversation_transcript_file()
+    ts = msg.get("timestamp", datetime.now().isoformat())
+    if transcript.exists():
+        header = ""
+    else:
+        header = f"---\ncreated: {ts}\n---\n\n# Bridge Transcript {transcript.stem}\n"
+    block = (
+        f"\n## {ts}\n"
+        f"- from: {msg.get('from', 'unknown')}\n"
+        f"- to: {msg.get('to', 'all')}\n"
+        f"- type: {msg.get('type', 'message')}\n\n"
+        f"{msg.get('content', '')}\n"
+    )
+    with transcript.open("a") as f:
+        f.write(header + block)
+
+
+def _hydrate_logged_bridge_ids():
+    if logged_bridge_ids:
+        return
+    if not CONVERSATION_LEDGER.exists():
+        return
+    try:
+        for line in CONVERSATION_LEDGER.read_text().splitlines():
+            if not line.strip():
+                continue
+            msg = json.loads(line)
+            msg_id = msg.get("id")
+            if isinstance(msg_id, int):
+                logged_bridge_ids.add(msg_id)
+    except Exception:
+        pass
 
 
 def _next_msg_id() -> int:
@@ -138,12 +223,14 @@ def _next_msg_id() -> int:
 
 def _read_bridge_messages(after_id: int = 0, limit: int = 100) -> list:
     _ensure_bridge_dir()
+    _hydrate_logged_bridge_ids()
     messages = []
     for f in sorted(BRIDGE_DIR.glob("*.json")):
         try:
             msg = json.loads(f.read_text())
             if msg.get("id", 0) > after_id:
                 messages.append(msg)
+                _append_conversation_log(msg)
         except (json.JSONDecodeError, KeyError):
             continue
     return messages[-limit:]
@@ -162,6 +249,7 @@ def _write_bridge_message(sender: str, content: str, msg_type: str = "message") 
     _ensure_bridge_dir()
     fname = f"{msg_id:03d}_{sender}.json"
     (BRIDGE_DIR / fname).write_text(json.dumps(msg, indent=2))
+    _append_conversation_log(msg)
     # Notify all connected WebSocket clients
     asyncio.run_coroutine_threadsafe(_broadcast_chat(msg), chat_loop)
     return msg
@@ -359,10 +447,22 @@ class HiiHandler(SimpleHTTPRequestHandler):
                 if match:
                     return self._serve_file(f"versions/{match['file']}", "text/html")
             return self._serve_file("index.html", "text/html")
+        elif path == "/codex":
+            return self._serve_file("codex.html", "text/html")
         elif path == "/graph":
             return self._serve_file("index.html", "text/html")
+        elif path == "/visual":
+            return self._serve_file("visual.html", "text/html")
         elif path == "/api/ui-versions":
             return self._json(_load_ui_versions())
+        elif path == "/api/codex":
+            return self._json(_load_codex_index())
+        elif path.startswith("/api/codex/"):
+            slug = path.split("/api/codex/", 1)[1].strip()
+            doc = _read_codex_doc(slug)
+            if not doc:
+                return self._json({"error": "codex document not found"}, 404)
+            return self._json(doc)
         elif path == "/api/state":
             return self._json(self._full_state())
         elif path == "/api/psyche":
