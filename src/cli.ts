@@ -267,7 +267,7 @@ async function maybeHandleBrowserPassthrough() {
 async function printChatBanner() {
   await printAnimatedLogo();
   console.log('High-speed thought sharpening. Search grounding is available through SearxNG when web is enabled.');
-  console.log('Commands: /help, /exit, /clear, /status, /capture [w h], /backend <ollama|mlx>, /model <backend:model|model>, /search <query>, /web on|off, /ground on|off, /memory on|off');
+  console.log('Commands: /help, /exit, /clear, /status, /models, /generate, /capture, /backend, /model, /search, /web, /ground, /memory');
   console.log('Tab completes slash commands and toggle values.');
   console.log('');
 }
