@@ -183,20 +183,15 @@ function completeChatLine(line: string): [string[], string] {
 
   const valueStem = expectingValue ? '' : parts[parts.length - 1];
   const boolValues = ['on', 'off'];
-  const backendValues = ['ollama', 'mlx'];
   if (command === '/web' || command === '/ground' || command === '/memory') {
     const hits = boolValues.filter((value) => value.startsWith(valueStem));
     return [hits.length ? hits : boolValues, valueStem];
-  }
-  if (command === '/backend') {
-    const hits = backendValues.filter((value) => value.startsWith(valueStem));
-    return [hits.length ? hits : backendValues, valueStem];
   }
   if (command === '/search') {
     return [['<query>'], valueStem];
   }
   if (command === '/model') {
-    return [['<backend:model|model-name>'], valueStem];
+    return [['<model-name>'], valueStem];
   }
   if (command === '/help') {
     return [[], valueStem];
@@ -266,7 +261,7 @@ async function maybeHandleBrowserPassthrough() {
 async function printChatBanner() {
   await printAnimatedLogo();
   console.log('High-speed thought sharpening. Search grounding is available through SearxNG when web is enabled.');
-  console.log('Commands: /help, /exit, /clear, /status, /models, /generate, /capture, /backend, /model, /search, /web, /ground, /memory');
+  console.log('Commands: /help, /exit, /clear, /status, /models, /generate, /capture, /model, /search, /web, /ground, /memory');
   console.log('Tab completes slash commands and toggle values.');
   console.log('');
 }
