@@ -1494,6 +1494,61 @@ rhino.command('install-hii')
     console.log(stdout);
   });
 
+const threeD = program.command('3d').description('Direct 3D runtimes and image-to-mesh workflows');
+
+threeD.command('install')
+  .description('Install direct 3D runtimes without ComfyUI')
+  .option('--target <name>', 'triposr|hunyuan|all', 'all')
+  .option('--skip-clone', 'Skip cloning repos')
+  .action(async (opts) => {
+    const { runShell } = await import('./tools/shell.js');
+    const target = String(opts.target || 'all');
+    const cmd = [
+      'python3',
+      'scripts/install_direct_3d_models.py',
+      '--target',
+      target,
+      opts.skipClone ? '--skip-clone' : '',
+    ].filter(Boolean).join(' ');
+    const { code, stdout, stderr } = await runShell(cmd);
+    if (code !== 0) {
+      console.error(stderr || stdout || '3D runtime install failed.');
+      process.exit(1);
+    }
+    console.log(stdout);
+  });
+
+threeD.command('triposr')
+  .description('Run direct TripoSR image-to-mesh inference')
+  .argument('<image>', 'Input image path')
+  .option('--output-dir <dir>', 'Output directory', '/tmp/hii-triposr-output')
+  .option('--model <pathOrId>', 'HF model id or local model path', 'stabilityai/TripoSR')
+  .option('--device <name>', 'mps|cuda:0|cpu')
+  .option('--format <name>', 'glb|obj', 'glb')
+  .option('--no-remove-bg', 'Skip background removal')
+  .action(async (image, opts) => {
+    const { runShell } = await import('./tools/shell.js');
+    const cmd = [
+      'python3',
+      'scripts/triposr_infer.py',
+      JSON.stringify(String(image)),
+      '--output-dir',
+      JSON.stringify(String(opts.outputDir || '/tmp/hii-triposr-output')),
+      '--model',
+      JSON.stringify(String(opts.model || 'stabilityai/TripoSR')),
+      '--format',
+      String(opts.format || 'glb'),
+      opts.device ? ['--device', JSON.stringify(String(opts.device))].join(' ') : '',
+      opts.noRemoveBg ? '--no-remove-bg' : '',
+    ].filter(Boolean).join(' ');
+    const { code, stdout, stderr } = await runShell(cmd);
+    if (code !== 0) {
+      console.error(stderr || stdout || 'TripoSR inference failed.');
+      process.exit(1);
+    }
+    console.log(stdout);
+  });
+
 async function main() {
   const handled = await maybeHandleBrowserPassthrough();
   if (handled) return;
