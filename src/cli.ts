@@ -319,7 +319,7 @@ async function runInteractiveChat(opts: any) {
   const merged = { ...cfg, allowShell: !!opts.shell, allowSearch: !!opts.web, offline: !opts.online };
   if (opts.memoryEntries !== 'auto') merged.memoryMaxEntries = Number(opts.memoryEntries) || merged.memoryMaxEntries;
   const provider = opts.webProvider === 'auto' ? 'searxng' : opts.webProvider;
-  const rl = readline.createInterface({ input, output, completer: completeChatLine });
+  let rl = readline.createInterface({ input, output, completer: completeChatLine });
   const history: ChatMessage[] = [];
   let autoGround = true;
   let useMemory = !opts.noMemory;
@@ -349,6 +349,7 @@ async function runInteractiveChat(opts: any) {
         console.log('`/web on|off` toggles search tool access.');
         console.log('`/ground on|off` toggles automatic grounding for unstable factual prompts.');
         console.log('`/memory on|off` toggles Obsidian recall/logging for this session.');
+        console.log('`/models` browse and select models across all backends (arrow keys).');
         console.log('`/clear` clears the in-memory conversation state.');
         console.log('Tab completes slash commands and `on|off` toggles.');
         continue;
@@ -424,6 +425,30 @@ async function runInteractiveChat(opts: any) {
         } catch (e: any) {
           console.log(`\nCapture error: ${e?.message || e}\n`);
         }
+        continue;
+      }
+      if (raw === '/models') {
+        rl.close();
+        const models = await listAllModels();
+        const items = modelsToMenuItems(models);
+        const pick = await interactiveMenu(items, {
+          title: '  Select a model',
+          pageSize: 15,
+        });
+        if (pick && pick.length > 0) {
+          const [backend, ...rest] = pick[0].value.split(':');
+          const modelName = rest.join(':');
+          if (backend === 'ollama' || backend === 'mlx') {
+            merged.chatBackend = backend as 'ollama' | 'mlx';
+            if (backend === 'mlx') merged.mlxModel = modelName;
+            else merged.baseModel = modelName;
+            console.log(`backend ${merged.chatBackend} | model ${resolveChatModel(merged)}`);
+          } else {
+            console.log(`Selected: ${pick[0].value} (external backend — use as reference)`);
+          }
+        }
+        // Re-create readline after raw-mode menu
+        rl = readline.createInterface({ input, output, completer: completeChatLine });
         continue;
       }
       if (raw.startsWith('/search ')) {
