@@ -16,7 +16,8 @@
 import { spawn, ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { chat as ollamaChat } from '../clients/ollama.js';
+import { chatWithConfig } from '../clients/chat.js';
+import { loadConfig } from '../config.js';
 
 const HII_DIR = path.join(process.env.HOME || '/tmp', '.hii');
 const AGENTS_FILE = path.join(HII_DIR, 'agents.json');
@@ -132,7 +133,8 @@ export async function localModelSummarize(model: string, agentResult: AgentResul
   const prompt = `Format this command output as a brief status report. Do not analyze or interpret, just summarize what happened:\n\nExit code: ${agentResult.exitCode}\nStdout: ${agentResult.stdout.slice(0, 2000)}\nStderr: ${agentResult.stderr.slice(0, 500)}`;
 
   try {
-    const { text } = await ollamaChat(model, [
+    const cfg = { ...loadConfig(), baseModel: model };
+    const { text } = await chatWithConfig(cfg, [
       { role: 'system', content: 'You are a formatter. Output brief status reports. No analysis. No opinions. Just facts.' },
       { role: 'user', content: prompt },
     ], { temperature: 0 });

@@ -1,0 +1,279 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HII Remote Session</title>
+    <style>
+      :root {
+        --bg: #0f1115;
+        --panel: #171a20;
+        --panel-2: #1d222b;
+        --border: rgba(255,255,255,0.08);
+        --text: #f6f7fb;
+        --muted: #9aa4b2;
+        --accent: #4ecdc4;
+        --danger: #ff6b6b;
+        --shadow: 0 20px 48px rgba(0,0,0,0.3);
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font-family: "SF Pro Display", "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+        background: radial-gradient(circle at top left, rgba(78,205,196,0.08), transparent 24%), var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+      }
+      .app {
+        display: grid;
+        grid-template-columns: 320px minmax(0,1fr);
+        min-height: 100vh;
+      }
+      .sidebar {
+        padding: 22px;
+        border-right: 1px solid var(--border);
+        background: rgba(14,17,22,0.88);
+      }
+      .shell {
+        padding: 22px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .panel {
+        background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015));
+        border: 1px solid var(--border);
+        border-radius: 22px;
+        box-shadow: var(--shadow);
+      }
+      .brand, .panel-body { padding: 18px; }
+      .brand h1 { font-size: 26px; letter-spacing: -0.04em; margin-bottom: 8px; }
+      .brand p { color: var(--muted); font-size: 14px; line-height: 1.6; }
+      .section-title {
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 18px 0 10px;
+      }
+      .remote-list { display: flex; flex-direction: column; gap: 10px; }
+      .remote-item {
+        width: 100%;
+        text-align: left;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 12px 14px;
+        color: var(--text);
+        cursor: pointer;
+      }
+      .remote-item.active { border-color: rgba(78,205,196,0.32); background: rgba(78,205,196,0.08); }
+      .remote-name { font-size: 14px; margin-bottom: 4px; }
+      .remote-meta { font-size: 12px; color: var(--muted); line-height: 1.5; }
+      .toolbar {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .headline h2 { font-size: 30px; letter-spacing: -0.05em; margin-bottom: 8px; }
+      .headline p { color: var(--muted); line-height: 1.6; max-width: 70ch; }
+      .toolbar-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+      button, .url-box {
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: rgba(255,255,255,0.04);
+        color: var(--text);
+        padding: 10px 14px;
+        font: inherit;
+      }
+      button.primary { background: rgba(78,205,196,0.14); border-color: rgba(78,205,196,0.28); cursor: pointer; }
+      button { cursor: pointer; }
+      .url-box {
+        width: 100%;
+        color: var(--muted);
+        font-size: 13px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .viewer {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        min-height: 70vh;
+      }
+      .viewer-meta {
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .viewer-meta span { color: var(--muted); font-size: 12px; }
+      iframe {
+        width: 100%;
+        height: 100%;
+        min-height: 68vh;
+        border: none;
+        border-radius: 0 0 22px 22px;
+        background: #0b0d12;
+      }
+      .empty {
+        padding: 26px;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+      .tips {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.6;
+      }
+      @media (max-width: 960px) {
+        .app { grid-template-columns: 1fr; }
+        iframe { min-height: 56vh; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="panel brand">
+          <h1>HII Remote</h1>
+          <p>Use your Windows machine through a browser stream on Tailscale. Pick a target, open fast, stay inside HII.</p>
+        </div>
+        <div class="section-title">Windows Targets</div>
+        <div id="remote-list" class="remote-list"></div>
+        <div class="section-title">Notes</div>
+        <div class="panel panel-body tips">
+          Register targets with:
+          <br><br>
+          <code>hii remote windows add --name "studio-pc" --host studio-pc.tailnet.ts.net --port 6080</code>
+          <br><br>
+          Best with noVNC or Guacamole already running on the Windows side.
+        </div>
+      </aside>
+
+      <main class="shell">
+        <div class="panel panel-body">
+          <div class="toolbar">
+            <div class="headline">
+              <h2 id="session-title">Remote Session</h2>
+              <p id="session-subtitle">Select a Windows target to start streaming it through your browser.</p>
+            </div>
+            <div class="toolbar-actions">
+              <button onclick="loadRemotes()">refresh</button>
+              <button class="primary" id="open-direct" onclick="openDirect()" disabled>open direct</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel viewer">
+          <div class="viewer-meta">
+            <div class="url-box" id="session-url">No target selected.</div>
+            <span id="session-provider">provider: n/a</span>
+          </div>
+          <div id="viewer-body" class="empty">
+            The noVNC session will be embedded here once you pick a registered target.
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      let remotes = [];
+      let selected = null;
+
+      function escapeHtml(value) {
+        return String(value ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      function selectedRemoteFromQuery() {
+        const params = new URLSearchParams(location.search);
+        return params.get('remote') || '';
+      }
+
+      async function fetchJson(url, options) {
+        const res = await fetch(url, options);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `request failed: ${res.status}`);
+        return data;
+      }
+
+      function renderRemotes() {
+        const list = document.getElementById('remote-list');
+        if (!remotes.length) {
+          list.innerHTML = '<div class="panel panel-body tips">No remotes registered yet.</div>';
+          return;
+        }
+        list.innerHTML = remotes.map((remote) => `
+          <button class="remote-item ${selected?.slug === remote.slug ? 'active' : ''}" onclick="selectRemote('${escapeHtml(remote.slug)}')">
+            <div class="remote-name">${escapeHtml(remote.name)}</div>
+            <div class="remote-meta">${escapeHtml(remote.provider)} · ${escapeHtml(remote.host || remote.url || '')}</div>
+          </button>
+        `).join('');
+      }
+
+      function renderSession() {
+        const title = document.getElementById('session-title');
+        const subtitle = document.getElementById('session-subtitle');
+        const url = document.getElementById('session-url');
+        const provider = document.getElementById('session-provider');
+        const viewer = document.getElementById('viewer-body');
+        const openButton = document.getElementById('open-direct');
+
+        if (!selected) {
+          title.textContent = 'Remote Session';
+          subtitle.textContent = 'Select a Windows target to start streaming it through your browser.';
+          url.textContent = 'No target selected.';
+          provider.textContent = 'provider: n/a';
+          viewer.className = 'empty';
+          viewer.innerHTML = 'The noVNC session will be embedded here once you pick a registered target.';
+          openButton.disabled = true;
+          return;
+        }
+
+        title.textContent = selected.name;
+        subtitle.textContent = selected.notes || 'Interactive browser session over Tailscale.';
+        url.textContent = selected.resolvedUrl;
+        provider.textContent = `provider: ${selected.provider}`;
+        viewer.className = '';
+        viewer.innerHTML = `<iframe src="${selected.resolvedUrl}" allow="clipboard-read; clipboard-write"></iframe>`;
+        openButton.disabled = false;
+      }
+
+      function selectRemote(slug) {
+        selected = remotes.find((item) => item.slug === slug) || null;
+        const params = new URLSearchParams(location.search);
+        if (selected) params.set('remote', selected.slug);
+        history.replaceState({}, '', `${location.pathname}?${params.toString()}`);
+        renderRemotes();
+        renderSession();
+      }
+
+      function openDirect() {
+        if (!selected) return;
+        window.open(selected.resolvedUrl, '_blank', 'noopener,noreferrer');
+      }
+
+      async function loadRemotes() {
+        const data = await fetchJson('/remotes');
+        remotes = data.remotes || [];
+        const fromQuery = selectedRemoteFromQuery();
+        selected = remotes.find((item) => item.slug === fromQuery) || remotes[0] || null;
+        renderRemotes();
+        renderSession();
+      }
+
+      loadRemotes().catch((error) => {
+        document.getElementById('viewer-body').innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+      });
+    </script>
+  </body>
+</html>

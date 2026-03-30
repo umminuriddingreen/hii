@@ -19,6 +19,11 @@ export type SpaceSnapshot = {
   windows: unknown[];
 };
 
+export type SpaceApps = {
+  backend: 'aerospace';
+  apps: string[];
+};
+
 function parseCliError(error: unknown): string {
   if (!error || typeof error !== 'object') return String(error);
   const maybe = error as { stderr?: string; stdout?: string; message?: string };
@@ -107,4 +112,41 @@ export async function focusSpaceWindow(windowId: string): Promise<{ ok: true; wi
 export async function switchSpaceWorkspace(workspace: string): Promise<{ ok: true; workspace: string }> {
   await runAerospace(['workspace', workspace]);
   return { ok: true, workspace };
+}
+
+export async function listSpaceApps(): Promise<SpaceApps> {
+  const health = await getSpaceHealth();
+  if (!health.installed) throw new Error('AeroSpace is not installed');
+  if (!health.running) throw new Error(health.error || 'AeroSpace is not running');
+  const raw = await runAerospace(['list-apps']);
+  const apps = raw
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return { backend: 'aerospace', apps };
+}
+
+export async function focusSpaceMonitor(target: string): Promise<{ ok: true; target: string }> {
+  await runAerospace(['focus-monitor', target]);
+  return { ok: true, target };
+}
+
+export async function moveSpaceWindowToWorkspace(workspace: string): Promise<{ ok: true; workspace: string }> {
+  await runAerospace(['move-node-to-workspace', workspace]);
+  return { ok: true, workspace };
+}
+
+export async function moveSpaceWorkspaceToMonitor(target: string): Promise<{ ok: true; target: string }> {
+  await runAerospace(['move-workspace-to-monitor', target]);
+  return { ok: true, target };
+}
+
+export async function reloadSpaceConfig(): Promise<{ ok: true }> {
+  await runAerospace(['reload-config']);
+  return { ok: true };
+}
+
+export async function balanceSpaceSizes(): Promise<{ ok: true }> {
+  await runAerospace(['balance-sizes']);
+  return { ok: true };
 }

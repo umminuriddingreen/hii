@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { URL } from 'node:url';
 import { loadConfig } from './config.js';
-import { agentLoop } from './agent.js';
+import { orchestrateIntent } from './orchestrator.js';
 import { VectorStore } from './store/vectordb.js';
 import { ingestPath } from './rag/ingest.js';
 import fs from 'node:fs';
@@ -10,6 +10,7 @@ import { buildVaultGraph } from './graph.js';
 import { execFile } from 'node:child_process';
 import { runAgentBrowser } from './tools/browser.js';
 import { focusSpaceWindow, getSpaceHealth, getSpaceSnapshot, switchSpaceWorkspace } from './tools/space.js';
+import { buildRemoteUrl, getRemote, listRemotes } from './remote.js';
 
 type ServeOpts = {
   port?: number;
@@ -135,13 +136,18 @@ export async function startServer(opts: ServeOpts = {}) {
         const prompt: string = body?.prompt ?? '';
         if (!prompt) return send(res, 400, { error: 'prompt required' });
         const merged = { ...cfg, allowShell: !!(body?.allowShell ?? opts.allowShell ?? cfg.allowShell), allowSearch: !!(body?.allowSearch ?? opts.allowSearch ?? cfg.allowSearch) };
-        const text = await agentLoop(merged, prompt, {
+        const result = await orchestrateIntent(merged, prompt, {
           webProvider: body?.webProvider ?? opts.webProvider,
           scholarly: !!(body?.scholarly ?? opts.scholarly),
           downloadPdfs: !!(body?.downloadPdfs ?? opts.downloadPdfs),
           useMemory: body?.memory ?? (opts.memory ?? cfg.memoryEnabled)
         });
-        return send(res, 200, { text });
+        return send(res, 200, {
+          text: result.text,
+          intent: result.intent,
+          usedTools: result.usedTools,
+          events: result.events,
+        });
       }
 
       if (u.pathname === '/ingest' && req.method === 'POST') {
@@ -188,6 +194,19 @@ export async function startServer(opts: ServeOpts = {}) {
         } catch (e: any) {
           return send(res, 500, { error: e?.message || String(e) });
         }
+      }
+
+      if (u.pathname === '/remotes' && req.method === 'GET') {
+        const remotes = listRemotes().map((remote) => ({ ...remote, resolvedUrl: buildRemoteUrl(remote) }));
+        return send(res, 200, { remotes });
+      }
+
+      if (u.pathname === '/remote' && req.method === 'GET') {
+        const id = u.searchParams.get('id') || u.searchParams.get('name') || '';
+        if (!id) return send(res, 400, { error: 'remote id or name required' });
+        const remote = getRemote(id);
+        if (!remote) return send(res, 404, { error: 'remote not found' });
+        return send(res, 200, { remote: { ...remote, resolvedUrl: buildRemoteUrl(remote) } });
       }
 
       if (u.pathname === '/graph' && req.method === 'GET') {
@@ -268,6 +287,18 @@ export async function startServer(opts: ServeOpts = {}) {
           res.end(html);
         } catch {
           return send(res, 500, { error: 'viewer not found' });
+        }
+        return;
+      }
+
+      if (u.pathname === '/remote.html' && req.method === 'GET') {
+        const p = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../public/remote.html');
+        try {
+          const html = fs.readFileSync(p, 'utf-8');
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(html);
+        } catch {
+          return send(res, 500, { error: 'remote session view not found' });
         }
         return;
       }

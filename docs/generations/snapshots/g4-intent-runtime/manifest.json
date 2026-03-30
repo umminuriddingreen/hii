@@ -1,0 +1,60 @@
+{
+  "id": "g4",
+  "name": "Intent Runtime",
+  "slug": "intent-runtime",
+  "kind": "snapshot",
+  "summary": "Deterministic orchestrator spine and typed event bus wired into HII chat/server",
+  "tags": [
+    "orchestrator",
+    "event-bus",
+    "control-plane"
+  ],
+  "createdAt": "2026-03-28T23:45:37.450Z",
+  "version": "0.1.0",
+  "git": {
+    "branch": "main",
+    "head": "c1fd711",
+    "dirty": true,
+    "statusLines": [
+      "M README.md",
+      " M engine/serve/server.py",
+      " M engine/serve/static/index.html",
+      " M engine/serve/static/visual.html",
+      " M engine/tools/api_registry.py",
+      " M src/agent.ts",
+      " M src/cli.ts",
+      " M src/logs.ts",
+      " M src/server.ts",
+      " M src/tools/search.ts",
+      "?? docs/execution-substrate-roadmap.md",
+      "?? docs/execution-substrate.md",
+      "?? docs/hii-execution-substrate.md",
+      "?? src/events.ts",
+      "?? src/generations.ts",
+      "?? src/orchestrator.ts"
+    ],
+    "changedFiles": [
+      "README.md",
+      "engine/serve/server.py",
+      "engine/serve/static/index.html",
+      "engine/serve/static/visual.html",
+      "engine/tools/api_registry.py",
+      "src/agent.ts",
+      "src/cli.ts",
+      "src/logs.ts",
+      "src/server.ts",
+      "src/tools/search.ts"
+    ],
+    "untrackedFiles": [
+      "docs/execution-substrate-roadmap.md",
+      "docs/execution-substrate.md",
+      "docs/hii-execution-substrate.md",
+      "src/events.ts",
+      "src/generations.ts",
+      "src/orchestrator.ts"
+    ],
+    "deletedFiles": []
+  },
+  "snapshotDir": "/Users/ummi/hii/docs/generations/snapshots/g4-intent-runtime",
+  "manifestPath": "/Users/ummi/hii/docs/generations/snapshots/g4-intent-runtime/manifest.json"
+}

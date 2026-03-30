@@ -16,13 +16,18 @@ Exposes:
     GET  /api/codex/<slug> — one codex document
     GET  /api/psyche    — psyche profile + system prompt
     GET  /api/graph     — HII graph data for dashboard graph view
+    GET  /api/generations — generation ledger
+    GET  /api/4d        — 4D operational state (where/when/state/flow)
+    GET  /api/board     — dashboard board state + context
     GET  /api/tasks     — task queue
     GET  /api/skills    — skill registry index
     GET  /api/agents    — registered agents
     GET  /api/version   — version/git state
     GET  /api/logs      — daemon logs
     GET  /api/health    — health check
+    GET  /vendor/fabric.js — local Fabric.js browser bundle
     POST /api/task      — add a task
+    POST /api/execute   — proxy a prompt into the orchestrator service
     POST /api/observe   — add psyche observation
     POST /api/ui-version-save — save current UI as a named version
 """
@@ -38,6 +43,8 @@ import struct
 import subprocess
 import termios
 import threading
+import urllib.error
+import urllib.request
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -54,7 +61,7 @@ from engine.agents.delegator import list_agents
 from engine.skills.registry import list_all as skills_list
 from engine.core.version import current as version_current, log as version_log
 from engine.core.daemon import is_running, read_logs, start_background
-from engine.tools.api_registry import CATALOG, _load_registry as load_api_registry, search_catalog
+from engine.tools.api_registry import CATALOG, _load_registry as load_api_registry, search_catalog, install_api
 
 STATIC_DIR = Path(__file__).parent / "static"
 UI_VERSIONS_DIR = STATIC_DIR / "versions"
@@ -66,8 +73,17 @@ HOME_HII_DIR = Path.home() / ".hii"
 CONVERSATIONS_DIR = HOME_HII_DIR / "conversations"
 CONVERSATION_LEDGER = CONVERSATIONS_DIR / "bridge.jsonl"
 CONVERSATION_TRANSCRIPTS_DIR = CONVERSATIONS_DIR / "transcripts"
+RUNS_DIR = HOME_HII_DIR / "runs"
+RUNS_LEDGER = RUNS_DIR / "runs.jsonl"
+RUN_ARTIFACTS_DIR = RUNS_DIR / "artifacts"
+BOARD_DIR = HOME_HII_DIR / "board"
+BOARD_STATE_FILE = BOARD_DIR / "main-board.json"
+BOARD_CONTEXT_FILE = BOARD_DIR / "main-board-context.txt"
 CODEX_DIR = HOME_HII_DIR / "codex"
 CODEX_INDEX_FILE = CODEX_DIR / "index.json"
+GENERATIONS_LEDGER = HII_ROOT / "docs" / "generations" / "ledger.json"
+EXECUTION_API = os.environ.get("HII_EXEC_API", "http://127.0.0.1:8787")
+FABRIC_JS_PATH = Path.home() / "Downloads" / "fabric.js-710" / "dist" / "index.min.js"
 
 
 # ── Bridge Chat ──────────────────────────────────────────────────────────────
@@ -152,6 +168,247 @@ def _read_codex_doc(slug: str) -> dict | None:
     if doc_path.exists():
         body = doc_path.read_text()
     return {"meta": match, "body": body}
+
+
+def _load_generations() -> dict:
+    if not GENERATIONS_LEDGER.exists():
+        return {"currentId": None, "generations": []}
+    try:
+        data = json.loads(GENERATIONS_LEDGER.read_text())
+        if isinstance(data, dict):
+            data.setdefault("currentId", None)
+            data.setdefault("generations", [])
+            return data
+    except json.JSONDecodeError:
+        pass
+    return {"currentId": None, "generations": []}
+
+
+def _read_recent_conversation_entries(limit: int = 16) -> list[dict]:
+    if not CONVERSATION_LEDGER.exists():
+        return []
+    entries = []
+    for line in CONVERSATION_LEDGER.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return entries[-limit:]
+
+
+def _ensure_run_dirs():
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    RUN_ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _ensure_board_dirs():
+    BOARD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _load_board_state() -> dict:
+    _ensure_board_dirs()
+    state = {
+        "objects": [],
+        "summary": "",
+        "updatedAt": None,
+    }
+    if BOARD_STATE_FILE.exists():
+        try:
+            raw = json.loads(BOARD_STATE_FILE.read_text())
+            if isinstance(raw, dict):
+                state.update(raw)
+        except json.JSONDecodeError:
+            pass
+    if not state.get("summary") and BOARD_CONTEXT_FILE.exists():
+        state["summary"] = BOARD_CONTEXT_FILE.read_text()
+    return state
+
+
+def _save_board_state(payload: dict) -> dict:
+    _ensure_board_dirs()
+    state = {
+        "objects": payload.get("objects", []),
+        "summary": (payload.get("summary") or "").strip(),
+        "updatedAt": datetime.now().isoformat(),
+    }
+    BOARD_STATE_FILE.write_text(json.dumps(state, indent=2))
+    BOARD_CONTEXT_FILE.write_text(state["summary"])
+    if state["summary"]:
+        p = PsycheProfile.load()
+        p.observe("observation", f"Board context updated:\n{state['summary']}", source="dashboard-board")
+    return state
+
+
+def _run_id() -> str:
+    return datetime.now().strftime("run-%Y%m%d-%H%M%S-%f")
+
+
+def _read_runs(limit: int | None = None) -> list[dict]:
+    if not RUNS_LEDGER.exists():
+        return []
+    entries = []
+    for line in RUNS_LEDGER.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    entries.sort(key=lambda item: item.get("completedAt") or item.get("startedAt") or "", reverse=True)
+    return entries[:limit] if limit else entries
+
+
+def _persist_run(payload: dict, response_code: int, response_data: dict) -> dict:
+    _ensure_run_dirs()
+    run_id = _run_id()
+    started_at = datetime.now().isoformat()
+    completed_at = datetime.now().isoformat()
+    artifact_dir = RUN_ARTIFACTS_DIR / run_id
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    result_text = response_data.get("text", "")
+    events = response_data.get("events", []) or []
+    intent = response_data.get("intent")
+    used_tools = response_data.get("usedTools", []) or []
+    status = "completed" if 200 <= response_code < 300 else "failed"
+    artifact_text_path = artifact_dir / "response.txt"
+    artifact_json_path = artifact_dir / "response.json"
+    artifact_events_path = artifact_dir / "events.json"
+    artifact_text_path.write_text(result_text or "")
+    artifact_json_path.write_text(json.dumps(response_data, indent=2))
+    artifact_events_path.write_text(json.dumps(events, indent=2))
+
+    task_ref = None
+    try:
+      if intent in ("execute", "plan"):
+          task = add_task(
+              name=_short(payload.get("prompt", ""), 72) or "Intent run",
+              target="architect",
+              prompt=payload.get("prompt", ""),
+          )
+          task_ref = {"id": task.id, "status": task.status, "target": task.target}
+    except Exception:
+      task_ref = None
+
+    record = {
+        "id": run_id,
+        "startedAt": started_at,
+        "completedAt": completed_at,
+        "status": status,
+        "prompt": payload.get("prompt", ""),
+        "intent": intent,
+        "usedTools": used_tools,
+        "eventCount": len(events),
+        "artifactTextPath": str(artifact_text_path),
+        "artifactJsonPath": str(artifact_json_path),
+        "artifactEventsPath": str(artifact_events_path),
+        "task": task_ref,
+        "responseCode": response_code,
+        "summary": _short(result_text or response_data.get("error", "") or payload.get("prompt", ""), 160),
+    }
+    with RUNS_LEDGER.open("a") as f:
+        f.write(json.dumps(record) + "\n")
+    return record
+
+
+def build_4d_state() -> dict:
+    p = PsycheProfile.load()
+    version = version_current()
+    tasks = list_tasks()
+    agents = list_agents(active_only=False)
+    graph = build_hii_graph()
+    generations = _load_generations()
+    recent_flow = _read_recent_conversation_entries(20)
+    recent_runs = _read_runs(12)
+
+    where = [
+        {"label": "Generations", "path": str(GENERATIONS_LEDGER.parent), "count": len(generations.get("generations", []))},
+        {"label": "Bridge", "path": str(BRIDGE_DIR), "count": len(list(BRIDGE_DIR.glob('*.json'))) if BRIDGE_DIR.exists() else 0},
+        {"label": "Conversations", "path": str(CONVERSATIONS_DIR), "count": len(recent_flow)},
+        {"label": "Codex", "path": str(CODEX_DIR), "count": len(_load_codex_index())},
+        {"label": "Runs", "path": str(RUNS_DIR), "count": len(_read_runs())},
+        {"label": "Artifacts", "path": str(RUN_ARTIFACTS_DIR), "count": len(list(RUN_ARTIFACTS_DIR.glob('*'))) if RUN_ARTIFACTS_DIR.exists() else 0},
+    ]
+    when = {
+        "version": version.get("version"),
+        "git": version.get("git"),
+        "last_psyche_update": p.last_updated,
+        "current_generation": generations.get("currentId"),
+        "recent_generation_times": [g.get("createdAt") for g in generations.get("generations", [])[:6]],
+    }
+    state = {
+        "tasks_open": len([t for t in tasks if getattr(t, "status", "") not in ("done", "completed", "closed")]),
+        "runs_total": len(_read_runs()),
+        "artifacts_total": len(list(RUN_ARTIFACTS_DIR.glob('*'))) if RUN_ARTIFACTS_DIR.exists() else 0,
+        "agents_total": len(agents),
+        "observations": len(p.observations),
+        "graph_nodes": graph["meta"]["node_count"],
+        "graph_edges": graph["meta"]["edge_count"],
+    }
+    flow = [
+        {
+            "at": item.get("timestamp"),
+            "from": item.get("from"),
+            "to": item.get("to"),
+            "type": item.get("type"),
+            "content": _short(item.get("content", ""), 140),
+        }
+        for item in recent_flow
+    ]
+    lanes = {
+        "where": where,
+        "when": when,
+        "state": state,
+        "flow": flow,
+        "runs": recent_runs,
+        "tasks": [
+            {
+                "id": t.id,
+                "name": t.name,
+                "status": t.status,
+                "target": t.target,
+                "created_at": t.created_at,
+            }
+            for t in tasks[:12]
+        ],
+        "generations": generations.get("generations", [])[:12],
+    }
+    return lanes
+
+
+def _proxy_execute(payload: dict) -> tuple[int, dict]:
+    board = _load_board_state()
+    board_summary = (board.get("summary") or "").strip()
+    if board_summary and payload.get("memory", True):
+        prompt = (payload.get("prompt") or "").strip()
+        payload = {
+            **payload,
+            "prompt": (
+                f"{prompt}\n\n"
+                "[Persistent board context]\n"
+                f"{board_summary}\n"
+                "Use this board context when it helps answer or execute the current intent."
+            ),
+            "boardContext": board_summary,
+        }
+    req = urllib.request.Request(
+        EXECUTION_API.rstrip("/") + "/chat",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=90) as res:
+            return res.status, json.loads(res.read().decode())
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode())
+        except Exception:
+            return e.code, {"error": str(e)}
+    except Exception as e:
+        return 502, {"error": f"execution service unavailable at {EXECUTION_API}: {e}"}
 
 
 def _ensure_bridge_dir():
@@ -472,6 +729,12 @@ class HiiHandler(SimpleHTTPRequestHandler):
             return self._json({"profile": p.summary(), "system_prompt": p.to_system_prompt()})
         elif path == "/api/graph":
             return self._json(build_hii_graph())
+        elif path == "/api/generations":
+            return self._json(_load_generations())
+        elif path == "/api/4d":
+            return self._json(build_4d_state())
+        elif path == "/api/board":
+            return self._json(_load_board_state())
         elif path == "/api/tasks":
             tasks = list_tasks()
             return self._json([{"id": t.id, "name": t.name, "target": t.target, "status": t.status} for t in tasks])
@@ -513,6 +776,16 @@ class HiiHandler(SimpleHTTPRequestHandler):
         elif path == "/api/bridge":
             after = int(parse_qs(parsed.query).get("after", ["0"])[0])
             return self._json({"messages": _read_bridge_messages(after_id=after)})
+        elif path == "/vendor/fabric.js":
+            if not FABRIC_JS_PATH.exists():
+                return self._json({"error": f"fabric bundle not found at {FABRIC_JS_PATH}"}, 404)
+            data = FABRIC_JS_PATH.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         elif path.startswith("/static/"):
             fname = path[8:]  # strip /static/
             return self._serve_file(fname)
@@ -543,10 +816,38 @@ class HiiHandler(SimpleHTTPRequestHandler):
                 return self._json({"id": t.id, "name": t.name, "status": t.status})
             except Exception as e:
                 return self._json({"error": str(e)}, 400)
+        elif path == "/api/execute":
+            prompt = (body.get("prompt") or "").strip()
+            if not prompt:
+                return self._json({"error": "prompt required"}, 400)
+            payload = {
+                "prompt": prompt,
+                "allowShell": bool(body.get("allowShell", False)),
+                "allowSearch": bool(body.get("allowSearch", True)),
+                "webProvider": body.get("webProvider", "searxng"),
+                "scholarly": bool(body.get("scholarly", False)),
+                "downloadPdfs": bool(body.get("downloadPdfs", False)),
+                "memory": body.get("memory", True),
+            }
+            code, data = _proxy_execute(payload)
+            return self._json(data, code)
         elif path == "/api/observe":
             p = PsycheProfile.load()
             p.observe(body.get("kind", "observation"), body.get("content", ""), body.get("source", "dashboard"))
             return self._json({"ok": True})
+        elif path == "/api/board":
+            return self._json(_save_board_state(body))
+        elif path == "/api/apis/install":
+            name = (body.get("name") or "").strip()
+            if not name:
+                return self._json({"error": "name required"}, 400)
+            try:
+                installed = install_api(name, interactive=False)
+                return self._json({"ok": True, "api": installed})
+            except ValueError as e:
+                return self._json({"error": str(e)}, 400)
+            except Exception as e:
+                return self._json({"error": f"install failed: {e}"}, 500)
         elif path == "/api/ui-version-save":
             name = (body.get("name") or "").strip()
             if not name:

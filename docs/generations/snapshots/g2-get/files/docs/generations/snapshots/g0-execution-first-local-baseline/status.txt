@@ -1,0 +1,13 @@
+M README.md
+ M engine/serve/server.py
+ M engine/serve/static/index.html
+ M engine/serve/static/visual.html
+ M engine/tools/api_registry.py
+ M src/agent.ts
+ M src/cli.ts
+ M src/logs.ts
+ M src/tools/search.ts
+?? docs/execution-substrate-roadmap.md
+?? docs/execution-substrate.md
+?? docs/hii-execution-substrate.md
+?? src/generations.ts

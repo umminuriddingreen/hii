@@ -1,6 +1,6 @@
-# hii — Local Agentic CLI (Ollama + RAG + Web + Memory)
+# hii — Local Thought Sharpening CLI (Ollama + RAG + SearxNG + Memory)
 
-hii is an offline‑first, local agentic CLI that runs on your Mac, powered by Ollama models. It can search your files (RAG), do web/academic lookups, optionally run shell commands, and log/recall chats to an Obsidian vault for durable memory.
+hii is an offline‑first, local thinking tool that runs on your Mac, powered by Ollama models. It sharpens framing, decomposition, and reasoning, can search your files (RAG), uses SearxNG for factual grounding, optionally runs shell commands, and logs/recalls chats to an Obsidian vault for durable memory.
 
 ## Quick Start
 
@@ -11,24 +11,30 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
 - Install/build:
   - `cd hii && npm install && npm run build && npm link`
 - Ingest your files: `hii ingest --path ./workspace`
+- Start the chat interface: `hii chat --web`
 - Ask with RAG: `hii chat "search files for auth middleware and explain"`
-- Web search: `export SERPAPI_KEY=... && hii chat --web "web: compare vector DBs"`
+- Web grounding: `hii chat --web "What is the latest SQLite release?"`
 - Scholarly: `hii chat --web --scholarly "papers on QLoRA for small GPUs"`
 - Memory (Obsidian): enabled by default → see “Obsidian Memory”.
 
 ## Commands
 
 - `hii ingest --path <folder>`: Index text/code files into local LanceDB
-- `hii chat [flags] "prompt"`:
+- `hii chat [flags] [prompt]`:
+  - no prompt opens the interactive Codex-like chat loop
   - `--shell`: allow shell execution (dangerous; use sparingly)
-  - `--web`: enable web search (SerpAPI/DuckDuckGo)
-  - `--web-provider serpapi|duckduckgo`: pick provider
+  - `--web`: enable factual grounding and web search
+  - `--web-provider searxng|serpapi|duckduckgo`: pick provider
   - `--scholarly`: academic mode (arXiv/OpenAlex/Crossref)
   - `--download-pdfs`: fetch OA PDFs and ingest into RAG
   - `--no-memory`: disable Obsidian memory for this call
   - `--memory-entries <n>`: recall this many entries
+  - interactive slash commands: `/help`, `/exit`, `/clear`, `/search <query>`, `/web on|off`, `/ground on|off`, `/memory on|off`
 - `hii papers "query" [--max N]`: Fetch OA PDFs for a query and ingest
 - `hii browser <agent-browser args...>`: Run the locally installed `agent-browser` CLI through `hii`
+- `hii health`: Return a compact operational status report for HII
+- `hii remote windows add --name "<pc>" --host mypc.tailnet.ts.net --port 6080`: register a browser-based Windows remote reachable over Tailscale
+- `hii remote windows open <pc>`: open that machine in your browser
 - `hii space health`: Report whether the desktop backend is installed and running
 - `hii space snapshot`: Return monitors, workspaces, and windows from the desktop backend
 - `hii space focus-window --id <windowId>`: Focus a window by backend id
@@ -37,10 +43,19 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
 - `hii models --set-vault "/Users/ummi/Library/Mobile Documents/iCloud~md~obsidian/Documents/hii/hii"`
 - `hii models --set-memory on --set-memory-entries 30`
 - `hii config`: print effective config
+- `hii generations paths`: show where generation metadata and snapshots live
+- `hii generations snapshot --name "GET" --summary "Current HII baseline" --kind vision`: save the current working tree as a named generation
+- `hii generations list`: list recorded generations
+- `hii generations current`: show the active generation
+- `hii generations show g0`: inspect one generation record
 - `hii tool new <name>`: scaffold a new tool file
  - `hii notes audio --file ./recording.wav [--title "Standup"] [--out-dir ./notes] [--keep-transcript]`: Send audio to LM Studio for transcription + Markdown note (supports `--chat-model`, `--transcribe-model`, `--lm-url`).
 - `hii memory test [--vault <path>]`: write a test entry to the vault
 - `hii memory check [--vault <path>]`: verify vault path and .obsidian presence
+- `hii generations snapshot --id g0 --name "Current HII" --summary "Execution-first local CLI"`: save the current working tree as a named generation snapshot
+- `hii generations list`: list recorded generations
+- `hii generations current`: inspect the current generation
+- `hii generations show <id>`: inspect one generation and its changed files
 - `hii duality init [--yin-name Yin] [--codex-name Codex]`: initialize the Yin/Codex bridge
 - `hii apps add --name "<app>" [--path /abs/path] [--stack vite,react,ts] [--status building] [--mvp-ready]`: register an app in the local product catalog
 - `hii apps list`: list tracked apps and MVP readiness
@@ -51,6 +66,7 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
 - `hii serve [--port 8787] [--web] [--scholarly] [--download-pdfs] [--no-memory]`:
    Start a local HTTP server that exposes:
    - POST /chat { prompt, allowShell?, allowSearch?, webProvider?, scholarly?, downloadPdfs?, memory? }
+     - returns `{ text, intent, usedTools, events }`
    - POST /browser { args: string[] }
    - GET /space/healthz
    - GET /space/snapshot
@@ -67,6 +83,7 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
 - File: `agent.config.json` in the project root (auto‑created if you save settings via `hii models`).
 - Env:
   - `OLLAMA_URL`: default `http://127.0.0.1:11434`
+  - `SEARXNG_URL`: default `http://127.0.0.1:8888`
   - `SERPAPI_KEY`: enable Google results via SerpAPI
   - `HII_OBSIDIAN_VAULT`: override Obsidian vault path
   - `LM_STUDIO_URL`: OpenAI-compatible LM Studio base URL (default `http://127.0.0.1:1234/v1`)
@@ -90,8 +107,12 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
 ## Web & Academic Search
 
 - Web providers:
-  - SerpAPI (needs `SERPAPI_KEY`) → high quality, Google
+  - SearxNG at `http://127.0.0.1:8888` by default
+  - SerpAPI (needs `SERPAPI_KEY`) → Google fallback
   - DuckDuckGo HTML (no key) → free fallback, conservative scraping
+- Grounding behavior:
+  - interactive chat can auto-ground prompts that look time-sensitive or externally factual
+  - `/search <query>` forces an immediate SearxNG-backed lookup without waiting for the model
 - Academic:
   - Sources: arXiv (API), OpenAlex, Crossref
   - Flags: `--scholarly`, optionally `--download-pdfs`
@@ -107,6 +128,35 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
   - `hii browser screenshot page.png`
 - This forwards arguments directly to the locally installed `agent-browser` binary under `node_modules/.bin`, so `hii` does not require a separate global install.
 
+## Windows Remote via Browser
+
+- `hii remote windows` is the lightweight HII surface for using a Windows machine from your Mac through the browser.
+- It assumes the Windows machine already exposes a browser-capable remote endpoint such as:
+  - noVNC
+  - Apache Guacamole
+  - any custom browser URL
+- This is intentionally simple: HII stores the target and opens it in one command.
+
+Examples:
+
+- noVNC over Tailscale:
+  - `hii remote windows add --name "studio-pc" --provider novnc --host studio-pc.tailnet.ts.net --port 6080`
+  - `hii remote windows open studio-pc`
+
+- Guacamole over Tailscale:
+  - `hii remote windows add --name "office-pc" --provider guacamole --host office-pc.tailnet.ts.net --port 8080`
+  - `hii remote windows open office-pc`
+
+- Custom browser URL:
+  - `hii remote windows add --name "custom-pc" --provider custom --url "https://custom.tailnet.ts.net/remote"`
+
+Useful commands:
+
+- `hii remote windows list`
+- `hii remote windows show <name>`
+- `hii remote windows url <name>`
+- `hii remote windows open <name>`
+
 ## Desktop Integration
 
 - `hii space` is the first slice of desktop integration and is intentionally `hii`-centric, not Codex-centric.
@@ -117,10 +167,29 @@ hii is an offline‑first, local agentic CLI that runs on your Mac, powered by O
   - desktop snapshot
   - focus window by id
   - switch workspace
+  - list visible apps
+  - focus monitor
+  - move focused window to workspace
+  - move focused workspace to monitor
+  - reload AeroSpace config
+  - balance workspace window sizes
 - Planned next capabilities:
   - UI inspection through Accessibility
   - typed desktop actions
   - screenshot/vision fallback when Accessibility is unavailable
+
+Useful commands:
+
+- `hii space health`
+- `hii space snapshot`
+- `hii space apps`
+- `hii space focus-window --id <windowId>`
+- `hii space switch-workspace --name <workspace>`
+- `hii space focus-monitor --target <next|prev|1|2|main>`
+- `hii space move-window-to-workspace --name <workspace>`
+- `hii space move-workspace-to-monitor --target <next|prev|1|2|main>`
+- `hii space reload-config`
+- `hii space balance`
 
 ## Obsidian Memory (Human + AI Augmentation)
 
@@ -161,6 +230,27 @@ Example flow:
   - MVP readiness
 - Use the app catalog as the source of truth for whether a project is still just an idea, actively building, or ready to ship as an MVP.
 
+## Generations
+
+- Generations are named working-tree snapshots of HII.
+- Storage:
+  - registry: `docs/generations/registry.json`
+  - snapshot payloads: `docs/generations/<generation-id>/`
+- Each generation records:
+  - semantic id such as `g0`, `g1`
+  - title
+  - version
+  - git branch / commit
+  - dirty-state file list
+  - optional notes and execution vision
+- The snapshot payload stores:
+  - `meta.json`
+  - `git-status.txt`
+  - `working-tree.patch`
+  - copies of changed files
+
+Use generations when HII crosses a meaningful conceptual boundary, not just for every small edit.
+
 ### Calling from Obsidian via HTTP + Viewing Graph
 
 - Start server: `hii serve --port 8787 --web --scholarly`
@@ -177,6 +267,43 @@ Example flow:
 - Web: enable explicitly (`--web`).
 - PDF size capped at 25 MB; limited fetch count per call.
 
+## Generations
+
+- Generations are named HII snapshots independent of clean git releases.
+- Each snapshot stores:
+  - metadata
+  - git status
+  - a full working-tree patch against `HEAD`
+  - exact copies of the changed files at capture time
+- Storage path: `docs/generations/`
+- Use this to preserve meaningful product states like `g0`, `g1`, `g2` as HII evolves from CLI helper into execution substrate.
+
+Example:
+
+- `hii generations snapshot --id g0 --name "Current HII" --summary "Codex-like chat + grounding before orchestrator spine" --tags cli,grounding`
+
+## Orchestrator
+
+- HII now has a deterministic orchestration layer between user intent and model/tool execution.
+- Main file: `src/orchestrator.ts`
+- It currently owns:
+  - intent classification
+  - memory loading
+  - automatic grounding
+  - tool execution events
+  - final response completion events
+- Event types include:
+  - `intent.received`
+  - `intent.classified`
+  - `memory.loaded`
+  - `grounding.started`
+  - `grounding.finished`
+  - `tool.selected`
+  - `tool.started`
+  - `tool.finished`
+  - `response.completed`
+  - `blocker.detected`
+
 ## Troubleshooting
 
 - `ollama serve` must be running; ensure pulled models exist
@@ -190,9 +317,15 @@ Private repository by request; no license header added.
 ## Updates, Ideas, and Releases
 
 - Log an idea/update:
-  - `hii updates add --title "Vector search hybrid" --body "Add BM25 + vector" --tags retrieval,ranking --to-vault`
+- `hii updates add --title "Vector search hybrid" --body "Add BM25 + vector" --tags retrieval,ranking --to-vault`
   - Writes to `docs/updates.md` and (optionally) to `<vault>/Updates/YYYY-MM.md`.
 - Bump version and update CHANGELOG:
   - `hii release bump --type minor --notes "Add HTTP server and viewer"`
   - Or set explicit version: `hii release bump --version 0.2.0 --notes "…"`
   - Updates `package.json` and `CHANGELOG.md`.
+- Track generations and internal product evolution:
+  - `hii generations snapshot --name g0 --summary "Execution-first local baseline" --tags baseline,execution`
+  - `hii generations list`
+  - `hii generations current`
+  - `hii generations show g0001`
+  - Writes manifests and dirty worktree snapshots to `docs/generations/`

@@ -2,19 +2,249 @@
 import { Command } from 'commander';
 import path from 'node:path';
 import fs from 'node:fs';
+import readline from 'node:readline/promises';
+import { stdin as input, stdout as output } from 'node:process';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { loadConfig, saveConfig } from './config.js';
 import { VectorStore } from './store/vectordb.js';
 import { ingestPath } from './rag/ingest.js';
-import { agentLoop } from './agent.js';
+import { agentLoop, agentTurn } from './agent.js';
 import { addApp, appsSummary, getApp, listApps, updateApp } from './apps.js';
 import { codexPaths, createCodexDoc, createWorkspaceCodex, getCodexDoc, listCodexDocs, searchCodexDocs } from './codex.js';
 import { formatDualMessages, initDuality, postDualMessage, readDualMessages } from './duality.js';
 import { appendConversationTurn, conversationPaths, conversationSummary, formatConversationEntries, listConversationTranscripts, readConversationTranscript, readRecentConversationEntries } from './conversations.js';
 import { runAgentBrowser } from './tools/browser.js';
-import { focusSpaceWindow, getSpaceHealth, getSpaceSnapshot, switchSpaceWorkspace } from './tools/space.js';
+import {
+  balanceSpaceSizes,
+  focusSpaceMonitor,
+  focusSpaceWindow,
+  getSpaceHealth,
+  getSpaceSnapshot,
+  listSpaceApps,
+  moveSpaceWindowToWorkspace,
+  moveSpaceWorkspaceToMonitor,
+  reloadSpaceConfig,
+  switchSpaceWorkspace,
+} from './tools/space.js';
+import { webSearch } from './tools/search.js';
+import { createGenerationSnapshot, currentGeneration, formatGenerationDetail, formatGenerationSummary, generationPaths, getGeneration, listGenerations } from './generations.js';
+import { getHiiHealth } from './health.js';
+import { addRemote, addSshRemote, buildRemoteUrl, execSshRemote, getRemote, getSshRemote, openRemote, remoteSummary, sshRemoteSummary, testSshRemote } from './remote.js';
+import type { ChatMessage } from './clients/chat.js';
+import { resolveChatBackend, resolveChatModel } from './clients/chat.js';
 
 const program = new Command();
-program.name('hii').description('Local agentic CLI powered by Ollama').version('0.1.0');
+program
+  .name('hii')
+  .description('Local agentic CLI powered by Ollama')
+  .version('0.1.0')
+  .showSuggestionAfterError(true)
+  .showHelpAfterError('(run with --help for usage)');
+
+const CHAT_SLASH_COMMANDS = [
+  '/help',
+  '/exit',
+  '/quit',
+  '/clear',
+  '/backend',
+  '/model',
+  '/status',
+  '/search',
+  '/web',
+  '/ground',
+  '/memory',
+] as const;
+
+const HII_LOGO = String.raw`
+  _     _ _
+ | |__ (_) |_
+ | '_ \| | __|
+ | | | | | |_
+ |_| |_|_|\__|
+`;
+
+const HII_LOGO_BITMAP = [
+  '##  ##  ####  ####',
+  '##  ##   ##    ## ',
+  '######   ##    ## ',
+  '##  ##   ##    ## ',
+  '##  ##  ####  ####',
+];
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  const next = new Array<number>(b.length + 1);
+  for (let i = 0; i < a.length; i += 1) {
+    next[0] = i + 1;
+    for (let j = 0; j < b.length; j += 1) {
+      const cost = a[i] === b[j] ? 0 : 1;
+      next[j + 1] = Math.min(
+        next[j] + 1,
+        prev[j + 1] + 1,
+        prev[j] + cost,
+      );
+    }
+    for (let j = 0; j < next.length; j += 1) prev[j] = next[j];
+  }
+  return prev[b.length];
+}
+
+function commandNames(cmd: Command): string[] {
+  const names = [cmd.name()];
+  const alias = cmd.alias();
+  if (alias) names.push(alias);
+  return names.filter(Boolean);
+}
+
+function resolveCommandToken(token: string, commands: readonly Command[]): string | null {
+  const normalized = token.toLowerCase();
+  const choices = commands.map((cmd) => ({
+    primary: cmd.name(),
+    names: commandNames(cmd).map((name) => name.toLowerCase()),
+  }));
+  const exact = choices.find((choice) => choice.names.includes(normalized));
+  if (exact) return exact.primary;
+
+  const prefixMatches = choices.filter((choice) => choice.names.some((name) => name.startsWith(normalized)));
+  if (prefixMatches.length === 1) return prefixMatches[0].primary;
+
+  const ranked = choices
+    .map((choice) => ({
+      primary: choice.primary,
+      distance: Math.min(...choice.names.map((name) => levenshtein(normalized, name))),
+    }))
+    .sort((a, b) => a.distance - b.distance || a.primary.localeCompare(b.primary));
+
+  const best = ranked[0];
+  const second = ranked[1];
+  if (!best) return null;
+  const strongMatch = best.distance <= 2 || (normalized.length >= 5 && best.distance <= 3);
+  const clearlyBetter = !second || best.distance + 1 <= second.distance;
+  return strongMatch && clearlyBetter ? best.primary : null;
+}
+
+function normalizeCliArgv(root: Command, argv: string[]): string[] {
+  if (argv.length <= 2) return [...argv, 'serve'];
+  const normalized = [...argv];
+  const firstToken = normalized[2];
+  if (firstToken && !firstToken.startsWith('-')) {
+    const firstResolved = resolveCommandToken(firstToken, root.commands);
+    if (!firstResolved) {
+      const looksLikePrompt = firstToken.includes(' ') || normalized.length > 3;
+      if (looksLikePrompt) {
+        normalized.splice(2, 0, 'chat');
+        return normalized;
+      }
+      return normalized;
+    }
+    normalized[2] = firstResolved;
+  }
+  let current = root;
+  let index = 2;
+
+  while (index < normalized.length) {
+    const token = normalized[index];
+    if (!token || token.startsWith('-')) break;
+    if (!current.commands.length) break;
+
+    const resolved = resolveCommandToken(token, current.commands);
+    if (!resolved) break;
+
+    normalized[index] = resolved;
+    const next = current.commands.find((cmd) => cmd.name() === resolved);
+    if (!next) break;
+    current = next;
+    index += 1;
+  }
+
+  return normalized;
+}
+
+function completeChatLine(line: string): [string[], string] {
+  const trimmed = line.trimStart();
+  if (!trimmed.startsWith('/')) return [[], line];
+
+  const parts = trimmed.split(/\s+/);
+  const command = parts[0] || '';
+  const expectingValue = /\s$/.test(trimmed);
+
+  if (parts.length <= 1 && !expectingValue) {
+    const hits = CHAT_SLASH_COMMANDS.filter((item) => item.startsWith(command));
+    return [hits.length ? hits : [...CHAT_SLASH_COMMANDS], command];
+  }
+
+  const valueStem = expectingValue ? '' : parts[parts.length - 1];
+  const boolValues = ['on', 'off'];
+  const backendValues = ['ollama', 'mlx'];
+  if (command === '/web' || command === '/ground' || command === '/memory') {
+    const hits = boolValues.filter((value) => value.startsWith(valueStem));
+    return [hits.length ? hits : boolValues, valueStem];
+  }
+  if (command === '/backend') {
+    const hits = backendValues.filter((value) => value.startsWith(valueStem));
+    return [hits.length ? hits : backendValues, valueStem];
+  }
+  if (command === '/search') {
+    return [['<query>'], valueStem];
+  }
+  if (command === '/model') {
+    return [['<backend:model|model-name>'], valueStem];
+  }
+  if (command === '/help') {
+    return [[], valueStem];
+  }
+  return [[], valueStem];
+}
+
+function printLogo() {
+  console.log(HII_LOGO);
+}
+
+function renderAnimatedLogoFrame(phase: number): string {
+  const palette = [' ', '.', ':', '-', '=', '+', '*', '#', '%', '@'];
+  const lines: string[] = [];
+  for (let y = 0; y < HII_LOGO_BITMAP.length; y += 1) {
+    const row = HII_LOGO_BITMAP[y];
+    let line = '';
+    const lead = Math.round(Math.sin(phase * 0.9 + y * 0.55) * 3 + 3);
+    line += ' '.repeat(Math.max(0, lead));
+    for (let x = 0; x < row.length; x += 1) {
+      const cell = row[x];
+      if (cell === ' ') {
+        line += ' ';
+        continue;
+      }
+      const depth = Math.sin((x * 0.42) + phase) + Math.cos((y * 0.75) - phase * 1.3);
+      const index = Math.max(3, Math.min(palette.length - 1, Math.round(((depth + 2) / 4) * (palette.length - 1))));
+      line += palette[index];
+    }
+    lines.push(line);
+  }
+  return lines.join('\n');
+}
+
+async function printAnimatedLogo() {
+  if (!output.isTTY || process.env.CI === 'true') {
+    printLogo();
+    return;
+  }
+  const frames = Array.from({ length: 10 }, (_, index) => renderAnimatedLogoFrame(index * 0.65));
+  output.write('\x1B[?25l');
+  try {
+    for (let index = 0; index < frames.length; index += 1) {
+      if (index > 0) {
+        output.write(`\x1B[${HII_LOGO_BITMAP.length}F`);
+      }
+      output.write(`${frames[index]}\n`);
+      await sleep(index === frames.length - 1 ? 40 : 55);
+    }
+  } finally {
+    output.write('\x1B[?25h');
+  }
+}
 
 async function maybeHandleBrowserPassthrough() {
   if (process.argv[2] !== 'browser') return false;
@@ -25,6 +255,180 @@ async function maybeHandleBrowserPassthrough() {
   } catch (error: any) {
     console.error(error?.message || String(error));
     process.exit(1);
+  }
+}
+
+async function printChatBanner() {
+  await printAnimatedLogo();
+  console.log('High-speed thought sharpening. Search grounding is available through SearxNG when web is enabled.');
+  console.log('Commands: /help, /exit, /clear, /status, /backend <ollama|mlx>, /model <backend:model|model>, /search <query>, /web on|off, /ground on|off, /memory on|off');
+  console.log('Tab completes slash commands and toggle values.');
+  console.log('');
+}
+
+function formatElapsed(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const tenths = Math.floor((ms % 1000) / 100);
+  return `${seconds}.${tenths}s`;
+}
+
+async function withLoadingIndicator<T>(label: string, task: () => Promise<T>): Promise<T> {
+  if (!output.isTTY || process.env.CI === 'true') return task();
+  const frames = ['|', '/', '-', '\\', '▃', '▄', '▅', '▆', '▇', '█'];
+  const started = Date.now();
+  let frame = 0;
+  let timer: NodeJS.Timeout | undefined;
+
+  const render = () => {
+    const elapsed = formatElapsed(Date.now() - started);
+    const prefix = frames[frame % frames.length];
+    output.write(`\r${prefix} ${label} ${elapsed}`);
+    frame += 1;
+  };
+
+  render();
+  timer = setInterval(render, 80);
+
+  try {
+    const result = await task();
+    clearInterval(timer);
+    output.write(`\r✓ ${label} ${formatElapsed(Date.now() - started)}\n`);
+    return result;
+  } catch (error) {
+    clearInterval(timer);
+    output.write(`\r✗ ${label} ${formatElapsed(Date.now() - started)}\n`);
+    throw error;
+  }
+}
+
+program.addHelpText('before', `${HII_LOGO}\n`);
+
+program.command('health')
+  .description('Show a compact operational health report for HII')
+  .action(async () => {
+    console.log(JSON.stringify(await getHiiHealth(), null, 2));
+  });
+
+async function runInteractiveChat(opts: any) {
+  const cfg = loadConfig();
+  const merged = { ...cfg, allowShell: !!opts.shell, allowSearch: !!opts.web, offline: !opts.online };
+  if (opts.memoryEntries !== 'auto') merged.memoryMaxEntries = Number(opts.memoryEntries) || merged.memoryMaxEntries;
+  const provider = opts.webProvider === 'auto' ? 'searxng' : opts.webProvider;
+  const rl = readline.createInterface({ input, output, completer: completeChatLine });
+  const history: ChatMessage[] = [];
+  let autoGround = true;
+  let useMemory = !opts.noMemory;
+
+  await printChatBanner();
+
+  try {
+    while (true) {
+      const raw = (await rl.question('› ')).trim();
+      if (!raw) continue;
+
+      if (raw === '/exit' || raw === '/quit') break;
+      if (raw === '/help') {
+        console.log('`/status` shows the active backend and model.');
+        console.log('`/backend <ollama|mlx>` switches chat backend for this session.');
+        console.log('`/model <backend:model|model>` switches the active chat model for this session.');
+        console.log('`/search <query>` runs grounded web lookup immediately.');
+        console.log('`/web on|off` toggles search tool access.');
+        console.log('`/ground on|off` toggles automatic grounding for unstable factual prompts.');
+        console.log('`/memory on|off` toggles Obsidian recall/logging for this session.');
+        console.log('`/clear` clears the in-memory conversation state.');
+        console.log('Tab completes slash commands and `on|off` toggles.');
+        continue;
+      }
+      if (raw === '/clear') {
+        history.length = 0;
+        console.log('Conversation cleared.');
+        continue;
+      }
+      if (raw === '/status') {
+        console.log(`backend ${resolveChatBackend(merged)} | model ${resolveChatModel(merged)}`);
+        continue;
+      }
+      if (raw.startsWith('/backend ')) {
+        const nextBackend = raw.slice('/backend '.length).trim().toLowerCase();
+        if (nextBackend !== 'ollama' && nextBackend !== 'mlx') {
+          console.log('Usage: /backend <ollama|mlx>');
+          continue;
+        }
+        merged.chatBackend = nextBackend as 'ollama' | 'mlx';
+        console.log(`backend ${merged.chatBackend}`);
+        continue;
+      }
+      if (raw.startsWith('/model ')) {
+        const value = raw.slice('/model '.length).trim();
+        if (!value) {
+          console.log('Usage: /model <backend:model|model>');
+          continue;
+        }
+        const separator = value.indexOf(':');
+        if (separator > 0) {
+          const maybeBackend = value.slice(0, separator).trim().toLowerCase();
+          const modelName = value.slice(separator + 1).trim();
+          if ((maybeBackend === 'ollama' || maybeBackend === 'mlx') && modelName) {
+            merged.chatBackend = maybeBackend as 'ollama' | 'mlx';
+            if (maybeBackend === 'mlx') merged.mlxModel = modelName;
+            else merged.baseModel = modelName;
+            console.log(`backend ${merged.chatBackend} | model ${resolveChatModel(merged)}`);
+            continue;
+          }
+        }
+        if (merged.chatBackend === 'mlx') merged.mlxModel = value;
+        else merged.baseModel = value;
+        console.log(`model ${resolveChatModel(merged)}`);
+        continue;
+      }
+      if (raw.startsWith('/web ')) {
+        merged.allowSearch = raw.endsWith('on');
+        console.log(`web ${merged.allowSearch ? 'on' : 'off'}`);
+        continue;
+      }
+      if (raw.startsWith('/ground ')) {
+        autoGround = raw.endsWith('on');
+        console.log(`ground ${autoGround ? 'on' : 'off'}`);
+        continue;
+      }
+      if (raw.startsWith('/memory ')) {
+        useMemory = raw.endsWith('on');
+        console.log(`memory ${useMemory ? 'on' : 'off'}`);
+        continue;
+      }
+      if (raw.startsWith('/search ')) {
+        const query = raw.slice('/search '.length).trim();
+        const result = merged.allowSearch && !merged.offline
+          ? await webSearch(query, provider as any)
+          : 'Search unavailable. Enable it with `--web` or `/web on`, and disable offline mode.';
+        console.log(`\n${result}\n`);
+        continue;
+      }
+
+      const turn = await withLoadingIndicator(
+        `loading ${resolveChatBackend(merged)}:${resolveChatModel(merged)}`,
+        async () => agentTurn(merged, raw, {
+          interactive: true,
+          webProvider: provider as any,
+          scholarly: !!opts.scholarly,
+          downloadPdfs: !!opts.downloadPdfs,
+          useMemory,
+          autoGround,
+          history,
+        }),
+      );
+      history.length = 0;
+      history.push(...turn.messages.filter((message) => !message.content.startsWith('Recent memory context:\n')));
+      appendConversationTurn({
+        source: 'hii.chat',
+        prompt: raw,
+        answer: turn.text,
+        tools: turn.usedTools,
+      });
+      console.log(`\n${turn.text}\n`);
+    }
+  } finally {
+    rl.close();
   }
 }
 
@@ -45,23 +449,33 @@ program.command('ingest')
   });
 
 program.command('chat')
-  .description('Interactive single-prompt chat with tools')
-  .argument('<prompt...>', 'Prompt text')
+  .description('Codex-like chat interface for thought sharpening')
+  .argument('[prompt...]', 'Prompt text')
   .option('--shell', 'Allow shell tool')
   .option('--web', 'Allow web search tool')
-  .option('--web-provider <name>', 'Web provider: serpapi|duckduckgo', 'auto')
+  .option('--web-provider <name>', 'Web provider: searxng|serpapi|duckduckgo', 'auto')
   .option('--scholarly', 'Use academic search (arXiv/OpenAlex/Crossref)')
   .option('--download-pdfs', 'Download open-access PDFs and ingest into RAG (with --scholarly)')
   .option('--no-memory', 'Disable memory recall and logging to Obsidian vault')
   .option('--memory-entries <n>', 'Max memory entries to recall', 'auto')
   .option('--online', 'Disable offline mode')
   .action(async (promptParts, opts) => {
+    if (!promptParts?.length) {
+      await runInteractiveChat(opts);
+      return;
+    }
     const cfg = loadConfig();
     const merged = { ...cfg, allowShell: !!opts.shell, allowSearch: !!opts.web, offline: !opts.online };
-    const provider = opts.webProvider === 'auto' ? undefined : opts.webProvider;
+    const provider = opts.webProvider === 'auto' ? 'searxng' : opts.webProvider;
     if (opts.memoryEntries !== 'auto') merged.memoryMaxEntries = Number(opts.memoryEntries) || merged.memoryMaxEntries;
     const prompt = promptParts.join(' ');
-    const text = await agentLoop(merged, prompt, { webProvider: provider as any, scholarly: !!opts.scholarly, downloadPdfs: !!opts.downloadPdfs, useMemory: !opts.noMemory });
+    const text = await agentLoop(merged, prompt, {
+      webProvider: provider as any,
+      scholarly: !!opts.scholarly,
+      downloadPdfs: !!opts.downloadPdfs,
+      useMemory: !opts.noMemory,
+      autoGround: true,
+    });
     appendConversationTurn({
       source: 'hii.chat',
       prompt,
@@ -81,19 +495,23 @@ program.command('browser')
 
 program.command('models')
   .description('Show or set active models')
+  .option('--set-backend <name>', 'Set chat backend: ollama|mlx')
   .option('--set-base <name>', 'Set base model')
   .option('--set-coder <name>', 'Set coder model')
   .option('--set-embed <name>', 'Set embed model')
+  .option('--set-mlx <name>', 'Set MLX chat model')
   .option('--set-vault <path>', 'Set Obsidian vault path')
   .option('--set-memory <onoff>', 'Enable/disable memory (on|off)')
   .option('--set-memory-entries <n>', 'Set default memory recall entries')
   .action((opts) => {
     const cfg = loadConfig();
-    if (opts.setBase || opts.setCoder || opts.setEmbed || opts.setVault || opts.setMemory || opts.setMemoryEntries) {
+    if (opts.setBackend || opts.setBase || opts.setCoder || opts.setEmbed || opts.setMlx || opts.setVault || opts.setMemory || opts.setMemoryEntries) {
       const updates: any = {
+        chatBackend: opts.setBackend ?? cfg.chatBackend,
         baseModel: opts.setBase ?? cfg.baseModel,
         coderModel: opts.setCoder ?? cfg.coderModel,
         embedModel: opts.setEmbed ?? cfg.embedModel,
+        mlxModel: opts.setMlx ?? cfg.mlxModel,
       };
       if (opts.setVault) updates.obsidianVaultPath = opts.setVault;
       if (opts.setMemory) updates.memoryEnabled = String(opts.setMemory).toLowerCase() === 'on';
@@ -115,9 +533,11 @@ program.command('models')
         });
       }
     } else {
+      console.log('Backend:', cfg.chatBackend);
       console.log('Base:', cfg.baseModel);
       console.log('Coder:', cfg.coderModel);
       console.log('Embed:', cfg.embedModel);
+      console.log('MLX:', cfg.mlxModel);
       if (cfg.obsidianVaultPath) console.log('Vault:', cfg.obsidianVaultPath);
       console.log('Memory enabled:', cfg.memoryEnabled);
       console.log('Memory entries:', cfg.memoryMaxEntries);
@@ -181,6 +601,68 @@ program.command('release')
     const notes = opts.notes || '- Misc updates';
     updateChangelog(process.cwd(), next, notes);
     console.log(`Bumped version to ${next} and updated CHANGELOG.`);
+  });
+
+const generations = program.command('generations').description('Track HII generations as named working-tree snapshots');
+
+generations.command('paths')
+  .description('Show generation storage paths')
+  .action(() => {
+    console.log(JSON.stringify(generationPaths(process.cwd()), null, 2));
+  });
+
+generations.command('snapshot')
+  .description('Capture the current HII working tree as a named generation')
+  .option('--id <id>', 'Generation id, e.g. g0')
+  .option('--name <name>', 'Generation name')
+  .option('--summary <text>', 'Why this generation matters')
+  .option('--tags <csv>', 'Comma-separated tags')
+  .option('--kind <kind>', 'snapshot|vision|release', 'snapshot')
+  .option('--no-current', 'Do not mark this snapshot as the current generation')
+  .action((opts) => {
+    const tags = typeof opts.tags === 'string'
+      ? opts.tags.split(',').map((tag: string) => tag.trim()).filter(Boolean)
+      : [];
+    const snapshot = createGenerationSnapshot(process.cwd(), {
+      id: opts.id,
+      name: opts.name,
+      summary: opts.summary,
+      tags,
+      kind: opts.kind,
+      markCurrent: opts.current,
+    });
+    console.log(JSON.stringify(snapshot, null, 2));
+  });
+
+generations.command('list')
+  .description('List recorded HII generations')
+  .action(() => {
+    const records = listGenerations(process.cwd());
+    const current = currentGeneration(process.cwd());
+    console.log(formatGenerationSummary(records, current?.id));
+  });
+
+generations.command('current')
+  .description('Show the current generation')
+  .action(() => {
+    const generation = currentGeneration(process.cwd());
+    if (!generation) {
+      console.log('No current generation recorded.');
+      return;
+    }
+    console.log(formatGenerationDetail(generation));
+  });
+
+generations.command('show')
+  .description('Show one recorded generation')
+  .argument('<idOrName>', 'Generation id or name')
+  .action((idOrName) => {
+    const generation = getGeneration(process.cwd(), idOrName);
+    if (!generation) {
+      console.error(`Generation not found: ${idOrName}`);
+      process.exit(1);
+    }
+    console.log(formatGenerationDetail(generation));
   });
 
 const memory = program.command('memory').description('Memory utilities');
@@ -548,6 +1030,191 @@ space.command('switch-workspace')
     console.log(JSON.stringify(await switchSpaceWorkspace(String(opts.name)), null, 2));
   });
 
+space.command('apps')
+  .description('List running applications visible to AeroSpace')
+  .action(async () => {
+    console.log(JSON.stringify(await listSpaceApps(), null, 2));
+  });
+
+space.command('focus-monitor')
+  .description('Focus a monitor by pattern, order, or relative direction')
+  .requiredOption('--target <target>', 'Examples: next, prev, 1, 2, main')
+  .action(async (opts) => {
+    console.log(JSON.stringify(await focusSpaceMonitor(String(opts.target)), null, 2));
+  });
+
+space.command('move-window-to-workspace')
+  .description('Move the focused window to a workspace')
+  .requiredOption('--name <workspace>', 'Workspace name')
+  .action(async (opts) => {
+    console.log(JSON.stringify(await moveSpaceWindowToWorkspace(String(opts.name)), null, 2));
+  });
+
+space.command('move-workspace-to-monitor')
+  .description('Move the focused workspace to a monitor')
+  .requiredOption('--target <target>', 'Examples: next, prev, 1, 2, main')
+  .action(async (opts) => {
+    console.log(JSON.stringify(await moveSpaceWorkspaceToMonitor(String(opts.target)), null, 2));
+  });
+
+space.command('reload-config')
+  .description('Reload the active AeroSpace config')
+  .action(async () => {
+    console.log(JSON.stringify(await reloadSpaceConfig(), null, 2));
+  });
+
+space.command('balance')
+  .description('Balance window sizes on the focused workspace')
+  .action(async () => {
+    console.log(JSON.stringify(await balanceSpaceSizes(), null, 2));
+  });
+
+const remote = program.command('remote').description('Browser-launchable remote machines and sessions');
+const remoteWindows = remote.command('windows').description('Manage Windows browser remote targets over Tailscale');
+const remoteSsh = remote.command('ssh').description('Manage SSH remotes over Tailscale');
+
+remoteWindows.command('add')
+  .description('Register a Windows machine reachable through a browser endpoint')
+  .requiredOption('--name <name>', 'Display name for this machine')
+  .option('--provider <provider>', 'novnc|guacamole|custom', 'novnc')
+  .option('--host <host>', 'Tailscale hostname or IP, e.g. mypc.tailnet.ts.net')
+  .option('--port <n>', 'Remote web port. Default noVNC is usually 6080')
+  .option('--scheme <scheme>', 'http|https', 'http')
+  .option('--path <path>', 'Override remote path. noVNC default is /vnc.html?autoconnect=1&resize=remote&reconnect=1&view_only=0')
+  .option('--url <url>', 'Exact custom URL for provider=custom')
+  .option('--notes <text>', 'Optional notes')
+  .action((opts) => {
+    const remote = addRemote({
+      name: opts.name,
+      provider: opts.provider,
+      host: opts.host,
+      port: opts.port ? Number(opts.port) : undefined,
+      scheme: opts.scheme,
+      path: opts.path,
+      url: opts.url,
+      notes: opts.notes,
+    } as any);
+    console.log(JSON.stringify({ ...remote, resolvedUrl: buildRemoteUrl(remote) }, null, 2));
+  });
+
+remoteWindows.command('list')
+  .description('List configured Windows browser remotes')
+  .action(() => {
+    console.log(remoteSummary());
+  });
+
+remoteWindows.command('show')
+  .description('Show one configured remote')
+  .argument('<name>', 'Remote name or slug')
+  .action((name) => {
+    const remote = getRemote(name);
+    if (!remote) {
+      console.error(`remote not found: ${name}`);
+      process.exit(1);
+    }
+    console.log(JSON.stringify({ ...remote, resolvedUrl: buildRemoteUrl(remote) }, null, 2));
+  });
+
+remoteWindows.command('url')
+  .description('Print the resolved browser URL for a remote')
+  .argument('<name>', 'Remote name or slug')
+  .action((name) => {
+    const remote = getRemote(name);
+    if (!remote) {
+      console.error(`remote not found: ${name}`);
+      process.exit(1);
+    }
+    console.log(buildRemoteUrl(remote));
+  });
+
+remoteWindows.command('open')
+  .description('Open the browser remote for a Windows machine')
+  .argument('<name>', 'Remote name or slug')
+  .action(async (name) => {
+    const result = await openRemote(name);
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+remoteWindows.command('session')
+  .description('Open a Windows remote inside the HII browser session surface')
+  .argument('<name>', 'Remote name or slug')
+  .option('--port <n>', 'Local HII server port', '8787')
+  .action(async (name, opts) => {
+    const remote = getRemote(name);
+    if (!remote) {
+      console.error(`remote not found: ${name}`);
+      process.exit(1);
+    }
+    const url = `http://127.0.0.1:${Number(opts.port) || 8787}/remote.html?remote=${encodeURIComponent(remote.slug)}`;
+    const { execFile } = await import('node:child_process');
+    execFile('open', [url], (error) => {
+      if (error) {
+        console.error(String(error));
+        process.exit(1);
+      }
+      console.log(url);
+    });
+  });
+
+remoteSsh.command('add')
+  .description('Register an SSH host reachable over Tailscale')
+  .requiredOption('--name <name>', 'Display name for this machine')
+  .requiredOption('--host <host>', 'Tailscale hostname or IP')
+  .option('--user <user>', 'SSH username')
+  .option('--port <n>', 'SSH port', '22')
+  .option('--auth <auth>', 'agent|password|key', 'agent')
+  .option('--key <path>', 'Private key path when using key auth')
+  .option('--notes <text>', 'Optional notes')
+  .action((opts) => {
+    const remote = addSshRemote({
+      name: opts.name,
+      host: opts.host,
+      user: opts.user,
+      port: opts.port ? Number(opts.port) : undefined,
+      auth: opts.auth,
+      keyPath: opts.key,
+      notes: opts.notes,
+    } as any);
+    console.log(JSON.stringify(remote, null, 2));
+  });
+
+remoteSsh.command('list')
+  .description('List configured SSH remotes')
+  .action(() => {
+    console.log(sshRemoteSummary());
+  });
+
+remoteSsh.command('show')
+  .description('Show one configured SSH remote')
+  .argument('<name>', 'Remote name or slug')
+  .action((name) => {
+    const remote = getSshRemote(name);
+    if (!remote) {
+      console.error(`ssh remote not found: ${name}`);
+      process.exit(1);
+    }
+    console.log(JSON.stringify(remote, null, 2));
+  });
+
+remoteSsh.command('test')
+  .description('Test SSH connectivity to a remote')
+  .argument('<name>', 'Remote name or slug')
+  .action(async (name) => {
+    const result = await testSshRemote(name);
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exit(1);
+  });
+
+remoteSsh.command('exec')
+  .description('Execute a command on an SSH remote')
+  .argument('<name>', 'Remote name or slug')
+  .requiredOption('--cmd <command>', 'Remote command to run')
+  .action(async (name, opts) => {
+    const result = await execSshRemote(name, String(opts.cmd));
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exit(result.code || 1);
+  });
+
 // Serve command (define before parse)
 program.command('serve')
   .description('Start local HTTP server for hii APIs')
@@ -695,7 +1362,8 @@ comfyui.action(async () => {
 async function main() {
   const handled = await maybeHandleBrowserPassthrough();
   if (handled) return;
-  await program.parseAsync(process.argv);
+  const argv = normalizeCliArgv(program, process.argv);
+  await program.parseAsync(argv);
 }
 
 main().catch((error: any) => {

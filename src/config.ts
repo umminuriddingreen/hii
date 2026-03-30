@@ -1,16 +1,20 @@
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 
 export type Config = {
+  chatBackend: 'ollama' | 'mlx';
   baseModel: string;
   coderModel: string;
   embedModel: string;
+  mlxModel: string;
   dbPath: string;
   workspacePath: string;
   sessionsPath: string;
-  obsidianVaultPath?: string;
+  memoryPath: string;
   memoryEnabled?: boolean;
   memoryMaxEntries?: number;
+  obsidianVaultPath?: string;
   allowShell: boolean;
   allowSearch: boolean;
   offline: boolean;
@@ -22,15 +26,18 @@ export type Config = {
 };
 
 const defaultConfig: Config = {
-  baseModel: process.env.AGENT_BASE_MODEL || 'qwen2.5:32b',
+  chatBackend: (process.env.HII_CHAT_BACKEND as 'ollama' | 'mlx') || 'ollama',
+  baseModel: process.env.AGENT_BASE_MODEL || 'qwen3.5:35b',
   coderModel: process.env.AGENT_CODER_MODEL || 'deepseek-coder-v2:16b',
   embedModel: process.env.AGENT_EMBED_MODEL || 'nomic-embed-text',
+  mlxModel: process.env.HII_MLX_MODEL || 'mlx-community/AceReason-Nemotron-1.1-7B-4bit',
   dbPath: path.resolve(process.cwd(), 'data'),
   workspacePath: path.resolve(process.cwd(), 'workspace'),
   sessionsPath: path.resolve(process.cwd(), 'sessions'),
-  obsidianVaultPath: process.env.HII_OBSIDIAN_VAULT || '/Users/ummi/Library/Mobile Documents/iCloud~md~obsidian/Documents/hii/hii',
+  memoryPath: process.env.HII_MEMORY_PATH || path.join(os.homedir(), '.hii', 'memory'),
   memoryEnabled: true,
-  memoryMaxEntries: 20,
+  memoryMaxEntries: 30,
+  obsidianVaultPath: process.env.HII_OBSIDIAN_VAULT,
   allowShell: false,
   allowSearch: false,
   offline: true,
