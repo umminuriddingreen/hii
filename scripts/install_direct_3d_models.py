@@ -65,6 +65,14 @@ HUNYUAN_SHAPE_PACKAGES = [
 ]
 
 
+def pick_python() -> str:
+    for candidate in ("python3.10", "python3.11", sys.executable):
+        path = shutil.which(candidate)
+        if path:
+            return path
+    return sys.executable
+
+
 def run(cmd: list[str], cwd: Path | None = None) -> None:
     subprocess.run(cmd, cwd=str(cwd) if cwd else None, check=True)
 
@@ -80,9 +88,20 @@ def ensure_repo(path: Path, url: str) -> str:
     return "cloned"
 
 
-def ensure_venv(venv_dir: Path) -> None:
-    if not python_bin(venv_dir).exists():
-        run([sys.executable, "-m", "venv", str(venv_dir)])
+def recreate_venv(venv_dir: Path, python_exe: str) -> None:
+    if venv_dir.exists():
+        shutil.rmtree(venv_dir)
+    run([python_exe, "-m", "venv", str(venv_dir)])
+
+
+def ensure_venv(venv_dir: Path, python_exe: str) -> None:
+    py = python_bin(venv_dir)
+    if not py.exists():
+        recreate_venv(venv_dir, python_exe)
+        return
+    version = subprocess.check_output([str(py), "--version"], text=True).strip()
+    if version.startswith("Python 3.14"):
+        recreate_venv(venv_dir, python_exe)
 
 
 def pip_install(venv_dir: Path, packages: list[str]) -> None:
@@ -93,7 +112,7 @@ def pip_install(venv_dir: Path, packages: list[str]) -> None:
 
 
 def install_triposr() -> dict:
-    ensure_venv(TRIPOSR_VENV)
+    ensure_venv(TRIPOSR_VENV, pick_python())
     pip_install(TRIPOSR_VENV, TRIPOSR_PACKAGES)
     return {
         "status": "installed",
@@ -104,7 +123,7 @@ def install_triposr() -> dict:
 
 
 def install_hunyuan_shape() -> dict:
-    ensure_venv(HUNYUAN_VENV)
+    ensure_venv(HUNYUAN_VENV, pick_python())
     pip_install(HUNYUAN_VENV, HUNYUAN_SHAPE_PACKAGES)
     return {
         "status": "installed-experimental",
