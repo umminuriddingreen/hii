@@ -261,7 +261,7 @@ async function maybeHandleBrowserPassthrough() {
 async function printChatBanner() {
   await printAnimatedLogo();
   console.log('High-speed thought sharpening. Search grounding is available through SearxNG when web is enabled.');
-  console.log('Commands: /help, /exit, /clear, /status, /backend <ollama|mlx>, /model <backend:model|model>, /search <query>, /web on|off, /ground on|off, /memory on|off');
+  console.log('Commands: /help, /exit, /clear, /status, /capture [w h], /backend <ollama|mlx>, /model <backend:model|model>, /search <query>, /web on|off, /ground on|off, /memory on|off');
   console.log('Tab completes slash commands and toggle values.');
   console.log('');
 }
@@ -394,6 +394,22 @@ async function runInteractiveChat(opts: any) {
       if (raw.startsWith('/memory ')) {
         useMemory = raw.endsWith('on');
         console.log(`memory ${useMemory ? 'on' : 'off'}`);
+        continue;
+      }
+      if (raw === '/capture' || raw.startsWith('/capture ')) {
+        const args = raw.slice('/capture'.length).trim().split(/\s+/);
+        const w = Number(args[0]) || 1920;
+        const h = Number(args[1]) || 1080;
+        const out = args[2] || '/tmp/hii-rhino-capture.png';
+        console.log(`Capturing Rhino viewport ${w}x${h} -> ${out}`);
+        try {
+          const { code, stdout, stderr } = await runShell(
+            `python3 ~/hii/scripts/rhino_capture_viewport.py --width ${w} --height ${h} --output "${out}"`
+          );
+          console.log(code === 0 ? `\n${stdout}\n` : `\nCapture failed: ${stderr}\n`);
+        } catch (e: any) {
+          console.log(`\nCapture error: ${e?.message || e}\n`);
+        }
         continue;
       }
       if (raw.startsWith('/search ')) {
@@ -601,6 +617,64 @@ program.command('release')
     const notes = opts.notes || '- Misc updates';
     updateChangelog(process.cwd(), next, notes);
     console.log(`Bumped version to ${next} and updated CHANGELOG.`);
+  });
+
+program.command('update')
+  .description('Pull latest HII changes, rebuild, and re-seed skills')
+  .option('--check', 'Only check for updates, do not apply')
+  .action(async (opts) => {
+    const hiiRoot = path.resolve(os.homedir(), 'hii');
+    const exec = (cmd: string) => runShell(cmd, hiiRoot);
+
+    // Fetch latest
+    console.log('Fetching latest...');
+    await exec('git fetch origin main');
+
+    const { stdout: localRev } = await exec('git rev-parse HEAD');
+    const { stdout: remoteRev } = await exec('git rev-parse origin/main');
+
+    if (localRev.trim() === remoteRev.trim()) {
+      console.log('HII is up to date.');
+      return;
+    }
+
+    const { stdout: countStr } = await exec('git rev-list HEAD..origin/main --count');
+    const count = parseInt(countStr.trim(), 10) || 0;
+    console.log(`${count} update(s) available.`);
+
+    if (opts.check) return;
+
+    // Pull
+    console.log('Pulling...');
+    const pull = await exec('git pull origin main');
+    if (pull.code !== 0) {
+      console.error('Pull failed:', pull.stderr);
+      process.exit(1);
+    }
+
+    // Rebuild
+    console.log('Installing dependencies...');
+    await exec('npm install');
+    console.log('Building...');
+    const build = await exec('npm run build');
+    if (build.code !== 0) {
+      console.error('Build failed:', build.stderr);
+      process.exit(1);
+    }
+
+    // Re-seed skills
+    console.log('Re-seeding skills...');
+    await exec('python3 -m engine.cli skill seed');
+
+    // Show new version
+    const pkgPath = path.join(hiiRoot, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+      console.log(`Updated to v${pkg.version}`);
+    }
+
+    const { stdout: logStr } = await exec(`git log --oneline -${count}`);
+    console.log('\nChanges:\n' + logStr.trim());
   });
 
 const generations = program.command('generations').description('Track HII generations as named working-tree snapshots');
