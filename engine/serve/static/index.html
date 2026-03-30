@@ -593,7 +593,7 @@
   </aside>
 </div>
 
-<script src="/static/vendor/fabric.min.js"></script>
+<script src="/vendor/fabric.js"></script>
 <script>
 const API = '';
 let shellState = null;
@@ -1028,12 +1028,8 @@ async function loadShell() {
 async function runIntent() {
   const prompt = document.getElementById('prompt-input').value.trim();
   if (!prompt) return;
-  const boardContext = summarizeBoardContext();
-  const compiledPrompt = boardContext
-    ? `[board context]\n${boardContext}\n\n[user intent]\n${prompt}`
-    : prompt;
   const payload = {
-    prompt: compiledPrompt,
+    prompt,
     allowSearch: document.getElementById('allow-search').checked,
     scholarly: document.getElementById('scholarly-mode').checked,
     memory: document.getElementById('memory-mode').checked,
