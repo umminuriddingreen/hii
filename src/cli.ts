@@ -2,6 +2,7 @@
 import { Command } from 'commander';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -27,6 +28,7 @@ import {
   switchSpaceWorkspace,
 } from './tools/space.js';
 import { webSearch } from './tools/search.js';
+import { runShell } from './tools/shell.js';
 import { createGenerationSnapshot, currentGeneration, formatGenerationDetail, formatGenerationSummary, generationPaths, getGeneration, listGenerations } from './generations.js';
 import { getHiiHealth } from './health.js';
 import { addRemote, addSshRemote, buildRemoteUrl, execSshRemote, getRemote, getSshRemote, openRemote, remoteSummary, sshRemoteSummary, testSshRemote } from './remote.js';
