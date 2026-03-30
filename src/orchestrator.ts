@@ -50,7 +50,8 @@ function buildSystemPrompt(cfg: Config, opts?: OrchestratorOptions): string {
     'When the user explicitly asks to run a command and shell access is enabled, use shell.',
     'If you need a tool, respond with only a single XML block in this exact form:',
     '<tool_call>{"name":"web_search","query":"..."}</tool_call>',
-    'Core tools: web_search, rag_search, shell, academic_search.',
+    'Core tools: web_search, rag_search, shell, academic_search, rhino_capture.',
+    'rhino_capture captures the Rhino viewport as PNG. Args: width, height, output.',
     microToolsSystemPrompt(),
     'If no tool is needed, answer normally.',
     `Shell enabled: ${cfg.allowShell}. Search enabled: ${cfg.allowSearch}. Offline mode: ${cfg.offline}.`,
@@ -120,6 +121,16 @@ async function runToolCall(
       if (!cmd) return { name: 'shell', content: 'Shell command missing.' };
       const { code, stdout, stderr } = await runShell(cmd);
       return { name: 'shell', content: `code=${code}\nstdout\n${stdout}\nstderr\n${stderr}` };
+    }
+    case 'rhino_capture': {
+      const width = Number(toolCall.args.width) || 1920;
+      const height = Number(toolCall.args.height) || 1080;
+      const output = String(toolCall.args.output || '/tmp/hii-rhino-capture.png');
+      const { code, stdout, stderr } = await runShell(
+        `python3 ~/hii/scripts/rhino_capture_viewport.py --width ${width} --height ${height} --output "${output}"`
+      );
+      if (code !== 0) return { name: 'rhino_capture', content: `Capture failed: ${stderr}` };
+      return { name: 'rhino_capture', content: stdout };
     }
     case 'academic_search': {
       if (!cfg.allowSearch || cfg.offline) {
