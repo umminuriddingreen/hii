@@ -27,13 +27,11 @@ const MLX_RUNNER = path.resolve(__dirname, '../../scripts/mlx_chat.py');
 const LOCAL_MLX_PYTHON = path.join(REPO_ROOT, '.venv-mlx', 'bin', 'python3');
 
 export function resolveChatBackend(cfg: Config): ChatBackend {
-  return cfg.chatBackend || 'ollama';
+  return 'ollama';
 }
 
 export function resolveChatModel(cfg: Config): string {
-  return resolveChatBackend(cfg) === 'mlx'
-    ? (cfg.mlxModel || cfg.baseModel)
-    : cfg.baseModel;
+  return cfg.baseModel;
 }
 
 export async function chatWithConfig(
@@ -41,9 +39,7 @@ export async function chatWithConfig(
   messages: ChatMessage[],
   options?: ChatOptions,
 ): Promise<{ text: string }> {
-  const backend = resolveChatBackend(cfg);
   const model = resolveChatModel(cfg);
-  if (backend === 'mlx') return mlxChat(model, messages, options);
   return ollamaChat(model, messages, options);
 }
 

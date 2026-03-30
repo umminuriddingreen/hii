@@ -26,8 +26,8 @@ export type Config = {
 };
 
 const defaultConfig: Config = {
-  chatBackend: (process.env.HII_CHAT_BACKEND as 'ollama' | 'mlx') || 'ollama',
-  baseModel: process.env.AGENT_BASE_MODEL || 'qwen3.5:35b',
+  chatBackend: 'ollama',
+  baseModel: process.env.AGENT_BASE_MODEL || 'nemotron-cascade-2:latest',
   coderModel: process.env.AGENT_CODER_MODEL || 'deepseek-coder-v2:16b',
   embedModel: process.env.AGENT_EMBED_MODEL || 'nomic-embed-text',
   mlxModel: process.env.HII_MLX_MODEL || 'mlx-community/AceReason-Nemotron-1.1-7B-4bit',
@@ -53,13 +53,17 @@ export function loadConfig(): Config {
   if (fs.existsSync(configPath)) {
     const raw = fs.readFileSync(configPath, 'utf-8');
     const parsed = JSON.parse(raw);
-    return { ...defaultConfig, ...parsed } as Config;
+    return {
+      ...defaultConfig,
+      ...parsed,
+      chatBackend: 'ollama',
+    } as Config;
   }
   return defaultConfig;
 }
 
 export function saveConfig(cfg: Partial<Config>): void {
-  const merged = { ...defaultConfig, ...cfg };
+  const merged = { ...defaultConfig, ...cfg, chatBackend: 'ollama' };
   const configPath = path.resolve(process.cwd(), 'agent.config.json');
   fs.writeFileSync(configPath, JSON.stringify(merged, null, 2));
 }

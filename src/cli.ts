@@ -34,7 +34,7 @@ import { getHiiHealth } from './health.js';
 import { addRemote, addSshRemote, buildRemoteUrl, execSshRemote, getRemote, getSshRemote, openRemote, remoteSummary, sshRemoteSummary, testSshRemote } from './remote.js';
 import type { ChatMessage } from './clients/chat.js';
 import { resolveChatBackend, resolveChatModel } from './clients/chat.js';
-import { listAllModels, modelsToMenuItems } from './clients/models.js';
+import { listOllamaModels, modelsToMenuItems } from './clients/models.js';
 import { interactiveMenu } from './tui/menu.js';
 
 const program = new Command();
@@ -50,7 +50,6 @@ const CHAT_SLASH_COMMANDS = [
   '/exit',
   '/quit',
   '/clear',
-  '/backend',
   '/model',
   '/status',
   '/search',
@@ -344,13 +343,12 @@ async function runInteractiveChat(opts: any) {
       if (raw === '/help') {
         console.log('`/status` shows the active backend and model.');
         console.log('`/capture [width height [path]]` captures Rhino viewport as PNG.');
-        console.log('`/backend <ollama|mlx>` switches chat backend for this session.');
-        console.log('`/model <backend:model|model>` switches the active chat model for this session.');
+        console.log('`/model <model>` switches the active Ollama chat model for this session.');
         console.log('`/search <query>` runs grounded web lookup immediately.');
         console.log('`/web on|off` toggles search tool access.');
         console.log('`/ground on|off` toggles automatic grounding for unstable factual prompts.');
         console.log('`/memory on|off` toggles Obsidian recall/logging for this session.');
-        console.log('`/models` browse and select models across all backends (arrow keys).');
+        console.log('`/models` browse and select pulled Ollama models (arrow keys).');
         console.log('`/generate [prompt]` captures Rhino viewport → ComfyUI img2img with live progress.');
         console.log('`/clear` clears the in-memory conversation state.');
         console.log('Tab completes slash commands and `on|off` toggles.');
@@ -365,36 +363,13 @@ async function runInteractiveChat(opts: any) {
         console.log(`backend ${resolveChatBackend(merged)} | model ${resolveChatModel(merged)}`);
         continue;
       }
-      if (raw.startsWith('/backend ')) {
-        const nextBackend = raw.slice('/backend '.length).trim().toLowerCase();
-        if (nextBackend !== 'ollama' && nextBackend !== 'mlx') {
-          console.log('Usage: /backend <ollama|mlx>');
-          continue;
-        }
-        merged.chatBackend = nextBackend as 'ollama' | 'mlx';
-        console.log(`backend ${merged.chatBackend}`);
-        continue;
-      }
       if (raw.startsWith('/model ')) {
         const value = raw.slice('/model '.length).trim();
         if (!value) {
-          console.log('Usage: /model <backend:model|model>');
+          console.log('Usage: /model <model>');
           continue;
         }
-        const separator = value.indexOf(':');
-        if (separator > 0) {
-          const maybeBackend = value.slice(0, separator).trim().toLowerCase();
-          const modelName = value.slice(separator + 1).trim();
-          if ((maybeBackend === 'ollama' || maybeBackend === 'mlx') && modelName) {
-            merged.chatBackend = maybeBackend as 'ollama' | 'mlx';
-            if (maybeBackend === 'mlx') merged.mlxModel = modelName;
-            else merged.baseModel = modelName;
-            console.log(`backend ${merged.chatBackend} | model ${resolveChatModel(merged)}`);
-            continue;
-          }
-        }
-        if (merged.chatBackend === 'mlx') merged.mlxModel = value;
-        else merged.baseModel = value;
+        merged.baseModel = value;
         console.log(`model ${resolveChatModel(merged)}`);
         continue;
       }
@@ -431,23 +406,16 @@ async function runInteractiveChat(opts: any) {
       }
       if (raw === '/models') {
         rl.close();
-        const models = await listAllModels();
+        const models = await listOllamaModels();
         const items = modelsToMenuItems(models);
         const pick = await interactiveMenu(items, {
           title: '  Select a model',
           pageSize: 15,
         });
         if (pick && pick.length > 0) {
-          const [backend, ...rest] = pick[0].value.split(':');
-          const modelName = rest.join(':');
-          if (backend === 'ollama' || backend === 'mlx') {
-            merged.chatBackend = backend as 'ollama' | 'mlx';
-            if (backend === 'mlx') merged.mlxModel = modelName;
-            else merged.baseModel = modelName;
-            console.log(`backend ${merged.chatBackend} | model ${resolveChatModel(merged)}`);
-          } else {
-            console.log(`Selected: ${pick[0].value} (external backend — use as reference)`);
-          }
+          const [, ...rest] = pick[0].value.split(':');
+          merged.baseModel = rest.join(':');
+          console.log(`backend ${resolveChatBackend(merged)} | model ${resolveChatModel(merged)}`);
         }
         // Re-create readline after raw-mode menu
         rl = readline.createInterface({ input, output, completer: completeChatLine });
@@ -568,23 +536,19 @@ program.command('browser')
 
 program.command('models')
   .description('Show or set active models')
-  .option('--set-backend <name>', 'Set chat backend: ollama|mlx')
   .option('--set-base <name>', 'Set base model')
   .option('--set-coder <name>', 'Set coder model')
   .option('--set-embed <name>', 'Set embed model')
-  .option('--set-mlx <name>', 'Set MLX chat model')
   .option('--set-vault <path>', 'Set Obsidian vault path')
   .option('--set-memory <onoff>', 'Enable/disable memory (on|off)')
   .option('--set-memory-entries <n>', 'Set default memory recall entries')
   .action((opts) => {
     const cfg = loadConfig();
-    if (opts.setBackend || opts.setBase || opts.setCoder || opts.setEmbed || opts.setMlx || opts.setVault || opts.setMemory || opts.setMemoryEntries) {
+    if (opts.setBase || opts.setCoder || opts.setEmbed || opts.setVault || opts.setMemory || opts.setMemoryEntries) {
       const updates: any = {
-        chatBackend: opts.setBackend ?? cfg.chatBackend,
         baseModel: opts.setBase ?? cfg.baseModel,
         coderModel: opts.setCoder ?? cfg.coderModel,
         embedModel: opts.setEmbed ?? cfg.embedModel,
-        mlxModel: opts.setMlx ?? cfg.mlxModel,
       };
       if (opts.setVault) updates.obsidianVaultPath = opts.setVault;
       if (opts.setMemory) updates.memoryEnabled = String(opts.setMemory).toLowerCase() === 'on';
@@ -610,7 +574,6 @@ program.command('models')
       console.log('Base:', cfg.baseModel);
       console.log('Coder:', cfg.coderModel);
       console.log('Embed:', cfg.embedModel);
-      console.log('MLX:', cfg.mlxModel);
       if (cfg.obsidianVaultPath) console.log('Vault:', cfg.obsidianVaultPath);
       console.log('Memory enabled:', cfg.memoryEnabled);
       console.log('Memory entries:', cfg.memoryMaxEntries);
