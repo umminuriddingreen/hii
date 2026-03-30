@@ -36,6 +36,15 @@ py_engine() {
     cd "$HII_ROOT" && python3 -m engine.cli "$@"
 }
 
+py_runtime() {
+    local venv_python="$HII_ROOT/.venv-mlx/bin/python3"
+    if [ -x "$venv_python" ]; then
+        echo "$venv_python"
+        return
+    fi
+    echo "python3"
+}
+
 ts_cli() {
     cd "$HII_ROOT" && node dist/cli.js "$@"
 }
@@ -113,7 +122,7 @@ case "$cmd" in
 
     # ── Dashboard server (Python) ──
     serve)
-        cd "$HII_ROOT" && python3 -m engine.serve.server "$@"
+        cd "$HII_ROOT" && "$(py_runtime)" -m engine.serve.server "$@"
         ;;
 
     # ── TypeScript API server ──
