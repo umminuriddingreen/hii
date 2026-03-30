@@ -1464,6 +1464,36 @@ comfyui.action(async () => {
   await comfyuiStart();
 });
 
+const rhino = program.command('rhino').description('Rhino integration and command installation');
+
+rhino.command('install-hii')
+  .description('Install the HII launcher as a Rhino alias in the active Rhino session')
+  .option('--alias <name>', 'Rhino alias name', 'Hii')
+  .option('--server <command>', 'RhinoMCP server command', 'uvx rhinomcp')
+  .option('--timeout <seconds>', 'Timeout seconds', '30')
+  .action(async (opts) => {
+    const { runShell } = await import('./tools/shell.js');
+    const alias = String(opts.alias || 'Hii');
+    const server = String(opts.server || 'uvx rhinomcp');
+    const timeout = Number(opts.timeout) || 30;
+    const cmd = [
+      'python3',
+      'scripts/rhino_install_hii_command.py',
+      '--alias',
+      JSON.stringify(alias),
+      '--server',
+      JSON.stringify(server),
+      '--timeout',
+      String(timeout),
+    ].join(' ');
+    const { code, stdout, stderr } = await runShell(cmd);
+    if (code !== 0) {
+      console.error(stderr || stdout || 'Rhino HII install failed.');
+      process.exit(1);
+    }
+    console.log(stdout);
+  });
+
 async function main() {
   const handled = await maybeHandleBrowserPassthrough();
   if (handled) return;
