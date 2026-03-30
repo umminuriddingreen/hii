@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useCanvasStore, makeId } from '../canvas/store'
-import { queuePrompt, connectWs, viewUrl, uploadImage, getCheckpoints } from '../comfy/api'
+import { queuePrompt, connectWs, viewUrl, uploadImage, getCheckpoints, captureRhinoViewport } from '../comfy/api'
 import { txt2img, img2img } from '../comfy/workflows'
 import type { ImageData_ } from '../canvas/types'
 
@@ -26,6 +26,7 @@ export function GeneratePanel() {
   const [model, setModel] = useState('')
   const [denoise, setDenoise] = useState(0.6)
   const [connected, setConnected] = useState(false)
+  const [capturing, setCapturing] = useState(false)
   const pendingNodeRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -93,6 +94,26 @@ export function GeneratePanel() {
     }
   }
 
+  async function captureRhino() {
+    setCapturing(true)
+    try {
+      const { url, filename } = await captureRhinoViewport()
+      const id = makeId()
+      addNode({
+        id, type: 'image',
+        x: -camera.x / camera.zoom + 60,
+        y: -camera.y / camera.zoom + 200,
+        w: 512, h: 288, selected: true,
+        data: { src: url, status: 'ready', label: `Rhino: ${filename}` } as ImageData_,
+      })
+      setMode('img2img')
+    } catch (e: any) {
+      console.error('Rhino capture failed:', e)
+    } finally {
+      setCapturing(false)
+    }
+  }
+
   function pullContext() {
     const ctx = getContextText()
     if (ctx) setPrompt((p) => (p ? `${p}, ${ctx}` : ctx))
@@ -118,6 +139,18 @@ export function GeneratePanel() {
           background: connected ? '#2ecc71' : B.red,
         }} />
       </div>
+
+      {/* Capture Rhino */}
+      <button onClick={captureRhino} disabled={capturing} style={{
+        border: `1px solid ${B.inputBorder}`, borderRadius: 8, padding: '6px 0',
+        background: capturing ? B.yellow : 'transparent',
+        color: capturing ? B.black : B.blue,
+        cursor: capturing ? 'wait' : 'pointer',
+        fontSize: 11, fontWeight: 600, letterSpacing: 0.3,
+        transition: 'all 0.15s',
+      }}>
+        {capturing ? 'Capturing...' : 'Capture Rhino Viewport'}
+      </button>
 
       {/* Mode toggle */}
       <div style={{ display: 'flex', gap: 4, background: B.inputBg, borderRadius: 8, padding: 3 }}>

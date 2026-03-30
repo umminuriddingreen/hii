@@ -38,6 +38,15 @@ export function viewUrl(filename: string, subfolder = '', type = 'output') {
   return `${BASE}/view?filename=${encodeURIComponent(filename)}&subfolder=${encodeURIComponent(subfolder)}&type=${type}`
 }
 
+export async function captureRhinoViewport(width = 1920, height = 1080): Promise<{ url: string; filename: string }> {
+  const res = await fetch(`/api/rhino/capture?w=${width}&h=${height}`)
+  if (!res.ok) throw new Error(`Rhino capture failed: ${res.status}`)
+  const blob = await res.blob()
+  const file = new File([blob], `rhino-capture-${Date.now()}.png`, { type: 'image/png' })
+  const uploaded = await uploadImage(file)
+  return { url: viewUrl(uploaded.name, '', 'input'), filename: uploaded.name }
+}
+
 export async function getCheckpoints(): Promise<string[]> {
   try {
     const res = await fetch(`${BASE}/object_info/CheckpointLoaderSimple`)
