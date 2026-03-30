@@ -34,6 +34,8 @@ import { getHiiHealth } from './health.js';
 import { addRemote, addSshRemote, buildRemoteUrl, execSshRemote, getRemote, getSshRemote, openRemote, remoteSummary, sshRemoteSummary, testSshRemote } from './remote.js';
 import type { ChatMessage } from './clients/chat.js';
 import { resolveChatBackend, resolveChatModel } from './clients/chat.js';
+import { listAllModels, modelsToMenuItems } from './clients/models.js';
+import { interactiveMenu } from './tui/menu.js';
 
 const program = new Command();
 program
@@ -55,6 +57,7 @@ const CHAT_SLASH_COMMANDS = [
   '/web',
   '/ground',
   '/memory',
+  '/models',
 ] as const;
 
 const HII_LOGO = String.raw`
