@@ -76,6 +76,9 @@ const HII_LOGO_BITMAP = [
   '##  ##  ####  ####',
 ];
 
+let logoAnimationTimer: NodeJS.Timeout | undefined;
+let logoAnimationPhase = 0;
+
 function levenshtein(a: string, b: string): number {
   if (a === b) return 0;
   if (!a.length) return b.length;
@@ -231,18 +234,24 @@ async function printAnimatedLogo() {
     printLogo();
     return;
   }
-  const frames = Array.from({ length: 10 }, (_, index) => renderAnimatedLogoFrame(index * 0.65));
-  output.write('\x1B[?25l');
-  try {
-    for (let index = 0; index < frames.length; index += 1) {
-      if (index > 0) {
-        output.write(`\x1B[${HII_LOGO_BITMAP.length}F`);
-      }
-      output.write(`${frames[index]}\n`);
-      await sleep(index === frames.length - 1 ? 40 : 55);
-    }
-  } finally {
-    output.write('\x1B[?25h');
+  if (logoAnimationTimer) return;
+
+  const render = () => {
+    const frame = renderAnimatedLogoFrame(logoAnimationPhase)
+      .split('\n')
+      .map((line) => `\x1B[2K${line}`)
+      .join('\n');
+    output.write('\x1B[s');
+    output.write(`\x1B[${HII_LOGO_BITMAP.length + 4}F`);
+    output.write(frame);
+    output.write('\x1B[u');
+    logoAnimationPhase += 0.65;
+  };
+
+  render();
+  logoAnimationTimer = setInterval(render, 90);
+  if (typeof logoAnimationTimer.unref === 'function') {
+    logoAnimationTimer.unref();
   }
 }
 
