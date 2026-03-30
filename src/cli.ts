@@ -58,6 +58,7 @@ const CHAT_SLASH_COMMANDS = [
   '/ground',
   '/memory',
   '/models',
+  '/generate',
 ] as const;
 
 const HII_LOGO = String.raw`
@@ -350,6 +351,7 @@ async function runInteractiveChat(opts: any) {
         console.log('`/ground on|off` toggles automatic grounding for unstable factual prompts.');
         console.log('`/memory on|off` toggles Obsidian recall/logging for this session.');
         console.log('`/models` browse and select models across all backends (arrow keys).');
+        console.log('`/generate [prompt]` captures Rhino viewport → ComfyUI img2img with live progress.');
         console.log('`/clear` clears the in-memory conversation state.');
         console.log('Tab completes slash commands and `on|off` toggles.');
         continue;
@@ -449,6 +451,22 @@ async function runInteractiveChat(opts: any) {
         }
         // Re-create readline after raw-mode menu
         rl = readline.createInterface({ input, output, completer: completeChatLine });
+        continue;
+      }
+      if (raw === '/generate' || raw.startsWith('/generate ')) {
+        const genPrompt = raw.slice('/generate'.length).trim() || undefined;
+        try {
+          const { rhinoToComfy } = await import('./tools/rhino-to-comfy.js');
+          const result = await rhinoToComfy({ prompt: genPrompt });
+          console.log(`\nmodel: ${result.model}`);
+          if (result.outputs.length) {
+            console.log('outputs:');
+            for (const o of result.outputs) console.log(`  ${o.url}`);
+          }
+          console.log();
+        } catch (e: any) {
+          console.log(`\nGeneration error: ${e?.message || e}\n`);
+        }
         continue;
       }
       if (raw.startsWith('/search ')) {
