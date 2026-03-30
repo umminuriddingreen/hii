@@ -1380,6 +1380,13 @@ comfyui.command('models')
     await comfyuiModels();
   });
 
+comfyui.command('config')
+  .description('Show the ComfyUI model-path configuration HII expects on this Mac')
+  .action(async () => {
+    const { comfyuiPrintModelConfig } = await import('./tools/comfyui.js');
+    comfyuiPrintModelConfig();
+  });
+
 comfyui.command('plan')
   .description('Plan a natural-language ComfyUI request into a structured invocation')
   .argument('<request...>', 'Natural-language creation request')

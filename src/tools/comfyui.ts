@@ -6,6 +6,10 @@ import path from 'node:path';
 const COMFYUI_APP = '/Applications/ComfyUI.app';
 const COMFYUI_URL = process.env.COMFYUI_URL ?? 'http://127.0.0.1:8000';
 const COMFYUI_LOG = path.join(os.homedir(), 'Library', 'Logs', 'ComfyUI', 'comfyui.log');
+const COMFYUI_MODEL_BASE = process.env.COMFYUI_MODEL_BASE ?? path.join(os.homedir(), 'Documents', 'ComfyUI');
+const COMFYUI_MODELS_DIR = path.join(COMFYUI_MODEL_BASE, 'models');
+const COMFYUI_BUNDLE_DIR = path.join(COMFYUI_APP, 'Contents', 'Resources', 'ComfyUI');
+const EXTRA_MODEL_PATHS_FILE = path.join(COMFYUI_BUNDLE_DIR, 'extra_model_paths.yaml');
 const MCP_SERVER_DIR = '/Volumes/JBDRIVE/hii/comfyui-mcp-server';
 const MCP_PORT = 9000;
 const HII_DIR = path.join(os.homedir(), '.hii');
@@ -39,10 +43,72 @@ function findPython(): string {
   throw new Error('python3 not found');
 }
 
+function renderExtraModelPaths(basePath = COMFYUI_MODEL_BASE): string {
+  return [
+    'comfyui:',
+    `  base_path: ${basePath}`,
+    '  is_default: true',
+    '  checkpoints: models/checkpoints/',
+    '  text_encoders: |',
+    '    models/text_encoders/',
+    '    models/clip/',
+    '  clip: models/clip/',
+    '  clip_vision: models/clip_vision/',
+    '  configs: models/configs/',
+    '  controlnet: models/controlnet/',
+    '  diffusion_models: |',
+    '    models/diffusion_models/',
+    '    models/unet/',
+    '  embeddings: models/embeddings/',
+    '  loras: models/loras/',
+    '  upscale_models: models/upscale_models/',
+    '  vae: models/vae/',
+    '  vae_approx: models/vae_approx/',
+    '  hypernetworks: models/hypernetworks/',
+    '  gligen: models/gligen/',
+    '  style_models: models/style_models/',
+    '  photomaker: models/photomaker/',
+    '  insightface: models/insightface/',
+    '  llm: models/LLM/',
+    '',
+  ].join('\n');
+}
+
+function readExtraModelConfig(): string | null {
+  try {
+    if (!fs.existsSync(EXTRA_MODEL_PATHS_FILE)) return null;
+    return fs.readFileSync(EXTRA_MODEL_PATHS_FILE, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+export function comfyuiModelConfigSummary(): {
+  appPath: string;
+  bundleConfigPath: string;
+  modelBasePath: string;
+  modelsDir: string;
+  bundleConfigExists: boolean;
+  modelsDirExists: boolean;
+  configMentionsModelBase: boolean;
+} {
+  const config = readExtraModelConfig();
+  return {
+    appPath: COMFYUI_APP,
+    bundleConfigPath: EXTRA_MODEL_PATHS_FILE,
+    modelBasePath: COMFYUI_MODEL_BASE,
+    modelsDir: COMFYUI_MODELS_DIR,
+    bundleConfigExists: !!config,
+    modelsDirExists: fs.existsSync(COMFYUI_MODELS_DIR),
+    configMentionsModelBase: !!config && config.includes(COMFYUI_MODEL_BASE),
+  };
+}
+
 // ── status ────────────────────────────────────────────────────────────────────
 
 export async function comfyuiStatus(): Promise<void> {
   console.log('\n── ComfyUI status ─────────────────────────────────────────');
+  const config = comfyuiModelConfigSummary();
 
   const r = await httpGet(`${COMFYUI_URL}/system_stats`);
   if (r.ok) {
@@ -68,6 +134,11 @@ export async function comfyuiStatus(): Promise<void> {
 
   if (fs.existsSync(COMFYUI_LOG)) console.log(`   ComfyUI log → ${COMFYUI_LOG}`);
   if (fs.existsSync(MCP_LOG))     console.log(`   MCP log     → ${MCP_LOG}`);
+  console.log(`   Model base  → ${config.modelBasePath}${config.modelsDirExists ? '' : ' — missing'}`);
+  console.log(`   Config file  → ${config.bundleConfigPath}${config.bundleConfigExists ? '' : ' — missing'}`);
+  if (config.bundleConfigExists && !config.configMentionsModelBase) {
+    console.log('   Warning     → extra_model_paths.yaml exists but points somewhere else');
+  }
   console.log();
 }
 
@@ -75,6 +146,14 @@ export async function comfyuiStatus(): Promise<void> {
 
 export async function comfyuiStart(opts: { noMcp?: boolean } = {}): Promise<void> {
   ensureDir();
+  const config = comfyuiModelConfigSummary();
+
+  if (!config.modelsDirExists) {
+    console.warn(`⚠️  ComfyUI models directory not found at ${config.modelsDir}`);
+  } else if (!config.bundleConfigExists || !config.configMentionsModelBase) {
+    console.warn(`⚠️  ComfyUI is not yet configured to load models from ${config.modelsDir}`);
+    console.warn(`   Write ${config.bundleConfigPath} before relying on local checkpoints.`);
+  }
 
   // 1. Check if ComfyUI is already running
   const alive = await httpGet(`${COMFYUI_URL}/system_stats`);
@@ -182,4 +261,12 @@ export async function comfyuiModels(): Promise<void> {
   console.log(`\n${models.length} checkpoint model(s):`);
   models.forEach(m => console.log(`  ${m}`));
   console.log();
+}
+
+export function comfyuiPrintModelConfig(): void {
+  const summary = comfyuiModelConfigSummary();
+  console.log(JSON.stringify({
+    ...summary,
+    suggestedConfig: renderExtraModelPaths(summary.modelBasePath),
+  }, null, 2));
 }
