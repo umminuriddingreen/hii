@@ -321,6 +321,14 @@ async function runInteractiveChat(opts: any) {
 
   await printChatBanner();
 
+  // Non-blocking update check
+  runShell('git -C ~/hii rev-list HEAD..origin/main --count 2>/dev/null').then(({ code, stdout }) => {
+    if (code === 0) {
+      const n = parseInt(stdout.trim(), 10);
+      if (n > 0) console.log(`(${n} update${n > 1 ? 's' : ''} available — run hii update)\n`);
+    }
+  }).catch(() => {});
+
   try {
     while (true) {
       const raw = (await rl.question('› ')).trim();
@@ -329,6 +337,7 @@ async function runInteractiveChat(opts: any) {
       if (raw === '/exit' || raw === '/quit') break;
       if (raw === '/help') {
         console.log('`/status` shows the active backend and model.');
+        console.log('`/capture [width height [path]]` captures Rhino viewport as PNG.');
         console.log('`/backend <ollama|mlx>` switches chat backend for this session.');
         console.log('`/model <backend:model|model>` switches the active chat model for this session.');
         console.log('`/search <query>` runs grounded web lookup immediately.');
