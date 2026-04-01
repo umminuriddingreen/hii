@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 
 export type Config = {
-  chatBackend: 'ollama' | 'mlx';
+  chatBackend: 'codex' | 'mlx';
   baseModel: string;
   coderModel: string;
   embedModel: string;
@@ -26,8 +26,8 @@ export type Config = {
 };
 
 const defaultConfig: Config = {
-  chatBackend: 'ollama',
-  baseModel: process.env.AGENT_BASE_MODEL || 'nemotron-cascade-2:latest',
+  chatBackend: 'codex',
+  baseModel: process.env.AGENT_BASE_MODEL || 'codex',
   coderModel: process.env.AGENT_CODER_MODEL || 'deepseek-coder-v2:16b',
   embedModel: process.env.AGENT_EMBED_MODEL || 'nomic-embed-text',
   mlxModel: process.env.HII_MLX_MODEL || 'mlx-community/AceReason-Nemotron-1.1-7B-4bit',
@@ -53,17 +53,26 @@ export function loadConfig(): Config {
   if (fs.existsSync(configPath)) {
     const raw = fs.readFileSync(configPath, 'utf-8');
     const parsed = JSON.parse(raw);
+    const chatBackend = parsed.chatBackend === 'mlx' ? 'mlx' : 'codex';
+    const baseModel = parsed.baseModel && parsed.baseModel !== 'nemotron-cascade-2:latest'
+      ? parsed.baseModel
+      : defaultConfig.baseModel;
     return {
       ...defaultConfig,
       ...parsed,
-      chatBackend: 'ollama',
+      chatBackend,
+      baseModel,
     } as Config;
   }
   return defaultConfig;
 }
 
 export function saveConfig(cfg: Partial<Config>): void {
-  const merged = { ...defaultConfig, ...cfg, chatBackend: 'ollama' };
+  const merged = {
+    ...defaultConfig,
+    ...cfg,
+    chatBackend: cfg.chatBackend === 'mlx' ? 'mlx' : 'codex',
+  };
   const configPath = path.resolve(process.cwd(), 'agent.config.json');
   fs.writeFileSync(configPath, JSON.stringify(merged, null, 2));
 }

@@ -34,13 +34,15 @@ import { getHiiHealth } from './health.js';
 import { addRemote, addSshRemote, buildRemoteUrl, execSshRemote, getRemote, getSshRemote, openRemote, remoteSummary, sshRemoteSummary, testSshRemote } from './remote.js';
 import type { ChatMessage } from './clients/chat.js';
 import { resolveChatBackend, resolveChatModel } from './clients/chat.js';
-import { listOllamaModels, modelsToMenuItems } from './clients/models.js';
+import { listAllModels, modelsToMenuItems } from './clients/models.js';
 import { interactiveMenu } from './tui/menu.js';
+import { slashMenu } from './tui/slash-menu.js';
+import { microTools } from './micro/index.js';
 
 const program = new Command();
 program
   .name('hii')
-  .description('Local agentic CLI powered by Ollama')
+  .description('Local agentic CLI powered by Codex')
   .version('0.1.0')
   .showSuggestionAfterError(true)
   .showHelpAfterError('(run with --help for usage)');
@@ -58,6 +60,7 @@ const CHAT_SLASH_COMMANDS = [
   '/memory',
   '/models',
   '/generate',
+  '/tools',
 ] as const;
 
 const HII_LOGO = String.raw`
@@ -338,21 +341,46 @@ async function runInteractiveChat(opts: any) {
     }
   }).catch(() => {});
 
+  let nextCommand: string | null = null;
+
   try {
     while (true) {
-      const raw = (await rl.question('› ')).trim();
-      if (!raw) continue;
+      let raw: string;
+      if (nextCommand) {
+        raw = nextCommand;
+        nextCommand = null;
+      } else {
+        raw = (await rl.question('› ')).trim();
+        if (!raw) continue;
+      }
 
       if (raw === '/exit' || raw === '/quit') break;
+
+      // Bare "/" opens the interactive slash menu
+      if (raw === '/') {
+        rl.close();
+        const picked = await slashMenu();
+        rl = readline.createInterface({ input, output, completer: completeChatLine });
+        if (!picked) continue;
+        // If command expects an argument (trailing space), prompt for it
+        if (picked.endsWith(' ')) {
+          const arg = (await rl.question(`${picked}`)).trim();
+          nextCommand = arg ? `${picked}${arg}` : picked.trimEnd();
+        } else {
+          nextCommand = picked;
+        }
+        continue;
+      }
+
       if (raw === '/help') {
         console.log('`/status` shows the active backend and model.');
         console.log('`/capture [width height [path]]` captures Rhino viewport as PNG.');
-        console.log('`/model <model>` switches the active Ollama chat model for this session.');
+        console.log('`/model <model>` switches the active chat model for this session.');
         console.log('`/search <query>` runs grounded web lookup immediately.');
         console.log('`/web on|off` toggles search tool access.');
         console.log('`/ground on|off` toggles automatic grounding for unstable factual prompts.');
         console.log('`/memory on|off` toggles Obsidian recall/logging for this session.');
-        console.log('`/models` browse and select pulled Ollama models (arrow keys).');
+        console.log('`/models` browse and select available chat backends/models.');
         console.log('`/generate [prompt]` captures Rhino viewport → ComfyUI img2img with live progress.');
         console.log('`/clear` clears the in-memory conversation state.');
         console.log('Tab completes slash commands and `on|off` toggles.');
@@ -410,19 +438,43 @@ async function runInteractiveChat(opts: any) {
       }
       if (raw === '/models') {
         rl.close();
-        const models = await listOllamaModels();
+        const models = await listAllModels();
         const items = modelsToMenuItems(models);
         const pick = await interactiveMenu(items, {
           title: '  Select a model',
           pageSize: 15,
         });
         if (pick && pick.length > 0) {
-          const [, ...rest] = pick[0].value.split(':');
-          merged.baseModel = rest.join(':');
+          const [backend, ...rest] = pick[0].value.split(':');
+          merged.chatBackend = backend === 'mlx' ? 'mlx' : 'codex';
+          merged.baseModel = rest.join(':') || backend;
           console.log(`backend ${resolveChatBackend(merged)} | model ${resolveChatModel(merged)}`);
         }
         // Re-create readline after raw-mode menu
         rl = readline.createInterface({ input, output, completer: completeChatLine });
+        continue;
+      }
+      if (raw === '/tools') {
+        rl.close();
+        const toolItems = [
+          // Macro tools
+          { label: '/tool web_search', value: '/tool web_search', description: 'multi-provider web search' },
+          { label: '/tool rag_search', value: '/tool rag_search', description: 'vector DB semantic search' },
+          { label: '/tool shell', value: '/tool shell', description: 'execute shell commands' },
+          { label: '/tool academic_search', value: '/tool academic_search', description: 'arxiv / openalex / crossref' },
+          { label: '/tool rhino_capture', value: '/tool rhino_capture', description: 'capture Rhino 3D viewport' },
+          // Micro tools (from registry)
+          ...microTools.map((t) => ({
+            label: `/tool ${t.name}`,
+            value: `/tool ${t.name}`,
+            description: t.description,
+          })),
+        ];
+        const pick = await interactiveMenu(toolItems, { title: '  Tools', pageSize: 15 });
+        rl = readline.createInterface({ input, output, completer: completeChatLine });
+        if (pick && pick.length > 0) {
+          console.log(`\n${pick[0].label}  ${pick[0].description ?? ''}\n`);
+        }
         continue;
       }
       if (raw === '/generate' || raw.startsWith('/generate ')) {

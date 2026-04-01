@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { Config } from '../config.js';
-import { chat as ollamaChat } from './ollama.js';
 
 export type ChatMessage = {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -11,7 +10,7 @@ export type ChatMessage = {
   tool_calls?: any[];
 };
 
-export type ChatBackend = 'ollama' | 'mlx';
+export type ChatBackend = 'codex' | 'mlx';
 
 export type ChatOptions = {
   stream?: boolean;
@@ -27,7 +26,7 @@ const MLX_RUNNER = path.resolve(__dirname, '../../scripts/mlx_chat.py');
 const LOCAL_MLX_PYTHON = path.join(REPO_ROOT, '.venv-mlx', 'bin', 'python3');
 
 export function resolveChatBackend(cfg: Config): ChatBackend {
-  return 'ollama';
+  return cfg.chatBackend === 'mlx' ? 'mlx' : 'codex';
 }
 
 export function resolveChatModel(cfg: Config): string {
@@ -39,8 +38,64 @@ export async function chatWithConfig(
   messages: ChatMessage[],
   options?: ChatOptions,
 ): Promise<{ text: string }> {
+  const backend = resolveChatBackend(cfg);
   const model = resolveChatModel(cfg);
-  return ollamaChat(model, messages, options);
+  if (backend === 'mlx') return mlxChat(model, messages, options);
+  return codexChat(model, messages, options);
+}
+
+function renderCodexPrompt(messages: ChatMessage[], options?: ChatOptions): string {
+  const transcript = messages
+    .map((message) => `${message.role.toUpperCase()}:\n${message.content}`.trim())
+    .join('\n\n');
+
+  return [
+    'You are the HII chat backend running through Codex CLI.',
+    'Respond directly and concisely.',
+    'If a tool is needed, output only one XML block in this exact format:',
+    '<tool_call>{"name":"web_search","query":"..."}</tool_call>',
+    'Otherwise answer normally.',
+    `Temperature hint: ${options?.temperature ?? 0.2}`,
+    '',
+    transcript,
+  ].join('\n');
+}
+
+export async function codexChat(
+  model: string,
+  messages: ChatMessage[],
+  options?: ChatOptions,
+): Promise<{ text: string }> {
+  const prompt = renderCodexPrompt(messages, options);
+  const args = ['exec', '--skip-git-repo-check', '-C', REPO_ROOT];
+  if (model && model !== 'codex') args.push('--model', model);
+  args.push(prompt);
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn('codex', args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    proc.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    proc.on('error', (error) => reject(error));
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`Codex chat error: ${stderr.trim() || `runner exited with code ${code}`}`));
+        return;
+      }
+      resolve({ text: stdout.trim() });
+    });
+  });
 }
 
 export async function mlxChat(
