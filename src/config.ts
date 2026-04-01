@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 
 export type Config = {
-  chatBackend: 'codex' | 'mlx';
+  chatBackend: 'codex' | 'mlx' | 'ollama' | 'claude';
   baseModel: string;
   coderModel: string;
   embedModel: string;
@@ -53,7 +53,8 @@ export function loadConfig(): Config {
   if (fs.existsSync(configPath)) {
     const raw = fs.readFileSync(configPath, 'utf-8');
     const parsed = JSON.parse(raw);
-    const chatBackend = parsed.chatBackend === 'mlx' ? 'mlx' : 'codex';
+    const validBackends = ['codex', 'mlx', 'ollama', 'claude'];
+    const chatBackend = validBackends.includes(parsed.chatBackend) ? parsed.chatBackend : 'codex';
     const baseModel = parsed.baseModel && parsed.baseModel !== 'nemotron-cascade-2:latest'
       ? parsed.baseModel
       : defaultConfig.baseModel;
@@ -71,7 +72,7 @@ export function saveConfig(cfg: Partial<Config>): void {
   const merged = {
     ...defaultConfig,
     ...cfg,
-    chatBackend: cfg.chatBackend === 'mlx' ? 'mlx' : 'codex',
+    chatBackend: ['codex', 'mlx', 'ollama', 'claude'].includes(cfg.chatBackend as string) ? cfg.chatBackend : 'codex',
   };
   const configPath = path.resolve(process.cwd(), 'agent.config.json');
   fs.writeFileSync(configPath, JSON.stringify(merged, null, 2));

@@ -446,7 +446,8 @@ async function runInteractiveChat(opts: any) {
         });
         if (pick && pick.length > 0) {
           const [backend, ...rest] = pick[0].value.split(':');
-          merged.chatBackend = backend === 'mlx' ? 'mlx' : 'codex';
+          const validBackends = ['codex', 'mlx', 'ollama', 'claude'];
+          merged.chatBackend = validBackends.includes(backend) ? backend as any : 'codex';
           merged.baseModel = rest.join(':') || backend;
           console.log(`backend ${resolveChatBackend(merged)} | model ${resolveChatModel(merged)}`);
         }

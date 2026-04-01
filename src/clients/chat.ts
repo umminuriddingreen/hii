@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { Config } from '../config.js';
+import { chat as ollamaChat } from './ollama.js';
 
 export type ChatMessage = {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -10,7 +11,7 @@ export type ChatMessage = {
   tool_calls?: any[];
 };
 
-export type ChatBackend = 'codex' | 'mlx';
+export type ChatBackend = 'codex' | 'mlx' | 'ollama' | 'claude';
 
 export type ChatOptions = {
   stream?: boolean;
@@ -25,8 +26,12 @@ const REPO_ROOT = path.resolve(__dirname, '../..');
 const MLX_RUNNER = path.resolve(__dirname, '../../scripts/mlx_chat.py');
 const LOCAL_MLX_PYTHON = path.join(REPO_ROOT, '.venv-mlx', 'bin', 'python3');
 
+const VALID_BACKENDS: ChatBackend[] = ['codex', 'mlx', 'ollama', 'claude'];
+
 export function resolveChatBackend(cfg: Config): ChatBackend {
-  return cfg.chatBackend === 'mlx' ? 'mlx' : 'codex';
+  return VALID_BACKENDS.includes(cfg.chatBackend as ChatBackend)
+    ? (cfg.chatBackend as ChatBackend)
+    : 'codex';
 }
 
 export function resolveChatModel(cfg: Config): string {
@@ -41,6 +46,8 @@ export async function chatWithConfig(
   const backend = resolveChatBackend(cfg);
   const model = resolveChatModel(cfg);
   if (backend === 'mlx') return mlxChat(model, messages, options);
+  if (backend === 'ollama') return ollamaChat(model, messages, options);
+  if (backend === 'claude') return claudeChat(model, messages, options);
   return codexChat(model, messages, options);
 }
 
@@ -144,5 +151,38 @@ export async function mlxChat(
 
     proc.stdin.write(payload);
     proc.stdin.end();
+  });
+}
+
+export async function claudeChat(
+  model: string,
+  messages: ChatMessage[],
+  options?: ChatOptions,
+): Promise<{ text: string }> {
+  const prompt = messages
+    .map((m) => `${m.role.toUpperCase()}:\n${m.content}`.trim())
+    .join('\n\n');
+
+  const args = ['--print', '--model', model, prompt];
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn('claude', args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+
+    proc.on('error', (error) => reject(error));
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`Claude chat error: ${stderr.trim() || `exited with code ${code}`}`));
+        return;
+      }
+      resolve({ text: stdout.trim() });
+    });
   });
 }
