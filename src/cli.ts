@@ -38,6 +38,7 @@ import { listAllModels, modelsToMenuItems } from './clients/models.js';
 import { interactiveMenu } from './tui/menu.js';
 import { launcherMenu } from './tui/launcher.js';
 import { slashMenu } from './tui/slash-menu.js';
+import { runStatusSurface } from './tui/status.js';
 import { runTopDashboard } from './tui/top.js';
 import { microTools } from './micro/index.js';
 import { radarAsJson, radarAsMarkdown, radarAsTerminal } from './market/radar.js';
@@ -290,18 +291,18 @@ async function ensureLocalServer(port = 8787) {
   const url = `http://127.0.0.1:${port}/healthz`;
   try {
     const res = await fetch(url);
-    if (res.ok) return { started: false, port };
+    if (res.ok) return { started: false, port, handle: null as { close: () => Promise<void> } | null };
   } catch {
     // server not reachable yet
   }
 
   try {
     const { startServer } = await import('./server.js');
-    await startServer({ port });
-    return { started: true, port };
+    const handle = await startServer({ port });
+    return { started: true, port, handle };
   } catch (error: any) {
     if (error?.code === 'EADDRINUSE') {
-      return { started: false, port };
+      return { started: false, port, handle: null as { close: () => Promise<void> } | null };
     }
     throw error;
   }
@@ -316,6 +317,10 @@ async function runLauncher() {
   }
   if (choice === 'top') {
     await runTopDashboard(program, microTools);
+    return;
+  }
+  if (choice === 'status') {
+    await runStatusSurface();
     return;
   }
   if (choice === 'radar') {
@@ -405,6 +410,12 @@ program.command('health')
   .description('Show a compact operational health report for HII')
   .action(async () => {
     console.log(JSON.stringify(await getHiiHealth(), null, 2));
+  });
+
+program.command('status')
+  .description('Live operational surface for runtime, storage, remotes, and desktop state')
+  .action(async () => {
+    await runStatusSurface();
   });
 
 program.command('top')
@@ -1715,8 +1726,14 @@ async function main() {
   if (handled) return;
   const rawArgs = process.argv.slice(2);
   if (rawArgs.length === 0) {
-    await ensureLocalServer(8787);
-    await runLauncher();
+    const server = await ensureLocalServer(8787);
+    try {
+      await runLauncher();
+    } finally {
+      if (server.started) {
+        await server.handle?.close();
+      }
+    }
     return;
   }
   const isHelpPath = rawArgs.includes('--help') || rawArgs.includes('-h') || rawArgs[0] === 'help';
