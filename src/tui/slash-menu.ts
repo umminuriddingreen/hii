@@ -17,6 +17,16 @@ const CSI = `${ESC}[`;
 const HIDE_CURSOR = `${CSI}?25l`;
 const SHOW_CURSOR = `${CSI}?25h`;
 
+export function cycleSlashCursor(length: number, cursor: number, delta: number): number {
+  if (length <= 0) return 0;
+  return (cursor + delta % length + length) % length;
+}
+
+function clampSlashCursor(length: number, cursor: number): number {
+  if (length <= 0) return 0;
+  return Math.max(0, Math.min(cursor, length - 1));
+}
+
 function clearLines(n: number) {
   for (let i = 0; i < n; i++) {
     stdout.write(`${CSI}2K`);
@@ -37,7 +47,7 @@ function renderLevel(
   lines.push(`\x1B[1m${crumb}\x1B[0m`);
 
   if (filterText) lines.push(`  filter: ${filterText}`);
-  lines.push(`  \x1B[2mtab cycle  ↑/↓ navigate  → submenu  ← back  enter select  esc cancel\x1B[0m`);
+  lines.push(`  \x1B[2mtab cycle  ↑/↓ or j/k navigate  pgup/pgdn jump  home/end edge  → submenu  ← back  enter select  esc cancel\x1B[0m`);
 
   const total = items.length;
   let start = 0;
@@ -145,7 +155,7 @@ export function slashMenu(
               (it.description?.toLowerCase().includes(q) ?? false),
           )
         : [...currentItems];
-      cursor = Math.min(cursor, Math.max(0, filtered.length - 1));
+      cursor = clampSlashCursor(filtered.length, cursor);
     }
 
     function draw() {
@@ -224,28 +234,64 @@ export function slashMenu(
 
       // Up
       if (key === `${CSI}A`) {
-        cursor = Math.max(0, cursor - 1);
+        cursor = cycleSlashCursor(filtered.length, cursor, -1);
         draw();
         return;
       }
 
       // Down
       if (key === `${CSI}B`) {
-        cursor = Math.min(filtered.length - 1, cursor + 1);
+        cursor = cycleSlashCursor(filtered.length, cursor, 1);
         draw();
         return;
       }
 
       // Tab — cycle forward through items
       if (key === '\t') {
-        cursor = (cursor + 1) % filtered.length;
+        cursor = cycleSlashCursor(filtered.length, cursor, 1);
         draw();
         return;
       }
 
       // Shift-Tab — cycle backward
       if (key === `${CSI}Z`) {
-        cursor = (cursor - 1 + filtered.length) % filtered.length;
+        cursor = cycleSlashCursor(filtered.length, cursor, -1);
+        draw();
+        return;
+      }
+
+      if (key === 'j') {
+        cursor = cycleSlashCursor(filtered.length, cursor, 1);
+        draw();
+        return;
+      }
+
+      if (key === 'k') {
+        cursor = cycleSlashCursor(filtered.length, cursor, -1);
+        draw();
+        return;
+      }
+
+      if (key === `${CSI}5~`) {
+        cursor = clampSlashCursor(filtered.length, cursor - pageSize);
+        draw();
+        return;
+      }
+
+      if (key === `${CSI}6~`) {
+        cursor = clampSlashCursor(filtered.length, cursor + pageSize);
+        draw();
+        return;
+      }
+
+      if (key === `${CSI}H` || key === `${CSI}1~`) {
+        cursor = 0;
+        draw();
+        return;
+      }
+
+      if (key === `${CSI}F` || key === `${CSI}4~`) {
+        cursor = clampSlashCursor(filtered.length, filtered.length - 1);
         draw();
         return;
       }

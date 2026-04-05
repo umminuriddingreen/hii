@@ -24,6 +24,16 @@ const CSI = `${ESC}[`;
 const HIDE_CURSOR = `${CSI}?25l`;
 const SHOW_CURSOR = `${CSI}?25h`;
 
+export function cycleCursor(length: number, cursor: number, delta: number): number {
+  if (length <= 0) return 0;
+  return (cursor + delta % length + length) % length;
+}
+
+function clampCursor(length: number, cursor: number): number {
+  if (length <= 0) return 0;
+  return Math.max(0, Math.min(cursor, length - 1));
+}
+
 function clearLines(n: number) {
   for (let i = 0; i < n; i++) {
     stdout.write(`${CSI}2K`); // clear line
@@ -48,7 +58,7 @@ function renderMenu(
   if (filterText) {
     lines.push(`  filter: ${filterText}`);
   }
-  lines.push(`  \x1B[2m↑/↓ navigate${opts.multi ? '  space select' : ''}  enter confirm  esc cancel  type to filter\x1B[0m`);
+  lines.push(`  \x1B[2m↑/↓ or tab cycle  pgup/pgdn jump  home/end edge${opts.multi ? '  space select' : ''}  enter confirm  esc cancel  type to filter\x1B[0m`);
 
   // Compute visible window
   const total = items.length;
@@ -110,7 +120,7 @@ export function interactiveMenu(
               (it.group?.toLowerCase().includes(q) ?? false),
           )
         : [...allItems];
-      cursor = Math.min(cursor, Math.max(0, filteredItems.length - 1));
+      cursor = clampCursor(filteredItems.length, cursor);
       selected.clear();
     }
 
@@ -153,14 +163,24 @@ export function interactiveMenu(
 
       // Arrow keys
       if (key === `${CSI}A`) {
-        // up
-        cursor = Math.max(0, cursor - 1);
+        cursor = cycleCursor(filteredItems.length, cursor, -1);
         draw();
         return;
       }
       if (key === `${CSI}B`) {
-        // down
-        cursor = Math.min(filteredItems.length - 1, cursor + 1);
+        cursor = cycleCursor(filteredItems.length, cursor, 1);
+        draw();
+        return;
+      }
+
+      if (key === '\t') {
+        cursor = cycleCursor(filteredItems.length, cursor, 1);
+        draw();
+        return;
+      }
+
+      if (key === `${CSI}Z`) {
+        cursor = cycleCursor(filteredItems.length, cursor, -1);
         draw();
         return;
       }
@@ -180,6 +200,42 @@ export function interactiveMenu(
           applyFilter();
           draw();
         }
+        return;
+      }
+
+      if (key === 'j') {
+        cursor = cycleCursor(filteredItems.length, cursor, 1);
+        draw();
+        return;
+      }
+
+      if (key === 'k') {
+        cursor = cycleCursor(filteredItems.length, cursor, -1);
+        draw();
+        return;
+      }
+
+      if (key === `${CSI}5~`) {
+        cursor = clampCursor(filteredItems.length, cursor - (opts.pageSize ?? 12));
+        draw();
+        return;
+      }
+
+      if (key === `${CSI}6~`) {
+        cursor = clampCursor(filteredItems.length, cursor + (opts.pageSize ?? 12));
+        draw();
+        return;
+      }
+
+      if (key === `${CSI}H` || key === `${CSI}1~`) {
+        cursor = 0;
+        draw();
+        return;
+      }
+
+      if (key === `${CSI}F` || key === `${CSI}4~`) {
+        cursor = clampCursor(filteredItems.length, filteredItems.length - 1);
+        draw();
         return;
       }
 

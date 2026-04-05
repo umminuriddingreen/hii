@@ -25,7 +25,7 @@ from .skills.registry import list_all as skills_list_all, search as skills_searc
 
 def main():
     parser = argparse.ArgumentParser(prog="hii-engine", description="HII Persistence Engine")
-    sub = parser.add_subparsers(dest="command")
+    sub = parser.add_subparsers(dest="subject")
 
     # ── daemon ──
     daemon_p = sub.add_parser("daemon")
@@ -72,7 +72,7 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == "daemon":
+    if args.subject == "daemon":
         if args.action == "status":
             running, pid = is_running()
             print(f"{'running' if running else 'stopped'}" + (f" pid={pid}" if pid else ""))
@@ -82,7 +82,7 @@ def main():
             import subprocess
             subprocess.run([sys.executable, "-m", "engine.core.daemon", args.action])
 
-    elif args.command == "psyche":
+    elif args.subject == "psyche":
         p = PsycheProfile.load()
         if args.action == "init":
             if args.name: p.name = args.name
@@ -98,7 +98,7 @@ def main():
         elif args.action == "summary":
             print(p.to_system_prompt())
 
-    elif args.command == "task":
+    elif args.subject == "task":
         if args.action == "add":
             if not args.name:
                 print("--name required"); sys.exit(1)
@@ -112,7 +112,7 @@ def main():
             n = purge_done()
             print(f"Purged {n} completed tasks")
 
-    elif args.command == "agent":
+    elif args.subject == "agent":
         if args.action == "register":
             if not args.name or not args.command:
                 print("--name and --command required"); sys.exit(1)
@@ -136,7 +136,7 @@ def main():
             deactivate(args.id)
             print(f"Deactivated {args.id}")
 
-    elif args.command == "version":
+    elif args.subject == "version":
         if args.action == "current":
             print(json.dumps(version_current(), indent=2))
         elif args.action == "snap":
@@ -150,7 +150,7 @@ def main():
         elif args.action == "diff":
             print(version_diff())
 
-    elif args.command == "skill":
+    elif args.subject == "skill":
         if args.action == "list":
             for s in skills_list_all(args.category if hasattr(args, 'category') and args.category else None):
                 print(f"  [{s['category']}] {s['id']}: {s['description']}")

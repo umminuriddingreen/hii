@@ -1,6 +1,6 @@
 # hii — Local Thought Sharpening CLI (Ollama + RAG + SearxNG + Memory)
 
-hii is an offline‑first, local thinking tool that runs on your Mac, powered by Ollama models. It sharpens framing, decomposition, and reasoning, can search your files (RAG), uses SearxNG for factual grounding, optionally runs shell commands, and logs/recalls chats to an Obsidian vault for durable memory.
+hii is an offline‑first, local thinking tool that runs on your Mac, powered by Ollama models. It sharpens framing, decomposition, and reasoning, searches local files first through RAG/native CLI surfaces, uses SearxNG and other web providers only when external grounding is needed, optionally runs shell commands, and logs/recalls chats to an Obsidian vault for durable memory.
 
 ## Quick Start
 
@@ -30,6 +30,7 @@ hii is an offline‑first, local thinking tool that runs on your Mac, powered by
   - `--no-memory`: disable Obsidian memory for this call
   - `--memory-entries <n>`: recall this many entries
   - interactive slash commands: `/help`, `/exit`, `/clear`, `/search <query>`, `/web on|off`, `/ground on|off`, `/memory on|off`
+  - interactive menus: `Tab`/`Shift-Tab` cycle, `j`/`k` or arrows move, `PgUp`/`PgDn` jump, `Home`/`End` go to edges
 - `hii papers "query" [--max N]`: Fetch OA PDFs for a query and ingest
 - `hii browser <agent-browser args...>`: Run the locally installed `agent-browser` CLI through `hii`
 - `hii health`: Return a compact operational status report for HII
@@ -106,6 +107,10 @@ hii is an offline‑first, local thinking tool that runs on your Mac, powered by
 
 ## Web & Academic Search
 
+- Search policy:
+  - native CLI and local search tools are the default first pass
+  - use `rg`, `rg --files`, local docs, and RAG before any web provider
+  - use SearxNG/web search only after local search is insufficient or the user explicitly wants web grounding
 - Web providers:
   - SearxNG at `http://127.0.0.1:8888` by default
   - SerpAPI (needs `SERPAPI_KEY`) → Google fallback

@@ -32,6 +32,8 @@ The current CLI and server are useful surfaces, but the system still leans on th
 - event emission
 - artifact registration
 
+When HII is answering questions or searching for context, it should try native CLI and local retrieval first (`rg`, `rg --files`, local docs, RAG, CLI-native search surfaces). Web providers should be the fallback when local sources are insufficient or the user explicitly requests web grounding.
+
 LLMs should plan and propose. They should not own state authority.
 
 ### 2. UI has to become execution-first

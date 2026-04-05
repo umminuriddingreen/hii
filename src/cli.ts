@@ -36,8 +36,11 @@ import type { ChatMessage } from './clients/chat.js';
 import { resolveChatBackend, resolveChatModel } from './clients/chat.js';
 import { listAllModels, modelsToMenuItems } from './clients/models.js';
 import { interactiveMenu } from './tui/menu.js';
+import { launcherMenu } from './tui/launcher.js';
 import { slashMenu } from './tui/slash-menu.js';
+import { runTopDashboard } from './tui/top.js';
 import { microTools } from './micro/index.js';
+import { radarAsJson, radarAsMarkdown, radarAsTerminal } from './market/radar.js';
 
 const program = new Command();
 program
@@ -81,6 +84,7 @@ const HII_LOGO_BITMAP = [
 
 let logoAnimationTimer: NodeJS.Timeout | undefined;
 let logoAnimationPhase = 0;
+let skipStaticHelpLogo = false;
 
 function levenshtein(a: string, b: string): number {
   if (a === b) return 0;
@@ -138,7 +142,7 @@ function resolveCommandToken(token: string, commands: readonly Command[]): strin
 }
 
 function normalizeCliArgv(root: Command, argv: string[]): string[] {
-  if (argv.length <= 2) return [...argv, 'serve'];
+  if (argv.length <= 2) return [...argv, 'chat'];
   const normalized = [...argv];
   const firstToken = normalized[2];
   if (firstToken && !firstToken.startsWith('-')) {
@@ -258,6 +262,88 @@ async function printAnimatedLogo() {
   }
 }
 
+function stopAnimatedLogo() {
+  if (logoAnimationTimer) {
+    clearInterval(logoAnimationTimer);
+    logoAnimationTimer = undefined;
+  }
+}
+
+async function playHelpLogoIntro() {
+  if (!output.isTTY || process.env.CI === 'true') return;
+  stopAnimatedLogo();
+  const frames = 6;
+  for (let i = 0; i < frames; i += 1) {
+    const frame = renderAnimatedLogoFrame(logoAnimationPhase)
+      .split('\n')
+      .map((line) => `\x1B[2K${line}`)
+      .join('\n');
+    output.write('\x1B[H\x1B[2J');
+    output.write(`${frame}\n\n`);
+    logoAnimationPhase += 0.65;
+    await sleep(90);
+  }
+  output.write('\x1B[H\x1B[2J');
+}
+
+async function ensureLocalServer(port = 8787) {
+  const url = `http://127.0.0.1:${port}/healthz`;
+  try {
+    const res = await fetch(url);
+    if (res.ok) return { started: false, port };
+  } catch {
+    // server not reachable yet
+  }
+
+  try {
+    const { startServer } = await import('./server.js');
+    await startServer({ port });
+    return { started: true, port };
+  } catch (error: any) {
+    if (error?.code === 'EADDRINUSE') {
+      return { started: false, port };
+    }
+    throw error;
+  }
+}
+
+async function runLauncher() {
+  const choice = await launcherMenu();
+  if (!choice || choice === 'exit') return;
+  if (choice === 'chat') {
+    await runInteractiveChat({});
+    return;
+  }
+  if (choice === 'top') {
+    await runTopDashboard(program, microTools);
+    return;
+  }
+  if (choice === 'radar') {
+    console.log(radarAsTerminal());
+    return;
+  }
+  if (choice === 'models') {
+    const models = await listAllModels();
+    const items = modelsToMenuItems(models);
+    const pick = await interactiveMenu(items, {
+      title: '  Select a model',
+      pageSize: 15,
+    });
+    if (pick?.[0]) {
+      const [backend, ...rest] = pick[0].value.split(':');
+      console.log(`selected ${backend}:${rest.join(':') || backend}`);
+    }
+    return;
+  }
+  if (choice === 'config') {
+    await program.parseAsync(['node', 'hii', 'config']);
+    return;
+  }
+  if (choice === 'health') {
+    console.log(JSON.stringify(await getHiiHealth(), null, 2));
+  }
+}
+
 async function maybeHandleBrowserPassthrough() {
   if (process.argv[2] !== 'browser') return false;
   const args = process.argv.slice(3);
@@ -274,7 +360,7 @@ async function printChatBanner() {
   await printAnimatedLogo();
   console.log('High-speed thought sharpening. Search grounding is available through SearxNG when web is enabled.');
   console.log('Commands: /help, /exit, /clear, /status, /models, /generate, /capture, /model, /search, /web, /ground, /memory');
-  console.log('Tab completes slash commands and toggle values.');
+  console.log('Tab completes slash commands and toggle values. In menus, use Tab/Shift-Tab to cycle and PgUp/PgDn/Home/End to jump.');
   console.log('');
 }
 
@@ -313,12 +399,34 @@ async function withLoadingIndicator<T>(label: string, task: () => Promise<T>): P
   }
 }
 
-program.addHelpText('before', `${HII_LOGO}\n`);
+program.addHelpText('before', () => (skipStaticHelpLogo ? '' : `${HII_LOGO}\n`));
 
 program.command('health')
   .description('Show a compact operational health report for HII')
   .action(async () => {
     console.log(JSON.stringify(await getHiiHealth(), null, 2));
+  });
+
+program.command('top')
+  .description('Full-screen dashboard for HII skills, commands, tools, and APIs')
+  .action(async () => {
+    await runTopDashboard(program, microTools);
+  });
+
+program.command('radar')
+  .description('Competitive radar for HII: market snapshot, five-year thesis, and build requirements')
+  .option('--format <type>', 'terminal|markdown|json', 'terminal')
+  .action(async (opts) => {
+    const format = String(opts.format || 'terminal');
+    if (format === 'json') {
+      console.log(JSON.stringify(radarAsJson(), null, 2));
+      return;
+    }
+    if (format === 'markdown' || format === 'md') {
+      console.log(radarAsMarkdown());
+      return;
+    }
+    console.log(radarAsTerminal());
   });
 
 async function runInteractiveChat(opts: any) {
@@ -383,7 +491,7 @@ async function runInteractiveChat(opts: any) {
         console.log('`/models` browse and select available chat backends/models.');
         console.log('`/generate [prompt]` captures Rhino viewport → ComfyUI img2img with live progress.');
         console.log('`/clear` clears the in-memory conversation state.');
-        console.log('Tab completes slash commands and `on|off` toggles.');
+        console.log('Tab completes slash commands and `on|off` toggles. Menus support Tab/Shift-Tab cycling plus PgUp/PgDn/Home/End jumps.');
         continue;
       }
       if (raw === '/clear') {
@@ -1605,6 +1713,17 @@ threeD.command('triposr')
 async function main() {
   const handled = await maybeHandleBrowserPassthrough();
   if (handled) return;
+  const rawArgs = process.argv.slice(2);
+  if (rawArgs.length === 0) {
+    await ensureLocalServer(8787);
+    await runLauncher();
+    return;
+  }
+  const isHelpPath = rawArgs.includes('--help') || rawArgs.includes('-h') || rawArgs[0] === 'help';
+  if (isHelpPath) {
+    skipStaticHelpLogo = true;
+    await playHelpLogoIntro();
+  }
   const argv = normalizeCliArgv(program, process.argv);
   await program.parseAsync(argv);
 }

@@ -33,3 +33,4 @@
 ## Security & Configuration Tips
 - Do not commit secrets; set `SERPAPI_KEY`, `HII_OBSIDIAN_VAULT`, and `OLLAMA_URL` via env or `agent.config.json` in the repo root.
 - `--shell` is opt-in for `chat`; keep commands read-only when possible. Large PDF downloads are capped; respect the 25 MB limit in scholarly mode.
+- For any information-retrieval task, MUST use native CLI and local search first: `rg`, `rg --files`, local docs, RAG, and CLI-native search surfaces. Use SearxNG or other web search only after local search is insufficient or the user explicitly asks for web grounding.

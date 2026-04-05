@@ -33,6 +33,7 @@ That makes HII a deterministic execution substrate for human intent.
 3. Deterministic Orchestrator
    - Own state, permissions, routing, validation, and tool selection.
    - Treat tools as atomic actions, not freeform suggestions.
+   - Prefer native CLI and local search surfaces first (`rg`, `rg --files`, local docs, RAG, CLI-native search); fall back to web search only when local sources are insufficient or the user explicitly asks for web grounding.
 
 4. Execution Layer
    - Run scripts, APIs, local tools, browser actions, and system integrations.

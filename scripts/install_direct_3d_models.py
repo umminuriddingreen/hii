@@ -19,6 +19,7 @@ TRIPOSR_VENV = VENV_ROOT / "triposr"
 HUNYUAN_VENV = VENV_ROOT / "hunyuan3d"
 
 TRIPOSR_PACKAGES = [
+    "numpy<2",
     "Pillow==10.1.0",
     "omegaconf==2.3.0",
     "einops==0.7.0",
@@ -27,9 +28,12 @@ TRIPOSR_PACKAGES = [
     "rembg",
     "huggingface-hub",
     "imageio[ffmpeg]",
-    "xatlas==0.0.9",
     "moderngl==5.10.0",
     "git+https://github.com/tatsy/torchmcubes.git",
+]
+
+TRIPOSR_OPTIONAL_PACKAGES = [
+    "xatlas==0.0.9",
 ]
 
 HUNYUAN_SHAPE_PACKAGES = [
@@ -48,9 +52,8 @@ HUNYUAN_SHAPE_PACKAGES = [
     "scikit-image==0.24.0",
     "rembg==2.0.65",
     "trimesh==4.4.7",
-    "pymeshlab==2022.2.post3",
-    "pygltflib==1.16.3",
-    "xatlas==0.0.9",
+    "pymeshlab>=2023.12.post3",
+    "pygltflib>=1.16.3",
     "omegaconf==2.3.0",
     "configargparse==1.7",
     "fastapi==0.115.12",
@@ -64,9 +67,13 @@ HUNYUAN_SHAPE_PACKAGES = [
     "torchdiffeq",
 ]
 
+HUNYUYAN_OPTIONAL_PACKAGES = [
+    "xatlas==0.0.9",
+]
 
-def pick_python() -> str:
-    for candidate in ("python3.10", "python3.11", sys.executable):
+
+def pick_python(*preferred: str) -> str:
+    for candidate in (*preferred, sys.executable):
         path = shutil.which(candidate)
         if path:
             return path
@@ -100,7 +107,8 @@ def ensure_venv(venv_dir: Path, python_exe: str) -> None:
         recreate_venv(venv_dir, python_exe)
         return
     version = subprocess.check_output([str(py), "--version"], text=True).strip()
-    if version.startswith("Python 3.14"):
+    expected = subprocess.check_output([python_exe, "--version"], text=True).strip()
+    if version != expected:
         recreate_venv(venv_dir, python_exe)
 
 
@@ -108,29 +116,45 @@ def pip_install(venv_dir: Path, packages: list[str]) -> None:
     py = python_bin(venv_dir)
     run([str(py), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
     run([str(py), "-m", "pip", "install", "torch", "torchvision"])
+    run([str(py), "-m", "pip", "install", "numpy<2"])
     run([str(py), "-m", "pip", "install", *packages])
 
 
+def pip_install_optional(venv_dir: Path, packages: list[str]) -> list[dict[str, str]]:
+    py = python_bin(venv_dir)
+    failures: list[dict[str, str]] = []
+    for package in packages:
+        try:
+            run([str(py), "-m", "pip", "install", package])
+        except subprocess.CalledProcessError as exc:
+            failures.append({"package": package, "error": str(exc)})
+    return failures
+
+
 def install_triposr() -> dict:
-    ensure_venv(TRIPOSR_VENV, pick_python())
+    ensure_venv(TRIPOSR_VENV, pick_python("python3.10", "python3.11"))
     pip_install(TRIPOSR_VENV, TRIPOSR_PACKAGES)
+    optional_failures = pip_install_optional(TRIPOSR_VENV, TRIPOSR_OPTIONAL_PACKAGES)
     return {
         "status": "installed",
         "repo": str(TRIPOSR_REPO),
         "venv": str(TRIPOSR_VENV),
         "python": str(python_bin(TRIPOSR_VENV)),
+        "optional_failures": optional_failures,
     }
 
 
 def install_hunyuan_shape() -> dict:
-    ensure_venv(HUNYUAN_VENV, pick_python())
+    ensure_venv(HUNYUAN_VENV, pick_python("python3.11", "python3.10"))
     pip_install(HUNYUAN_VENV, HUNYUAN_SHAPE_PACKAGES)
+    optional_failures = pip_install_optional(HUNYUAN_VENV, HUNYUYAN_OPTIONAL_PACKAGES)
     return {
         "status": "installed-experimental",
         "repo": str(HUNYUAN_REPO),
         "venv": str(HUNYUAN_VENV),
         "python": str(python_bin(HUNYUAN_VENV)),
         "note": "Shape-only environment installed. Model config/weights layout still required for direct local execution.",
+        "optional_failures": optional_failures,
     }
 
 

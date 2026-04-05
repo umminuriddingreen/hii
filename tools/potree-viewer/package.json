@@ -1,0 +1,7 @@
+{
+  "name": "potree-viewer",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "npx serve . -l 3333 -s"
+  }
+}
