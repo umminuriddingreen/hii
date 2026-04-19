@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/ummi/.hii/**)",
+      "Read(//Users/ummi/**)",
+      "Read(//Users/ummi/Documents/**)",
+      "Bash(set -e)",
+      "Bash(cp -R '/Users/ummi/Library/Application Support/McNeel/Rhinoceros/packages/8.0/rhinomcp/.' __TRACKED_VAR__/vendor/rhino/rhinomcp/)",
+      "Bash(cp '/Users/ummi/Library/Application Support/McNeel/Rhinoceros/8.0/Plug-ins/Grasshopper \\(b45a29b1-4343-4035-989e-044e8580d9cf\\)/Libraries/GH_MCP.gha' __TRACKED_VAR__/vendor/rhino/grasshopper/)",
+      "Bash(find /Users/ummi/hii-agent-harness -name .DS_Store -delete -print)"
+    ]
+  }
+}

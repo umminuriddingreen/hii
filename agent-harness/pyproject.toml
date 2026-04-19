@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hii-agent-harness"
+version = "0.1.0"
+description = "Unified Rhino MCP, Grasshopper, ComfyUI, and agent-harness tooling for Codex and Claude."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "mcp>=1.0.0",
+]
+
+[project.scripts]
+hii-agent-harness = "hii_agent_harness.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

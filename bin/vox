@@ -1,0 +1,4 @@
+#!/bin/zsh
+# VOX — Voice-to-Action Engine for HII
+# Usage: vox [live|route "text"|status]
+exec python3.11 -m engine.vox "$@"

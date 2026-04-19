@@ -1,0 +1,23 @@
+{
+  "id": "ollama-rhino-agent",
+  "name": "Run Rhino Agent",
+  "description": "Start Ollama-powered Rhino automation agent",
+  "category": "rhino",
+  "target": "local",
+  "inputs": {
+    "prompt": "str"
+  },
+  "script": "cd ~/dev/agent && python3 ollama_rhino_agent.py '{prompt}'",
+  "template": null,
+  "outputs": null,
+  "examples": [],
+  "tags": [
+    "rhino",
+    "agent",
+    "ollama",
+    "3d",
+    "automation"
+  ],
+  "created_at": "2026-03-27T17:45:51.984838",
+  "version": 1
+}

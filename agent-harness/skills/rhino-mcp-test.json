@@ -1,0 +1,20 @@
+{
+  "id": "rhino-mcp-test",
+  "name": "Rhino MCP Smoke Test",
+  "description": "Test Rhino MCP server connection",
+  "category": "rhino",
+  "target": "local",
+  "inputs": {},
+  "script": "cd ~/dev/agent && python3 rhino_mcp_smoketest.py",
+  "template": null,
+  "outputs": null,
+  "examples": [],
+  "tags": [
+    "rhino",
+    "mcp",
+    "test",
+    "3d"
+  ],
+  "created_at": "2026-03-27T17:45:51.984836",
+  "version": 1
+}

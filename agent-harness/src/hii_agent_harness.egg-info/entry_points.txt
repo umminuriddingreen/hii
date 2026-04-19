@@ -1,0 +1,2 @@
+[console_scripts]
+hii-agent-harness = hii_agent_harness.cli:main

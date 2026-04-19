@@ -1,0 +1,27 @@
+{
+  "id": "bootstrap-hii-agent-harness",
+  "name": "Bootstrap HII Agent Harness",
+  "description": "Install and verify the portable Rhino, Grasshopper MCP, ComfyUI, Codex, and Claude harness package.",
+  "category": "system",
+  "target": "local",
+  "inputs": {
+    "root": "str"
+  },
+  "script": "cd {root} && python3 -m venv .venv && . .venv/bin/activate && pip install -U pip setuptools wheel && pip install -e . && PYTHONPATH={root}/src python3 -m hii_agent_harness doctor",
+  "template": null,
+  "outputs": "Installed harness environment with doctor output",
+  "examples": [
+    "bootstrap /Users/ummi/hii-agent-harness"
+  ],
+  "tags": [
+    "hii",
+    "rhino",
+    "grasshopper",
+    "comfyui",
+    "codex",
+    "claude",
+    "mcp"
+  ],
+  "created_at": "2026-04-14T15:21:00Z",
+  "version": 1
+}

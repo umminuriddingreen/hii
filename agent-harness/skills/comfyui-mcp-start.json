@@ -1,0 +1,20 @@
+{
+  "id": "comfyui-mcp-start",
+  "name": "Start ComfyUI MCP Server",
+  "description": "Start the ComfyUI MCP server for image/audio generation",
+  "category": "comfyui",
+  "target": "local",
+  "inputs": {},
+  "script": "cd ~/Documents/UMMI/hii/comfyui-mcp-server && python server.py",
+  "template": null,
+  "outputs": null,
+  "examples": [],
+  "tags": [
+    "comfyui",
+    "mcp",
+    "image",
+    "generation"
+  ],
+  "created_at": "2026-03-27T17:46:08.797029",
+  "version": 1
+}

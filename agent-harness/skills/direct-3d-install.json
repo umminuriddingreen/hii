@@ -1,0 +1,25 @@
+{
+  "id": "direct-3d-install",
+  "name": "Install Direct 3D Runtimes",
+  "description": "Install direct TripoSR and Hunyuan 3D runtimes for HII without ComfyUI",
+  "category": "build",
+  "target": "local",
+  "inputs": {
+    "target": "triposr|hunyuan|all"
+  },
+  "script": "cd ~/hii && python3 scripts/install_direct_3d_models.py --target {target}",
+  "template": null,
+  "outputs": "JSON install status for direct 3D runtimes",
+  "examples": [
+    "hii skill run direct-3d-install --target triposr",
+    "hii skill run direct-3d-install --target hunyuan"
+  ],
+  "tags": [
+    "3d",
+    "triposr",
+    "hunyuan",
+    "install"
+  ],
+  "created_at": "2026-03-29T23:21:57.531474",
+  "version": 1
+}

@@ -1,0 +1,25 @@
+{
+  "id": "rhino-install-hii-command",
+  "name": "Install HII Rhino Command",
+  "description": "Install the HII launcher as a Rhino alias in the active Rhino session via RhinoMCP.",
+  "category": "system",
+  "target": "local",
+  "inputs": {
+    "alias": "str"
+  },
+  "script": "cd ~/hii && node dist/cli.js rhino install-hii --alias {alias}",
+  "template": null,
+  "outputs": "Rhino alias installed and bound to the HII launcher script.",
+  "examples": [
+    "python3 -m engine.cli skill run --id rhino-install-hii-command"
+  ],
+  "tags": [
+    "rhino",
+    "hii",
+    "command",
+    "alias",
+    "mcp"
+  ],
+  "created_at": "2026-03-29T00:00:00Z",
+  "version": 1
+}

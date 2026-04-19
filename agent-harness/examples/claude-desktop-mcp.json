@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "grasshopper": {
+      "command": "hii",
+      "args": [
+        "harness",
+        "grasshopper-mcp"
+      ],
+      "env": {
+        "GRASSHOPPER_MCP_HOST": "127.0.0.1",
+        "GRASSHOPPER_MCP_PORT": "8080",
+        "GRASSHOPPER_MCP_TIMEOUT_S": "15"
+      }
+    }
+  }
+}

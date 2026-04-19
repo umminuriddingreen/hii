@@ -1,0 +1,19 @@
+{
+  "id": "comfyui-start",
+  "name": "Start ComfyUI",
+  "description": "Spawn ComfyUI + MCP server",
+  "category": "comfyui",
+  "target": "local",
+  "inputs": {},
+  "script": "cd ${HII_ROOT:-~/hii} &&node dist/cli.js comfyui start",
+  "template": null,
+  "outputs": null,
+  "examples": [],
+  "tags": [
+    "comfyui",
+    "image",
+    "generation"
+  ],
+  "created_at": "2026-03-27T23:30:25.139863",
+  "version": 1
+}

@@ -1,0 +1,11 @@
+{
+  "id": "potree-viewer",
+  "name": "Potree Point Cloud Viewer",
+  "description": "High-performance WebGL point cloud viewer for .las/.laz/.ply files",
+  "category": "visualization",
+  "target": "local",
+  "inputs": {"file": "string"},
+  "script": "cd ~/hii/tools/potree-viewer && npx serve . -l 3333 -s",
+  "template": "Launch point cloud viewer on port 3333",
+  "examples": ["view point cloud", "open potree viewer", "3d scan viewer"]
+}

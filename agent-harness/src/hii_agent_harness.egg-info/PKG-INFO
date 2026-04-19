@@ -1,0 +1,92 @@
+Metadata-Version: 2.4
+Name: hii-agent-harness
+Version: 0.1.0
+Summary: Unified Rhino MCP, Grasshopper, ComfyUI, and agent-harness tooling for Codex and Claude.
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: mcp>=1.0.0
+
+# HII Agent Harness
+
+`hii-agent-harness` bundles the Rhino/Grasshopper MCP bridge, ComfyUI helpers, and agent-harness config generation into one installable package.
+
+It is designed to replace machine-specific scripts with a portable CLI that can be installed on a new system and then connected to Codex or Claude through MCP.
+
+## What It Includes
+
+- A built-in Grasshopper MCP bridge exposed over stdio for agent harnesses.
+- ComfyUI helpers for health checks, model resolution, text-to-image runs, and saved workflow execution.
+- Ready-to-write config snippets for Codex and Claude Desktop.
+- A generated Rhino Python helper script so Rhino can invoke the harness cleanly.
+
+## Install
+
+```bash
+cd hii-agent-harness
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+## Basic Usage
+
+Check local status:
+
+```bash
+hii-agent-harness doctor
+hii-agent-harness comfy status
+```
+
+Run the Grasshopper MCP server:
+
+```bash
+hii-agent-harness grasshopper-mcp
+```
+
+Queue a simple ComfyUI generation:
+
+```bash
+hii-agent-harness comfy text2img "conceptual tower model with soft studio lighting"
+```
+
+Run a saved ComfyUI workflow:
+
+```bash
+hii-agent-harness comfy workflow ./workflow.json --image-name rhino_capture.png
+```
+
+Generate MCP config for Codex:
+
+```bash
+hii-agent-harness harness init --agent codex --output ./examples/codex-mcp.json
+```
+
+Generate MCP config for Claude Desktop:
+
+```bash
+hii-agent-harness harness init --agent claude --output ./examples/claude-desktop-mcp.json
+```
+
+Generate a Rhino-side helper script:
+
+```bash
+hii-agent-harness rhino alias-script --output ./examples/rhino_harness_command.py
+```
+
+## Environment Variables
+
+- `COMFYUI_URL`
+- `GRASSHOPPER_MCP_HOST`
+- `GRASSHOPPER_MCP_PORT`
+- `GRASSHOPPER_MCP_TIMEOUT_S`
+- `GRASSHOPPER_MCP_CONNECT_RETRIES`
+- `GRASSHOPPER_MCP_RETRY_BACKOFF_S`
+- `GRASSHOPPER_MCP_MAX_RESPONSE_BYTES`
+- `GRASSHOPPER_MCP_CAP_CACHE`
+- `HII_AGENT_HARNESS_COMMAND`
+
+## Notes
+
+- Grasshopper support expects Rhino + Grasshopper to be running with your GH_MCP component listening on a TCP port.
+- ComfyUI support assumes a reachable ComfyUI HTTP server; the default URL is `http://127.0.0.1:8188`.
+- The package removes hardcoded local paths from the original scripts so you can move it to another machine and reconfigure it with env vars instead.

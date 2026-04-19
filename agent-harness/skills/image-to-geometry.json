@@ -1,0 +1,21 @@
+{
+  "id": "image-to-geometry",
+  "name": "Image to 3D Geometry",
+  "description": "Convert online image references into Rhino 3D geometry via LLM analysis",
+  "category": "rhino",
+  "target": "local",
+  "inputs": {
+    "image_url": "str",
+    "description": "str (optional context)"
+  },
+  "script": "python3 ~/HII/tools/image-to-geometry/image_to_geometry.py --url {image_url} --desc '{description}'",
+  "template": null,
+  "outputs": null,
+  "examples": [
+    "image-to-geometry --url https://example.com/building.jpg --desc 'modern glass tower'",
+    "image-to-geometry --url https://example.com/chair.png --desc 'ergonomic office chair' --dry-run"
+  ],
+  "tags": ["rhino", "3d", "image", "geometry", "comfyui"],
+  "created_at": "2026-04-03T00:00:00.000000",
+  "version": 1
+}

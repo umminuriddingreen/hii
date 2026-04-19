@@ -1,0 +1,122 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "hermes-agent",
+  "elements": [
+    {
+      "type": "rectangle",
+      "id": "r_build",
+      "x": 100,
+      "y": 200,
+      "width": 400,
+      "height": 300,
+      "roundness": { "type": 3 },
+      "backgroundColor": "#a5d8ff",
+      "fillStyle": "solid",
+      "strokeColor": "#1e1e1e",
+      "strokeWidth": 2
+    },
+    {
+      "type": "text",
+      "id": "t_building",
+      "x": 110,
+      "y": 210,
+      "width": 380,
+      "height": 30,
+      "text": "HII Cultural Pavilion",
+      "fontSize": 24,
+      "fontFamily": 1,
+      "strokeColor": "#1e1e1e",
+      "autoResize": true
+    },
+    {
+      "type": "rectangle",
+      "id": "r_dc1",
+      "x": 50,
+      "y": 50,
+      "width": 80,
+      "height": 60,
+      "roundness": { "type": 3 },
+      "backgroundColor": "#b2f2bb",
+      "fillStyle": "solid",
+      "strokeColor": "#1e1e1e",
+      "strokeWidth": 2
+    },
+    {
+      "type": "text",
+      "id": "t_dc1",
+      "x": 55,
+      "y": 55,
+      "width": 70,
+      "height": 25,
+      "text": "DC1",
+      "fontSize": 14,
+      "fontFamily": 1,
+      "strokeColor": "#1e1e1e"
+    },
+    {
+      "type": "arrow",
+      "id": "a_to_dc1",
+      "x": 190,
+      "y": 350,
+      "width": 200,
+      "height": 0,
+      "points": [[-0.5, 0], [0, 0]],
+      "endArrowhead": "arrow",
+      "startBinding": { "elementId": "r_build", "fixedPoint": [0.9, 0.5] },
+      "endBinding": { "elementId": "r_dc1", "fixedPoint": [0.1, 0.5] }
+    },
+    {
+      "type": "rectangle",
+      "id": "r_dc2",
+      "x": 550,
+      "y": 150,
+      "width": 80,
+      "height": 60,
+      "roundness": { "type": 3 },
+      "backgroundColor": "#b2f2bb",
+      "fillStyle": "solid",
+      "strokeColor": "#1e1e1e",
+      "strokeWidth": 2
+    },
+    {
+      "type": "text",
+      "id": "t_dc2",
+      "x": 555,
+      "y": 155,
+      "width": 70,
+      "height": 25,
+      "text": "DC2",
+      "fontSize": 14,
+      "fontFamily": 1,
+      "strokeColor": "#1e1e1e"
+    },
+    {
+      "type": "arrow",
+      "id": "a_to_dc2",
+      "x": 390,
+      "y": 350,
+      "width": 200,
+      "height": 0,
+      "points": [[0.5, -0.5], [0, 0]],
+      "endArrowhead": "arrow",
+      "startBinding": { "elementId": "r_build", "fixedPoint": [0.1, 0.5] },
+      "endBinding": { "elementId": "r_dc2", "fixedPoint": [0.9, 0.5] }
+    },
+    {
+      "type": "text",
+      "id": "t_culture",
+      "x": 20,
+      "y": 20,
+      "width": 180,
+      "height": 25,
+      "text": "Afrofuturism",
+      "fontFamily": 1,
+      "fontSize": 20,
+      "strokeColor": "#d0bfff"
+    }
+  ],
+  "appState": {
+    "viewBackgroundColor": "#ffffff"
+  }
+}

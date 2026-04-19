@@ -1,0 +1,28 @@
+{
+  "id": "rhino-viewport-capture",
+  "name": "Rhino Viewport Capture",
+  "description": "Capture Rhino viewport as PNG for canvas/img2img workflows",
+  "category": "bridge",
+  "target": "local",
+  "inputs": {
+    "width": "int (default 1920)",
+    "height": "int (default 1080)",
+    "output": "str (default /tmp/hii-rhino-capture.png)"
+  },
+  "script": "python3 ~/hii/scripts/rhino_capture_viewport.py --width {width} --height {height} --output {output}",
+  "template": null,
+  "outputs": "JSON with path, width, height",
+  "examples": [
+    "python3 ~/hii/scripts/rhino_capture_viewport.py --width 1920 --height 1080"
+  ],
+  "tags": [
+    "rhino",
+    "viewport",
+    "capture",
+    "canvas",
+    "comfyui",
+    "img2img"
+  ],
+  "created_at": "2026-03-30T01:59:27.203376+00:00",
+  "version": 1
+}

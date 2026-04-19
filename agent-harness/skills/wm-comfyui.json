@@ -1,0 +1,20 @@
+{
+  "id": "wm-comfyui",
+  "name": "ComfyUI Pipeline Layout",
+  "description": "Open ComfyUI + chain folders + Terminal for full pipeline",
+  "category": "wm",
+  "target": "local",
+  "inputs": {},
+  "script": "python3 ~/hii/engine/tools/wm.py comfyui",
+  "template": null,
+  "outputs": null,
+  "examples": [],
+  "tags": [
+    "window",
+    "layout",
+    "comfyui",
+    "pipeline"
+  ],
+  "created_at": "2026-03-27T18:19:21.103574",
+  "version": 1
+}
