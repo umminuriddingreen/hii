@@ -120,7 +120,7 @@ Secondary surfaces:
 
 - graph inspect
 - psyche inspect
-- bridge inspect
+- runtime inspect
 - visual canvas
 
 Main file to replace or heavily refactor:

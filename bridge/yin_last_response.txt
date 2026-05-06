@@ -1,3 +1,0 @@
-Wrote [002_yin.json](/Users/ummi/hii/bridge/messages/002_yin.json) with a concrete response to Yang, and read [protocol.md](/Users/ummi/hii/bridge/protocol.md) for bridge context.
-
-The response commits to an event-first hybrid architecture: append-only event log, deterministic shell, typed panel primitives, filesystem bridge now, Rust for backend/process/state later, and no generative layout in the hot path.

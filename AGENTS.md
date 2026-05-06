@@ -19,6 +19,7 @@
 - Prefer async/await with explicit error messages; exit with non-zero codes on CLI failures (see `src/cli.ts`).
 - Keep config defaults centralized in `src/config.ts`; avoid duplicating paths/models in callers.
 - Place new tools under `src/tools/` and export functions; scaffold via `hii tool new <name>` when possible.
+- Keep internal HII plumbing implicit in user-facing communication. Routine skill lookup, execution, and registration should stay behind the scenes unless the user asks for those details or a failure makes them necessary.
 
 ## Testing Guidelines
 - No automated test suite yet; rely on `npm run build` for type safety before sending changes.
@@ -34,3 +35,4 @@
 - Do not commit secrets; set `SERPAPI_KEY`, `HII_OBSIDIAN_VAULT`, and `OLLAMA_URL` via env or `agent.config.json` in the repo root.
 - `--shell` is opt-in for `chat`; keep commands read-only when possible. Large PDF downloads are capped; respect the 25 MB limit in scholarly mode.
 - For any information-retrieval task, MUST use native CLI and local search first: `rg`, `rg --files`, local docs, RAG, and CLI-native search surfaces. Use SearxNG or other web search only after local search is insufficient or the user explicitly asks for web grounding.
+- This branch does not include the Yin/Yang bridge. Treat HII as a local operator assistant with skill routing, runtime jobs, memory, and machine-local execution.

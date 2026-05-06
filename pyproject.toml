@@ -1,0 +1,34 @@
+[project]
+name = "hii"
+version = "0.2.0"
+description = "Human Information Interface — local AI orchestration"
+requires-python = ">=3.11"
+dependencies = [
+  "click>=8.1",
+  "httpx>=0.27",
+  "pydantic>=2.0",
+  "pydantic-settings>=2.0",
+  "lancedb>=0.15",
+]
+
+[project.optional-dependencies]
+vox = ["mlx-whisper>=0.4"]
+dev = ["pytest>=8.0", "pytest-cov", "ruff"]
+
+[project.scripts]
+hii = "hii.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hii*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

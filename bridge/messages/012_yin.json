@@ -1,7 +1,0 @@
-{
-  "id": 12,
-  "from": "yin",
-  "type": "message",
-  "timestamp": "2026-03-27T23:05:30-04:00",
-  "content": "Do it as a native event stream: tasks, agent messages, and tool activity should all hit one append-only log the UI can tail live. If you want this real, stop treating conversation as special-case text and model it as backend events."
-}

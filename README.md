@@ -1,336 +1,187 @@
-# hii — Local Thought Sharpening CLI (Ollama + RAG + SearxNG + Memory)
+# HII Test
 
-hii is an offline‑first, local thinking tool that runs on your Mac, powered by Ollama models. It sharpens framing, decomposition, and reasoning, searches local files first through RAG/native CLI surfaces, uses SearxNG and other web providers only when external grounding is needed, optionally runs shell commands, and logs/recalls chats to an Obsidian vault for durable memory.
+HII is a local operator assistant for one machine. It gives you a command line for local AI chat, file search, repeatable skills, runtime jobs, memory, browser helpers, and machine-focused workflows.
 
-## Quick Start
+This test branch removes the Yin/Yang bridge and cross-agent chat coordination layer. HII is now focused on local execution, local memory, and clear installation on macOS and Windows.
 
-- Prereqs: Node 20+, Ollama running; pull models:
-  - `ollama pull qwen2.5:32b`
-  - `ollama pull deepseek-coder-v2:16b`
-  - `ollama pull nomic-embed-text`
-- Install/build:
-  - `cd hii && npm install && npm run build && npm link`
-- Ingest your files: `hii ingest --path ./workspace`
-- Start the chat interface: `hii chat --web`
-- Ask with RAG: `hii chat "search files for auth middleware and explain"`
-- Web grounding: `hii chat --web "What is the latest SQLite release?"`
-- Scholarly: `hii chat --web --scholarly "papers on QLoRA for small GPUs"`
-- Memory (Obsidian): enabled by default → see “Obsidian Memory”.
+## What HII Does
 
-## Commands
+- Chat with local or configured models from a CLI.
+- Search and ingest local files for retrieval-assisted answers.
+- Run registered local skills instead of remembering scattered scripts.
+- Track work as durable runtime objects: intent, job, steps, artifacts, and memory.
+- Serve local HTTP/dashboard surfaces for health, graph, tasks, and tools.
+- Keep user-owned runtime state under `~/.hii`.
 
-- `hii ingest --path <folder>`: Index text/code files into local LanceDB
-- `hii chat [flags] [prompt]`:
-  - no prompt opens the interactive Codex-like chat loop
-  - `--shell`: allow shell execution (dangerous; use sparingly)
-  - `--web`: enable factual grounding and web search
-  - `--web-provider searxng|serpapi|duckduckgo`: pick provider
-  - `--scholarly`: academic mode (arXiv/OpenAlex/Crossref)
-  - `--download-pdfs`: fetch OA PDFs and ingest into RAG
-  - `--no-memory`: disable Obsidian memory for this call
-  - `--memory-entries <n>`: recall this many entries
-  - interactive slash commands: `/help`, `/exit`, `/clear`, `/search <query>`, `/web on|off`, `/ground on|off`, `/memory on|off`
-  - interactive menus: `Tab`/`Shift-Tab` cycle, `j`/`k` or arrows move, `PgUp`/`PgDn` jump, `Home`/`End` go to edges
-- `hii papers "query" [--max N]`: Fetch OA PDFs for a query and ingest
-- `hii browser <agent-browser args...>`: Run the locally installed `agent-browser` CLI through `hii`
-- `hii health`: Return a compact operational status report for HII
-- `hii remote windows add --name "<pc>" --host mypc.tailnet.ts.net --port 6080`: register a browser-based Windows remote reachable over Tailscale
-- `hii remote windows open <pc>`: open that machine in your browser
-- `hii space health`: Report whether the desktop backend is installed and running
-- `hii space snapshot`: Return monitors, workspaces, and windows from the desktop backend
-- `hii space focus-window --id <windowId>`: Focus a window by backend id
-- `hii space switch-workspace --name <workspace>`: Switch to a workspace by name
-- `hii models [--set-base <m>] [--set-coder <m>] [--set-embed <m>]`
-- `hii models --set-vault "/Users/ummi/Library/Mobile Documents/iCloud~md~obsidian/Documents/hii/hii"`
-- `hii models --set-memory on --set-memory-entries 30`
-- `hii config`: print effective config
-- `hii generations paths`: show where generation metadata and snapshots live
-- `hii generations snapshot --name "GET" --summary "Current HII baseline" --kind vision`: save the current working tree as a named generation
-- `hii generations list`: list recorded generations
-- `hii generations current`: show the active generation
-- `hii generations show g0`: inspect one generation record
-- `hii tool new <name>`: scaffold a new tool file
- - `hii notes audio --file ./recording.wav [--title "Standup"] [--out-dir ./notes] [--keep-transcript]`: Send audio to LM Studio for transcription + Markdown note (supports `--chat-model`, `--transcribe-model`, `--lm-url`).
-- `hii memory test [--vault <path>]`: write a test entry to the vault
-- `hii memory check [--vault <path>]`: verify vault path and .obsidian presence
-- `hii generations snapshot --id g0 --name "Current HII" --summary "Execution-first local CLI"`: save the current working tree as a named generation snapshot
-- `hii generations list`: list recorded generations
-- `hii generations current`: inspect the current generation
-- `hii generations show <id>`: inspect one generation and its changed files
-- `hii duality init [--yin-name Yin] [--codex-name Codex]`: initialize the Yin/Codex bridge
-- `hii apps add --name "<app>" [--path /abs/path] [--stack vite,react,ts] [--status building] [--mvp-ready]`: register an app in the local product catalog
-- `hii apps list`: list tracked apps and MVP readiness
-- `hii apps show <name>`: inspect one app record
-- `hii apps set <name> [--status mvp] [--mvp-ready true]`: update app status and MVP readiness
-- `hii duality post --from yin --to codex --kind handoff --topic "next step" --message "..." [--tags memory,plan]`: write a structured handoff
-- `hii duality read [--for yin|codex] [--limit 20]`: read recent bridge messages
-- `hii serve [--port 8787] [--web] [--scholarly] [--download-pdfs] [--no-memory]`:
-   Start a local HTTP server that exposes:
-   - POST /chat { prompt, allowShell?, allowSearch?, webProvider?, scholarly?, downloadPdfs?, memory? }
-     - returns `{ text, intent, usedTools, events }`
-   - POST /browser { args: string[] }
-   - GET /space/healthz
-   - GET /space/snapshot
-   - POST /space/action { action, ... }
-   - POST /ingest { path }
-   - GET /healthz
-   - GET /graph — vault note/tag graph
-   - GET /view — simple graph viewer UI
-   - GET /note?id=<rel-path> — fetch note content
-   - GET /open?id=<rel-path> — open note in your default editor/Finder
+## What This Branch Excludes
+
+- No Yin/Yang bridge commands.
+- No bridge message files or bridge chat websocket.
+- No cross-agent handoff log as a product feature.
+- No seeded `bridge-send` or `bridge-read` skills.
+
+## Repository Layout
+
+- `src/` - TypeScript CLI, RAG, chat, tools, server, TUI surfaces.
+- `hii/` - Python package surface for the HII runtime and local orchestration.
+- `engine/` - Compatibility Python engine modules still used by older runtime paths.
+- `agent-harness/` - Rhino/Grasshopper and ComfyUI harness utilities.
+- `docs/` - Architecture and planning notes.
+- `~/.hii/` - Runtime state created on the installed machine.
+
+## macOS Install
+
+Prerequisites:
+
+- macOS 13 or newer.
+- Git.
+- Node.js 20 or newer.
+- Python 3.11 or newer.
+- Ollama, if you want local model serving.
+
+Install:
+
+```bash
+git clone https://github.com/umminuriddingreen/hii-test.git
+cd hii-test
+npm install
+npm run build
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
+```
+
+Optional local models:
+
+```bash
+ollama pull qwen2.5:32b
+ollama pull deepseek-coder-v2:16b
+ollama pull nomic-embed-text
+```
+
+Run:
+
+```bash
+npm start -- health
+npm start -- chat "summarize this repo"
+python -m hii --help
+```
+
+Install the TypeScript CLI globally from the checkout:
+
+```bash
+npm link
+hii health
+```
+
+## Windows Install
+
+Recommended path: Windows Terminal with PowerShell.
+
+Prerequisites:
+
+- Windows 11.
+- Git for Windows.
+- Node.js 20 or newer.
+- Python 3.11 or newer from python.org or `winget`.
+- Ollama for Windows, if you want local model serving.
+
+Install:
+
+```powershell
+git clone https://github.com/umminuriddingreen/hii-test.git
+cd hii-test
+npm install
+npm run build
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
+```
+
+If PowerShell blocks activation, run this once for your user:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+Optional local models:
+
+```powershell
+ollama pull qwen2.5:32b
+ollama pull deepseek-coder-v2:16b
+ollama pull nomic-embed-text
+```
+
+Run:
+
+```powershell
+npm start -- health
+npm start -- chat "summarize this repo"
+python -m hii --help
+```
+
+Install the TypeScript CLI globally from the checkout:
+
+```powershell
+npm link
+hii health
+```
+
+## Common Commands
+
+```bash
+hii health
+hii status
+hii ingest --path ./workspace
+hii chat "search files for auth middleware and explain"
+hii chat --web "ground this with search"
+hii papers "small local model RAG"
+hii memory check --vault "/path/to/obsidian/vault"
+hii serve --port 8787
+```
+
+Python runtime commands:
+
+```bash
+python -m hii daemon status
+python -m hii skill list
+python -m hii runtime jobs
+```
 
 ## Configuration
 
-- File: `agent.config.json` in the project root (auto‑created if you save settings via `hii models`).
-- Env:
-  - `OLLAMA_URL`: default `http://127.0.0.1:11434`
-  - `SEARXNG_URL`: default `http://127.0.0.1:8888`
-  - `SERPAPI_KEY`: enable Google results via SerpAPI
-  - `HII_OBSIDIAN_VAULT`: override Obsidian vault path
-  - `LM_STUDIO_URL`: OpenAI-compatible LM Studio base URL (default `http://127.0.0.1:1234/v1`)
-  - `LM_STUDIO_API_KEY`: Optional LM Studio API key
-  - `LM_STUDIO_CHAT_MODEL`: Model to use for Markdown note writing
-  - `LM_STUDIO_TRANSCRIBE_MODEL`: Model to use for transcription
-  - `HII_NOTES_PATH`: Default output folder for generated notes
-- Defaults (see `src/config.ts`):
-  - Base: `qwen2.5:32b`, Coder: `deepseek-coder-v2:16b`, Embed: `nomic-embed-text`
-  - DB path: `./data`, Workspace: `./workspace`, Sessions: `./sessions`
-  - Memory: enabled, max 20 entries
-  - LM Studio: `http://127.0.0.1:1234/v1`, Chat model `lmstudio-community/Meta-Llama-3-8B-Instruct`, Transcription `whisper-large-v3`
-  - Notes path: `./notes`
+Project config lives in `agent.config.json` when saved through the CLI.
 
-## RAG (Local Files)
+Useful environment variables:
 
-- Ingest: `hii ingest --path ./workspace`
-- Supported types: `.md .txt .js/.ts/.tsx/.jsx .py .go .rs .java .json .yaml/.yml`
-- Chunking: ~900 tokens with ~150 overlap (word‑approximate)
+- `OLLAMA_URL` - default `http://127.0.0.1:11434`.
+- `SEARXNG_URL` - default `http://127.0.0.1:8888`.
+- `SERPAPI_KEY` - optional Google search provider key.
+- `HII_OBSIDIAN_VAULT` - optional Obsidian vault path.
+- `LM_STUDIO_URL` - OpenAI-compatible LM Studio URL.
+- `HII_NOTES_PATH` - default note output folder.
 
-## Web & Academic Search
+## Runtime State
 
-- Search policy:
-  - native CLI and local search tools are the default first pass
-  - use `rg`, `rg --files`, local docs, and RAG before any web provider
-  - use SearxNG/web search only after local search is insufficient or the user explicitly wants web grounding
-- Web providers:
-  - SearxNG at `http://127.0.0.1:8888` by default
-  - SerpAPI (needs `SERPAPI_KEY`) → Google fallback
-  - DuckDuckGo HTML (no key) → free fallback, conservative scraping
-- Grounding behavior:
-  - interactive chat can auto-ground prompts that look time-sensitive or externally factual
-  - `/search <query>` forces an immediate SearxNG-backed lookup without waiting for the model
-- Academic:
-  - Sources: arXiv (API), OpenAlex, Crossref
-  - Flags: `--scholarly`, optionally `--download-pdfs`
-- PDF ingest: OA PDFs are downloaded (<= 25 MB) → parsed → added to RAG
+HII writes runtime state to `~/.hii`:
 
-## Browser Automation
+- `runtime.sqlite3` - strict runtime loop database.
+- `hii.db` - broader local task/message state.
+- `skills/` - registered local skills.
+- `psyche.json` - local user profile state.
+- `runtime/artifacts/` - generated job artifacts.
 
-- Installed as a project dependency: `npm install agent-browser`
-- One-time browser setup: `hii browser install`
-- Example usage:
-  - `hii browser open https://example.com`
-  - `hii browser snapshot`
-  - `hii browser screenshot page.png`
-- This forwards arguments directly to the locally installed `agent-browser` binary under `node_modules/.bin`, so `hii` does not require a separate global install.
+This state is machine-local and should not be committed.
 
-## Windows Remote via Browser
+## Development
 
-- `hii remote windows` is the lightweight HII surface for using a Windows machine from your Mac through the browser.
-- It assumes the Windows machine already exposes a browser-capable remote endpoint such as:
-  - noVNC
-  - Apache Guacamole
-  - any custom browser URL
-- This is intentionally simple: HII stores the target and opens it in one command.
+```bash
+npm run build
+npm test
+python -m pytest
+python -m compileall hii engine
+```
 
-Examples:
-
-- noVNC over Tailscale:
-  - `hii remote windows add --name "studio-pc" --provider novnc --host studio-pc.tailnet.ts.net --port 6080`
-  - `hii remote windows open studio-pc`
-
-- Guacamole over Tailscale:
-  - `hii remote windows add --name "office-pc" --provider guacamole --host office-pc.tailnet.ts.net --port 8080`
-  - `hii remote windows open office-pc`
-
-- Custom browser URL:
-  - `hii remote windows add --name "custom-pc" --provider custom --url "https://custom.tailnet.ts.net/remote"`
-
-Useful commands:
-
-- `hii remote windows list`
-- `hii remote windows show <name>`
-- `hii remote windows url <name>`
-- `hii remote windows open <name>`
-
-## Desktop Integration
-
-- `hii space` is the first slice of desktop integration and is intentionally `hii`-centric, not Codex-centric.
-- Current backend:
-  - AeroSpace window manager when installed and running
-- Current capabilities:
-  - health check
-  - desktop snapshot
-  - focus window by id
-  - switch workspace
-  - list visible apps
-  - focus monitor
-  - move focused window to workspace
-  - move focused workspace to monitor
-  - reload AeroSpace config
-  - balance workspace window sizes
-- Planned next capabilities:
-  - UI inspection through Accessibility
-  - typed desktop actions
-  - screenshot/vision fallback when Accessibility is unavailable
-
-Useful commands:
-
-- `hii space health`
-- `hii space snapshot`
-- `hii space apps`
-- `hii space focus-window --id <windowId>`
-- `hii space switch-workspace --name <workspace>`
-- `hii space focus-monitor --target <next|prev|1|2|main>`
-- `hii space move-window-to-workspace --name <workspace>`
-- `hii space move-workspace-to-monitor --target <next|prev|1|2|main>`
-- `hii space reload-config`
-- `hii space balance`
-
-## Obsidian Memory (Human + AI Augmentation)
-
-- Default vault: `/Users/ummi/Library/Mobile Documents/iCloud~md~obsidian/Documents/hii/hii`
-- What it does:
-  - Recalls last N chat entries as context to improve continuity
-  - Logs each chat to `Chats/YYYY-MM-DD.md`
-- Controls:
-  - Disable per call: `--no-memory`
-  - Size: `--memory-entries <n>` or set in config
-  - Change vault via `HII_OBSIDIAN_VAULT` or `agent.config.json`
-  - Set vault via CLI: `hii models --set-vault "<path>"`
-  - Test write: `hii memory test`
-- Best Practices (see `docs/obsidian.md`): tags, templates, backlinks/MOCs, periodic reviews
-
-## Yin / Yang Duality
-
-- `Yin` is the reflective side: context, continuity, pattern recognition, and long-memory framing.
-- `Yang` is the execution side: implementation, verification, and delivery.
-- The bridge persists to `~/.hii/bridge/yin-codex.jsonl`.
-- If an Obsidian vault is configured, each bridge message is also mirrored into the existing chat log for durable recall.
-
-Example flow:
-
-- `hii duality init --yin-name Yin --codex-name Yang`
-- `hii duality post --from yin --to yang --kind context --topic "user model" --message "Prefer simpler solutions and iterative refinement." --tags memory,identity`
-- `hii duality post --from yang --to yin --kind reflection --topic "implementation result" --message "Bridge command compiled and validated." --tags build,verification`
-- `hii duality read --for yang --limit 10`
-
-## App Catalog
-
-- Every app should be tracked in `~/.hii/apps.json`.
-- Each record should carry at minimum:
-  - name
-  - path
-  - stack
-  - status
-  - MVP readiness
-- Use the app catalog as the source of truth for whether a project is still just an idea, actively building, or ready to ship as an MVP.
-
-## Generations
-
-- Generations are named working-tree snapshots of HII.
-- Storage:
-  - registry: `docs/generations/registry.json`
-  - snapshot payloads: `docs/generations/<generation-id>/`
-- Each generation records:
-  - semantic id such as `g0`, `g1`
-  - title
-  - version
-  - git branch / commit
-  - dirty-state file list
-  - optional notes and execution vision
-- The snapshot payload stores:
-  - `meta.json`
-  - `git-status.txt`
-  - `working-tree.patch`
-  - copies of changed files
-
-Use generations when HII crosses a meaningful conceptual boundary, not just for every small edit.
-
-### Calling from Obsidian via HTTP + Viewing Graph
-
-- Start server: `hii serve --port 8787 --web --scholarly`
-- Example call (Templater/HTTP plugin):
-  - POST http://127.0.0.1:8787/chat
-  - Body: `{ "prompt": "Summarize this note: {{selection}}", "allowSearch": true, "scholarly": false }`
-  - Response: `{ "text": "..." }`
-- Graph viewer: open http://127.0.0.1:8787/view
-  - Filter notes, run full‑text search, preview note content, show link/backlink counts, open notes in your editor.
-
-## Safety
-
-- Shell is off by default; enable with `--shell`. Prefer read‑only commands; add confirmations for destructive actions in future.
-- Web: enable explicitly (`--web`).
-- PDF size capped at 25 MB; limited fetch count per call.
-
-## Generations
-
-- Generations are named HII snapshots independent of clean git releases.
-- Each snapshot stores:
-  - metadata
-  - git status
-  - a full working-tree patch against `HEAD`
-  - exact copies of the changed files at capture time
-- Storage path: `docs/generations/`
-- Use this to preserve meaningful product states like `g0`, `g1`, `g2` as HII evolves from CLI helper into execution substrate.
-
-Example:
-
-- `hii generations snapshot --id g0 --name "Current HII" --summary "Codex-like chat + grounding before orchestrator spine" --tags cli,grounding`
-
-## Orchestrator
-
-- HII now has a deterministic orchestration layer between user intent and model/tool execution.
-- Main file: `src/orchestrator.ts`
-- It currently owns:
-  - intent classification
-  - memory loading
-  - automatic grounding
-  - tool execution events
-  - final response completion events
-- Event types include:
-  - `intent.received`
-  - `intent.classified`
-  - `memory.loaded`
-  - `grounding.started`
-  - `grounding.finished`
-  - `tool.selected`
-  - `tool.started`
-  - `tool.finished`
-  - `response.completed`
-  - `blocker.detected`
-
-## Troubleshooting
-
-- `ollama serve` must be running; ensure pulled models exist
-- If `hii` not found after `npm link`, ensure your global npm bin is in PATH
-- LanceDB files appear under `./data`; delete to reset index
-- Obsidian vault path must be accessible; the CLI will create `Chats/` on first log
-
-## License
-
-Private repository by request; no license header added.
-## Updates, Ideas, and Releases
-
-- Log an idea/update:
-- `hii updates add --title "Vector search hybrid" --body "Add BM25 + vector" --tags retrieval,ranking --to-vault`
-  - Writes to `docs/updates.md` and (optionally) to `<vault>/Updates/YYYY-MM.md`.
-- Bump version and update CHANGELOG:
-  - `hii release bump --type minor --notes "Add HTTP server and viewer"`
-  - Or set explicit version: `hii release bump --version 0.2.0 --notes "…"`
-  - Updates `package.json` and `CHANGELOG.md`.
-- Track generations and internal product evolution:
-  - `hii generations snapshot --name g0 --summary "Execution-first local baseline" --tags baseline,execution`
-  - `hii generations list`
-  - `hii generations current`
-  - `hii generations show g0001`
-  - Writes manifests and dirty worktree snapshots to `docs/generations/`
+The codebase still contains TypeScript and Python runtime surfaces. For this branch, keep new user-facing work installable on both macOS and Windows, keep runtime state under `~/.hii`, and do not reintroduce bridge/Yin-Yang coordination features.

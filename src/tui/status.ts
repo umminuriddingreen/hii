@@ -68,7 +68,7 @@ function detailLines(health: Awaited<ReturnType<typeof getHiiHealth>> | null): s
     formatKeyValue('generation_total', String(health.generation.total)),
     formatKeyValue('remotes', remoteNames),
     '',
-    ...wrapText('This surface replaces JSON-first health output with an operator-grade cockpit and is the foundation for future sessions, agents, and bridge observability screens.', 52),
+    ...wrapText('This surface replaces JSON-first health output with an operator-grade cockpit for runtime state, jobs, skills, and local machine health.', 52),
   ];
 }
 

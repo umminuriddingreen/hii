@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { appendConversationTurn } from '../conversations.js';
 
 const COMFYUI_URL = process.env.COMFYUI_URL ?? 'http://127.0.0.1:8000';
 const HII_DIR = path.join(os.homedir(), '.hii');
@@ -370,17 +369,6 @@ export async function comfyuiCreate(request: string, opts: ComfyCreateOptions = 
   }
 
   appendRequestLog(result);
-  appendConversationTurn({
-    source: 'hii.comfyui.create',
-    prompt: request,
-    answer: JSON.stringify({
-      promptId: result.promptId,
-      model: result.plan.model,
-      size: `${result.plan.width}x${result.plan.height}`,
-      outputs: result.outputs?.map((item) => item.url) ?? [],
-    }),
-    tools: ['comfyui'],
-  });
   printResult(result, !!opts.json);
   return result;
 }

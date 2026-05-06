@@ -12,8 +12,6 @@ import { ingestPath } from './rag/ingest.js';
 import { agentLoop, agentTurn } from './agent.js';
 import { addApp, appsSummary, getApp, listApps, updateApp } from './apps.js';
 import { codexPaths, createCodexDoc, createWorkspaceCodex, getCodexDoc, listCodexDocs, searchCodexDocs } from './codex.js';
-import { formatDualMessages, initDuality, postDualMessage, readDualMessages } from './duality.js';
-import { appendConversationTurn, conversationPaths, conversationSummary, formatConversationEntries, listConversationTranscripts, readConversationTranscript, readRecentConversationEntries } from './conversations.js';
 import { runAgentBrowser } from './tools/browser.js';
 import {
   balanceSpaceSizes,
@@ -636,12 +634,6 @@ async function runInteractiveChat(opts: any) {
       );
       history.length = 0;
       history.push(...turn.messages.filter((message) => !message.content.startsWith('Recent memory context:\n')));
-      appendConversationTurn({
-        source: 'hii.chat',
-        prompt: raw,
-        answer: turn.text,
-        tools: turn.usedTools,
-      });
       console.log(`\n${turn.text}\n`);
     }
   } finally {
@@ -692,12 +684,6 @@ program.command('chat')
       downloadPdfs: !!opts.downloadPdfs,
       useMemory: !opts.noMemory,
       autoGround: true,
-    });
-    appendConversationTurn({
-      source: 'hii.chat',
-      prompt,
-      answer: text,
-      tools: [opts.shell ? 'shell' : '', opts.web ? 'web' : '', opts.scholarly ? 'scholarly' : ''].filter(Boolean),
     });
     console.log(text);
   });
@@ -985,52 +971,6 @@ memory.command('check')
     }
   });
 
-const duality = program.command('duality').description('Persistent Yin <-> Codex interaction layer');
-
-duality.command('init')
-  .description('Initialize Yin/Codex bridge state')
-  .option('--yin-name <name>', 'Name for the reflective side', 'Yin')
-  .option('--codex-name <name>', 'Name for the execution side', 'Yang')
-  .action((opts) => {
-    const state = initDuality(opts.yinName, opts.codexName);
-    console.log(JSON.stringify(state, null, 2));
-  });
-
-duality.command('post')
-  .description('Post a structured message between Yin and Codex')
-  .requiredOption('--from <agent>', 'yin|codex')
-  .requiredOption('--to <agent>', 'yin|codex|both')
-  .requiredOption('--kind <kind>', 'context|plan|handoff|reflection|decision')
-  .requiredOption('--topic <text>', 'Short topic for the message')
-  .requiredOption('--message <text>', 'Message body')
-  .option('--tags <csv>', 'Comma-separated tags')
-  .action((opts) => {
-    const tags = typeof opts.tags === 'string'
-      ? opts.tags.split(',').map((tag: string) => tag.trim()).filter(Boolean)
-      : [];
-    const entry = postDualMessage({
-      from: opts.from,
-      to: opts.to,
-      kind: opts.kind,
-      topic: opts.topic,
-      message: opts.message,
-      tags,
-    } as any);
-    console.log(JSON.stringify(entry, null, 2));
-  });
-
-duality.command('read')
-  .description('Read recent Yin/Yang messages')
-  .option('--for <agent>', 'Filter for yin|yang')
-  .option('--limit <n>', 'Number of messages to show', '20')
-  .action((opts) => {
-    const messages = readDualMessages({
-      forAgent: opts.for,
-      limit: Number(opts.limit) || 20,
-    } as any);
-    console.log(formatDualMessages(messages));
-  });
-
 const apps = program.command('apps').description('Track product apps and MVP readiness');
 
 apps.command('add')
@@ -1096,51 +1036,6 @@ apps.command('set')
     if (opts.tags) patch.tags = opts.tags.split(',').map((x: string) => x.trim()).filter(Boolean);
     const app = updateApp(name, patch);
     console.log(JSON.stringify(app, null, 2));
-  });
-
-const conversations = program.command('conversations').description('Inspect persistent bridge conversation logs');
-
-conversations.command('summary')
-  .description('Show conversation ledger summary')
-  .action(() => {
-    console.log(JSON.stringify(conversationSummary(), null, 2));
-  });
-
-conversations.command('list')
-  .description('List stored conversation transcript files')
-  .action(() => {
-    const paths = conversationPaths();
-    const files = listConversationTranscripts();
-    console.log(`Ledger: ${paths.ledger}`);
-    console.log(`Transcripts: ${paths.transcripts}`);
-    if (!files.length) {
-      console.log('No transcript files found.');
-      return;
-    }
-    for (const file of files) {
-      console.log(file);
-    }
-  });
-
-conversations.command('tail')
-  .description('Show the most recent conversation entries')
-  .option('-n, --limit <n>', 'Number of entries to show', '20')
-  .action((opts) => {
-    const limit = Number(opts.limit) || 20;
-    const entries = readRecentConversationEntries(limit);
-    console.log(formatConversationEntries(entries));
-  });
-
-conversations.command('show')
-  .description('Show a saved transcript file')
-  .argument('<file>', 'Transcript filename, e.g. 2026-03-28.md')
-  .action((file) => {
-    try {
-      console.log(readConversationTranscript(file));
-    } catch (error: any) {
-      console.error(error?.message || String(error));
-      process.exit(1);
-    }
   });
 
 const codex = program.command('codex').description('Persistent live document database for workspace knowledge');

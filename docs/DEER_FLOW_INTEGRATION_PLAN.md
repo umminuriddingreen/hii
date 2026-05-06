@@ -69,11 +69,10 @@ Source context: Deer Flow positions itself as a super-agent harness with progres
 - Why: Deer Flow’s gateway model unifies interactive surfaces and makes agent behavior reusable across environments.
 - HII landing spots:
   - `/Users/ummi/hii/src/server.ts`
-  - `/Users/ummi/hii/src/duality.ts`
   - `/Users/ummi/hii/src/remote.ts`
   - `/Users/ummi/hii/public/`
 - Minimal slice:
-  - Standardize a thread/session envelope across CLI, HTTP, and duality bridge.
+  - Standardize a thread/session envelope across CLI, HTTP, and remote surfaces.
   - Expose agent/task state through one schema.
   - Add server endpoints for agents and tasks instead of keeping them only in the Python engine server.
 

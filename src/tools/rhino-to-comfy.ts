@@ -7,7 +7,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { stdout } from 'node:process';
 import { runShell } from './shell.js';
-import { appendConversationTurn } from '../conversations.js';
 
 const COMFYUI_URL = process.env.COMFYUI_URL ?? 'http://127.0.0.1:8000';
 
@@ -274,13 +273,6 @@ export async function rhinoToComfy(opts: RhinoToComfyOptions = {}): Promise<Rhin
   if (isTTY) stdout.write('\r  ✓ generation complete                    \n');
 
   const result: RhinoToComfyResult = { capturePath, outputs, prompt, model };
-
-  appendConversationTurn({
-    source: 'hii.rhino-to-comfy',
-    prompt,
-    answer: JSON.stringify({ model, outputs: outputs.map((o) => o.url) }),
-    tools: ['rhino_capture', 'comfyui'],
-  });
 
   return result;
 }
