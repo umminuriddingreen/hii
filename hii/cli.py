@@ -340,5 +340,90 @@ def serve(port):
     start(port=port)
 
 
+# ── caps (capability map) ──
+
+@main.group()
+def caps():
+    """Capability map — what this machine can do."""
+    pass
+
+
+@caps.command("show")
+def caps_show():
+    """Pretty-print the current capability map (uses cache if fresh)."""
+    from . import capabilities
+    cap = capabilities.get_capability_map()
+    counts = cap.counts()
+    click.echo(f"scan_id={cap.scan_id}  at={cap.generated_at}")
+    if cap.host:
+        click.echo(f"  host: {cap.host.get('hostname')} ({cap.host.get('os')} {cap.host.get('architecture')})  user={cap.host.get('username')}")
+    click.echo("")
+    for k, v in counts.items():
+        click.echo(f"  {k:10} {v}")
+    click.echo("")
+    available_apps = [a.name for a in cap.apps if a.available]
+    if available_apps:
+        click.echo("  apps available: " + ", ".join(sorted(available_apps)))
+    online_services = [s.name for s in cap.services if s.available]
+    click.echo("  services online: " + (", ".join(online_services) if online_services else "(none)"))
+    if cap.warnings:
+        click.echo(f"  warnings: {len(cap.warnings)}")
+    if cap.errors:
+        click.echo(f"  errors:   {len(cap.errors)}")
+
+
+@caps.command("refresh")
+def caps_refresh():
+    """Force rescan and overwrite cache."""
+    from . import capabilities
+    cap = capabilities.refresh_capability_map()
+    counts = cap.counts()
+    click.echo(f"refreshed: scan_id={cap.scan_id}")
+    for k, v in counts.items():
+        click.echo(f"  {k:10} {v}")
+    if cap.errors:
+        click.echo(f"errors: {len(cap.errors)}")
+
+
+@caps.command("export")
+@click.option("--format", "fmt", type=click.Choice(["json", "llm"]), default="llm")
+def caps_export(fmt):
+    """Export the capability map. `llm` = agent-readable markdown; `json` = raw."""
+    from . import capabilities
+    payload = capabilities.export_as_json() if fmt == "json" else capabilities.export_for_llm()
+    # Force UTF-8 on stdout so Unicode (checkmarks, arrows) doesn't crash on Windows cp1252.
+    try:
+        sys.stdout.buffer.write(payload.encode("utf-8"))
+        sys.stdout.buffer.write(b"\n")
+    except AttributeError:
+        click.echo(payload)
+
+
+@caps.command("diff")
+def caps_diff():
+    """Compare current capability map vs previous snapshot."""
+    from .capabilities import cache as cap_cache, export as cap_export
+    cur = cap_cache.read_current()
+    prev = cap_cache.read_previous()
+    if not cur:
+        click.echo("no current capability map — run `hii caps refresh` first")
+        return
+    if not prev:
+        click.echo("no previous capability map yet — refresh twice to see a diff")
+        return
+    d = cap_export.diff(cur, prev)
+    for kind, info in d.items():
+        if info["added_count"] or info["removed_count"] or info["flipped_count"]:
+            click.echo(f"\n{kind}:")
+            if info["added"]:
+                click.echo(f"  + added ({info['added_count']}): " + ", ".join(info["added"]))
+            if info["removed"]:
+                click.echo(f"  - removed ({info['removed_count']}): " + ", ".join(info["removed"]))
+            if info["availability_flipped"]:
+                click.echo(f"  ~ availability changed ({info['flipped_count']}):")
+                for line in info["availability_flipped"]:
+                    click.echo(f"      {line}")
+
+
 if __name__ == "__main__":
     main()

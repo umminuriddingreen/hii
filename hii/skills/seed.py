@@ -384,6 +384,47 @@ BUILTIN_SKILLS = [
         tags=["audio", "transcribe", "notes", "voice"],
     ),
 
+    # ── Computer Use (Claude vision + Windows desktop) ──
+    Skill(
+        id="computer-use",
+        name="Computer-Use Agent",
+        description="Drive the Windows desktop via Claude vision: launch apps, click, type, take screenshots, infer next step from what's on screen",
+        category="agent",
+        target="local",
+        inputs={
+            "task": "str - natural-language goal (e.g. 'open Notepad and write hello')",
+            "max_steps": "int (optional, default 25)",
+            "model": "str (optional, default claude-sonnet-4-6)",
+        },
+        script="cd \"${HII_ROOT:-~/hii}\" && python -m hii.skills.computer_agent --task '{task}' --max-steps {max_steps} --model {model}",
+        tags=["computer-use", "agent", "vision", "desktop", "automation", "claude"],
+        examples=[
+            "hii skill run computer-use --task 'Open Notepad and type Hello HII'",
+            "hii skill run computer-use --task 'Launch Rhino 8 and open the most recent ACN site model' --max-steps 40",
+            "python -m hii.skills.computer_agent --task 'Open Calculator and compute 17*23' --confirm",
+        ],
+    ),
+
+    # ── Architecture (Rhino/Grasshopper + ComfyUI) ──
+    Skill(
+        id="arch-design",
+        name="Architectural Design",
+        description="Natural-language brief -> parametric Rhino/Grasshopper model + ComfyUI render + design report",
+        category="arch",
+        target="local",
+        inputs={
+            "brief": "str - natural-language design brief",
+            "typology": "str (optional: tower|slab|courtyard)",
+            "seed": "int (optional, default 42)",
+        },
+        script="cd \"${HII_ROOT:-~/hii}\" && python -m hii.skills.arch_design --brief '{brief}' --typology {typology} --seed {seed}",
+        tags=["arch", "architecture", "grasshopper", "rhino", "comfyui", "parametric", "render"],
+        examples=[
+            "hii skill run arch-design --brief 'twisted biophilic 40-floor tower with vertical gardens' --seed 42",
+            "python -m hii.skills.arch_design --brief 'mass-timber courtyard housing' --dry-run",
+        ],
+    ),
+
     # ── Memory ──
     Skill(
         id="memory-check",
