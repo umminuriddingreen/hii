@@ -2,8 +2,9 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { randomUUID } from 'crypto';
 import { supabaseAdmin } from '@/lib/server/supabase';
 import { r2Configured, presignDownload } from '@/lib/server/r2';
+import { stripe, stripeConfigured } from '@/lib/server/stripe';
 import { getTrack } from '@/lib/server/tracks';
-import { purchases, downloads, type DownloadEvent } from '@/lib/server/devstore';
+import { purchases, downloads, purchaseBySession, type DownloadEvent } from '@/lib/server/devstore';
 
 /**
  * The core of the spine: only mint a signed download URL for a PAID
@@ -20,7 +21,39 @@ export async function GET(request: NextRequest) {
   let trackId: string | null = null;
   let purchaseRef: string | null = null;
 
-  if (db) {
+  // Stripe path: trust the live session as source of truth for payment,
+  // so a real test payment works without a webhook configured.
+  if (sessionId && stripeConfigured()) {
+    const s = stripe()!;
+    const session = await s.checkout.sessions.retrieve(sessionId);
+    if (session.payment_status !== 'paid')
+      return new NextResponse('Payment not completed', { status: 402 });
+
+    if (db) {
+      await db
+        .from('purchases')
+        .update({ status: 'paid', paid_at: new Date().toISOString() })
+        .eq('stripe_session_id', sessionId);
+      const { data: purchase } = await db
+        .from('purchases')
+        .select('*')
+        .eq('stripe_session_id', sessionId)
+        .single();
+      trackId = purchase?.track_id ?? (session.metadata?.track_id as string) ?? null;
+      purchaseRef = purchase?.id ?? null;
+    } else {
+      const purchase = purchaseBySession(sessionId);
+      if (purchase) {
+        purchase.status = 'paid';
+        purchase.paid_at = new Date().toISOString();
+        purchaseRef = purchase.id;
+        trackId = purchase.track_id;
+      } else {
+        trackId = (session.metadata?.track_id as string) ?? null;
+      }
+    }
+    if (!trackId) return new NextResponse('Track not found', { status: 404 });
+  } else if (db) {
     const q = db.from('purchases').select('*');
     const { data: purchase } = sessionId
       ? await q.eq('stripe_session_id', sessionId).single()

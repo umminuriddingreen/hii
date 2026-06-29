@@ -49,3 +49,8 @@ export const downloads = store.downloads;
 export function downloadsForTrack(trackId: string): DownloadEvent[] {
   return downloads.filter((d) => d.track_id === trackId);
 }
+
+export function purchaseBySession(sessionId: string): Purchase | undefined {
+  for (const p of purchases.values()) if (p.stripe_session_id === sessionId) return p;
+  return undefined;
+}

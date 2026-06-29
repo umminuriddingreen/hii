@@ -43,6 +43,17 @@ export async function POST(request: NextRequest) {
         stripe_session_id: session.id,
         status: 'pending'
       });
+    } else {
+      // Stripe configured but no Supabase yet: track the pending purchase
+      // in the dev store, keyed by Stripe session id.
+      const pending: Purchase = {
+        id: randomUUID(),
+        track_id: track.id,
+        status: 'pending',
+        stripe_session_id: session.id,
+        created_at: new Date().toISOString()
+      };
+      purchases.set(pending.id, pending);
     }
     return NextResponse.redirect(session.url!, { status: 303 });
   }
