@@ -1,16 +1,18 @@
-import { redirect } from '@sveltejs/kit';
+import { NextResponse, type NextRequest } from 'next/server';
 import { randomUUID } from 'crypto';
-import type { RequestHandler } from './$types';
-import { getTrack } from '$lib/server/tracks';
-import { stripe, stripeConfigured } from '$lib/server/stripe';
-import { supabaseAdmin } from '$lib/server/supabase';
-import { purchases, type Purchase } from '$lib/server/devstore';
+import { getTrack } from '@/lib/server/tracks';
+import { stripe, stripeConfigured } from '@/lib/server/stripe';
+import { supabaseAdmin } from '@/lib/server/supabase';
+import { purchases, type Purchase } from '@/lib/server/devstore';
 
-export const POST: RequestHandler = async ({ request, url }) => {
+export async function POST(request: NextRequest) {
   const data = await request.formData();
   const trackId = String(data.get('track_id') ?? '');
   const track = await getTrack(trackId);
-  if (!track) return new Response('Track not found', { status: 404 });
+  if (!track) return new NextResponse('Track not found', { status: 404 });
+
+  const origin =
+    process.env.NEXT_PUBLIC_BASE_URL ?? new URL(request.url).origin;
 
   // Real path: hand off to Stripe Checkout.
   if (stripeConfigured()) {
@@ -27,8 +29,8 @@ export const POST: RequestHandler = async ({ request, url }) => {
           }
         }
       ],
-      success_url: `${url.origin}/api/download?session={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${url.origin}/t/${track.id}`,
+      success_url: `${origin}/api/download?session={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/t/${track.id}`,
       metadata: { track_id: track.id }
     });
 
@@ -42,7 +44,7 @@ export const POST: RequestHandler = async ({ request, url }) => {
         status: 'pending'
       });
     }
-    throw redirect(303, session.url!);
+    return NextResponse.redirect(session.url!, { status: 303 });
   }
 
   // Dev fallback: simulate an instant successful payment so the spine runs.
@@ -55,5 +57,5 @@ export const POST: RequestHandler = async ({ request, url }) => {
     paid_at: new Date().toISOString()
   };
   purchases.set(purchase.id, purchase);
-  throw redirect(303, `/api/download?purchase=${purchase.id}`);
-};
+  return NextResponse.redirect(`${origin}/api/download?purchase=${purchase.id}`, { status: 303 });
+}

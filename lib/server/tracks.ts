@@ -1,9 +1,6 @@
-import { supabaseAdmin } from '$lib/server/supabase';
-import {
-  tracks as devTracks,
-  downloadsForTrack,
-  type Track
-} from '$lib/server/devstore';
+import 'server-only';
+import { supabaseAdmin } from './supabase';
+import { tracks as devTracks, downloadsForTrack, type Track } from './devstore';
 
 /** Fetch a track from Supabase if configured, else the dev store. */
 export async function getTrack(id: string): Promise<Track | null> {

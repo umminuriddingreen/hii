@@ -2,6 +2,8 @@
  * In-memory fallback so the v1 spine runs end-to-end locally
  * BEFORE Supabase/R2/Stripe keys are filled in. Replaced by real
  * tables once env is configured. Data resets on server restart.
+ *
+ * Stashed on globalThis so Next.js dev hot-reload doesn't wipe it.
  */
 export type Track = {
   id: string;
@@ -30,9 +32,19 @@ export type DownloadEvent = {
   created_at: string;
 };
 
-export const tracks = new Map<string, Track>();
-export const purchases = new Map<string, Purchase>();
-export const downloads: DownloadEvent[] = [];
+type Store = {
+  tracks: Map<string, Track>;
+  purchases: Map<string, Purchase>;
+  downloads: DownloadEvent[];
+};
+
+const g = globalThis as unknown as { __hiiStore?: Store };
+const store: Store =
+  g.__hiiStore ?? (g.__hiiStore = { tracks: new Map(), purchases: new Map(), downloads: [] });
+
+export const tracks = store.tracks;
+export const purchases = store.purchases;
+export const downloads = store.downloads;
 
 export function downloadsForTrack(trackId: string): DownloadEvent[] {
   return downloads.filter((d) => d.track_id === trackId);
