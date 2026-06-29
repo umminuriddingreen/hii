@@ -1,4 +1,4 @@
--- secure-music-link / hii v1 schema
+-- hii v1 schema
 -- Identity = producer (Supabase auth.users)
 -- Information = track (file in R2)
 -- Exchange = license + purchase + download_event
