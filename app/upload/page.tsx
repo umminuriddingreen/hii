@@ -10,7 +10,7 @@ function SubmitButton() {
   return (
     <button
       disabled={pending}
-      className="rounded bg-emerald-500 px-5 py-2 font-medium text-black hover:bg-emerald-400 disabled:opacity-50"
+      className="rounded bg-black px-5 py-2 font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
     >
       {pending ? 'Uploading…' : 'Create link'}
     </button>
@@ -25,8 +25,8 @@ export default function UploadPage() {
       <h1 className="text-2xl font-bold">Upload a track</h1>
 
       {state.assetUrl && (
-        <div className="mt-6 rounded border border-emerald-700 bg-emerald-950/40 p-4">
-          <p className="text-emerald-300">Track created. Send this link to your buyer:</p>
+        <div className="mt-6 rounded border border-emerald-300 bg-emerald-50 p-4">
+          <p className="text-emerald-700">Track created. Send this link to your buyer:</p>
           <a href={state.assetUrl} className="mt-2 block break-all font-mono text-sm underline">
             {state.assetUrl}
           </a>
@@ -35,12 +35,12 @@ export default function UploadPage() {
 
       <form action={formAction} className="mt-6 space-y-4">
         <label className="block">
-          <span className="text-sm text-neutral-400">Title</span>
-          <input name="title" required className="mt-1 w-full rounded bg-neutral-900 px-3 py-2" />
+          <span className="text-sm text-neutral-600">Title</span>
+          <input name="title" required className="mt-1 w-full rounded border border-neutral-300 bg-white px-3 py-2" />
         </label>
 
         <label className="block">
-          <span className="text-sm text-neutral-400">Price (USD)</span>
+          <span className="text-sm text-neutral-600">Price (USD)</span>
           <input
             name="price"
             type="number"
@@ -48,13 +48,13 @@ export default function UploadPage() {
             step="0.01"
             defaultValue="9.99"
             required
-            className="mt-1 w-full rounded bg-neutral-900 px-3 py-2"
+            className="mt-1 w-full rounded border border-neutral-300 bg-white px-3 py-2"
           />
         </label>
 
         <label className="block">
-          <span className="text-sm text-neutral-400">License</span>
-          <select name="license" className="mt-1 w-full rounded bg-neutral-900 px-3 py-2">
+          <span className="text-sm text-neutral-600">License</span>
+          <select name="license" className="mt-1 w-full rounded border border-neutral-300 bg-white px-3 py-2">
             <option value="non-exclusive">Non-exclusive</option>
             <option value="exclusive">Exclusive</option>
             <option value="lease">Lease</option>
@@ -62,7 +62,7 @@ export default function UploadPage() {
         </label>
 
         <label className="block">
-          <span className="text-sm text-neutral-400">Audio file</span>
+          <span className="text-sm text-neutral-600">Audio file</span>
           <input
             name="file"
             type="file"
@@ -72,7 +72,7 @@ export default function UploadPage() {
           />
         </label>
 
-        {state.error && <p className="text-red-400">{state.error}</p>}
+        {state.error && <p className="text-red-600">{state.error}</p>}
 
         <SubmitButton />
       </form>
