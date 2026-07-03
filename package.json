@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "hii:registry:scan": "node scripts/hii-registry-scan.mjs",
     "lint": "next lint"
   },
   "dependencies": {
