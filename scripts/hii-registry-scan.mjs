@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 function homePath(...parts) {
   return path.join(os.homedir(), ...parts);
@@ -182,7 +183,7 @@ function scanOllama(machineId) {
   }
 }
 
-function scanRegistry() {
+export function scanRegistry() {
   const machine = scanMachine();
   const hermes = scanHermes(machine.id);
   const codex = scanCodex(machine.id);
@@ -201,5 +202,7 @@ function scanRegistry() {
   };
 }
 
-const snapshot = scanRegistry();
-process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const snapshot = scanRegistry();
+  process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
+}
