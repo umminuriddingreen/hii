@@ -45,6 +45,36 @@
     "trustLevel": "first-party"
   },
   {
+    "id": "hii.loop.user_proxy",
+    "name": "User Proxy Plan Loop",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Read local events, notes, jobs, bridge logs, and repo state to propose the next plan while waiting for explicit y/n approval before action.",
+    "inputs": ["OG events", "bridge logs", "loop notes", "recent jobs", "repo state"],
+    "outputs": ["append-only plan decision", "policy gate", "next command proposal"],
+    "permissions": ["local-only", "append-only runtime files", "propose without executing", "y/n approval gate"],
+    "visibility": "local",
+    "costModel": { "type": "free" },
+    "evidence": ["hii loop once", "~/.hii/loop/decisions.jsonl", "~/.hii/loop/notes.jsonl"],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.pack.export",
+    "name": "Export HII Capability Pack",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Package a compartmentalized manifest for a HII surface or capability set without publishing it externally.",
+    "inputs": ["pack id", "capability registry", "source path inventory"],
+    "outputs": ["local pack manifest", "file list", "capability list", "verification commands"],
+    "permissions": ["local-only export", "no push", "no upload", "no secret values"],
+    "visibility": "local",
+    "costModel": { "type": "free" },
+    "evidence": ["hii pack export", "~/.hii/packs/exports"],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
     "id": "hii.registry.scan",
     "name": "Scan Local Capability Registry",
     "owner": "hii",

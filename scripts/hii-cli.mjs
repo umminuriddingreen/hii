@@ -12,8 +12,14 @@ const RUNTIME = path.join(os.homedir(), ".hii");
 const BRIDGE_DIR = path.join(ROOT, "bridge", "messages");
 const BRIDGE_LOG = path.join(RUNTIME, "bridge", "yin-codex.jsonl");
 const CAPABILITY_REGISTRY = path.join(ROOT, "lib", "capabilities", "registry.json");
+const CAPABILITY_PACKS = path.join(ROOT, "lib", "capabilities", "packs.json");
 const LOCAL_CAPABILITY_JOBS = path.join(ROOT, ".hii", "capability-jobs.jsonl");
 const OG_EVENTS = path.join(RUNTIME, "og", "events.jsonl");
+const LOOP_DIR = path.join(RUNTIME, "loop");
+const LOOP_DECISIONS = path.join(LOOP_DIR, "decisions.jsonl");
+const LOOP_NOTES = path.join(LOOP_DIR, "notes.jsonl");
+const LOOP_DISABLED = path.join(LOOP_DIR, "disabled");
+const PACK_EXPORT_DIR = path.join(RUNTIME, "packs", "exports");
 
 function codexBin() {
   const pinned = path.join(os.homedir(), ".local", "bin", "codex");
@@ -81,6 +87,12 @@ function readJsonl(file) {
   }
 }
 
+function appendJsonl(file, entry) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, `${JSON.stringify(entry)}\n`);
+  return entry;
+}
+
 function redactText(value) {
   return String(value)
     .replace(/((?:api[_-]?key|token|secret|password|passwd|pwd|access[_-]?token|refresh[_-]?token)=)([^\s]+)/gi, "$1[redacted]")
@@ -122,6 +134,8 @@ function runtimePointers() {
     fileExistsSummary(path.join(RUNTIME, "registry", "snapshot.json")),
     fileExistsSummary(path.join(RUNTIME, "conversations", "bridge.jsonl")),
     fileExistsSummary(BRIDGE_LOG),
+    fileExistsSummary(LOOP_DECISIONS),
+    fileExistsSummary(LOOP_NOTES),
     fileExistsSummary(path.join(RUNTIME, "mind0", "state.json"))
   ];
 }
@@ -179,8 +193,254 @@ function inferNextActions({ prompt, git, capabilities, jobs, bridge }) {
 }
 
 function appendOgEvent(event) {
-  fs.mkdirSync(path.dirname(OG_EVENTS), { recursive: true });
-  fs.appendFileSync(OG_EVENTS, `${JSON.stringify(event)}\n`);
+  appendJsonl(OG_EVENTS, event);
+}
+
+function classifyLoopPolicy(action) {
+  const text = `${action.track} ${action.coordinate} ${action.action}`.toLowerCase();
+  const refused = ["push", "publish", "upload", "delete", "reset", "external", "network", "payment"];
+  const approval = ["spawn", "commit", "edit", "write", "build", "ship", "agent", "npm run build"];
+  if (refused.some((word) => text.includes(word))) {
+    return {
+      risk: "external-or-destructive",
+      requiresApproval: true,
+      allowedWithoutApproval: false,
+      defaultDecision: "no",
+      reason: "external, destructive, or payment-like actions stay blocked until the user explicitly says yes"
+    };
+  }
+  if (approval.some((word) => text.includes(word))) {
+    return {
+      risk: "mutating-or-costly",
+      requiresApproval: true,
+      allowedWithoutApproval: false,
+      defaultDecision: "ask",
+      reason: "mutating or costly actions need a y/n gate"
+    };
+  }
+  return {
+    risk: "observe",
+    requiresApproval: false,
+    allowedWithoutApproval: true,
+    defaultDecision: "yes",
+    reason: "observe/summarize/propose actions are local-only and non-mutating"
+  };
+}
+
+function userProxyContext(prompt = "") {
+  const git = gitSnapshot();
+  const capabilities = readJsonArray(CAPABILITY_REGISTRY);
+  const jobs = readJsonl(LOCAL_CAPABILITY_JOBS).slice(-20);
+  const bridge = readJsonl(BRIDGE_LOG).slice(-30).map((entry) => ({
+    ts: entry.ts,
+    type: entry.type,
+    from: entry.from,
+    to: entry.to,
+    body: entry.body ? redactText(entry.body).slice(0, 500) : undefined,
+    prompt: entry.prompt ? redactText(entry.prompt).slice(0, 500) : undefined
+  }));
+  const og = readJsonl(OG_EVENTS).slice(-20);
+  const notes = readJsonl(LOOP_NOTES).slice(-20);
+  const decisions = readJsonl(LOOP_DECISIONS).slice(-20);
+  const nextActions = inferNextActions({ prompt, git, capabilities, jobs, bridge });
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    prompt: redactText(prompt),
+    identity: {
+      repo: ROOT,
+      runtime: RUNTIME,
+      role: "local user-proxy context for persistent HII loops"
+    },
+    git,
+    sources: {
+      bridgeEvents: bridge.length,
+      ogEvents: og.length,
+      notes: notes.length,
+      decisions: decisions.length,
+      jobs: jobs.length,
+      capabilities: capabilities.length
+    },
+    recent: {
+      bridge,
+      og: og.map((entry) => ({
+        id: entry.id,
+        ts: entry.ts,
+        mode: entry.mode,
+        prompt: entry.prompt ? redactText(entry.prompt).slice(0, 280) : ""
+      })),
+      notes: notes.map((entry) => ({
+        id: entry.id,
+        ts: entry.ts,
+        note: redactText(entry.note ?? "").slice(0, 500)
+      })),
+      decisions: decisions.map((entry) => ({
+        id: entry.id,
+        ts: entry.ts,
+        status: entry.status,
+        decision: entry.decision,
+        track: entry.proposal?.track,
+        nextCommand: entry.proposal?.nextCommand
+      }))
+    },
+    nextActions
+  };
+}
+
+function loopDecisionFromContext(context, mode = "once") {
+  const top = context.nextActions[0] ?? {
+    score: 0,
+    track: "idle",
+    coordinate: "hii loop",
+    action: "wait for a user note or new local event"
+  };
+  const policy = classifyLoopPolicy(top);
+  return {
+    id: randomUUID(),
+    ts: new Date().toISOString(),
+    capabilityId: "hii.loop.user_proxy",
+    mode,
+    status: fs.existsSync(LOOP_DISABLED) ? "disabled" : "proposed",
+    inputs: {
+      prompt: context.prompt,
+      repo: context.identity.repo,
+      branch: context.git.branch,
+      dirtyFiles: context.git.status.length,
+      sources: context.sources
+    },
+    inferredIntent: {
+      track: top.track,
+      confidence: top.score,
+      evidence: [
+        `repo=${context.identity.repo}`,
+        `branch=${context.git.branch}`,
+        `dirtyFiles=${context.git.status.length}`,
+        `bridgeEvents=${context.sources.bridgeEvents}`,
+        `ogEvents=${context.sources.ogEvents}`,
+        `notes=${context.sources.notes}`
+      ]
+    },
+    proposal: {
+      track: top.track,
+      coordinate: top.coordinate,
+      next: top.action,
+      capabilityId: top.track === "operational graph" ? "hii.og.operational_graph" : "hii.terminal.observe",
+      nextCommand: top.coordinate === ROOT
+        ? "git status --short"
+        : top.coordinate,
+      verification: top.track === "local CI/CD" ? "npm run build" : "hii context --json"
+    },
+    policy,
+    decision: policy.defaultDecision,
+    controls: {
+      yes: `hii loop decide ${top.score ? "yes" : "no"}`,
+      no: "hii loop decide no",
+      note: "hii loop note <your note>"
+    }
+  };
+}
+
+function printLoopDecision(decision) {
+  console.log("HII Loop — user proxy\n");
+  console.log(`decision: ${decision.id}`);
+  console.log(`status:   ${decision.status}`);
+  console.log(`intent:   ${decision.inferredIntent.track} (${decision.inferredIntent.confidence})`);
+  console.log(`risk:     ${decision.policy.risk}`);
+  console.log(`gate:     ${decision.policy.requiresApproval ? "y/n required" : "auto-observe ok"}`);
+  console.log(`next:     ${decision.proposal.next}`);
+  console.log(`command:  ${decision.proposal.nextCommand}`);
+  console.log(`verify:   ${decision.proposal.verification}`);
+  console.log("\ncontrols:");
+  console.log(`  y   ${decision.controls.yes}`);
+  console.log(`  n   ${decision.controls.no}`);
+  console.log(`  tab ${decision.controls.note}`);
+  console.log(`\nlog: ${LOOP_DECISIONS}`);
+}
+
+function cmdLoop(args) {
+  const sub = args[0] || "once";
+  if (sub === "note") {
+    const note = redactText(args.slice(1).join(" "));
+    if (!note) { console.error("usage: hii loop note <note>"); process.exit(1); }
+    const entry = appendJsonl(LOOP_NOTES, {
+      id: randomUUID(),
+      ts: new Date().toISOString(),
+      type: "user-note",
+      note
+    });
+    console.log(`noted ${entry.id}`);
+    console.log(`log: ${LOOP_NOTES}`);
+    return;
+  }
+  if (sub === "decide") {
+    const value = String(args[1] ?? "").toLowerCase();
+    if (!["y", "yes", "n", "no"].includes(value)) {
+      console.error("usage: hii loop decide <yes|no>");
+      process.exit(1);
+    }
+    const latest = readJsonl(LOOP_DECISIONS).slice(-1)[0];
+    if (!latest) {
+      console.error("no loop decision yet; run `hii loop once` first");
+      process.exit(1);
+    }
+    const entry = appendJsonl(LOOP_DECISIONS, {
+      ...latest,
+      id: randomUUID(),
+      ts: new Date().toISOString(),
+      parentId: latest.id,
+      status: value.startsWith("y") ? "approved" : "rejected",
+      decision: value.startsWith("y") ? "yes" : "no"
+    });
+    console.log(`${entry.status} ${latest.id}`);
+    console.log(`next: ${entry.status === "approved" ? entry.proposal.nextCommand : "wait for note or new event"}`);
+    return;
+  }
+  if (sub === "status") {
+    const decisions = readJsonl(LOOP_DECISIONS);
+    const notes = readJsonl(LOOP_NOTES);
+    const latest = decisions.slice(-1)[0];
+    console.log("HII Loop Status\n");
+    console.log(`enabled:   ${fs.existsSync(LOOP_DISABLED) ? "no" : "yes"}`);
+    console.log(`decisions: ${decisions.length}`);
+    console.log(`notes:     ${notes.length}`);
+    console.log(`log:       ${LOOP_DECISIONS}`);
+    if (latest) {
+      console.log(`\nlatest:   ${latest.id}`);
+      console.log(`status:   ${latest.status}`);
+      console.log(`intent:   ${latest.inferredIntent?.track ?? "unknown"}`);
+      console.log(`next:     ${latest.proposal?.next ?? "unknown"}`);
+      console.log(`decision: ${latest.decision ?? "unknown"}`);
+    }
+    return;
+  }
+  if (sub === "disable") {
+    fs.mkdirSync(LOOP_DIR, { recursive: true });
+    fs.writeFileSync(LOOP_DISABLED, `${new Date().toISOString()}\n`);
+    console.log(`disabled: ${LOOP_DISABLED}`);
+    return;
+  }
+  if (sub === "enable") {
+    if (fs.existsSync(LOOP_DISABLED)) fs.unlinkSync(LOOP_DISABLED);
+    console.log("enabled");
+    return;
+  }
+  if (sub !== "once") {
+    console.error("usage: hii loop [once|status|note|decide|enable|disable]");
+    process.exit(1);
+  }
+  const prompt = args.slice(1).join(" ") || "persistent user proxy loop";
+  const context = userProxyContext(prompt);
+  const decision = appendJsonl(LOOP_DECISIONS, loopDecisionFromContext(context, "once"));
+  appendOgEvent({
+    id: randomUUID(),
+    ts: decision.ts,
+    capabilityId: "hii.loop.user_proxy",
+    mode: "loop-once",
+    prompt: context.prompt,
+    decisionId: decision.id,
+    nextActions: context.nextActions
+  });
+  printLoopDecision(decision);
 }
 
 function cmdOg(args) {
@@ -255,6 +515,11 @@ function agentCommandCatalog() {
     { command: "hii caps show", purpose: "List backend-owned capabilities." },
     { command: "hii og status", purpose: "Infer likely next work from repo, bridge, job, and runtime context." },
     { command: "hii og capture <message>", purpose: "Append an operational-graph event for this turn." },
+    { command: "hii loop once", purpose: "Propose the next user-proxy plan locally; do not act until y/n approval." },
+    { command: "hii loop note <note>", purpose: "Add user notes to steer the persistent loop." },
+    { command: "hii loop decide <yes|no>", purpose: "Approve or reject the latest proposed plan." },
+    { command: "hii pack list", purpose: "List compartmentalized HII capability packs." },
+    { command: "hii pack export <id>", purpose: "Write a local-only pack manifest for staged shipping." },
     { command: "hii jobs", purpose: "List recent local capability jobs." },
     { command: "hii doctor", purpose: "Run status plus registry doctor." },
     { command: "hii ship", purpose: "Typecheck and commit locally; does not push." },
@@ -387,6 +652,87 @@ function cmdJobs(args) {
   }
 }
 
+function packById(id) {
+  return readJsonArray(CAPABILITY_PACKS).find((pack) => pack.id === id);
+}
+
+function printPack(pack) {
+  console.log(`${pack.id}`);
+  console.log(`  name:       ${pack.name}`);
+  console.log(`  summary:    ${pack.summary}`);
+  console.log(`  caps:       ${(pack.capabilities ?? []).join(", ")}`);
+  console.log(`  routes:     ${(pack.routes ?? []).join(", ")}`);
+  console.log(`  commands:   ${(pack.commands ?? []).join(", ")}`);
+  console.log(`  boundary:   ${pack.shipBoundary}`);
+}
+
+function cmdPack(args) {
+  const sub = args[0] || "list";
+  const packs = readJsonArray(CAPABILITY_PACKS);
+  if (sub === "list") {
+    console.log("HII capability packs\n");
+    for (const pack of packs) {
+      console.log(`${pack.id}`);
+      console.log(`  ${pack.summary}`);
+      console.log("");
+    }
+    return;
+  }
+  if (sub === "show") {
+    const pack = packById(args[1]);
+    if (!pack) { console.error("usage: hii pack show <pack-id>"); process.exit(1); }
+    printPack(pack);
+    console.log("\nfiles:");
+    for (const file of pack.files ?? []) console.log(`  ${file}`);
+    console.log("\nverification:");
+    for (const command of pack.verification ?? []) console.log(`  ${command}`);
+    return;
+  }
+  if (sub === "export") {
+    const pack = packById(args[1]);
+    if (!pack) { console.error("usage: hii pack export <pack-id>"); process.exit(1); }
+    const git = gitSnapshot();
+    const capabilities = readJsonArray(CAPABILITY_REGISTRY)
+      .filter((capability) => (pack.capabilities ?? []).includes(capability.id));
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const out = path.join(PACK_EXPORT_DIR, `${pack.id}-${stamp}.json`);
+    const manifest = {
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      exportKind: "hii.capability-pack.manifest",
+      localOnly: true,
+      pack,
+      capabilities,
+      source: {
+        repo: ROOT,
+        branch: git.branch,
+        dirtyFiles: git.status.length
+      },
+      guardrails: [
+        "This is a local manifest export only.",
+        "No files were uploaded, pushed, or published.",
+        "Secret values are not included.",
+        "Run verification commands before shipping this pack anywhere external."
+      ]
+    };
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    fs.writeFileSync(out, `${JSON.stringify(manifest, null, 2)}\n`);
+    appendJsonl(path.join(RUNTIME, "packs", "exports.jsonl"), {
+      id: randomUUID(),
+      ts: manifest.exportedAt,
+      packId: pack.id,
+      path: out,
+      dirtyFiles: manifest.source.dirtyFiles
+    });
+    console.log(`exported ${pack.id}`);
+    console.log(`manifest: ${out}`);
+    console.log("not pushed; not published");
+    return;
+  }
+  console.error("usage: hii pack <list|show|export>");
+  process.exit(1);
+}
+
 function cmdTerminal(args) {
   const url = "http://localhost:3000/terminal";
   if (args.includes("--open")) {
@@ -495,7 +841,8 @@ switch (cmd) {
   case "jobs": cmdJobs(rest); break;
   case "terminal": cmdTerminal(rest); break;
   case "og": cmdOg(rest); break;
-  case "loop": cmdOg(rest); break;
+  case "loop": cmdLoop(rest); break;
+  case "pack": cmdPack(rest); break;
   case "registry": {
     const sub = rest[0];
     if (!["scan", "doctor", "export"].includes(sub)) {
@@ -532,6 +879,13 @@ usage: hii <command>
   caps [show]         list backend-owned capabilities
   jobs [n]            list recent local capability jobs
   og [capture <msg>]  infer the operational graph and likely next path
+  loop once [prompt]  propose next plan; waits for y/n before acting
+  loop status         show latest user-proxy plan and notes
+  loop note <note>    add steering context (tab path in UI)
+  loop decide yes|no  approve or reject latest plan
+  pack list           list compartmentalized capability packs
+  pack show <id>      show pack routes, files, caps, and checks
+  pack export <id>    write local-only pack manifest
   check               typecheck (the inner fix loop)
   ship [message]      typecheck -> local commit only
   ship --push [msg]   explicit external push to origin

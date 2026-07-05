@@ -20,6 +20,7 @@ const commands: Record<string, { label: string; href?: string; api?: string }> =
   '/dashboard': { label: 'dashboard', href: '/dashboard' },
   '/login': { label: 'sign in', href: '/login' },
   '/og': { label: 'operational graph', api: '/api/og/status' },
+  '/loop': { label: 'propose next plan', api: '/api/og/status' },
   '/context': { label: 'agent context', api: '/api/context' }
 };
 
@@ -41,11 +42,12 @@ export function HiiNew() {
   }
 
   function formatApiLines(key: string, data: Record<string, unknown>) {
-    if (key === '/og') {
+    if (key === '/og' || key === '/loop') {
       const nextActions = Array.isArray(data.nextActions) ? data.nextActions : [];
       return [
         `branch ${String(data.branch ?? 'unknown')}`,
         `dirty ${String(data.dirtyFiles ?? 0)}`,
+        key === '/loop' ? 'gate y/n before action' : 'mode observe',
         ...nextActions.slice(0, 3).map((action) => {
           const item = action as { score?: number; track?: string; next?: string };
           return `${item.score ?? 0} ${item.track ?? 'next'}: ${item.next ?? ''}`;
