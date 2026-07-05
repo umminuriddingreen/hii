@@ -257,6 +257,8 @@ function agentCommandCatalog() {
     { command: "hii og capture <message>", purpose: "Append an operational-graph event for this turn." },
     { command: "hii jobs", purpose: "List recent local capability jobs." },
     { command: "hii doctor", purpose: "Run status plus registry doctor." },
+    { command: "hii ship", purpose: "Typecheck and commit locally; does not push." },
+    { command: "hii ship --push <message>", purpose: "Explicit external push; use only after user approval." },
     { command: "npm run build", purpose: "Validate the Next.js product app." }
   ];
 }
@@ -308,6 +310,8 @@ function agentContextPayload() {
       "Do not reset, delete, or rewrite unclear user or agent work.",
       "Leave .claude, .hermes, life, screenshots, and other local/generated state untracked unless explicitly scoped.",
       "Keep secrets reference-only; report env presence, never raw values.",
+      "Complete work locally by default; do not fetch, push, publish, upload, or call external services unless the user explicitly asks.",
+      "Use hii ship for local typecheck and commit only; use hii ship --push only after explicit external publish approval.",
       "Run npm run build after meaningful HII product edits.",
       "Use /Users/ummi/hii for the product repo and /Users/ummi/hii-old only through hii legacy."
     ],
@@ -436,19 +440,27 @@ function cmdCheck() {
 
 function cmdShip(args) {
   if (!cmdCheck()) { console.error("ship aborted: typecheck failed"); process.exit(1); }
-  const msg = args.join(" ") || `ship: ${new Date().toISOString()}`;
+  const shouldPush = args.includes("--push");
+  const messageArgs = args.filter((arg) => arg !== "--push");
+  const msg = messageArgs.join(" ") || `ship: ${new Date().toISOString()}`;
   const dirty = execFileSync("git", ["-C", ROOT, "status", "--porcelain"]).toString().trim();
   if (dirty) {
     execFileSync("git", ["-C", ROOT, "add", "-A"]);
     const c = spawnSync("git", ["-C", ROOT, "commit", "-m", msg], { stdio: "inherit" });
     if (c.status !== 0) process.exit(c.status ?? 1);
   } else {
-    console.log("tree clean — pushing existing commits");
+    console.log("tree clean — nothing to commit");
+  }
+  const commit = execFileSync("git", ["-C", ROOT, "rev-parse", "--short", "HEAD"]).toString().trim();
+  if (!shouldPush) {
+    logBridge({ type: "ship-local", commit, message: msg, ok: true });
+    console.log(`shipped local ${commit}`);
+    console.log("not pushed; use `hii ship --push <message>` only when external publish is intended");
+    return;
   }
   const p = spawnSync("git", ["-C", ROOT, "push", "origin", "HEAD"], { stdio: "inherit" });
-  const commit = execFileSync("git", ["-C", ROOT, "rev-parse", "--short", "HEAD"]).toString().trim();
-  logBridge({ type: "ship", commit, message: msg, ok: p.status === 0 });
-  console.log(p.status === 0 ? `shipped ${commit}` : "push failed");
+  logBridge({ type: "ship-push", commit, message: msg, ok: p.status === 0 });
+  console.log(p.status === 0 ? `pushed ${commit}` : "push failed");
   process.exit(p.status ?? 1);
 }
 
@@ -521,7 +533,8 @@ usage: hii <command>
   jobs [n]            list recent local capability jobs
   og [capture <msg>]  infer the operational graph and likely next path
   check               typecheck (the inner fix loop)
-  ship [message]      typecheck -> commit all -> push (CI runs on GitHub)
+  ship [message]      typecheck -> local commit only
+  ship --push [msg]   explicit external push to origin
   dev|build|start     run the Next.js app
   registry <sub>      scan | doctor | export
   bridge send <msg>   message Yin (Codex) via ~/hii/bridge/messages

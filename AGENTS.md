@@ -14,6 +14,8 @@ This repo is an active multi-agent worktree. Codex, Claude, HII workers, and the
 - Treat broad untracked folders such as `.claude/`, `.hermes/`, screenshots, and `life/` as possibly owned by another agent or the user.
 - Preserve the current product repo at `/Users/ummi/hii`; do not confuse it with `/Users/ummi/hii-old`.
 - Keep secrets reference-only. Never print raw token values or copy credential files into docs, logs, or commits.
+- Complete work locally by default. Do not fetch, push, publish, upload, or call
+  external services unless the user explicitly asks for that external action.
 
 ## Current Product Direction
 
@@ -27,5 +29,7 @@ This repo is an active multi-agent worktree. Codex, Claude, HII workers, and the
 - Use `hii health --text` and `hii caps show` as compatibility-safe agent
   entrypoints.
 - Use `npm run build` for app validation.
+- Use `hii ship` only for local typecheck + commit. Use `hii ship --push` only
+  after explicit user approval to publish externally.
 - For billing work, also verify `/credits`, `/api/credits/quote`, `/api/credits/account`, `/api/credits/checkout`, `/api/capabilities/jobs`, and `/api/stripe/webhook` behavior where possible.
 - If a dev server is running, do not assume its `.next` cache survived `next build`; restart after build if routes become inconsistent.

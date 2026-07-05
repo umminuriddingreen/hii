@@ -61,6 +61,8 @@ hii caps            # backend capability registry
 hii og status       # ranked operational graph next path
 hii og capture ...  # append an operational graph event
 hii jobs            # recent local capability jobs
+hii ship            # typecheck and commit locally
+hii ship --push     # explicit external push to origin
 hii terminal        # local terminal coordinates
 hii terminal --open # open /terminal
 hii legacy ...      # old Python runtime at ~/hii-old

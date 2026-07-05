@@ -41,4 +41,8 @@ repo, bridge, capability, job, and runtime context.
   local state unless the task explicitly scopes them.
 - Do not copy or print raw secrets.
 - Do not reset or delete unclear user work.
+- Do not fetch, push, publish, upload, or call external services unless the
+  user explicitly asks for that external action.
+- `hii ship` is local-only by default. `hii ship --push` is the explicit
+  external publish command.
 - Run `npm run build` after meaningful HII product edits.
