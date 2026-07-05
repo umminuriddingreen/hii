@@ -4,6 +4,11 @@ This repo is an active multi-agent worktree. Codex, Claude, HII workers, and the
 
 ## Worktree Discipline
 
+- Start with `hii context --json` for a machine-readable map of repo paths,
+  runtime files, commands, capabilities, recent jobs, guardrails, and likely
+  next actions.
+- Then run `hii og status` when you need the operational graph's ranked next
+  path from current repo, bridge, job, and runtime context.
 - Check `git status --short` and targeted diffs before editing.
 - Do not reset, delete, format, or rewrite files outside your scoped task.
 - Treat broad untracked folders such as `.claude/`, `.hermes/`, screenshots, and `life/` as possibly owned by another agent or the user.
@@ -19,6 +24,8 @@ This repo is an active multi-agent worktree. Codex, Claude, HII workers, and the
 
 ## Verification
 
+- Use `hii health --text` and `hii caps show` as compatibility-safe agent
+  entrypoints.
 - Use `npm run build` for app validation.
 - For billing work, also verify `/credits`, `/api/credits/quote`, `/api/credits/account`, `/api/credits/checkout`, `/api/capabilities/jobs`, and `/api/stripe/webhook` behavior where possible.
 - If a dev server is running, do not assume its `.next` cache survived `next build`; restart after build if routes become inconsistent.

@@ -248,6 +248,103 @@ function cmdStatus() {
   console.log(`bridge:  ${fs.existsSync(BRIDGE_LOG) ? BRIDGE_LOG : "no log yet"}`);
 }
 
+function agentCommandCatalog() {
+  return [
+    { command: "hii health --text", purpose: "Human-readable repo, env-presence, codex, and bridge snapshot." },
+    { command: "hii context --json", purpose: "Machine-readable agent context snapshot; best first command for agents." },
+    { command: "hii caps show", purpose: "List backend-owned capabilities." },
+    { command: "hii og status", purpose: "Infer likely next work from repo, bridge, job, and runtime context." },
+    { command: "hii og capture <message>", purpose: "Append an operational-graph event for this turn." },
+    { command: "hii jobs", purpose: "List recent local capability jobs." },
+    { command: "hii doctor", purpose: "Run status plus registry doctor." },
+    { command: "npm run build", purpose: "Validate the Next.js product app." }
+  ];
+}
+
+function agentContextPayload() {
+  const git = gitSnapshot();
+  const capabilities = readJsonArray(CAPABILITY_REGISTRY);
+  const jobs = readJsonl(LOCAL_CAPABILITY_JOBS)
+    .sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")))
+    .slice(0, 10);
+  const bridge = fileExistsSummary(BRIDGE_LOG);
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    identity: {
+      name: "HII",
+      role: "local-first capability terminal and exchange spine",
+      repo: ROOT,
+      runtime: RUNTIME,
+      legacyRuntime: path.join(os.homedir(), "hii-old")
+    },
+    git,
+    commands: agentCommandCatalog(),
+    capabilities: capabilities.map((capability) => ({
+      id: capability.id,
+      name: capability.name,
+      owner: capability.owner,
+      runtime: capability.runtime,
+      visibility: capability.visibility,
+      status: capability.status,
+      trustLevel: capability.trustLevel,
+      summary: capability.summary
+    })),
+    localState: {
+      bridge,
+      capabilityJobs: fileExistsSummary(LOCAL_CAPABILITY_JOBS),
+      ogEvents: fileExistsSummary(OG_EVENTS),
+      runtimePointers: runtimePointers(),
+      recentJobs: jobs.map((job) => ({
+        id: job.id,
+        capabilityId: job.capabilityId,
+        status: job.status,
+        createdAt: job.createdAt,
+        inputSummary: job.inputSummary ? redactText(job.inputSummary).slice(0, 280) : ""
+      }))
+    },
+    guardrails: [
+      "Check git status and targeted diffs before editing.",
+      "Do not reset, delete, or rewrite unclear user or agent work.",
+      "Leave .claude, .hermes, life, screenshots, and other local/generated state untracked unless explicitly scoped.",
+      "Keep secrets reference-only; report env presence, never raw values.",
+      "Run npm run build after meaningful HII product edits.",
+      "Use /Users/ummi/hii for the product repo and /Users/ummi/hii-old only through hii legacy."
+    ],
+    nextActions: inferNextActions({
+      prompt: "agent context accessibility",
+      git,
+      capabilities,
+      jobs,
+      bridge: readJsonl(BRIDGE_LOG).slice(-20)
+    })
+  };
+}
+
+function cmdContext(args) {
+  const payload = agentContextPayload();
+  if (args.includes("--json")) {
+    console.log(JSON.stringify(payload, null, 2));
+    return;
+  }
+  console.log("HII Agent Context\n");
+  console.log(`repo:    ${payload.identity.repo}`);
+  console.log(`runtime: ${payload.identity.runtime}`);
+  console.log(`git:     ${payload.git.branch}${payload.git.status.length ? ` (${payload.git.status.length} dirty)` : " (clean)"}`);
+  console.log(`caps:    ${payload.capabilities.length}`);
+  console.log(`jobs:    ${payload.localState.recentJobs.length}`);
+  console.log("\nBest commands:");
+  for (const item of payload.commands.slice(0, 6)) {
+    console.log(`  ${item.command}`);
+    console.log(`      ${item.purpose}`);
+  }
+  console.log("\nLikely next path:");
+  for (const item of payload.nextActions.slice(0, 3)) {
+    console.log(`  ${item.score} ${item.track}: ${item.action}`);
+  }
+  console.log("\nFor agents: hii context --json");
+}
+
 function cmdCaps() {
   const capabilities = readJsonArray(CAPABILITY_REGISTRY);
   if (capabilities.length === 0) {
@@ -355,6 +452,8 @@ switch (cmd) {
     }
     cmdCaps();
     break;
+  case "context": cmdContext(rest); break;
+  case "agent-context": cmdContext(rest); break;
   case "jobs": cmdJobs(rest); break;
   case "terminal": cmdTerminal(rest); break;
   case "og": cmdOg(rest); break;
@@ -389,6 +488,7 @@ usage: hii <command>
 
   terminal [--open]   show or open the local HII terminal
   health [--text]     compatibility alias for status
+  context [--json]    agent-readable repo/runtime/capability context
   status              env + git + codex snapshot
   doctor              status + registry doctor
   caps [show]         list backend-owned capabilities

@@ -54,9 +54,12 @@ continue to use Supabase, R2, and Stripe as the durable product database.
 
 ```sh
 hii                 # doorway help
+hii context --json  # machine-readable context for agents
 hii status          # machine/git/env snapshot
 hii doctor          # status + registry doctor
 hii caps            # backend capability registry
+hii og status       # ranked operational graph next path
+hii og capture ...  # append an operational graph event
 hii jobs            # recent local capability jobs
 hii terminal        # local terminal coordinates
 hii terminal --open # open /terminal
