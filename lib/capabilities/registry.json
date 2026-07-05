@@ -545,5 +545,35 @@
     ],
     "status": "ready",
     "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.exchange.link_stream_mcp",
+    "name": "Link Stream MCP Server",
+    "owner": "hii",
+    "runtime": "cloudflare-worker",
+    "summary": "Remote MCP server (Streamable HTTP, bearer-token gated) exposing post_link and list_links tools over the public link stream, deployable as the hii-stream-mcp Worker.",
+    "inputs": [
+      "MCP tools/call requests",
+      "LINKS_POST_TOKEN bearer auth"
+    ],
+    "outputs": [
+      "link_posts rows",
+      "public stream reads"
+    ],
+    "permissions": [
+      "bearer-token gate on /mcp",
+      "service-role insert",
+      "anon read"
+    ],
+    "visibility": "public",
+    "costModel": {
+      "type": "free",
+      "currency": "usd"
+    },
+    "evidence": [
+      "extensions/hii-stream-mcp/src/index.ts"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
   }
 ]
