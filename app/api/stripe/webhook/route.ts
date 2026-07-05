@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { stripe, stripeConfigured } from '@/lib/server/stripe';
 import { markOrderPaid } from '@/lib/server/data';
+import { applyCreditTopUp, parseCreditCurrency } from '@/lib/server/credits';
 
 /**
  * Marks an order paid on checkout.session.completed. The /api/download
@@ -24,9 +25,25 @@ export async function POST(request: NextRequest) {
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object as {
       id: string;
+      amount_total?: number | null;
       customer_details?: { email?: string | null } | null;
+      metadata?: Record<string, string> | null;
     };
-    await markOrderPaid(session.id, session.customer_details?.email ?? null);
+    if (session.metadata?.kind === 'credit_topup') {
+      const userId = session.metadata.user_id;
+      const currency = parseCreditCurrency(session.metadata.currency);
+      const amountCents = Number(session.metadata.amount_cents ?? session.amount_total ?? 0);
+      if (userId && Number.isFinite(amountCents) && amountCents > 0) {
+        await applyCreditTopUp({
+          userId,
+          currency,
+          amountCents: Math.round(amountCents),
+          stripeSessionId: session.id
+        });
+      }
+    } else {
+      await markOrderPaid(session.id, session.customer_details?.email ?? null);
+    }
   }
 
   return NextResponse.json({ received: true });

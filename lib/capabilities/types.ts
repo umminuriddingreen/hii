@@ -70,7 +70,15 @@ export type LedgerEntry = {
   jobId: string;
   capabilityId: string;
   actor: 'hii' | 'operator' | 'agent' | 'stripe' | 'system';
-  type: 'quote' | 'approval' | 'compute_cost' | 'platform_fee' | 'proof' | 'refund';
+  type:
+    | 'credit_topup'
+    | 'quote'
+    | 'reservation'
+    | 'approval'
+    | 'compute_cost'
+    | 'platform_fee'
+    | 'proof'
+    | 'refund';
   amountCents?: number;
   currency?: CapabilityQuote['currency'];
   summary: string;

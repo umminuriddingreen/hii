@@ -140,3 +140,350 @@ create policy "links_delete_own" on public.exchange_links for delete to authenti
 create policy "orders_select_own" on public.orders for select to authenticated using ((select auth.uid()) = seller_id);
 create policy "downloads_select_own" on public.download_events for select to authenticated
   using (exists (select 1 from public.assets a where a.id = download_events.asset_id and a.seller_id = (select auth.uid())));
+
+-- HII CREDITS / CAPABILITY JOBS --------------------------------------------
+-- Account balances are scoped per user and currency. Credits are internal
+-- prepaid balance, not transferable money.
+
+create table if not exists public.credit_accounts (
+  user_id        uuid not null references auth.users(id) on delete cascade,
+  currency       text not null default 'usd' check (currency in ('usd', 'eur', 'gbp', 'credits')),
+  balance_cents  integer not null default 0 check (balance_cents >= 0),
+  reserved_cents integer not null default 0 check (reserved_cents >= 0),
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  primary key (user_id, currency),
+  check (reserved_cents <= balance_cents)
+);
+
+create table if not exists public.capability_jobs (
+  id             uuid primary key default gen_random_uuid(),
+  user_id        uuid not null references auth.users(id) on delete cascade,
+  user_email     text,
+  capability_id  text not null,
+  input_summary  text not null,
+  status         text not null default 'queued'
+                 check (status in ('queued', 'running', 'waiting_approval', 'completed', 'failed', 'cancelled')),
+  currency       text not null default 'usd' check (currency in ('usd', 'eur', 'gbp', 'credits')),
+  quote          jsonb,
+  reserved_cents integer not null default 0 check (reserved_cents >= 0),
+  budget         text,
+  metadata       jsonb not null default '{}'::jsonb,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+
+create table if not exists public.credit_ledger_entries (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references auth.users(id) on delete cascade,
+  job_id        uuid references public.capability_jobs(id) on delete set null,
+  capability_id text,
+  actor         text not null default 'hii'
+                check (actor in ('hii', 'operator', 'agent', 'stripe', 'system')),
+  type          text not null
+                check (type in ('credit_topup', 'quote', 'reservation', 'approval', 'compute_cost', 'platform_fee', 'proof', 'refund')),
+  amount_cents  integer,
+  currency      text not null default 'usd' check (currency in ('usd', 'eur', 'gbp', 'credits')),
+  external_id   text unique,
+  summary       text not null,
+  created_at    timestamptz not null default now()
+);
+
+create table if not exists public.task_transcript_events (
+  id         uuid primary key default gen_random_uuid(),
+  job_id     uuid not null references public.capability_jobs(id) on delete cascade,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  actor      text not null check (actor in ('user', 'hii', 'agent', 'ledger', 'operator', 'system')),
+  text       text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.proof_artifacts (
+  id         uuid primary key default gen_random_uuid(),
+  job_id     uuid not null references public.capability_jobs(id) on delete cascade,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  kind       text not null check (kind in ('log', 'screenshot', 'download', 'receipt', 'link', 'json')),
+  label      text not null,
+  href       text,
+  path       text,
+  summary    text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_credit_ledger_user on public.credit_ledger_entries(user_id, created_at desc);
+create index if not exists idx_credit_ledger_job on public.credit_ledger_entries(job_id);
+create index if not exists idx_capability_jobs_user on public.capability_jobs(user_id, created_at desc);
+create index if not exists idx_transcript_events_job on public.task_transcript_events(job_id, created_at asc);
+create index if not exists idx_proof_artifacts_job on public.proof_artifacts(job_id, created_at asc);
+
+alter table public.credit_accounts         enable row level security;
+alter table public.credit_ledger_entries   enable row level security;
+alter table public.capability_jobs         enable row level security;
+alter table public.task_transcript_events  enable row level security;
+alter table public.proof_artifacts         enable row level security;
+
+grant select on public.credit_accounts to authenticated;
+grant select on public.credit_ledger_entries to authenticated;
+grant select, insert on public.capability_jobs to authenticated;
+grant select, insert on public.task_transcript_events to authenticated;
+grant select on public.proof_artifacts to authenticated;
+
+create policy "credit_accounts_select_own" on public.credit_accounts for select to authenticated
+  using ((select auth.uid()) = user_id);
+
+create policy "credit_ledger_select_own" on public.credit_ledger_entries for select to authenticated
+  using ((select auth.uid()) = user_id);
+
+create policy "capability_jobs_select_own" on public.capability_jobs for select to authenticated
+  using ((select auth.uid()) = user_id);
+
+create policy "capability_jobs_insert_own" on public.capability_jobs for insert to authenticated
+  with check ((select auth.uid()) = user_id);
+
+create policy "task_transcript_events_select_own" on public.task_transcript_events for select to authenticated
+  using ((select auth.uid()) = user_id);
+
+create policy "task_transcript_events_insert_own" on public.task_transcript_events for insert to authenticated
+  with check ((select auth.uid()) = user_id);
+
+create policy "proof_artifacts_select_own" on public.proof_artifacts for select to authenticated
+  using ((select auth.uid()) = user_id);
+
+create or replace function public.apply_credit_topup(
+  target_user_id uuid,
+  p_currency text,
+  p_amount_cents integer,
+  p_external_id text,
+  p_summary text
+)
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  inserted_count integer;
+begin
+  if p_amount_cents <= 0 then
+    raise exception 'credit top-up amount must be positive';
+  end if;
+
+  insert into public.credit_accounts (user_id, currency)
+  values (target_user_id, p_currency)
+  on conflict (user_id, currency) do nothing;
+
+  insert into public.credit_ledger_entries (
+    user_id, actor, type, amount_cents, currency, external_id, summary
+  )
+  values (
+    target_user_id, 'stripe', 'credit_topup', p_amount_cents, p_currency, p_external_id, p_summary
+  )
+  on conflict (external_id) do nothing;
+
+  get diagnostics inserted_count = row_count;
+
+  if inserted_count > 0 then
+    update public.credit_accounts
+    set balance_cents = balance_cents + p_amount_cents,
+        updated_at = now()
+    where user_id = target_user_id and currency = p_currency;
+  end if;
+end;
+$$;
+revoke execute on function public.apply_credit_topup(uuid, text, integer, text, text) from public, anon, authenticated;
+grant execute on function public.apply_credit_topup(uuid, text, integer, text, text) to service_role;
+
+create or replace function public.reserve_capability_job(
+  target_user_id uuid,
+  p_user_email text,
+  p_capability_id text,
+  p_input_summary text,
+  p_currency text,
+  p_quote jsonb,
+  p_reserved_cents integer,
+  p_status text,
+  p_budget text,
+  p_metadata jsonb,
+  p_transcript jsonb
+)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare
+  account_balance integer;
+  account_reserved integer;
+  new_job_id uuid;
+  transcript_event jsonb;
+begin
+  if p_reserved_cents <= 0 then
+    raise exception 'reserved amount must be positive';
+  end if;
+
+  insert into public.credit_accounts (user_id, currency)
+  values (target_user_id, p_currency)
+  on conflict (user_id, currency) do nothing;
+
+  select balance_cents, reserved_cents into account_balance, account_reserved
+  from public.credit_accounts
+  where user_id = target_user_id and currency = p_currency
+  for update;
+
+  if account_balance - account_reserved < p_reserved_cents then
+    raise exception 'insufficient credit balance';
+  end if;
+
+  update public.credit_accounts
+  set reserved_cents = reserved_cents + p_reserved_cents,
+      updated_at = now()
+  where user_id = target_user_id and currency = p_currency;
+
+  insert into public.capability_jobs (
+    user_id, user_email, capability_id, input_summary, status, currency, quote,
+    reserved_cents, budget, metadata
+  )
+  values (
+    target_user_id, p_user_email, p_capability_id, p_input_summary, p_status, p_currency, p_quote,
+    p_reserved_cents, p_budget, coalesce(p_metadata, '{}'::jsonb)
+  )
+  returning id into new_job_id;
+
+  insert into public.credit_ledger_entries (
+    user_id, job_id, capability_id, actor, type, amount_cents, currency, summary
+  )
+  values
+    (target_user_id, new_job_id, p_capability_id, 'hii', 'quote', null, p_currency, 'Created quoted HII capability job.'),
+    (target_user_id, new_job_id, p_capability_id, 'hii', 'reservation', p_reserved_cents, p_currency, 'Reserved credits for approved task execution.');
+
+  if jsonb_typeof(p_transcript) = 'array' then
+    for transcript_event in select * from jsonb_array_elements(p_transcript)
+    loop
+      insert into public.task_transcript_events (job_id, user_id, actor, text)
+      values (
+        new_job_id,
+        target_user_id,
+        coalesce(transcript_event->>'actor', 'hii'),
+        coalesce(transcript_event->>'text', '')
+      );
+    end loop;
+  end if;
+
+  return new_job_id;
+end;
+$$;
+revoke execute on function public.reserve_capability_job(uuid, text, text, text, text, jsonb, integer, text, text, jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.reserve_capability_job(uuid, text, text, text, text, jsonb, integer, text, text, jsonb, jsonb) to service_role;
+
+create or replace function public.finalize_capability_job(
+  target_user_id uuid,
+  p_job_id uuid,
+  p_status text,
+  p_compute_cost_cents integer,
+  p_platform_fee_cents integer,
+  p_summary text,
+  p_proof jsonb,
+  p_transcript jsonb
+)
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  job_record public.capability_jobs%rowtype;
+  actual_cents integer;
+  unused_cents integer;
+  proof_event jsonb;
+  transcript_event jsonb;
+begin
+  select * into job_record
+  from public.capability_jobs
+  where id = p_job_id and user_id = target_user_id
+  for update;
+
+  if not found then
+    raise exception 'capability job not found';
+  end if;
+
+  if job_record.status in ('completed', 'failed', 'cancelled') then
+    return;
+  end if;
+
+  actual_cents = greatest(coalesce(p_compute_cost_cents, 0), 0) + greatest(coalesce(p_platform_fee_cents, 0), 0);
+
+  if actual_cents > job_record.reserved_cents then
+    raise exception 'final cost exceeds reserved credits';
+  end if;
+
+  unused_cents = job_record.reserved_cents - actual_cents;
+
+  update public.credit_accounts
+  set balance_cents = balance_cents - actual_cents,
+      reserved_cents = reserved_cents - job_record.reserved_cents,
+      updated_at = now()
+  where user_id = target_user_id and currency = job_record.currency;
+
+  update public.capability_jobs
+  set status = p_status,
+      updated_at = now()
+  where id = p_job_id;
+
+  if p_compute_cost_cents > 0 then
+    insert into public.credit_ledger_entries (
+      user_id, job_id, capability_id, actor, type, amount_cents, currency, summary
+    )
+    values (
+      target_user_id, p_job_id, job_record.capability_id, 'system', 'compute_cost',
+      -p_compute_cost_cents, job_record.currency, 'Computer and model reimbursement.'
+    );
+  end if;
+
+  if p_platform_fee_cents > 0 then
+    insert into public.credit_ledger_entries (
+      user_id, job_id, capability_id, actor, type, amount_cents, currency, summary
+    )
+    values (
+      target_user_id, p_job_id, job_record.capability_id, 'hii', 'platform_fee',
+      -p_platform_fee_cents, job_record.currency, 'HII coordination fee.'
+    );
+  end if;
+
+  if unused_cents > 0 then
+    insert into public.credit_ledger_entries (
+      user_id, job_id, capability_id, actor, type, amount_cents, currency, summary
+    )
+    values (
+      target_user_id, p_job_id, job_record.capability_id, 'hii', 'refund',
+      unused_cents, job_record.currency, 'Released unused reserved credits.'
+    );
+  end if;
+
+  insert into public.credit_ledger_entries (
+    user_id, job_id, capability_id, actor, type, amount_cents, currency, summary
+  )
+  values (
+    target_user_id, p_job_id, job_record.capability_id, 'hii', 'proof',
+    null, job_record.currency, coalesce(p_summary, 'Capability job finalized with proof.')
+  );
+
+  if jsonb_typeof(p_proof) = 'array' then
+    for proof_event in select * from jsonb_array_elements(p_proof)
+    loop
+      insert into public.proof_artifacts (job_id, user_id, kind, label, href, path, summary)
+      values (
+        p_job_id,
+        target_user_id,
+        coalesce(proof_event->>'kind', 'receipt'),
+        coalesce(proof_event->>'label', 'Proof artifact'),
+        proof_event->>'href',
+        proof_event->>'path',
+        proof_event->>'summary'
+      );
+    end loop;
+  end if;
+
+  if jsonb_typeof(p_transcript) = 'array' then
+    for transcript_event in select * from jsonb_array_elements(p_transcript)
+    loop
+      insert into public.task_transcript_events (job_id, user_id, actor, text)
+      values (
+        p_job_id,
+        target_user_id,
+        coalesce(transcript_event->>'actor', 'hii'),
+        coalesce(transcript_event->>'text', '')
+      );
+    end loop;
+  end if;
+end;
+$$;
+revoke execute on function public.finalize_capability_job(uuid, uuid, text, integer, integer, text, jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.finalize_capability_job(uuid, uuid, text, integer, integer, text, jsonb, jsonb) to service_role;
