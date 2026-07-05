@@ -30,6 +30,21 @@
     "trustLevel": "operator-reviewed"
   },
   {
+    "id": "hii.og.operational_graph",
+    "name": "OG Operational Graph",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Infer the user's likely next path from local conversation, repo, job, bridge, and capability context.",
+    "inputs": ["conversation turn", "repo state", "capability registry", "job history", "bridge logs", "runtime pointers"],
+    "outputs": ["operational graph event", "ranked next actions", "capability job receipt"],
+    "permissions": ["local-only", "redact secret-like values", "append-only runtime files"],
+    "visibility": "local",
+    "costModel": { "type": "free" },
+    "evidence": ["hii og", "~/.hii/og/events.jsonl", ".hii/capability-jobs.jsonl"],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
     "id": "hii.registry.scan",
     "name": "Scan Local Capability Registry",
     "owner": "hii",

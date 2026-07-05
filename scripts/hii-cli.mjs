@@ -13,6 +13,7 @@ const BRIDGE_DIR = path.join(ROOT, "bridge", "messages");
 const BRIDGE_LOG = path.join(RUNTIME, "bridge", "yin-codex.jsonl");
 const CAPABILITY_REGISTRY = path.join(ROOT, "lib", "capabilities", "registry.json");
 const LOCAL_CAPABILITY_JOBS = path.join(ROOT, ".hii", "capability-jobs.jsonl");
+const OG_EVENTS = path.join(RUNTIME, "og", "events.jsonl");
 
 function codexBin() {
   const pinned = path.join(os.homedir(), ".local", "bin", "codex");
@@ -78,6 +79,154 @@ function readJsonl(file) {
   } catch {
     return [];
   }
+}
+
+function redactText(value) {
+  return String(value)
+    .replace(/((?:api[_-]?key|token|secret|password|passwd|pwd|access[_-]?token|refresh[_-]?token)=)([^\s]+)/gi, "$1[redacted]")
+    .replace(/((?:OPENAI|ANTHROPIC|SUPABASE|STRIPE|GITHUB|VERCEL|CLOUDFLARE|AWS)[A-Z0-9_]*=)([^\s]+)/g, "$1[redacted]")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1[redacted]")
+    .replace(/(sk-[A-Za-z0-9_-]{12,})/g, "[redacted]")
+    .slice(0, 2000);
+}
+
+function gitSnapshot() {
+  try {
+    const branch = execFileSync("git", ["-C", ROOT, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).trim();
+    const status = execFileSync("git", ["-C", ROOT, "status", "--short"], { encoding: "utf8" })
+      .split("\n")
+      .filter(Boolean)
+      .map(redactText);
+    const recent = execFileSync("git", ["-C", ROOT, "log", "--oneline", "-5"], { encoding: "utf8" })
+      .split("\n")
+      .filter(Boolean);
+    return { branch, status, recent };
+  } catch {
+    return { branch: "unknown", status: [], recent: [] };
+  }
+}
+
+function fileExistsSummary(file) {
+  try {
+    const stat = fs.statSync(file);
+    return { path: file, exists: true, bytes: stat.size, updatedAt: stat.mtime.toISOString() };
+  } catch {
+    return { path: file, exists: false };
+  }
+}
+
+function runtimePointers() {
+  return [
+    fileExistsSummary(path.join(RUNTIME, "agent_context.md")),
+    fileExistsSummary(path.join(RUNTIME, "intent_state.json")),
+    fileExistsSummary(path.join(RUNTIME, "registry", "snapshot.json")),
+    fileExistsSummary(path.join(RUNTIME, "conversations", "bridge.jsonl")),
+    fileExistsSummary(BRIDGE_LOG),
+    fileExistsSummary(path.join(RUNTIME, "mind0", "state.json"))
+  ];
+}
+
+function inferNextActions({ prompt, git, capabilities, jobs, bridge }) {
+  const text = `${prompt} ${git.status.join(" ")} ${bridge.map((entry) => JSON.stringify(entry)).join(" ")}`.toLowerCase();
+  const actions = [];
+  if (git.status.length > 0) {
+    actions.push({
+      score: 95,
+      track: "repo hygiene",
+      coordinate: ROOT,
+      action: "review dirty files, commit product changes, leave local/private files untracked"
+    });
+  }
+  if (text.includes("og") || text.includes("oracle") || text.includes("persistent") || text.includes("conversation")) {
+    actions.push({
+      score: 92,
+      track: "operational graph",
+      coordinate: "hii og",
+      action: "capture this turn as an OG event and use local context to rank the next path"
+    });
+  }
+  if (capabilities.some((capability) => capability.id === "termite.rhino.managed_job")) {
+    actions.push({
+      score: text.includes("termite") || text.includes("rhino") ? 90 : 62,
+      track: "Termite capability",
+      coordinate: "/termite + termite.rhino.managed_job",
+      action: "keep Termite as the first proof capability with logs and artifacts"
+    });
+  }
+  if (text.includes("build") || text.includes("ci") || text.includes("local")) {
+    actions.push({
+      score: 88,
+      track: "local CI/CD",
+      coordinate: "npm run build",
+      action: "run build and CLI checks after each meaningful implementation step"
+    });
+  }
+  if (jobs.length > 0) {
+    actions.push({
+      score: 72,
+      track: "capability jobs",
+      coordinate: LOCAL_CAPABILITY_JOBS,
+      action: "summarize recent job receipts before spawning more work"
+    });
+  }
+  actions.push({
+    score: 55,
+    track: "HII exchange spine",
+    coordinate: "/upload + /x/[id]",
+    action: "preserve the file exchange loop as a first-party capability while extending OG"
+  });
+  return actions.sort((a, b) => b.score - a.score).slice(0, 5);
+}
+
+function appendOgEvent(event) {
+  fs.mkdirSync(path.dirname(OG_EVENTS), { recursive: true });
+  fs.appendFileSync(OG_EVENTS, `${JSON.stringify(event)}\n`);
+}
+
+function cmdOg(args) {
+  const sub = args[0] || "status";
+  const prompt = redactText(args.slice(1).join(" "));
+  const capabilities = readJsonArray(CAPABILITY_REGISTRY);
+  const jobs = readJsonl(LOCAL_CAPABILITY_JOBS).slice(-20);
+  const bridge = readJsonl(BRIDGE_LOG).slice(-20).map((entry) => ({
+    ts: entry.ts,
+    type: entry.type,
+    from: entry.from,
+    to: entry.to,
+    body: entry.body ? redactText(entry.body).slice(0, 280) : undefined
+  }));
+  const git = gitSnapshot();
+  const event = {
+    id: randomUUID(),
+    ts: new Date().toISOString(),
+    capabilityId: "hii.og.operational_graph",
+    mode: sub,
+    prompt,
+    sources: {
+      repo: ROOT,
+      branch: git.branch,
+      dirtyFiles: git.status.length,
+      capabilities: capabilities.length,
+      recentJobs: jobs.length,
+      bridgeEvents: bridge.length,
+      runtime: runtimePointers()
+    },
+    nextActions: inferNextActions({ prompt, git, capabilities, jobs, bridge })
+  };
+  if (sub === "capture" || prompt) appendOgEvent(event);
+  console.log("OG — Operational Graph\n");
+  console.log(`event:   ${event.id}`);
+  console.log(`mode:    ${event.mode}${sub === "capture" || prompt ? " (captured)" : ""}`);
+  console.log(`repo:    ${ROOT}`);
+  console.log(`git:     ${git.branch}${git.status.length ? ` (${git.status.length} dirty)` : " (clean)"}`);
+  console.log(`sources: capabilities=${capabilities.length} jobs=${jobs.length} bridge=${bridge.length}`);
+  console.log("\nLikely next path:");
+  for (const item of event.nextActions) {
+    console.log(`  ${item.score}  ${item.track}`);
+    console.log(`      coordinate: ${item.coordinate}`);
+    console.log(`      next:       ${item.action}`);
+  }
+  console.log(`\nlog: ${OG_EVENTS}`);
 }
 
 function cmdStatus() {
@@ -199,6 +348,8 @@ switch (cmd) {
   case "caps": cmdCaps(); break;
   case "jobs": cmdJobs(rest); break;
   case "terminal": cmdTerminal(rest); break;
+  case "og": cmdOg(rest); break;
+  case "loop": cmdOg(rest); break;
   case "registry": {
     const sub = rest[0];
     if (!["scan", "doctor", "export"].includes(sub)) {
@@ -232,6 +383,7 @@ usage: hii <command>
   doctor              status + registry doctor
   caps                list backend-owned capabilities
   jobs [n]            list recent local capability jobs
+  og [capture <msg>]  infer the operational graph and likely next path
   dev|build|start     run the Next.js app
   registry <sub>      scan | doctor | export
   bridge send <msg>   message Yin (Codex) via ~/hii/bridge/messages
