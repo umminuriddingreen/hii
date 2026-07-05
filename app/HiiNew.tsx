@@ -12,17 +12,68 @@ type SpawnedCommand = {
   lines?: string[];
 };
 
-const commands: Record<string, { label: string; href?: string; api?: string }> = {
-  '/terminal': { label: 'open terminal', href: '/terminal' },
-  '/credits': { label: 'quote capability work', href: '/credits' },
-  '/termite': { label: 'termite alpha', href: '/termite' },
-  '/upload': { label: 'new exchange', href: '/upload' },
-  '/dashboard': { label: 'dashboard', href: '/dashboard' },
-  '/login': { label: 'sign in', href: '/login' },
-  '/og': { label: 'operational graph', api: '/api/og/status' },
-  '/loop': { label: 'propose next plan', api: '/api/og/status' },
-  '/context': { label: 'agent context', api: '/api/context' }
+type Command = {
+  label: string;
+  href?: string;
+  api?: string;
+  lines?: string[];
+  group: 'social' | 'studio' | 'terminal' | 'services' | 'system';
 };
+
+const helpLines = [
+  'social    /feed /boards /home /post',
+  'studio    /studio /dashboard /upload /x',
+  'terminal  /terminal /sessions',
+  'services  /credits /jobs /capabilities /termite',
+  'system    /context /og /loop /installer /login',
+  'tip       type commands with or without /'
+];
+
+const commands: Record<string, Command> = {
+  '/help': { label: 'show command index', lines: helpLines, group: 'system' },
+  '/': { label: 'show command index', lines: helpLines, group: 'system' },
+
+  '/feed': { label: 'open home feed', href: '/feed', group: 'social' },
+  '/home': { label: 'open home feed', href: '/feed', group: 'social' },
+  '/boards': { label: 'open boards', href: '/boards', group: 'social' },
+  '/post': { label: 'create post', href: '/upload', group: 'social' },
+
+  '/studio': { label: 'creator studio', href: '/dashboard', group: 'studio' },
+  '/dashboard': { label: 'creator studio', href: '/dashboard', group: 'studio' },
+  '/upload': { label: 'publish asset', href: '/upload', group: 'studio' },
+  '/new': { label: 'publish asset', href: '/upload', group: 'studio' },
+  '/x': { label: 'open an exchange item by id: /x/<id>', lines: ['paste a full /x/<id> link or open from feed'], group: 'studio' },
+
+  '/terminal': { label: 'open terminal', href: '/terminal', group: 'terminal' },
+  '/sessions': { label: 'terminal sessions', api: '/api/terminal/sessions', group: 'terminal' },
+  '/agents': { label: 'terminal sessions', api: '/api/terminal/sessions', group: 'terminal' },
+
+  '/credits': { label: 'quote capability work', href: '/credits', group: 'services' },
+  '/account': { label: 'credit account', api: '/api/credits/account', group: 'services' },
+  '/jobs': { label: 'capability jobs', api: '/api/capabilities/jobs', group: 'services' },
+  '/capabilities': { label: 'capability catalog', api: '/api/capabilities', group: 'services' },
+  '/packs': { label: 'capability catalog', api: '/api/capabilities', group: 'services' },
+  '/termite': { label: 'termite alpha', href: '/termite', group: 'services' },
+  '/installer': { label: 'termite installer state', api: '/api/termite/installer', group: 'services' },
+  '/termite-jobs': { label: 'termite jobs', api: '/api/termite/jobs', group: 'services' },
+
+  '/login': { label: 'sign in', href: '/login', group: 'system' },
+  '/signin': { label: 'sign in', href: '/login', group: 'system' },
+  '/og': { label: 'operational graph', api: '/api/og/status', group: 'system' },
+  '/loop': { label: 'propose next plan', api: '/api/og/status', group: 'system' },
+  '/context': { label: 'agent context', api: '/api/context', group: 'system' }
+};
+
+function normalizeCommand(input: string) {
+  const key = input.trim().toLowerCase();
+  if (!key) return '/';
+  if (key.startsWith('/x/')) return key;
+  return key.startsWith('/') ? key : `/${key}`;
+}
+
+function displayCommand(command: string) {
+  return command === '/' ? '/help' : command;
+}
 
 export function HiiNew() {
   const [name, setName] = useState('');
@@ -30,10 +81,12 @@ export function HiiNew() {
   const [command, setCommand] = useState('');
   const [spawned, setSpawned] = useState<SpawnedCommand[]>([]);
 
-  const suggestions = useMemo(
-    () => Object.keys(commands).filter((item) => item.startsWith(command || '/')).slice(0, 6),
-    [command]
-  );
+  const suggestions = useMemo(() => {
+    const key = normalizeCommand(command || '/');
+    const pool = Object.keys(commands).filter((item) => item !== '/');
+    if (key === '/') return ['/feed', '/boards', '/post', '/studio', '/terminal', '/capabilities', '/credits', '/help'];
+    return pool.filter((item) => item.startsWith(key)).slice(0, 10);
+  }, [command]);
 
   function submitName(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -66,22 +119,87 @@ export function HiiNew() {
         first ? `next ${first.track}: ${first.next}` : 'next waiting'
       ];
     }
+    if (key === '/capabilities' || key === '/packs') {
+      const capabilities = Array.isArray(data.capabilities) ? data.capabilities : [];
+      return [
+        `${capabilities.length} capabilities`,
+        ...capabilities.slice(0, 8).map((capability) => {
+          const item = capability as { id?: string; status?: string; visibility?: string };
+          return `${item.status ?? 'unknown'} ${item.id ?? 'capability'} ${item.visibility ?? ''}`.trim();
+        })
+      ];
+    }
+    if (key === '/jobs' || key === '/termite-jobs') {
+      const jobs = Array.isArray(data.jobs) ? data.jobs : [];
+      const warning = typeof data.warning === 'string' ? data.warning : null;
+      return [
+        `${jobs.length} jobs`,
+        ...(warning ? [warning] : []),
+        ...jobs.slice(0, 6).map((job) => {
+          const item = job as { id?: string; status?: string; capability_id?: string; capabilityId?: string; input_summary?: string; inputSummary?: string };
+          return `${item.status ?? 'unknown'} ${(item.capability_id ?? item.capabilityId ?? 'job')} ${(item.input_summary ?? item.inputSummary ?? item.id ?? '').toString().slice(0, 64)}`;
+        })
+      ];
+    }
+    if (key === '/sessions' || key === '/agents') {
+      const agents = Array.isArray(data.agents) ? data.agents : [];
+      return [
+        `${agents.length} terminal sessions`,
+        ...agents.slice(0, 8).map((agent) => {
+          const item = agent as { name?: string; pid?: number; status?: string; title?: string };
+          return `${item.status ?? 'seen'} ${item.name ?? item.title ?? 'agent'} ${item.pid ?? ''}`.trim();
+        })
+      ];
+    }
+    if (key === '/account') {
+      const account = data.account as { balance_cents?: number; reserved_cents?: number; currency?: string } | undefined;
+      if (data.error) return [String(data.error)];
+      return [
+        `balance ${account?.balance_cents ?? 0} ${account?.currency ?? 'usd'}`,
+        `reserved ${account?.reserved_cents ?? 0}`,
+        data.warning ? String(data.warning) : 'account ready'
+      ];
+    }
+    if (key === '/installer') {
+      const actions = Array.isArray(data.actions) ? data.actions : [];
+      const state = data.state as { installed?: boolean; running?: boolean } | undefined;
+      return [
+        `installed ${String(state?.installed ?? 'unknown')}`,
+        `running ${String(state?.running ?? 'unknown')}`,
+        `${actions.length} installer actions`
+      ];
+    }
+    if (data.error) return [String(data.error)];
     return ['done'];
   }
 
   async function submitCommand(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const key = command.trim().toLowerCase();
-    const item = commands[key] ?? { label: key ? `spawn ${key}` : 'waiting' };
+    const key = normalizeCommand(command);
+    if (key.startsWith('/x/')) {
+      setSpawned((current) => [
+        ...current,
+        {
+          id: Date.now(),
+          command: key,
+          label: 'open exchange item',
+          href: key
+        }
+      ]);
+      setCommand('');
+      return;
+    }
+
+    const item = commands[key] ?? { label: key ? `spawn ${key}` : 'waiting', group: 'terminal' as const };
     const id = Date.now();
     setSpawned((current) => [
       ...current,
       {
         id,
-        command: key || '/',
+        command: displayCommand(key),
         label: item.label,
         href: item.href,
-        lines: item.api ? ['loading'] : undefined
+        lines: item.lines ?? (item.api ? ['loading'] : undefined)
       }
     ]);
     setCommand('');
@@ -173,7 +291,7 @@ export function HiiNew() {
               <button
                 key={item}
                 type="button"
-                onClick={() => setCommand(item)}
+                onClick={() => setCommand(item.slice(1))}
                 className="font-mono hover:text-black"
               >
                 {item}

@@ -9,6 +9,7 @@ next-env.d.ts
 .DS_Store
 *.tsbuildinfo
 .hii/
+supabase/.temp/
 
 .claude/worktrees/
 .hermes/

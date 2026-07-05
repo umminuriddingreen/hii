@@ -48,6 +48,10 @@ export type ExchangeLinkFull = ExchangeLink & {
   seller_name: string | null;
 };
 
+export type FeedItem = ExchangeLinkFull & {
+  seller_handle: string | null;
+};
+
 function db() {
   const client = supabaseAdmin();
   if (!client) throw new Error('Supabase service role not configured');
@@ -70,6 +74,40 @@ export async function getExchangeLink(id: string): Promise<ExchangeLinkFull | nu
     .single();
 
   return { ...(data as ExchangeLinkFull), seller_name: profile?.display_name ?? null };
+}
+
+export async function getPublicFeed(): Promise<FeedItem[]> {
+  const { data } = await db()
+    .from('exchange_links')
+    .select('*, asset:assets(*), license:licenses(*)')
+    .eq('active', true)
+    .order('created_at', { ascending: false })
+    .limit(48);
+
+  const links = (data ?? []).filter((item) => item.asset) as ExchangeLinkFull[];
+  const sellerIds = Array.from(new Set(links.map((link) => link.seller_id)));
+  const { data: profiles } = sellerIds.length
+    ? await db().from('profiles').select('id, display_name').in('id', sellerIds)
+    : { data: [] };
+
+  const profileById = new Map(
+    (profiles ?? []).map((profile) => [
+      profile.id as string,
+      {
+        displayName: (profile.display_name as string | null) ?? null,
+        handle: null
+      }
+    ])
+  );
+
+  return links.map((link) => {
+    const profile = profileById.get(link.seller_id);
+    return {
+      ...link,
+      seller_name: profile?.displayName ?? null,
+      seller_handle: profile?.handle ?? null
+    };
+  });
 }
 
 /** Best-effort view counter for analytics; never blocks the page. */

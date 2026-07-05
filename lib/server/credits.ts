@@ -47,8 +47,41 @@ export type DurableCapabilityJob = {
   reserved_cents: number;
   budget: string | null;
   metadata: Record<string, unknown>;
+  runner_id: string | null;
+  assigned_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
   created_at: string;
   updated_at: string;
+  capabilityId?: string;
+  inputSummary?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  logs?: string[];
+  ledger?: CreditLedgerEntry[];
+  proofArtifacts?: CreditProofArtifact[];
+};
+
+export type CreditTranscriptEvent = {
+  id: string;
+  job_id: string;
+  user_id: string;
+  actor: 'user' | 'hii' | 'agent' | 'ledger' | 'operator' | 'system';
+  text: string;
+  created_at: string;
+};
+
+export type CreditProofArtifact = {
+  id: string;
+  job_id: string;
+  user_id: string;
+  kind: 'log' | 'screenshot' | 'download' | 'receipt' | 'link' | 'json';
+  label: string;
+  href: string | null;
+  path: string | null;
+  summary: string | null;
+  created_at: string;
+  createdAt?: string;
 };
 
 export const creditCurrencies: CreditCurrency[] = ['usd', 'eur', 'gbp', 'credits'];
@@ -111,12 +144,91 @@ export async function getCreditDashboard(userId: string, currency: CreditCurrenc
   if (ledgerError) throw ledgerError;
   if (jobsError) throw jobsError;
 
+  const hydratedJobs = await hydrateDurableJobs(
+    (jobs ?? []) as DurableCapabilityJob[],
+    (ledger ?? []) as CreditLedgerEntry[]
+  );
+
   return {
     account,
     accounts: (accounts ?? []) as CreditAccount[],
     ledger: (ledger ?? []) as CreditLedgerEntry[],
-    jobs: (jobs ?? []) as DurableCapabilityJob[]
+    jobs: hydratedJobs
   };
+}
+
+async function hydrateDurableJobs(jobs: DurableCapabilityJob[], knownLedger: CreditLedgerEntry[] = []) {
+  if (jobs.length === 0) return [];
+
+  const client = db();
+  const jobIds = jobs.map((job) => job.id);
+  const knownJobIds = new Set(knownLedger.map((entry) => entry.job_id).filter(Boolean));
+
+  const [{ data: extraLedger, error: extraLedgerError }, { data: transcript, error: transcriptError }, { data: proof, error: proofError }] =
+    await Promise.all([
+      knownJobIds.size === jobIds.length
+        ? Promise.resolve({ data: [] as CreditLedgerEntry[], error: null })
+        : client
+            .from('credit_ledger_entries')
+            .select('*')
+            .in('job_id', jobIds)
+            .order('created_at', { ascending: false }),
+      client
+        .from('task_transcript_events')
+        .select('*')
+        .in('job_id', jobIds)
+        .order('created_at', { ascending: true }),
+      client
+        .from('proof_artifacts')
+        .select('*')
+        .in('job_id', jobIds)
+        .order('created_at', { ascending: true })
+    ]);
+
+  if (extraLedgerError) throw extraLedgerError;
+  if (transcriptError) throw transcriptError;
+  if (proofError) throw proofError;
+
+  const ledgerRows = [...knownLedger, ...((extraLedger ?? []) as CreditLedgerEntry[])];
+  const ledgerByJob = groupBy(ledgerRows, (entry) => entry.job_id);
+  const transcriptByJob = groupBy((transcript ?? []) as CreditTranscriptEvent[], (event) => event.job_id);
+  const proofByJob = groupBy((proof ?? []) as CreditProofArtifact[], (artifact) => artifact.job_id);
+
+  return jobs.map((job) => {
+    const jobLedger = ledgerByJob.get(job.id) ?? [];
+    const jobProof = (proofByJob.get(job.id) ?? []).map((artifact) => ({
+      ...artifact,
+      createdAt: artifact.created_at
+    }));
+    const jobTranscript = transcriptByJob.get(job.id) ?? [];
+    const logs =
+      jobTranscript.length > 0
+        ? jobTranscript.map((event) => `[${event.created_at}] ${event.actor}: ${event.text}`)
+        : jobLedger.map((entry) => `[${entry.created_at}] ledger/${entry.type}: ${entry.summary}`);
+
+    return {
+      ...job,
+      capabilityId: job.capability_id,
+      inputSummary: job.input_summary,
+      createdAt: job.created_at,
+      updatedAt: job.updated_at,
+      ledger: jobLedger,
+      proofArtifacts: jobProof,
+      logs
+    };
+  });
+}
+
+function groupBy<T>(rows: T[], keyFor: (row: T) => string | null) {
+  const grouped = new Map<string, T[]>();
+  for (const row of rows) {
+    const key = keyFor(row);
+    if (!key) continue;
+    const existing = grouped.get(key) ?? [];
+    existing.push(row);
+    grouped.set(key, existing);
+  }
+  return grouped;
 }
 
 export async function applyCreditTopUp(args: {
@@ -164,7 +276,8 @@ export async function reserveCapabilityJob(args: {
     .eq('id', data as string)
     .single();
   if (jobError) throw jobError;
-  return job as DurableCapabilityJob;
+  const [hydrated] = await hydrateDurableJobs([job as DurableCapabilityJob]);
+  return hydrated;
 }
 
 export async function finalizeCapabilityJob(args: {

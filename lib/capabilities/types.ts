@@ -3,6 +3,7 @@ export type CapabilityRuntime =
   | 'local-cli'
   | 'local-process'
   | 'managed-operator'
+  | 'trusted-runner'
   | 'supabase-flow';
 
 export type CapabilityVisibility = 'local' | 'authenticated' | 'public';
@@ -30,6 +31,13 @@ export type CapabilityDefinition = {
   evidence: string[];
   status: CapabilityStatus;
   trustLevel: CapabilityTrustLevel;
+  runnerSupport?: {
+    requiredCapabilityId: string;
+    handler: string;
+    expectedInputs: string[];
+    expectedOutputs: string[];
+    verification: string[];
+  };
 };
 
 export type CapabilityJobStatus =

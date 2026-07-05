@@ -5,7 +5,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 const ROOT = path.join(os.homedir(), "hii");
 const RUNTIME = path.join(os.homedir(), ".hii");
@@ -20,6 +20,10 @@ const LOOP_DECISIONS = path.join(LOOP_DIR, "decisions.jsonl");
 const LOOP_NOTES = path.join(LOOP_DIR, "notes.jsonl");
 const LOOP_DISABLED = path.join(LOOP_DIR, "disabled");
 const PACK_EXPORT_DIR = path.join(RUNTIME, "packs", "exports");
+const MONEY_DIR = path.join(RUNTIME, "money");
+const MONEY_IDEAS = path.join(MONEY_DIR, "ideas.jsonl");
+const MONEY_OFFERS_DIR = path.join(MONEY_DIR, "offers");
+const RUNNER_CAPABILITIES = ["termite.rhino.managed_job"];
 
 function codexBin() {
   const pinned = path.join(os.homedir(), ".local", "bin", "codex");
@@ -50,6 +54,89 @@ function readEnvFile() {
     }
   }
   return values;
+}
+
+function cleanEnvValue(value) {
+  return String(value ?? "").replace(/^['"]|['"]$/g, "");
+}
+
+function appBaseUrl() {
+  const env = readEnvFile();
+  return cleanEnvValue(process.env.NEXT_PUBLIC_BASE_URL || env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
+}
+
+function runnerToken() {
+  return process.env.HII_RUNNER_TOKEN || cleanEnvValue(readEnvFile().HII_RUNNER_TOKEN || "");
+}
+
+function supabaseEnvConfigured() {
+  const env = readEnvFile();
+  const url = cleanEnvValue(process.env.NEXT_PUBLIC_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || "");
+  const key = cleanEnvValue(process.env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_ROLE_KEY || "");
+  return Boolean(url && key);
+}
+
+function createRunnerToken() {
+  return `hii_runner_${randomBytes(32).toString("base64url")}`;
+}
+
+function hashRunnerToken(token) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+async function supabaseRpc(name, body) {
+  const env = readEnvFile();
+  const url = cleanEnvValue(process.env.NEXT_PUBLIC_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || "");
+  const key = cleanEnvValue(process.env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_ROLE_KEY || "");
+  if (!url || !key) {
+    throw new Error("NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for runner init.");
+  }
+  const res = await fetch(`${url.replace(/\/$/, "")}/rest/v1/rpc/${name}`, {
+    method: "POST",
+    headers: {
+      apikey: key,
+      authorization: `Bearer ${key}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || `${name} failed with ${res.status}`);
+  return data;
+}
+
+async function supabaseRows(table, params) {
+  const env = readEnvFile();
+  const url = cleanEnvValue(process.env.NEXT_PUBLIC_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || "");
+  const key = cleanEnvValue(process.env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_ROLE_KEY || "");
+  if (!url || !key) return null;
+  const search = new URLSearchParams(params);
+  const res = await fetch(`${url.replace(/\/$/, "")}/rest/v1/${table}?${search.toString()}`, {
+    headers: {
+      apikey: key,
+      authorization: `Bearer ${key}`,
+      accept: "application/json"
+    }
+  });
+  const data = await res.json().catch(() => []);
+  if (!res.ok) throw new Error(data.message || `${table} query failed with ${res.status}`);
+  return Array.isArray(data) ? data : [];
+}
+
+async function runnerFetch(pathname, options = {}) {
+  const token = runnerToken();
+  if (!token) {
+    throw new Error("HII_RUNNER_TOKEN is required. Run `hii runner init <name>` first.");
+  }
+  const headers = {
+    authorization: `Bearer ${token}`,
+    ...(options.body ? { "content-type": "application/json" } : {}),
+    ...(options.headers ?? {})
+  };
+  const res = await fetch(`${appBaseUrl()}${pathname}`, { ...options, headers });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `${options.method || "GET"} ${pathname} failed with ${res.status}`);
+  return data;
 }
 
 function logBridge(event) {
@@ -93,13 +180,57 @@ function appendJsonl(file, entry) {
   return entry;
 }
 
-function redactText(value) {
+function slug(input) {
+  return String(input || "idea")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 72) || "idea";
+}
+
+function parseFlagValue(args, name, fallback) {
+  const index = args.indexOf(name);
+  if (index === -1) return fallback;
+  const value = args[index + 1];
+  return value && !value.startsWith("--") ? value : fallback;
+}
+
+function withoutFlags(args, flagsWithValues = [], booleanFlags = []) {
+  const out = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (flagsWithValues.includes(arg)) {
+      i += 1;
+      continue;
+    }
+    if (booleanFlags.includes(arg)) continue;
+    out.push(arg);
+  }
+  return out;
+}
+
+function sanitizeText(value) {
   return String(value)
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/[\b\r]/g, "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
     .replace(/((?:api[_-]?key|token|secret|password|passwd|pwd|access[_-]?token|refresh[_-]?token)=)([^\s]+)/gi, "$1[redacted]")
     .replace(/((?:OPENAI|ANTHROPIC|SUPABASE|STRIPE|GITHUB|VERCEL|CLOUDFLARE|AWS)[A-Z0-9_]*=)([^\s]+)/g, "$1[redacted]")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1[redacted]")
-    .replace(/(sk-[A-Za-z0-9_-]{12,})/g, "[redacted]")
+    .replace(/(sk-[A-Za-z0-9_-]{12,})/g, "[redacted]");
+}
+
+function redactText(value) {
+  return sanitizeText(value)
     .slice(0, 2000);
+}
+
+function cleanModelOutput(value) {
+  let text = sanitizeText(value);
+  text = text.replace(/^Thinking\.\.\.[\s\S]*?\.\.\.done thinking\.\s*/i, "");
+  const firstBrief = text.indexOf("# Idea to Offer");
+  if (firstBrief > 0) text = text.slice(firstBrief);
+  return text.trim();
 }
 
 function gitSnapshot() {
@@ -518,8 +649,12 @@ function agentCommandCatalog() {
     { command: "hii loop once", purpose: "Propose the next user-proxy plan locally; do not act until y/n approval." },
     { command: "hii loop note <note>", purpose: "Add user notes to steer the persistent loop." },
     { command: "hii loop decide <yes|no>", purpose: "Approve or reject the latest proposed plan." },
+    { command: "hii money idea <idea>", purpose: "Use local models to turn a rough idea into a sellable offer and execution handoff." },
+    { command: "hii money list", purpose: "List recent local idea-to-offer receipts." },
     { command: "hii pack list", purpose: "List compartmentalized HII capability packs." },
     { command: "hii pack export <id>", purpose: "Write a local-only pack manifest for staged shipping." },
+    { command: "hii runner init <name>", purpose: "Register an owned runner and print its local token once." },
+    { command: "hii runner start --once", purpose: "Heartbeat, claim one whitelisted capability job, stream logs, and exit." },
     { command: "hii jobs", purpose: "List recent local capability jobs." },
     { command: "hii doctor", purpose: "Run status plus registry doctor." },
     { command: "hii ship", purpose: "Typecheck and commit locally; does not push." },
@@ -633,23 +768,385 @@ function cmdCaps() {
   }
 }
 
-function cmdJobs(args) {
+async function readDurableJobs(limit) {
+  const durable = await supabaseRows("capability_jobs", {
+    select: "*",
+    order: "created_at.desc",
+    limit: String(limit)
+  });
+  if (!durable) return { jobs: [], configured: false };
+  if (durable.length === 0) return { jobs: [], configured: true };
+
+  const jobIds = durable.map((job) => job.id).filter(Boolean);
+  const jobFilter = `in.(${jobIds.join(",")})`;
+  const [ledger, proof] = await Promise.all([
+    supabaseRows("credit_ledger_entries", {
+      select: "*",
+      job_id: jobFilter,
+      order: "created_at.desc"
+    }),
+    supabaseRows("proof_artifacts", {
+      select: "*",
+      job_id: jobFilter,
+      order: "created_at.asc"
+    })
+  ]);
+
+  const ledgerByJob = groupRows(ledger ?? [], (entry) => entry.job_id);
+  const proofByJob = groupRows(proof ?? [], (entry) => entry.job_id);
+
+  return {
+    configured: true,
+    jobs: durable.map((job) => ({
+      ...job,
+      capabilityId: job.capability_id,
+      inputSummary: job.input_summary,
+      createdAt: job.created_at,
+      budget: job.budget,
+      ledger: ledgerByJob.get(job.id) ?? [],
+      proofArtifacts: proofByJob.get(job.id) ?? [],
+      source: "supabase"
+    }))
+  };
+}
+
+function groupRows(rows, keyFor) {
+  const out = new Map();
+  for (const row of rows) {
+    const key = keyFor(row);
+    if (!key) continue;
+    const existing = out.get(key) ?? [];
+    existing.push(row);
+    out.set(key, existing);
+  }
+  return out;
+}
+
+async function cmdJobs(args) {
   const limit = Number(args[0] ?? 20);
-  const jobs = readJsonl(LOCAL_CAPABILITY_JOBS)
-    .sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")))
-    .slice(0, Number.isFinite(limit) ? limit : 20);
+  const resolvedLimit = Number.isFinite(limit) ? limit : 20;
+  const localJobs = readJsonl(LOCAL_CAPABILITY_JOBS).map((job) => ({ ...job, source: "local" }));
+  let durableResult = { jobs: [], configured: false };
+  let durableWarning = null;
+  try {
+    durableResult = await readDurableJobs(resolvedLimit);
+  } catch (error) {
+    durableResult.configured = supabaseEnvConfigured();
+    durableWarning = error instanceof Error ? error.message : String(error);
+  }
+
+  const byId = new Map();
+  for (const job of [...localJobs, ...durableResult.jobs]) {
+    byId.set(job.id, job);
+  }
+  const jobs = Array.from(byId.values())
+    .sort((a, b) => String(b.createdAt ?? b.created_at ?? "").localeCompare(String(a.createdAt ?? a.created_at ?? "")))
+    .slice(0, resolvedLimit);
   if (jobs.length === 0) {
-    console.log("No local capability jobs yet.");
+    console.log("No capability jobs yet.");
+    if (!durableResult.configured) console.log("durable: Supabase env not configured; showing local JSONL only.");
+    if (durableWarning) console.log(`durable warning: ${redactText(durableWarning)}`);
     return;
   }
-  console.log("Recent local capability jobs\n");
+  console.log("Recent HII capability jobs\n");
+  if (!durableResult.configured) console.log("durable: Supabase env not configured; showing local JSONL only.\n");
+  if (durableWarning) console.log(`durable schema warning: ${redactText(durableWarning)}\n`);
   for (const job of jobs) {
-    console.log(`${job.id}  ${job.status ?? "unknown"}  ${job.capabilityId ?? "unknown"}`);
-    console.log(`  created: ${job.createdAt ?? "unknown"}`);
-    console.log(`  input:   ${job.inputSummary ?? ""}`);
+    console.log(`${job.id}  ${job.status ?? "unknown"}  ${job.capabilityId ?? job.capability_id ?? "unknown"}`);
+    console.log(`  source:  ${job.source ?? "unknown"}`);
+    console.log(`  created: ${job.createdAt ?? job.created_at ?? "unknown"}`);
+    console.log(`  input:   ${job.inputSummary ?? job.input_summary ?? ""}`);
     if (job.budget) console.log(`  budget:  ${job.budget}`);
+    console.log(`  ledger:  ${job.ledger?.length ?? 0}`);
+    console.log(`  proof:   ${job.proofArtifacts?.length ?? 0}`);
     console.log("");
   }
+}
+
+function recentMoneyContext() {
+  const ideas = readJsonl(MONEY_IDEAS).slice(-5);
+  const jobs = readJsonl(LOCAL_CAPABILITY_JOBS).slice(-10);
+  return {
+    recentIdeas: ideas.map((idea) => ({
+      id: idea.id,
+      createdAt: idea.createdAt,
+      idea: redactText(idea.idea ?? "").slice(0, 180),
+      model: idea.model,
+      status: idea.status
+    })),
+    recentJobs: jobs.map((job) => ({
+      id: job.id,
+      capabilityId: job.capabilityId,
+      status: job.status,
+      inputSummary: redactText(job.inputSummary ?? "").slice(0, 180)
+    }))
+  };
+}
+
+function moneyPrompt({ idea, model, flags }) {
+  const context = recentMoneyContext();
+  return [
+    "You are HII's local money loop.",
+    "Your job is to turn a rough idea into a near-term sellable offer for Ummi.",
+    "",
+    "Constraints:",
+    "- Optimize for making money soon, not abstract strategy.",
+    "- Prefer local-first workflows, HII, Codex, Claude Code, Ollama, Rhino/Termite, web intelligence, small business services, and packaged digital outputs when relevant.",
+    "- Be concrete, direct, and short enough to act on today.",
+    "- Return final answer only. Do not include thinking, reasoning traces, or terminal control output.",
+    "- Do not claim buyers exist unless this prompt gives evidence. Frame buyer/pain as hypotheses when needed.",
+    "- No external outreach is being sent here. Produce a handoff prompt only.",
+    "",
+    `Requested model: ${model}`,
+    `Mode: ${flags.deep ? "deep" : flags.write ? "write" : "standard"}`,
+    "",
+    "Recent local HII context:",
+    JSON.stringify(context, null, 2),
+    "",
+    "Rough idea:",
+    idea,
+    "",
+    "Return exactly these Markdown sections:",
+    "# Idea to Offer",
+    "## Buyer",
+    "## Pain",
+    "## Offer",
+    "## Proof",
+    "## Price",
+    "## Fastest Ship",
+    "## Risks",
+    "## Next 2 Hours",
+    "## Handoff Prompt",
+    "",
+    "In Handoff Prompt, write one concise prompt for Codex or Claude Code to execute the next build/sales asset step. Do not include shell commands that publish, email, charge money, delete, reset, or push."
+  ].join("\n");
+}
+
+function fallbackMoneyBrief({ idea, model, error }) {
+  const cleanIdea = redactText(idea);
+  return [
+    "# Idea to Offer",
+    "",
+    "## Buyer",
+    "Likely buyer is the person or business that already pays for this outcome manually. Validate with one concrete example before building further.",
+    "",
+    "## Pain",
+    `They need a faster, cleaner, or cheaper path from request to finished output around: ${cleanIdea}`,
+    "",
+    "## Offer",
+    "Package the workflow as a fixed-scope service with one clear deliverable, one revision, and a fast turnaround.",
+    "",
+    "## Proof",
+    "Create one before/after, demo brief, screenshot, sample asset, or local receipt that shows the output is real.",
+    "",
+    "## Price",
+    "Start with a simple paid test: $50-$250 depending on effort and buyer urgency. Raise price only after one completed delivery.",
+    "",
+    "## Fastest Ship",
+    "Make a one-page offer, one sample output, and one direct outreach list of 10 likely buyers.",
+    "",
+    "## Risks",
+    "The buyer may not value the output, the scope may be too broad, or the proof may not be specific enough.",
+    "",
+    "## Next 2 Hours",
+    "Define the exact deliverable, create one sample, write the offer copy, and identify 10 reachable buyers.",
+    "",
+    "## Handoff Prompt",
+    `Turn this idea into a concrete first sellable asset: ${cleanIdea}. Create the smallest proof artifact, offer copy, price/package, and a 10-buyer outreach list. Keep the work local-first and do not publish, push, email, or charge anyone.`,
+    "",
+    `<!-- partial: local model ${model} unavailable: ${redactText(error)} -->`
+  ].join("\n");
+}
+
+async function runOllamaMoney({ model, prompt }) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 180000);
+  try {
+    const response = await fetch("http://127.0.0.1:11434/api/generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model,
+        prompt,
+        stream: false
+      }),
+      signal: controller.signal
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `ollama generate failed with ${response.status}`);
+    }
+    const output = cleanModelOutput(data.response || "");
+    if (!output) throw new Error("ollama returned an empty response");
+    return output;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function extractHandoffPrompt(brief) {
+  const match = brief.match(/## Handoff Prompt\s+([\s\S]*?)(?:\n## |\n<!--|$)/);
+  return (match?.[1]?.trim() || "Use the money-loop brief above to build the smallest proof artifact and offer copy. Do not publish, push, email, or charge anyone.")
+    .replace(/^["']|["']$/g, "");
+}
+
+function printMoneyHandoff({ handoff, brief }) {
+  const prompt = extractHandoffPrompt(brief);
+  if (handoff === "codex") {
+    console.log("\nHandoff command, not run:");
+    console.log(`hii codex ${JSON.stringify(prompt)}`);
+  } else if (handoff === "claude") {
+    console.log("\nClaude Code handoff prompt, not run:");
+    console.log(prompt);
+  }
+}
+
+async function cmdMoney(args) {
+  const sub = args[0] || "help";
+  if (sub === "idea") {
+    const rest = args.slice(1);
+    const flags = {
+      json: rest.includes("--json"),
+      deep: rest.includes("--deep"),
+      write: rest.includes("--write")
+    };
+    const requestedModel = parseFlagValue(rest, "--model", null);
+    const handoff = parseFlagValue(rest, "--handoff", "none");
+    const model = requestedModel || (flags.deep ? "qwen-deep" : flags.write ? "gemma-write" : "qwen-work");
+    const idea = withoutFlags(rest, ["--model", "--handoff"], ["--json", "--deep", "--write"]).join(" ").trim();
+    if (!idea) {
+      console.error("usage: hii money idea <rough idea> [--model qwen-work] [--deep] [--write] [--json] [--handoff codex|claude|none]");
+      process.exit(1);
+    }
+    if (!["codex", "claude", "none"].includes(handoff)) {
+      console.error("handoff must be one of: codex, claude, none");
+      process.exit(1);
+    }
+
+    const id = randomUUID();
+    const prompt = moneyPrompt({ idea: redactText(idea), model, flags });
+    let status = "completed";
+    let error;
+    let brief;
+    try {
+      brief = await runOllamaMoney({ model, prompt });
+    } catch (err) {
+      status = "partial";
+      error = err instanceof Error ? err.message : String(err);
+      brief = fallbackMoneyBrief({ idea, model, error });
+    }
+    const receipt = writeMoneyReceipt({ id, idea, model, status, brief, prompt, handoff, error });
+    if (flags.json) {
+      console.log(JSON.stringify({ receipt, brief }, null, 2));
+      return;
+    }
+    console.log(brief.trim());
+    console.log(`\nreceipt: ${receipt.id}`);
+    console.log(`offer:   ${receipt.offerPath}`);
+    console.log(`status:  ${receipt.status}`);
+    printMoneyHandoff({ handoff, brief });
+    return;
+  }
+  if (sub === "list") {
+    const limit = Number(args[1] ?? 10);
+    const ideas = readJsonl(MONEY_IDEAS)
+      .sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")))
+      .slice(0, Number.isFinite(limit) ? limit : 10);
+    if (ideas.length === 0) {
+      console.log("No money-loop ideas yet.");
+      return;
+    }
+    console.log("Recent HII money-loop ideas\n");
+    for (const idea of ideas) {
+      console.log(`${idea.id}  ${idea.status ?? "unknown"}  ${idea.model ?? "unknown"}`);
+      console.log(`  created: ${idea.createdAt ?? "unknown"}`);
+      console.log(`  idea:    ${idea.idea ?? ""}`);
+      console.log(`  offer:   ${idea.offerPath ?? ""}`);
+      console.log("");
+    }
+    return;
+  }
+  if (sub === "show") {
+    const id = args[1];
+    if (!id) {
+      console.error("usage: hii money show <id>");
+      process.exit(1);
+    }
+    const receipt = readJsonl(MONEY_IDEAS).find((entry) => entry.id === id);
+    if (!receipt) {
+      console.error(`money receipt not found: ${id}`);
+      process.exit(1);
+    }
+    if (receipt.offerPath && fs.existsSync(receipt.offerPath)) {
+      console.log(fs.readFileSync(receipt.offerPath, "utf8").trim());
+      console.log(`\nreceipt: ${receipt.id}`);
+      console.log(`offer:   ${receipt.offerPath}`);
+      return;
+    }
+    console.log(JSON.stringify(receipt, null, 2));
+    return;
+  }
+  console.error("usage: hii money <idea|list|show>");
+  process.exit(sub === "help" ? 0 : 1);
+}
+
+function writeMoneyReceipt({ id, idea, model, status, brief, prompt, handoff, error }) {
+  const createdAt = new Date().toISOString();
+  const offerPath = path.join(MONEY_OFFERS_DIR, `${createdAt.replace(/[:.]/g, "-")}-${slug(idea)}.md`);
+  fs.mkdirSync(path.dirname(offerPath), { recursive: true });
+  fs.writeFileSync(offerPath, `${brief.trim()}\n`);
+  const receipt = appendJsonl(MONEY_IDEAS, {
+    id,
+    capabilityId: "hii.money.idea_to_offer",
+    createdAt,
+    idea: redactText(idea),
+    model,
+    status,
+    handoff,
+    offerPath,
+    promptPreview: redactText(prompt).slice(0, 1200),
+    error: error ? redactText(error) : undefined
+  });
+  appendJsonl(LOCAL_CAPABILITY_JOBS, {
+    id,
+    capabilityId: "hii.money.idea_to_offer",
+    inputSummary: redactText(idea),
+    userId: "local",
+    status: status === "completed" ? "completed" : "failed",
+    budget: "local-only",
+    logs: [
+      `Generated idea-to-offer brief with ${model}.`,
+      `Offer brief: ${offerPath}`,
+      handoff === "none" ? "No execution handoff requested." : `Handoff target: ${handoff}.`
+    ],
+    ledger: [
+      {
+        id: randomUUID(),
+        jobId: id,
+        capabilityId: "hii.money.idea_to_offer",
+        actor: "hii",
+        type: "proof",
+        summary: "Created local idea-to-offer receipt and proof artifact.",
+        createdAt
+      }
+    ],
+    proofArtifacts: [{
+      id: randomUUID(),
+      kind: "log",
+      label: "Idea-to-offer brief",
+      path: offerPath,
+      summary: "Local HII money-loop offer brief.",
+      createdAt
+    }],
+    createdAt,
+    updatedAt: createdAt,
+    metadata: {
+      source: "hii money idea",
+      model,
+      moneyReceiptId: id
+    }
+  });
+  return receipt;
 }
 
 function packById(id) {
@@ -784,6 +1281,95 @@ function cmdCheck() {
   return r.status === 0;
 }
 
+function runnerUsage() {
+  console.error("usage: hii runner <init <name>|start [--once]>");
+}
+
+async function cmdRunner(args) {
+  const sub = args[0];
+  if (sub === "init") {
+    const name = args.slice(1).join(" ").trim();
+    if (!name) {
+      runnerUsage();
+      process.exit(1);
+    }
+    const token = createRunnerToken();
+    const runner = await supabaseRpc("register_capability_runner", {
+      p_name: name,
+      p_token_hash: hashRunnerToken(token),
+      p_capabilities: RUNNER_CAPABILITIES
+    });
+    console.log("HII runner registered\n");
+    console.log(`runner: ${runner.name ?? name}`);
+    console.log(`id:     ${runner.id ?? "created"}`);
+    console.log("\nAdd this to your local runner environment. It is shown once:");
+    console.log(`export HII_RUNNER_TOKEN=${token}`);
+    console.log(`export NEXT_PUBLIC_BASE_URL=${appBaseUrl()}`);
+    return;
+  }
+
+  if (sub === "start") {
+    const once = args.includes("--once");
+    const intervalMs = 5000;
+    do {
+      const heartbeat = await runnerFetch("/api/runners/heartbeat", {
+        method: "POST",
+        body: JSON.stringify({ capabilities: RUNNER_CAPABILITIES })
+      });
+      console.log(`heartbeat: ${heartbeat.runner?.name ?? heartbeat.runner?.id ?? "runner"} online`);
+
+      const next = await runnerFetch(`/api/runners/jobs/next?capability=${encodeURIComponent(RUNNER_CAPABILITIES[0])}`);
+      const job = next.job;
+      if (!job) {
+        console.log("job: none");
+        if (once) return;
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+        continue;
+      }
+
+      if (job.capability_id !== "termite.rhino.managed_job") {
+        throw new Error(`No whitelisted handler for ${job.capability_id}`);
+      }
+
+      const started = `Runner claimed Termite job ${job.id}: ${job.input_summary}`;
+      console.log(started);
+      await runnerFetch(`/api/runners/jobs/${job.id}/events`, {
+        method: "POST",
+        body: JSON.stringify({
+          events: [
+            { actor: "agent", text: started },
+            { actor: "operator", text: "Termite runner v1 is operator-reviewed; Rhino execution is whitelisted to termite.rhino.managed_job." }
+          ]
+        })
+      });
+
+      const summary = "Termite runner accepted the managed Rhino job and produced an initial operator-reviewed log proof.";
+      const complete = await runnerFetch(`/api/runners/jobs/${job.id}/complete`, {
+        method: "POST",
+        body: JSON.stringify({
+          status: "completed",
+          summary,
+          computeCostCents: 0,
+          platformFeeCents: 0,
+          proof: [
+            {
+              kind: "log",
+              label: "Termite runner log",
+              summary
+            }
+          ],
+          transcript: [{ actor: "agent", text: summary }]
+        })
+      });
+      console.log(`completed: ${complete.job?.id ?? job.id}`);
+      if (once) return;
+    } while (true);
+  }
+
+  runnerUsage();
+  process.exit(1);
+}
+
 function cmdShip(args) {
   if (!cmdCheck()) { console.error("ship aborted: typecheck failed"); process.exit(1); }
   const shouldPush = args.includes("--push");
@@ -838,11 +1424,23 @@ switch (cmd) {
     break;
   case "context": cmdContext(rest); break;
   case "agent-context": cmdContext(rest); break;
-  case "jobs": cmdJobs(rest); break;
+  case "jobs":
+    cmdJobs(rest).catch((error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    });
+    break;
   case "terminal": cmdTerminal(rest); break;
   case "og": cmdOg(rest); break;
   case "loop": cmdLoop(rest); break;
+  case "money": cmdMoney(rest); break;
   case "pack": cmdPack(rest); break;
+  case "runner":
+    cmdRunner(rest).catch((error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    });
+    break;
   case "registry": {
     const sub = rest[0];
     if (!["scan", "doctor", "export"].includes(sub)) {
@@ -883,9 +1481,14 @@ usage: hii <command>
   loop status         show latest user-proxy plan and notes
   loop note <note>    add steering context (tab path in UI)
   loop decide yes|no  approve or reject latest plan
+  money idea <idea>   turn a rough idea into a local offer brief
+  money list [n]      list recent idea-to-offer receipts
+  money show <id>     show a saved offer brief
   pack list           list compartmentalized capability packs
   pack show <id>      show pack routes, files, caps, and checks
   pack export <id>    write local-only pack manifest
+  runner init <name>  register an owned runner and print its token once
+  runner start --once claim one whitelisted runner job and exit
   check               typecheck (the inner fix loop)
   ship [message]      typecheck -> local commit only
   ship --push [msg]   explicit external push to origin

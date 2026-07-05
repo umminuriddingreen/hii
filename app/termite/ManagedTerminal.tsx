@@ -9,9 +9,10 @@ type TermiteJob = {
   workflow: string;
   prompt: string;
   budget: string;
-  status: 'queued';
+  status: 'queued' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled';
   createdAt: string;
   logs: string[];
+  ledger?: unknown[];
   proofArtifacts?: Array<{
     id: string;
     kind: string;
@@ -99,8 +100,8 @@ export function ManagedTerminal({ signedIn }: { signedIn: boolean }) {
         <div>
           <h2 className="text-xl font-semibold">Managed Job Terminal</h2>
           <p className="mt-2 text-sm text-neutral-600">
-            A client account can launch a managed Termite job. You run the Rhino/Codex workflow
-            on your system, monitor it, then upload proof or deliverables back through HII.
+            A client account can launch a quoted Termite job. Approved runner machines claim the
+            Rhino workflow, stream logs, then return proof artifacts and a ledger-backed receipt.
           </p>
         </div>
         {!signedIn && (
@@ -144,7 +145,7 @@ export function ManagedTerminal({ signedIn }: { signedIn: boolean }) {
             disabled={!signedIn}
           >
             <option value="alpha-free">Alpha feedback run</option>
-            <option value="pilot-paid">Paid pilot</option>
+            <option value="pilot-paid">Paid runner pilot</option>
             <option value="monthly-managed">Monthly managed workflow</option>
           </select>
         </label>
@@ -185,6 +186,9 @@ export function ManagedTerminal({ signedIn }: { signedIn: boolean }) {
                 </div>
                 <p className="mt-2 text-neutral-600">{workflowLabels[job.workflow] ?? job.workflow}</p>
                 <p className="mt-1 font-mono text-xs text-neutral-500">{job.capabilityId}</p>
+                <p className="mt-2 text-xs text-neutral-500">
+                  ledger {job.ledger?.length ?? 0} · proof {job.proofArtifacts?.length ?? 0}
+                </p>
                 {job.proofArtifacts && job.proofArtifacts.length > 0 && (
                   <p className="mt-2 text-xs text-neutral-500">
                     proof: {job.proofArtifacts.map((artifact) => artifact.label).join(', ')}

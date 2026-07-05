@@ -66,23 +66,35 @@
   {
     "id": "hii-termite-alpha",
     "name": "HII Termite Alpha",
-    "summary": "Managed Rhino/Termite job queue, installer surface, logs, and proof artifacts.",
+    "summary": "Trusted runner-backed Rhino/Termite job queue, installer surface, logs, proof artifacts, and receipts.",
     "capabilities": ["termite.rhino.managed_job", "termite.rhino.installer_action"],
-    "routes": ["/termite", "/api/termite/jobs", "/api/termite/installer"],
-    "commands": ["hii caps show", "hii jobs"],
+    "routes": ["/termite", "/api/termite/jobs", "/api/termite/installer", "/api/runners/heartbeat", "/api/runners/jobs/next", "/api/runners/jobs/[id]/events", "/api/runners/jobs/[id]/complete"],
+    "commands": ["hii runner init <name>", "hii runner start --once", "hii caps show", "hii jobs"],
     "files": [
       "app/termite/page.tsx",
       "app/termite/ManagedTerminal.tsx",
       "app/termite/InstallerAssistant.tsx",
       "app/api/termite/jobs/route.ts",
       "app/api/termite/installer/route.ts",
+      "app/api/runners/heartbeat/route.ts",
+      "app/api/runners/jobs/next/route.ts",
+      "app/api/runners/jobs/[id]/events/route.ts",
+      "app/api/runners/jobs/[id]/complete/route.ts",
       "lib/server/termite-jobs.ts",
       "lib/server/termite-installer.ts",
+      "lib/server/runners.ts",
       "public/downloads/termite-alpha-macos.zip"
     ],
-    "runtimeFiles": ["~/hii/.hii/termite-jobs.jsonl", "~/hii/.hii/termite-installer-runs.jsonl"],
-    "verification": ["npm run build"],
-    "shipBoundary": "operator-reviewed; Rhino execution remains managed and whitelisted"
+    "runnerSupport": {
+      "requiredCapabilityId": "termite.rhino.managed_job",
+      "expectedInputs": ["workflow", "prompt", "budget", "reserved quote"],
+      "expectedOutputs": ["runner transcript", "proof_artifacts.log", "completed or failed capability_jobs row"],
+      "proofArtifacts": ["log first; screenshot/model artifacts when available"],
+      "verificationCommands": ["hii runner start --once", "hii caps show", "npm run build"]
+    },
+    "runtimeFiles": ["Supabase capability_runners", "Supabase capability_jobs runner fields", "~/hii/.hii/termite-jobs.jsonl", "~/hii/.hii/termite-installer-runs.jsonl"],
+    "verification": ["node scripts/hii-cli.mjs runner start --once", "npm run build"],
+    "shipBoundary": "owned approved runners only; Rhino execution remains whitelisted and operator-reviewed"
   },
   {
     "id": "hii-exchange-spine",

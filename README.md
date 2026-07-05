@@ -27,7 +27,9 @@ Current first-party capabilities:
 - `hii.registry.scan` and `hii.registry.doctor` inspect local machine capability
   metadata without copying raw secrets.
 - `hii.credits.quote` prices bounded capability jobs before execution.
-- `termite.rhino.managed_job` queues managed Rhino/Termite alpha work.
+- `termite.rhino.managed_job` is the canonical v1 proof path: quote/reserve a
+  Rhino/Termite runner job, stream logs, write ledger rows, and return proof
+  artifacts.
 - `termite.rhino.installer_action` exposes the Termite alpha installer surface.
 - `hii.exchange.asset_link` preserves the Supabase/R2/Stripe exchange loop.
 
@@ -44,9 +46,12 @@ Shared contracts are in `lib/capabilities/types.ts`:
 - `LedgerEntry`
 - `ProofArtifact`
 
-V1 persistence is intentionally simple. Local-only terminal and Termite alpha
-runs append JSONL rows under `.hii/`; authenticated exchange and payment flows
-continue to use Supabase, R2, and Stripe as the durable product database.
+V1 persistence is split by trust boundary. Local-only terminal receipts append
+JSONL rows under `.hii/`; quoted capability jobs use Supabase tables for
+`capability_jobs`, `credit_ledger_entries`, `task_transcript_events`, and
+`proof_artifacts`. `node scripts/hii-cli.mjs jobs`, `/terminal`, and `/termite`
+read that same job contract when Supabase is configured, with local JSONL as a
+fallback.
 
 ## CLI Doorway
 
@@ -57,10 +62,10 @@ hii                 # doorway help
 hii context --json  # machine-readable context for agents
 hii status          # machine/git/env snapshot
 hii doctor          # status + registry doctor
-hii caps            # backend capability registry
+hii caps show       # backend capability registry
 hii og status       # ranked operational graph next path
 hii og capture ...  # append an operational graph event
-hii jobs            # recent local capability jobs
+hii jobs            # recent durable + local capability jobs
 hii ship            # typecheck and commit locally
 hii ship --push     # explicit external push to origin
 hii terminal        # local terminal coordinates
@@ -71,10 +76,11 @@ hii legacy ...      # old Python runtime at ~/hii-old
 ## App Surfaces
 
 - `/terminal` is the local console for process snapshots, backend capability
-  discovery, recent local jobs, and bounded agent spawn presets.
+  discovery, recent capability jobs, ledger/proof counts, and bounded agent
+  spawn presets.
 - `/credits` quotes capability jobs and produces ledger-ready transcript rows.
-- `/termite` is the first concrete managed capability: Rhino/Termite jobs with
-  logs and proof hooks.
+- `/termite` is the first concrete managed capability: quoted Rhino/Termite
+  jobs with runner logs, ledger rows, and proof artifacts.
 - `/upload` and `/x/[id]` remain the exchange asset flow.
 
 ## Stack
@@ -107,7 +113,15 @@ npm run build
 npm run hii:registry:doctor
 node scripts/hii-cli.mjs status
 node scripts/hii-cli.mjs doctor
-node scripts/hii-cli.mjs caps
+node scripts/hii-cli.mjs caps show
+node scripts/hii-cli.mjs jobs
+```
+
+Canonical vertical-slice smoke path:
+
+```sh
+node scripts/hii-cli.mjs caps show
+# Sign in locally, open /termite, choose a paid runner budget, and launch a job.
 node scripts/hii-cli.mjs jobs
 ```
 

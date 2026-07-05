@@ -52,6 +52,8 @@ type CapabilityJob = {
   status: string;
   budget?: string;
   createdAt: string;
+  ledger?: unknown[];
+  proofArtifacts?: unknown[];
 };
 
 const defaultPrompt =
@@ -259,6 +261,9 @@ export function HiiTerminal() {
                   <p className="mt-1 text-neutral-600">{job.inputSummary}</p>
                   <p className="mt-1 text-xs uppercase text-neutral-500">
                     {job.status} · {new Date(job.createdAt).toLocaleString()}
+                  </p>
+                  <p className="mt-1 text-xs text-neutral-500">
+                    ledger {job.ledger?.length ?? 0} · proof {job.proofArtifacts?.length ?? 0}
                   </p>
                 </div>
               ))}
