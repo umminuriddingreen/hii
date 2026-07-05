@@ -33,6 +33,27 @@ type TerminalSnapshot = {
   processes: ProcessLine[];
 };
 
+type CapabilityDefinition = {
+  id: string;
+  name: string;
+  owner: string;
+  runtime: string;
+  summary: string;
+  visibility: string;
+  status: string;
+  trustLevel: string;
+  costModel: { type: string; currency?: string };
+};
+
+type CapabilityJob = {
+  id: string;
+  capabilityId: string;
+  inputSummary: string;
+  status: string;
+  budget?: string;
+  createdAt: string;
+};
+
 const defaultPrompt =
   'Observe HII, AII, Termite, Codex, Claude, Ollama, and local dev server activity. Report stuck agents, blocked permission prompts, failed builds, and next actions.';
 
@@ -70,7 +91,27 @@ export function HiiTerminal() {
   const [prompt, setPrompt] = useState(defaultPrompt);
   const [spawning, setSpawning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [capabilities, setCapabilities] = useState<CapabilityDefinition[]>([]);
+  const [jobs, setJobs] = useState<CapabilityJob[]>([]);
   const terminalRef = useRef<HTMLPreElement | null>(null);
+
+  useEffect(() => {
+    async function loadCapabilities() {
+      const [capabilityRes, jobRes] = await Promise.all([
+        fetch('/api/capabilities', { cache: 'no-store' }),
+        fetch('/api/capabilities/jobs', { cache: 'no-store' })
+      ]);
+      if (capabilityRes.ok) {
+        const data = await capabilityRes.json();
+        setCapabilities(data.capabilities ?? []);
+      }
+      if (jobRes.ok) {
+        const data = await jobRes.json();
+        setJobs(data.jobs ?? []);
+      }
+    }
+    void loadCapabilities();
+  }, []);
 
   useEffect(() => {
     const source = new EventSource('/api/terminal/stream');
@@ -115,6 +156,11 @@ export function HiiTerminal() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Failed to spawn agent.');
+      const jobsRes = await fetch('/api/capabilities/jobs', { cache: 'no-store' });
+      if (jobsRes.ok) {
+        const jobsData = await jobsRes.json();
+        setJobs(jobsData.jobs ?? []);
+      }
       setLines((current) =>
         [
           ...current,
@@ -180,10 +226,42 @@ export function HiiTerminal() {
           </div>
 
           <div className="rounded border border-neutral-200 p-4">
-            <h2 className="font-semibold">Task Ledger</h2>
+            <h2 className="font-semibold">Capability Registry</h2>
+            <div className="mt-3 space-y-3 text-sm">
+              {capabilities.length === 0 && <p className="text-neutral-500">Loading backend capabilities...</p>}
+              {capabilities.map((capability) => (
+                <div key={capability.id} className="border-t border-neutral-100 pt-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium">{capability.name}</p>
+                      <p className="mt-1 font-mono text-xs text-neutral-500">{capability.id}</p>
+                    </div>
+                    <span className="rounded border border-neutral-300 px-2 py-1 text-xs uppercase text-neutral-600">
+                      {capability.status}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-neutral-600">{capability.summary}</p>
+                  <p className="mt-2 text-xs text-neutral-500">
+                    {capability.runtime} · {capability.visibility} · {capability.trustLevel}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded border border-neutral-200 p-4">
+            <h2 className="font-semibold">Capability Jobs</h2>
             <div className="mt-3 space-y-2 text-sm text-neutral-700">
-              <p>Each approved task should reserve credits before running.</p>
-              <p>Completed work appends compute reimbursement, HII fee, proof, and receipt rows.</p>
+              {jobs.length === 0 && <p>No local capability jobs yet.</p>}
+              {jobs.slice(0, 5).map((job) => (
+                <div key={job.id} className="border-t border-neutral-100 pt-2">
+                  <p className="font-mono text-xs">{job.capabilityId}</p>
+                  <p className="mt-1 text-neutral-600">{job.inputSummary}</p>
+                  <p className="mt-1 text-xs uppercase text-neutral-500">
+                    {job.status} · {new Date(job.createdAt).toLocaleString()}
+                  </p>
+                </div>
+              ))}
             </div>
             <a
               href="/credits"

@@ -11,6 +11,8 @@ const ROOT = path.join(os.homedir(), "hii");
 const RUNTIME = path.join(os.homedir(), ".hii");
 const BRIDGE_DIR = path.join(ROOT, "bridge", "messages");
 const BRIDGE_LOG = path.join(RUNTIME, "bridge", "yin-codex.jsonl");
+const CAPABILITY_REGISTRY = path.join(ROOT, "lib", "capabilities", "registry.json");
+const LOCAL_CAPABILITY_JOBS = path.join(ROOT, ".hii", "capability-jobs.jsonl");
 
 function codexBin() {
   const pinned = path.join(os.homedir(), ".local", "bin", "codex");
@@ -55,6 +57,29 @@ function npmRun(script, extra = []) {
   process.exit(r.status ?? 1);
 }
 
+function readJsonArray(file) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function readJsonl(file) {
+  try {
+    return fs.readFileSync(file, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        try { return JSON.parse(line); } catch { return null; }
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 function cmdStatus() {
   const env = readEnvFile();
   console.log("HII — marketplace status\n");
@@ -72,6 +97,56 @@ function cmdStatus() {
   const codex = spawnSync(codexBin(), ["--version"], { encoding: "utf8" });
   console.log(`\ncodex:   ${codex.status === 0 ? codex.stdout.trim() : "not installed"}`);
   console.log(`bridge:  ${fs.existsSync(BRIDGE_LOG) ? BRIDGE_LOG : "no log yet"}`);
+}
+
+function cmdCaps() {
+  const capabilities = readJsonArray(CAPABILITY_REGISTRY);
+  if (capabilities.length === 0) {
+    console.log("No capability registry found.");
+    return;
+  }
+  console.log("HII backend capabilities\n");
+  for (const capability of capabilities) {
+    console.log(`${capability.id}`);
+    console.log(`  name:       ${capability.name}`);
+    console.log(`  owner:      ${capability.owner}`);
+    console.log(`  runtime:    ${capability.runtime}`);
+    console.log(`  state:      ${capability.status} / ${capability.trustLevel}`);
+    console.log(`  visibility: ${capability.visibility}`);
+    console.log(`  summary:    ${capability.summary}`);
+    console.log("");
+  }
+}
+
+function cmdJobs(args) {
+  const limit = Number(args[0] ?? 20);
+  const jobs = readJsonl(LOCAL_CAPABILITY_JOBS)
+    .sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")))
+    .slice(0, Number.isFinite(limit) ? limit : 20);
+  if (jobs.length === 0) {
+    console.log("No local capability jobs yet.");
+    return;
+  }
+  console.log("Recent local capability jobs\n");
+  for (const job of jobs) {
+    console.log(`${job.id}  ${job.status ?? "unknown"}  ${job.capabilityId ?? "unknown"}`);
+    console.log(`  created: ${job.createdAt ?? "unknown"}`);
+    console.log(`  input:   ${job.inputSummary ?? ""}`);
+    if (job.budget) console.log(`  budget:  ${job.budget}`);
+    console.log("");
+  }
+}
+
+function cmdTerminal(args) {
+  const url = "http://localhost:3000/terminal";
+  if (args.includes("--open")) {
+    spawnSync("open", [url], { stdio: "inherit" });
+    return;
+  }
+  console.log("HII Terminal");
+  console.log(`  local UI: ${url}`);
+  console.log("  start:    hii dev");
+  console.log("  open:     hii terminal --open");
 }
 
 function cmdBridge(args) {
@@ -121,6 +196,9 @@ switch (cmd) {
   case "dev": npmRun("dev", rest); break;
   case "build": npmRun("build", rest); break;
   case "start": npmRun("start", rest); break;
+  case "caps": cmdCaps(); break;
+  case "jobs": cmdJobs(rest); break;
+  case "terminal": cmdTerminal(rest); break;
   case "registry": {
     const sub = rest[0];
     if (!["scan", "doctor", "export"].includes(sub)) {
@@ -149,8 +227,11 @@ switch (cmd) {
 
 usage: hii <command>
 
+  terminal [--open]   show or open the local HII terminal
   status              env + git + codex snapshot
   doctor              status + registry doctor
+  caps                list backend-owned capabilities
+  jobs [n]            list recent local capability jobs
   dev|build|start     run the Next.js app
   registry <sub>      scan | doctor | export
   bridge send <msg>   message Yin (Codex) via ~/hii/bridge/messages

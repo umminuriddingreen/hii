@@ -3,6 +3,8 @@ import { appendFile, mkdir } from 'fs/promises';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { randomUUID } from 'crypto';
+import { appendCapabilityJob } from '@/lib/capabilities/local-store';
 
 const execFileAsync = promisify(execFile);
 
@@ -239,5 +241,45 @@ export async function spawnClaudeAgent(request: SpawnRequest) {
 
   await mkdir(path.dirname(spawnLogPath), { recursive: true });
   await appendFile(spawnLogPath, `${JSON.stringify(run)}\n`, 'utf8');
+  const capabilityJobId = run.id ?? randomUUID();
+  await appendCapabilityJob({
+    id: capabilityJobId,
+    capabilityId: 'hii.agent.spawn',
+    inputSummary: `${preset}: ${prompt.slice(0, 240)}`,
+    userId: 'local',
+    userEmail: null,
+    status: 'running',
+    budget: 'local-operator',
+    logs: [
+      `[${startedAt}] spawned ${name}`,
+      output || 'spawn request accepted'
+    ],
+    ledger: [
+      {
+        id: randomUUID(),
+        jobId: capabilityJobId,
+        capabilityId: 'hii.agent.spawn',
+        actor: 'hii',
+        type: 'approval',
+        summary: `Local operator spawned preset ${preset}.`,
+        createdAt: startedAt
+      }
+    ],
+    proofArtifacts: [
+      {
+        id: randomUUID(),
+        kind: 'log',
+        label: 'Spawn receipt',
+        summary: output || 'Claude session spawn request accepted.',
+        createdAt: startedAt
+      }
+    ],
+    createdAt: startedAt,
+    updatedAt: startedAt,
+    metadata: {
+      preset,
+      name
+    }
+  });
   return run;
 }
