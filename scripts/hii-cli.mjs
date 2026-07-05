@@ -334,6 +334,9 @@ function cmdCodex(args) {
 
 const [cmd, ...rest] = process.argv.slice(2);
 switch (cmd) {
+  case "health":
+    cmdStatus();
+    break;
   case "status":
   case "doctor":
     cmdStatus();
@@ -345,7 +348,13 @@ switch (cmd) {
   case "dev": npmRun("dev", rest); break;
   case "build": npmRun("build", rest); break;
   case "start": npmRun("start", rest); break;
-  case "caps": cmdCaps(); break;
+  case "caps":
+    if (rest[0] && rest[0] !== "show") {
+      console.error("usage: hii caps [show]");
+      process.exit(1);
+    }
+    cmdCaps();
+    break;
   case "jobs": cmdJobs(rest); break;
   case "terminal": cmdTerminal(rest); break;
   case "og": cmdOg(rest); break;
@@ -379,9 +388,10 @@ switch (cmd) {
 usage: hii <command>
 
   terminal [--open]   show or open the local HII terminal
+  health [--text]     compatibility alias for status
   status              env + git + codex snapshot
   doctor              status + registry doctor
-  caps                list backend-owned capabilities
+  caps [show]         list backend-owned capabilities
   jobs [n]            list recent local capability jobs
   og [capture <msg>]  infer the operational graph and likely next path
   dev|build|start     run the Next.js app
