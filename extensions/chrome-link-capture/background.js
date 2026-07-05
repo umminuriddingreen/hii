@@ -13,15 +13,18 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
-async function endpoint() {
-  const values = await chrome.storage.sync.get({ endpoint: DEFAULT_ENDPOINT });
-  return values.endpoint || DEFAULT_ENDPOINT;
+async function settings() {
+  const values = await chrome.storage.sync.get({ endpoint: DEFAULT_ENDPOINT, token: "" });
+  return { endpoint: values.endpoint || DEFAULT_ENDPOINT, token: values.token || "" };
 }
 
 async function saveLink(payload) {
-  const response = await fetch(await endpoint(), {
+  const { endpoint, token } = await settings();
+  const headers = { "content-type": "application/json" };
+  if (token) headers.authorization = `Bearer ${token}`;
+  const response = await fetch(endpoint, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(payload)
   });
   const data = await response.json().catch(() => ({}));

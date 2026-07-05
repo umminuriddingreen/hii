@@ -36,8 +36,12 @@
   <body>
     <h1>HII Link Capture</h1>
     <label>
-      Local HII endpoint
+      HII endpoint (local feed or public stream)
       <input id="endpoint" />
+    </label>
+    <label style="display: block; margin-top: 12px;">
+      Post token (required for the public stream, blank for local)
+      <input id="token" type="password" />
     </label>
     <button id="save">Save options</button>
     <div id="status"></div>

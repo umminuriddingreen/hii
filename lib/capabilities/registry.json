@@ -5,12 +5,27 @@
     "owner": "hii",
     "runtime": "local-process",
     "summary": "Read local process and agent-session state for the HII workstation terminal.",
-    "inputs": ["local request host", "stream focus"],
-    "outputs": ["redacted process snapshot", "agent session list"],
-    "permissions": ["local-only host unless HII_LOCAL_TERMINAL_ENABLED=1", "read process list", "redact tokens"],
+    "inputs": [
+      "local request host",
+      "stream focus"
+    ],
+    "outputs": [
+      "redacted process snapshot",
+      "agent session list"
+    ],
+    "permissions": [
+      "local-only host unless HII_LOCAL_TERMINAL_ENABLED=1",
+      "read process list",
+      "redact tokens"
+    ],
     "visibility": "local",
-    "costModel": { "type": "free" },
-    "evidence": ["app/api/terminal/stream", "lib/server/hii-terminal.ts"],
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "app/api/terminal/stream",
+      "lib/server/hii-terminal.ts"
+    ],
     "status": "ready",
     "trustLevel": "first-party"
   },
@@ -20,12 +35,30 @@
     "owner": "hii",
     "runtime": "local-cli",
     "summary": "Launch a whitelisted Claude terminal session preset from the local HII backend.",
-    "inputs": ["preset", "prompt", "session name"],
-    "outputs": ["spawn receipt", "redacted command output", "local job row"],
-    "permissions": ["local-only host", "whitelisted presets", "redacted logs"],
+    "inputs": [
+      "preset",
+      "prompt",
+      "session name"
+    ],
+    "outputs": [
+      "spawn receipt",
+      "redacted command output",
+      "local job row"
+    ],
+    "permissions": [
+      "local-only host",
+      "whitelisted presets",
+      "redacted logs"
+    ],
     "visibility": "local",
-    "costModel": { "type": "quoted", "currency": "credits" },
-    "evidence": ["app/api/terminal/sessions", ".hii/capability-jobs.jsonl"],
+    "costModel": {
+      "type": "quoted",
+      "currency": "credits"
+    },
+    "evidence": [
+      "app/api/terminal/sessions",
+      ".hii/capability-jobs.jsonl"
+    ],
     "status": "partial",
     "trustLevel": "operator-reviewed"
   },
@@ -35,12 +68,33 @@
     "owner": "hii",
     "runtime": "local-cli",
     "summary": "Infer the user's likely next path from local conversation, repo, job, bridge, and capability context.",
-    "inputs": ["conversation turn", "repo state", "capability registry", "job history", "bridge logs", "runtime pointers"],
-    "outputs": ["operational graph event", "ranked next actions", "capability job receipt"],
-    "permissions": ["local-only", "redact secret-like values", "append-only runtime files"],
+    "inputs": [
+      "conversation turn",
+      "repo state",
+      "capability registry",
+      "job history",
+      "bridge logs",
+      "runtime pointers"
+    ],
+    "outputs": [
+      "operational graph event",
+      "ranked next actions",
+      "capability job receipt"
+    ],
+    "permissions": [
+      "local-only",
+      "redact secret-like values",
+      "append-only runtime files"
+    ],
     "visibility": "local",
-    "costModel": { "type": "free" },
-    "evidence": ["hii og", "~/.hii/og/events.jsonl", ".hii/capability-jobs.jsonl"],
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii og",
+      "~/.hii/og/events.jsonl",
+      ".hii/capability-jobs.jsonl"
+    ],
     "status": "ready",
     "trustLevel": "first-party"
   },
@@ -50,12 +104,33 @@
     "owner": "hii",
     "runtime": "local-cli",
     "summary": "Read local events, notes, jobs, bridge logs, and repo state to propose the next plan while waiting for explicit y/n approval before action.",
-    "inputs": ["OG events", "bridge logs", "loop notes", "recent jobs", "repo state"],
-    "outputs": ["append-only plan decision", "policy gate", "next command proposal"],
-    "permissions": ["local-only", "append-only runtime files", "propose without executing", "y/n approval gate"],
+    "inputs": [
+      "OG events",
+      "bridge logs",
+      "loop notes",
+      "recent jobs",
+      "repo state"
+    ],
+    "outputs": [
+      "append-only plan decision",
+      "policy gate",
+      "next command proposal"
+    ],
+    "permissions": [
+      "local-only",
+      "append-only runtime files",
+      "propose without executing",
+      "y/n approval gate"
+    ],
     "visibility": "local",
-    "costModel": { "type": "free" },
-    "evidence": ["hii loop once", "~/.hii/loop/decisions.jsonl", "~/.hii/loop/notes.jsonl"],
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii loop once",
+      "~/.hii/loop/decisions.jsonl",
+      "~/.hii/loop/notes.jsonl"
+    ],
     "status": "ready",
     "trustLevel": "first-party"
   },
@@ -65,12 +140,36 @@
     "owner": "hii",
     "runtime": "local-cli",
     "summary": "Turn a rough idea into a sellable offer brief, local proof target, price/package, and Codex or Claude handoff prompt using local Ollama models.",
-    "inputs": ["rough idea", "optional local model", "optional handoff target"],
-    "outputs": ["local offer brief", "idea receipt", "capability job receipt", "handoff prompt"],
-    "permissions": ["local-only", "append-only runtime files", "redact secret-like values", "no publishing", "no payments", "no outreach", "no agent spawn by default"],
+    "inputs": [
+      "rough idea",
+      "optional local model",
+      "optional handoff target"
+    ],
+    "outputs": [
+      "local offer brief",
+      "idea receipt",
+      "capability job receipt",
+      "handoff prompt"
+    ],
+    "permissions": [
+      "local-only",
+      "append-only runtime files",
+      "redact secret-like values",
+      "no publishing",
+      "no payments",
+      "no outreach",
+      "no agent spawn by default"
+    ],
     "visibility": "local",
-    "costModel": { "type": "free" },
-    "evidence": ["hii money idea", "~/.hii/money/ideas.jsonl", "~/.hii/money/offers", ".hii/capability-jobs.jsonl"],
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii money idea",
+      "~/.hii/money/ideas.jsonl",
+      "~/.hii/money/offers",
+      ".hii/capability-jobs.jsonl"
+    ],
     "status": "ready",
     "trustLevel": "first-party"
   },
@@ -80,12 +179,31 @@
     "owner": "hii",
     "runtime": "local-cli",
     "summary": "Package a compartmentalized manifest for a HII surface or capability set without publishing it externally.",
-    "inputs": ["pack id", "capability registry", "source path inventory"],
-    "outputs": ["local pack manifest", "file list", "capability list", "verification commands"],
-    "permissions": ["local-only export", "no push", "no upload", "no secret values"],
+    "inputs": [
+      "pack id",
+      "capability registry",
+      "source path inventory"
+    ],
+    "outputs": [
+      "local pack manifest",
+      "file list",
+      "capability list",
+      "verification commands"
+    ],
+    "permissions": [
+      "local-only export",
+      "no push",
+      "no upload",
+      "no secret values"
+    ],
     "visibility": "local",
-    "costModel": { "type": "free" },
-    "evidence": ["hii pack export", "~/.hii/packs/exports"],
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii pack export",
+      "~/.hii/packs/exports"
+    ],
     "status": "ready",
     "trustLevel": "first-party"
   },
@@ -95,12 +213,25 @@
     "owner": "hii",
     "runtime": "local-cli",
     "summary": "Inspect machine, agent, provider, model, MCP, and secret-presence metadata without copying raw secrets.",
-    "inputs": ["local filesystem paths", "installed command metadata"],
-    "outputs": ["normalized registry snapshot"],
-    "permissions": ["secret-safe metadata only", "no raw token reads"],
+    "inputs": [
+      "local filesystem paths",
+      "installed command metadata"
+    ],
+    "outputs": [
+      "normalized registry snapshot"
+    ],
+    "permissions": [
+      "secret-safe metadata only",
+      "no raw token reads"
+    ],
     "visibility": "local",
-    "costModel": { "type": "free" },
-    "evidence": ["npm run hii:registry:scan", "lib/registry/scan.ts"],
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "npm run hii:registry:scan",
+      "lib/registry/scan.ts"
+    ],
     "status": "ready",
     "trustLevel": "first-party"
   },
@@ -110,12 +241,24 @@
     "owner": "hii",
     "runtime": "local-cli",
     "summary": "Validate local registry health and report warnings without aborting on optional unavailable tools.",
-    "inputs": ["registry scan result"],
-    "outputs": ["health summary", "warnings"],
-    "permissions": ["secret-safe metadata only"],
+    "inputs": [
+      "registry scan result"
+    ],
+    "outputs": [
+      "health summary",
+      "warnings"
+    ],
+    "permissions": [
+      "secret-safe metadata only"
+    ],
     "visibility": "local",
-    "costModel": { "type": "free" },
-    "evidence": ["npm run hii:registry:doctor", "lib/registry/doctor.ts"],
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "npm run hii:registry:doctor",
+      "lib/registry/doctor.ts"
+    ],
     "status": "ready",
     "trustLevel": "first-party"
   },
@@ -125,12 +268,28 @@
     "owner": "hii",
     "runtime": "next-route",
     "summary": "Estimate runtime, token budget, compute reimbursement, and HII fee for a bounded capability job.",
-    "inputs": ["capability id", "task summary", "currency", "max budget"],
-    "outputs": ["quote", "ledger-ready transcript"],
-    "permissions": ["quote only", "no execution"],
+    "inputs": [
+      "capability id",
+      "task summary",
+      "currency",
+      "max budget"
+    ],
+    "outputs": [
+      "quote",
+      "ledger-ready transcript"
+    ],
+    "permissions": [
+      "quote only",
+      "no execution"
+    ],
     "visibility": "public",
-    "costModel": { "type": "free" },
-    "evidence": ["app/api/credits/quote", "lib/server/hii-credits.ts"],
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "app/api/credits/quote",
+      "lib/server/hii-credits.ts"
+    ],
     "status": "ready",
     "trustLevel": "first-party"
   },
@@ -140,19 +299,56 @@
     "owner": "termite",
     "runtime": "trusted-runner",
     "summary": "Queue a quoted Rhino/Termite workflow for approved runner machines with logs, proof artifacts, and ledger receipts.",
-    "inputs": ["workflow", "Rhino task", "budget tier", "authenticated user", "reserved credits"],
-    "outputs": ["capability job", "runner transcript", "log proof artifact", "ledger receipt"],
-    "permissions": ["authenticated account", "approved owned runner", "whitelisted Termite handler only", "no arbitrary shell execution"],
+    "inputs": [
+      "workflow",
+      "Rhino task",
+      "budget tier",
+      "authenticated user",
+      "reserved credits"
+    ],
+    "outputs": [
+      "capability job",
+      "runner transcript",
+      "log proof artifact",
+      "ledger receipt"
+    ],
+    "permissions": [
+      "authenticated account",
+      "approved owned runner",
+      "whitelisted Termite handler only",
+      "no arbitrary shell execution"
+    ],
     "visibility": "authenticated",
-    "costModel": { "type": "quoted", "currency": "usd" },
+    "costModel": {
+      "type": "quoted",
+      "currency": "usd"
+    },
     "runnerSupport": {
       "requiredCapabilityId": "termite.rhino.managed_job",
       "handler": "termite.rhino.managed_job",
-      "expectedInputs": ["workflow", "prompt", "budget", "quote"],
-      "expectedOutputs": ["transcript events", "proof_artifacts.log", "final job status"],
-      "verification": ["hii runner start --once", "hii caps show", "npm run build"]
+      "expectedInputs": [
+        "workflow",
+        "prompt",
+        "budget",
+        "quote"
+      ],
+      "expectedOutputs": [
+        "transcript events",
+        "proof_artifacts.log",
+        "final job status"
+      ],
+      "verification": [
+        "hii runner start --once",
+        "hii caps show",
+        "npm run build"
+      ]
     },
-    "evidence": ["app/api/termite/jobs", "app/api/runners/jobs/next", "supabase capability_jobs", ".hii/termite-jobs.jsonl"],
+    "evidence": [
+      "app/api/termite/jobs",
+      "app/api/runners/jobs/next",
+      "supabase capability_jobs",
+      ".hii/termite-jobs.jsonl"
+    ],
     "status": "partial",
     "trustLevel": "operator-reviewed"
   },
@@ -162,12 +358,24 @@
     "owner": "termite",
     "runtime": "next-route",
     "summary": "Serve the Mac alpha installer and surface install instructions for Termite.",
-    "inputs": ["download request"],
-    "outputs": ["installer metadata", "download link"],
-    "permissions": ["public alpha asset only"],
+    "inputs": [
+      "download request"
+    ],
+    "outputs": [
+      "installer metadata",
+      "download link"
+    ],
+    "permissions": [
+      "public alpha asset only"
+    ],
     "visibility": "public",
-    "costModel": { "type": "free" },
-    "evidence": ["app/api/termite/installer", "public/downloads/termite-alpha-macos.zip"],
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "app/api/termite/installer",
+      "public/downloads/termite-alpha-macos.zip"
+    ],
     "status": "ready",
     "trustLevel": "first-party"
   },
@@ -177,12 +385,31 @@
     "owner": "hii",
     "runtime": "chrome-extension",
     "summary": "Capture active browser tabs and selected page context into the local HII link stream.",
-    "inputs": ["active tab URL", "page title", "optional note", "optional tags"],
-    "outputs": ["local link post", "append-only JSONL receipt"],
-    "permissions": ["activeTab", "contextMenus", "storage", "local HII endpoint only"],
+    "inputs": [
+      "active tab URL",
+      "page title",
+      "optional note",
+      "optional tags"
+    ],
+    "outputs": [
+      "local link post",
+      "append-only JSONL receipt"
+    ],
+    "permissions": [
+      "activeTab",
+      "contextMenus",
+      "storage",
+      "local HII endpoint only"
+    ],
     "visibility": "local",
-    "costModel": { "type": "free" },
-    "evidence": ["extensions/chrome-link-capture", "app/api/links", ".hii/link-posts.jsonl"],
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "extensions/chrome-link-capture",
+      "app/api/links",
+      ".hii/link-posts.jsonl"
+    ],
     "status": "ready",
     "trustLevel": "first-party"
   },
@@ -192,12 +419,29 @@
     "owner": "hii",
     "runtime": "local-cli",
     "summary": "Download captured http/https links into local HTML and text cache files so the feed can work offline.",
-    "inputs": ["link stream JSONL", "http/https page"],
-    "outputs": ["cached HTML", "readable text", "cache index entry"],
-    "permissions": ["local filesystem write under .hii", "bounded page fetch", "no secret extraction"],
+    "inputs": [
+      "link stream JSONL",
+      "http/https page"
+    ],
+    "outputs": [
+      "cached HTML",
+      "readable text",
+      "cache index entry"
+    ],
+    "permissions": [
+      "local filesystem write under .hii",
+      "bounded page fetch",
+      "no secret extraction"
+    ],
     "visibility": "local",
-    "costModel": { "type": "free" },
-    "evidence": ["scripts/hii-link-cache.mjs", ".hii/link-cache", ".hii/link-cache.jsonl"],
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "scripts/hii-link-cache.mjs",
+      ".hii/link-cache",
+      ".hii/link-cache.jsonl"
+    ],
     "status": "ready",
     "trustLevel": "first-party"
   },
@@ -207,12 +451,29 @@
     "owner": "hii",
     "runtime": "ollama",
     "summary": "Summarize cached link text with a local Ollama model for offline recall and future ranking.",
-    "inputs": ["cached page text", "link title", "operator note"],
-    "outputs": ["local summary", "cache index annotation"],
-    "permissions": ["local Ollama endpoint", "text capped before inference", "cloud optional not required"],
+    "inputs": [
+      "cached page text",
+      "link title",
+      "operator note"
+    ],
+    "outputs": [
+      "local summary",
+      "cache index annotation"
+    ],
+    "permissions": [
+      "local Ollama endpoint",
+      "text capped before inference",
+      "cloud optional not required"
+    ],
     "visibility": "local",
-    "costModel": { "type": "free" },
-    "evidence": ["scripts/hii-link-cache.mjs", "HII_LINKS_OLLAMA_MODEL", "http://127.0.0.1:11434/api/generate"],
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "scripts/hii-link-cache.mjs",
+      "HII_LINKS_OLLAMA_MODEL",
+      "http://127.0.0.1:11434/api/generate"
+    ],
     "status": "ready",
     "trustLevel": "first-party"
   },
@@ -222,12 +483,66 @@
     "owner": "hii",
     "runtime": "supabase-flow",
     "summary": "Upload a file, sell access through Stripe Checkout, and issue time-limited R2 downloads after payment.",
-    "inputs": ["seller account", "asset", "license terms", "price"],
-    "outputs": ["shareable exchange link", "paid order", "presigned download"],
-    "permissions": ["authenticated seller upload", "Stripe payment verification", "time-limited R2 access"],
+    "inputs": [
+      "seller account",
+      "asset",
+      "license terms",
+      "price"
+    ],
+    "outputs": [
+      "shareable exchange link",
+      "paid order",
+      "presigned download"
+    ],
+    "permissions": [
+      "authenticated seller upload",
+      "Stripe payment verification",
+      "time-limited R2 access"
+    ],
     "visibility": "public",
-    "costModel": { "type": "stripe-checkout", "currency": "usd" },
-    "evidence": ["app/upload", "app/x/[id]", "app/api/checkout", "app/api/download"],
+    "costModel": {
+      "type": "stripe-checkout",
+      "currency": "usd"
+    },
+    "evidence": [
+      "app/upload",
+      "app/x/[id]",
+      "app/api/checkout",
+      "app/api/download"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.exchange.link_stream_publish",
+    "name": "Public Link Stream Publish",
+    "owner": "hii",
+    "runtime": "cli-http",
+    "summary": "Publish locally captured link posts (with Ollama summaries) to the public stream at umminuriddingreen.com/stream via a token-gated Pages endpoint backed by Supabase.",
+    "inputs": [
+      "local link posts (.hii/link-posts.jsonl)",
+      "cache summaries",
+      "HII_LINKS_PUBLISH_TOKEN"
+    ],
+    "outputs": [
+      "public link_posts rows",
+      "publish receipts (.hii/link-published.jsonl)",
+      "umminuriddingreen.com/stream"
+    ],
+    "permissions": [
+      "bearer-token write to /api/links",
+      "public anonymous read"
+    ],
+    "visibility": "public",
+    "costModel": {
+      "type": "free",
+      "currency": "usd"
+    },
+    "evidence": [
+      "scripts/hii-cli.mjs links publish",
+      "supabase/schema.sql link_posts",
+      "extensions/chrome-link-capture"
+    ],
     "status": "ready",
     "trustLevel": "first-party"
   }

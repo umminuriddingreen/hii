@@ -1269,8 +1269,63 @@ function cmdLinks(args) {
     });
     process.exit(r.status ?? 1);
   }
-  console.error("usage: hii links [status|cache]");
+  if (sub === "publish") {
+    cmdLinksPublish(args.slice(1));
+    return;
+  }
+  console.error("usage: hii links [status|cache|publish]");
   process.exit(1);
+}
+
+const LINK_PUBLISHED = path.join(ROOT, ".hii", "link-published.jsonl");
+
+async function cmdLinksPublish(args) {
+  const endpoint = process.env.HII_LINKS_PUBLISH_URL || "https://umminuriddingreen.com/api/links";
+  const token = process.env.HII_LINKS_PUBLISH_TOKEN;
+  if (!token) {
+    console.error("HII_LINKS_PUBLISH_TOKEN is not set; publish target requires it");
+    process.exit(1);
+  }
+  const dryRun = args.includes("--dry-run");
+  const posts = readJsonl(LINK_POSTS);
+  const published = new Set(readJsonl(LINK_PUBLISHED).map((r) => r.postId));
+  const cache = readJsonl(LINK_CACHE);
+  const summaryByPost = new Map();
+  for (const entry of cache) {
+    if (entry.summary && !summaryByPost.has(entry.postId)) summaryByPost.set(entry.postId, entry.summary);
+  }
+  const pending = posts.filter((p) => /^https?:\/\//i.test(p.url || "") && !published.has(p.id));
+  console.log(`publish target: ${endpoint}`);
+  console.log(`pending: ${pending.length} (of ${posts.length} local posts)`);
+  if (dryRun || pending.length === 0) return;
+  let ok = 0;
+  for (const post of pending) {
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          url: post.url,
+          title: post.title || "",
+          note: post.note || "",
+          tags: post.tags || [],
+          source: post.source || "hii-local",
+          summary: summaryByPost.get(post.id) || null
+        })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = await res.json();
+      fs.appendFileSync(
+        LINK_PUBLISHED,
+        `${JSON.stringify({ postId: post.id, remoteId: body?.post?.id ?? null, target: endpoint, ts: new Date().toISOString() })}\n`
+      );
+      ok += 1;
+      console.log(`published: ${post.title || post.url}`);
+    } catch (error) {
+      console.error(`failed: ${post.url} (${error.message})`);
+    }
+  }
+  console.log(`done: ${ok}/${pending.length} published`);
 }
 
 function cmdBridge(args) {
@@ -1518,6 +1573,7 @@ usage: hii <command>
   money show <id>     show a saved offer brief
   links status        show browser link stream and cache coordinates
   links cache         cache browser links and summarize with Ollama
+  links publish       push local link posts to the public stream (umminuriddingreen.com)
   pack list           list compartmentalized capability packs
   pack show <id>      show pack routes, files, caps, and checks
   pack export <id>    write local-only pack manifest

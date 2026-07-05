@@ -901,3 +901,24 @@ create policy "feed_reactions_insert_own" on public.feed_reactions for insert to
   with check ((select auth.uid()) = user_id);
 create policy "feed_reactions_delete_own" on public.feed_reactions for delete to authenticated
   using ((select auth.uid()) = user_id);
+
+-- Public link stream (published from the local HII link loop; read-only to the web)
+create table if not exists public.link_posts (
+  id uuid primary key default gen_random_uuid(),
+  url text not null,
+  title text not null default '',
+  note text not null default '',
+  tags text[] not null default '{}',
+  source text not null default 'manual',
+  summary text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_link_posts_created on public.link_posts(created_at desc);
+
+alter table public.link_posts enable row level security;
+
+grant select on public.link_posts to anon, authenticated;
+
+drop policy if exists "link_posts_select_all" on public.link_posts;
+create policy "link_posts_select_all" on public.link_posts for select to anon, authenticated using (true);
