@@ -11,3 +11,6 @@ next-env.d.ts
 .hii/
 
 .claude/worktrees/
+.hermes/
+life/
+enaefe-next*.png
