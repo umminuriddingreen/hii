@@ -1,22 +1,16 @@
+import type { CapabilityQuote } from '@/lib/capabilities/types';
+
 export type HiiCurrency = 'usd' | 'eur' | 'gbp' | 'credits';
 
 export type HiiQuoteInput = {
   task: string;
   currency: HiiCurrency;
   maxBudgetCents?: number;
+  capabilityId?: string;
 };
 
-export type HiiQuote = {
-  id: string;
+export type HiiQuote = CapabilityQuote & {
   task: string;
-  currency: HiiCurrency;
-  estimatedTokens: number;
-  estimatedMinutes: number;
-  computeCostCents: number;
-  platformFeeCents: number;
-  totalCents: number;
-  maxBudgetCents: number;
-  status: 'ready' | 'needs-approval' | 'over-budget';
   transcript: Array<{
     actor: 'user' | 'hii' | 'agent' | 'ledger';
     text: string;
@@ -53,6 +47,7 @@ function quoteId(task: string, currency: HiiCurrency) {
 
 export function createHiiQuote(input: HiiQuoteInput): HiiQuote {
   const task = input.task.trim() || 'Run a bounded computer task and return proof.';
+  const capabilityId = input.capabilityId || 'hii.agent.spawn';
   const wordCount = task.split(/\s+/).filter(Boolean).length;
   const complexity = clamp(Math.ceil(wordCount / 9), 1, 8);
   const estimatedMinutes = clamp(4 + complexity * 3, 6, 35);
@@ -66,6 +61,8 @@ export function createHiiQuote(input: HiiQuoteInput): HiiQuote {
 
   return {
     id: quoteId(task, input.currency),
+    capabilityId,
+    inputSummary: task,
     task,
     currency: input.currency,
     estimatedTokens,
@@ -75,6 +72,7 @@ export function createHiiQuote(input: HiiQuoteInput): HiiQuote {
     totalCents,
     maxBudgetCents,
     status,
+    createdAt: new Date().toISOString(),
     transcript: [
       {
         actor: 'user',
@@ -82,7 +80,7 @@ export function createHiiQuote(input: HiiQuoteInput): HiiQuote {
       },
       {
         actor: 'hii',
-        text: `I can run this as a bounded agent task. Estimate: ${estimatedMinutes} minutes, ${estimatedTokens.toLocaleString()} tokens, ${formatHiiMoney(totalCents, input.currency)} total.`
+        text: `I can run ${capabilityId} as a bounded capability job. Estimate: ${estimatedMinutes} minutes, ${estimatedTokens.toLocaleString()} tokens, ${formatHiiMoney(totalCents, input.currency)} total.`
       },
       {
         actor: 'ledger',
