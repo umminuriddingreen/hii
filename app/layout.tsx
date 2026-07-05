@@ -1,6 +1,7 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { AliveBars } from './AliveBars';
 
 export const metadata: Metadata = {
   title: 'hii — conversational computer work',
@@ -11,6 +12,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="min-h-screen bg-white text-black">
+        <AliveBars />
         <header className="flex items-center justify-between border-b border-neutral-200 px-6 py-4">
           <div>
             <Link href="/" className="font-mono text-lg font-bold">

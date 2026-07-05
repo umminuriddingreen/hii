@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { FormEvent, useMemo, useState } from 'react';
+import { AliveBars } from './AliveBars';
 
 type SpawnedCommand = {
   id: number;
@@ -103,7 +104,10 @@ export function HiiNew() {
 
   return (
     <div className="fixed inset-0 z-50 bg-white text-black">
-      <div className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-black animate-pulse" />
+      <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-4">
+        <div className="h-2 w-2 rounded-full bg-black animate-pulse" />
+        <AliveBars compact />
+      </div>
 
       <div className="absolute left-6 top-6 font-mono text-xs">
         hii
@@ -124,7 +128,10 @@ export function HiiNew() {
               {item.lines && (
                 <div className="ml-3 space-y-1 text-xs text-neutral-500">
                   {item.lines.map((line) => (
-                    <div key={line}>{line}</div>
+                    <div key={line} className="flex items-center gap-2">
+                      {line === 'loading' && <AliveBars compact />}
+                      <span>{line}</span>
+                    </div>
                   ))}
                 </div>
               )}
