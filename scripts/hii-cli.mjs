@@ -429,8 +429,34 @@ function cmdCodex(args) {
   process.exit(r.status ?? 1);
 }
 
+function cmdCheck() {
+  const r = spawnSync("npx", ["tsc", "--noEmit"], { cwd: ROOT, stdio: "inherit" });
+  return r.status === 0;
+}
+
+function cmdShip(args) {
+  if (!cmdCheck()) { console.error("ship aborted: typecheck failed"); process.exit(1); }
+  const msg = args.join(" ") || `ship: ${new Date().toISOString()}`;
+  const dirty = execFileSync("git", ["-C", ROOT, "status", "--porcelain"]).toString().trim();
+  if (dirty) {
+    execFileSync("git", ["-C", ROOT, "add", "-A"]);
+    const c = spawnSync("git", ["-C", ROOT, "commit", "-m", msg], { stdio: "inherit" });
+    if (c.status !== 0) process.exit(c.status ?? 1);
+  } else {
+    console.log("tree clean — pushing existing commits");
+  }
+  const p = spawnSync("git", ["-C", ROOT, "push", "origin", "HEAD"], { stdio: "inherit" });
+  const commit = execFileSync("git", ["-C", ROOT, "rev-parse", "--short", "HEAD"]).toString().trim();
+  logBridge({ type: "ship", commit, message: msg, ok: p.status === 0 });
+  console.log(p.status === 0 ? `shipped ${commit}` : "push failed");
+  process.exit(p.status ?? 1);
+}
+
 const [cmd, ...rest] = process.argv.slice(2);
 switch (cmd) {
+  case "check":
+    process.exit(cmdCheck() ? 0 : 1);
+  case "ship": cmdShip(rest); break;
   case "health":
     cmdStatus();
     break;
@@ -494,6 +520,8 @@ usage: hii <command>
   caps [show]         list backend-owned capabilities
   jobs [n]            list recent local capability jobs
   og [capture <msg>]  infer the operational graph and likely next path
+  check               typecheck (the inner fix loop)
+  ship [message]      typecheck -> commit all -> push (CI runs on GitHub)
   dev|build|start     run the Next.js app
   registry <sub>      scan | doctor | export
   bridge send <msg>   message Yin (Codex) via ~/hii/bridge/messages
