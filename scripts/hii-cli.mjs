@@ -654,6 +654,7 @@ function agentCommandCatalog() {
     { command: "hii money idea <idea>", purpose: "Use local models to turn a rough idea into a sellable offer and execution handoff." },
     { command: "hii money list", purpose: "List recent local idea-to-offer receipts." },
     { command: "hii links cache", purpose: "Cache browser-captured links locally and summarize them with Ollama when available." },
+    { command: "hii links publish", purpose: "Publish locally captured links to the token-gated public stream." },
     { command: "hii pack list", purpose: "List compartmentalized HII capability packs." },
     { command: "hii pack export <id>", purpose: "Write a local-only pack manifest for staged shipping." },
     { command: "hii runner init <name>", purpose: "Register an owned runner and print its local token once." },
@@ -1259,7 +1260,7 @@ function cmdLinks(args) {
     console.log(`cached:    ${cached}`);
     console.log(`failed:    ${failed}`);
     console.log(`cache:     ${LINK_CACHE}`);
-    console.log("\nnext: hii links cache");
+    console.log("\nnext: hii links cache && hii links publish --dry-run");
     return;
   }
   if (sub === "cache") {
@@ -1277,16 +1278,17 @@ function cmdLinks(args) {
   process.exit(1);
 }
 
-const LINK_PUBLISHED = path.join(ROOT, ".hii", "link-published.jsonl");
+const LINK_PUBLISHED = path.join(ROOT, ".hii", "link-publish.jsonl");
 
 async function cmdLinksPublish(args) {
-  const endpoint = process.env.HII_LINKS_PUBLISH_URL || "https://umminuriddingreen.com/api/links";
+  const endpoint = process.env.HII_LINKS_PUBLISH_ENDPOINT || process.env.HII_LINKS_PUBLISH_URL || "https://umminuriddingreen.com/api/links";
   const token = process.env.HII_LINKS_PUBLISH_TOKEN;
-  if (!token) {
+  const dryRun = args.includes("--dry-run");
+  if (!token && !dryRun) {
     console.error("HII_LINKS_PUBLISH_TOKEN is not set; publish target requires it");
     process.exit(1);
   }
-  const dryRun = args.includes("--dry-run");
+  const force = args.includes("--force");
   const posts = readJsonl(LINK_POSTS);
   const published = new Set(readJsonl(LINK_PUBLISHED).map((r) => r.postId));
   const cache = readJsonl(LINK_CACHE);
@@ -1294,9 +1296,11 @@ async function cmdLinksPublish(args) {
   for (const entry of cache) {
     if (entry.summary && !summaryByPost.has(entry.postId)) summaryByPost.set(entry.postId, entry.summary);
   }
-  const pending = posts.filter((p) => /^https?:\/\//i.test(p.url || "") && !published.has(p.id));
+  const pending = posts.filter((p) => /^https?:\/\//i.test(p.url || "") && (force || !published.has(p.id)));
   console.log(`publish target: ${endpoint}`);
   console.log(`pending: ${pending.length} (of ${posts.length} local posts)`);
+  console.log(`receipts: ${LINK_PUBLISHED}`);
+  if (force) console.log("force: yes");
   if (dryRun || pending.length === 0) return;
   let ok = 0;
   for (const post of pending) {
@@ -1315,10 +1319,12 @@ async function cmdLinksPublish(args) {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = await res.json();
-      fs.appendFileSync(
-        LINK_PUBLISHED,
-        `${JSON.stringify({ postId: post.id, remoteId: body?.post?.id ?? null, target: endpoint, ts: new Date().toISOString() })}\n`
-      );
+      appendJsonl(LINK_PUBLISHED, {
+        postId: post.id,
+        remoteId: body?.post?.id ?? null,
+        target: endpoint,
+        ts: new Date().toISOString()
+      });
       ok += 1;
       console.log(`published: ${post.title || post.url}`);
     } catch (error) {

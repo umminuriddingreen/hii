@@ -124,9 +124,9 @@
     "id": "hii-link-stream",
     "name": "HII Link Stream",
     "summary": "Browser capture, local downloader cache, and Ollama interpretation for an offline-first feed.",
-    "capabilities": ["hii.browser.link_capture", "hii.downloader.offline_cache", "hii.ollama.link_interpreter"],
+    "capabilities": ["hii.browser.link_capture", "hii.downloader.offline_cache", "hii.ollama.link_interpreter", "hii.links.publish_stream"],
     "routes": ["/feed", "/api/links"],
-    "commands": ["hii links status", "hii links cache", "npm run hii:links:cache"],
+    "commands": ["hii links status", "hii links cache", "hii links publish", "npm run hii:links:cache"],
     "files": [
       "app/feed/page.tsx",
       "app/api/links/route.ts",
@@ -139,8 +139,8 @@
       "extensions/chrome-link-capture/options.html",
       "extensions/chrome-link-capture/options.js"
     ],
-    "runtimeFiles": ["~/hii/.hii/link-posts.jsonl", "~/hii/.hii/link-cache.jsonl", "~/hii/.hii/link-cache"],
-    "verification": ["node scripts/hii-cli.mjs links status", "npm run hii:links:cache", "npm run build"],
+    "runtimeFiles": ["~/hii/.hii/link-posts.jsonl", "~/hii/.hii/link-cache.jsonl", "~/hii/.hii/link-cache", "~/hii/.hii/link-publish.jsonl"],
+    "verification": ["node scripts/hii-cli.mjs links status", "node scripts/hii-cli.mjs links publish --dry-run", "npm run hii:links:cache", "npm run build"],
     "shipBoundary": "local-first browser extension and cache; external sync or publishing requires a separate approval gate"
   }
 ]

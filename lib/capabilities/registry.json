@@ -514,19 +514,20 @@
     "trustLevel": "first-party"
   },
   {
-    "id": "hii.exchange.link_stream_publish",
+    "id": "hii.links.publish_stream",
     "name": "Public Link Stream Publish",
     "owner": "hii",
-    "runtime": "cli-http",
+    "runtime": "local-cli",
     "summary": "Publish locally captured link posts (with Ollama summaries) to the public stream at umminuriddingreen.com/stream via a token-gated Pages endpoint backed by Supabase.",
     "inputs": [
       "local link posts (.hii/link-posts.jsonl)",
       "cache summaries",
+      "HII_LINKS_PUBLISH_ENDPOINT",
       "HII_LINKS_PUBLISH_TOKEN"
     ],
     "outputs": [
       "public link_posts rows",
-      "publish receipts (.hii/link-published.jsonl)",
+      "publish receipts (.hii/link-publish.jsonl)",
       "umminuriddingreen.com/stream"
     ],
     "permissions": [
@@ -535,8 +536,7 @@
     ],
     "visibility": "public",
     "costModel": {
-      "type": "free",
-      "currency": "usd"
+      "type": "free"
     },
     "evidence": [
       "scripts/hii-cli.mjs links publish",

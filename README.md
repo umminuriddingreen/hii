@@ -38,6 +38,8 @@ Current first-party capabilities:
   for offline reading.
 - `hii.ollama.link_interpreter` summarizes cached link text with local Ollama
   when available.
+- `hii.links.publish_stream` publishes locally captured links to the public
+  stream at `umminuriddingreen.com/stream`.
 - `termite.rhino.managed_job` is the canonical v1 proof path: quote/reserve a
   Rhino/Termite runner job, stream logs, write ledger rows, and return proof
   artifacts.
@@ -78,6 +80,7 @@ hii og status       # ranked operational graph next path
 hii og capture ...  # append an operational graph event
 hii links status    # browser/offline feed coordinates
 hii links cache     # cache captured links and summarize with Ollama
+hii links publish   # push local captured links to the public stream
 hii jobs            # recent durable + local capability jobs
 hii ship            # typecheck and commit locally
 hii ship --push     # explicit external push to origin
@@ -144,6 +147,17 @@ The cache agent writes HTML, readable text, and cache receipts under
 `.hii/link-cache*`. If Ollama is running, it summarizes pages with
 `fast-local`; if not, the download still completes and the feed marks the
 summary as unavailable.
+
+Publish captured links to the public stream:
+
+```sh
+export HII_LINKS_PUBLISH_ENDPOINT=https://umminuriddingreen.com/api/links
+export HII_LINKS_PUBLISH_TOKEN=... # generated token, never committed
+node scripts/hii-cli.mjs links publish
+```
+
+Publish receipts append to `.hii/link-publish.jsonl`. Use `--dry-run` to inspect
+pending links and `--force` to resend already published local post ids.
 
 ## Run
 
