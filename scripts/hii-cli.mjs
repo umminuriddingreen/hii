@@ -23,6 +23,8 @@ const PACK_EXPORT_DIR = path.join(RUNTIME, "packs", "exports");
 const MONEY_DIR = path.join(RUNTIME, "money");
 const MONEY_IDEAS = path.join(MONEY_DIR, "ideas.jsonl");
 const MONEY_OFFERS_DIR = path.join(MONEY_DIR, "offers");
+const LINK_POSTS = path.join(ROOT, ".hii", "link-posts.jsonl");
+const LINK_CACHE = path.join(ROOT, ".hii", "link-cache.jsonl");
 const RUNNER_CAPABILITIES = ["termite.rhino.managed_job"];
 
 function codexBin() {
@@ -651,6 +653,7 @@ function agentCommandCatalog() {
     { command: "hii loop decide <yes|no>", purpose: "Approve or reject the latest proposed plan." },
     { command: "hii money idea <idea>", purpose: "Use local models to turn a rough idea into a sellable offer and execution handoff." },
     { command: "hii money list", purpose: "List recent local idea-to-offer receipts." },
+    { command: "hii links cache", purpose: "Cache browser-captured links locally and summarize them with Ollama when available." },
     { command: "hii pack list", purpose: "List compartmentalized HII capability packs." },
     { command: "hii pack export <id>", purpose: "Write a local-only pack manifest for staged shipping." },
     { command: "hii runner init <name>", purpose: "Register an owned runner and print its local token once." },
@@ -1242,6 +1245,34 @@ function cmdTerminal(args) {
   console.log("  open:     hii terminal --open");
 }
 
+function cmdLinks(args) {
+  const sub = args[0] || "status";
+  if (sub === "status") {
+    const posts = readJsonl(LINK_POSTS);
+    const cache = readJsonl(LINK_CACHE);
+    const cached = cache.filter((entry) => entry.status === "cached").length;
+    const failed = cache.filter((entry) => entry.status === "failed").length;
+    console.log("HII Links\n");
+    console.log(`feed:      http://localhost:3000/feed`);
+    console.log(`extension: ${path.join(ROOT, "extensions", "chrome-link-capture")}`);
+    console.log(`posts:     ${posts.length}`);
+    console.log(`cached:    ${cached}`);
+    console.log(`failed:    ${failed}`);
+    console.log(`cache:     ${LINK_CACHE}`);
+    console.log("\nnext: hii links cache");
+    return;
+  }
+  if (sub === "cache") {
+    const r = spawnSync("node", [path.join(ROOT, "scripts", "hii-link-cache.mjs"), ...args.slice(1)], {
+      cwd: ROOT,
+      stdio: "inherit"
+    });
+    process.exit(r.status ?? 1);
+  }
+  console.error("usage: hii links [status|cache]");
+  process.exit(1);
+}
+
 function cmdBridge(args) {
   const sub = args[0];
   if (sub === "send") {
@@ -1434,6 +1465,7 @@ switch (cmd) {
   case "og": cmdOg(rest); break;
   case "loop": cmdLoop(rest); break;
   case "money": cmdMoney(rest); break;
+  case "links": cmdLinks(rest); break;
   case "pack": cmdPack(rest); break;
   case "runner":
     cmdRunner(rest).catch((error) => {
@@ -1484,6 +1516,8 @@ usage: hii <command>
   money idea <idea>   turn a rough idea into a local offer brief
   money list [n]      list recent idea-to-offer receipts
   money show <id>     show a saved offer brief
+  links status        show browser link stream and cache coordinates
+  links cache         cache browser links and summarize with Ollama
   pack list           list compartmentalized capability packs
   pack show <id>      show pack routes, files, caps, and checks
   pack export <id>    write local-only pack manifest

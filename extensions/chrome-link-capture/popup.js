@@ -1,0 +1,34 @@
+async function activeTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab;
+}
+
+function tagsFromInput(value) {
+  return value.split(",").map((tag) => tag.trim()).filter(Boolean);
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+  const tab = await activeTab();
+  document.getElementById("title").value = tab?.title || "";
+  document.getElementById("url").value = tab?.url || "";
+});
+
+document.getElementById("form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const status = document.getElementById("status");
+  status.textContent = "Saving...";
+  const payload = {
+    title: document.getElementById("title").value,
+    url: document.getElementById("url").value,
+    note: document.getElementById("note").value,
+    tags: tagsFromInput(document.getElementById("tags").value),
+    source: "chrome-popup"
+  };
+  chrome.runtime.sendMessage({ type: "save-link", payload }, (response) => {
+    if (response?.ok) {
+      status.textContent = "Saved. Run hii links cache to make it offline.";
+    } else {
+      status.textContent = response?.error || "Could not save link.";
+    }
+  });
+});

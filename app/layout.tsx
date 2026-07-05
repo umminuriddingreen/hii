@@ -21,7 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <span className="ml-3 text-sm text-neutral-500">people, information, tools</span>
           </div>
           <nav className="flex gap-4 text-sm">
-            <Link href="/feed" className="text-neutral-600 hover:text-black">Feed</Link>
+            <Link href="/feed" className="text-neutral-600 hover:text-black">Links</Link>
             <Link href="/boards" className="text-neutral-600 hover:text-black">Boards</Link>
             <Link href="/terminal" className="text-neutral-600 hover:text-black">Terminal</Link>
             <Link href="/credits" className="text-neutral-600 hover:text-black">Credits</Link>

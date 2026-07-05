@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Save to HII</title>
+    <style>
+      body {
+        width: 320px;
+        margin: 0;
+        padding: 14px;
+        font: 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #111;
+        background: #fff;
+      }
+      label {
+        display: block;
+        margin-top: 10px;
+        font-weight: 600;
+      }
+      input,
+      textarea {
+        box-sizing: border-box;
+        width: 100%;
+        margin-top: 4px;
+        border: 1px solid #cfcfcf;
+        padding: 8px;
+        font: inherit;
+      }
+      textarea {
+        min-height: 70px;
+        resize: vertical;
+      }
+      button {
+        width: 100%;
+        margin-top: 12px;
+        border: 1px solid #111;
+        background: #111;
+        color: #fff;
+        padding: 9px 10px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      a {
+        color: #111;
+      }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+      }
+      #status {
+        min-height: 18px;
+        margin-top: 10px;
+        color: #555;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="row">
+      <strong>Save to HII</strong>
+      <a href="options.html" target="_blank">Options</a>
+    </div>
+    <form id="form">
+      <label>
+        Title
+        <input id="title" name="title" required minlength="3" maxlength="120" />
+      </label>
+      <label>
+        URL
+        <input id="url" name="url" required />
+      </label>
+      <label>
+        Note
+        <textarea id="note" name="note" maxlength="500"></textarea>
+      </label>
+      <label>
+        Tags
+        <input id="tags" name="tags" value="browser" />
+      </label>
+      <button>Save link</button>
+      <div id="status"></div>
+    </form>
+    <script src="popup.js"></script>
+  </body>
+</html>

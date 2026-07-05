@@ -119,5 +119,28 @@
     "runtimeFiles": ["Supabase assets/orders/download_events", "Cloudflare R2 object storage", "Stripe checkout/webhook events"],
     "verification": ["npm run build"],
     "shipBoundary": "public exchange flow; requires explicit external services"
+  },
+  {
+    "id": "hii-link-stream",
+    "name": "HII Link Stream",
+    "summary": "Browser capture, local downloader cache, and Ollama interpretation for an offline-first feed.",
+    "capabilities": ["hii.browser.link_capture", "hii.downloader.offline_cache", "hii.ollama.link_interpreter"],
+    "routes": ["/feed", "/api/links"],
+    "commands": ["hii links status", "hii links cache", "npm run hii:links:cache"],
+    "files": [
+      "app/feed/page.tsx",
+      "app/api/links/route.ts",
+      "lib/server/link-stream.ts",
+      "scripts/hii-link-cache.mjs",
+      "extensions/chrome-link-capture/manifest.json",
+      "extensions/chrome-link-capture/popup.html",
+      "extensions/chrome-link-capture/popup.js",
+      "extensions/chrome-link-capture/background.js",
+      "extensions/chrome-link-capture/options.html",
+      "extensions/chrome-link-capture/options.js"
+    ],
+    "runtimeFiles": ["~/hii/.hii/link-posts.jsonl", "~/hii/.hii/link-cache.jsonl", "~/hii/.hii/link-cache"],
+    "verification": ["node scripts/hii-cli.mjs links status", "npm run hii:links:cache", "npm run build"],
+    "shipBoundary": "local-first browser extension and cache; external sync or publishing requires a separate approval gate"
   }
 ]

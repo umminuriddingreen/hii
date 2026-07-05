@@ -5,6 +5,11 @@ first market proof is deliberately narrow: backend-owned capabilities are
 visible in HII Terminal, callable through `hii`, priced through credits, and
 represented as jobs with logs, ledger rows, and proof artifacts.
 
+The next adoption loop is browser-first. Think Open WebUI's local/offline AI
+control plane, but aimed at HII's operating logic: the browser captures useful
+links, HII stores the stream locally, a downloader caches pages onto the
+machine, and Ollama interprets the cache for an offline feed.
+
 The original file-for-value loop still exists. It is now modeled as the
 `hii.exchange.asset_link` capability:
 
@@ -27,6 +32,12 @@ Current first-party capabilities:
 - `hii.registry.scan` and `hii.registry.doctor` inspect local machine capability
   metadata without copying raw secrets.
 - `hii.credits.quote` prices bounded capability jobs before execution.
+- `hii.browser.link_capture` captures pages from Chrome into the local link
+  stream.
+- `hii.downloader.offline_cache` downloads captured pages into `.hii/link-cache`
+  for offline reading.
+- `hii.ollama.link_interpreter` summarizes cached link text with local Ollama
+  when available.
 - `termite.rhino.managed_job` is the canonical v1 proof path: quote/reserve a
   Rhino/Termite runner job, stream logs, write ledger rows, and return proof
   artifacts.
@@ -65,6 +76,8 @@ hii doctor          # status + registry doctor
 hii caps show       # backend capability registry
 hii og status       # ranked operational graph next path
 hii og capture ...  # append an operational graph event
+hii links status    # browser/offline feed coordinates
+hii links cache     # cache captured links and summarize with Ollama
 hii jobs            # recent durable + local capability jobs
 hii ship            # typecheck and commit locally
 hii ship --push     # explicit external push to origin
@@ -75,6 +88,9 @@ hii legacy ...      # old Python runtime at ~/hii-old
 
 ## App Surfaces
 
+- `/feed` is the browser-captured link stream. It accepts manual saves, reads
+  Chrome extension posts from `/api/links`, and shows offline cache/Ollama
+  summary state.
 - `/terminal` is the local console for process snapshots, backend capability
   discovery, recent capability jobs, ledger/proof counts, and bounded agent
   spawn presets.
@@ -91,6 +107,43 @@ hii legacy ...      # old Python runtime at ~/hii-old
 - Cloudflare R2 for file storage (S3 SDK, presigned GETs)
 - Stripe Checkout + signature-verified webhook
 - Local JSONL for terminal and Termite alpha job receipts
+- Chrome Manifest V3 extension for browser link capture
+- Ollama for local link summaries (`HII_LINKS_OLLAMA_MODEL`, default
+  `fast-local`)
+
+## Browser Link Stream MVP
+
+Start the local app:
+
+```sh
+npm run dev
+```
+
+Open `http://localhost:3000/feed`.
+
+Load the Chrome extension:
+
+```text
+chrome://extensions
+Developer mode -> Load unpacked -> /Users/ummi/hii/extensions/chrome-link-capture
+```
+
+Capture links from the popup or right-click context menu. The extension posts to
+`http://localhost:3000/api/links` by default; change that in the extension
+options if the app runs somewhere else.
+
+Cache the feed for offline use:
+
+```sh
+npm run hii:links:cache
+# or
+node scripts/hii-cli.mjs links cache
+```
+
+The cache agent writes HTML, readable text, and cache receipts under
+`.hii/link-cache*`. If Ollama is running, it summarizes pages with
+`fast-local`; if not, the download still completes and the feed marks the
+summary as unavailable.
 
 ## Run
 
@@ -111,6 +164,8 @@ stripe listen --forward-to localhost:3000/api/stripe/webhook
 ```sh
 npm run build
 npm run hii:registry:doctor
+node scripts/hii-cli.mjs links status
+node scripts/hii-cli.mjs links cache
 node scripts/hii-cli.mjs status
 node scripts/hii-cli.mjs doctor
 node scripts/hii-cli.mjs caps show
