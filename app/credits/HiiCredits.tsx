@@ -1,11 +1,13 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 type HiiCurrency = 'usd' | 'eur' | 'gbp' | 'credits';
 
 type HiiQuote = {
   id: string;
+  capabilityId: string;
+  inputSummary: string;
   task: string;
   currency: HiiCurrency;
   estimatedTokens: number;
@@ -15,10 +17,17 @@ type HiiQuote = {
   totalCents: number;
   maxBudgetCents: number;
   status: 'ready' | 'needs-approval' | 'over-budget';
+  createdAt: string;
   transcript: Array<{
     actor: 'user' | 'hii' | 'agent' | 'ledger';
     text: string;
   }>;
+};
+
+type CapabilityDefinition = {
+  id: string;
+  name: string;
+  status: string;
 };
 
 const initialTask =
@@ -54,6 +63,8 @@ export function HiiCredits() {
   const [currency, setCurrency] = useState<HiiCurrency>('usd');
   const [budget, setBudget] = useState(15);
   const [quote, setQuote] = useState<HiiQuote | null>(null);
+  const [capabilityId, setCapabilityId] = useState('hii.agent.spawn');
+  const [capabilities, setCapabilities] = useState<CapabilityDefinition[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,7 +78,8 @@ export function HiiCredits() {
         body: JSON.stringify({
           task,
           currency,
-          maxBudgetCents: Math.round(budget * 100)
+          maxBudgetCents: Math.round(budget * 100),
+          capabilityId
         })
       });
       const data = await res.json();
@@ -84,6 +96,8 @@ export function HiiCredits() {
     () =>
       quote ?? {
         id: 'hii-preview',
+        capabilityId,
+        inputSummary: task,
         task,
         currency,
         estimatedTokens: 0,
@@ -93,6 +107,7 @@ export function HiiCredits() {
         totalCents: 0,
         maxBudgetCents: Math.round(budget * 100),
         status: 'ready' as const,
+        createdAt: new Date().toISOString(),
         transcript: [
           {
             actor: 'user' as const,
@@ -105,8 +120,15 @@ export function HiiCredits() {
           }
         ]
       },
-    [budget, currency, quote, task]
+    [budget, capabilityId, currency, quote, task]
   );
+
+  useEffect(() => {
+    fetch('/api/capabilities', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setCapabilities(data?.capabilities ?? []))
+      .catch(() => setCapabilities([]));
+  }, []);
 
   return (
     <div className="min-h-[calc(100vh-9rem)]">
@@ -134,6 +156,21 @@ export function HiiCredits() {
               />
             </label>
             <div className="mt-3 grid grid-cols-2 gap-3">
+              <label className="col-span-2 block">
+                <span className="text-sm text-neutral-600">Capability</span>
+                <select
+                  value={capabilityId}
+                  onChange={(event) => setCapabilityId(event.target.value)}
+                  className="mt-1 w-full rounded border border-neutral-300 bg-white px-3 py-2"
+                >
+                  {capabilities.length === 0 && <option value="hii.agent.spawn">Spawn bounded agent session</option>}
+                  {capabilities.map((capability) => (
+                    <option key={capability.id} value={capability.id}>
+                      {capability.name} ({capability.status})
+                    </option>
+                  ))}
+                </select>
+              </label>
               <label className="block">
                 <span className="text-sm text-neutral-600">Currency</span>
                 <select
@@ -204,7 +241,7 @@ export function HiiCredits() {
           <div className="rounded border border-neutral-900 bg-black">
             <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3 font-mono text-xs text-neutral-400">
               <span>hii://conversation/{activeQuote.id}</span>
-              <span>{currencyLabels[activeQuote.currency]}</span>
+              <span>{activeQuote.capabilityId}</span>
             </div>
             <div className="space-y-3 p-4">
               {activeQuote.transcript.map((turn, index) => (

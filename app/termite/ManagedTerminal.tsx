@@ -4,12 +4,20 @@ import { useEffect, useMemo, useState } from 'react';
 
 type TermiteJob = {
   id: string;
+  capabilityId: string;
+  inputSummary: string;
   workflow: string;
   prompt: string;
   budget: string;
   status: 'queued';
   createdAt: string;
   logs: string[];
+  proofArtifacts?: Array<{
+    id: string;
+    kind: string;
+    label: string;
+    summary?: string;
+  }>;
 };
 
 const workflowLabels: Record<string, string> = {
@@ -77,6 +85,7 @@ export function ManagedTerminal({ signedIn }: { signedIn: boolean }) {
     }
     return [
       `$ hii termite job ${latest.id.slice(0, 8)}`,
+      `capability: ${latest.capabilityId}`,
       `status: ${latest.status}`,
       `workflow: ${workflowLabels[latest.workflow] ?? latest.workflow}`,
       `budget: ${latest.budget}`,
@@ -175,6 +184,12 @@ export function ManagedTerminal({ signedIn }: { signedIn: boolean }) {
                   </span>
                 </div>
                 <p className="mt-2 text-neutral-600">{workflowLabels[job.workflow] ?? job.workflow}</p>
+                <p className="mt-1 font-mono text-xs text-neutral-500">{job.capabilityId}</p>
+                {job.proofArtifacts && job.proofArtifacts.length > 0 && (
+                  <p className="mt-2 text-xs text-neutral-500">
+                    proof: {job.proofArtifacts.map((artifact) => artifact.label).join(', ')}
+                  </p>
+                )}
                 <p className="mt-1 text-xs text-neutral-400">{new Date(job.createdAt).toLocaleString()}</p>
               </div>
             ))}
