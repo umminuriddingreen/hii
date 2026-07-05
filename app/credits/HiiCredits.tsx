@@ -64,6 +64,7 @@ type AccountResponse = {
   accounts: CreditAccount[];
   ledger: CreditLedgerEntry[];
   jobs: CapabilityJob[];
+  warning?: string;
 };
 
 const initialTask =
@@ -355,6 +356,11 @@ export function HiiCredits() {
             ) : (
               <p className="mt-4 text-sm text-neutral-500">
                 Use USD, EUR, or GBP for Stripe top-ups. HII credits stay as an internal quote unit.
+              </p>
+            )}
+            {accountData?.warning && (
+              <p className="mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                {accountData.warning}
               </p>
             )}
           </div>

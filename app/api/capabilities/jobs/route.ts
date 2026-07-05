@@ -17,8 +17,26 @@ export async function GET(request: Request) {
 
   if (user) {
     const currency = parseCreditCurrency(new URL(request.url).searchParams.get('currency'));
-    const dashboard = await getCreditDashboard(user.id, currency);
-    return NextResponse.json({ jobs: dashboard.jobs, ledger: dashboard.ledger });
+    try {
+      const dashboard = await getCreditDashboard(user.id, currency);
+      return NextResponse.json({ jobs: dashboard.jobs, ledger: dashboard.ledger });
+    } catch (error) {
+      if (localTerminalAllowed(request)) {
+        const jobs = await listCapabilityJobs({ userId: user.id, limit: 50 });
+        return NextResponse.json({
+          jobs,
+          ledger: [],
+          warning:
+            error instanceof Error
+              ? `Durable credit jobs unavailable: ${error.message}`
+              : 'Durable credit jobs unavailable.'
+        });
+      }
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : 'Could not load capability jobs.' },
+        { status: 500 }
+      );
+    }
   }
 
   if (localTerminalAllowed(request)) {

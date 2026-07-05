@@ -20,8 +20,25 @@ export async function GET(request: Request) {
     const dashboard = await getCreditDashboard(user.id, currency);
     return NextResponse.json(dashboard);
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not load credit account.';
+    if (message.includes('credit_accounts') || message.includes('PGRST205')) {
+      return NextResponse.json({
+        account: {
+          user_id: user.id,
+          currency,
+          balance_cents: 0,
+          reserved_cents: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        },
+        accounts: [],
+        ledger: [],
+        jobs: [],
+        warning: `Durable credit schema is not applied yet: ${message}`
+      });
+    }
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Could not load credit account.' },
+      { error: message },
       { status: 500 }
     );
   }
