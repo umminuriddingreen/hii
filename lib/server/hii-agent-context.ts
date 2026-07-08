@@ -7,7 +7,7 @@ import capabilities from '@/lib/capabilities/registry.json';
 
 const root = path.join(os.homedir(), 'hii');
 const runtime = path.join(os.homedir(), '.hii');
-const bridgeLog = path.join(runtime, 'bridge', 'yin-codex.jsonl');
+const bridgeLog = path.join(runtime, 'bridge', 'codex.jsonl');
 const localJobs = path.join(root, '.hii', 'capability-jobs.jsonl');
 const ogEvents = path.join(runtime, 'og', 'events.jsonl');
 

@@ -8,7 +8,7 @@ _trace_lock = Lock()
 
 def trace_llm(entry):
     entry["ts"] = datetime.now(timezone.utc).isoformat()
-    entry["source"] = "yang/notes-classify"
+    entry["source"] = "hii/notes-classify"
     with _trace_lock:
         with open(TRACE_PATH, "a") as f:
             f.write(json.dumps(entry) + "\n")
