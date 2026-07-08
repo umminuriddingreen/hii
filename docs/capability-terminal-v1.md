@@ -20,7 +20,7 @@ anything runs.
 ## First Capability Path
 
 1. `/api/capabilities` exposes backend-visible capability definitions.
-2. `/terminal` renders capabilities and recent local capability jobs.
+2. `/console` renders capabilities and recent local capability jobs.
 3. `hii caps` lists the same registry from the CLI.
 4. `hii jobs` tails the local JSONL job store.
 5. `/credits` quotes a selected capability with shared quote fields.

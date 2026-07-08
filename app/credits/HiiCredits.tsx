@@ -68,7 +68,7 @@ type AccountResponse = {
 };
 
 const initialTask =
-  'Use my computer to inspect the HII terminal, summarize what happened, and produce a demo-safe next action list.';
+  'Use my computer to inspect the HII console, summarize what happened, and produce a demo-safe next action list.';
 
 const currencyLabels: Record<HiiCurrency, string> = {
   usd: 'USD',
@@ -292,13 +292,13 @@ export function HiiCredits() {
   const canStripeTopUp = currency !== 'credits';
 
   return (
-    <div className="min-h-[calc(100vh-9rem)]">
-      <section className="border-b border-neutral-200 pb-6">
-        <p className="text-sm font-medium text-neutral-500">HII credits</p>
-        <h1 className="mt-3 max-w-4xl text-3xl font-bold tracking-normal">
+    <div className="hii-page">
+      <section className="hii-page-header">
+        <p className="hii-kicker">HII credits</p>
+        <h1 className="hii-page-title">
           Account balance, task quotes, receipts, and proof in one transcript.
         </h1>
-        <p className="mt-4 max-w-3xl text-neutral-600">
+        <p className="hii-page-copy">
           Buy prepaid balance, reserve it for bounded capability work, then finalize each job into
           compute reimbursement, HII coordination fee, transcript, and proof artifacts.
         </p>
@@ -306,7 +306,7 @@ export function HiiCredits() {
 
       <section className="grid gap-5 pt-6 lg:grid-cols-[minmax(18rem,26rem)_1fr]">
         <aside className="space-y-5">
-          <div className="rounded border border-neutral-200 p-4">
+          <div className="hii-card">
             <h2 className="font-semibold">Account Balance</h2>
             <label className="mt-4 block">
               <span className="text-sm text-neutral-600">Currency</span>
@@ -316,7 +316,7 @@ export function HiiCredits() {
                   setCurrency(event.target.value as HiiCurrency);
                   setQuote(null);
                 }}
-                className="mt-1 w-full rounded border border-neutral-300 bg-white px-3 py-2"
+                className="hii-select mt-1 w-full px-3 py-2"
               >
                 {Object.entries(currencyLabels).map(([code, label]) => (
                   <option key={code} value={code}>
@@ -326,15 +326,15 @@ export function HiiCredits() {
               </select>
             </label>
             <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
-              <div className="rounded border border-neutral-200 p-3">
+              <div className="hii-stat-card">
                 <p className="text-xs uppercase text-neutral-500">balance</p>
                 <p className="mt-1 font-semibold">{money(account?.balance_cents ?? 0, currency)}</p>
               </div>
-              <div className="rounded border border-neutral-200 p-3">
+              <div className="hii-stat-card">
                 <p className="text-xs uppercase text-neutral-500">reserved</p>
                 <p className="mt-1 font-semibold">{money(account?.reserved_cents ?? 0, currency)}</p>
               </div>
-              <div className="rounded border border-neutral-200 p-3">
+              <div className="hii-stat-card">
                 <p className="text-xs uppercase text-neutral-500">available</p>
                 <p className="mt-1 font-semibold">{money(availableCents, currency)}</p>
               </div>
@@ -347,7 +347,7 @@ export function HiiCredits() {
                     type="button"
                     onClick={() => topUp(amount)}
                     disabled={Boolean(loading)}
-                    className="rounded border border-neutral-300 px-3 py-2 text-sm font-medium hover:bg-neutral-50 disabled:opacity-50"
+                    className="hii-secondary-action disabled:opacity-50"
                   >
                     Add {money(amount, currency)}
                   </button>
@@ -365,14 +365,14 @@ export function HiiCredits() {
             )}
           </div>
 
-          <div className="rounded border border-neutral-200 p-4">
+          <div className="hii-card">
             <h2 className="font-semibold">Task Request</h2>
             <label className="mt-4 block">
               <span className="text-sm text-neutral-600">What should HII do?</span>
               <textarea
                 value={task}
                 onChange={(event) => setTask(event.target.value)}
-                className="mt-1 min-h-36 w-full rounded border border-neutral-300 bg-white px-3 py-2 text-sm"
+                className="hii-textarea mt-1 min-h-36 w-full px-3 py-2 text-sm"
               />
             </label>
             <div className="mt-3 grid grid-cols-2 gap-3">
@@ -381,7 +381,7 @@ export function HiiCredits() {
                 <select
                   value={capabilityId}
                   onChange={(event) => setCapabilityId(event.target.value)}
-                  className="mt-1 w-full rounded border border-neutral-300 bg-white px-3 py-2"
+                  className="hii-select mt-1 w-full px-3 py-2"
                 >
                   {capabilities.length === 0 && <option value="hii.agent.spawn">Spawn bounded agent session</option>}
                   {capabilities.map((capability) => (
@@ -399,7 +399,7 @@ export function HiiCredits() {
                   step="1"
                   value={budget}
                   onChange={(event) => setBudget(Number(event.target.value))}
-                  className="mt-1 w-full rounded border border-neutral-300 bg-white px-3 py-2"
+                  className="hii-field mt-1 w-full px-3 py-2"
                 />
               </label>
               <div className="flex items-end gap-2">
@@ -407,7 +407,7 @@ export function HiiCredits() {
                   type="button"
                   onClick={requestQuote}
                   disabled={Boolean(loading)}
-                  className="w-full rounded border border-neutral-300 px-4 py-2 text-sm font-medium hover:bg-neutral-50 disabled:opacity-50"
+                  className="hii-secondary-action w-full disabled:opacity-50"
                 >
                   {loading === 'quote' ? 'Quoting...' : 'Quote'}
                 </button>
@@ -415,7 +415,7 @@ export function HiiCredits() {
                   type="button"
                   onClick={reserveJob}
                   disabled={Boolean(loading) || activeQuote.status === 'over-budget'}
-                  className="w-full rounded bg-black px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
+                  className="hii-command-button w-full disabled:opacity-50"
                 >
                   {loading === 'reserve' ? 'Reserving...' : 'Reserve'}
                 </button>
@@ -426,7 +426,7 @@ export function HiiCredits() {
             {!signedIn && (
               <a
                 href="/login?next=/credits"
-                className="mt-3 block rounded border border-neutral-300 px-3 py-2 text-center text-sm font-medium hover:bg-neutral-50"
+                className="hii-secondary-action mt-3 block text-center"
               >
                 Sign in to reserve credits
               </a>
@@ -436,26 +436,26 @@ export function HiiCredits() {
 
         <div className="space-y-5">
           <div className="grid gap-3 md:grid-cols-4">
-            <div className="rounded border border-neutral-200 p-4">
+            <div className="hii-stat-card">
               <p className="text-xs uppercase text-neutral-500">status</p>
               <p className="mt-2 font-semibold">{statusLabel(activeQuote.status)}</p>
             </div>
-            <div className="rounded border border-neutral-200 p-4">
+            <div className="hii-stat-card">
               <p className="text-xs uppercase text-neutral-500">tokens</p>
               <p className="mt-2 font-semibold">{activeQuote.estimatedTokens.toLocaleString()}</p>
             </div>
-            <div className="rounded border border-neutral-200 p-4">
+            <div className="hii-stat-card">
               <p className="text-xs uppercase text-neutral-500">runtime</p>
               <p className="mt-2 font-semibold">{activeQuote.estimatedMinutes} min</p>
             </div>
-            <div className="rounded border border-neutral-200 p-4">
+            <div className="hii-stat-card">
               <p className="text-xs uppercase text-neutral-500">total</p>
               <p className="mt-2 font-semibold">{money(activeQuote.totalCents, activeQuote.currency)}</p>
             </div>
           </div>
 
-          <div className="rounded border border-neutral-900 bg-black">
-            <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3 font-mono text-xs text-neutral-400">
+          <div className="hii-terminal-frame">
+            <div className="hii-terminal-bar">
               <span>hii://conversation/{activeQuote.id}</span>
               <span>{activeQuote.capabilityId}</span>
             </div>
@@ -478,7 +478,7 @@ export function HiiCredits() {
             </div>
           </div>
 
-          <section className="rounded border border-neutral-200 p-4">
+          <section className="hii-card">
             <h2 className="font-semibold">Recent Jobs</h2>
             <div className="mt-4 divide-y divide-neutral-100 text-sm">
               {(accountData?.jobs ?? []).length === 0 && <p className="text-neutral-500">No reserved jobs yet.</p>}
@@ -496,7 +496,7 @@ export function HiiCredits() {
                       type="button"
                       onClick={() => finalizeJob(job)}
                       disabled={Boolean(loading)}
-                      className="h-9 rounded border border-neutral-300 px-3 text-sm font-medium hover:bg-neutral-50 disabled:opacity-50"
+                      className="hii-secondary-action h-9 disabled:opacity-50"
                     >
                       {loading === `finalize-${job.id}` ? 'Finalizing...' : 'Finalize'}
                     </button>
@@ -506,7 +506,7 @@ export function HiiCredits() {
             </div>
           </section>
 
-          <section className="rounded border border-neutral-200 p-4">
+          <section className="hii-card">
             <h2 className="font-semibold">Ledger</h2>
             <div className="mt-4 divide-y divide-neutral-100 text-sm">
               {(accountData?.ledger ?? []).length === 0 && <p className="text-neutral-500">No ledger rows yet.</p>}

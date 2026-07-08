@@ -30,14 +30,17 @@ export default async function DashboardPage() {
   for (const o of paid) salesByLink.set(o.exchange_link_id ?? '', (salesByLink.get(o.exchange_link_id ?? '') ?? 0) + 1);
 
   return (
-    <>
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Dashboard</h1>
+    <div className="hii-page">
+      <header className="hii-page-header flex items-start justify-between gap-4">
+        <div>
+          <p className="hii-kicker">HII dashboard</p>
+          <h1 className="hii-page-title">Exchange receipts</h1>
+          <p className="mt-3 text-sm text-neutral-500">{user?.email}</p>
+        </div>
         <form method="POST" action="/auth/signout">
-          <button className="text-sm text-neutral-500 underline">Sign out</button>
+          <button className="hii-secondary-action">Sign out</button>
         </form>
-      </div>
-      <p className="mt-1 text-sm text-neutral-500">{user?.email}</p>
+      </header>
 
       <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Stat label="Views" value={(links ?? []).reduce((s, l) => s + (l.views ?? 0), 0)} />
@@ -47,7 +50,7 @@ export default async function DashboardPage() {
       </div>
 
       <h2 className="mt-10 text-lg font-semibold">Exchange links</h2>
-      <div className="mt-3 overflow-x-auto">
+      <div className="hii-card mt-3 overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead className="text-neutral-500">
             <tr>
@@ -62,13 +65,13 @@ export default async function DashboardPage() {
             {(links ?? []).map((l) => {
               const asset = l.asset as unknown as { title?: string } | null;
               return (
-                <tr key={l.id} className="border-t border-neutral-200">
+                <tr key={l.id} className="border-t border-[rgba(23,107,255,0.18)]">
                   <td className="py-2">{asset?.title ?? '—'}</td>
                   <td className="py-2">{usd(l.price_cents)}</td>
                   <td className="py-2">{l.views}</td>
                   <td className="py-2">{salesByLink.get(l.id) ?? 0}</td>
                   <td className="py-2">
-                    <Link href={`/x/${l.id}`} className="font-mono text-xs underline">
+                    <Link href={`/x/${l.id}`} className="hii-resource-link font-mono text-xs">
                       /x/{l.id.slice(0, 8)}…
                     </Link>
                   </td>
@@ -78,7 +81,7 @@ export default async function DashboardPage() {
             {(links ?? []).length === 0 && (
               <tr>
                 <td colSpan={5} className="py-6 text-neutral-400">
-                  No exchanges yet. <Link href="/upload" className="underline">Create one →</Link>
+                  No exchanges yet. <Link href="/upload" className="hii-resource-link">Create one</Link>
                 </td>
               </tr>
             )}
@@ -96,13 +99,13 @@ export default async function DashboardPage() {
       ) : (
         <p className="mt-3 text-sm text-neutral-400">No buyers yet.</p>
       )}
-    </>
+    </div>
   );
 }
 
 function Stat({ label, value }: { label: string; value: number | string }) {
   return (
-    <div className="rounded border border-neutral-200 p-4">
+    <div className="hii-stat-card">
       <div className="text-xs uppercase tracking-wide text-neutral-500">{label}</div>
       <div className="mt-1 text-2xl font-bold">{value}</div>
     </div>

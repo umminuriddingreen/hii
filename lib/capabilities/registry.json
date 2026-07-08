@@ -135,6 +135,44 @@
     "trustLevel": "first-party"
   },
   {
+    "id": "hii.board.task_kanban",
+    "name": "Task Kanban Board",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Track HII work as a local kanban/todo board with CLI commands, a dense browser surface, and append-only task events.",
+    "inputs": [
+      "task title",
+      "lane",
+      "priority",
+      "owner",
+      "coordinate",
+      "notes",
+      "tags"
+    ],
+    "outputs": [
+      "task event log",
+      "kanban board",
+      "agent context task summary"
+    ],
+    "permissions": [
+      "local-only",
+      "append local task events",
+      "local browser mutation from localhost"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii board",
+      "/boards",
+      "/api/board/tasks",
+      "~/.hii/board/tasks.jsonl"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
     "id": "hii.money.idea_to_offer",
     "name": "Idea To Offer Money Loop",
     "owner": "hii",
@@ -575,5 +613,133 @@
     ],
     "status": "ready",
     "trustLevel": "first-party"
+  },
+  {
+    "id": "thirdparty.blender_mcp",
+    "name": "Blender MCP",
+    "owner": "ahujasid/blender-mcp",
+    "runtime": "local-cli",
+    "summary": "Local MCP server source for controlling Blender through the Blender MCP addon and socket bridge.",
+    "inputs": [
+      "MCP stdio request",
+      "Blender addon socket on BLENDER_HOST/BLENDER_PORT"
+    ],
+    "outputs": [
+      "Blender scene inspection",
+      "Blender object and material operations",
+      "viewport screenshot resources when Blender is connected"
+    ],
+    "permissions": [
+      "local Blender process",
+      "local socket bridge",
+      "third-party MCP source installed under /Users/ummi/mcp-servers/blender-mcp"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "/Users/ummi/mcp-servers/blender-mcp",
+      "uv run blender-mcp",
+      "addon.py"
+    ],
+    "status": "partial",
+    "trustLevel": "experimental"
+  },
+  {
+    "id": "thirdparty.browsermcp",
+    "name": "BrowserMCP Source",
+    "owner": "BrowserMCP/mcp",
+    "runtime": "local-cli",
+    "summary": "BrowserMCP source checkout and published package path for local browser automation; the cloned repo currently documents that it cannot be built standalone.",
+    "inputs": [
+      "Browser MCP client request",
+      "BrowserMCP Chrome extension bridge"
+    ],
+    "outputs": [
+      "browser automation actions when a runnable package or extension bridge is installed"
+    ],
+    "permissions": [
+      "local browser profile when enabled",
+      "third-party MCP source installed under /Users/ummi/mcp-servers/browsermcp",
+      "use published npx package for runtime until workspace dependencies are resolved"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "/Users/ummi/mcp-servers/browsermcp",
+      "README.md standalone build warning",
+      "npm install --omit=dev fails on workspace:* dependencies",
+      "npx --yes @browsermcp/mcp --help"
+    ],
+    "status": "partial",
+    "trustLevel": "experimental"
+  },
+  {
+    "id": "thirdparty.google_mcp_catalog",
+    "name": "Google MCP Catalog",
+    "owner": "google/mcp",
+    "runtime": "local-cli",
+    "summary": "Cloned Google MCP catalog and examples repo for discovering official Google remote MCP servers and open-source Google MCP implementations.",
+    "inputs": [
+      "Google MCP product selection",
+      "remote MCP endpoint or linked open-source server choice"
+    ],
+    "outputs": [
+      "Google MCP server docs",
+      "example paths",
+      "handoff links for runnable Google MCP servers"
+    ],
+    "permissions": [
+      "catalog/read-only source under /Users/ummi/mcp-servers/google-mcp",
+      "no Google Cloud auth or remote endpoint configured by default"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "/Users/ummi/mcp-servers/google-mcp",
+      "README.md",
+      "examples/allstrides",
+      "examples/launchmybakery"
+    ],
+    "status": "ready",
+    "trustLevel": "experimental"
+  },
+  {
+    "id": "thirdparty.searxng_search_mcp",
+    "name": "SearXNG Search MCP",
+    "owner": "mcp-searxng + searxng/searxng",
+    "runtime": "local-cli",
+    "summary": "Local SearXNG MCP wrapper and SearXNG source/config directories for private metasearch and URL reading.",
+    "inputs": [
+      "MCP search request",
+      "SEARXNG_URL pointing at a live SearXNG instance"
+    ],
+    "outputs": [
+      "web search results",
+      "URL content converted to markdown"
+    ],
+    "permissions": [
+      "local or configured SearXNG instance",
+      "third-party MCP wrapper under /Users/ummi/mcp-servers/mcp-searxng",
+      "do not bind to localhost:8080 until that port is running SearXNG"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "/Users/ummi/mcp-servers/mcp-searxng",
+      "/Users/ummi/mcp-servers/searxng-app",
+      "https://docs.searxng.org/index.html",
+      "npx --yes mcp-searxng",
+      "localhost:8080 currently serves Python SimpleHTTP, not SearXNG"
+    ],
+    "status": "blocked",
+    "trustLevel": "experimental"
   }
 ]

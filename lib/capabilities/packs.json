@@ -3,28 +3,32 @@
     "id": "hii-core-loop",
     "name": "HII Core Loop",
     "summary": "Local user-proxy loop, OG context, y/n plan gate, and agent-readable context.",
-    "capabilities": ["hii.loop.user_proxy", "hii.og.operational_graph", "hii.terminal.observe"],
-    "routes": ["/", "/api/context", "/api/og/status"],
-    "commands": ["hii context --json", "hii og status", "hii loop once", "hii loop note", "hii loop decide"],
+    "capabilities": ["hii.loop.user_proxy", "hii.og.operational_graph", "hii.terminal.observe", "hii.board.task_kanban"],
+    "routes": ["/", "/boards", "/console", "/api/context", "/api/og/status", "/api/board/tasks"],
+    "commands": ["hii context --json", "hii og status", "hii loop once", "hii loop note", "hii loop decide", "hii board", "hii console"],
     "files": [
       "app/HiiNew.tsx",
       "app/page.tsx",
+      "app/boards/page.tsx",
+      "app/boards/BoardClient.tsx",
       "app/api/context/route.ts",
       "app/api/og/status/route.ts",
+      "app/api/board/tasks/route.ts",
+      "lib/server/hii-board.ts",
       "lib/server/hii-agent-context.ts",
       "scripts/hii-cli.mjs"
     ],
-    "runtimeFiles": ["~/.hii/og/events.jsonl", "~/.hii/loop/decisions.jsonl", "~/.hii/loop/notes.jsonl"],
-    "verification": ["node scripts/hii-cli.mjs loop once", "node scripts/hii-cli.mjs loop status", "npm run build"],
+    "runtimeFiles": ["~/.hii/og/events.jsonl", "~/.hii/loop/decisions.jsonl", "~/.hii/loop/notes.jsonl", "~/.hii/board/tasks.jsonl"],
+    "verification": ["node scripts/hii-cli.mjs loop once", "node scripts/hii-cli.mjs loop status", "node scripts/hii-cli.mjs board", "npm run build"],
     "shipBoundary": "local-only; exports manifests, never pushes or publishes"
   },
   {
     "id": "hii-terminal",
-    "name": "HII Terminal",
+    "name": "HII Console",
     "summary": "Local command center for process observation, agent spawn presets, capability discovery, and recent jobs.",
     "capabilities": ["hii.terminal.observe", "hii.agent.spawn", "hii.registry.scan", "hii.registry.doctor"],
-    "routes": ["/terminal", "/api/terminal/stream", "/api/terminal/sessions", "/api/capabilities", "/api/capabilities/jobs"],
-    "commands": ["hii terminal", "hii caps show", "hii jobs", "hii doctor"],
+    "routes": ["/console", "/terminal", "/api/terminal/stream", "/api/terminal/sessions", "/api/capabilities", "/api/capabilities/jobs"],
+    "commands": ["hii console", "hii terminal", "hii caps show", "hii jobs", "hii doctor"],
     "files": [
       "app/terminal/page.tsx",
       "app/terminal/HiiTerminal.tsx",
@@ -142,5 +146,27 @@
     "runtimeFiles": ["~/hii/.hii/link-posts.jsonl", "~/hii/.hii/link-cache.jsonl", "~/hii/.hii/link-cache", "~/hii/.hii/link-publish.jsonl"],
     "verification": ["node scripts/hii-cli.mjs links status", "node scripts/hii-cli.mjs links publish --dry-run", "npm run hii:links:cache", "npm run build"],
     "shipBoundary": "local-first browser extension and cache; external sync or publishing requires a separate approval gate"
+  },
+  {
+    "id": "hii-third-party-mcp-sources",
+    "name": "HII Third-Party MCP Sources",
+    "summary": "Local source installs for Blender MCP, BrowserMCP, Google's MCP catalog, and SearXNG search MCP, tracked as experimental HII-visible capabilities.",
+    "capabilities": ["thirdparty.blender_mcp", "thirdparty.browsermcp", "thirdparty.google_mcp_catalog", "thirdparty.searxng_search_mcp"],
+    "routes": ["/console", "/api/capabilities"],
+    "commands": ["hii caps show", "cd /Users/ummi/mcp-servers/blender-mcp && uv run blender-mcp", "npx --yes @browsermcp/mcp"],
+    "files": [
+      "/Users/ummi/mcp-servers/blender-mcp",
+      "/Users/ummi/mcp-servers/browsermcp",
+      "/Users/ummi/mcp-servers/google-mcp",
+      "/Users/ummi/mcp-servers/mcp-searxng",
+      "/Users/ummi/mcp-servers/searxng-app",
+      "lib/capabilities/registry.json"
+    ],
+    "runtimeFiles": [
+      "/Users/ummi/mcp-servers/blender-mcp/.venv",
+      "Blender addon socket on localhost:9876 when enabled"
+    ],
+    "verification": ["node scripts/hii-cli.mjs caps show", "cd /Users/ummi/mcp-servers/blender-mcp && uv run blender-mcp", "npx --yes @browsermcp/mcp --help", "npx --yes mcp-searxng"],
+    "shipBoundary": "third-party local sources only; BrowserMCP source build is blocked until upstream standalone dependencies are resolved, but the published npx package is runnable; Google MCP repo is a catalog, not a configured Google Cloud endpoint; SearXNG MCP requires SEARXNG_URL pointed at a real SearXNG service"
   }
 ]

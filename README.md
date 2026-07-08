@@ -62,7 +62,7 @@ Shared contracts are in `lib/capabilities/types.ts`:
 V1 persistence is split by trust boundary. Local-only terminal receipts append
 JSONL rows under `.hii/`; quoted capability jobs use Supabase tables for
 `capability_jobs`, `credit_ledger_entries`, `task_transcript_events`, and
-`proof_artifacts`. `node scripts/hii-cli.mjs jobs`, `/terminal`, and `/termite`
+`proof_artifacts`. `node scripts/hii-cli.mjs jobs`, `/console`, and `/termite`
 read that same job contract when Supabase is configured, with local JSONL as a
 fallback.
 
@@ -84,9 +84,9 @@ hii links publish   # push local captured links to the public stream
 hii jobs            # recent durable + local capability jobs
 hii ship            # typecheck and commit locally
 hii ship --push     # explicit external push to origin
-hii terminal        # local terminal coordinates
-hii terminal --open # open /terminal
-hii legacy ...      # old Python runtime at ~/hii-old
+hii console         # local console coordinates
+hii console --open  # open /console
+hii terminal        # compatibility alias for the console
 ```
 
 ## App Surfaces
@@ -94,9 +94,9 @@ hii legacy ...      # old Python runtime at ~/hii-old
 - `/feed` is the browser-captured link stream. It accepts manual saves, reads
   Chrome extension posts from `/api/links`, and shows offline cache/Ollama
   summary state.
-- `/terminal` is the local console for process snapshots, backend capability
+- `/console` is the local console for process snapshots, backend capability
   discovery, recent capability jobs, ledger/proof counts, and bounded agent
-  spawn presets.
+  spawn presets. `/terminal` remains a compatibility route.
 - `/credits` quotes capability jobs and produces ledger-ready transcript rows.
 - `/termite` is the first concrete managed capability: quoted Rhino/Termite
   jobs with runner logs, ledger rows, and proof artifacts.

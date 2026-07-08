@@ -4,33 +4,37 @@ import Link from 'next/link';
 import { AliveBars } from './AliveBars';
 
 export const metadata: Metadata = {
-  title: 'hii — conversational computer work',
-  description: 'Turn tasks, files, agents, credits, proof, and payments into one conversation transcript.'
+  title: 'hii - verified agent work',
+  description: 'Local-first control plane for capabilities, approvals, jobs, proof, and receipts.'
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-white text-black">
+      <body className="hii-app-shell">
         <AliveBars />
-        <header className="flex items-center justify-between border-b border-neutral-200 px-6 py-4">
-          <div>
-            <Link href="/" className="font-mono text-lg font-bold">
-              hii
-            </Link>
-            <span className="ml-3 text-sm text-neutral-500">people, information, tools</span>
+        <header className="hii-topbar sticky top-0 z-40 px-4 py-3 sm:px-6">
+          <div className="mx-auto flex max-w-7xl flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-baseline gap-3">
+              <Link href="/" className="font-mono text-lg font-black uppercase text-[var(--hii-electric-blue)] underline underline-offset-2">
+                hii
+              </Link>
+              <span className="font-mono text-xs uppercase text-neutral-600">control plane</span>
+            </div>
+            <nav className="flex flex-wrap gap-x-4 gap-y-2 text-xs">
+              <Link href="/" className="hii-nav-link">Desk</Link>
+              <Link href="/landing" className="hii-nav-link">Playbook</Link>
+              <Link href="/feed" className="hii-nav-link">Feed</Link>
+              <Link href="/boards" className="hii-nav-link">Boards</Link>
+              <Link href="/console" className="hii-nav-link">Console</Link>
+              <Link href="/credits" className="hii-nav-link">Credits</Link>
+              <Link href="/termite" className="hii-nav-link">Termite</Link>
+              <Link href="/upload" className="hii-nav-link">Exchange</Link>
+              <Link href="/dashboard" className="hii-nav-link">Dashboard</Link>
+            </nav>
           </div>
-          <nav className="flex gap-4 text-sm">
-            <Link href="/feed" className="text-neutral-600 hover:text-black">Links</Link>
-            <Link href="/boards" className="text-neutral-600 hover:text-black">Boards</Link>
-            <Link href="/terminal" className="text-neutral-600 hover:text-black">Terminal</Link>
-            <Link href="/credits" className="text-neutral-600 hover:text-black">Credits</Link>
-            <Link href="/termite" className="text-neutral-600 hover:text-black">Termite</Link>
-            <Link href="/upload" className="text-neutral-600 hover:text-black">New exchange</Link>
-            <Link href="/dashboard" className="text-neutral-600 hover:text-black">Dashboard</Link>
-          </nav>
         </header>
-        <main className="mx-auto max-w-7xl px-6 py-10">{children}</main>
+        <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:py-10">{children}</main>
       </body>
     </html>
   );

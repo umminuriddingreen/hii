@@ -997,7 +997,29 @@ function cmdProbe(args) {
   }
 }
 
-function cmdCaps() {
+function runSdkContractSmoke(args = []) {
+  const r = spawnSync("node", [path.join(ROOT, "scripts", "hii-sdk-contract-smoke.mjs"), ...args], { cwd: ROOT, stdio: "inherit" });
+  process.exit(r.status ?? 1);
+}
+
+function cmdSdk(args) {
+  const sub = args[0] || "status";
+  if (sub !== "status" && sub !== "check") {
+    console.error("usage: hii sdk [status|check]");
+    process.exit(1);
+  }
+  runSdkContractSmoke(args.slice(1));
+}
+
+function cmdCaps(args = []) {
+  const sub = args[0] || "show";
+  if (sub === "validate") {
+    runSdkContractSmoke(args.slice(1));
+  }
+  if (sub !== "show") {
+    console.error("usage: hii caps [show|validate]");
+    process.exit(1);
+  }
   const capabilities = readJsonArray(CAPABILITY_REGISTRY);
   if (capabilities.length === 0) {
     console.log("No capability registry found.");
@@ -1944,12 +1966,9 @@ switch (cmd) {
   case "build": npmRun("build", rest); break;
   case "start": npmRun("start", rest); break;
   case "caps":
-    if (rest[0] && rest[0] !== "show") {
-      console.error("usage: hii caps [show]");
-      process.exit(1);
-    }
-    cmdCaps();
+    cmdCaps(rest);
     break;
+  case "sdk": cmdSdk(rest); break;
   case "context": cmdContext(rest); break;
   case "agent-context": cmdContext(rest); break;
   case "probe": cmdProbe(rest); break;
@@ -2004,6 +2023,8 @@ usage: hii <command>
   status              env + git + codex snapshot
   doctor              status + registry doctor
   caps [show]         list backend-owned capabilities
+  caps validate       validate registry, jobs, proof kinds, and API/CLI parity
+  sdk status          run SDK contract smoke checks
   jobs [n]            list recent local capability jobs
   jobs reconcile      reconcile local HII agent jobs from Claude state
   og [capture <msg>]  infer the operational graph and likely next path

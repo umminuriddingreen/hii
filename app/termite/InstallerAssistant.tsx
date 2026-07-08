@@ -95,7 +95,7 @@ export function InstallerAssistant() {
   }, []);
 
   return (
-    <section className="border-t border-neutral-200 pt-8">
+    <section className="border-t border-[var(--hii-electric-blue)] pt-8">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold">Local LLM Install Manager</h2>
@@ -108,7 +108,7 @@ export function InstallerAssistant() {
         <button
           type="button"
           onClick={refresh}
-          className="rounded border border-neutral-300 px-4 py-2 text-sm font-medium hover:bg-neutral-50"
+          className="hii-secondary-action"
         >
           Refresh
         </button>
@@ -117,7 +117,7 @@ export function InstallerAssistant() {
       {state && (
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           {stateLabels.map(([key, label]) => (
-            <div key={key} className="rounded border border-neutral-200 p-4">
+            <div key={key} className="hii-stat-card">
               <div className="text-xs uppercase text-neutral-500">{label}</div>
               <div className="mt-1 font-mono text-sm">{state[key] ? 'PASS' : 'MISSING'}</div>
             </div>
@@ -125,7 +125,7 @@ export function InstallerAssistant() {
         </div>
       )}
 
-      <div className="mt-5 rounded border border-neutral-800 bg-black p-4 font-mono text-sm text-green-200">
+      <div className="hii-terminal-frame mt-5 p-4 font-mono text-sm">
         <p>$ local-llm installer-manager</p>
         <p>model: {guidance?.model ?? 'checking...'}</p>
         <p>available: {guidance ? String(guidance.available) : 'checking...'}</p>
@@ -141,7 +141,7 @@ export function InstallerAssistant() {
             type="button"
             onClick={() => runAction(action.id)}
             disabled={Boolean(busyAction)}
-            className="rounded border border-neutral-300 p-4 text-left hover:bg-neutral-50 disabled:opacity-50"
+            className="hii-card text-left hover:bg-[var(--hii-soft-blue)] disabled:opacity-50"
           >
             <span className="block font-medium">
               {busyAction === action.id ? 'Running...' : action.label}
@@ -152,10 +152,10 @@ export function InstallerAssistant() {
       </div>
 
       {run && (
-        <div className="mt-5 rounded border border-neutral-200 bg-neutral-50 p-4">
+        <div className="hii-card mt-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="font-mono text-xs">{run.command}</p>
-            <span className="rounded border border-neutral-300 px-2 py-1 text-xs uppercase">
+            <span className="border border-[rgba(23,107,255,0.28)] bg-[var(--hii-warm-white)] px-2 py-1 text-xs uppercase">
               exit {run.exitCode}
             </span>
           </div>

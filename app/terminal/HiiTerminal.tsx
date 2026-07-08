@@ -84,8 +84,8 @@ export function HiiTerminal() {
   const [connected, setConnected] = useState(false);
   const [showAll, setShowAll] = useState(true);
   const [lines, setLines] = useState<string[]>([
-    '$ hii terminal --stream system --agents',
-    'connecting to local process stream...'
+    '$ hii console --stream matrix --agents',
+    'connecting to local context stream...'
   ]);
   const [agents, setAgents] = useState<AgentSession[]>([]);
   const [preset, setPreset] = useState('observer');
@@ -183,27 +183,27 @@ export function HiiTerminal() {
   const agentRows = useMemo(() => agents.slice(0, 12), [agents]);
 
   return (
-    <div className="min-h-[calc(100vh-9rem)]">
-      <section className="border-b border-neutral-200 pb-6">
-        <p className="text-sm font-medium text-neutral-500">HII terminal</p>
-        <h1 className="mt-3 text-3xl font-bold tracking-normal">
-          Live conversation stream for system and agent work.
+    <div className="hii-page">
+      <section className="hii-page-header">
+        <p className="hii-kicker">HII console</p>
+        <h1 className="hii-page-title">
+          Matrix view for system and agent work.
         </h1>
-        <p className="mt-4 max-w-3xl text-neutral-600">
-          A local-only browser terminal for watching Claude/Codex-style turns, agent sessions,
-          HII jobs, workstation activity, approvals, and future ledger events as one transcript.
+        <p className="hii-page-copy">
+          A local-only power layer for watching Claude/Codex-style turns, agent sessions,
+          HII jobs, workstation activity, approvals, and proof receipts as one transcript.
         </p>
       </section>
 
       <section className="grid gap-5 pt-6 lg:grid-cols-[minmax(18rem,22rem)_1fr]">
         <aside className="space-y-5">
-          <div className="rounded border border-neutral-200 p-4">
+          <div className="hii-card">
             <div className="flex items-center justify-between gap-3">
               <h2 className="font-semibold">Stream</h2>
               <span
-                className={`rounded border px-2 py-1 text-xs uppercase ${
+                className={`border px-2 py-1 text-xs uppercase ${
                   connected
-                    ? 'border-green-700 text-green-700'
+                    ? 'border-[var(--hii-electric-blue)] bg-[var(--hii-soft-green)] text-[var(--hii-graphite)]'
                     : 'border-neutral-300 text-neutral-500'
                 }`}
               >
@@ -220,14 +220,14 @@ export function HiiTerminal() {
             </label>
             <button
               type="button"
-              onClick={() => setLines(['$ hii terminal --clear'])}
-              className="mt-4 w-full rounded border border-neutral-300 px-3 py-2 text-sm font-medium hover:bg-neutral-50"
+              onClick={() => setLines(['$ hii console --clear'])}
+              className="hii-secondary-action mt-4 w-full"
             >
-              Clear terminal
+              Clear console
             </button>
           </div>
 
-          <div className="rounded border border-neutral-200 p-4">
+          <div className="hii-card">
             <h2 className="font-semibold">Capability Registry</h2>
             <div className="mt-3 space-y-3 text-sm">
               {capabilities.length === 0 && <p className="text-neutral-500">Loading backend capabilities...</p>}
@@ -238,7 +238,7 @@ export function HiiTerminal() {
                       <p className="font-medium">{capability.name}</p>
                       <p className="mt-1 font-mono text-xs text-neutral-500">{capability.id}</p>
                     </div>
-                    <span className="rounded border border-neutral-300 px-2 py-1 text-xs uppercase text-neutral-600">
+                    <span className="border border-[rgba(23,107,255,0.28)] bg-[var(--hii-warm-white)] px-2 py-1 text-xs uppercase text-neutral-600">
                       {capability.status}
                     </span>
                   </div>
@@ -251,7 +251,7 @@ export function HiiTerminal() {
             </div>
           </div>
 
-          <div className="rounded border border-neutral-200 p-4">
+          <div className="hii-card">
             <h2 className="font-semibold">Capability Jobs</h2>
             <div className="mt-3 space-y-2 text-sm text-neutral-700">
               {jobs.length === 0 && <p>No local capability jobs yet.</p>}
@@ -270,13 +270,13 @@ export function HiiTerminal() {
             </div>
             <a
               href="/credits"
-              className="mt-4 block rounded border border-neutral-300 px-3 py-2 text-center text-sm font-medium hover:bg-neutral-50"
+              className="hii-secondary-action mt-4 block text-center"
             >
               Quote a task
             </a>
           </div>
 
-          <div className="rounded border border-neutral-200 p-4">
+          <div className="hii-card">
             <h2 className="font-semibold">Spawn Agent Session</h2>
             <div className="mt-4 space-y-3">
               <label className="block">
@@ -284,7 +284,7 @@ export function HiiTerminal() {
                 <select
                   value={preset}
                   onChange={(event) => setPreset(event.target.value)}
-                  className="mt-1 w-full rounded border border-neutral-300 bg-white px-3 py-2"
+                  className="hii-select mt-1 w-full px-3 py-2"
                 >
                   <option value="observer">Read-only observer</option>
                   <option value="termite-demo">Termite demo operator</option>
@@ -297,7 +297,7 @@ export function HiiTerminal() {
                 <input
                   value={name}
                   onChange={(event) => setName(event.target.value)}
-                  className="mt-1 w-full rounded border border-neutral-300 bg-white px-3 py-2"
+                  className="hii-field mt-1 w-full px-3 py-2"
                 />
               </label>
               <label className="block">
@@ -305,7 +305,7 @@ export function HiiTerminal() {
                 <textarea
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
-                  className="mt-1 min-h-32 w-full rounded border border-neutral-300 bg-white px-3 py-2 text-sm"
+                  className="hii-textarea mt-1 min-h-32 w-full px-3 py-2 text-sm"
                 />
               </label>
               {error && <p className="text-sm text-red-600">{error}</p>}
@@ -313,14 +313,14 @@ export function HiiTerminal() {
                 type="button"
                 onClick={spawnAgent}
                 disabled={spawning}
-                className="w-full rounded bg-black px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
+                className="hii-command-button w-full disabled:opacity-50"
               >
-                {spawning ? 'Spawning...' : 'Spawn Claude terminal'}
+                {spawning ? 'Spawning...' : 'Spawn Claude session'}
               </button>
             </div>
           </div>
 
-          <div className="rounded border border-neutral-200 p-4">
+          <div className="hii-card">
             <h2 className="font-semibold">Agent Sessions</h2>
             <div className="mt-3 space-y-2 text-sm">
               {agentRows.length === 0 && <p className="text-neutral-500">No Claude sessions reported.</p>}
@@ -337,14 +337,14 @@ export function HiiTerminal() {
           </div>
         </aside>
 
-        <div className="min-w-0 rounded border border-neutral-900 bg-black">
-          <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3 font-mono text-xs text-neutral-400">
-            <span>hii://terminal/system</span>
+        <div className="hii-terminal-frame min-w-0">
+          <div className="hii-terminal-bar">
+            <span>hii://console/matrix</span>
             <span>{showAll ? 'all processes' : 'agent focus'}</span>
           </div>
           <pre
             ref={terminalRef}
-            className="h-[calc(100vh-13rem)] overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed text-green-200"
+            className="hii-terminal-body h-[calc(100vh-13rem)] overflow-auto whitespace-pre-wrap break-words p-4 text-xs leading-relaxed"
           >
             {lines.join('\n')}
           </pre>

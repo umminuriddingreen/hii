@@ -95,7 +95,7 @@ export function ManagedTerminal({ signedIn }: { signedIn: boolean }) {
   }, [jobs, signedIn]);
 
   return (
-    <section className="border-t border-neutral-200 pt-8">
+    <section className="border-t border-[var(--hii-electric-blue)] pt-8">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold">Managed Job Terminal</h2>
@@ -105,13 +105,13 @@ export function ManagedTerminal({ signedIn }: { signedIn: boolean }) {
           </p>
         </div>
         {!signedIn && (
-          <a href="/login?next=/termite" className="rounded bg-black px-4 py-2 text-sm font-medium text-white">
+          <a href="/login?next=/termite" className="hii-command-button">
             Sign in
           </a>
         )}
       </div>
 
-      <div className="mt-5 rounded border border-neutral-800 bg-black p-4 font-mono text-sm text-green-200">
+      <div className="hii-terminal-frame mt-5 p-4 font-mono text-sm">
         {terminalLines.map((line) => (
           <p key={line} className="break-words">
             {line}
@@ -125,7 +125,7 @@ export function ManagedTerminal({ signedIn }: { signedIn: boolean }) {
           <select
             value={workflow}
             onChange={(event) => setWorkflow(event.target.value)}
-            className="mt-1 w-full rounded border border-neutral-300 bg-white px-3 py-2"
+            className="hii-select mt-1 w-full px-3 py-2"
             disabled={!signedIn}
           >
             {Object.entries(workflowLabels).map(([value, label]) => (
@@ -141,7 +141,7 @@ export function ManagedTerminal({ signedIn }: { signedIn: boolean }) {
           <select
             value={budget}
             onChange={(event) => setBudget(event.target.value)}
-            className="mt-1 w-full rounded border border-neutral-300 bg-white px-3 py-2"
+            className="hii-select mt-1 w-full px-3 py-2"
             disabled={!signedIn}
           >
             <option value="alpha-free">Alpha feedback run</option>
@@ -155,7 +155,7 @@ export function ManagedTerminal({ signedIn }: { signedIn: boolean }) {
           <textarea
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
-            className="mt-1 min-h-36 w-full rounded border border-neutral-300 bg-white px-3 py-2"
+            className="hii-textarea mt-1 min-h-36 w-full px-3 py-2"
             disabled={!signedIn}
           />
         </label>
@@ -166,7 +166,7 @@ export function ManagedTerminal({ signedIn }: { signedIn: boolean }) {
           type="button"
           onClick={launchJob}
           disabled={!signedIn || busy}
-          className="rounded bg-black px-5 py-2 font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
+          className="hii-command-button disabled:opacity-50"
         >
           {busy ? 'Launching...' : 'Launch managed job'}
         </button>
@@ -177,10 +177,10 @@ export function ManagedTerminal({ signedIn }: { signedIn: boolean }) {
           <h3 className="font-semibold">Recent managed jobs</h3>
           <div className="mt-3 space-y-3">
             {jobs.slice(0, 5).map((job) => (
-              <div key={job.id} className="rounded border border-neutral-200 p-4 text-sm">
+              <div key={job.id} className="hii-card text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <span className="font-mono">{job.id}</span>
-                  <span className="rounded border border-neutral-300 px-2 py-1 text-xs uppercase">
+                  <span className="border border-[rgba(23,107,255,0.28)] bg-[var(--hii-warm-white)] px-2 py-1 text-xs uppercase">
                     {job.status}
                   </span>
                 </div>

@@ -36,13 +36,13 @@ export default async function TermiteAlphaPage() {
   const user = await getUser();
 
   return (
-    <div className="space-y-12">
-      <section className="border-b border-neutral-200 pb-10">
-        <p className="text-sm font-medium text-neutral-500">Termite alpha</p>
-        <h1 className="mt-3 text-3xl font-bold tracking-normal">
+    <div className="hii-page space-y-12">
+      <section className="hii-page-header">
+        <p className="hii-kicker">Termite alpha</p>
+        <h1 className="hii-page-title">
           Provisioned AI automation for Rhino 8.
         </h1>
-        <p className="mt-4 text-neutral-600">
+        <p className="hii-page-copy">
           Termite is the first HII capability item: a managed agent workflow that can
           inspect Rhino documents, create test geometry, capture proof, and turn the
           result into a tracked client job. Start on this Mac, then scale the same
@@ -52,13 +52,13 @@ export default async function TermiteAlphaPage() {
         <div className="mt-6 flex flex-wrap gap-3">
           <a
             href={downloadHref}
-            className="rounded bg-black px-5 py-2 font-medium text-white hover:bg-neutral-800"
+            className="hii-command-button"
           >
             Download alpha zip
           </a>
           <Link
             href="/"
-            className="rounded border border-neutral-300 px-5 py-2 font-medium hover:bg-neutral-50"
+            className="hii-secondary-action"
           >
             Back to HII
           </Link>
@@ -73,13 +73,13 @@ export default async function TermiteAlphaPage() {
         <h2 className="text-xl font-semibold">Install Sequence</h2>
         <ol className="mt-4 space-y-3">
           {installSteps.map((step) => (
-            <li key={step} className="rounded border border-neutral-200 p-4">
+            <li key={step} className="hii-card">
               {step}
             </li>
           ))}
         </ol>
 
-        <div className="mt-5 rounded border border-neutral-200 bg-neutral-50 p-4 font-mono text-sm">
+        <div className="hii-terminal-frame mt-5 p-4 font-mono text-sm">
           <p>cd /path/to/Termite</p>
           <p>npm run build</p>
           <p>npm run install:rhino-mac</p>
@@ -91,25 +91,25 @@ export default async function TermiteAlphaPage() {
         <h2 className="text-xl font-semibold">Update Sequence</h2>
         <ol className="mt-4 space-y-3">
           {updateSteps.map((step) => (
-            <li key={step} className="rounded border border-neutral-200 p-4">
+            <li key={step} className="hii-card">
               {step}
             </li>
           ))}
         </ol>
       </section>
 
-      <section className="border-t border-neutral-200 pt-8">
+      <section className="border-t border-[var(--hii-electric-blue)] pt-8">
         <h2 className="text-xl font-semibold">Scale Path</h2>
         <ol className="mt-4 space-y-3">
           {scaleSteps.map((step) => (
-            <li key={step} className="rounded border border-neutral-200 p-4">
+            <li key={step} className="hii-card">
               {step}
             </li>
           ))}
         </ol>
       </section>
 
-      <section className="border-t border-neutral-200 pt-8">
+      <section className="border-t border-[var(--hii-electric-blue)] pt-8">
         <h2 className="text-xl font-semibold">Current Alpha Boundary</h2>
         <p className="mt-3 text-neutral-600">
           The bridge and MCP server are ready for a Rhino 8 alpha test. Use tracked,

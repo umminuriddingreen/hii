@@ -24,10 +24,10 @@ const seedPosts = [
   },
   {
     id: "seed-capability-terminal",
-    url: "/terminal",
-    title: "Capability terminal",
-    note: "The agent OS surface shows processes, capabilities, jobs, terminal sessions, and proof receipts from one local command layer.",
-    tags: ["agent-os", "terminal"],
+    url: "/console",
+    title: "HII Console",
+    note: "The power surface shows processes, capabilities, jobs, console sessions, and proof receipts from one local command layer.",
+    tags: ["agent-os", "console"],
     source: "hii",
     createdAt: "2026-07-05T09:44:07.595Z"
   },

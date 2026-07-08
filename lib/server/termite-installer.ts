@@ -46,9 +46,9 @@ const actions: CommandSpec[] = [
     id: 'hii-health',
     label: 'Check HII capabilities',
     description: 'Confirm local HII and Ollama capability state.',
-    cwd: '/Users/ummi/hii-old',
-    command: '/Users/ummi/hii-old/.venv/bin/python',
-    args: ['-m', 'hii.cli', 'health', '--text'],
+    cwd: hiiRoot,
+    command: '/Users/ummi/bin/hii',
+    args: ['health', '--text'],
     timeoutMs: 15000
   },
   {

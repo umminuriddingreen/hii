@@ -11,6 +11,7 @@
     "hii:registry:export": "node scripts/hii-registry-export.mjs",
     "hii:links:cache": "node scripts/hii-link-cache.mjs",
     "hii:admin-agent:plan": "node scripts/hii-admin-agent-plan.mjs",
+    "hii:sdk:check": "node scripts/hii-sdk-contract-smoke.mjs",
     "lint": "next lint"
   },
   "dependencies": {

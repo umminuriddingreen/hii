@@ -4,7 +4,10 @@ export type CapabilityRuntime =
   | 'local-process'
   | 'managed-operator'
   | 'trusted-runner'
-  | 'supabase-flow';
+  | 'supabase-flow'
+  | 'chrome-extension'
+  | 'ollama'
+  | 'cloudflare-worker';
 
 export type CapabilityVisibility = 'local' | 'authenticated' | 'public';
 
@@ -86,7 +89,8 @@ export type LedgerEntry = {
     | 'compute_cost'
     | 'platform_fee'
     | 'proof'
-    | 'refund';
+    | 'refund'
+    | 'reconciliation';
   amountCents?: number;
   currency?: CapabilityQuote['currency'];
   summary: string;
