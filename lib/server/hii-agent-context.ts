@@ -39,6 +39,21 @@ function readJsonl(file: string) {
   }
 }
 
+function latestById<T extends { id?: unknown }>(entries: T[]) {
+  const byId = new Map<unknown, T>();
+  for (const entry of entries) {
+    if (!entry?.id) continue;
+    byId.set(entry.id, entry);
+  }
+  return Array.from(byId.values());
+}
+
+function recentLocalJobs(limit: number) {
+  return latestById(readJsonl(localJobs))
+    .sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')))
+    .slice(0, limit);
+}
+
 function fileSummary(file: string) {
   try {
     const stat = fs.statSync(file);
@@ -46,6 +61,37 @@ function fileSummary(file: string) {
   } catch {
     return { path: file, exists: false };
   }
+}
+
+function classifyGitStatus(lines: string[]) {
+  const counts = {
+    total: lines.length,
+    staged: 0,
+    modified: 0,
+    deleted: 0,
+    renamed: 0,
+    untracked: 0,
+    conflicted: 0
+  };
+  const files = lines.map((line) => {
+    const index = line[0] ?? ' ';
+    const worktree = line[1] ?? ' ';
+    const rawPath = line.slice(3).trim();
+    const filePath = rawPath.includes(' -> ') ? rawPath.split(' -> ').pop() ?? rawPath : rawPath;
+    if (index !== ' ' && index !== '?') counts.staged += 1;
+    if (index === '?' && worktree === '?') counts.untracked += 1;
+    if (index === 'R' || worktree === 'R') counts.renamed += 1;
+    if (index === 'D' || worktree === 'D') counts.deleted += 1;
+    if (index === 'U' || worktree === 'U' || (index === 'A' && worktree === 'A') || (index === 'D' && worktree === 'D')) counts.conflicted += 1;
+    if (worktree !== ' ' && worktree !== '?' && worktree !== 'D' && worktree !== 'U') counts.modified += 1;
+    return { path: filePath, index, worktree, raw: line };
+  });
+  return {
+    clean: lines.length === 0,
+    counts,
+    files,
+    sample: files.slice(0, 60)
+  };
 }
 
 function gitSnapshot() {
@@ -60,10 +106,39 @@ function gitSnapshot() {
     const recent = execFileSync('git', ['-C', root, 'log', '--oneline', '-5'], { encoding: 'utf8' })
       .split('\n')
       .filter(Boolean);
-    return { branch, status, recent };
+    return { branch, status, worktree: classifyGitStatus(status), recent };
   } catch {
-    return { branch: 'unknown', status: [], recent: [] };
+    return { branch: 'unknown', status: [], worktree: classifyGitStatus([]), recent: [] };
   }
+}
+
+function staleLegacyRuntimeProbe() {
+  const legacyPath = path.join(os.homedir(), 'hii-old');
+  const capabilityCache = path.join(runtime, 'capabilities.json');
+  const findings = [];
+  if (fs.existsSync(legacyPath)) {
+    findings.push({
+      path: legacyPath,
+      state: 'present',
+      action: 'remove or mine then discard; current HII is /Users/ummi/hii'
+    });
+  }
+  if (fs.existsSync(capabilityCache)) {
+    const text = fs.readFileSync(capabilityCache, 'utf8');
+    if (text.includes(legacyPath) || text.includes('hii-old')) {
+      findings.push({
+        path: capabilityCache,
+        state: 'stale-reference',
+        action: 'ignore as runtime truth until refreshed by current registry scan'
+      });
+    }
+  }
+  return {
+    legacyPath,
+    currentRepo: root,
+    clean: findings.length === 0,
+    findings
+  };
 }
 
 function inferNextActions(input: string) {
@@ -101,7 +176,7 @@ function inferNextActions(input: string) {
 
 export function getHiiAgentContext() {
   const git = gitSnapshot();
-  const jobs = readJsonl(localJobs).slice(-10);
+  const jobs = recentLocalJobs(10);
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
@@ -112,7 +187,7 @@ export function getHiiAgentContext() {
       role: 'hyper-basic command surface over backend capabilities'
     },
     git,
-    commands: ['/og', '/context', '/terminal', '/credits', '/termite', '/upload'],
+    commands: ['/og', '/context', '/console', '/boards', '/credits', '/termite', '/upload'],
     capabilities: capabilities.map((capability) => ({
       id: capability.id,
       name: capability.name,
@@ -121,6 +196,8 @@ export function getHiiAgentContext() {
     })),
     localState: {
       bridge: fileSummary(bridgeLog),
+      worktreeProbe: git.worktree,
+      legacyRuntimeProbe: staleLegacyRuntimeProbe(),
       jobs: fileSummary(localJobs),
       og: fileSummary(ogEvents),
       recentJobs: jobs.map((job) => ({

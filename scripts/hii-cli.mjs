@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// HII CLI — marketplace-era entrypoint (replaces the old Python psyche-engine CLI).
-// Installed via ~/bin/hii. `hii legacy ...` still reaches the old CLI at ~/hii-old.
+// HII CLI — single current entrypoint for the local capability terminal.
+// Installed via ~/bin/hii.
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -14,6 +14,7 @@ const BRIDGE_LOG = path.join(RUNTIME, "bridge", "yin-codex.jsonl");
 const CAPABILITY_REGISTRY = path.join(ROOT, "lib", "capabilities", "registry.json");
 const CAPABILITY_PACKS = path.join(ROOT, "lib", "capabilities", "packs.json");
 const LOCAL_CAPABILITY_JOBS = path.join(ROOT, ".hii", "capability-jobs.jsonl");
+const CLAUDE_JOBS_DIR = path.join(os.homedir(), ".claude", "jobs");
 const OG_EVENTS = path.join(RUNTIME, "og", "events.jsonl");
 const LOOP_DIR = path.join(RUNTIME, "loop");
 const LOOP_DECISIONS = path.join(LOOP_DIR, "decisions.jsonl");
@@ -23,9 +24,13 @@ const PACK_EXPORT_DIR = path.join(RUNTIME, "packs", "exports");
 const MONEY_DIR = path.join(RUNTIME, "money");
 const MONEY_IDEAS = path.join(MONEY_DIR, "ideas.jsonl");
 const MONEY_OFFERS_DIR = path.join(MONEY_DIR, "offers");
+const BOARD_DIR = path.join(RUNTIME, "board");
+const BOARD_TASKS = path.join(BOARD_DIR, "tasks.jsonl");
 const LINK_POSTS = path.join(ROOT, ".hii", "link-posts.jsonl");
 const LINK_CACHE = path.join(ROOT, ".hii", "link-cache.jsonl");
 const RUNNER_CAPABILITIES = ["termite.rhino.managed_job"];
+const BOARD_LANES = ["backlog", "next", "doing", "blocked", "done"];
+const BOARD_PRIORITIES = ["low", "normal", "high", "urgent"];
 
 function codexBin() {
   const pinned = path.join(os.homedir(), ".local", "bin", "codex");
@@ -182,12 +187,67 @@ function appendJsonl(file, entry) {
   return entry;
 }
 
+function latestById(entries) {
+  const byId = new Map();
+  for (const entry of entries) {
+    if (!entry?.id) continue;
+    byId.set(entry.id, entry);
+  }
+  return Array.from(byId.values());
+}
+
+function localCapabilityJobsLatest() {
+  return latestById(readJsonl(LOCAL_CAPABILITY_JOBS));
+}
+
+function recentLocalCapabilityJobs(limit) {
+  return localCapabilityJobsLatest()
+    .sort((a, b) => String(b.createdAt ?? b.created_at ?? "").localeCompare(String(a.createdAt ?? a.created_at ?? "")))
+    .slice(0, limit);
+}
+
+function claudeStateForJob(jobId) {
+  const statePath = path.join(CLAUDE_JOBS_DIR, jobId, "state.json");
+  try {
+    const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    return { statePath, state };
+  } catch {
+    return { statePath, state: null };
+  }
+}
+
+function mappedClaudeStatus(state) {
+  const map = {
+    done: "completed",
+    failed: "failed",
+    blocked: "blocked",
+    stopped: "cancelled"
+  };
+  return map[String(state ?? "").toLowerCase()] ?? null;
+}
+
 function slug(input) {
   return String(input || "idea")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 72) || "idea";
+}
+
+function normalizeBoardLane(value) {
+  return BOARD_LANES.includes(value) ? value : "backlog";
+}
+
+function normalizeBoardPriority(value) {
+  return BOARD_PRIORITIES.includes(value) ? value : "normal";
+}
+
+function parseCsvTags(value) {
+  return String(value || "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .slice(0, 12);
 }
 
 function parseFlagValue(args, name, fallback) {
@@ -227,6 +287,37 @@ function redactText(value) {
     .slice(0, 2000);
 }
 
+function classifyGitStatus(lines) {
+  const counts = {
+    total: lines.length,
+    staged: 0,
+    modified: 0,
+    deleted: 0,
+    renamed: 0,
+    untracked: 0,
+    conflicted: 0
+  };
+  const files = lines.map((line) => {
+    const index = line[0] ?? " ";
+    const worktree = line[1] ?? " ";
+    const rawPath = line.slice(3).trim();
+    const filePath = rawPath.includes(" -> ") ? rawPath.split(" -> ").pop() : rawPath;
+    if (index !== " " && index !== "?") counts.staged += 1;
+    if (index === "?" && worktree === "?") counts.untracked += 1;
+    if (index === "R" || worktree === "R") counts.renamed += 1;
+    if (index === "D" || worktree === "D") counts.deleted += 1;
+    if (index === "U" || worktree === "U" || (index === "A" && worktree === "A") || (index === "D" && worktree === "D")) counts.conflicted += 1;
+    if (worktree !== " " && worktree !== "?" && worktree !== "D" && worktree !== "U") counts.modified += 1;
+    return { path: filePath, index, worktree, raw: line };
+  });
+  return {
+    clean: lines.length === 0,
+    counts,
+    files,
+    sample: files.slice(0, 60)
+  };
+}
+
 function cleanModelOutput(value) {
   let text = sanitizeText(value);
   text = text.replace(/^Thinking\.\.\.[\s\S]*?\.\.\.done thinking\.\s*/i, "");
@@ -245,9 +336,9 @@ function gitSnapshot() {
     const recent = execFileSync("git", ["-C", ROOT, "log", "--oneline", "-5"], { encoding: "utf8" })
       .split("\n")
       .filter(Boolean);
-    return { branch, status, recent };
+    return { branch, status, worktree: classifyGitStatus(status), recent };
   } catch {
-    return { branch: "unknown", status: [], recent: [] };
+    return { branch: "unknown", status: [], worktree: classifyGitStatus([]), recent: [] };
   }
 }
 
@@ -269,8 +360,38 @@ function runtimePointers() {
     fileExistsSummary(BRIDGE_LOG),
     fileExistsSummary(LOOP_DECISIONS),
     fileExistsSummary(LOOP_NOTES),
+    fileExistsSummary(BOARD_TASKS),
     fileExistsSummary(path.join(RUNTIME, "mind0", "state.json"))
   ];
+}
+
+function staleLegacyRuntimeProbe() {
+  const legacyPath = path.join(os.homedir(), "hii-old");
+  const capabilityCache = path.join(RUNTIME, "capabilities.json");
+  const findings = [];
+  if (fs.existsSync(legacyPath)) {
+    findings.push({
+      path: legacyPath,
+      state: "present",
+      action: "remove or mine then discard; current HII is /Users/ummi/hii"
+    });
+  }
+  if (fs.existsSync(capabilityCache)) {
+    const text = fs.readFileSync(capabilityCache, "utf8");
+    if (text.includes(legacyPath) || text.includes("hii-old")) {
+      findings.push({
+        path: capabilityCache,
+        state: "stale-reference",
+        action: "ignore as runtime truth until refreshed by current registry scan"
+      });
+    }
+  }
+  return {
+    legacyPath,
+    currentRepo: ROOT,
+    clean: findings.length === 0,
+    findings
+  };
 }
 
 function inferNextActions({ prompt, git, capabilities, jobs, bridge }) {
@@ -329,6 +450,85 @@ function appendOgEvent(event) {
   appendJsonl(OG_EVENTS, event);
 }
 
+function boardTasks({ includeDone = false } = {}) {
+  const tasks = new Map();
+  for (const event of readJsonl(BOARD_TASKS)) {
+    if (event.type === "created" && event.task?.id) {
+      tasks.set(event.task.id, event.task);
+      continue;
+    }
+    if (event.type === "updated" && event.id && tasks.has(event.id)) {
+      const existing = tasks.get(event.id);
+      tasks.set(event.id, {
+        ...existing,
+        ...(event.patch ?? {}),
+        id: existing.id,
+        updatedAt: event.patch?.updatedAt ?? event.ts ?? existing.updatedAt
+      });
+    }
+  }
+  return Array.from(tasks.values())
+    .filter((task) => includeDone || task.lane !== "done")
+    .sort((a, b) => {
+      const laneDelta = BOARD_LANES.indexOf(a.lane) - BOARD_LANES.indexOf(b.lane);
+      if (laneDelta !== 0) return laneDelta;
+      const priorityDelta = BOARD_PRIORITIES.indexOf(b.priority) - BOARD_PRIORITIES.indexOf(a.priority);
+      if (priorityDelta !== 0) return priorityDelta;
+      return String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? ""));
+    });
+}
+
+function appendBoardEvent(event) {
+  return appendJsonl(BOARD_TASKS, event);
+}
+
+function createBoardTask({ title, lane, priority, owner, coordinate, notes, tags, source = "hii board" }) {
+  const cleanTitle = redactText(title).trim();
+  if (cleanTitle.length < 2) {
+    console.error("usage: hii board add <title> [--lane backlog|next|doing|blocked|done] [--priority low|normal|high|urgent]");
+    process.exit(1);
+  }
+  const now = new Date().toISOString();
+  const task = {
+    id: randomUUID(),
+    title: cleanTitle.slice(0, 240),
+    lane: normalizeBoardLane(lane),
+    priority: normalizeBoardPriority(priority),
+    owner: redactText(owner || "main agent").slice(0, 80),
+    coordinate: redactText(coordinate || ROOT).slice(0, 240),
+    notes: redactText(notes || "").slice(0, 2000),
+    tags: parseCsvTags(tags),
+    source,
+    createdAt: now,
+    updatedAt: now
+  };
+  appendBoardEvent({ type: "created", task, ts: now });
+  return task;
+}
+
+function updateBoardTask(idOrPrefix, patch) {
+  const matches = boardTasks({ includeDone: true }).filter((task) => task.id.startsWith(idOrPrefix));
+  if (matches.length !== 1) {
+    console.error(matches.length === 0 ? `task not found: ${idOrPrefix}` : `task id is ambiguous: ${idOrPrefix}`);
+    if (matches.length > 1) matches.slice(0, 8).forEach((task) => console.error(`  ${task.id.slice(0, 8)} ${task.title}`));
+    process.exit(1);
+  }
+  const task = matches[0];
+  const now = new Date().toISOString();
+  const cleanPatch = { updatedAt: now };
+  if (patch.lane !== undefined) {
+    cleanPatch.lane = normalizeBoardLane(patch.lane);
+    cleanPatch.completedAt = cleanPatch.lane === "done" ? now : undefined;
+  }
+  if (patch.priority !== undefined) cleanPatch.priority = normalizeBoardPriority(patch.priority);
+  if (patch.owner !== undefined) cleanPatch.owner = redactText(patch.owner).trim().slice(0, 80) || task.owner;
+  if (patch.coordinate !== undefined) cleanPatch.coordinate = redactText(patch.coordinate).trim().slice(0, 240) || task.coordinate;
+  if (patch.notes !== undefined) cleanPatch.notes = redactText(patch.notes).trim().slice(0, 2000);
+  if (patch.tags !== undefined) cleanPatch.tags = parseCsvTags(patch.tags);
+  appendBoardEvent({ type: "updated", id: task.id, patch: cleanPatch, ts: now });
+  return { ...task, ...cleanPatch };
+}
+
 function classifyLoopPolicy(action) {
   const text = `${action.track} ${action.coordinate} ${action.action}`.toLowerCase();
   const refused = ["push", "publish", "upload", "delete", "reset", "external", "network", "payment"];
@@ -363,7 +563,7 @@ function classifyLoopPolicy(action) {
 function userProxyContext(prompt = "") {
   const git = gitSnapshot();
   const capabilities = readJsonArray(CAPABILITY_REGISTRY);
-  const jobs = readJsonl(LOCAL_CAPABILITY_JOBS).slice(-20);
+  const jobs = recentLocalCapabilityJobs(20);
   const bridge = readJsonl(BRIDGE_LOG).slice(-30).map((entry) => ({
     ts: entry.ts,
     type: entry.type,
@@ -580,7 +780,7 @@ function cmdOg(args) {
   const sub = args[0] || "status";
   const prompt = redactText(args.slice(1).join(" "));
   const capabilities = readJsonArray(CAPABILITY_REGISTRY);
-  const jobs = readJsonl(LOCAL_CAPABILITY_JOBS).slice(-20);
+  const jobs = recentLocalCapabilityJobs(20);
   const bridge = readJsonl(BRIDGE_LOG).slice(-20).map((entry) => ({
     ts: entry.ts,
     type: entry.type,
@@ -645,12 +845,16 @@ function agentCommandCatalog() {
   return [
     { command: "hii health --text", purpose: "Human-readable repo, env-presence, codex, and bridge snapshot." },
     { command: "hii context --json", purpose: "Machine-readable agent context snapshot; best first command for agents." },
+    { command: "hii probe", purpose: "Print the full HII worktree probe and stale-runtime warnings." },
     { command: "hii caps show", purpose: "List backend-owned capabilities." },
     { command: "hii og status", purpose: "Infer likely next work from repo, bridge, job, and runtime context." },
     { command: "hii og capture <message>", purpose: "Append an operational-graph event for this turn." },
     { command: "hii loop once", purpose: "Propose the next user-proxy plan locally; do not act until y/n approval." },
     { command: "hii loop note <note>", purpose: "Add user notes to steer the persistent loop." },
     { command: "hii loop decide <yes|no>", purpose: "Approve or reject the latest proposed plan." },
+    { command: "hii board", purpose: "Show the local kanban/todo board grouped by backlog, next, doing, blocked, and done." },
+    { command: "hii board add <title>", purpose: "Create a local task with owner, coordinate, priority, tags, and notes." },
+    { command: "hii board move <id> <lane>", purpose: "Move a task between kanban lanes." },
     { command: "hii money idea <idea>", purpose: "Use local models to turn a rough idea into a sellable offer and execution handoff." },
     { command: "hii money list", purpose: "List recent local idea-to-offer receipts." },
     { command: "hii links cache", purpose: "Cache browser-captured links locally and summarize them with Ollama when available." },
@@ -660,6 +864,7 @@ function agentCommandCatalog() {
     { command: "hii runner init <name>", purpose: "Register an owned runner and print its local token once." },
     { command: "hii runner start --once", purpose: "Heartbeat, claim one whitelisted capability job, stream logs, and exit." },
     { command: "hii jobs", purpose: "List recent local capability jobs." },
+    { command: "hii jobs reconcile", purpose: "Append local reconciliation receipts for completed Claude-backed HII agent jobs." },
     { command: "hii doctor", purpose: "Run status plus registry doctor." },
     { command: "hii ship", purpose: "Typecheck and commit locally; does not push." },
     { command: "hii ship --push <message>", purpose: "Explicit external push; use only after user approval." },
@@ -670,9 +875,8 @@ function agentCommandCatalog() {
 function agentContextPayload() {
   const git = gitSnapshot();
   const capabilities = readJsonArray(CAPABILITY_REGISTRY);
-  const jobs = readJsonl(LOCAL_CAPABILITY_JOBS)
-    .sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")))
-    .slice(0, 10);
+  const jobs = recentLocalCapabilityJobs(10);
+  const tasks = boardTasks({ includeDone: false }).slice(0, 12);
   const bridge = fileExistsSummary(BRIDGE_LOG);
   return {
     schemaVersion: 1,
@@ -681,8 +885,7 @@ function agentContextPayload() {
       name: "HII",
       role: "local-first capability terminal and exchange spine",
       repo: ROOT,
-      runtime: RUNTIME,
-      legacyRuntime: path.join(os.homedir(), "hii-old")
+      runtime: RUNTIME
     },
     git,
     commands: agentCommandCatalog(),
@@ -698,6 +901,25 @@ function agentContextPayload() {
     })),
     localState: {
       bridge,
+      worktreeProbe: git.worktree,
+      legacyRuntimeProbe: staleLegacyRuntimeProbe(),
+      boardTasks: {
+        path: BOARD_TASKS,
+        open: tasks.length,
+        byLane: BOARD_LANES.reduce((acc, lane) => {
+          acc[lane] = tasks.filter((task) => task.lane === lane).length;
+          return acc;
+        }, {}),
+        recent: tasks.map((task) => ({
+          id: task.id,
+          title: task.title,
+          lane: task.lane,
+          priority: task.priority,
+          owner: task.owner,
+          coordinate: task.coordinate,
+          updatedAt: task.updatedAt
+        }))
+      },
       capabilityJobs: fileExistsSummary(LOCAL_CAPABILITY_JOBS),
       ogEvents: fileExistsSummary(OG_EVENTS),
       runtimePointers: runtimePointers(),
@@ -717,7 +939,7 @@ function agentContextPayload() {
       "Complete work locally by default; do not fetch, push, publish, upload, or call external services unless the user explicitly asks.",
       "Use hii ship for local typecheck and commit only; use hii ship --push only after explicit external publish approval.",
       "Run npm run build after meaningful HII product edits.",
-      "Use /Users/ummi/hii for the product repo and /Users/ummi/hii-old only through hii legacy."
+      "Use /Users/ummi/hii as the only HII product/runtime surface; legacy patterns are migrated into this repo before old checkouts are discarded."
     ],
     nextActions: inferNextActions({
       prompt: "agent context accessibility",
@@ -739,6 +961,7 @@ function cmdContext(args) {
   console.log(`repo:    ${payload.identity.repo}`);
   console.log(`runtime: ${payload.identity.runtime}`);
   console.log(`git:     ${payload.git.branch}${payload.git.status.length ? ` (${payload.git.status.length} dirty)` : " (clean)"}`);
+  console.log(`probe:   staged=${payload.git.worktree.counts.staged} modified=${payload.git.worktree.counts.modified} deleted=${payload.git.worktree.counts.deleted} untracked=${payload.git.worktree.counts.untracked}`);
   console.log(`caps:    ${payload.capabilities.length}`);
   console.log(`jobs:    ${payload.localState.recentJobs.length}`);
   console.log("\nBest commands:");
@@ -751,6 +974,27 @@ function cmdContext(args) {
     console.log(`  ${item.score} ${item.track}: ${item.action}`);
   }
   console.log("\nFor agents: hii context --json");
+}
+
+function cmdProbe(args) {
+  const git = gitSnapshot();
+  const legacy = staleLegacyRuntimeProbe();
+  if (args.includes("--json")) {
+    console.log(JSON.stringify({ generatedAt: new Date().toISOString(), repo: ROOT, git, legacyRuntimeProbe: legacy }, null, 2));
+    return;
+  }
+  console.log("HII Worktree Probe\n");
+  console.log(`repo:    ${ROOT}`);
+  console.log(`git:     ${git.branch}${git.worktree.clean ? " (clean)" : ` (${git.worktree.counts.total} dirty)`}`);
+  console.log(`counts:  staged=${git.worktree.counts.staged} modified=${git.worktree.counts.modified} deleted=${git.worktree.counts.deleted} untracked=${git.worktree.counts.untracked} conflicted=${git.worktree.counts.conflicted}`);
+  if (git.worktree.files.length) {
+    console.log("\nFiles:");
+    for (const file of git.worktree.files) console.log(`  ${file.raw}`);
+  }
+  if (!legacy.clean) {
+    console.log("\nLegacy runtime warnings:");
+    for (const finding of legacy.findings) console.log(`  ${finding.state}: ${finding.path} - ${finding.action}`);
+  }
 }
 
 function cmdCaps() {
@@ -770,6 +1014,99 @@ function cmdCaps() {
     console.log(`  summary:    ${capability.summary}`);
     console.log("");
   }
+}
+
+function printBoard(tasks, { includeDone = false } = {}) {
+  console.log("HII Board\n");
+  console.log(`store: ${BOARD_TASKS}`);
+  console.log(`open:  ${tasks.filter((task) => task.lane !== "done").length}`);
+  if (includeDone) console.log("done:  included");
+  console.log("");
+
+  for (const lane of BOARD_LANES) {
+    if (!includeDone && lane === "done") continue;
+    const laneTasks = tasks.filter((task) => task.lane === lane);
+    console.log(`${lane} (${laneTasks.length})`);
+    if (laneTasks.length === 0) {
+      console.log("  -");
+      continue;
+    }
+    for (const task of laneTasks) {
+      const tags = task.tags?.length ? ` #${task.tags.join(" #")}` : "";
+      console.log(`  ${task.id.slice(0, 8)}  [${task.priority}] ${task.title}${tags}`);
+      console.log(`      owner: ${task.owner}  coordinate: ${task.coordinate}`);
+      if (task.notes) console.log(`      notes: ${task.notes.slice(0, 180)}`);
+    }
+    console.log("");
+  }
+}
+
+function cmdBoard(args) {
+  const sub = args[0] || "list";
+  if (sub === "list" || sub === "show") {
+    const includeDone = args.includes("--done") || args.includes("--all");
+    printBoard(boardTasks({ includeDone }), { includeDone });
+    return;
+  }
+  if (sub === "add") {
+    const rest = args.slice(1);
+    const title = withoutFlags(rest, ["--lane", "--priority", "--owner", "--coordinate", "--notes", "--tags"]).join(" ").trim();
+    const task = createBoardTask({
+      title,
+      lane: parseFlagValue(rest, "--lane", "backlog"),
+      priority: parseFlagValue(rest, "--priority", "normal"),
+      owner: parseFlagValue(rest, "--owner", "main agent"),
+      coordinate: parseFlagValue(rest, "--coordinate", ROOT),
+      notes: parseFlagValue(rest, "--notes", ""),
+      tags: parseFlagValue(rest, "--tags", "")
+    });
+    console.log(`added ${task.id.slice(0, 8)}  ${task.title}`);
+    console.log(`lane: ${task.lane}  priority: ${task.priority}`);
+    console.log(`store: ${BOARD_TASKS}`);
+    return;
+  }
+  if (sub === "move") {
+    const id = args[1];
+    const lane = args[2];
+    if (!id || !lane) {
+      console.error("usage: hii board move <task-id-prefix> <backlog|next|doing|blocked|done>");
+      process.exit(1);
+    }
+    const task = updateBoardTask(id, { lane });
+    console.log(`moved ${task.id.slice(0, 8)} -> ${task.lane}`);
+    console.log(task.title);
+    return;
+  }
+  if (sub === "done") {
+    const id = args[1];
+    if (!id) {
+      console.error("usage: hii board done <task-id-prefix>");
+      process.exit(1);
+    }
+    const task = updateBoardTask(id, { lane: "done" });
+    console.log(`done ${task.id.slice(0, 8)}`);
+    console.log(task.title);
+    return;
+  }
+  if (sub === "edit") {
+    const id = args[1];
+    const rest = args.slice(2);
+    if (!id) {
+      console.error("usage: hii board edit <task-id-prefix> [--priority high] [--owner name] [--coordinate path] [--notes text] [--tags a,b]");
+      process.exit(1);
+    }
+    const task = updateBoardTask(id, {
+      priority: parseFlagValue(rest, "--priority", undefined),
+      owner: parseFlagValue(rest, "--owner", undefined),
+      coordinate: parseFlagValue(rest, "--coordinate", undefined),
+      notes: parseFlagValue(rest, "--notes", undefined),
+      tags: parseFlagValue(rest, "--tags", undefined)
+    });
+    console.log(`updated ${task.id.slice(0, 8)}  ${task.title}`);
+    return;
+  }
+  console.error("usage: hii board [list|add|move|done|edit]");
+  process.exit(1);
 }
 
 async function readDurableJobs(limit) {
@@ -827,9 +1164,13 @@ function groupRows(rows, keyFor) {
 }
 
 async function cmdJobs(args) {
+  if (args[0] === "reconcile") {
+    cmdJobsReconcile(args.slice(1));
+    return;
+  }
   const limit = Number(args[0] ?? 20);
   const resolvedLimit = Number.isFinite(limit) ? limit : 20;
-  const localJobs = readJsonl(LOCAL_CAPABILITY_JOBS).map((job) => ({ ...job, source: "local" }));
+  const localJobs = localCapabilityJobsLatest().map((job) => ({ ...job, source: "local" }));
   let durableResult = { jobs: [], configured: false };
   let durableWarning = null;
   try {
@@ -867,9 +1208,104 @@ async function cmdJobs(args) {
   }
 }
 
+function cmdJobsReconcile(args) {
+  const dryRun = args.includes("--dry-run");
+  const jobs = localCapabilityJobsLatest();
+  const candidates = jobs.filter((job) => job.capabilityId === "hii.agent.spawn");
+  const reconciled = [];
+  const unchanged = [];
+  const missing = [];
+
+  for (const job of candidates) {
+    const { statePath, state } = claudeStateForJob(job.id);
+    if (!state) {
+      missing.push({ id: job.id, status: job.status ?? "unknown", statePath });
+      continue;
+    }
+    const nextStatus = mappedClaudeStatus(state.state);
+    if (!nextStatus || job.status === nextStatus) {
+      unchanged.push({ id: job.id, status: job.status ?? "unknown", claudeState: state.state ?? "unknown" });
+      continue;
+    }
+    if (!["running", "queued", "pending"].includes(String(job.status ?? "").toLowerCase())) {
+      unchanged.push({ id: job.id, status: job.status ?? "unknown", claudeState: state.state ?? "unknown" });
+      continue;
+    }
+
+    const now = new Date().toISOString();
+    const detail = state.detail ? redactText(String(state.detail)).slice(0, 500) : `Claude state ${state.state}`;
+    const result = state.output?.result ? redactText(String(state.output.result)).slice(0, 500) : detail;
+    const entry = {
+      ...job,
+      status: nextStatus,
+      updatedAt: now,
+      logs: [
+        ...(Array.isArray(job.logs) ? job.logs : []),
+        `[${now}] reconciled local HII job from Claude state ${state.state} -> ${nextStatus}`,
+        detail
+      ],
+      ledger: [
+        ...(Array.isArray(job.ledger) ? job.ledger : []),
+        {
+          id: randomUUID(),
+          jobId: job.id,
+          capabilityId: job.capabilityId,
+          actor: "hii",
+          type: "reconciliation",
+          summary: `Mapped Claude job state ${state.state} to HII status ${nextStatus}.`,
+          createdAt: now
+        }
+      ],
+      proofArtifacts: [
+        ...(Array.isArray(job.proofArtifacts) ? job.proofArtifacts : []),
+        {
+          id: randomUUID(),
+          kind: "log",
+          label: "Claude state reconciliation",
+          path: statePath,
+          summary: result,
+          createdAt: now
+        }
+      ],
+      metadata: {
+        ...(job.metadata ?? {}),
+        reconciledFrom: "claude",
+        claudeStatePath: statePath,
+        claudeState: state.state ?? null,
+        claudeUpdatedAt: state.updatedAt ?? null,
+        reconciledAt: now
+      }
+    };
+    if (!dryRun) appendJsonl(LOCAL_CAPABILITY_JOBS, entry);
+    reconciled.push({ id: job.id, from: job.status ?? "unknown", to: nextStatus, claudeState: state.state ?? "unknown" });
+  }
+
+  console.log("HII job reconciliation\n");
+  console.log(`store:       ${LOCAL_CAPABILITY_JOBS}`);
+  console.log(`claude:      ${CLAUDE_JOBS_DIR}`);
+  console.log(`mode:        ${dryRun ? "dry-run" : "append-only"}`);
+  console.log(`local jobs:  ${jobs.length}`);
+  console.log(`agent jobs:  ${candidates.length}`);
+  console.log(`updated:     ${reconciled.length}`);
+  console.log(`unchanged:   ${unchanged.length}`);
+  console.log(`missing:     ${missing.length}`);
+  if (reconciled.length) {
+    console.log("\nReconciled:");
+    for (const item of reconciled) {
+      console.log(`  ${item.id}  ${item.from} -> ${item.to}  claude=${item.claudeState}`);
+    }
+  }
+  if (missing.length) {
+    console.log("\nMissing Claude state:");
+    for (const item of missing.slice(0, 12)) {
+      console.log(`  ${item.id}  hii=${item.status}  ${item.statePath}`);
+    }
+  }
+}
+
 function recentMoneyContext() {
   const ideas = readJsonl(MONEY_IDEAS).slice(-5);
-  const jobs = readJsonl(LOCAL_CAPABILITY_JOBS).slice(-10);
+  const jobs = recentLocalCapabilityJobs(10);
   return {
     recentIdeas: ideas.map((idea) => ({
       id: idea.id,
@@ -1235,15 +1671,15 @@ function cmdPack(args) {
 }
 
 function cmdTerminal(args) {
-  const url = "http://localhost:3000/terminal";
+  const url = "http://localhost:3000/console";
   if (args.includes("--open")) {
     spawnSync("open", [url], { stdio: "inherit" });
     return;
   }
-  console.log("HII Terminal");
+  console.log("HII Console");
   console.log(`  local UI: ${url}`);
   console.log("  start:    hii dev");
-  console.log("  open:     hii terminal --open");
+  console.log("  open:     hii console --open");
 }
 
 function cmdLinks(args) {
@@ -1516,15 +1952,18 @@ switch (cmd) {
     break;
   case "context": cmdContext(rest); break;
   case "agent-context": cmdContext(rest); break;
+  case "probe": cmdProbe(rest); break;
   case "jobs":
     cmdJobs(rest).catch((error) => {
       console.error(error instanceof Error ? error.message : String(error));
       process.exit(1);
     });
     break;
+  case "console": cmdTerminal(rest); break;
   case "terminal": cmdTerminal(rest); break;
   case "og": cmdOg(rest); break;
   case "loop": cmdLoop(rest); break;
+  case "board": cmdBoard(rest); break;
   case "money": cmdMoney(rest); break;
   case "links": cmdLinks(rest); break;
   case "pack": cmdPack(rest); break;
@@ -1549,31 +1988,33 @@ switch (cmd) {
     process.exit(r.status ?? 1);
   }
   case "codex": cmdCodex(rest); break;
-  case "legacy": {
-    const legacyRoot = path.join(os.homedir(), "hii-old");
-    const py = path.join(legacyRoot, ".venv", "bin", "python");
-    const r = spawnSync(fs.existsSync(py) ? py : "python3", ["-m", "hii", ...rest], {
-      cwd: legacyRoot, stdio: "inherit"
-    });
-    process.exit(r.status ?? 1);
-  }
+  case "legacy":
+    console.error("HII is now a single current surface at /Users/ummi/hii. Migrate needed legacy behavior into the current repo instead of running ~/hii-old.");
+    process.exit(1);
   default:
     console.log(`HII — Human Information Interface (marketplace CLI)
 
 usage: hii <command>
 
-  terminal [--open]   show or open the local HII terminal
+  console [--open]    show or open the local HII console
+  terminal [--open]   compatibility alias for the local HII console
   health [--text]     compatibility alias for status
   context [--json]    agent-readable repo/runtime/capability context
+  probe [--json]      full worktree probe + stale-runtime warnings
   status              env + git + codex snapshot
   doctor              status + registry doctor
   caps [show]         list backend-owned capabilities
   jobs [n]            list recent local capability jobs
+  jobs reconcile      reconcile local HII agent jobs from Claude state
   og [capture <msg>]  infer the operational graph and likely next path
   loop once [prompt]  propose next plan; waits for y/n before acting
   loop status         show latest user-proxy plan and notes
   loop note <note>    add steering context (tab path in UI)
   loop decide yes|no  approve or reject latest plan
+  board               show local kanban/todo board
+  board add <title>   create a task with lane/priority/owner/coordinate
+  board move <id> <lane>
+                      move a task to backlog|next|doing|blocked|done
   money idea <idea>   turn a rough idea into a local offer brief
   money list [n]      list recent idea-to-offer receipts
   money show <id>     show a saved offer brief
@@ -1594,7 +2035,6 @@ usage: hii <command>
   bridge log [n]      tail ~/.hii/bridge/yin-codex.jsonl
   bridge inbox [n]    list recent bridge messages
   codex <prompt>      run Codex in the repo, logged to the bridge
-  mcp [args]          codex mcp passthrough (default: list)
-  legacy <args>       old Python CLI at ~/hii-old`);
+  mcp [args]          codex mcp passthrough (default: list)`);
     process.exit(cmd ? 1 : 0);
 }

@@ -15,13 +15,16 @@ export async function appendCapabilityJob(job: CapabilityJob) {
 export async function listCapabilityJobs(options: { userId?: string; limit?: number } = {}) {
   try {
     const raw = await readFile(jobsPath, 'utf8');
+    const byId = new Map<string, CapabilityJob>();
     const jobs = raw
       .split('\n')
       .filter(Boolean)
       .map((line) => JSON.parse(line) as CapabilityJob)
-      .filter((job) => !options.userId || job.userId === options.userId)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    return jobs.slice(0, options.limit ?? 25);
+      .filter((job) => !options.userId || job.userId === options.userId);
+    for (const job of jobs) byId.set(job.id, job);
+    return Array.from(byId.values())
+      .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt))
+      .slice(0, options.limit ?? 25);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw error;
