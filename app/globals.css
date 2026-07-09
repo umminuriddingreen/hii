@@ -467,3 +467,10 @@ html {
     opacity: 0.7;
   }
 }
+
+/* --- hii canvas (homepage) --- */
+[data-canvas-dragging] iframe,
+[data-canvas-dragging] embed,
+[data-canvas-dragging] video {
+  pointer-events: none;
+}

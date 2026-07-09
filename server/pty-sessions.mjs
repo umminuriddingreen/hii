@@ -1,0 +1,147 @@
+import { spawn } from 'node-pty';
+import path from 'path';
+import os from 'os';
+
+const ALLOWED_ROOT = path.resolve(os.homedir());
+const SCROLLBACK_LIMIT = 2 * 1024 * 1024; // 2MB per session
+const EXIT_LINGER_MS = 60_000;
+
+/** @type {Map<string, Session>} */
+const sessions = new Map();
+
+/**
+ * @typedef {object} Session
+ * @property {import('node-pty').IPty | null} pty
+ * @property {Buffer[]} scrollback
+ * @property {number} scrollbackBytes
+ * @property {Set<import('ws').WebSocket>} subscribers
+ * @property {string} cwd
+ * @property {number} cols
+ * @property {number} rows
+ * @property {string} createdAt
+ * @property {number | null} exitCode
+ */
+
+function isInside(target) {
+  const resolved = path.resolve(target);
+  return resolved === ALLOWED_ROOT || resolved.startsWith(`${ALLOWED_ROOT}${path.sep}`);
+}
+
+function pushScrollback(session, data) {
+  const chunk = Buffer.from(data, 'utf8');
+  session.scrollback.push(chunk);
+  session.scrollbackBytes += chunk.length;
+  while (session.scrollbackBytes > SCROLLBACK_LIMIT && session.scrollback.length > 1) {
+    session.scrollbackBytes -= session.scrollback.shift().length;
+  }
+}
+
+function broadcast(session, message) {
+  const payload = JSON.stringify(message);
+  for (const ws of session.subscribers) {
+    if (ws.readyState === ws.OPEN) ws.send(payload);
+  }
+}
+
+export function createSession(sessionId, { cwd, cols, rows }) {
+  if (sessions.has(sessionId)) return sessions.get(sessionId);
+  const safeCwd = cwd && isInside(cwd) ? path.resolve(cwd) : ALLOWED_ROOT;
+  const shell = process.env.SHELL || '/bin/zsh';
+  const pty = spawn(shell, ['-l'], {
+    name: 'xterm-256color',
+    cwd: safeCwd,
+    cols: Math.max(20, Math.min(500, cols || 80)),
+    rows: Math.max(5, Math.min(200, rows || 24)),
+    env: process.env
+  });
+  /** @type {Session} */
+  const session = {
+    pty,
+    scrollback: [],
+    scrollbackBytes: 0,
+    subscribers: new Set(),
+    cwd: safeCwd,
+    cols: cols || 80,
+    rows: rows || 24,
+    createdAt: new Date().toISOString(),
+    exitCode: null
+  };
+  sessions.set(sessionId, session);
+
+  pty.onData((data) => {
+    pushScrollback(session, data);
+    broadcast(session, { t: 'data', sessionId, data });
+  });
+  pty.onExit(({ exitCode }) => {
+    session.exitCode = exitCode;
+    session.pty = null;
+    broadcast(session, { t: 'exit', sessionId, exitCode });
+    setTimeout(() => {
+      if (sessions.get(sessionId) === session && !session.pty) sessions.delete(sessionId);
+    }, EXIT_LINGER_MS).unref?.();
+  });
+
+  return session;
+}
+
+export function getSession(sessionId) {
+  return sessions.get(sessionId) ?? null;
+}
+
+export function attach(sessionId, ws) {
+  const session = sessions.get(sessionId);
+  if (!session) return null;
+  session.subscribers.add(ws);
+  return session;
+}
+
+export function detach(ws) {
+  for (const session of sessions.values()) {
+    session.subscribers.delete(ws);
+  }
+}
+
+export function scrollbackText(session) {
+  return Buffer.concat(session.scrollback).toString('utf8');
+}
+
+export function write(sessionId, data) {
+  const session = sessions.get(sessionId);
+  if (session?.pty && typeof data === 'string') session.pty.write(data);
+}
+
+export function resize(sessionId, cols, rows) {
+  const session = sessions.get(sessionId);
+  if (!session?.pty) return;
+  const c = Math.max(20, Math.min(500, Math.floor(cols) || session.cols));
+  const r = Math.max(5, Math.min(200, Math.floor(rows) || session.rows));
+  session.cols = c;
+  session.rows = r;
+  try {
+    session.pty.resize(c, r);
+  } catch {
+    /* pty may have just exited */
+  }
+}
+
+export function kill(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  try {
+    session.pty?.kill();
+  } catch {
+    /* already dead */
+  }
+  sessions.delete(sessionId);
+}
+
+export function listSessions() {
+  return [...sessions.entries()].map(([id, session]) => ({
+    sessionId: id,
+    cwd: session.cwd,
+    createdAt: session.createdAt,
+    alive: session.pty !== null,
+    exitCode: session.exitCode,
+    subscribers: session.subscribers.size
+  }));
+}
