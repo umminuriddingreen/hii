@@ -97,7 +97,7 @@ export default function BrowserNode({ node, onPayload }: BrowserNodeProps) {
     if (loadTimer.current) clearTimeout(loadTimer.current);
   };
 
-  const openInChrome = (url: string) => {
+  const openExternal = (url: string) => {
     fetch('/api/files/open', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -152,10 +152,10 @@ export default function BrowserNode({ node, onPayload }: BrowserNodeProps) {
               <div className="text-[13px] font-medium text-[var(--hii-graphite)]">this site refuses to be embedded</div>
               <div className="mt-1 break-all font-mono text-[10px] text-neutral-500">{view.url}</div>
               <button
-                onClick={() => openInChrome(view.url)}
+                onClick={() => openExternal(view.url)}
                 className="mt-3 rounded-full bg-[var(--hii-graphite)] px-4 py-1.5 font-mono text-[11px] text-white transition-opacity hover:opacity-80"
               >
-                open in Chrome
+                open in Helium
               </button>
             </div>
           </div>

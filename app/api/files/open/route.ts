@@ -10,6 +10,7 @@ export const dynamic = 'force-dynamic';
 
 const execFileAsync = promisify(execFile);
 const ALLOWED_ROOT = path.resolve(os.homedir());
+const BROWSER_APP = process.env.HII_BROWSER_APP || 'Helium';
 
 function isInside(target: string) {
   const resolved = path.resolve(target);
@@ -28,8 +29,13 @@ export async function POST(request: Request) {
   }
   try {
     if (typeof body.url === 'string' && /^https?:\/\//i.test(body.url)) {
-      await execFileAsync('open', ['-a', 'Google Chrome', body.url], { timeout: 5000 });
-      return NextResponse.json({ ok: true, opened: 'chrome' });
+      try {
+        await execFileAsync('open', ['-a', BROWSER_APP, body.url], { timeout: 5000 });
+        return NextResponse.json({ ok: true, opened: BROWSER_APP });
+      } catch {
+        await execFileAsync('open', [body.url], { timeout: 5000 });
+        return NextResponse.json({ ok: true, opened: 'default browser' });
+      }
     }
     if (typeof body.path === 'string' && isInside(body.path)) {
       await execFileAsync('open', [path.resolve(body.path)], { timeout: 5000 });
