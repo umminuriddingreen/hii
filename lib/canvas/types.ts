@@ -13,6 +13,56 @@ export type CanvasNodeType =
   | 'board'
   | 'job';
 
+export type SpatialObjectKind =
+  | 'agent'
+  | 'task'
+  | 'model'
+  | 'source'
+  | 'browser'
+  | 'terminal'
+  | 'receipt'
+  | 'proof'
+  | 'memory'
+  | 'scene'
+  | 'capability'
+  | 'event';
+
+export type SpatialObjectStatus =
+  | 'proposed'
+  | 'queued'
+  | 'running'
+  | 'waiting_approval'
+  | 'blocked'
+  | 'failed'
+  | 'completed'
+  | 'approved'
+  | 'rejected'
+  | 'archived'
+  | 'ready'
+  | 'partial'
+  | 'planned'
+  | 'unknown';
+
+export type SpatialAuditEntry = {
+  ts: string;
+  actor: 'human' | 'agent' | 'hii' | 'system';
+  action: string;
+  note?: string;
+};
+
+export type SpatialObjectMetadata = {
+  kind: SpatialObjectKind;
+  owner?: string;
+  status?: SpatialObjectStatus;
+  source?: string;
+  capabilityId?: string;
+  runId?: string;
+  proofRefs?: string[];
+  memoryRefs?: string[];
+  parentId?: string;
+  audit?: SpatialAuditEntry[];
+};
+
 export const canvasNodeTypes: CanvasNodeType[] = [
   'note',
   'text',
@@ -39,6 +89,7 @@ export type CanvasNode = {
   z: number;
   createdAt: string;
   updatedAt: string;
+  object?: SpatialObjectMetadata;
   payload: Record<string, unknown>;
 };
 
@@ -66,6 +117,97 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+function sanitizeText(value: unknown, maxLength: number) {
+  if (typeof value !== 'string') return undefined;
+  const text = value
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+    .replace(/[\b\r]/g, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .trim()
+    .slice(0, maxLength);
+  return text || undefined;
+}
+
+function sanitizeStringArray(value: unknown, maxItems: number, maxLength: number) {
+  if (!Array.isArray(value)) return undefined;
+  const items = value
+    .map((item) => sanitizeText(item, maxLength))
+    .filter((item): item is string => Boolean(item))
+    .slice(0, maxItems);
+  return items.length ? items : undefined;
+}
+
+export function normalizeSpatialObject(raw: unknown): SpatialObjectMetadata | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const object = raw as Record<string, unknown>;
+  const kinds: SpatialObjectKind[] = [
+    'agent',
+    'task',
+    'model',
+    'source',
+    'browser',
+    'terminal',
+    'receipt',
+    'proof',
+    'memory',
+    'scene',
+    'capability',
+    'event'
+  ];
+  const statuses: SpatialObjectStatus[] = [
+    'proposed',
+    'queued',
+    'running',
+    'waiting_approval',
+    'blocked',
+    'failed',
+    'completed',
+    'approved',
+    'rejected',
+    'archived',
+    'ready',
+    'partial',
+    'planned',
+    'unknown'
+  ];
+  if (!kinds.includes(object.kind as SpatialObjectKind)) return undefined;
+  const audit = Array.isArray(object.audit)
+    ? object.audit
+        .map((entry) => {
+          if (!entry || typeof entry !== 'object') return null;
+          const auditEntry = entry as Record<string, unknown>;
+          const actor = ['human', 'agent', 'hii', 'system'].includes(auditEntry.actor as string)
+            ? (auditEntry.actor as SpatialAuditEntry['actor'])
+            : 'system';
+          const ts = sanitizeText(auditEntry.ts, 64);
+          const action = sanitizeText(auditEntry.action, 120);
+          if (!ts || !action) return null;
+          const normalized: SpatialAuditEntry = {
+            ts,
+            actor,
+            action
+          };
+          const note = sanitizeText(auditEntry.note, 500);
+          if (note) normalized.note = note;
+          return normalized;
+        })
+        .filter((entry): entry is SpatialAuditEntry => entry !== null)
+        .slice(-20)
+    : undefined;
+  return {
+    kind: object.kind as SpatialObjectKind,
+    owner: sanitizeText(object.owner, 80),
+    status: statuses.includes(object.status as SpatialObjectStatus) ? (object.status as SpatialObjectStatus) : undefined,
+    source: sanitizeText(object.source, 160),
+    capabilityId: sanitizeText(object.capabilityId, 160),
+    runId: sanitizeText(object.runId, 160),
+    proofRefs: sanitizeStringArray(object.proofRefs, 24, 240),
+    memoryRefs: sanitizeStringArray(object.memoryRefs, 24, 240),
+    parentId: sanitizeText(object.parentId, 160),
+    audit: audit && audit.length ? audit : undefined
+  };
+}
+
 export function normalizeNode(raw: unknown): CanvasNode | null {
   if (!raw || typeof raw !== 'object') return null;
   const node = raw as Record<string, unknown>;
@@ -83,6 +225,7 @@ export function normalizeNode(raw: unknown): CanvasNode | null {
     z: isFiniteNumber(node.z) ? node.z : 1,
     createdAt: typeof node.createdAt === 'string' ? node.createdAt : now,
     updatedAt: typeof node.updatedAt === 'string' ? node.updatedAt : now,
+    object: normalizeSpatialObject(node.object),
     payload: node.payload && typeof node.payload === 'object' ? (node.payload as Record<string, unknown>) : {}
   };
 }
