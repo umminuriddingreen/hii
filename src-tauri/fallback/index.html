@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HII Canvas</title>
+    <style>
+      :root {
+        color: #171717;
+        background: #fbfaf7;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      body {
+        display: grid;
+        min-height: 100vh;
+        margin: 0;
+        place-items: center;
+      }
+
+      main {
+        max-width: 34rem;
+        padding: 2rem;
+        text-align: center;
+      }
+
+      h1 {
+        margin: 0 0 0.75rem;
+        font-size: 0.95rem;
+        letter-spacing: 0;
+        text-transform: lowercase;
+      }
+
+      p {
+        margin: 0;
+        color: #737373;
+        font-size: 0.78rem;
+        line-height: 1.7;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>hii canvas</h1>
+      <p id="status">Starting the local canvas server. The native window will switch to the whiteboard when it is ready.</p>
+    </main>
+    <script>
+      const target = 'http://127.0.0.1:3042/';
+      const status = document.getElementById('status');
+
+      async function tryCanvas() {
+        try {
+          await fetch(target, { method: 'HEAD', cache: 'no-store' });
+          location.replace(target);
+        } catch {
+          if (status) status.textContent = 'Waiting for the local canvas server on 127.0.0.1:3042.';
+          setTimeout(tryCanvas, 500);
+        }
+      }
+
+      setTimeout(tryCanvas, 200);
+    </script>
+  </body>
+</html>

@@ -2,12 +2,14 @@ node_modules
 /.next
 /out
 /build
+.next-tauri/
 .env
 .env.*
 !.env.example
 next-env.d.ts
 .DS_Store
 *.tsbuildinfo
+src-tauri/target/
 .hii/
 supabase/.temp/
 
