@@ -65,7 +65,18 @@ function truncateProcessText(value: string, maxLength = 720) {
 export function localTerminalAllowed(request: Request) {
   if (process.env.HII_LOCAL_TERMINAL_ENABLED === '1') return true;
   const host = request.headers.get('host') ?? '';
-  return host.startsWith('localhost:') || host.startsWith('127.0.0.1:') || host.startsWith('[::1]:');
+  const hostOk =
+    host.startsWith('localhost:') || host.startsWith('127.0.0.1:') || host.startsWith('[::1]:');
+  // Host alone is forgeable-by-default in a browser (any site can fetch
+  // http://localhost:3000 and the browser sets Host for it). Origin is what
+  // distinguishes our own pages from a cross-site request.
+  const origin = request.headers.get('origin');
+  const originOk =
+    !origin ||
+    origin.startsWith('http://localhost:') ||
+    origin.startsWith('http://127.0.0.1:') ||
+    origin.startsWith('http://[::1]:');
+  return hostOk && originOk;
 }
 
 export function redactProcessLine(value: string) {

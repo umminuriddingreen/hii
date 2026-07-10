@@ -22,6 +22,17 @@ const sessions = new Map();
  * @property {number | null} exitCode
  */
 
+// Server-process secrets (Stripe, Supabase service role, R2, …) must not leak
+// into interactive shells; the login shell re-sources the user's own profile,
+// so anything the user normally exports comes back on its own.
+const SECRET_ENV_PATTERN = /(SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|PRIVATE|API_KEY|ACCESS_KEY|SERVICE_ROLE)/i;
+
+function ptyEnv() {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !SECRET_ENV_PATTERN.test(name))
+  );
+}
+
 function isInside(target) {
   const resolved = path.resolve(target);
   return resolved === ALLOWED_ROOT || resolved.startsWith(`${ALLOWED_ROOT}${path.sep}`);
@@ -52,7 +63,7 @@ export function createSession(sessionId, { cwd, cols, rows }) {
     cwd: safeCwd,
     cols: Math.max(20, Math.min(500, cols || 80)),
     rows: Math.max(5, Math.min(200, rows || 24)),
-    env: process.env
+    env: ptyEnv()
   });
   /** @type {Session} */
   const session = {
