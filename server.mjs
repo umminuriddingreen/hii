@@ -5,12 +5,22 @@ import { attachPtyGateway, isLocalRequest } from './server/pty-gateway.mjs';
 
 const dev = process.env.NODE_ENV !== 'production';
 const port = Number(process.env.PORT || 3000);
+const host = process.env.HOST || '127.0.0.1';
 const PTY_PATH = '/api/pty';
 
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
-await app.prepare();
+try {
+  console.log(
+    `hii preparing ${dev ? 'development' : 'production'} server on ${host}:${port}`
+  );
+  await app.prepare();
+} catch (error) {
+  console.error('hii server prepare failed');
+  console.error(error);
+  process.exit(1);
+}
 
 const server = createServer((req, res) => handle(req, res));
 
@@ -42,6 +52,13 @@ rawOn('upgrade', (req, socket, head) => {
   wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
 });
 
-server.listen(port, () => {
-  console.log(`hii ready on http://localhost:${port} (pty gateway at ws://localhost:${port}${PTY_PATH})`);
+server.on('error', (error) => {
+  console.error('hii server listen failed');
+  console.error(error);
+  process.exit(1);
+});
+
+console.log(`hii listening on ${host}:${port}`);
+server.listen(port, host, () => {
+  console.log(`hii ready on http://${host}:${port} (pty gateway at ws://${host}:${port}${PTY_PATH})`);
 });

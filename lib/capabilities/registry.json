@@ -135,6 +135,100 @@
     "trustLevel": "first-party"
   },
   {
+    "id": "hii.voice.daemon",
+    "name": "Always-On HII Voice Daemon",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Listen for the local wake phrase \"hii\", route speech through a local Ollama model, speak conversational system updates, and persist voice memories plus skill proposals.",
+    "inputs": [
+      "microphone speech",
+      "wake phrase",
+      "text test prompt",
+      "local HII runtime context"
+    ],
+    "outputs": [
+      "spoken response",
+      "voice transcript",
+      "memory candidate",
+      "skill proposal",
+      "operational graph event",
+      "loop note"
+    ],
+    "permissions": [
+      "local-only",
+      "microphone permission",
+      "macOS speech recognition permission",
+      "append-only runtime files",
+      "local Ollama request",
+      "speak via macOS say",
+      "no external publish",
+      "no destructive actions",
+      "approval gate for execution"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii voice start",
+      "hii voice ask",
+      "scripts/hii-voice-daemon.mjs",
+      "scripts/hii-voice-listener.swift",
+      "~/.hii/voice/events.jsonl",
+      "~/.hii/voice/memory.jsonl",
+      "~/.hii/voice/skill-proposals.jsonl"
+    ],
+    "status": "partial",
+    "trustLevel": "operator-reviewed"
+  },
+  {
+    "id": "hii.daemon.instances",
+    "name": "HII Daemon Instance Supervisor",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Run hiid as the local-first persistent supervisor for HII daemon instances, managed Codex runs, live action feed, voice state, and HII-owned process visibility.",
+    "inputs": [
+      "daemon command",
+      "managed Codex prompt",
+      "local process snapshot",
+      "voice status",
+      "runtime event logs"
+    ],
+    "outputs": [
+      "daemon status",
+      "instance registry",
+      "live feed event",
+      "managed Codex run receipt",
+      "whiteboard daemon panel"
+    ],
+    "permissions": [
+      "local-only",
+      "append-only runtime files",
+      "observe Mac processes",
+      "control HII-owned processes",
+      "reversible local autonomy",
+      "approval required for destructive or external actions",
+      "secrets reference-only"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii daemon start",
+      "hii daemon status",
+      "hii instances list",
+      "hii feed",
+      "hii codex run",
+      "scripts/hiid.mjs",
+      "/api/daemon",
+      "~/.hii/daemon/status.json",
+      "~/.hii/daemon/events.jsonl"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
     "id": "hii.board.task_kanban",
     "name": "Task Kanban Board",
     "owner": "hii",

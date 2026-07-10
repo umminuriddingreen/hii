@@ -8,6 +8,7 @@ import { useCamera } from './useCamera';
 import { useWorkspace } from './useWorkspace';
 import { NodeFrame } from './NodeFrame';
 import { CommandBar } from './CommandBar';
+import { DaemonButton } from './DaemonButton';
 import { FileNode, FontNode, HtmlNode, ImageNode, LinkNode, MediaNode, NoteNode, TextNode } from './nodes/StaticNodes';
 import { ptyKill } from './usePtySocket';
 
@@ -88,6 +89,23 @@ export function CanvasRoot() {
       if (type === 'terminal' && !payload.cwd) payload = { ...payload, cwd: '/Users/ummi/hii' };
       const seed = seedFor(type, payload);
       spawnSeeds([seed], { x: center.x - seed.w / 2, y: center.y - seed.h / 2 });
+    },
+    [camera, spawnSeeds]
+  );
+
+  const pinDaemonEvent = useCallback(
+    (event: { ts: string; type: string; status?: string; text?: string; loop?: string; target?: string }) => {
+      const center = camera.centerWorld();
+      const title = `${event.type}${event.status ? ` · ${event.status}` : ''}`;
+      const content = [
+        title,
+        event.text || event.target || '',
+        event.loop ? `loop: ${event.loop}` : '',
+        event.ts
+      ]
+        .filter(Boolean)
+        .join('\n');
+      spawnSeeds([seedFor('note', { title, content })], { x: center.x - 140, y: center.y - 100 });
     },
     [camera, spawnSeeds]
   );
@@ -196,6 +214,7 @@ export function CanvasRoot() {
 
       <Dock spawn={spawn} />
       <CommandBar spawn={spawn} resetView={camera.reset} />
+      <DaemonButton onPin={pinDaemonEvent} />
       <div data-canvas-ui className="pointer-events-none absolute left-5 top-4 select-none">
         <span className="font-mono text-[13px] font-semibold lowercase tracking-tight text-[var(--hii-graphite)]">hii</span>
         <span className="ml-2 font-mono text-[10px] uppercase tracking-widest text-neutral-400">canvas</span>

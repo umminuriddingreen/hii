@@ -26,6 +26,9 @@ const MONEY_IDEAS = path.join(MONEY_DIR, "ideas.jsonl");
 const MONEY_OFFERS_DIR = path.join(MONEY_DIR, "offers");
 const BOARD_DIR = path.join(RUNTIME, "board");
 const BOARD_TASKS = path.join(BOARD_DIR, "tasks.jsonl");
+const VOICE_DIR = path.join(RUNTIME, "voice");
+const VOICE_DAEMON = path.join(ROOT, "scripts", "hii-voice-daemon.mjs");
+const HIID = path.join(ROOT, "scripts", "hiid.mjs");
 const LINK_POSTS = path.join(ROOT, ".hii", "link-posts.jsonl");
 const LINK_CACHE = path.join(ROOT, ".hii", "link-cache.jsonl");
 const RUNNER_CAPABILITIES = ["termite.rhino.managed_job"];
@@ -155,6 +158,11 @@ function logBridge(event) {
 
 function npmRun(script, extra = []) {
   const r = spawnSync("npm", ["run", script, ...extra], { cwd: ROOT, stdio: "inherit" });
+  process.exit(r.status ?? 1);
+}
+
+function nodeScript(script, args = []) {
+  const r = spawnSync(process.execPath, [script, ...args], { cwd: ROOT, stdio: "inherit", env: process.env });
   process.exit(r.status ?? 1);
 }
 
@@ -361,7 +369,14 @@ function runtimePointers() {
     fileExistsSummary(LOOP_DECISIONS),
     fileExistsSummary(LOOP_NOTES),
     fileExistsSummary(BOARD_TASKS),
-    fileExistsSummary(path.join(RUNTIME, "mind0", "state.json"))
+    fileExistsSummary(path.join(RUNTIME, "mind0", "state.json")),
+    fileExistsSummary(path.join(RUNTIME, "daemon", "status.json")),
+    fileExistsSummary(path.join(RUNTIME, "daemon", "instances.json")),
+    fileExistsSummary(path.join(RUNTIME, "daemon", "events.jsonl")),
+    fileExistsSummary(path.join(RUNTIME, "codex", "index.json")),
+    fileExistsSummary(path.join(VOICE_DIR, "status.json")),
+    fileExistsSummary(path.join(VOICE_DIR, "memory.jsonl")),
+    fileExistsSummary(path.join(VOICE_DIR, "skill-proposals.jsonl"))
   ];
 }
 
@@ -852,6 +867,14 @@ function agentCommandCatalog() {
     { command: "hii loop once", purpose: "Propose the next user-proxy plan locally; do not act until y/n approval." },
     { command: "hii loop note <note>", purpose: "Add user notes to steer the persistent loop." },
     { command: "hii loop decide <yes|no>", purpose: "Approve or reject the latest proposed plan." },
+    { command: "hii daemon start", purpose: "Start hiid, the local HII daemon instance supervisor." },
+    { command: "hii daemon status", purpose: "Show hiid health, runtime path, instance count, and autonomy boundary." },
+    { command: "hii feed --follow", purpose: "Read the daemon action feed for live HII work." },
+    { command: "hii instances list", purpose: "List HII-managed and observed daemon instances." },
+    { command: "hii codex run <prompt>", purpose: "Queue a managed HII Codex run through hiid with receipts and logs." },
+    { command: "hii voice start", purpose: "Start the local HII voice daemon: wake phrase, local LLM, spoken updates, memories, and skill proposals." },
+    { command: "hii voice ask <prompt>", purpose: "Send a text prompt through the same HII voice loop for testing without microphone input." },
+    { command: "hii voice status", purpose: "Show voice daemon pid, state, model, log, memory, and skill proposal coordinates." },
     { command: "hii board", purpose: "Show the local kanban/todo board grouped by backlog, next, doing, blocked, and done." },
     { command: "hii board add <title>", purpose: "Create a local task with owner, coordinate, priority, tags, and notes." },
     { command: "hii board move <id> <lane>", purpose: "Move a task between kanban lanes." },
@@ -1818,12 +1841,53 @@ function cmdBridge(args) {
 }
 
 function cmdCodex(args) {
+  const sub = args[0] || "status";
+  if (["run", "enqueue", "status", "logs", "stop"].includes(sub)) {
+    const r = spawnSync(process.execPath, [HIID, "codex", ...args], { cwd: ROOT, stdio: "inherit", env: process.env });
+    process.exit(r.status ?? 1);
+  }
   const prompt = args.join(" ");
-  if (!prompt) { console.error("usage: hii codex <prompt>"); process.exit(1); }
-  logBridge({ type: "codex-exec", prompt });
-  const r = spawnSync(codexBin(), ["exec", "--cd", ROOT, prompt], { stdio: "inherit" });
-  logBridge({ type: "codex-exec-done", prompt, exitCode: r.status ?? 1 });
+  if (!prompt) { console.error("usage: hii codex run <prompt>"); process.exit(1); }
+  logBridge({ type: "codex-queued", prompt });
+  const r = spawnSync(process.execPath, [HIID, "codex", "run", prompt], { cwd: ROOT, stdio: "inherit", env: process.env });
   process.exit(r.status ?? 1);
+}
+
+function cmdDaemon(args) {
+  const sub = args[0] || "status";
+  const aliases = {
+    on: "start",
+    enable: "start",
+    start: "start",
+    off: "stop",
+    disable: "stop",
+    stop: "stop",
+    restart: "restart",
+    status: "status",
+    logs: "logs",
+    feed: "feed",
+    instances: "instances",
+    runs: "runs"
+  };
+  const mapped = aliases[sub];
+  if (!mapped) {
+    console.error("usage: hii daemon <start|stop|restart|status|feed|logs|instances|runs>");
+    process.exit(1);
+  }
+  nodeScript(HIID, [mapped, ...args.slice(1)]);
+}
+
+function cmdFeed(args) {
+  nodeScript(HIID, ["feed", ...(args.length ? args : ["30"])]);
+}
+
+function cmdInstances(args) {
+  const sub = args[0] || "list";
+  if (!["list", "show"].includes(sub)) {
+    console.error("usage: hii instances list");
+    process.exit(1);
+  }
+  nodeScript(HIID, ["instances"]);
 }
 
 function cmdCheck() {
@@ -1982,6 +2046,10 @@ switch (cmd) {
   case "terminal": cmdTerminal(rest); break;
   case "og": cmdOg(rest); break;
   case "loop": cmdLoop(rest); break;
+  case "voice": nodeScript(VOICE_DAEMON, rest.length ? rest : ["status"]); break;
+  case "daemon": cmdDaemon(rest); break;
+  case "instances": cmdInstances(rest); break;
+  case "feed": cmdFeed(rest); break;
   case "board": cmdBoard(rest); break;
   case "money": cmdMoney(rest); break;
   case "links": cmdLinks(rest); break;
@@ -2032,6 +2100,16 @@ usage: hii <command>
   loop status         show latest user-proxy plan and notes
   loop note <note>    add steering context (tab path in UI)
   loop decide yes|no  approve or reject latest plan
+  daemon start        start hiid, the HII instance supervisor
+  daemon stop         stop hiid
+  daemon status       show hiid health, autonomy, and instance count
+  daemon feed         show recent daemon actions
+  instances list      list daemon instances and observed processes
+  feed [n]            show the HII live action feed
+  voice start         start the always-on local voice daemon
+  voice ask <prompt>  test the voice loop without microphone input
+  voice status        show daemon status, logs, memory, and skill coordinates
+  voice stop|logs     stop daemon or tail local voice logs
   board               show local kanban/todo board
   board add <title>   create a task with lane/priority/owner/coordinate
   board move <id> <lane>
@@ -2055,7 +2133,9 @@ usage: hii <command>
   bridge send <msg>   message Yin (Codex) via ~/hii/bridge/messages
   bridge log [n]      tail ~/.hii/bridge/yin-codex.jsonl
   bridge inbox [n]    list recent bridge messages
-  codex <prompt>      run Codex in the repo, logged to the bridge
+  codex run <prompt>  queue a managed HII Codex run through hiid
+  codex status        list managed HII Codex runs
+  codex logs <id>     show a managed HII Codex run log
   mcp [args]          codex mcp passthrough (default: list)`);
     process.exit(cmd ? 1 : 0);
 }

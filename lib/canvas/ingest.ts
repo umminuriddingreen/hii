@@ -10,7 +10,15 @@ export type NodeSeed = {
 const CODE =
   /\.(m?[jt]sx?|svelte|vue|py|rb|go|rs|c|h|cpp|hpp|cs|java|kt|swift|sh|zsh|fish|sql|html?|css|scss|less|json[c5]?|ya?ml|toml|xml|md|markdown|txt|csv|tsv|log|env|ini|conf|lock|gitignore)$/i;
 const FONT = /\.(ttf|otf|woff2?)$/i;
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp|avif|svg|bmp|ico|heic|heif)$/i;
+const AUDIO_FILE = /\.(mp3|wav|aiff?|aac|m4a|flac|ogg|oga|opus|weba)$/i;
+const VIDEO_FILE = /\.(mp4|m4v|mov|webm|ogv|avi|mkv)$/i;
+const PDF_FILE = /\.pdf$/i;
 const IMG_URL = /\.(png|jpe?g|gif|webp|avif|svg)(\?|$)/i;
+const ARCHIVE = /\.(zip|tar|tgz|tar\.gz|rar|7z|gz|bz2|xz|dmg|pkg)$/i;
+const DESIGN = /\.(fig|sketch|psd|psb|ai|ait|eps|indd|idml|xd|afdesign|afphoto|afpub|kra)$/i;
+const MODEL_3D = /\.(glb|gltf|obj|stl|fbx|usdz|usd|usdc|dae|blend|3ds|ply)$/i;
+const CAD = /\.(3dm|dwg|dxf|step|stp|iges|igs|ifc|sat|skp|rvt|3mf)$/i;
 
 export const defaultSize: Record<CanvasNodeType, { w: number; h: number }> = {
   note: { w: 280, h: 200 },
@@ -48,36 +56,66 @@ export function seedFor(type: CanvasNodeType, payload: Record<string, unknown> =
   return { type, ...defaultSize[type], payload };
 }
 
-function emojiFor(name: string, mime: string) {
-  if (/\.(glb|gltf|obj|stl|fbx|usdz|blend)$/i.test(name)) return '🧊';
-  if (/\.(zip|tar|gz|rar|7z|dmg|pkg)$/i.test(name)) return '🗜️';
-  if (/\.(sketch|fig|psd|ai)$/i.test(name)) return '🎨';
-  if (mime.startsWith('application/')) return '📦';
-  return '📄';
+function extensionFor(name: string) {
+  const lower = name.toLowerCase();
+  if (lower.endsWith('.tar.gz')) return 'tar.gz';
+  const match = lower.match(/\.([a-z0-9]+)$/);
+  return match ? match[1] : '';
+}
+
+function fileSummary(name: string, mime: string) {
+  const extension = extensionFor(name);
+  if (MODEL_3D.test(name)) {
+    return { category: '3d model', emoji: '🧊', label: '3D asset', description: 'Preview not embedded; metadata only.' };
+  }
+  if (CAD.test(name)) {
+    return { category: 'cad', emoji: '📐', label: 'CAD / BIM asset', description: 'Preview not embedded; metadata only.' };
+  }
+  if (DESIGN.test(name)) {
+    return { category: 'design', emoji: '🎨', label: 'Design source', description: 'Preview not embedded; metadata only.' };
+  }
+  if (ARCHIVE.test(name)) {
+    return { category: 'archive', emoji: '🗜️', label: 'Archive/package', description: 'Contents not unpacked or saved.' };
+  }
+  if (/spreadsheet|excel|sheet/i.test(mime) || /\.(xlsx?|numbers|ods)$/i.test(name)) {
+    return { category: 'spreadsheet', emoji: '▦', label: 'Spreadsheet', description: 'Preview not embedded; metadata only.' };
+  }
+  if (/presentation|powerpoint|keynote/i.test(mime) || /\.(pptx?|key)$/i.test(name)) {
+    return { category: 'presentation', emoji: '▣', label: 'Presentation', description: 'Preview not embedded; metadata only.' };
+  }
+  if (/word|document/i.test(mime) || /\.(docx?|pages|rtf)$/i.test(name)) {
+    return { category: 'document', emoji: '▤', label: 'Document', description: 'Preview not embedded; metadata only.' };
+  }
+  if (mime.startsWith('application/')) {
+    return { category: 'application', emoji: '📦', label: 'Application file', description: 'Preview not embedded; metadata only.' };
+  }
+  return { category: extension || 'file', emoji: '📄', label: extension ? `${extension.toUpperCase()} file` : 'File', description: 'Preview not embedded; metadata only.' };
 }
 
 export async function seedFromFile(file: File): Promise<NodeSeed> {
   const name = file.name || 'untitled';
   const t = file.type || '';
-  if (t.startsWith('image/')) {
-    return seedFor('image', { url: URL.createObjectURL(file), name, ephemeral: true });
+  const extension = extensionFor(name);
+  if (t.startsWith('image/') || IMAGE_FILE.test(name)) {
+    return seedFor('image', { url: URL.createObjectURL(file), name, mime: t, size: file.size, extension, ephemeral: true });
   }
-  if (t.startsWith('video/') || t.startsWith('audio/') || t === 'application/pdf') {
-    const kind = t === 'application/pdf' ? 'pdf' : t.split('/')[0];
-    return seedFor('media', { url: URL.createObjectURL(file), name, kind, ephemeral: true });
+  if (t.startsWith('video/') || VIDEO_FILE.test(name) || t.startsWith('audio/') || AUDIO_FILE.test(name) || t === 'application/pdf' || PDF_FILE.test(name)) {
+    const kind = t === 'application/pdf' || PDF_FILE.test(name) ? 'pdf' : t.startsWith('audio/') || AUDIO_FILE.test(name) ? 'audio' : 'video';
+    const size = kind === 'audio' ? { w: 420, h: 132 } : kind === 'pdf' ? { w: 520, h: 420 } : { w: 480, h: 320 };
+    return { ...seedFor('media', { url: URL.createObjectURL(file), name, kind, mime: t, size: file.size, extension, ephemeral: true }), ...size };
   }
   if (FONT.test(name)) {
     const fam = 'f' + Math.random().toString(36).slice(2);
     const face = new FontFace(fam, await file.arrayBuffer());
     await face.load();
     document.fonts.add(face);
-    return seedFor('font', { fam, name, ephemeral: true });
+    return seedFor('font', { fam, name, mime: t, size: file.size, extension, ephemeral: true });
   }
   if (t.startsWith('text/') || CODE.test(name) || /json|xml|javascript/.test(t)) {
     const content = await file.slice(0, 100_000).text();
-    return seedFor('text', { content, name });
+    return seedFor('text', { content, name, mime: t, size: file.size, extension, truncated: file.size > 100_000 });
   }
-  return seedFor('file', { name, size: file.size, mime: t, emoji: emojiFor(name, t) });
+  return seedFor('file', { name, size: file.size, mime: t, extension, metadataOnly: true, ...fileSummary(name, t) });
 }
 
 export function seedFromUrl(u: string, html = ''): NodeSeed {
