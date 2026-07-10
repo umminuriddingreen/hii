@@ -53,30 +53,18 @@ function gitSnapshot() {
     const branch = execFileSync('git', ['-C', root, 'rev-parse', '--abbrev-ref', 'HEAD'], {
       encoding: 'utf8'
     }).trim();
-    const status = execFileSync('git', ['-C', root, 'status', '--short'], { encoding: 'utf8' })
-      .split('\n')
-      .filter(Boolean)
-      .map(redactText);
     const recent = execFileSync('git', ['-C', root, 'log', '--oneline', '-5'], { encoding: 'utf8' })
       .split('\n')
       .filter(Boolean);
-    return { branch, status, recent };
+    return { branch, recent };
   } catch {
-    return { branch: 'unknown', status: [], recent: [] };
+    return { branch: 'unknown', recent: [] };
   }
 }
 
 function inferNextActions(input: string) {
-  const git = gitSnapshot();
-  const text = `${input} ${git.status.join(' ')}`.toLowerCase();
+  const text = input.toLowerCase();
   const actions = [];
-  if (git.status.length > 0) {
-    actions.push({
-      score: 95,
-      track: 'repo hygiene',
-      next: 'review dirty files, commit product changes, leave local/private files untracked'
-    });
-  }
   if (text.includes('og') || text.includes('context') || text.includes('agent')) {
     actions.push({
       score: 92,
@@ -140,7 +128,6 @@ export function getHiiOgStatus() {
     generatedAt: context.generatedAt,
     repo: context.identity.repo,
     branch: context.git.branch,
-    dirtyFiles: context.git.status.length,
     capabilities: context.capabilities.length,
     nextActions: inferNextActions('og status')
   };

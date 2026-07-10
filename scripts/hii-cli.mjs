@@ -238,16 +238,12 @@ function cleanModelOutput(value) {
 function gitSnapshot() {
   try {
     const branch = execFileSync("git", ["-C", ROOT, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).trim();
-    const status = execFileSync("git", ["-C", ROOT, "status", "--short"], { encoding: "utf8" })
-      .split("\n")
-      .filter(Boolean)
-      .map(redactText);
     const recent = execFileSync("git", ["-C", ROOT, "log", "--oneline", "-5"], { encoding: "utf8" })
       .split("\n")
       .filter(Boolean);
-    return { branch, status, recent };
+    return { branch, recent };
   } catch {
-    return { branch: "unknown", status: [], recent: [] };
+    return { branch: "unknown", recent: [] };
   }
 }
 
@@ -274,16 +270,8 @@ function runtimePointers() {
 }
 
 function inferNextActions({ prompt, git, capabilities, jobs, bridge }) {
-  const text = `${prompt} ${git.status.join(" ")} ${bridge.map((entry) => JSON.stringify(entry)).join(" ")}`.toLowerCase();
+  const text = `${prompt} ${bridge.map((entry) => JSON.stringify(entry)).join(" ")}`.toLowerCase();
   const actions = [];
-  if (git.status.length > 0) {
-    actions.push({
-      score: 95,
-      track: "repo hygiene",
-      coordinate: ROOT,
-      action: "review dirty files, commit product changes, leave local/private files untracked"
-    });
-  }
   if (text.includes("og") || text.includes("oracle") || text.includes("persistent") || text.includes("conversation")) {
     actions.push({
       score: 92,
@@ -438,7 +426,6 @@ function loopDecisionFromContext(context, mode = "once") {
       prompt: context.prompt,
       repo: context.identity.repo,
       branch: context.git.branch,
-      dirtyFiles: context.git.status.length,
       sources: context.sources
     },
     inferredIntent: {
@@ -447,7 +434,6 @@ function loopDecisionFromContext(context, mode = "once") {
       evidence: [
         `repo=${context.identity.repo}`,
         `branch=${context.git.branch}`,
-        `dirtyFiles=${context.git.status.length}`,
         `bridgeEvents=${context.sources.bridgeEvents}`,
         `ogEvents=${context.sources.ogEvents}`,
         `notes=${context.sources.notes}`
@@ -458,9 +444,7 @@ function loopDecisionFromContext(context, mode = "once") {
       coordinate: top.coordinate,
       next: top.action,
       capabilityId: top.track === "operational graph" ? "hii.og.operational_graph" : "hii.terminal.observe",
-      nextCommand: top.coordinate === ROOT
-        ? "git status --short"
-        : top.coordinate,
+      nextCommand: top.coordinate,
       verification: top.track === "local CI/CD" ? "npm run build" : "hii context --json"
     },
     policy,
@@ -598,7 +582,6 @@ function cmdOg(args) {
     sources: {
       repo: ROOT,
       branch: git.branch,
-      dirtyFiles: git.status.length,
       capabilities: capabilities.length,
       recentJobs: jobs.length,
       bridgeEvents: bridge.length,
@@ -611,7 +594,7 @@ function cmdOg(args) {
   console.log(`event:   ${event.id}`);
   console.log(`mode:    ${event.mode}${sub === "capture" || prompt ? " (captured)" : ""}`);
   console.log(`repo:    ${ROOT}`);
-  console.log(`git:     ${git.branch}${git.status.length ? ` (${git.status.length} dirty)` : " (clean)"}`);
+  console.log(`git:     ${git.branch}`);
   console.log(`sources: capabilities=${capabilities.length} jobs=${jobs.length} bridge=${bridge.length}`);
   console.log("\nLikely next path:");
   for (const item of event.nextActions) {
@@ -628,8 +611,7 @@ function cmdStatus() {
   console.log(`repo:    ${ROOT}`);
   try {
     const branch = execFileSync("git", ["-C", ROOT, "rev-parse", "--abbrev-ref", "HEAD"]).toString().trim();
-    const dirty = execFileSync("git", ["-C", ROOT, "status", "--porcelain"]).toString().trim();
-    console.log(`git:     ${branch}${dirty ? " (dirty)" : " (clean)"}`);
+    console.log(`git:     ${branch}`);
   } catch { console.log("git:     unavailable"); }
   console.log("\nenv:");
   for (const key of ENV_KEYS) {
@@ -738,7 +720,7 @@ function cmdContext(args) {
   console.log("HII Agent Context\n");
   console.log(`repo:    ${payload.identity.repo}`);
   console.log(`runtime: ${payload.identity.runtime}`);
-  console.log(`git:     ${payload.git.branch}${payload.git.status.length ? ` (${payload.git.status.length} dirty)` : " (clean)"}`);
+  console.log(`git:     ${payload.git.branch}`);
   console.log(`caps:    ${payload.capabilities.length}`);
   console.log(`jobs:    ${payload.localState.recentJobs.length}`);
   console.log("\nBest commands:");
@@ -1206,8 +1188,7 @@ function cmdPack(args) {
       capabilities,
       source: {
         repo: ROOT,
-        branch: git.branch,
-        dirtyFiles: git.status.length
+        branch: git.branch
       },
       guardrails: [
         "This is a local manifest export only.",
@@ -1222,8 +1203,7 @@ function cmdPack(args) {
       id: randomUUID(),
       ts: manifest.exportedAt,
       packId: pack.id,
-      path: out,
-      dirtyFiles: manifest.source.dirtyFiles
+      path: out
     });
     console.log(`exported ${pack.id}`);
     console.log(`manifest: ${out}`);
