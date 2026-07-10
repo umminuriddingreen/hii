@@ -47,7 +47,7 @@ at `~/.hii/archive/aii-workstation-git-2026-07-10`).
 | `scripts/hiid.mjs` (daemon supervisor) | AII | ✅ moved to `aii/daemon/hiid.mjs` (2026-07-10), `~/.hii/daemon` file contract unchanged |
 | `lib/capabilities`, `lib/admin-agent` | AII | ✅ (2026-07-10) registry/packs data → `aii/capabilities/`, admin-agent logic → `aii/admin-agent/`; hiid publishes the registry to `~/.hii/capabilities.json` and HII's thin client (`lib/capabilities/index.ts`) reads the published copy |
 | `bridge/`, bridge skills | AII | ✅ (2026-07-10) message drop moved off the repo to the runtime substrate `~/.hii/bridge/messages` (`hii bridge` CLI updated; skills unchanged — they call the CLI); HII bridge *viewer* surface still to build |
-| agent spawn in `lib/server/hii-terminal.ts` | AII | HII surface posts intent; AII daemon executes |
+| agent spawn in `lib/server/hii-terminal.ts` | AII | ✅ (2026-07-10) HII appends `agent.spawn` intents to `~/.hii/daemon/intents.jsonl` and records a `queued` job; hiid consumes intents (cursor at `intents.cursor.json`, history skipped on first run), runs the claude CLI, and appends the `running`/`failed` job update under the same id |
 | `app/api/*` UI-serving routes, canvas, boards | HII | stays |
 | PTY gateway/sessions | HII | stays (it is a surface); AII attaches to sessions via the same WS contract |
 | skills registry `~/.hii/skills` | AII-owned data | HII renders it |

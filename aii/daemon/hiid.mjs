@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // hiid — HII's local-first persistent runtime supervisor.
-import { spawn, spawnSync } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -35,6 +35,139 @@ const activeRuns = new Map();
 const CAPABILITY_SOURCE = path.join(ROOT, "aii", "capabilities", "registry.json");
 const CAPABILITY_PUBLISHED = path.join(RUNTIME, "capabilities.json");
 let publishedCapabilityMtime = 0;
+
+// Agent-spawn intents: HII surfaces append intents to INTENTS; the daemon is
+// the only thing that actually executes agent spawns (docs/aii-hii-boundary.md).
+// Job progress is reported by appending updated records (same id, last wins)
+// to HII's capability job ledger.
+const INTENTS = path.join(DAEMON_DIR, "intents.jsonl");
+const INTENTS_CURSOR = path.join(DAEMON_DIR, "intents.cursor.json");
+const CAPABILITY_JOBS = path.join(ROOT, ".hii", "capability-jobs.jsonl");
+const CLAUDE_BIN = "/opt/homebrew/bin/claude";
+
+function cleanSessionName(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+}
+
+const SPAWN_PRESETS = {
+  observer: [
+    "You are a read-only HII observer agent.",
+    "Watch the local HII/AII/Termite workstation state and report actionable status.",
+    "Do not edit files, do not touch secrets, do not push or commit."
+  ],
+  shipper: [
+    "You are a bounded HII shipping agent.",
+    "Improve the HII product surface only when the requested scope is clear.",
+    "Do not delete or revert user work. Do not touch secrets. Verify with npm run build when editing HII."
+  ],
+  "termite-demo": [
+    "You are a Termite demo operator for HII.",
+    "Prepare or monitor a Rhino/Termite alpha demo and report exact blockers and proof artifacts.",
+    "Do not edit files unless explicitly asked. Do not touch secrets."
+  ]
+};
+
+function presetPrompt(preset, prompt) {
+  const base = String(prompt || "").trim();
+  const framing = SPAWN_PRESETS[preset];
+  return framing ? [...framing, base].filter(Boolean).join("\n\n") : base;
+}
+
+function reportSpawnJob(intent, { status, output, startedAt }) {
+  const ts = now();
+  const job = {
+    id: intent.id,
+    capabilityId: "hii.agent.spawn",
+    inputSummary: `${intent.preset}: ${String(intent.prompt).slice(0, 240)}`,
+    userId: "local",
+    userEmail: null,
+    status,
+    budget: "local-operator",
+    logs: [`[${startedAt}] intent ${intent.id} → ${status}`, output || "spawn request accepted"],
+    ledger: [
+      {
+        id: randomUUID(),
+        jobId: intent.id,
+        capabilityId: "hii.agent.spawn",
+        actor: "aii.hiid",
+        type: "approval",
+        summary: `hiid executed spawn intent (preset ${intent.preset}).`,
+        createdAt: ts
+      }
+    ],
+    proofArtifacts: [
+      {
+        id: randomUUID(),
+        kind: "log",
+        label: "Spawn receipt",
+        summary: output || "Claude session spawn request accepted.",
+        createdAt: ts
+      }
+    ],
+    createdAt: intent.requestedAt || startedAt,
+    updatedAt: ts,
+    metadata: { preset: intent.preset, name: intent.name }
+  };
+  appendJsonl(CAPABILITY_JOBS, job);
+}
+
+function executeSpawnIntent(intent) {
+  const preset = Object.hasOwn(SPAWN_PRESETS, intent.preset) || intent.preset === "custom" ? intent.preset : "observer";
+  const prompt = presetPrompt(preset, intent.prompt).slice(0, 12000);
+  const name = cleanSessionName(intent.name || `hii-${preset}-${Date.now().toString(36)}`);
+  const startedAt = now();
+  const args = [
+    prompt,
+    "--bg",
+    "--safe-mode",
+    "--model",
+    "claude-fable-5",
+    "--name",
+    name,
+    "--permission-mode",
+    preset === "observer" ? "default" : "auto"
+  ];
+  execFile(CLAUDE_BIN, args, { cwd: ROOT, timeout: 15000, maxBuffer: 512 * 1024 }, (error, stdout, stderr) => {
+    const output = redact(`${stdout ?? ""}${stderr ?? ""}`.trim());
+    if (error) {
+      reportSpawnJob({ ...intent, preset, name }, { status: "failed", output: output || String(error.message), startedAt });
+      event("agent.spawn.failed", { actor: "hii.daemon", target: name, status: "failed", text: output || String(error.message) });
+      return;
+    }
+    reportSpawnJob({ ...intent, preset, name }, { status: "running", output, startedAt });
+    event("agent.spawned", { actor: "hii.daemon", target: name, status: "running", text: `Spawned ${name} from intent ${intent.id}` });
+  });
+}
+
+function processSpawnIntents() {
+  let lines;
+  try {
+    lines = fs.readFileSync(INTENTS, "utf8").split("\n").filter(Boolean);
+  } catch {
+    return;
+  }
+  const cursor = safeReadJson(INTENTS_CURSOR, null);
+  // First run: skip history rather than replaying old intents.
+  const processed = cursor && Number.isInteger(cursor.processed) ? cursor.processed : lines.length;
+  if (lines.length <= processed) {
+    if (!cursor) writeJson(INTENTS_CURSOR, { processed });
+    return;
+  }
+  for (const line of lines.slice(processed)) {
+    let intent;
+    try {
+      intent = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (intent?.kind === "agent.spawn" && intent.id) executeSpawnIntent(intent);
+  }
+  writeJson(INTENTS_CURSOR, { processed: lines.length });
+}
 
 function publishCapabilities() {
   let mtime;
@@ -429,6 +562,7 @@ function runLoop() {
   setInterval(() => {
     try {
       publishCapabilities();
+      processSpawnIntents();
       startQueuedRuns();
       writeStatus("running");
     } catch (error) {
