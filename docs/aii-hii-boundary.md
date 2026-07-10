@@ -11,7 +11,7 @@ Everything concerned with *surfaces* and how humans and agents use them:
 - The *presentation* of state: rendering jobs, capabilities, agents — not deciding them
 - An **agent-facing surface contract**: every UI affordance HII offers must also be reachable as a declared capability (JSON schema + endpoint), so agents use HII the same way humans do
 
-**AII — the agent coordination & capability layer (`~/dev/aii-workstation` → canonical agent runtime)**
+**AII — the agent coordination & capability layer (`~/hii/aii/` — lives inside the HII repo)**
 Everything concerned with *agents as workers*:
 - Agent lifecycle: spawn, monitor, steer, recover (currently `hiid.mjs`, spawn routes, bridge)
 - The capability registry and policy engine (currently `lib/capabilities`, `~/.hii/capabilities.json`, skills registry)
@@ -33,9 +33,18 @@ AII consumes.
 
 ## What moves where (migration targets)
 
+AII lives in the same repo (`~/hii/aii/`) but the boundary is enforced by the
+dependency rule: nothing under `app/`, `lib/`, `components/` imports from
+`aii/` — HII reaches AII only through `~/.hii` state files and process
+execution (spawning `aii/daemon/hiid.mjs`). Current layout:
+`aii/daemon/hiid.mjs` (runtime supervisor, moved 2026-07-10) and
+`aii/workstation/` (the Tauri control plane, moved from `~/dev/aii-workstation`
+with a compatibility symlink left behind; its pre-move git history is archived
+at `~/.hii/archive/aii-workstation-git-2026-07-10`).
+
 | Today (in ~/hii) | Belongs to | Action |
 |---|---|---|
-| `scripts/hiid.mjs` (daemon supervisor) | AII | move to AII, keep `~/.hii/daemon` file contract |
+| `scripts/hiid.mjs` (daemon supervisor) | AII | ✅ moved to `aii/daemon/hiid.mjs` (2026-07-10), `~/.hii/daemon` file contract unchanged |
 | `lib/capabilities`, `lib/admin-agent` | AII | extract; HII keeps a thin read/render client |
 | `bridge/`, bridge skills | AII | move; HII gets a bridge *viewer* surface |
 | agent spawn in `lib/server/hii-terminal.ts` | AII | HII surface posts intent; AII daemon executes |

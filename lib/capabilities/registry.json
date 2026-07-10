@@ -220,7 +220,7 @@
       "hii instances list",
       "hii feed",
       "hii codex run",
-      "scripts/hiid.mjs",
+      "aii/daemon/hiid.mjs",
       "/api/daemon",
       "~/.hii/daemon/status.json",
       "~/.hii/daemon/events.jsonl"

@@ -21,7 +21,7 @@ const VOICE_PID = path.join(RUNTIME, "voice", "daemon.pid");
 const CODEX_INDEX = path.join(RUNTIME, "codex", "index.json");
 
 const OWNED_PATTERNS = [
-  `${ROOT}/scripts/hiid.mjs`,
+  `${ROOT}/aii/daemon/hiid.mjs`,
   `${ROOT}/scripts/hii-voice-daemon.mjs`,
   `${ROOT}/server.mjs`,
   `${ROOT}/node_modules/.bin/next`,

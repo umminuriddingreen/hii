@@ -14,7 +14,7 @@ const runsDir = path.join(daemonDir, 'runs');
 const statusPath = path.join(daemonDir, 'status.json');
 const instancesPath = path.join(daemonDir, 'instances.json');
 const eventsPath = path.join(daemonDir, 'events.jsonl');
-const hiidScript = path.join(hiiRoot, 'scripts', 'hiid.mjs');
+const hiidScript = path.join(hiiRoot, 'aii', 'daemon', 'hiid.mjs');
 
 export type HiiDaemonEvent = {
   id: string;
