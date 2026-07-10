@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import capabilities from '@/lib/capabilities/registry.json';
+import { listCapabilities } from '@/lib/capabilities';
 
 const root = path.join(os.homedir(), 'hii');
 const runtime = path.join(os.homedir(), '.hii');
@@ -180,7 +180,7 @@ export function getHiiAgentContext() {
     },
     git,
     commands: ['/og', '/context', '/console', '/boards', '/credits', '/termite', '/upload'],
-    capabilities: capabilities.map((capability) => ({
+    capabilities: listCapabilities().map((capability) => ({
       id: capability.id,
       name: capability.name,
       status: capability.status,

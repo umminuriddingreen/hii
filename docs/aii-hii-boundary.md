@@ -45,7 +45,7 @@ at `~/.hii/archive/aii-workstation-git-2026-07-10`).
 | Today (in ~/hii) | Belongs to | Action |
 |---|---|---|
 | `scripts/hiid.mjs` (daemon supervisor) | AII | ✅ moved to `aii/daemon/hiid.mjs` (2026-07-10), `~/.hii/daemon` file contract unchanged |
-| `lib/capabilities`, `lib/admin-agent` | AII | extract; HII keeps a thin read/render client |
+| `lib/capabilities`, `lib/admin-agent` | AII | ✅ (2026-07-10) registry/packs data → `aii/capabilities/`, admin-agent logic → `aii/admin-agent/`; hiid publishes the registry to `~/.hii/capabilities.json` and HII's thin client (`lib/capabilities/index.ts`) reads the published copy |
 | `bridge/`, bridge skills | AII | move; HII gets a bridge *viewer* surface |
 | agent spawn in `lib/server/hii-terminal.ts` | AII | HII surface posts intent; AII daemon executes |
 | `app/api/*` UI-serving routes, canvas, boards | HII | stays |

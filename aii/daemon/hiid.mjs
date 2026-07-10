@@ -30,6 +30,32 @@ const OWNED_PATTERNS = [
 
 const activeRuns = new Map();
 
+// AII owns the capability registry (aii/capabilities/registry.json) and
+// publishes it to the shared runtime substrate; HII reads the published copy.
+const CAPABILITY_SOURCE = path.join(ROOT, "aii", "capabilities", "registry.json");
+const CAPABILITY_PUBLISHED = path.join(RUNTIME, "capabilities.json");
+let publishedCapabilityMtime = 0;
+
+function publishCapabilities() {
+  let mtime;
+  try {
+    mtime = fs.statSync(CAPABILITY_SOURCE).mtimeMs;
+  } catch {
+    return; // no source registry on this machine
+  }
+  if (mtime === publishedCapabilityMtime) return;
+  const registry = safeReadJson(CAPABILITY_SOURCE, null);
+  if (!Array.isArray(registry)) return;
+  writeJson(CAPABILITY_PUBLISHED, registry);
+  publishedCapabilityMtime = mtime;
+  event("capabilities.published", {
+    actor: "hii.daemon",
+    target: CAPABILITY_PUBLISHED,
+    status: "ok",
+    text: `Published ${registry.length} capabilities from AII registry`
+  });
+}
+
 function ensureDirs() {
   fs.mkdirSync(DAEMON_DIR, { recursive: true });
   fs.mkdirSync(RUNS_DIR, { recursive: true });
@@ -399,8 +425,10 @@ function runLoop() {
     loop: "observed -> decided -> acted -> next"
   });
   writeStatus("running");
+  publishCapabilities();
   setInterval(() => {
     try {
+      publishCapabilities();
       startQueuedRuns();
       writeStatus("running");
     } catch (error) {
