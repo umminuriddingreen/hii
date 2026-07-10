@@ -7,7 +7,7 @@ import capabilities from '@/lib/capabilities/registry.json';
 
 const root = path.join(os.homedir(), 'hii');
 const runtime = path.join(os.homedir(), '.hii');
-const bridgeLog = path.join(runtime, 'bridge', 'yin-codex.jsonl');
+const bridgeLog = path.join(runtime, 'bridge', 'codex.jsonl');
 const localJobs = path.join(root, '.hii', 'capability-jobs.jsonl');
 const ogEvents = path.join(runtime, 'og', 'events.jsonl');
 
@@ -142,16 +142,8 @@ function staleLegacyRuntimeProbe() {
 }
 
 function inferNextActions(input: string) {
-  const git = gitSnapshot();
-  const text = `${input} ${git.status.join(' ')}`.toLowerCase();
+  const text = input.toLowerCase();
   const actions = [];
-  if (git.status.length > 0) {
-    actions.push({
-      score: 95,
-      track: 'repo hygiene',
-      next: 'review dirty files, commit product changes, leave local/private files untracked'
-    });
-  }
   if (text.includes('og') || text.includes('context') || text.includes('agent')) {
     actions.push({
       score: 92,
@@ -217,7 +209,6 @@ export function getHiiOgStatus() {
     generatedAt: context.generatedAt,
     repo: context.identity.repo,
     branch: context.git.branch,
-    dirtyFiles: context.git.status.length,
     capabilities: context.capabilities.length,
     nextActions: inferNextActions('og status')
   };

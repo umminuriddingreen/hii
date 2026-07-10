@@ -10,7 +10,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 const ROOT = path.join(os.homedir(), "hii");
 const RUNTIME = path.join(os.homedir(), ".hii");
 const BRIDGE_DIR = path.join(ROOT, "bridge", "messages");
-const BRIDGE_LOG = path.join(RUNTIME, "bridge", "yin-codex.jsonl");
+const BRIDGE_LOG = path.join(RUNTIME, "bridge", "codex.jsonl");
 const CAPABILITY_REGISTRY = path.join(ROOT, "lib", "capabilities", "registry.json");
 const CAPABILITY_PACKS = path.join(ROOT, "lib", "capabilities", "packs.json");
 const LOCAL_CAPABILITY_JOBS = path.join(ROOT, ".hii", "capability-jobs.jsonl");
@@ -151,7 +151,7 @@ async function runnerFetch(pathname, options = {}) {
 
 function logBridge(event) {
   fs.mkdirSync(path.dirname(BRIDGE_LOG), { recursive: true });
-  const entry = { ts: new Date().toISOString(), from: "yang", ...event };
+  const entry = { ts: new Date().toISOString(), from: "hii", ...event };
   fs.appendFileSync(BRIDGE_LOG, `${JSON.stringify(entry)}\n`);
   return entry;
 }
@@ -410,16 +410,8 @@ function staleLegacyRuntimeProbe() {
 }
 
 function inferNextActions({ prompt, git, capabilities, jobs, bridge }) {
-  const text = `${prompt} ${git.status.join(" ")} ${bridge.map((entry) => JSON.stringify(entry)).join(" ")}`.toLowerCase();
+  const text = `${prompt} ${bridge.map((entry) => JSON.stringify(entry)).join(" ")}`.toLowerCase();
   const actions = [];
-  if (git.status.length > 0) {
-    actions.push({
-      score: 95,
-      track: "repo hygiene",
-      coordinate: ROOT,
-      action: "review dirty files, commit product changes, leave local/private files untracked"
-    });
-  }
   if (text.includes("og") || text.includes("oracle") || text.includes("persistent") || text.includes("conversation")) {
     actions.push({
       score: 92,
@@ -653,7 +645,6 @@ function loopDecisionFromContext(context, mode = "once") {
       prompt: context.prompt,
       repo: context.identity.repo,
       branch: context.git.branch,
-      dirtyFiles: context.git.status.length,
       sources: context.sources
     },
     inferredIntent: {
@@ -662,7 +653,6 @@ function loopDecisionFromContext(context, mode = "once") {
       evidence: [
         `repo=${context.identity.repo}`,
         `branch=${context.git.branch}`,
-        `dirtyFiles=${context.git.status.length}`,
         `bridgeEvents=${context.sources.bridgeEvents}`,
         `ogEvents=${context.sources.ogEvents}`,
         `notes=${context.sources.notes}`
@@ -673,9 +663,7 @@ function loopDecisionFromContext(context, mode = "once") {
       coordinate: top.coordinate,
       next: top.action,
       capabilityId: top.track === "operational graph" ? "hii.og.operational_graph" : "hii.terminal.observe",
-      nextCommand: top.coordinate === ROOT
-        ? "git status --short"
-        : top.coordinate,
+      nextCommand: top.coordinate,
       verification: top.track === "local CI/CD" ? "npm run build" : "hii context --json"
     },
     policy,
@@ -813,7 +801,6 @@ function cmdOg(args) {
     sources: {
       repo: ROOT,
       branch: git.branch,
-      dirtyFiles: git.status.length,
       capabilities: capabilities.length,
       recentJobs: jobs.length,
       bridgeEvents: bridge.length,
@@ -826,7 +813,7 @@ function cmdOg(args) {
   console.log(`event:   ${event.id}`);
   console.log(`mode:    ${event.mode}${sub === "capture" || prompt ? " (captured)" : ""}`);
   console.log(`repo:    ${ROOT}`);
-  console.log(`git:     ${git.branch}${git.status.length ? ` (${git.status.length} dirty)` : " (clean)"}`);
+  console.log(`git:     ${git.branch}`);
   console.log(`sources: capabilities=${capabilities.length} jobs=${jobs.length} bridge=${bridge.length}`);
   console.log("\nLikely next path:");
   for (const item of event.nextActions) {
@@ -843,8 +830,7 @@ function cmdStatus() {
   console.log(`repo:    ${ROOT}`);
   try {
     const branch = execFileSync("git", ["-C", ROOT, "rev-parse", "--abbrev-ref", "HEAD"]).toString().trim();
-    const dirty = execFileSync("git", ["-C", ROOT, "status", "--porcelain"]).toString().trim();
-    console.log(`git:     ${branch}${dirty ? " (dirty)" : " (clean)"}`);
+    console.log(`git:     ${branch}`);
   } catch { console.log("git:     unavailable"); }
   console.log("\nenv:");
   for (const key of ENV_KEYS) {
@@ -1687,8 +1673,7 @@ function cmdPack(args) {
       capabilities,
       source: {
         repo: ROOT,
-        branch: git.branch,
-        dirtyFiles: git.status.length
+        branch: git.branch
       },
       guardrails: [
         "This is a local manifest export only.",
@@ -1703,8 +1688,7 @@ function cmdPack(args) {
       id: randomUUID(),
       ts: manifest.exportedAt,
       packId: pack.id,
-      path: out,
-      dirtyFiles: manifest.source.dirtyFiles
+      path: out
     });
     console.log(`exported ${pack.id}`);
     console.log(`manifest: ${out}`);
@@ -1821,10 +1805,10 @@ function cmdBridge(args) {
     const body = args.slice(1).join(" ");
     if (!body) { console.error("usage: hii bridge send <message>"); process.exit(1); }
     fs.mkdirSync(BRIDGE_DIR, { recursive: true });
-    const msg = { id: randomUUID(), ts: new Date().toISOString(), from: "yang", to: "yin", body };
-    const file = path.join(BRIDGE_DIR, `${msg.ts.replace(/[:.]/g, "-")}-yang.json`);
+    const msg = { id: randomUUID(), ts: new Date().toISOString(), from: "hii", to: "codex", body };
+    const file = path.join(BRIDGE_DIR, `${msg.ts.replace(/[:.]/g, "-")}-hii.json`);
     fs.writeFileSync(file, `${JSON.stringify(msg, null, 2)}\n`);
-    logBridge({ type: "message", to: "yin", file, body });
+    logBridge({ type: "message", to: "codex", file, body });
     console.log(`sent → ${file}`);
   } else if (sub === "log") {
     const n = Number(args[1] ?? 20);
@@ -2130,8 +2114,8 @@ usage: hii <command>
   ship --push [msg]   explicit external push to origin
   dev|build|start     run the Next.js app
   registry <sub>      scan | doctor | export
-  bridge send <msg>   message Yin (Codex) via ~/hii/bridge/messages
-  bridge log [n]      tail ~/.hii/bridge/yin-codex.jsonl
+  bridge send <msg>   message Codex via ~/hii/bridge/messages
+  bridge log [n]      tail ~/.hii/bridge/codex.jsonl
   bridge inbox [n]    list recent bridge messages
   codex run <prompt>  queue a managed HII Codex run through hiid
   codex status        list managed HII Codex runs
