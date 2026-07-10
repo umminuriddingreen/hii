@@ -9,7 +9,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 const ROOT = path.join(os.homedir(), "hii");
 const RUNTIME = path.join(os.homedir(), ".hii");
-const BRIDGE_DIR = path.join(ROOT, "bridge", "messages");
+const BRIDGE_DIR = path.join(RUNTIME, "bridge", "messages");
 const BRIDGE_LOG = path.join(RUNTIME, "bridge", "codex.jsonl");
 const CAPABILITY_REGISTRY = path.join(ROOT, "aii", "capabilities", "registry.json");
 const CAPABILITY_PACKS = path.join(ROOT, "aii", "capabilities", "packs.json");
@@ -1810,7 +1810,7 @@ function cmdBridge(args) {
     fs.writeFileSync(file, `${JSON.stringify(msg, null, 2)}\n`);
     logBridge({ type: "message", to: "codex", file, body });
     console.log(`sent → ${file}`);
-  } else if (sub === "log") {
+  } else if (sub === "log" || sub === "read") {
     const n = Number(args[1] ?? 20);
     if (!fs.existsSync(BRIDGE_LOG)) { console.log("no bridge log yet"); return; }
     const lines = fs.readFileSync(BRIDGE_LOG, "utf8").trim().split("\n").slice(-n);
@@ -2114,8 +2114,8 @@ usage: hii <command>
   ship --push [msg]   explicit external push to origin
   dev|build|start     run the Next.js app
   registry <sub>      scan | doctor | export
-  bridge send <msg>   message Codex via ~/hii/bridge/messages
-  bridge log [n]      tail ~/.hii/bridge/codex.jsonl
+  bridge send <msg>   message Codex via ~/.hii/bridge/messages
+  bridge log|read [n] tail ~/.hii/bridge/codex.jsonl
   bridge inbox [n]    list recent bridge messages
   codex run <prompt>  queue a managed HII Codex run through hiid
   codex status        list managed HII Codex runs
