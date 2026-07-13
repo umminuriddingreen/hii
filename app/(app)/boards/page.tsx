@@ -1,10 +1,13 @@
 import Link from 'next/link';
 import { BoardClient } from './BoardClient';
 import { boardStorePath, listBoardTasks } from '@/lib/server/hii-board';
+import { surfaceEnabled } from '@/lib/server/hii-config';
+import { SurfaceDisabled } from '@/components/SurfaceDisabled';
 
 export const dynamic = 'force-dynamic';
 
 export default async function BoardsPage() {
+  if (!surfaceEnabled('boards')) return <SurfaceDisabled name="boards" />;
   const tasks = await listBoardTasks({ includeDone: true });
   const open = tasks.filter((task) => task.lane !== 'done').length;
   const doing = tasks.filter((task) => task.lane === 'doing').length;

@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import { createLinkPost, listLinkPostsWithCache } from '@/lib/server/link-stream';
+import { surfaceEnabled } from '@/lib/server/hii-config';
+import { SurfaceDisabled } from '@/components/SurfaceDisabled';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,6 +17,7 @@ function cacheLabel(status: string | undefined) {
 }
 
 export default async function FeedPage() {
+  if (!surfaceEnabled('feed')) return <SurfaceDisabled name="feed" />;
   const posts = await listLinkPostsWithCache(80);
   const cachedCount = posts.filter((post) => post.cache?.status === 'cached').length;
   const failedCount = posts.filter((post) => post.cache?.status === 'failed').length;
