@@ -52,6 +52,16 @@ at `~/.hii/archive/aii-workstation-git-2026-07-10`).
 | PTY gateway/sessions | HII | stays (it is a surface); AII attaches to sessions via the same WS contract |
 | skills registry `~/.hii/skills` | AII-owned data | HII renders it |
 
+## Configuration authority (live since 2026-07-12)
+
+AII owns `~/.hii/config.json` (surface enablement + defaults + agentNotes).
+hiid seeds it on start and mutates it via `hiid config set <dot.path> <value>`
+(every change is an auditable `config.updated` event). HII reads it through
+`lib/server/hii-config.ts` (`readHiiConfig` / `surfaceEnabled`) and serves it
+read-only at `/api/config` (capability `hii.config.read`). HII never writes
+this file. The pre-existing legacy engine config that lived at that path is
+archived at `~/.hii/archive/config.json.legacy-engine-2026-07-12`.
+
 ## End state
 
 AII observes how the user works (jobs, boards, attention data) and

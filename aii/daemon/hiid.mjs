@@ -36,6 +36,81 @@ const CAPABILITY_SOURCE = path.join(ROOT, "aii", "capabilities", "registry.json"
 const CAPABILITY_PUBLISHED = path.join(RUNTIME, "capabilities.json");
 let publishedCapabilityMtime = 0;
 
+// HII surface configuration — the configuration-authority side of
+// docs/aii-hii-boundary.md. AII owns ~/.hii/config.json; HII surfaces read it
+// and render accordingly. `hiid config set` is how AII (or the operator)
+// reshapes HII without touching HII code.
+const HII_CONFIG = path.join(RUNTIME, "config.json");
+
+const DEFAULT_CONFIG = {
+  version: 1,
+  updatedAt: null,
+  updatedBy: "aii.hiid",
+  defaults: { homepage: "canvas" },
+  surfaces: {
+    canvas: { enabled: true },
+    terminal: { enabled: true, defaultCwd: "~" },
+    boards: { enabled: true },
+    feed: { enabled: true }
+  },
+  agentNotes: []
+};
+
+function ensureConfig() {
+  if (fs.existsSync(HII_CONFIG)) return;
+  writeJson(HII_CONFIG, { ...DEFAULT_CONFIG, updatedAt: now() });
+  event("config.initialized", {
+    actor: "hii.daemon",
+    target: HII_CONFIG,
+    status: "ok",
+    text: "Wrote default HII surface config"
+  });
+}
+
+function cmdConfig(args) {
+  const sub = args[0];
+  const config = safeReadJson(HII_CONFIG, { ...DEFAULT_CONFIG });
+  if (!sub || sub === "show") {
+    console.log(JSON.stringify(config, null, 2));
+    return;
+  }
+  if (sub === "get") {
+    const value = args[1]?.split(".").reduce((cur, key) => cur?.[key], config);
+    console.log(JSON.stringify(value ?? null, null, 2));
+    return;
+  }
+  if (sub === "set") {
+    const dotPath = args[1];
+    const raw = args.slice(2).join(" ");
+    if (!dotPath || !raw) throw new Error("usage: hiid config set <dot.path> <json-value>");
+    let value;
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      value = raw; // treat unparseable input as a plain string
+    }
+    const keys = dotPath.split(".");
+    let cursor = config;
+    for (const key of keys.slice(0, -1)) {
+      if (typeof cursor[key] !== "object" || cursor[key] === null) cursor[key] = {};
+      cursor = cursor[key];
+    }
+    cursor[keys[keys.length - 1]] = value;
+    config.updatedAt = now();
+    config.updatedBy = "aii.hiid";
+    writeJson(HII_CONFIG, config);
+    event("config.updated", {
+      actor: "hii.daemon",
+      target: dotPath,
+      status: "ok",
+      text: `HII config ${dotPath} = ${JSON.stringify(value)}`
+    });
+    console.log(`set ${dotPath} = ${JSON.stringify(value)}`);
+    return;
+  }
+  throw new Error("usage: hiid config <show|get <path>|set <path> <value>>");
+}
+
 // Agent-spawn intents: HII surfaces append intents to INTENTS; the daemon is
 // the only thing that actually executes agent spawns (docs/aii-hii-boundary.md).
 // Job progress is reported by appending updated records (same id, last wins)
@@ -558,6 +633,7 @@ function runLoop() {
     loop: "observed -> decided -> acted -> next"
   });
   writeStatus("running");
+  ensureConfig();
   publishCapabilities();
   setInterval(() => {
     try {
@@ -692,6 +768,7 @@ try {
     else printFeed(Number(args[0] || 20));
   }
   else if (cmd === "logs") tailFile(LOG, Number(args[0] || 80));
+  else if (cmd === "config") cmdConfig(args);
   else if (cmd === "instances") printInstances();
   else if (cmd === "runs") printRuns(Number(args[0] || 20));
   else if (cmd === "codex") {
@@ -716,7 +793,7 @@ try {
       throw new Error("usage: hiid codex <run|status|logs|stop>");
     }
   } else {
-    throw new Error("usage: hiid <start|stop|restart|status|feed|logs|instances|runs|codex>");
+    throw new Error("usage: hiid <start|stop|restart|status|feed|logs|config|instances|runs|codex>");
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

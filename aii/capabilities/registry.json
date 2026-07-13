@@ -835,5 +835,30 @@
     ],
     "status": "blocked",
     "trustLevel": "experimental"
+  },
+  {
+    "id": "hii.config.read",
+    "name": "Read HII Surface Config",
+    "owner": "aii",
+    "runtime": "local-process",
+    "summary": "Read the AII-owned HII surface configuration (~/.hii/config.json) that decides which surfaces are enabled and their defaults. Written only by AII via `hiid config set`.",
+    "inputs": [],
+    "outputs": [
+      "surface config json"
+    ],
+    "permissions": [
+      "read ~/.hii/config.json"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "app/api/config/route.ts",
+      "lib/server/hii-config.ts",
+      "aii/daemon/hiid.mjs"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
   }
 ]
