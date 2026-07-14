@@ -1,12 +1,12 @@
 [package]
-name = "hii-canvas"
+name = "hii"
 version = "0.1.0"
-description = "HII Canvas desktop shell"
+description = "HII local-first visual interface"
 authors = ["Ummi"]
 edition = "2021"
 
 [lib]
-name = "hii_canvas_lib"
+name = "hii_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

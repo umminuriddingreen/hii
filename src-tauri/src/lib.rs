@@ -7,10 +7,10 @@ use std::{
 };
 use tauri::{Manager, Url, WindowEvent};
 
-const CANVAS_URL: &str = "http://127.0.0.1:3042";
+const HII_URL: &str = "http://127.0.0.1:3042";
 const DEFAULT_HII_REPO: &str = "/Users/ummi/hii";
 
-struct CanvasServer(Mutex<Option<Child>>);
+struct HiiServer(Mutex<Option<Child>>);
 
 #[derive(Serialize)]
 struct DesktopSurface {
@@ -23,17 +23,17 @@ struct DesktopSurface {
 fn desktop_surface() -> DesktopSurface {
     DesktopSurface {
         name: "HII",
-        surface: "canvas",
-        server: CANVAS_URL,
+        surface: "hii",
+        server: HII_URL,
     }
 }
 
-fn canvas_is_reachable() -> bool {
-    let addr: SocketAddr = "127.0.0.1:3042".parse().expect("valid local canvas address");
+fn hii_is_reachable() -> bool {
+    let addr: SocketAddr = "127.0.0.1:3042".parse().expect("valid local HII address");
     TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok()
 }
 
-fn spawn_canvas_server() -> Result<Child, String> {
+fn spawn_hii_server() -> Result<Child, String> {
     let repo = std::env::var("HII_REPO").unwrap_or_else(|_| DEFAULT_HII_REPO.to_string());
     Command::new("/bin/zsh")
         .arg("-lc")
@@ -49,24 +49,24 @@ fn spawn_canvas_server() -> Result<Child, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(CanvasServer(Mutex::new(None)))
+        .manage(HiiServer(Mutex::new(None)))
         .setup(|app| {
-            if !canvas_is_reachable() {
-                let child = spawn_canvas_server()?;
-                *app.state::<CanvasServer>().0.lock().map_err(|err| err.to_string())? = Some(child);
+            if !hii_is_reachable() {
+                let child = spawn_hii_server()?;
+                *app.state::<HiiServer>().0.lock().map_err(|err| err.to_string())? = Some(child);
             }
 
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
                 for _ in 0..40 {
-                    if canvas_is_reachable() {
+                    if hii_is_reachable() {
                         break;
                     }
                     std::thread::sleep(Duration::from_millis(250));
                 }
 
                 if let Some(window) = app_handle.get_webview_window("main") {
-                    if let Ok(url) = Url::parse(CANVAS_URL) {
+                    if let Ok(url) = Url::parse(HII_URL) {
                         let _ = window.navigate(url);
                     }
                     let _ = window.set_focus();
@@ -79,7 +79,7 @@ pub fn run() {
             if matches!(event, WindowEvent::CloseRequested { .. }) {
                 if let Ok(mut child) = window
                     .app_handle()
-                    .state::<CanvasServer>()
+                    .state::<HiiServer>()
                     .0
                     .lock()
                 {
@@ -91,5 +91,5 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![desktop_surface])
         .run(tauri::generate_context!())
-        .expect("error while running HII Canvas desktop shell");
+        .expect("error while running HII desktop interface");
 }

@@ -142,6 +142,11 @@ HII owns the Next.js interface, Tauri desktop shell, projects and sources,
 context-pack review, boards, canvas, feed, activity history, terminal surfaces,
 approvals, verification views, and receipts.
 
+The spatial visual interface is named **HII**. “Canvas” describes an internal
+interaction model, not a separate product, surface brand, or application name.
+HII presents governed data and execution state published by AII through the
+shared local runtime.
+
 HII answers:
 
 - What does the system know, and where did it come from?

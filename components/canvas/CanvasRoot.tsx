@@ -216,8 +216,7 @@ export function CanvasRoot() {
       <CommandBar spawn={spawn} resetView={camera.reset} />
       <DaemonButton onPin={pinDaemonEvent} />
       <div data-canvas-ui className="pointer-events-none absolute left-5 top-4 select-none">
-        <span className="font-mono text-[13px] font-semibold lowercase tracking-tight text-[var(--hii-graphite)]">hii</span>
-        <span className="ml-2 font-mono text-[10px] uppercase tracking-widest text-neutral-400">canvas</span>
+        <span className="font-mono text-[14px] font-semibold lowercase tracking-tight text-[var(--hii-graphite)]">hii</span>
       </div>
     </div>
   );

@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default desktop capability set for the HII Canvas shell.","local":true,"windows":["main"],"permissions":["core:default"]}}
+{"default":{"identifier":"default","description":"Default desktop capability set for HII.","local":true,"windows":["main"],"permissions":["core:default"]}}

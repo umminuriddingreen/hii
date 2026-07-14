@@ -9,6 +9,6 @@ export default function Home() {
   const config = readHiiConfig();
   const homepage = config.defaults.homepage || 'canvas';
   if (homepage !== 'canvas') redirect(`/${homepage}`);
-  if (config.surfaces.canvas?.enabled === false) return <SurfaceDisabled name="canvas" />;
+  if (config.surfaces.canvas?.enabled === false) return <SurfaceDisabled name="HII" />;
   return <CanvasRoot />;
 }

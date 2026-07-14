@@ -29,7 +29,7 @@ export async function GET(request: Request) {
       method: 'GET',
       redirect: 'follow',
       signal: AbortSignal.timeout(5000),
-      headers: { 'user-agent': 'Mozilla/5.0 (hii-canvas frame probe)' }
+      headers: { 'user-agent': 'Mozilla/5.0 (HII local frame probe)' }
     });
     res.body?.cancel();
     return NextResponse.json({ frameable: frameableFromHeaders(res.headers), finalUrl: res.url, status: res.status });

@@ -50,6 +50,10 @@ decentralized compute network, geometry platform, or personal-data harvester.
 - **Models** are replaceable reasoning engines; they do not own permissions or
   durable project truth.
 
+The visual interface and desktop application are called **HII**. Canvas is an
+internal spatial interaction model, not a second product name. HII displays and
+controls governed state published by AII through the shared runtime.
+
 The dependency direction is:
 
 ```text

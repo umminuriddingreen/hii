@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "HII Canvas",
+  "productName": "HII",
   "version": "0.1.0",
-  "identifier": "com.ummi.hii.canvas",
+  "identifier": "com.ummi.hii",
   "build": {
     "beforeDevCommand": "npm run dev:web:tauri",
     "devUrl": "http://127.0.0.1:3042",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "HII Canvas",
+        "title": "HII",
         "width": 1440,
         "height": 960,
         "minWidth": 900,
