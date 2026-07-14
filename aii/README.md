@@ -12,6 +12,9 @@ capabilities, and — eventually — configuration authority over HII's surfaces
 - `capabilities/` — the capability registry (`registry.json`) and packs
   (`packs.json`). Source of truth; hiid publishes the registry to
   `~/.hii/capabilities.json`, which HII's thin client reads.
+- `skills/` — the proof-backed skill growth contract. Agent actions become
+  append-only receipts; repeatable work becomes a draft; only verified,
+  operator-reviewed drafts enter the registered catalog.
 - `admin-agent/` — admin workflow planning/policy logic (consent-gated
   proposals; no direct execution).
 - `scripts/` — AII operational scripts (e.g. `hii-admin-agent-plan.mjs`).

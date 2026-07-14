@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 const ROOT = path.join(os.homedir(), "hii");
-const REGISTRY = path.join(ROOT, "lib", "capabilities", "registry.json");
+const REGISTRY = path.join(ROOT, "aii", "capabilities", "registry.json");
 const JOBS = path.join(ROOT, ".hii", "capability-jobs.jsonl");
 const API_CAPABILITIES_ROUTE = path.join(ROOT, "app", "api", "capabilities", "route.ts");
 const CLI = path.join(ROOT, "scripts", "hii-cli.mjs");

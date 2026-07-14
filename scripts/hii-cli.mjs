@@ -1,14 +1,15 @@
 #!/usr/bin/env node
-// HII CLI — single current entrypoint for the local capability terminal.
+// HII CLI — single current entrypoint for the Human Information Interface.
 // Installed via ~/bin/hii.
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { runSkillCommand } from "../aii/skills/registry.mjs";
 
 const ROOT = path.join(os.homedir(), "hii");
-const RUNTIME = path.join(os.homedir(), ".hii");
+const RUNTIME = process.env.HII_RUNTIME_DIR || path.join(os.homedir(), ".hii");
 const BRIDGE_DIR = path.join(RUNTIME, "bridge", "messages");
 const BRIDGE_LOG = path.join(RUNTIME, "bridge", "codex.jsonl");
 const CAPABILITY_REGISTRY = path.join(ROOT, "aii", "capabilities", "registry.json");
@@ -376,7 +377,9 @@ function runtimePointers() {
     fileExistsSummary(path.join(RUNTIME, "codex", "index.json")),
     fileExistsSummary(path.join(VOICE_DIR, "status.json")),
     fileExistsSummary(path.join(VOICE_DIR, "memory.jsonl")),
-    fileExistsSummary(path.join(VOICE_DIR, "skill-proposals.jsonl"))
+    fileExistsSummary(path.join(VOICE_DIR, "skill-proposals.jsonl")),
+    fileExistsSummary(path.join(RUNTIME, "skills", "actions.jsonl")),
+    fileExistsSummary(path.join(RUNTIME, "skills", "registry.json"))
   ];
 }
 
@@ -445,10 +448,10 @@ function inferNextActions({ prompt, git, capabilities, jobs, bridge }) {
     });
   }
   actions.push({
-    score: 55,
-    track: "HII exchange spine",
-    coordinate: "/upload + /x/[id]",
-    action: "preserve the file exchange loop as a first-party capability while extending OG"
+    score: 76,
+    track: "Context Dock truthful bootstrap",
+    coordinate: "docs/HII_AII_MASTER_CONTEXT.md + ~/.hii/hii.db",
+    action: "align product truth, storage, permissions, context provenance, and bounded MCP around the Context Dock vertical slice"
   });
   return actions.sort((a, b) => b.score - a.score).slice(0, 5);
 }
@@ -826,7 +829,7 @@ function cmdOg(args) {
 
 function cmdStatus() {
   const env = readEnvFile();
-  console.log("HII — marketplace status\n");
+  console.log("HII — Human Information Interface status\n");
   console.log(`repo:    ${ROOT}`);
   try {
     const branch = execFileSync("git", ["-C", ROOT, "rev-parse", "--abbrev-ref", "HEAD"]).toString().trim();
@@ -870,6 +873,10 @@ function agentCommandCatalog() {
     { command: "hii links publish", purpose: "Publish locally captured links to the token-gated public stream." },
     { command: "hii pack list", purpose: "List compartmentalized HII capability packs." },
     { command: "hii pack export <id>", purpose: "Write a local-only pack manifest for staged shipping." },
+    { command: "hii skill report", purpose: "Record a structured agent-action receipt and propose repeatable work as a draft skill." },
+    { command: "hii skill list", purpose: "List proof-backed registered skills; add --all to include drafts." },
+    { command: "hii skill register <id>", purpose: "Promote a validated draft into an operator-reviewed local skill." },
+    { command: "hii skill export <id>", purpose: "Export one registered skill as a portable local package without publishing it." },
     { command: "hii runner init <name>", purpose: "Register an owned runner and print its local token once." },
     { command: "hii runner start --once", purpose: "Heartbeat, claim one whitelisted capability job, stream logs, and exit." },
     { command: "hii jobs", purpose: "List recent local capability jobs." },
@@ -892,7 +899,7 @@ function agentContextPayload() {
     generatedAt: new Date().toISOString(),
     identity: {
       name: "HII",
-      role: "local-first capability terminal and exchange spine",
+      role: "local-first human interface for source-linked context and verified agent work",
       repo: ROOT,
       runtime: RUNTIME
     },
@@ -2038,6 +2045,15 @@ switch (cmd) {
   case "money": cmdMoney(rest); break;
   case "links": cmdLinks(rest); break;
   case "pack": cmdPack(rest); break;
+  case "skill":
+  case "skills":
+    try {
+      runSkillCommand(rest);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+    break;
   case "runner":
     cmdRunner(rest).catch((error) => {
       console.error(error instanceof Error ? error.message : String(error));
@@ -2063,7 +2079,7 @@ switch (cmd) {
     console.error("HII is now a single current surface at /Users/ummi/hii. Migrate needed legacy behavior into the current repo instead of running ~/hii-old.");
     process.exit(1);
   default:
-    console.log(`HII — Human Information Interface (marketplace CLI)
+    console.log(`HII — Human Information Interface
 
 usage: hii <command>
 
@@ -2107,6 +2123,14 @@ usage: hii <command>
   pack list           list compartmentalized capability packs
   pack show <id>      show pack routes, files, caps, and checks
   pack export <id>    write local-only pack manifest
+  skill report        append an agent-action receipt; --repeatable creates a draft
+  skill create <id>   create or update a draft skill bundle
+  skill register <id> promote a proof-backed draft after operator review
+  skill list [--all]  list registered skills and optionally drafts
+  skill search <query> search the active skill catalog
+  skill show <id>     show a registered skill or draft
+  skill export <id>   create a portable local .hii-skill.json package
+  skill doctor        validate registry, bundles, receipts, and legacy count
   runner init <name>  register an owned runner and print its token once
   runner start --once claim one whitelisted runner job and exit
   check               typecheck (the inner fix loop)

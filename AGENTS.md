@@ -1,5 +1,16 @@
 # HII Agent Guide
 
+## Required Product Context
+
+Before planning or modifying HII, read:
+
+- `docs/HII_AII_MASTER_CONTEXT.md`
+
+This document defines the founder thesis, HII/AII boundary, current Context
+Dock product scope, architecture constraints, deferred roadmap, trust model,
+and required agent behavior. Historical brainstorms do not override the
+current product decision.
+
 This repo is an active multi-agent worktree. Codex, Claude, HII workers, and the user may all be editing or generating artifacts at the same time.
 
 ## Mission
@@ -49,6 +60,10 @@ Human intent -> bounded agent/tool work -> logs/proof -> verification -> receipt
 - If a dev server is running, do not assume its `.next` cache survived `next build`; restart after build if routes become inconsistent.
 
 ## Required Final Report
+
+After meaningful completed work, also record the receipt through
+`hii skill report`. Mark repeatable work with `--repeatable`; this creates a
+draft only. Registration remains proof-backed and operator-reviewed.
 
 Done:
 Verified:

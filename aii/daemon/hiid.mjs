@@ -146,10 +146,15 @@ const SPAWN_PRESETS = {
   ]
 };
 
+const AGENT_REPORTING = [
+  "After meaningful work, record a structured after-work receipt with `hii skill report`.",
+  "Mark repeatable verified work with `--repeatable` to create a draft skill candidate; do not register, publish, sell, or license it yourself."
+];
+
 function presetPrompt(preset, prompt) {
   const base = String(prompt || "").trim();
   const framing = SPAWN_PRESETS[preset];
-  return framing ? [...framing, base].filter(Boolean).join("\n\n") : base;
+  return framing ? [...framing, ...AGENT_REPORTING, base].filter(Boolean).join("\n\n") : [...AGENT_REPORTING, base].filter(Boolean).join("\n\n");
 }
 
 function reportSpawnJob(intent, { status, output, startedAt }) {

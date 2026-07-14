@@ -22,6 +22,7 @@
     "hii:links:cache": "node scripts/hii-link-cache.mjs",
     "hii:admin-agent:plan": "node scripts/hii-admin-agent-plan.mjs",
     "hii:sdk:check": "node scripts/hii-sdk-contract-smoke.mjs",
+    "hii:skills:check": "node scripts/hii-skill-registry-smoke.mjs",
     "lint": "next lint"
   },
   "dependencies": {

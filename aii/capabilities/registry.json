@@ -340,6 +340,49 @@
     "trustLevel": "first-party"
   },
   {
+    "id": "hii.skills.grow",
+    "name": "Grow Verified Skill Registry",
+    "owner": "aii",
+    "runtime": "local-cli",
+    "summary": "Capture agent-action receipts, turn repeatable verified work into reviewed skills, and export portable local skill packages.",
+    "inputs": [
+      "agent action receipt",
+      "project coordinate",
+      "verification evidence",
+      "risk and side-effect metadata",
+      "operator review"
+    ],
+    "outputs": [
+      "append-only action receipt",
+      "draft skill bundle",
+      "operator-reviewed registered skill",
+      "portable local skill package"
+    ],
+    "permissions": [
+      "local-only runtime writes",
+      "secret-like value redaction",
+      "proof required before registration",
+      "operator review required before registration",
+      "no automatic execution",
+      "no upload, publish, sale, or license grant"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii skill report",
+      "hii skill register",
+      "hii skill doctor",
+      "aii/skills/registry.mjs",
+      "~/.hii/skills/actions.jsonl",
+      "~/.hii/skills/registry.json",
+      "~/.hii/skills/registered"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
     "id": "hii.registry.scan",
     "name": "Scan Local Capability Registry",
     "owner": "hii",
@@ -842,7 +885,9 @@
     "owner": "aii",
     "runtime": "local-process",
     "summary": "Read the AII-owned HII surface configuration (~/.hii/config.json) that decides which surfaces are enabled and their defaults. Written only by AII via `hiid config set`.",
-    "inputs": [],
+    "inputs": [
+      "local read request"
+    ],
     "outputs": [
       "surface config json"
     ],

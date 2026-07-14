@@ -158,9 +158,9 @@ function inferNextActions(input: string) {
       next: 'keep Termite as the first proof capability with logs and artifacts'
     },
     {
-      score: 55,
-      track: 'HII exchange spine',
-      next: 'preserve upload and exchange links while the new command surface evolves'
+      score: 76,
+      track: 'Context Dock truthful bootstrap',
+      next: 'align product truth, storage, permissions, provenance, and bounded MCP around the Context Dock vertical slice'
     }
   );
   return actions.sort((a, b) => b.score - a.score).slice(0, 4);
@@ -176,7 +176,7 @@ export function getHiiAgentContext() {
       name: 'hii',
       repo: root,
       runtime,
-      role: 'hyper-basic command surface over backend capabilities'
+      role: 'local-first human interface for source-linked context and verified agent work'
     },
     git,
     commands: ['/og', '/context', '/console', '/boards', '/credits', '/termite', '/upload'],

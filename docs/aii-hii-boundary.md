@@ -14,7 +14,7 @@ Everything concerned with *surfaces* and how humans and agents use them:
 **AII — the agent coordination & capability layer (`~/hii/aii/` — lives inside the HII repo)**
 Everything concerned with *agents as workers*:
 - Agent lifecycle: spawn, monitor, steer, recover (currently `hiid.mjs`, spawn routes, bridge)
-- The capability registry and policy engine (currently `lib/capabilities`, `~/.hii/capabilities.json`, skills registry)
+- The capability registry and policy engine (source in `aii/capabilities`, published to `~/.hii/capabilities.json`, with the skill-growth registry under `~/.hii/skills`)
 - Inter-agent messaging (bridge), job/run records, machine fleet
 - **Configuration authority over HII**: AII may write HII's config (layouts, defaults, enabled surfaces) to fit the user; HII reads config, never the reverse
 

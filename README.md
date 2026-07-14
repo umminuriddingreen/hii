@@ -1,205 +1,190 @@
-# HII — capability terminal and exchange spine
+# HII — Human Information Interface
 
-HII is a local-first capability terminal with a resource exchange spine. The
-first market proof is deliberately narrow: backend-owned capabilities are
-visible in HII Terminal, callable through `hii`, priced through credits, and
-represented as jobs with logs, ledger rows, and proof artifacts.
+HII is a local-first, user-owned interface that turns human intent into
+verified agent work across context, tools, files, machines, memory, and
+reusable capabilities.
 
-The next adoption loop is browser-first. Think Open WebUI's local/offline AI
-control plane, but aimed at HII's operating logic: the browser captures useful
-links, HII stores the stream locally, a downloader caches pages onto the
-machine, and Ollama interprets the cache for an offline feed.
+AII—the Agent Information Interface—is the coordination, policy, and execution
+layer beneath HII. It publishes capabilities, manages agents, governs actions,
+and records proof through shared runtime state under `~/.hii`.
 
-The original file-for-value loop still exists. It is now modeled as the
-`hii.exchange.asset_link` capability:
+Read [the HII/AII master context](docs/HII_AII_MASTER_CONTEXT.md) before making
+product or architecture changes.
 
-auth -> upload (server action -> Cloudflare R2) -> exchange link `/x/[id]` ->
-Stripe Checkout (`/api/checkout`) -> webhook marks order paid
-(`/api/stripe/webhook`) -> download re-verifies payment live with Stripe and
-mints a 5-minute presigned R2 URL (`/api/download`), logging each download.
+## Current Product Decision
 
-## Backend Capability System
+The active founder-beta product is **HII Context Dock 0.1**:
 
-Capabilities live in `lib/capabilities/` and are backend primitives, not UI
-prompts. A capability declares its id, owner, runtime, inputs, outputs,
-permissions, visibility, cost model, evidence, status, and trust level.
+> Select a project once. HII continuously prepares the smallest verified,
+> source-linked context package the agent needs.
 
-Current first-party capabilities:
-
-- `hii.terminal.observe` watches the local terminal/process stream.
-- `hii.agent.spawn` launches bounded local agent sessions from whitelisted
-  presets.
-- `hii.registry.scan` and `hii.registry.doctor` inspect local machine capability
-  metadata without copying raw secrets.
-- `hii.credits.quote` prices bounded capability jobs before execution.
-- `hii.browser.link_capture` captures pages from Chrome into the local link
-  stream.
-- `hii.downloader.offline_cache` downloads captured pages into `.hii/link-cache`
-  for offline reading.
-- `hii.ollama.link_interpreter` summarizes cached link text with local Ollama
-  when available.
-- `hii.links.publish_stream` publishes locally captured links to the public
-  stream at `umminuriddingreen.com/stream`.
-- `termite.rhino.managed_job` is the canonical v1 proof path: quote/reserve a
-  Rhino/Termite runner job, stream logs, write ledger rows, and return proof
-  artifacts.
-- `termite.rhino.installer_action` exposes the Termite alpha installer surface.
-- `hii.exchange.asset_link` preserves the Supabase/R2/Stripe exchange loop.
-
-Execution remains server-owned. UI and LLMs can discover and configure
-capabilities, but only whitelisted backend routes and CLI commands decide what
-runs.
-
-## Local Jobs, Quotes, Ledger, And Proof
-
-Shared contracts are in `lib/capabilities/types.ts`:
-
-- `CapabilityJob`
-- `CapabilityQuote`
-- `LedgerEntry`
-- `ProofArtifact`
-
-V1 persistence is split by trust boundary. Local-only terminal receipts append
-JSONL rows under `.hii/`; quoted capability jobs use Supabase tables for
-`capability_jobs`, `credit_ledger_entries`, `task_transcript_events`, and
-`proof_artifacts`. `node scripts/hii-cli.mjs jobs`, `/console`, and `/termite`
-read that same job contract when Supabase is configured, with local JSONL as a
-fallback.
-
-## CLI Doorway
-
-`scripts/hii-cli.mjs` is the local doorway:
-
-```sh
-hii                 # doorway help
-hii context --json  # machine-readable context for agents
-hii status          # machine/git/env snapshot
-hii doctor          # status + registry doctor
-hii caps show       # backend capability registry
-hii og status       # ranked operational graph next path
-hii og capture ...  # append an operational graph event
-hii links status    # browser/offline feed coordinates
-hii links cache     # cache captured links and summarize with Ollama
-hii links publish   # push local captured links to the public stream
-hii jobs            # recent durable + local capability jobs
-hii ship            # typecheck and commit locally
-hii ship --push     # explicit external push to origin
-hii console         # local console coordinates
-hii console --open  # open /console
-hii terminal        # compatibility alias for the console
-```
-
-## App Surfaces
-
-- `/feed` is the browser-captured link stream. It accepts manual saves, reads
-  Chrome extension posts from `/api/links`, and shows offline cache/Ollama
-  summary state.
-- `/console` is the local console for process snapshots, backend capability
-  discovery, recent capability jobs, ledger/proof counts, and bounded agent
-  spawn presets. `/terminal` remains a compatibility route.
-- `/credits` quotes capability jobs and produces ledger-ready transcript rows.
-- `/termite` is the first concrete managed capability: quoted Rhino/Termite
-  jobs with runner logs, ledger rows, and proof artifacts.
-- `/upload` and `/x/[id]` remain the exchange asset flow.
-
-## Stack
-
-- Next.js 14 (App Router) + Tailwind
-- Supabase — Postgres, Auth (SSR sessions via `middleware.ts`), RLS
-  deny-by-default with per-seller policies (`supabase/schema.sql`)
-- Cloudflare R2 for file storage (S3 SDK, presigned GETs)
-- Stripe Checkout + signature-verified webhook
-- Local JSONL for terminal and Termite alpha job receipts
-- Chrome Manifest V3 extension for browser link capture
-- Ollama for local link summaries (`HII_LINKS_OLLAMA_MODEL`, default
-  `fast-local`)
-
-## Browser Link Stream MVP
-
-Start the local app:
-
-```sh
-npm run dev
-```
-
-Open `http://localhost:3000/feed`.
-
-Load the Chrome extension:
+The intended vertical slice is:
 
 ```text
-chrome://extensions
-Developer mode -> Load unpacked -> /Users/ummi/hii/extensions/chrome-link-capture
+selected project
+→ visible source permissions
+→ deterministic local inventory and extraction
+→ source-linked project model
+→ task-specific context pack
+→ user review
+→ bounded MCP delivery
+→ verified agent result
+→ durable receipt and project memory
 ```
 
-Capture links from the popup or right-click context menu. The extension posts to
-`http://localhost:3000/api/links` by default; change that in the extension
-options if the app runs somewhere else.
+Context Dock is not yet complete. Existing boards, console, daemon, jobs,
+capabilities, bridge, voice, packs, link, credit, exchange, and Termite
+surfaces are implementation history or substrate. They are not permission to
+widen the Context Dock 0.1 release into a marketplace, AI chat product,
+decentralized compute network, geometry platform, or personal-data harvester.
 
-Cache the feed for offline use:
+## HII / AII Boundary
+
+- **HII** owns the human-facing Next.js/Tauri interface, context review,
+  projects, boards, approvals, activity, verification, and receipts.
+- **AII** owns agent lifecycle, capabilities, policy, managed execution,
+  handoffs, proof collection, runtime configuration, and skill promotion.
+- **Shared runtime** under `~/.hii` is the explicit contract between them.
+- **Models** are replaceable reasoning engines; they do not own permissions or
+  durable project truth.
+
+The dependency direction is:
+
+```text
+AII → publishes governed state → ~/.hii ← HII reads and presents state
+```
+
+## Current Coordinates
+
+```text
+Repository:       /Users/ummi/hii
+Runtime:          /Users/ummi/.hii
+Launcher:         /Users/ummi/bin/hii
+Context database: /Users/ummi/.hii/hii.db
+AII source:       /Users/ummi/hii/aii
+Capability source:/Users/ummi/hii/aii/capabilities/registry.json
+```
+
+`/Users/ummi/hii-old` is legacy evidence only if present. It is never a current
+execution or validation target.
+
+## Agent Bootstrap
 
 ```sh
-npm run hii:links:cache
-# or
-node scripts/hii-cli.mjs links cache
+hii context --json
+hii og status
+hii caps show
+git status --short
 ```
 
-The cache agent writes HTML, readable text, and cache receipts under
-`.hii/link-cache*`. If Ollama is running, it summarizes pages with
-`fast-local`; if not, the download still completes and the feed marks the
-summary as unavailable.
+Live command, repository, process, and runtime evidence wins over cached
+summaries.
 
-Publish captured links to the public stream:
+## Verified-Work Loop
+
+Every serious workflow should close this loop:
+
+```text
+intent
+→ bounded task
+→ approved capability
+→ execution logs and artifacts
+→ verification
+→ receipt
+→ durable memory
+→ reusable skill
+```
+
+After meaningful work, agents record a structured receipt:
 
 ```sh
-export HII_LINKS_PUBLISH_ENDPOINT=https://umminuriddingreen.com/api/links
-export HII_LINKS_PUBLISH_TOKEN=... # generated token, never committed
-node scripts/hii-cli.mjs links publish
+hii skill report \
+  --agent codex \
+  --project hii \
+  --coordinate /Users/ummi/hii \
+  --summary "Implemented a bounded workflow" \
+  --outcome completed \
+  --verification verified \
+  --checks "npm run build" \
+  --proof "/path/to/proof"
 ```
 
-Publish receipts append to `.hii/link-publish.jsonl`. Use `--dry-run` to inspect
-pending links and `--force` to resend already published local post ids.
+Repeatable work may create a draft candidate:
 
-## Run
+```sh
+hii skill report ... --repeatable --skill-id verify-hii-build
+hii skill list --all
+hii skill show verify-hii-build
+```
+
+Drafts are not executable skills. Registration requires proof or a declared
+verification command plus explicit operator review:
+
+```sh
+hii skill register verify-hii-build --reviewed-by ummi
+hii skill doctor
+hii skill export verify-hii-build --include-provenance
+```
+
+Exports are local portable packages. They are not uploaded, published, sold,
+or licensed by the export command.
+
+## Context Dock Architectural Constraints
+
+- Use this repository and the current HII/AII runtime.
+- Use `~/.hii/hii.db` for canonical Context Dock data.
+- Do not create another daemon, runtime, database, or product repository.
+- Use SQLite FTS5 and deterministic retrieval before embeddings.
+- Keep user source files in place.
+- Preserve path, line/page, freshness, hash/revision, and selection provenance.
+- Keep source transmission visible and user-controlled.
+- Exclude secrets from context packs, traces, receipts, and logs.
+- Expose bounded MCP tools; do not expose general shell execution.
+- Keep source-file mutation outside the Context Dock MCP server.
+
+## Development
 
 ```sh
 npm install
-cp .env.example .env   # fill: Supabase x3, R2 x4, Stripe x2, base URL
 npm run dev
 ```
 
-Stripe webhook locally:
-
-```sh
-stripe listen --forward-to localhost:3000/api/stripe/webhook
-```
+The app uses Next.js 14 with a Tauri desktop shell. Local runtime state belongs
+under `~/.hii`; repo-local `.hii` files that remain are migration debt and must
+not be multiplied.
 
 ## Verification
 
 ```sh
+hii check
+npm run hii:sdk:check
+npm run hii:skills:check
 npm run build
-npm run hii:registry:doctor
-node scripts/hii-cli.mjs links status
-node scripts/hii-cli.mjs links cache
-node scripts/hii-cli.mjs status
-node scripts/hii-cli.mjs doctor
-node scripts/hii-cli.mjs caps show
-node scripts/hii-cli.mjs jobs
+hii health --text
+hii caps show
 ```
 
-Canonical vertical-slice smoke path:
+Report exact failures and unverified behavior. Do not treat a successful exit
+code as sufficient when behavior can be exercised directly.
 
-```sh
-node scripts/hii-cli.mjs caps show
-# Sign in locally, open /termite, choose a paid runner budget, and launch a job.
-node scripts/hii-cli.mjs jobs
+## Shipping Boundary
+
+`hii ship` means local validation and a local commit only. It may stage broad
+worktree changes, so inspect ownership first.
+
+`hii ship --push` requires explicit approval. Publishing, uploading, payments,
+sales, outreach, deletion, secret export, and other irreversible or external
+actions always require separate authority.
+
+## Required Receipt
+
+Every completed task ends with:
+
+```text
+Done:
+Verified:
+Not Verified:
+Proof:
+Risk:
+Next Command:
 ```
-
-## Ship Checklist
-
-- [ ] Hosting target (Vercel is the zero-config fit for this stack) + custom
-      domain
-- [ ] Stripe live keys + live webhook endpoint
-- [ ] Direct-to-R2 presigned uploads (server-action upload caps file size at
-      the host body limit)
-- [ ] Receipt email with re-download link after purchase (Resend)
-- [ ] Basic tests around checkout/webhook/download/capability jobs
