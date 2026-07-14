@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import type { CanvasNodeType } from '../../lib/canvas/types';
+import type { WorkspaceNodeType } from '../../lib/workspace/types';
 
 type Command = {
   id: string;
@@ -12,7 +12,7 @@ type Command = {
 };
 
 type CommandBarProps = {
-  spawn: (type: CanvasNodeType, payload?: Record<string, unknown>) => void;
+  spawn: (type: WorkspaceNodeType, payload?: Record<string, unknown>) => void;
   resetView: () => void;
 };
 
@@ -77,7 +77,7 @@ export function CommandBar({ spawn, resetView }: CommandBarProps) {
     <AnimatePresence>
       {open && (
         <motion.div
-          data-canvas-ui
+          data-workspace-ui
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}

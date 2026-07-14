@@ -1,10 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CanvasNode } from '../../../lib/canvas/types';
+import type { WorkspaceNode } from '../../../lib/workspace/types';
 
 type BrowserNodeProps = {
-  node: CanvasNode;
+  node: WorkspaceNode;
   onPayload: (patch: Record<string, unknown>) => void;
 };
 

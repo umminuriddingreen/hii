@@ -1,38 +1,25 @@
 #!/usr/bin/env node
-import { cp, readFile, rm } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const nextDir = path.join(root, ".next");
-const tauriNextDir = path.join(root, ".next-tauri");
+const portableDir = path.join(root, ".hii-app");
+const nodeRuntime = path.join(portableDir, "bin", "node");
+const serverDir = path.join(portableDir, "server");
 const port = process.env.PORT || "3042";
 
-async function readBuildId(dir) {
-  try {
-    return (await readFile(path.join(dir, "BUILD_ID"), "utf8")).trim();
-  } catch {
-    return null;
-  }
-}
-
-const tauriBuildId = await readBuildId(tauriNextDir);
-
-if (!tauriBuildId) {
-  console.error("Missing .next-tauri/BUILD_ID. Run `npm run build:web:tauri` before starting the Tauri app.");
+try {
+  await access(nodeRuntime);
+  await access(path.join(serverDir, "server.mjs"));
+} catch {
+  console.error("Missing .hii-app portable runtime. Run `npm run build:web:tauri` first.");
   process.exit(1);
 }
 
-await rm(nextDir, { recursive: true, force: true });
-await cp(tauriNextDir, nextDir, {
-  recursive: true,
-  force: true,
-  verbatimSymlinks: true
-});
-
-const child = spawn(process.execPath, ["server.mjs"], {
-  cwd: root,
+const child = spawn(nodeRuntime, ["server.mjs"], {
+  cwd: serverDir,
   stdio: "inherit",
   env: {
     ...process.env,

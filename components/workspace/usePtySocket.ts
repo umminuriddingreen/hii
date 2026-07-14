@@ -1,5 +1,7 @@
 'use client';
 
+// Shared terminal transport for HII workspace objects.
+
 export type PtyServerMessage = {
   t: 'created' | 'attached' | 'scrollback' | 'data' | 'exit' | 'killed' | 'sessions' | 'error';
   sessionId?: string;

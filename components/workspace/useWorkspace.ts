@@ -1,13 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { normalizeWorkspace, type CanvasNode, type WorkspaceDoc, type WorkspaceViewport } from '../../lib/canvas/types';
+import { normalizeWorkspace, type WorkspaceNode, type WorkspaceDoc, type WorkspaceViewport } from '../../lib/workspace/types';
 
 export type WorkspaceApi = {
   ready: boolean;
-  nodes: CanvasNode[];
-  addNode: (node: CanvasNode) => void;
-  patchNode: (id: string, patch: Partial<CanvasNode>) => void;
+  nodes: WorkspaceNode[];
+  addNode: (node: WorkspaceNode) => void;
+  patchNode: (id: string, patch: Partial<WorkspaceNode>) => void;
   removeNode: (id: string) => void;
   bringToFront: (id: string) => void;
   takeZ: () => number;
@@ -16,11 +16,11 @@ export type WorkspaceApi = {
 };
 
 export function useWorkspace(getViewport: () => WorkspaceViewport): WorkspaceApi {
-  const [nodes, setNodes] = useState<CanvasNode[]>([]);
+  const [nodes, setNodes] = useState<WorkspaceNode[]>([]);
   const [ready, setReady] = useState(false);
   const [initialViewport, setInitialViewport] = useState<WorkspaceViewport | null>(null);
   const nextZ = useRef(1);
-  const nodesRef = useRef<CanvasNode[]>([]);
+  const nodesRef = useRef<WorkspaceNode[]>([]);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   nodesRef.current = nodes;
 
@@ -33,7 +33,7 @@ export function useWorkspace(getViewport: () => WorkspaceViewport): WorkspaceApi
       nodes: nodesRef.current.filter((node) => !node.payload.ephemeral || node.type !== 'image')
     };
     try {
-      await fetch('/api/canvas/workspace', {
+      await fetch('/api/workspace', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(doc)
@@ -50,7 +50,7 @@ export function useWorkspace(getViewport: () => WorkspaceViewport): WorkspaceApi
 
   const load = useCallback(async (initial: boolean) => {
     try {
-      const res = await fetch('/api/canvas/workspace', { cache: 'no-store' });
+      const res = await fetch('/api/workspace', { cache: 'no-store' });
       if (!res.ok) return;
       const doc = normalizeWorkspace(await res.json());
       nextZ.current = Math.max(nextZ.current, doc.nextZ);
@@ -91,7 +91,7 @@ export function useWorkspace(getViewport: () => WorkspaceViewport): WorkspaceApi
   }, [load]);
 
   const addNode = useCallback(
-    (node: CanvasNode) => {
+    (node: WorkspaceNode) => {
       setNodes((current) => [...current, node]);
       scheduleSave();
     },
@@ -99,7 +99,7 @@ export function useWorkspace(getViewport: () => WorkspaceViewport): WorkspaceApi
   );
 
   const patchNode = useCallback(
-    (id: string, patch: Partial<CanvasNode>) => {
+    (id: string, patch: Partial<WorkspaceNode>) => {
       setNodes((current) =>
         current.map((node) =>
           node.id === id ? { ...node, ...patch, updatedAt: new Date().toISOString() } : node

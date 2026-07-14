@@ -2,8 +2,8 @@
 
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CanvasNode, CanvasNodeType } from '../../lib/canvas/types';
-import { makeNode, seedFor, seedsFromDataTransfer, seedFromFile, seedFromString, type NodeSeed } from '../../lib/canvas/ingest';
+import type { WorkspaceNode, WorkspaceNodeType } from '../../lib/workspace/types';
+import { makeNode, seedFor, seedsFromDataTransfer, seedFromFile, seedFromString, type NodeSeed } from '../../lib/workspace/ingest';
 import { useCamera } from './useCamera';
 import { useWorkspace } from './useWorkspace';
 import { NodeFrame } from './NodeFrame';
@@ -20,7 +20,7 @@ const BrowserNode = dynamic(() => import('./nodes/BrowserNode'), { ssr: false })
 const ContextNode = dynamic(() => import('./nodes/ContextNode'), { ssr: false });
 const BoardNode = dynamic(() => import('./nodes/BoardNode'), { ssr: false });
 
-function nodeTitle(node: CanvasNode): string {
+function nodeTitle(node: WorkspaceNode): string {
   switch (node.type) {
     case 'terminal':
       return String(node.payload.title ?? 'terminal');
@@ -37,7 +37,7 @@ function nodeTitle(node: CanvasNode): string {
   }
 }
 
-type BodyRenderers = Partial<Record<CanvasNodeType, React.ComponentType<{ node: CanvasNode; onPayload: (patch: Record<string, unknown>) => void }>>>;
+type BodyRenderers = Partial<Record<WorkspaceNodeType, React.ComponentType<{ node: WorkspaceNode; onPayload: (patch: Record<string, unknown>) => void }>>>;
 
 const bodyRenderers: BodyRenderers = {
   note: NoteNode,
@@ -54,13 +54,13 @@ const bodyRenderers: BodyRenderers = {
   board: BoardNode
 };
 
-function disposeNode(node: CanvasNode) {
+function disposeNode(node: WorkspaceNode) {
   if (node.type === 'terminal' && typeof node.payload.sessionId === 'string') {
     ptyKill(node.payload.sessionId);
   }
 }
 
-export function CanvasRoot() {
+export function HiiRoot() {
   const saveRef = useRef<() => void>(() => {});
   const camera = useCamera(() => saveRef.current());
   const workspace = useWorkspace(camera.getViewport);
@@ -84,9 +84,8 @@ export function CanvasRoot() {
   );
 
   const spawn = useCallback(
-    (type: CanvasNodeType, payload: Record<string, unknown> = {}) => {
+    (type: WorkspaceNodeType, payload: Record<string, unknown> = {}) => {
       const center = camera.centerWorld();
-      if (type === 'terminal' && !payload.cwd) payload = { ...payload, cwd: '/Users/ummi/hii' };
       const seed = seedFor(type, payload);
       spawnSeeds([seed], { x: center.x - seed.w / 2, y: center.y - seed.h / 2 });
     },
@@ -162,7 +161,7 @@ export function CanvasRoot() {
     <div
       ref={camera.viewportRef}
       onPointerDown={(e) => {
-        if ((e.target as Element).closest('[data-node-id],[data-canvas-ui]')) return;
+        if ((e.target as Element).closest('[data-node-id],[data-workspace-ui]')) return;
         setSelected(null);
         camera.panStart(e);
       }}
@@ -175,7 +174,7 @@ export function CanvasRoot() {
         backgroundSize: '32px 32px'
       }}
     >
-      <div ref={camera.worldRef} data-canvas-world className="absolute left-0 top-0 origin-top-left will-change-transform">
+      <div ref={camera.worldRef} data-workspace-world className="absolute left-0 top-0 origin-top-left will-change-transform">
         {workspace.nodes.map((node) => {
           const Body = bodyRenderers[node.type];
           return (
@@ -215,15 +214,15 @@ export function CanvasRoot() {
       <Dock spawn={spawn} />
       <CommandBar spawn={spawn} resetView={camera.reset} />
       <DaemonButton onPin={pinDaemonEvent} />
-      <div data-canvas-ui className="pointer-events-none absolute left-5 top-4 select-none">
+      <div data-workspace-ui className="pointer-events-none absolute left-5 top-4 select-none">
         <span className="font-mono text-[14px] font-semibold lowercase tracking-tight text-[var(--hii-graphite)]">hii</span>
       </div>
     </div>
   );
 }
 
-function Dock({ spawn }: { spawn: (type: CanvasNodeType) => void }) {
-  const items: Array<{ type: CanvasNodeType; label: string }> = [
+function Dock({ spawn }: { spawn: (type: WorkspaceNodeType) => void }) {
+  const items: Array<{ type: WorkspaceNodeType; label: string }> = [
     { type: 'terminal', label: 'terminal' },
     { type: 'browser', label: 'browser' },
     { type: 'note', label: 'note' },
@@ -232,7 +231,7 @@ function Dock({ spawn }: { spawn: (type: CanvasNodeType) => void }) {
   ];
   return (
     <div
-      data-canvas-ui
+      data-workspace-ui
       className="absolute bottom-5 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-white px-2 py-1.5 shadow-[0_0_0_1px_rgba(23,23,23,0.12),0_8px_24px_rgba(23,23,23,0.08)]"
     >
       {items.map((item) => (

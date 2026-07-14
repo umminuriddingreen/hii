@@ -50,9 +50,9 @@ decentralized compute network, geometry platform, or personal-data harvester.
 - **Models** are replaceable reasoning engines; they do not own permissions or
   durable project truth.
 
-The visual interface and desktop application are called **HII**. Canvas is an
-internal spatial interaction model, not a second product name. HII displays and
-controls governed state published by AII through the shared runtime.
+The visual interface and desktop application are called **HII**. Its spatial
+workspace displays and controls governed state published by AII through the
+shared runtime; there is no separately named interface product.
 
 The dependency direction is:
 
@@ -159,6 +159,16 @@ The app uses Next.js 14 with a Tauri desktop shell. Local runtime state belongs
 under `~/.hii`; repo-local `.hii` files that remain are migration debt and must
 not be multiplied.
 
+Build the standalone macOS application with:
+
+```sh
+npm run build:tauri
+```
+
+The resulting `src-tauri/target/release/bundle/macos/HII.app` contains its own
+production server and Node runtime. It reads user-owned state from `~/.hii` and
+does not require the source repository to launch.
+
 ## Verification
 
 ```sh
@@ -166,6 +176,7 @@ hii check
 npm run hii:sdk:check
 npm run hii:skills:check
 npm run build
+npm run build:tauri
 hii health --text
 hii caps show
 ```

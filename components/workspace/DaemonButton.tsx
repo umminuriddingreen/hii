@@ -128,7 +128,7 @@ export function DaemonButton({ onPin }: DaemonButtonProps) {
   const runs = useMemo(() => snapshot?.runs.slice(0, 8) ?? [], [snapshot]);
 
   return (
-    <div data-canvas-ui className="absolute right-5 top-4 z-50">
+    <div data-workspace-ui className="absolute right-5 top-4 z-50">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}

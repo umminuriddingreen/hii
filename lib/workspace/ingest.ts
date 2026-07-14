@@ -1,7 +1,7 @@
-import type { CanvasNode, CanvasNodeType } from './types';
+import type { WorkspaceNode, WorkspaceNodeType } from './types';
 
 export type NodeSeed = {
-  type: CanvasNodeType;
+  type: WorkspaceNodeType;
   w: number;
   h: number;
   payload: Record<string, unknown>;
@@ -20,7 +20,7 @@ const DESIGN = /\.(fig|sketch|psd|psb|ai|ait|eps|indd|idml|xd|afdesign|afphoto|a
 const MODEL_3D = /\.(glb|gltf|obj|stl|fbx|usdz|usd|usdc|dae|blend|3ds|ply)$/i;
 const CAD = /\.(3dm|dwg|dxf|step|stp|iges|igs|ifc|sat|skp|rvt|3mf)$/i;
 
-export const defaultSize: Record<CanvasNodeType, { w: number; h: number }> = {
+export const defaultSize: Record<WorkspaceNodeType, { w: number; h: number }> = {
   note: { w: 280, h: 200 },
   text: { w: 440, h: 320 },
   link: { w: 340, h: 96 },
@@ -36,7 +36,7 @@ export const defaultSize: Record<CanvasNodeType, { w: number; h: number }> = {
   job: { w: 360, h: 300 }
 };
 
-export function makeNode(seed: NodeSeed, x: number, y: number, z: number): CanvasNode {
+export function makeNode(seed: NodeSeed, x: number, y: number, z: number): WorkspaceNode {
   const now = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
@@ -52,7 +52,7 @@ export function makeNode(seed: NodeSeed, x: number, y: number, z: number): Canva
   };
 }
 
-export function seedFor(type: CanvasNodeType, payload: Record<string, unknown> = {}): NodeSeed {
+export function seedFor(type: WorkspaceNodeType, payload: Record<string, unknown> = {}): NodeSeed {
   return { type, ...defaultSize[type], payload };
 }
 

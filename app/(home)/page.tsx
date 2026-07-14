@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { CanvasRoot } from '../../components/canvas/CanvasRoot';
+import { HiiRoot } from '../../components/workspace/HiiRoot';
 import { readHiiConfig } from '@/lib/server/hii-config';
 import { SurfaceDisabled } from '@/components/SurfaceDisabled';
 
@@ -7,8 +7,8 @@ export const dynamic = 'force-dynamic';
 
 export default function Home() {
   const config = readHiiConfig();
-  const homepage = config.defaults.homepage || 'canvas';
-  if (homepage !== 'canvas') redirect(`/${homepage}`);
-  if (config.surfaces.canvas?.enabled === false) return <SurfaceDisabled name="HII" />;
-  return <CanvasRoot />;
+  const homepage = config.defaults.homepage || 'workspace';
+  if (homepage !== 'workspace') redirect(`/${homepage}`);
+  if (config.surfaces.workspace?.enabled === false) return <SurfaceDisabled name="HII" />;
+  return <HiiRoot />;
 }

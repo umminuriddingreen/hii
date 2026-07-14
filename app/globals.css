@@ -779,8 +779,8 @@ html {
 }
 
 /* --- HII spatial workspace (homepage) --- */
-[data-canvas-dragging] iframe,
-[data-canvas-dragging] embed,
-[data-canvas-dragging] video {
+[data-workspace-dragging] iframe,
+[data-workspace-dragging] embed,
+[data-workspace-dragging] video {
   pointer-events: none;
 }

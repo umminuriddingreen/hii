@@ -1,4 +1,4 @@
-export type CanvasNodeType =
+export type WorkspaceNodeType =
   | 'note'
   | 'text'
   | 'link'
@@ -63,7 +63,7 @@ export type SpatialObjectMetadata = {
   audit?: SpatialAuditEntry[];
 };
 
-export const canvasNodeTypes: CanvasNodeType[] = [
+export const workspaceNodeTypes: WorkspaceNodeType[] = [
   'note',
   'text',
   'link',
@@ -79,9 +79,9 @@ export const canvasNodeTypes: CanvasNodeType[] = [
   'job'
 ];
 
-export type CanvasNode = {
+export type WorkspaceNode = {
   id: string;
-  type: CanvasNodeType;
+  type: WorkspaceNodeType;
   x: number;
   y: number;
   w: number;
@@ -100,7 +100,7 @@ export type WorkspaceDoc = {
   updatedAt: string;
   viewport: WorkspaceViewport;
   nextZ: number;
-  nodes: CanvasNode[];
+  nodes: WorkspaceNode[];
 };
 
 export function emptyWorkspace(): WorkspaceDoc {
@@ -208,16 +208,16 @@ export function normalizeSpatialObject(raw: unknown): SpatialObjectMetadata | un
   };
 }
 
-export function normalizeNode(raw: unknown): CanvasNode | null {
+export function normalizeNode(raw: unknown): WorkspaceNode | null {
   if (!raw || typeof raw !== 'object') return null;
   const node = raw as Record<string, unknown>;
   if (typeof node.id !== 'string' || !node.id) return null;
-  if (!canvasNodeTypes.includes(node.type as CanvasNodeType)) return null;
+  if (!workspaceNodeTypes.includes(node.type as WorkspaceNodeType)) return null;
   if (![node.x, node.y, node.w, node.h].every(isFiniteNumber)) return null;
   const now = new Date().toISOString();
   return {
     id: node.id.slice(0, 64),
-    type: node.type as CanvasNodeType,
+    type: node.type as WorkspaceNodeType,
     x: node.x as number,
     y: node.y as number,
     w: Math.max(40, node.w as number),
@@ -235,7 +235,7 @@ export function normalizeWorkspace(raw: unknown): WorkspaceDoc {
   const doc = raw as Record<string, unknown>;
   const viewport = (doc.viewport ?? {}) as Record<string, unknown>;
   const nodes = Array.isArray(doc.nodes)
-    ? doc.nodes.map(normalizeNode).filter((node): node is CanvasNode => node !== null).slice(0, 500)
+    ? doc.nodes.map(normalizeNode).filter((node): node is WorkspaceNode => node !== null).slice(0, 500)
     : [];
   return {
     version: 1,

@@ -139,13 +139,12 @@ The ideal daily question is:
 ### HII owns the human-facing layer
 
 HII owns the Next.js interface, Tauri desktop shell, projects and sources,
-context-pack review, boards, canvas, feed, activity history, terminal surfaces,
+context-pack review, boards, spatial workspace, feed, activity history, terminal surfaces,
 approvals, verification views, and receipts.
 
-The spatial visual interface is named **HII**. “Canvas” describes an internal
-interaction model, not a separate product, surface brand, or application name.
-HII presents governed data and execution state published by AII through the
-shared local runtime.
+The spatial visual interface is named **HII**. It is not a separately branded
+surface or application. HII presents governed data and execution state
+published by AII through the shared local runtime.
 
 HII answers:
 

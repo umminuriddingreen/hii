@@ -1,9 +1,9 @@
 'use client';
 
-import type { CanvasNode } from '../../../lib/canvas/types';
+import type { WorkspaceNode } from '../../../lib/workspace/types';
 
 type NodeBodyProps = {
-  node: CanvasNode;
+  node: WorkspaceNode;
   onPayload: (patch: Record<string, unknown>) => void;
 };
 

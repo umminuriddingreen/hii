@@ -4,6 +4,7 @@ node_modules
 /output/
 /build
 .next-tauri/
+.hii-app/
 .env
 .env.*
 !.env.example

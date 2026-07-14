@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef } from 'react';
-import type { WorkspaceViewport } from '../../lib/canvas/types';
+import type { WorkspaceViewport } from '../../lib/workspace/types';
 
 export type Camera = { x: number; y: number; z: number };
 
@@ -90,14 +90,14 @@ export function useCamera(onSettle?: () => void) {
       const sy = e.clientY;
       const ox = cam.current.x;
       const oy = cam.current.y;
-      document.documentElement.setAttribute('data-canvas-dragging', '1');
+      document.documentElement.setAttribute('data-workspace-dragging', '1');
       const move = (ev: PointerEvent) => {
         cam.current.x = ox + ev.clientX - sx;
         cam.current.y = oy + ev.clientY - sy;
         commit();
       };
       const up = () => {
-        document.documentElement.removeAttribute('data-canvas-dragging');
+        document.documentElement.removeAttribute('data-workspace-dragging');
         removeEventListener('pointermove', move);
         removeEventListener('pointerup', up);
       };

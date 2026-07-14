@@ -1,15 +1,15 @@
 'use client';
 
 import { useRef } from 'react';
-import type { CanvasNode } from '../../lib/canvas/types';
+import type { WorkspaceNode } from '../../lib/workspace/types';
 
 type NodeFrameProps = {
-  node: CanvasNode;
+  node: WorkspaceNode;
   selected: boolean;
   title: string;
   getZoom: () => number;
   onSelect: () => void;
-  onCommit: (patch: Partial<CanvasNode>) => void;
+  onCommit: (patch: Partial<WorkspaceNode>) => void;
   onClose: () => void;
   chromeless?: boolean;
   children: React.ReactNode;
@@ -35,7 +35,7 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, 
     const oy = node.y;
     let nx = ox;
     let ny = oy;
-    document.documentElement.setAttribute('data-canvas-dragging', '1');
+    document.documentElement.setAttribute('data-workspace-dragging', '1');
     const move = (ev: PointerEvent) => {
       const z = getZoom();
       nx = ox + (ev.clientX - sx) / z;
@@ -43,7 +43,7 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, 
       if (frameRef.current) frameRef.current.style.transform = `translate(${nx}px, ${ny}px)`;
     };
     const up = () => {
-      document.documentElement.removeAttribute('data-canvas-dragging');
+      document.documentElement.removeAttribute('data-workspace-dragging');
       removeEventListener('pointermove', move);
       removeEventListener('pointerup', up);
       if (nx !== ox || ny !== oy) onCommit({ x: nx, y: ny });
@@ -63,7 +63,7 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, 
     const oh = node.h;
     let nw = ow;
     let nh = oh;
-    document.documentElement.setAttribute('data-canvas-dragging', '1');
+    document.documentElement.setAttribute('data-workspace-dragging', '1');
     const move = (ev: PointerEvent) => {
       const z = getZoom();
       nw = Math.max(140, ow + (ev.clientX - sx) / z);
@@ -74,7 +74,7 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, 
       }
     };
     const up = () => {
-      document.documentElement.removeAttribute('data-canvas-dragging');
+      document.documentElement.removeAttribute('data-workspace-dragging');
       removeEventListener('pointermove', move);
       removeEventListener('pointerup', up);
       if (nw !== ow || nh !== oh) onCommit({ w: nw, h: nh });

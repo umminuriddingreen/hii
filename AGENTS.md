@@ -46,8 +46,8 @@ Human intent -> bounded agent/tool work -> logs/proof -> verification -> receipt
 
 - HII is a local-first control plane for verified agent work.
 - The visual interface and desktop application are named HII. Never append a
-  separate product name; canvas is only an internal spatial interaction model.
-  HII displays governed state published by AII through the shared runtime.
+  separate product name. HII's spatial workspace displays governed state
+  published by AII through the shared runtime.
 - Founder decision ADR 001 reopens an Obsidian-class HII Knowledge Workspace
   built on Context Dock and `~/.hii/hii.db`.
 - The current implementation target is an end-to-end local knowledge loop:

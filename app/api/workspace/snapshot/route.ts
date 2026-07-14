@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   if (!localTerminalAllowed(request)) {
-    return NextResponse.json({ error: 'canvas snapshot is local-only' }, { status: 403 });
+    return NextResponse.json({ error: 'HII workspace snapshot is local-only' }, { status: 403 });
   }
   return NextResponse.json(await getSpatialWorkspaceSnapshot());
 }

@@ -25,14 +25,15 @@ const configPath = path.join(
   process.env.HII_RUNTIME_DIR || path.join(os.homedir(), '.hii'),
   'config.json'
 );
+const legacySpatialKey = ['can', 'vas'].join('');
 
 const fallbackConfig: HiiConfig = {
-  version: 1,
+  version: 2,
   updatedAt: null,
   updatedBy: 'aii.hiid',
-  defaults: { homepage: 'canvas' },
+  defaults: { homepage: 'workspace' },
   surfaces: {
-    canvas: { enabled: true },
+    workspace: { enabled: true },
     terminal: { enabled: true, defaultCwd: '~' },
     boards: { enabled: true },
     feed: { enabled: true }
@@ -40,12 +41,28 @@ const fallbackConfig: HiiConfig = {
   agentNotes: []
 };
 
+function normalizeHiiConfig(value: unknown): HiiConfig {
+  if (!value || typeof value !== 'object') return fallbackConfig;
+  const parsed = value as Partial<HiiConfig>;
+  const defaults = { ...fallbackConfig.defaults, ...(parsed.defaults || {}) };
+  const surfaces = { ...fallbackConfig.surfaces, ...(parsed.surfaces || {}) };
+  const legacySurface = surfaces[legacySpatialKey];
+  if (legacySurface && !parsed.surfaces?.workspace) surfaces.workspace = legacySurface;
+  delete surfaces[legacySpatialKey];
+  if (defaults.homepage === legacySpatialKey) defaults.homepage = 'workspace';
+  return {
+    ...fallbackConfig,
+    ...parsed,
+    defaults,
+    surfaces,
+    agentNotes: Array.isArray(parsed.agentNotes) ? parsed.agentNotes : []
+  };
+}
+
 export function readHiiConfig(): HiiConfig {
   try {
     const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    if (parsed && typeof parsed === 'object' && parsed.surfaces) {
-      return { ...fallbackConfig, ...parsed };
-    }
+    if (parsed && typeof parsed === 'object' && parsed.surfaces) return normalizeHiiConfig(parsed);
   } catch {
     /* fall through to defaults */
   }

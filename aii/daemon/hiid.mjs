@@ -41,14 +41,15 @@ let publishedCapabilityMtime = 0;
 // and render accordingly. `hiid config set` is how AII (or the operator)
 // reshapes HII without touching HII code.
 const HII_CONFIG = path.join(RUNTIME, "config.json");
+const LEGACY_SPATIAL_KEY = ["can", "vas"].join("");
 
 const DEFAULT_CONFIG = {
-  version: 1,
+  version: 2,
   updatedAt: null,
   updatedBy: "aii.hiid",
-  defaults: { homepage: "canvas" },
+  defaults: { homepage: "workspace" },
   surfaces: {
-    canvas: { enabled: true },
+    workspace: { enabled: true },
     terminal: { enabled: true, defaultCwd: "~" },
     boards: { enabled: true },
     feed: { enabled: true }
@@ -56,9 +57,38 @@ const DEFAULT_CONFIG = {
   agentNotes: []
 };
 
+function migrateConfig(config) {
+  let changed = false;
+  if (!config.defaults || typeof config.defaults !== "object") {
+    config.defaults = { ...DEFAULT_CONFIG.defaults };
+    changed = true;
+  }
+  if (!config.surfaces || typeof config.surfaces !== "object") {
+    config.surfaces = { ...DEFAULT_CONFIG.surfaces };
+    changed = true;
+  }
+  if (config.defaults.homepage === LEGACY_SPATIAL_KEY) {
+    config.defaults.homepage = "workspace";
+    changed = true;
+  }
+  if (config.surfaces[LEGACY_SPATIAL_KEY]) {
+    if (!config.surfaces.workspace) config.surfaces.workspace = config.surfaces[LEGACY_SPATIAL_KEY];
+    delete config.surfaces[LEGACY_SPATIAL_KEY];
+    changed = true;
+  }
+  if (config.version !== DEFAULT_CONFIG.version) {
+    config.version = DEFAULT_CONFIG.version;
+    changed = true;
+  }
+  return changed;
+}
+
 function ensureConfig() {
-  if (fs.existsSync(HII_CONFIG)) return;
-  writeJson(HII_CONFIG, { ...DEFAULT_CONFIG, updatedAt: now() });
+  const exists = fs.existsSync(HII_CONFIG);
+  const config = exists ? safeReadJson(HII_CONFIG, { ...DEFAULT_CONFIG }) : { ...DEFAULT_CONFIG };
+  const changed = migrateConfig(config);
+  if (exists && !changed) return;
+  writeJson(HII_CONFIG, { ...config, updatedAt: now(), updatedBy: "aii.hiid" });
   event("config.initialized", {
     actor: "hii.daemon",
     target: HII_CONFIG,
@@ -68,6 +98,7 @@ function ensureConfig() {
 }
 
 function cmdConfig(args) {
+  ensureConfig();
   const sub = args[0];
   const config = safeReadJson(HII_CONFIG, { ...DEFAULT_CONFIG });
   if (!sub || sub === "show") {

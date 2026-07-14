@@ -2,12 +2,12 @@ import 'server-only';
 import { listCapabilities } from '@/lib/capabilities';
 import { listCapabilityJobs } from '@/lib/capabilities/local-store';
 import type { CapabilityJobStatus, CapabilityStatus } from '@/lib/capabilities/types';
-import type { CanvasNode, SpatialObjectStatus, WorkspaceDoc } from '@/lib/canvas/types';
-import { emptyWorkspace } from '@/lib/canvas/types';
+import type { WorkspaceNode, SpatialObjectStatus, WorkspaceDoc } from '@/lib/workspace/types';
+import { emptyWorkspace } from '@/lib/workspace/types';
 import { listBoardTasks, type BoardLane } from './hii-board';
 import { getHiiDaemonSnapshot, type HiiDaemonEvent, type HiiDaemonRun } from './hii-daemon';
 
-type SpatialSnapshotNode = CanvasNode & {
+type SpatialSnapshotNode = WorkspaceNode & {
   id: string;
 };
 
@@ -39,7 +39,7 @@ const statusFromJob: Record<CapabilityJobStatus, SpatialObjectStatus> = {
 
 function nodeBase(input: {
   id: string;
-  type?: CanvasNode['type'];
+  type?: WorkspaceNode['type'];
   x: number;
   y: number;
   w?: number;

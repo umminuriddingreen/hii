@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import type { CanvasNode } from '../../../lib/canvas/types';
+import type { WorkspaceNode } from '../../../lib/workspace/types';
 import { ptySend, ptySubscribe, type PtyServerMessage } from '../usePtySocket';
 
 type TerminalNodeProps = {
-  node: CanvasNode;
+  node: WorkspaceNode;
   onPayload: (patch: Record<string, unknown>) => void;
 };
 
