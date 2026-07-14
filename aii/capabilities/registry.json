@@ -880,6 +880,50 @@
     "trustLevel": "experimental"
   },
   {
+    "id": "hii.knowledge.workspace",
+    "name": "HII Local Knowledge Workspace",
+    "owner": "aii",
+    "runtime": "next-route",
+    "summary": "Create, connect, search, version, graph, import, and export local Markdown knowledge through the canonical HII database.",
+    "inputs": [
+      "local note or Markdown import",
+      "bounded note mutation",
+      "search query",
+      "daily-note date",
+      "local export request"
+    ],
+    "outputs": [
+      "versioned Markdown note",
+      "folders and nested tags",
+      "wikilinks and backlinks",
+      "FTS5 search results",
+      "knowledge graph",
+      "local Markdown or JSON export",
+      "append-only knowledge event"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "read and write ~/.hii/hii.db",
+      "bounded knowledge tables only",
+      "optimistic conflict detection",
+      "secret-like value redaction",
+      "no upload, publish, sync, or external transmission"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "/knowledge",
+      "/api/knowledge",
+      "lib/server/hii-knowledge.ts",
+      "scripts/hii-knowledge-smoke.mjs",
+      "~/.hii/hii.db"
+    ],
+    "status": "partial",
+    "trustLevel": "first-party"
+  },
+  {
     "id": "hii.config.read",
     "name": "Read HII Surface Config",
     "owner": "aii",

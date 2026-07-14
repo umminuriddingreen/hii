@@ -867,6 +867,8 @@ function agentCommandCatalog() {
     { command: "hii board", purpose: "Show the local kanban/todo board grouped by backlog, next, doing, blocked, and done." },
     { command: "hii board add <title>", purpose: "Create a local task with owner, coordinate, priority, tags, and notes." },
     { command: "hii board move <id> <lane>", purpose: "Move a task between kanban lanes." },
+    { command: "hii knowledge", purpose: "Show the local HII Knowledge Workspace and canonical database coordinate." },
+    { command: "hii knowledge check", purpose: "Run the isolated notes, links, search, graph, history, lifecycle, and export smoke test." },
     { command: "hii money idea <idea>", purpose: "Use local models to turn a rough idea into a sellable offer and execution handoff." },
     { command: "hii money list", purpose: "List recent local idea-to-offer receipts." },
     { command: "hii links cache", purpose: "Cache browser-captured links locally and summarize them with Ollama when available." },
@@ -1718,6 +1720,33 @@ function cmdTerminal(args) {
   console.log("  open:     hii console --open");
 }
 
+function cmdKnowledge(args) {
+  const sub = args[0] || "status";
+  if (sub === "check") {
+    const result = spawnSync("npm", ["run", "hii:knowledge:check"], { cwd: ROOT, stdio: "inherit" });
+    process.exit(result.status ?? 1);
+  }
+  const url = "http://localhost:3000/knowledge";
+  const database = path.join(RUNTIME, "hii.db");
+  if (sub === "open" || args.includes("--open")) {
+    spawnSync("open", [url], { stdio: "inherit" });
+    return;
+  }
+  if (sub !== "status") {
+    console.error("usage: hii knowledge [status|open|check]");
+    process.exit(1);
+  }
+  const count = fs.existsSync(database)
+    ? spawnSync("sqlite3", [database, "SELECT COUNT(*) FROM knowledge_notes WHERE deleted_at IS NULL;"], { encoding: "utf8" })
+    : null;
+  console.log("HII Knowledge Workspace\n");
+  console.log(`ui:       ${url}`);
+  console.log(`database: ${database}`);
+  console.log(`exists:   ${fs.existsSync(database) ? "yes" : "not initialized"}`);
+  console.log(`notes:    ${count?.status === 0 ? count.stdout.trim() : "-"}`);
+  console.log("local-only; no sync or publish");
+}
+
 function cmdLinks(args) {
   const sub = args[0] || "status";
   if (sub === "status") {
@@ -2045,6 +2074,7 @@ switch (cmd) {
   case "money": cmdMoney(rest); break;
   case "links": cmdLinks(rest); break;
   case "pack": cmdPack(rest); break;
+  case "knowledge": cmdKnowledge(rest); break;
   case "skill":
   case "skills":
     try {
@@ -2123,6 +2153,9 @@ usage: hii <command>
   pack list           list compartmentalized capability packs
   pack show <id>      show pack routes, files, caps, and checks
   pack export <id>    write local-only pack manifest
+  knowledge [status]  show the local knowledge workspace coordinate
+  knowledge open      open /knowledge in the browser
+  knowledge check     run the isolated SQLite knowledge lifecycle smoke test
   skill report        append an agent-action receipt; --repeatable creates a draft
   skill create <id>   create or update a draft skill bundle
   skill register <id> promote a proof-backed draft after operator review

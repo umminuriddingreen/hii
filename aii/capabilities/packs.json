@@ -23,6 +23,24 @@
     "shipBoundary": "local-only; exports manifests, never pushes or publishes"
   },
   {
+    "id": "hii-knowledge-workspace",
+    "name": "HII Knowledge Workspace",
+    "summary": "Local Markdown knowledge, deterministic links/tags/search, graph navigation, history, lifecycle controls, and receipts on ~/.hii/hii.db.",
+    "capabilities": ["hii.knowledge.workspace"],
+    "routes": ["/knowledge", "/api/knowledge"],
+    "commands": ["hii knowledge", "hii knowledge --open", "hii knowledge check"],
+    "files": [
+      "app/knowledge/page.tsx",
+      "app/knowledge/KnowledgeWorkspace.tsx",
+      "app/api/knowledge/route.ts",
+      "lib/server/hii-knowledge.ts",
+      "scripts/hii-knowledge-smoke.mjs"
+    ],
+    "runtimeFiles": ["~/.hii/hii.db knowledge_* tables"],
+    "verification": ["npm run hii:knowledge:check", "npm run build"],
+    "shipBoundary": "local-only knowledge state; importing reads user-selected files in the browser; export downloads locally; no sync or publish"
+  },
+  {
     "id": "hii-terminal",
     "name": "HII Console",
     "summary": "Local command center for process observation, agent spawn presets, capability discovery, and recent jobs.",
