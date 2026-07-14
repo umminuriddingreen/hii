@@ -13,10 +13,11 @@ product or architecture changes.
 
 ## Current Product Decision
 
-The active founder-beta product is **HII Context Dock 0.1**:
+The active product is **HII Knowledge Workspace**, built on the Context Dock
+foundation:
 
-> Select a project once. HII continuously prepares the smallest verified,
-> source-linked context package the agent needs.
+> Build knowledge once. HII keeps it linked, source-aware, agent-ready, and
+> accountable.
 
 The intended vertical slice is:
 
@@ -25,6 +26,7 @@ selected project
 → visible source permissions
 → deterministic local inventory and extraction
 → source-linked project model
+→ Markdown notes, folders, tags, links, backlinks, and graph
 → task-specific context pack
 → user review
 → bounded MCP delivery
@@ -32,7 +34,7 @@ selected project
 → durable receipt and project memory
 ```
 
-Context Dock is not yet complete. Existing boards, console, daemon, jobs,
+The knowledge and Context Dock loop is not yet complete. Existing boards, console, daemon, jobs,
 capabilities, bridge, voice, packs, link, credit, exchange, and Termite
 surfaces are implementation history or substrate. They are not permission to
 widen the Context Dock 0.1 release into a marketplace, AI chat product,

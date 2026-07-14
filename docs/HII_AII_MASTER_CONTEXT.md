@@ -88,19 +88,21 @@ state and proof while models remain replaceable reasoning engines.
 
 ### HII as the product being shipped now
 
-The immediate product is **HII Context Dock 0.1 — Founder Beta**:
+The product foundation is **HII Context Dock** and its active human-facing
+surface is now the **HII Knowledge Workspace**:
 
-> A local-first project context compiler that continuously prepares the
-> smallest source-linked context package Codex or ChatGPT needs, then records
-> what the agent did and how the result was verified.
+> A local-first knowledge and project context environment that lets humans and
+> agents create, connect, retrieve, review, and verify durable work without
+> losing source provenance.
 
 The product promise is:
 
-> Select a project once. HII continuously prepares the smallest verified
-> context package the agent needs.
+> Build knowledge once. HII keeps it linked, source-aware, agent-ready, and
+> accountable.
 
-The existence of the broader practice and platform does not authorize agents
-to widen the current product scope.
+Founder decision ADR 001 explicitly reopens an Obsidian-class local knowledge
+workspace inside HII. It does not authorize a separate runtime, cloud-first
+sync, plugin marketplace, or unbounded agent access.
 
 ## Ummi's central goal
 
@@ -228,7 +230,7 @@ Every serious workflow should map to:
 Context Dock owns the before-work context layer. AII owns the during-work
 governance layer. Receipts, memory, and skills close the after-work layer.
 
-## Current product: HII Context Dock 0.1
+## Current product: HII Knowledge Workspace on Context Dock
 
 ### User outcome
 
@@ -246,6 +248,9 @@ A user should be able to:
 10. Let an agent perform separately authorized work.
 11. Record decisions, files changed, verification, blockers, and next action.
 12. Resume later without reconstructing project understanding.
+13. Create and edit durable Markdown notes with folders, tags, wikilinks,
+    backlinks, graph navigation, daily notes, history, and local export.
+14. Let verified agent work become linked knowledge and reusable capability.
 
 ### P0 capabilities
 
@@ -260,6 +265,9 @@ A user should be able to:
 - Activity receipts for reads, results, verification, failures, and next action.
 - Restart persistence and an installable macOS application.
 - Visible privacy and external-transmission boundaries.
+- Obsidian-class local note creation, Markdown editing, links/backlinks, tags,
+  FTS5 search, graph navigation, daily notes, history, trash/restore, and
+  Markdown/JSON import/export.
 
 ### Hard architecture decisions
 
@@ -445,12 +453,12 @@ Level 8 — Separately permissioned personal operational intelligence
 
 The existence of later levels never authorizes skipping Level 2.
 
-## Deferred and prohibited scope for Context Dock 0.1
+## Deferred and prohibited scope
 
 Do not expand the current release into:
 
 - another chatbot or AI-themed terminal;
-- an IDE, Obsidian, Notion, or general notes replacement;
+- copying proprietary Obsidian code, branding, sync behavior, or plugin APIs;
 - blanket email, message, calendar, photo, health, or financial ingestion;
 - a full personal ontology or life-data harvester;
 - unrestricted autonomous agents or unrestricted shell MCP tools;
@@ -483,10 +491,10 @@ CD-080  Verification and security testing
 CD-090  Packaging and founder-beta launch
 ```
 
-The first priority is truthful bootstrap:
+The current priority is a truthful, end-to-end local knowledge loop:
 
 ```text
-README = AGENTS.md = CLI help = UI = capability metadata
+ADR = README = AGENTS.md = CLI help = UI = database = capability metadata
 ```
 
 Truth fragmentation is a larger immediate risk than missing features.

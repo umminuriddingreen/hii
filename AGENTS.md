@@ -45,8 +45,14 @@ Human intent -> bounded agent/tool work -> logs/proof -> verification -> receipt
 ## Current Product Direction
 
 - HII is a local-first control plane for verified agent work.
-- The current implementation target is `hii today` + `/today` + unified context + stale job handling + standard receipts.
-- Do not add new surfaces, capabilities, marketplace features, Creator Desk features, MCP catalog work, credits expansion, or decentralized compute features until the daily operational loop is reliable.
+- Founder decision ADR 001 reopens an Obsidian-class HII Knowledge Workspace
+  built on Context Dock and `~/.hii/hii.db`.
+- The current implementation target is an end-to-end local knowledge loop:
+  Markdown notes, folders, links/backlinks, tags, FTS5 search, graph, daily
+  notes, history, trash/restore, import/export, provenance, and receipts.
+- Do not expand this into a plugin marketplace, cloud sync product, Creator
+  Desk, credits expansion, or decentralized compute feature until the local
+  knowledge loop is reliable.
 - Local terminal execution remains operator-controlled and local-only until a hardened remote runner exists.
 
 ## Verification
