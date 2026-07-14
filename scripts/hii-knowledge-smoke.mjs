@@ -44,6 +44,9 @@ try {
     () => knowledge.updateKnowledgeNote(atlas.note.id, { content: 'stale write', ifMatch: atlas.note.updatedAt }),
     /changed after it was opened/
   );
+  const restoredVersion = knowledge.restoreKnowledgeVersion(atlas.note.id, 1, updated.note.updatedAt);
+  assert.equal(restoredVersion.note.content, atlas.note.content);
+  assert.equal(restoredVersion.versions.length, 3);
 
   knowledge.trashKnowledgeNote(workspace.note.id);
   assert.equal(knowledge.knowledgeWorkspace().trashCount, 1);
@@ -74,7 +77,7 @@ try {
   console.log('notes:       4');
   console.log('links:       resolved + backlinks verified');
   console.log('search:      FTS5 verified');
-  console.log('history:     optimistic conflict + versions verified');
+  console.log('history:     optimistic conflict + version restore verified');
   console.log('lifecycle:   create/save/trash/restore/daily/import/export verified');
 } finally {
   knowledge.resetKnowledgeDbForTests();

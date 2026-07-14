@@ -17,6 +17,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <Link href="/" className="hii-nav-link">Desk</Link>
             <Link href="/landing" className="hii-nav-link">Playbook</Link>
             <Link href="/feed" className="hii-nav-link">Feed</Link>
+            <Link href="/knowledge" className="hii-nav-link">Knowledge</Link>
             <Link href="/boards" className="hii-nav-link">Boards</Link>
             <Link href="/console" className="hii-nav-link">Console</Link>
             <Link href="/credits" className="hii-nav-link">Credits</Link>

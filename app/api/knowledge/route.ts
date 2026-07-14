@@ -8,8 +8,10 @@ import {
   importKnowledgeNotes,
   knowledgeGraph,
   knowledgeWorkspace,
+  listKnowledgeNotes,
   openDailyNote,
   restoreKnowledgeNote,
+  restoreKnowledgeVersion,
   searchKnowledge,
   trashKnowledgeNote,
   updateKnowledgeNote
@@ -33,6 +35,7 @@ export async function GET(request: Request) {
     }
     if (mode === 'search') return NextResponse.json({ results: searchKnowledge(url.searchParams.get('q') || '') });
     if (mode === 'graph') return NextResponse.json(knowledgeGraph());
+    if (mode === 'trash') return NextResponse.json({ notes: listKnowledgeNotes({ includeDeleted: true }).filter((note) => note.deletedAt) });
     if (mode === 'export-note') {
       const note = exportKnowledgeNote(url.searchParams.get('id') || '');
       if (!note) return NextResponse.json({ error: 'Note not found.' }, { status: 404 });
@@ -63,6 +66,7 @@ export async function POST(request: Request) {
     if (action === 'save') return NextResponse.json(updateKnowledgeNote(String(body?.id || ''), { ...body, actor: 'api.knowledge' }));
     if (action === 'trash') return NextResponse.json({ note: trashKnowledgeNote(String(body?.id || ''), 'api.knowledge') });
     if (action === 'restore') return NextResponse.json(restoreKnowledgeNote(String(body?.id || ''), 'api.knowledge'));
+    if (action === 'restore-version') return NextResponse.json(restoreKnowledgeVersion(String(body?.id || ''), Number(body?.version), body?.ifMatch, 'api.knowledge'));
     if (action === 'daily') return NextResponse.json(openDailyNote(String(body?.date || new Date().toISOString().slice(0, 10)), 'api.knowledge'));
     if (action === 'import') return NextResponse.json({ notes: importKnowledgeNotes(body?.files, 'api.knowledge') }, { status: 201 });
     return NextResponse.json({ error: 'Unknown knowledge action.' }, { status: 400 });

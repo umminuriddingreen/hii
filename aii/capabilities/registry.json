@@ -920,7 +920,7 @@
       "scripts/hii-knowledge-smoke.mjs",
       "~/.hii/hii.db"
     ],
-    "status": "partial",
+    "status": "ready",
     "trustLevel": "first-party"
   },
   {

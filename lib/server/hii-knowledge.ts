@@ -422,6 +422,24 @@ export function restoreKnowledgeNote(id: string, actor = 'hii.knowledge') {
   return getKnowledgeNote(id);
 }
 
+export function restoreKnowledgeVersion(noteId: string, version: number, ifMatch?: string, actor = 'hii.knowledge') {
+  const database = db();
+  const snapshot = database.prepare(`
+    SELECT title, path, content FROM knowledge_note_versions
+    WHERE note_id = ? AND version = ?
+  `).get(noteId, version) as { title?: string; path?: string; content?: string } | undefined;
+  if (!snapshot?.title || snapshot.content === undefined) throw new Error(`Version ${version} was not found.`);
+  const note = updateKnowledgeNote(noteId, {
+    title: snapshot.title,
+    path: snapshot.path,
+    content: snapshot.content,
+    ifMatch,
+    actor
+  });
+  emitEvent(database, 'note.version_restored', noteId, `Restored version ${version}`, { version }, actor);
+  return note;
+}
+
 export function getKnowledgeNote(id: string) {
   const database = db();
   const row = getNoteRow(database, id);
@@ -445,7 +463,7 @@ export function getKnowledgeNote(id: string) {
   const versions = database.prepare(`
     SELECT id, version, title, path, created_at AS createdAt, source
     FROM knowledge_note_versions WHERE note_id = ? ORDER BY version DESC LIMIT 50
-  `).all(id);
+  `).all(id) as unknown as Array<{ id: string; version: number; title: string; path: string; createdAt: string; source: string }>;
   const mapLink = (link: typeof outgoing[number]): KnowledgeLink => ({
     sourceNoteId: link.source_note_id,
     sourceTitle: link.source_title,
@@ -525,15 +543,15 @@ export function knowledgeGraph() {
     SELECT n.id, n.title, n.folder, n.pinned, n.updated_at AS updatedAt,
       (SELECT COUNT(*) FROM knowledge_links l WHERE l.source_note_id = n.id OR l.target_note_id = n.id) AS degree
     FROM knowledge_notes n WHERE n.deleted_at IS NULL ORDER BY n.updated_at DESC
-  `).all();
+  `).all() as unknown as Array<{ id: string; title: string; folder: string; pinned: number; updatedAt: string; degree: number }>;
   const edges = database.prepare(`
     SELECT source_note_id AS source, target_note_id AS target, target_title AS targetTitle
     FROM knowledge_links WHERE target_note_id IS NOT NULL
-  `).all();
+  `).all() as unknown as Array<{ source: string; target: string; targetTitle: string }>;
   const unresolved = database.prepare(`
     SELECT source_note_id AS source, target_title AS targetTitle
     FROM knowledge_links WHERE target_note_id IS NULL
-  `).all();
+  `).all() as unknown as Array<{ source: string; targetTitle: string }>;
   return { nodes, edges, unresolved };
 }
 
@@ -543,17 +561,17 @@ export function knowledgeWorkspace() {
   const folders = database.prepare(`
     SELECT folder, COUNT(*) AS count FROM knowledge_notes
     WHERE deleted_at IS NULL GROUP BY folder ORDER BY folder COLLATE NOCASE
-  `).all();
+  `).all() as unknown as Array<{ folder: string; count: number }>;
   const tags = database.prepare(`
     SELECT t.tag, COUNT(*) AS count FROM knowledge_tags t
     JOIN knowledge_notes n ON n.id = t.note_id
     WHERE n.deleted_at IS NULL GROUP BY t.tag ORDER BY count DESC, t.tag
-  `).all();
+  `).all() as unknown as Array<{ tag: string; count: number }>;
   const trash = database.prepare('SELECT COUNT(*) AS count FROM knowledge_notes WHERE deleted_at IS NOT NULL').get() as { count: number };
   const events = database.prepare(`
     SELECT id, type, note_id AS noteId, actor, summary, created_at AS createdAt
     FROM knowledge_events ORDER BY created_at DESC LIMIT 30
-  `).all();
+  `).all() as unknown as Array<{ id: string; type: string; noteId: string | null; actor: string; summary: string; createdAt: string }>;
   return {
     dbPath: knowledgeDbPath(),
     notes,

@@ -1,6 +1,7 @@
 node_modules
 /.next
 /out
+/output/
 /build
 .next-tauri/
 .env
