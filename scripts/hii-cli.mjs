@@ -28,6 +28,7 @@ const MONEY_OFFERS_DIR = path.join(MONEY_DIR, "offers");
 const BOARD_DIR = path.join(RUNTIME, "board");
 const BOARD_TASKS = path.join(BOARD_DIR, "tasks.jsonl");
 const HIID = path.join(ROOT, "aii", "daemon", "hiid.mjs");
+const HII_TUI = path.join(ROOT, "scripts", "hii-tui.mjs");
 const LINK_POSTS = path.join(ROOT, ".hii", "link-posts.jsonl");
 const LINK_CACHE = path.join(ROOT, ".hii", "link-cache.jsonl");
 const RUNNER_CAPABILITIES = ["termite.rhino.managed_job"];
@@ -1823,6 +1824,178 @@ function cmdTerminal(args) {
   console.log("  open:     hii console --open");
 }
 
+function cmdChat(args = []) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    console.error("hii chat requires an interactive terminal; use `hii now --json` for scripts");
+    process.exit(1);
+  }
+  const result = spawnSync(process.execPath, [HII_TUI, ...args], {
+    cwd: ROOT,
+    stdio: "inherit",
+    env: process.env
+  });
+  process.exit(result.status ?? 1);
+}
+
+// The command line is HII's fastest control surface.  It deliberately speaks in
+// HII primitives (intent, context, bounded work, proof, receipt), rather than
+// pretending an agent shell is the product.
+const GLYPH = {
+  mark: "◈",
+  ready: "●",
+  active: "◐",
+  waiting: "○",
+  proof: "✓",
+  warning: "!",
+  arrow: "→",
+  rule: "─"
+};
+
+function terminalWidth() {
+  return Math.max(56, Math.min(Number(process.stdout.columns) || 88, 112));
+}
+
+function line(label = "") {
+  console.log(`${GLYPH.rule.repeat(terminalWidth() - 2)}${label ? ` ${label}` : ""}`);
+}
+
+function shortId(value) {
+  return String(value || "").slice(0, 8) || "—";
+}
+
+function cliSnapshot() {
+  const git = gitSnapshot();
+  const tasks = boardTasks({ includeDone: false });
+  const jobs = recentLocalCapabilityJobs(8);
+  const running = jobs.filter((job) => ["queued", "pending", "running"].includes(String(job.status).toLowerCase()));
+  const verified = jobs.filter((job) => String(job.status).toLowerCase() === "completed");
+  const next = tasks.find((task) => task.lane === "doing") || tasks.find((task) => task.lane === "next") || tasks.find((task) => task.lane === "backlog");
+  return { git, tasks, jobs, running, verified, next };
+}
+
+function cmdNow(args = []) {
+  const snapshot = cliSnapshot();
+  if (args.includes("--json")) {
+    console.log(JSON.stringify({
+      schemaVersion: 1,
+      kind: "hii.cli.snapshot",
+      generatedAt: new Date().toISOString(),
+      repo: ROOT,
+      runtime: RUNTIME,
+      git: snapshot.git.worktree,
+      tasks: snapshot.tasks,
+      activeJobs: snapshot.running,
+      recentVerifiedJobs: snapshot.verified.slice(0, 4),
+      next: snapshot.next ?? null
+    }, null, 2));
+    return;
+  }
+
+  console.log(`\n${GLYPH.mark}  HII  /  HUMAN INFORMATION INTERFACE`);
+  console.log("   intent → bounded work → proof → receipt");
+  line();
+  console.log(`${snapshot.git.worktree.clean ? GLYPH.ready : GLYPH.warning}  WORKSPACE  ${snapshot.git.branch}  ${snapshot.git.worktree.clean ? "clean" : `${snapshot.git.worktree.counts.total} changes need review`}`);
+  console.log(`${snapshot.running.length ? GLYPH.active : GLYPH.waiting}  AGENTS     ${snapshot.running.length ? `${snapshot.running.length} active` : "no active bounded work"}  ·  ${snapshot.verified.length} verified receipts`);
+  console.log(`${GLYPH.proof}  PROOF      ${snapshot.jobs.length ? `${snapshot.jobs.length} recent job receipts` : "none yet"}`);
+  line(" NOW ");
+  if (snapshot.next) {
+    const state = snapshot.next.lane === "doing" ? "IN PROGRESS" : "READY";
+    console.log(`${GLYPH.arrow}  ${state}  ${snapshot.next.title}`);
+    console.log(`   ${shortId(snapshot.next.id)}  ·  ${snapshot.next.owner}  ·  ${snapshot.next.coordinate}`);
+    if (snapshot.next.notes) console.log(`   ${snapshot.next.notes.slice(0, terminalWidth() - 6)}`);
+  } else {
+    console.log(`${GLYPH.arrow}  No bounded task selected.`);
+    console.log("   Start one: hii task <intent>");
+  }
+  line(" COMMANDS ");
+  console.log("  hii task <intent>       capture intent as a bounded local task");
+  console.log("  hii work                 inspect the active work queue and receipts");
+  console.log("  hii proof [receipt-id]   inspect proof before trusting completion");
+  console.log("  hii codex run <prompt>   queue a managed local Codex run");
+  console.log("  hii help                 command map and safety boundary\n");
+}
+
+function cmdTask(args) {
+  const rest = args.slice();
+  const title = withoutFlags(rest, ["--owner", "--coordinate", "--priority", "--notes", "--tags"]).join(" ").trim();
+  if (!title) {
+    console.error("usage: hii task <intent> [--owner name] [--coordinate path] [--priority low|normal|high|urgent] [--notes text] [--tags a,b]");
+    process.exit(1);
+  }
+  const task = createBoardTask({
+    title,
+    lane: "next",
+    priority: parseFlagValue(rest, "--priority", "normal"),
+    owner: parseFlagValue(rest, "--owner", "operator"),
+    coordinate: parseFlagValue(rest, "--coordinate", ROOT),
+    notes: parseFlagValue(rest, "--notes", "Intent captured through HII CLI. Define acceptance proof before execution."),
+    tags: parseFlagValue(rest, "--tags", "")
+  });
+  logBridge({ type: "intent-captured", taskId: task.id, title: task.title, coordinate: task.coordinate });
+  console.log(`\n${GLYPH.mark}  INTENT CAPTURED`);
+  line();
+  console.log(`${GLYPH.arrow}  ${task.title}`);
+  console.log(`   task: ${shortId(task.id)}  ·  lane: next  ·  owner: ${task.owner}`);
+  console.log(`   coordinate: ${task.coordinate}`);
+  console.log(`\nNext: hii board move ${shortId(task.id)} doing`);
+  console.log("Proof gate: record a receipt with `hii skill report` after verification.\n");
+}
+
+function cmdWork(args = []) {
+  const snapshot = cliSnapshot();
+  if (args.includes("--json")) {
+    console.log(JSON.stringify({ activeTasks: snapshot.tasks.filter((task) => ["next", "doing", "blocked"].includes(task.lane)), activeJobs: snapshot.running }, null, 2));
+    return;
+  }
+  console.log(`\n${GLYPH.mark}  HII WORK QUEUE`);
+  line();
+  const tasks = snapshot.tasks.filter((task) => ["next", "doing", "blocked"].includes(task.lane));
+  if (!tasks.length) console.log("○  No active tasks. Capture an intent with `hii task <intent>`.");
+  for (const task of tasks) {
+    const icon = task.lane === "doing" ? GLYPH.active : task.lane === "blocked" ? GLYPH.warning : GLYPH.ready;
+    console.log(`${icon}  ${task.lane.toUpperCase().padEnd(7)} ${shortId(task.id)}  ${task.title}`);
+    console.log(`   ${task.owner}  ·  ${task.coordinate}`);
+  }
+  if (snapshot.running.length) {
+    line(" AGENTS ");
+    for (const job of snapshot.running) console.log(`${GLYPH.active}  ${shortId(job.id)}  ${job.capabilityId || "unknown capability"}  ${job.status}`);
+  }
+  console.log("\nInspect evidence: hii proof\n");
+}
+
+function cmdProof(args = []) {
+  const requested = args[0];
+  const jobs = recentLocalCapabilityJobs(20);
+  const matches = requested ? jobs.filter((job) => String(job.id).startsWith(requested)) : jobs;
+  console.log(`\n${GLYPH.mark}  HII PROOF LEDGER`);
+  line();
+  if (!matches.length) {
+    console.log("○  No matching receipts. A task is not verified until it has inspectable proof.");
+    return;
+  }
+  for (const job of matches.slice(0, requested ? 20 : 8)) {
+    const verified = String(job.status).toLowerCase() === "completed";
+    console.log(`${verified ? GLYPH.proof : GLYPH.warning}  ${shortId(job.id)}  ${job.status || "unknown"}  ${job.capabilityId || "unknown capability"}`);
+    console.log(`   proof: ${(job.proofArtifacts || []).length}  ·  ledger: ${(job.ledger || []).length}  ·  ${job.createdAt || "unknown time"}`);
+    for (const artifact of (job.proofArtifacts || []).slice(0, 3)) console.log(`   ${GLYPH.arrow}  ${artifact.label || artifact.kind || "artifact"}${artifact.path ? `  ${artifact.path}` : ""}`);
+  }
+  console.log("\nCompletion is a claim; proof is the receipt.\n");
+}
+
+function cmdHelp() {
+  console.log(`\n${GLYPH.mark}  HII COMMAND MAP\n`);
+  console.log("  hii                         open the interactive HII terminal");
+  console.log("  hii chat                    explicitly open the interactive terminal");
+  console.log("  hii now [--json]            same snapshot, script-friendly");
+  console.log("  hii task <intent>           capture a bounded task in the local board");
+  console.log("  hii work [--json]           active tasks and governed agent work");
+  console.log("  hii proof [receipt-id]      inspect logs, artifacts, and receipts");
+  console.log("  hii board | jobs | context  detailed state surfaces");
+  console.log("  hii codex run <prompt>      managed run through HII daemon");
+  console.log("  hii skill report            write a post-verification action receipt");
+  console.log("\n  Boundary: HII captures intent and proof locally. Execution remains explicitly\n  operator-controlled; shipping, pushing, publishing, and payment are never implicit.\n");
+}
+
 function cmdKnowledge(args) {
   const sub = args[0] || "status";
   if (sub === "check") {
@@ -2135,6 +2308,32 @@ function cmdShip(args) {
 
 const [cmd, ...rest] = process.argv.slice(2);
 switch (cmd) {
+  case undefined:
+    if (process.stdin.isTTY && process.stdout.isTTY) cmdChat(rest);
+    else cmdNow(rest);
+    break;
+  case "chat":
+    cmdChat(rest);
+    break;
+  case "now":
+    cmdNow(rest);
+    break;
+  case "help":
+  case "--help":
+  case "-h":
+    cmdHelp();
+    break;
+  case "task":
+  case "capture":
+    cmdTask(rest);
+    break;
+  case "work":
+    cmdWork(rest);
+    break;
+  case "proof":
+  case "receipt":
+    cmdProof(rest);
+    break;
   case "check":
     process.exit(cmdCheck() ? 0 : 1);
   case "ship": cmdShip(rest); break;
@@ -2215,6 +2414,8 @@ switch (cmd) {
 
 usage: hii <command>
 
+  chat                open the full-screen conversational HII terminal
+  now [--json]        show the static control-plane snapshot
   console [--open]    show or open the local HII console
   terminal [--open]   compatibility alias for the local HII console
   health [--text]     compatibility alias for status

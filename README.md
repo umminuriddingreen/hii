@@ -86,6 +86,36 @@ git status --short
 Live command, repository, process, and runtime evidence wins over cached
 summaries.
 
+## Terminal Control Plane
+
+The `hii` command is a classical, Unicode-first terminal surface for the same
+governed workflow—not a generic agent chat shell. In a terminal, running it
+without arguments opens the full-screen conversational interface. In a pipe or
+script it safely falls back to a static snapshot instead of waiting for input.
+
+```sh
+hii
+hii chat
+hii now
+hii task "Add source provenance to the import receipt" --coordinate /Users/ummi/hii
+hii work
+hii proof
+```
+
+The TUI provides an animated Unicode state mark, a persistent multiline
+composer, history, an editable follow-up queue, managed-run progress, and
+slash commands such as `/now`, `/work`, `/proof`, `/status`, `/stop`, and
+`/help`. Set `HII_MOTION=off` for a steady reduced-motion display.
+
+`hii task` captures intent locally as a board task. `hii work` shows active
+human and agent work. `hii proof` makes receipts, logs, and artifacts visible
+before a completion claim is trusted. Scriptable equivalents remain available
+through `hii now --json` and `hii work --json`.
+
+Execution is still explicit: use `hii codex run <prompt>` only to queue a
+managed local run, then inspect its proof. The CLI never infers permission to
+ship, push, publish, spend, or contact anyone.
+
 ## Verified-Work Loop
 
 Every serious workflow should close this loop:
