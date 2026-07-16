@@ -277,6 +277,10 @@ html {
 
 .hii-investor-page * { box-sizing: border-box; }
 .hii-investor-page ::selection { background: var(--investor-citrus); color: var(--investor-ink); }
+.hii-investor-page a:focus-visible {
+  outline: 3px solid var(--investor-blue);
+  outline-offset: 4px;
+}
 
 .hii-investor-nav {
   position: relative;
