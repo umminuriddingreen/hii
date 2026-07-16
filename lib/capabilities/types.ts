@@ -7,7 +7,8 @@ export type CapabilityRuntime =
   | 'supabase-flow'
   | 'chrome-extension'
   | 'ollama'
-  | 'cloudflare-worker';
+  | 'cloudflare-worker'
+  | 'webgl';
 
 export type CapabilityVisibility = 'local' | 'authenticated' | 'public';
 

@@ -51,6 +51,8 @@ type DaemonSnapshot = {
   instances: DaemonInstance[];
   events: DaemonEvent[];
   runs: DaemonRun[];
+  rawOutput: string;
+  rawOutputPath: string;
 };
 
 type DaemonButtonProps = {
@@ -81,6 +83,8 @@ export function DaemonButton({ onPin }: DaemonButtonProps) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [prompt, setPrompt] = useState('');
+  const [view, setView] = useState<'raw' | 'feed'>('raw');
+  const [actionOutput, setActionOutput] = useState('');
 
   const refresh = useCallback(async () => {
     try {
@@ -111,6 +115,9 @@ export function DaemonButton({ onPin }: DaemonButtonProps) {
         if (!res.ok) throw new Error(String(res.status));
         const data = await res.json();
         if (data.snapshot) setSnapshot(data.snapshot as DaemonSnapshot);
+        const stdout = typeof data.result?.stdout === 'string' ? data.result.stdout : '';
+        const stderr = typeof data.result?.stderr === 'string' ? data.result.stderr : '';
+        setActionOutput([`$ hiid ${action}`, stdout, stderr].filter(Boolean).join('\n'));
         setError(null);
       } catch {
         setError('action failed');
@@ -126,6 +133,8 @@ export function DaemonButton({ onPin }: DaemonButtonProps) {
   const recent = useMemo(() => snapshot?.events.slice(0, 18) ?? [], [snapshot]);
   const instances = useMemo(() => snapshot?.instances.slice(0, 16) ?? [], [snapshot]);
   const runs = useMemo(() => snapshot?.runs.slice(0, 8) ?? [], [snapshot]);
+  const ownedCount = useMemo(() => snapshot?.instances.filter((instance) => instance.owned).length ?? 0, [snapshot]);
+  const observedCount = useMemo(() => snapshot?.instances.filter((instance) => !instance.owned).length ?? 0, [snapshot]);
 
   return (
     <div data-workspace-ui className="absolute right-5 top-4 z-50">
@@ -144,13 +153,17 @@ export function DaemonButton({ onPin }: DaemonButtonProps) {
       {open && (
         <div
           onPointerDown={(event) => event.stopPropagation()}
-          className="mt-2 flex max-h-[calc(100vh-96px)] w-[min(520px,calc(100vw-40px))] flex-col overflow-hidden rounded-lg bg-white shadow-[0_0_0_1px_rgba(23,23,23,0.12),0_18px_70px_rgba(23,23,23,0.18)]"
+          className="mt-2 flex max-h-[calc(100vh-96px)] w-[min(720px,calc(100vw-40px))] flex-col overflow-hidden rounded-lg bg-white shadow-[0_0_0_1px_rgba(23,23,23,0.12),0_18px_70px_rgba(23,23,23,0.18)]"
         >
           <div className="flex items-center justify-between border-b border-neutral-900/10 px-4 py-3">
             <div>
               <div className="font-mono text-[12px] font-semibold text-[var(--hii-graphite)]">HII daemon</div>
               <div className="mt-0.5 font-mono text-[10px] text-neutral-400">
                 {snapshot?.alive ? `pid ${snapshot.status.pid}` : error || 'stopped'} · {snapshot?.status.autonomy ?? 'reversible-local'}
+              </div>
+              <div className="mt-1 flex items-center gap-2 font-mono text-[9px] text-neutral-400">
+                <span className="text-emerald-600">{ownedCount} managed</span>
+                <span>{observedCount} observe-only</span>
               </div>
             </div>
             <div className="flex gap-1">
@@ -187,7 +200,7 @@ export function DaemonButton({ onPin }: DaemonButtonProps) {
             ))}
           </div>
 
-          <div className="scroll grid min-h-0 flex-1 grid-cols-[190px_1fr] overflow-auto">
+          <div className="scroll grid min-h-0 flex-1 grid-cols-[230px_1fr] overflow-auto">
             <div className="border-r border-neutral-900/10 p-3">
               <div className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">instances</div>
               <div className="mt-2 space-y-1.5">
@@ -239,8 +252,18 @@ export function DaemonButton({ onPin }: DaemonButtonProps) {
                     {runs.map((run) => (
                       <div key={run.id} className="rounded-md bg-neutral-50 px-2.5 py-2">
                         <div className="truncate text-[11px] text-neutral-700">{run.title || run.prompt}</div>
-                        <div className="mt-0.5 font-mono text-[9px] text-neutral-400">
-                          {run.status} · {timeLabel(run.updatedAt)}
+                        <div className="mt-0.5 flex items-center justify-between gap-2 font-mono text-[9px] text-neutral-400">
+                          <span>{run.status} · {timeLabel(run.updatedAt)}</span>
+                          {['queued', 'running'].includes(run.status) && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => act('codex.stop', { id: run.id })}
+                              className="text-rose-500 hover:text-rose-700 disabled:opacity-40"
+                            >
+                              stop
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -249,40 +272,62 @@ export function DaemonButton({ onPin }: DaemonButtonProps) {
               )}
             </div>
 
-            <div className="p-3">
-              <div className="flex items-center justify-between">
-                <div className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">live feed</div>
-                <button
-                  type="button"
-                  onClick={refresh}
-                  className="font-mono text-[10px] text-neutral-400 hover:text-[var(--hii-electric-blue)]"
-                >
-                  refresh
-                </button>
+            <div className="flex min-h-0 flex-col p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex rounded-md bg-neutral-100 p-0.5 font-mono text-[9px]">
+                  {(['raw', 'feed'] as const).map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => setView(item)}
+                      className={`rounded px-2 py-1 ${view === item ? 'bg-white text-neutral-800 shadow-sm' : 'text-neutral-400'}`}
+                    >
+                      {item === 'raw' ? 'raw output' : 'event feed'}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex min-w-0 items-center gap-3">
+                  {snapshot?.rawOutputPath && view === 'raw' && (
+                    <span className="max-w-[190px] truncate font-mono text-[8px] text-neutral-300">{snapshot.rawOutputPath}</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={refresh}
+                    className="shrink-0 font-mono text-[10px] text-neutral-400 hover:text-[var(--hii-electric-blue)]"
+                  >
+                    refresh
+                  </button>
+                </div>
               </div>
-              <div className="mt-2 space-y-2">
-                {recent.length === 0 && <div className="font-mono text-[11px] text-neutral-400">no daemon events yet</div>}
-                {recent.map((event) => (
-                  <div key={event.id} className="group rounded-md border border-neutral-900/10 px-3 py-2">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate font-mono text-[10px] text-neutral-400">
-                          {timeLabel(event.ts)} · {event.type} {event.status ? `· ${event.status}` : ''}
+              {view === 'raw' ? (
+                <pre data-testid="hii-daemon-raw-output" className="mt-2 min-h-[280px] flex-1 overflow-auto rounded-lg bg-[#111820] p-3 font-mono text-[10px] leading-relaxed text-[#c6d2dc] shadow-inner">
+                  {[actionOutput, snapshot?.rawOutput].filter(Boolean).join('\n\n') || 'No daemon output yet. Start hiid or refresh after the next daemon tick.'}
+                </pre>
+              ) : (
+                <div className="mt-2 space-y-2 overflow-auto">
+                  {recent.length === 0 && <div className="font-mono text-[11px] text-neutral-400">no daemon events yet</div>}
+                  {recent.map((event) => (
+                    <div key={event.id} className="group rounded-md border border-neutral-900/10 px-3 py-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate font-mono text-[10px] text-neutral-400">
+                            {timeLabel(event.ts)} · {event.type} {event.status ? `· ${event.status}` : ''}
+                          </div>
+                          <div className="mt-1 text-[12px] leading-snug text-neutral-700">{event.text || event.target || event.type}</div>
+                          {event.loop && <div className="mt-1 font-mono text-[9px] text-neutral-400">{event.loop}</div>}
                         </div>
-                        <div className="mt-1 text-[12px] leading-snug text-neutral-700">{event.text || event.target || event.type}</div>
-                        {event.loop && <div className="mt-1 font-mono text-[9px] text-neutral-400">{event.loop}</div>}
+                        <button
+                          type="button"
+                          onClick={() => onPin(event)}
+                          className="shrink-0 rounded-md px-1.5 py-1 font-mono text-[9px] text-neutral-300 opacity-0 hover:bg-neutral-50 hover:text-[var(--hii-electric-blue)] group-hover:opacity-100"
+                        >
+                          pin
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => onPin(event)}
-                        className="shrink-0 rounded-md px-1.5 py-1 font-mono text-[9px] text-neutral-300 opacity-0 hover:bg-neutral-50 hover:text-[var(--hii-electric-blue)] group-hover:opacity-100"
-                      >
-                        pin
-                      </button>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

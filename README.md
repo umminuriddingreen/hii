@@ -35,7 +35,7 @@ selected project
 ```
 
 The knowledge and Context Dock loop is not yet complete. Existing boards, console, daemon, jobs,
-capabilities, bridge, voice, packs, link, credit, exchange, and Termite
+capabilities, bridge, packs, link, credit, exchange, and Termite
 surfaces are implementation history or substrate. They are not permission to
 widen the Context Dock 0.1 release into a marketplace, AI chat product,
 decentralized compute network, geometry platform, or personal-data harvester.
@@ -175,6 +175,9 @@ does not require the source repository to launch.
 hii check
 npm run hii:sdk:check
 npm run hii:skills:check
+npm run hii:knowledge:check
+npm run hii:windows:check
+npm run hii:workspace:check
 npm run build
 npm run build:tauri
 hii health --text

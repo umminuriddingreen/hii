@@ -16,13 +16,10 @@ const INSTANCES = path.join(DAEMON_DIR, "instances.json");
 const STATUS = path.join(DAEMON_DIR, "status.json");
 const PID = path.join(DAEMON_DIR, "daemon.pid");
 const LOG = path.join(DAEMON_DIR, "daemon.log");
-const VOICE_STATUS = path.join(RUNTIME, "voice", "status.json");
-const VOICE_PID = path.join(RUNTIME, "voice", "daemon.pid");
 const CODEX_INDEX = path.join(RUNTIME, "codex", "index.json");
 
 const OWNED_PATTERNS = [
   `${ROOT}/aii/daemon/hiid.mjs`,
-  `${ROOT}/scripts/hii-voice-daemon.mjs`,
   `${ROOT}/server.mjs`,
   `${ROOT}/node_modules/.bin/next`,
   "codex exec"
@@ -437,23 +434,6 @@ function discoverProcesses() {
   return r.stdout.split("\n").map(parseProcessLine).filter(Boolean).slice(0, 80);
 }
 
-function voiceInstance() {
-  const status = safeReadJson(VOICE_STATUS, {});
-  const pid = Number(fs.existsSync(VOICE_PID) ? fs.readFileSync(VOICE_PID, "utf8").trim() : "");
-  const alive = Boolean(status?.alive) || pidAlive(pid);
-  return {
-    id: "voice:hii",
-    type: "voice",
-    title: "HII Voice",
-    pid: alive && pid ? pid : null,
-    status: alive ? "running" : "stopped",
-    owned: true,
-    autonomy: "reversible-local",
-    model: status?.status?.model ?? status?.model ?? "local",
-    heartbeatAt: status?.status?.updatedAt ?? status?.updatedAt ?? null
-  };
-}
-
 function runFiles() {
   try {
     return fs.readdirSync(RUNS_DIR)
@@ -516,7 +496,6 @@ function instanceSnapshot() {
       heartbeatAt: now(),
       coordinate: DAEMON_DIR
     },
-    voiceInstance(),
     ...codexInstances(),
     ...processInstances.filter((item) => item.pid !== process.pid)
   ];

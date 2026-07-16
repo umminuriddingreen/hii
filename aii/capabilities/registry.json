@@ -135,67 +135,20 @@
     "trustLevel": "first-party"
   },
   {
-    "id": "hii.voice.daemon",
-    "name": "Always-On HII Voice Daemon",
-    "owner": "hii",
-    "runtime": "local-cli",
-    "summary": "Listen for the local wake phrase \"hii\", route speech through a local Ollama model, speak conversational system updates, and persist voice memories plus skill proposals.",
-    "inputs": [
-      "microphone speech",
-      "wake phrase",
-      "text test prompt",
-      "local HII runtime context"
-    ],
-    "outputs": [
-      "spoken response",
-      "voice transcript",
-      "memory candidate",
-      "skill proposal",
-      "operational graph event",
-      "loop note"
-    ],
-    "permissions": [
-      "local-only",
-      "microphone permission",
-      "macOS speech recognition permission",
-      "append-only runtime files",
-      "local Ollama request",
-      "speak via macOS say",
-      "no external publish",
-      "no destructive actions",
-      "approval gate for execution"
-    ],
-    "visibility": "local",
-    "costModel": {
-      "type": "free"
-    },
-    "evidence": [
-      "hii voice start",
-      "hii voice ask",
-      "scripts/hii-voice-daemon.mjs",
-      "scripts/hii-voice-listener.swift",
-      "~/.hii/voice/events.jsonl",
-      "~/.hii/voice/memory.jsonl",
-      "~/.hii/voice/skill-proposals.jsonl"
-    ],
-    "status": "partial",
-    "trustLevel": "operator-reviewed"
-  },
-  {
     "id": "hii.daemon.instances",
     "name": "HII Daemon Instance Supervisor",
     "owner": "hii",
     "runtime": "local-cli",
-    "summary": "Run hiid as the local-first persistent supervisor for HII daemon instances, managed Codex runs, live action feed, voice state, and HII-owned process visibility.",
+    "summary": "Run hiid as the local-first persistent supervisor for HII daemon instances, managed Codex runs, redacted raw daemon output, live action feed, and HII-owned process visibility.",
     "inputs": [
       "daemon command",
       "managed Codex prompt",
       "local process snapshot",
-      "voice status",
       "runtime event logs"
     ],
     "outputs": [
       "daemon status",
+      "redacted raw stdout and stderr tail",
       "instance registry",
       "live feed event",
       "managed Codex run receipt",
@@ -223,7 +176,8 @@
       "aii/daemon/hiid.mjs",
       "/api/daemon",
       "~/.hii/daemon/status.json",
-      "~/.hii/daemon/events.jsonl"
+      "~/.hii/daemon/events.jsonl",
+      "~/.hii/daemon/daemon.log"
     ],
     "status": "ready",
     "trustLevel": "first-party"
@@ -880,6 +834,88 @@
     "trustLevel": "experimental"
   },
   {
+    "id": "hii.workspace.creative_canvas",
+    "name": "Create on the HII Spatial Canvas",
+    "owner": "hii",
+    "runtime": "next-route",
+    "summary": "Place editable text, paste and move durable media, sketch vector ink, crop and extract images, and open managed HII chat directly in the spatial workspace.",
+    "inputs": [
+      "typed canvas text",
+      "local clipboard or dropped media",
+      "pointer-based pen or marker strokes",
+      "non-destructive crop insets",
+      "explicit managed chat message"
+    ],
+    "outputs": [
+      "persisted movable workspace nodes",
+      "local workspace media assets",
+      "editable vector ink",
+      "cropped image extraction or PNG download",
+      "inspectable managed Codex response"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "write bounded assets under ~/.hii/workspace/assets",
+      "no automatic external upload or publication",
+      "explicit Send action before prompt or attachment paths reach the configured Codex provider",
+      "local export requires an explicit user click"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "provider"
+    },
+    "evidence": [
+      "components/workspace/HiiRoot.tsx",
+      "components/workspace/nodes/ChatNode.tsx",
+      "components/workspace/nodes/CreativeNodes.tsx",
+      "app/api/workspace/assets",
+      "app/api/daemon/runs",
+      "~/.hii/workspace/workspace.json",
+      "npm run build"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.scene.sound-field",
+    "name": "Render Governed Sound Field Object",
+    "owner": "hii",
+    "runtime": "webgl",
+    "summary": "Render measured or explicitly modeled sound-level readings as an interactive, provenance-aware WebGL object in the HII spatial workspace.",
+    "inputs": [
+      "named spatial sound points",
+      "dBA readings or modeled values",
+      "time and scenario metadata",
+      "data provenance"
+    ],
+    "outputs": [
+      "interactive HII sound-field object",
+      "dBA scale and selected-point detail",
+      "persisted workspace object metadata"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "render local WebGL",
+      "write one bounded workspace object through the HII workspace API",
+      "label modeled data visibly",
+      "no microphone capture",
+      "no external publish"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "components/workspace/nodes/SouthBerkeleySoundFieldNode.tsx",
+      "lib/workspace/types.ts",
+      "lib/workspace/ingest.ts",
+      "~/.hii/workspace/workspace.json",
+      "npm run build"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
     "id": "hii.knowledge.workspace",
     "name": "HII Local Knowledge Workspace",
     "owner": "aii",
@@ -924,6 +960,44 @@
     "trustLevel": "first-party"
   },
   {
+    "id": "hii.window-state.backend",
+    "name": "Persist Scrollable HII Window State",
+    "owner": "hii",
+    "runtime": "next-route",
+    "summary": "Persist per-window bounds, scroll offsets, workspace viewport, focus, lifecycle state, and revision history for resumable HII windows with cursor-paginated reads.",
+    "inputs": [
+      "stable window and workspace identifiers",
+      "window bounds and lifecycle status",
+      "scroll and spatial viewport offsets",
+      "optional optimistic base revision"
+    ],
+    "outputs": [
+      "restorable window state",
+      "cursor-paginated window collection",
+      "revision conflict response",
+      "local window-state audit history"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "read and write bounded window-state tables in ~/.hii/hii.db",
+      "secret-like value redaction",
+      "no upload, publish, sync, or external transmission"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "/api/workspace/windows",
+      "lib/server/hii-window-state.ts",
+      "scripts/hii-window-state-smoke.mjs",
+      "npm run hii:windows:check",
+      "npm run build"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
     "id": "hii.config.read",
     "name": "Read HII Surface Config",
     "owner": "aii",
@@ -949,5 +1023,71 @@
     ],
     "status": "ready",
     "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.config.control",
+    "name": "Control HII Surface Config",
+    "owner": "aii",
+    "runtime": "next-route",
+    "summary": "Enable or pause a known HII surface and choose the default home surface through AII-owned hiid configuration authority.",
+    "inputs": [
+      "known HII surface id",
+      "toggle or home action"
+    ],
+    "outputs": [
+      "updated surface config json",
+      "config.updated daemon event"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "allowlisted surfaces.<id>.enabled or defaults.homepage path only",
+      "write through hiid config set",
+      "no direct config file writes from the HII client"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "components/workspace/CommandBar.tsx",
+      "app/api/config/route.ts",
+      "lib/server/hii-daemon.ts",
+      "aii/daemon/hiid.mjs"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.skills.start",
+    "name": "Start Registered HII Skill",
+    "owner": "aii",
+    "runtime": "next-route",
+    "summary": "Start any operator-reviewed registered HII skill as a bounded hiid-managed Codex run with the skill bundle as its execution contract.",
+    "inputs": [
+      "registered HII skill id"
+    ],
+    "outputs": [
+      "queued managed Codex run id",
+      "daemon run log and receipt"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "registered skills only",
+      "operator-reviewed bundle required",
+      "no legacy manifest shell execution",
+      "no push publish spend message delete or irreversible action without separate authority"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "provider"
+    },
+    "evidence": [
+      "components/workspace/CommandBar.tsx",
+      "app/api/skills/route.ts",
+      "lib/server/hii-skills.ts",
+      "/api/daemon/runs"
+    ],
+    "status": "ready",
+    "trustLevel": "operator-reviewed"
   }
 ]

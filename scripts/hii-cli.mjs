@@ -27,8 +27,6 @@ const MONEY_IDEAS = path.join(MONEY_DIR, "ideas.jsonl");
 const MONEY_OFFERS_DIR = path.join(MONEY_DIR, "offers");
 const BOARD_DIR = path.join(RUNTIME, "board");
 const BOARD_TASKS = path.join(BOARD_DIR, "tasks.jsonl");
-const VOICE_DIR = path.join(RUNTIME, "voice");
-const VOICE_DAEMON = path.join(ROOT, "scripts", "hii-voice-daemon.mjs");
 const HIID = path.join(ROOT, "aii", "daemon", "hiid.mjs");
 const LINK_POSTS = path.join(ROOT, ".hii", "link-posts.jsonl");
 const LINK_CACHE = path.join(ROOT, ".hii", "link-cache.jsonl");
@@ -375,9 +373,6 @@ function runtimePointers() {
     fileExistsSummary(path.join(RUNTIME, "daemon", "instances.json")),
     fileExistsSummary(path.join(RUNTIME, "daemon", "events.jsonl")),
     fileExistsSummary(path.join(RUNTIME, "codex", "index.json")),
-    fileExistsSummary(path.join(VOICE_DIR, "status.json")),
-    fileExistsSummary(path.join(VOICE_DIR, "memory.jsonl")),
-    fileExistsSummary(path.join(VOICE_DIR, "skill-proposals.jsonl")),
     fileExistsSummary(path.join(RUNTIME, "skills", "actions.jsonl")),
     fileExistsSummary(path.join(RUNTIME, "skills", "registry.json"))
   ];
@@ -537,6 +532,38 @@ function updateBoardTask(idOrPrefix, patch) {
   if (patch.tags !== undefined) cleanPatch.tags = parseCsvTags(patch.tags);
   appendBoardEvent({ type: "updated", id: task.id, patch: cleanPatch, ts: now });
   return { ...task, ...cleanPatch };
+}
+
+function boardDedupeKey(task) {
+  return [task.title, task.owner, task.coordinate]
+    .map((value) => String(value ?? "").trim().toLowerCase().replace(/\s+/g, " "))
+    .join("\u0000");
+}
+
+function dedupeBoardTasks({ dryRun = false } = {}) {
+  const groups = new Map();
+  for (const task of boardTasks()) {
+    const key = boardDedupeKey(task);
+    const group = groups.get(key) ?? [];
+    group.push(task);
+    groups.set(key, group);
+  }
+
+  const reconciled = [];
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const ordered = [...group].sort((a, b) =>
+      String(b.updatedAt ?? b.createdAt ?? "").localeCompare(String(a.updatedAt ?? a.createdAt ?? ""))
+    );
+    const keep = ordered[0];
+    for (const duplicate of ordered.slice(1)) {
+      const note = `Archived duplicate of ${keep.id.slice(0, 8)} during append-only board reconciliation.`;
+      const notes = [duplicate.notes, note].filter(Boolean).join("\n").slice(0, 2000);
+      if (!dryRun) updateBoardTask(duplicate.id, { lane: "done", notes });
+      reconciled.push({ duplicate, keep });
+    }
+  }
+  return reconciled;
 }
 
 function classifyLoopPolicy(action) {
@@ -861,12 +888,10 @@ function agentCommandCatalog() {
     { command: "hii feed --follow", purpose: "Read the daemon action feed for live HII work." },
     { command: "hii instances list", purpose: "List HII-managed and observed daemon instances." },
     { command: "hii codex run <prompt>", purpose: "Queue a managed HII Codex run through hiid with receipts and logs." },
-    { command: "hii voice start", purpose: "Start the local HII voice daemon: wake phrase, local LLM, spoken updates, memories, and skill proposals." },
-    { command: "hii voice ask <prompt>", purpose: "Send a text prompt through the same HII voice loop for testing without microphone input." },
-    { command: "hii voice status", purpose: "Show voice daemon pid, state, model, log, memory, and skill proposal coordinates." },
     { command: "hii board", purpose: "Show the local kanban/todo board grouped by backlog, next, doing, blocked, and done." },
     { command: "hii board add <title>", purpose: "Create a local task with owner, coordinate, priority, tags, and notes." },
     { command: "hii board move <id> <lane>", purpose: "Move a task between kanban lanes." },
+    { command: "hii board dedupe", purpose: "Archive duplicate open cards through append-only board events." },
     { command: "hii knowledge", purpose: "Show the local HII Knowledge Workspace and canonical database coordinate." },
     { command: "hii knowledge check", purpose: "Run the isolated notes, links, search, graph, history, lifecycle, and export smoke test." },
     { command: "hii money idea <idea>", purpose: "Use local models to turn a rough idea into a sellable offer and execution handoff." },
@@ -883,6 +908,7 @@ function agentCommandCatalog() {
     { command: "hii runner start --once", purpose: "Heartbeat, claim one whitelisted capability job, stream logs, and exit." },
     { command: "hii jobs", purpose: "List recent local capability jobs." },
     { command: "hii jobs reconcile", purpose: "Append local reconciliation receipts for completed Claude-backed HII agent jobs." },
+    { command: "hii jobs cancel <id> --reason <reason>", purpose: "Append a cancellation receipt for one stale local capability job." },
     { command: "hii doctor", purpose: "Run status plus registry doctor." },
     { command: "hii ship", purpose: "Typecheck and commit locally; does not push." },
     { command: "hii ship --push <message>", purpose: "Explicit external push; use only after user approval." },
@@ -1117,6 +1143,17 @@ function cmdBoard(args) {
     console.log(task.title);
     return;
   }
+  if (sub === "dedupe") {
+    const dryRun = args.includes("--dry-run");
+    const reconciled = dedupeBoardTasks({ dryRun });
+    console.log("HII board deduplication\n");
+    console.log(`mode:       ${dryRun ? "dry-run" : "append-only"}`);
+    console.log(`duplicates: ${reconciled.length}`);
+    for (const item of reconciled) {
+      console.log(`  ${item.duplicate.id.slice(0, 8)} -> done; keep ${item.keep.id.slice(0, 8)}  ${item.keep.title}`);
+    }
+    return;
+  }
   if (sub === "done") {
     const id = args[1];
     if (!id) {
@@ -1145,7 +1182,7 @@ function cmdBoard(args) {
     console.log(`updated ${task.id.slice(0, 8)}  ${task.title}`);
     return;
   }
-  console.error("usage: hii board [list|add|move|done|edit]");
+  console.error("usage: hii board [list|add|move|done|edit|dedupe]");
   process.exit(1);
 }
 
@@ -1208,6 +1245,10 @@ async function cmdJobs(args) {
     cmdJobsReconcile(args.slice(1));
     return;
   }
+  if (args[0] === "cancel") {
+    cmdJobsCancel(args.slice(1));
+    return;
+  }
   const limit = Number(args[0] ?? 20);
   const resolvedLimit = Number.isFinite(limit) ? limit : 20;
   const localJobs = localCapabilityJobsLatest().map((job) => ({ ...job, source: "local" }));
@@ -1246,6 +1287,68 @@ async function cmdJobs(args) {
     console.log(`  proof:   ${job.proofArtifacts?.length ?? 0}`);
     console.log("");
   }
+}
+
+function cmdJobsCancel(args) {
+  const idOrPrefix = args[0];
+  const reason = redactText(parseFlagValue(args, "--reason", "")).trim();
+  if (!idOrPrefix || !reason) {
+    console.error("usage: hii jobs cancel <job-id-prefix> --reason <reason>");
+    process.exit(1);
+  }
+  const matches = localCapabilityJobsLatest().filter((job) => String(job.id).startsWith(idOrPrefix));
+  if (matches.length !== 1) {
+    console.error(matches.length === 0 ? `job not found: ${idOrPrefix}` : `job id is ambiguous: ${idOrPrefix}`);
+    process.exit(1);
+  }
+  const job = matches[0];
+  if (["completed", "failed", "cancelled"].includes(String(job.status))) {
+    console.error(`job is already terminal: ${job.id} ${job.status}`);
+    process.exit(1);
+  }
+
+  const now = new Date().toISOString();
+  const entry = {
+    ...job,
+    status: "cancelled",
+    updatedAt: now,
+    logs: [
+      ...(Array.isArray(job.logs) ? job.logs : []),
+      `[${now}] cancelled by local operator: ${reason}`
+    ],
+    ledger: [
+      ...(Array.isArray(job.ledger) ? job.ledger : []),
+      {
+        id: randomUUID(),
+        jobId: job.id,
+        capabilityId: job.capabilityId,
+        actor: "hii",
+        type: "reconciliation",
+        summary: `Cancelled stale local job: ${reason}`,
+        createdAt: now
+      }
+    ],
+    proofArtifacts: [
+      ...(Array.isArray(job.proofArtifacts) ? job.proofArtifacts : []),
+      {
+        id: randomUUID(),
+        kind: "log",
+        label: "Local cancellation receipt",
+        summary: reason,
+        createdAt: now
+      }
+    ],
+    metadata: {
+      ...(job.metadata ?? {}),
+      cancelledAt: now,
+      cancelledBy: "local-operator",
+      cancellationReason: reason
+    }
+  };
+  appendJsonl(LOCAL_CAPABILITY_JOBS, entry);
+  console.log(`cancelled ${job.id}`);
+  console.log(`reason: ${reason}`);
+  console.log(`store:  ${LOCAL_CAPABILITY_JOBS}`);
 }
 
 function cmdJobsReconcile(args) {
@@ -2066,7 +2169,6 @@ switch (cmd) {
   case "terminal": cmdTerminal(rest); break;
   case "og": cmdOg(rest); break;
   case "loop": cmdLoop(rest); break;
-  case "voice": nodeScript(VOICE_DAEMON, rest.length ? rest : ["status"]); break;
   case "daemon": cmdDaemon(rest); break;
   case "instances": cmdInstances(rest); break;
   case "feed": cmdFeed(rest); break;
@@ -2125,6 +2227,7 @@ usage: hii <command>
   sdk status          run SDK contract smoke checks
   jobs [n]            list recent local capability jobs
   jobs reconcile      reconcile local HII agent jobs from Claude state
+  jobs cancel <id>    append cancellation receipt; requires --reason
   og [capture <msg>]  infer the operational graph and likely next path
   loop once [prompt]  propose next plan; waits for y/n before acting
   loop status         show latest user-proxy plan and notes
@@ -2136,14 +2239,11 @@ usage: hii <command>
   daemon feed         show recent daemon actions
   instances list      list daemon instances and observed processes
   feed [n]            show the HII live action feed
-  voice start         start the always-on local voice daemon
-  voice ask <prompt>  test the voice loop without microphone input
-  voice status        show daemon status, logs, memory, and skill coordinates
-  voice stop|logs     stop daemon or tail local voice logs
   board               show local kanban/todo board
   board add <title>   create a task with lane/priority/owner/coordinate
   board move <id> <lane>
                       move a task to backlog|next|doing|blocked|done
+  board dedupe        archive duplicate open cards; add --dry-run to preview
   money idea <idea>   turn a rough idea into a local offer brief
   money list [n]      list recent idea-to-offer receipts
   money show <id>     show a saved offer brief

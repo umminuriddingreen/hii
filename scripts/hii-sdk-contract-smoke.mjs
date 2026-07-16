@@ -19,7 +19,8 @@ const allowed = {
     "supabase-flow",
     "chrome-extension",
     "ollama",
-    "cloudflare-worker"
+    "cloudflare-worker",
+    "webgl"
   ]),
   visibility: new Set(["local", "authenticated", "public"]),
   status: new Set(["ready", "partial", "blocked", "planned"]),

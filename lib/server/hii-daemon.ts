@@ -3,6 +3,7 @@ import { execFile } from 'child_process';
 import { mkdir, readFile, readdir, writeFile } from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
+import { redactProcessLine } from '@/lib/server/hii-terminal';
 
 const execFileAsync = promisify(execFile);
 
@@ -14,6 +15,7 @@ const runsDir = path.join(daemonDir, 'runs');
 const statusPath = path.join(daemonDir, 'status.json');
 const instancesPath = path.join(daemonDir, 'instances.json');
 const eventsPath = path.join(daemonDir, 'events.jsonl');
+const daemonLogPath = path.join(daemonDir, 'daemon.log');
 const hiidScript = path.join(hiiRoot, 'aii', 'daemon', 'hiid.mjs');
 
 export type HiiDaemonEvent = {
@@ -104,6 +106,19 @@ async function readRuns(): Promise<HiiDaemonRun[]> {
   }
 }
 
+async function readDaemonOutput() {
+  try {
+    return (await readFile(daemonLogPath, 'utf8'))
+      .split('\n')
+      .slice(-320)
+      .map((line) => redactProcessLine(line))
+      .join('\n')
+      .trim();
+  } catch {
+    return '';
+  }
+}
+
 async function pidAlive(pid: number | null | undefined) {
   if (!pid) return false;
   try {
@@ -121,6 +136,7 @@ export async function getHiiDaemonSnapshot() {
   const events = (await readJsonl<HiiDaemonEvent>(eventsPath)).slice(-120).reverse();
   const runs = (await readRuns()).slice(0, 40);
   const alive = await pidAlive(typeof status.pid === 'number' ? status.pid : null);
+  const rawOutput = await readDaemonOutput();
 
   return {
     alive,
@@ -141,7 +157,9 @@ export async function getHiiDaemonSnapshot() {
     },
     instances: instancesDoc.instances ?? [],
     events,
-    runs
+    runs,
+    rawOutput,
+    rawOutputPath: daemonLogPath
   };
 }
 
@@ -157,6 +175,12 @@ export async function controlHiiDaemon(action: string, body: Record<string, unkn
     const id = typeof body.id === 'string' ? body.id.trim() : '';
     if (!id) throw new Error('Run id required.');
     args.push('codex', 'stop', id);
+  } else if (action === 'config.set') {
+    const configPath = typeof body.path === 'string' ? body.path.trim() : '';
+    if (!/^(?:surfaces\.[a-z0-9_-]+\.enabled|defaults\.homepage)$/.test(configPath)) {
+      throw new Error('Unsupported HII config path.');
+    }
+    args.push('config', 'set', configPath, JSON.stringify(body.value));
   } else {
     throw new Error(`Unsupported daemon action: ${action}`);
   }
@@ -169,9 +193,25 @@ export async function controlHiiDaemon(action: string, body: Record<string, unkn
   });
   return {
     action,
+    runId: action === 'codex.run' ? result.stdout.match(/codex-[a-z0-9-]+/i)?.[0] ?? null : null,
     stdout: result.stdout.trim(),
     stderr: result.stderr.trim()
   };
+}
+
+export async function getHiiDaemonRun(id: string) {
+  if (!/^codex-[a-z0-9-]+$/i.test(id)) return null;
+  const run = await readJson<HiiDaemonRun | null>(path.join(runsDir, `${id}.json`), null);
+  if (!run) return null;
+  let output = '';
+  if (run.log) {
+    try {
+      output = (await readFile(run.log, 'utf8')).slice(-120_000);
+    } catch {
+      /* the queued run may not have opened its log yet */
+    }
+  }
+  return { ...run, output };
 }
 
 export async function createDaemonFeedPin(event: HiiDaemonEvent) {
