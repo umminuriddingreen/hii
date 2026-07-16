@@ -1,7 +1,8 @@
 import 'server-only';
-import { mkdir, readFile, rename, writeFile } from 'fs/promises';
+import { mkdir, readFile } from 'fs/promises';
 import path from 'path';
 import { emptyWorkspace, normalizeWorkspace, type WorkspaceDoc } from '../workspace/types';
+import { atomicWriteFile } from './atomic-write';
 
 const workspaceDir = path.join(process.env.HII_RUNTIME_DIR || path.join(process.env.HOME || '.', '.hii'), 'workspace');
 const workspacePath = path.join(workspaceDir, 'workspace.json');
@@ -29,9 +30,7 @@ export async function readWorkspace(): Promise<WorkspaceDoc> {
 
 async function persistWorkspace(doc: WorkspaceDoc) {
   await mkdir(workspaceDir, { recursive: true });
-  const tmpPath = `${workspacePath}.tmp`;
-  await writeFile(tmpPath, `${JSON.stringify(doc, null, 2)}\n`, 'utf8');
-  await rename(tmpPath, workspacePath);
+  await atomicWriteFile(workspacePath, `${JSON.stringify(doc, null, 2)}\n`);
 }
 
 export async function writeWorkspace(raw: unknown): Promise<WorkspaceDoc> {

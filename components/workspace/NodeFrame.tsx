@@ -11,17 +11,24 @@ type NodeFrameProps = {
   onSelect: () => void;
   onCommit: (patch: Partial<WorkspaceNode>) => void;
   onClose: () => void;
+  onErase?: () => void;
   chromeless?: boolean;
   children: React.ReactNode;
 };
 
 const INTERACTIVE = 'input,textarea,select,iframe,video,audio,embed,a,button,.scroll,.xterm,[contenteditable]';
 
-export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, onClose, chromeless, children }: NodeFrameProps) {
+export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, onClose, onErase, chromeless, children }: NodeFrameProps) {
   const frameRef = useRef<HTMLDivElement | null>(null);
 
   const dragStart = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
+    if (onErase) {
+      e.stopPropagation();
+      e.preventDefault();
+      onErase();
+      return;
+    }
     onSelect();
     if ((e.target as Element).closest(INTERACTIVE)) {
       e.stopPropagation();
@@ -88,10 +95,12 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, 
       ref={frameRef}
       data-node-id={node.id}
       onPointerDown={dragStart}
-      className={`group absolute left-0 top-0 flex cursor-grab flex-col overflow-hidden rounded-lg bg-white active:cursor-grabbing ${
-        selected
-          ? 'shadow-[0_0_0_1px_var(--hii-electric-blue),0_8px_24px_rgba(23,23,23,0.08)]'
-          : 'shadow-[0_0_0_1px_rgba(23,23,23,0.12),0_4px_16px_rgba(23,23,23,0.05)]'
+      className={`group absolute left-0 top-0 flex cursor-grab flex-col rounded-lg active:cursor-grabbing ${chromeless ? 'overflow-visible bg-transparent' : 'overflow-hidden bg-white'} ${
+        chromeless
+          ? selected ? 'shadow-[0_0_0_1px_var(--hii-electric-blue)]' : ''
+          : selected
+            ? 'shadow-[0_0_0_1px_var(--hii-electric-blue),0_8px_24px_rgba(23,23,23,0.08)]'
+            : 'shadow-[0_0_0_1px_rgba(23,23,23,0.12),0_4px_16px_rgba(23,23,23,0.05)]'
       }`}
       style={{
         transform: `translate(${node.x}px, ${node.y}px)`,
@@ -112,6 +121,11 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, 
           >
             ×
           </button>
+        </div>
+      )}
+      {chromeless && selected && (
+        <div data-node-drag-handle className="absolute -left-2 -top-2 z-20 grid h-5 w-5 select-none place-items-center rounded-full bg-white font-mono text-[10px] text-neutral-500 shadow-[0_0_0_1px_rgba(23,23,23,0.16),0_3px_10px_rgba(23,23,23,0.12)]" title="Drag">
+          ⠿
         </div>
       )}
       <div className="relative min-h-0 flex-1">{children}</div>

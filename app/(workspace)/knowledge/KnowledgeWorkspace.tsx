@@ -81,7 +81,7 @@ function MarkdownPreview({ content, onLink }: { content: string; onLink: (title:
     }
     const heading = line.match(/^(#{1,6})\s+(.+)$/);
     if (heading) {
-      const Tag = `h${Math.min(heading[1].length + 1, 6)}` as keyof JSX.IntrinsicElements;
+      const Tag = `h${Math.min(heading[1].length + 1, 6)}` as 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
       output.push(<Tag key={index} className={`hii-md-heading hii-md-h${heading[1].length}`}>{inlineMarkdown(heading[2], onLink)}</Tag>);
       return;
     }

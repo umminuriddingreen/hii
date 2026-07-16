@@ -64,6 +64,7 @@ export function useCamera(onSettle?: () => void) {
     const el = viewportRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
+      if ((e.target as Element).closest('[data-workspace-ui]')) return;
       if (!e.ctrlKey && !e.metaKey && (e.target as Element).closest('.scroll, .xterm, iframe')) return;
       e.preventDefault();
       const c = cam.current;

@@ -21,23 +21,49 @@ export function useWorkspace(getViewport: () => WorkspaceViewport): WorkspaceApi
   const [initialViewport, setInitialViewport] = useState<WorkspaceViewport | null>(null);
   const nextZ = useRef(1);
   const nodesRef = useRef<WorkspaceNode[]>([]);
+  const syncedAt = useRef('');
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   nodesRef.current = nodes;
 
   const persist = useCallback(async () => {
-    const doc: WorkspaceDoc = {
-      version: 1,
-      updatedAt: new Date().toISOString(),
-      viewport: getViewport(),
-      nextZ: nextZ.current,
-      nodes: nodesRef.current.filter((node) => !node.payload.ephemeral || node.type !== 'image')
-    };
     try {
-      await fetch('/api/workspace', {
+      const localNodes = nodesRef.current.filter((node) => !node.payload.ephemeral || node.type !== 'image');
+      const remoteResponse = await fetch('/api/workspace', { cache: 'no-store' });
+      const remote = remoteResponse.ok ? normalizeWorkspace(await remoteResponse.json()) : null;
+      const merged = new Map(localNodes.map((node) => [node.id, node]));
+
+      if (remote) {
+        for (const incoming of remote.nodes) {
+          const local = merged.get(incoming.id);
+          if (local) {
+            if (incoming.updatedAt > local.updatedAt) merged.set(incoming.id, incoming);
+          } else if (incoming.updatedAt > syncedAt.current) {
+            // Preserve objects created by another HII window after this client
+            // last synchronized. Older missing objects may have been deleted here.
+            merged.set(incoming.id, incoming);
+          }
+        }
+        nextZ.current = Math.max(nextZ.current, remote.nextZ);
+      }
+
+      const nodesToWrite = [...merged.values()];
+      const doc: WorkspaceDoc = {
+        version: 1,
+        updatedAt: new Date().toISOString(),
+        viewport: getViewport(),
+        nextZ: nextZ.current,
+        nodes: nodesToWrite
+      };
+      const response = await fetch('/api/workspace', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(doc)
       });
+      if (response.ok) {
+        const result = (await response.json()) as { updatedAt?: string };
+        syncedAt.current = result.updatedAt || doc.updatedAt;
+        setNodes(nodesToWrite);
+      }
     } catch {
       /* local-only surface; retry on next mutation */
     }
@@ -53,6 +79,7 @@ export function useWorkspace(getViewport: () => WorkspaceViewport): WorkspaceApi
       const res = await fetch('/api/workspace', { cache: 'no-store' });
       if (!res.ok) return;
       const doc = normalizeWorkspace(await res.json());
+      syncedAt.current = doc.updatedAt;
       nextZ.current = Math.max(nextZ.current, doc.nextZ);
       if (initial) {
         setNodes(doc.nodes);

@@ -1,5 +1,6 @@
 'use client';
 
+import { useRef, useState } from 'react';
 import type { WorkspaceNode } from '../../../lib/workspace/types';
 
 type NodeBodyProps = {
@@ -87,9 +88,24 @@ export function FileNode({ node }: NodeBodyProps) {
   );
 }
 
-export function ImageNode({ node }: NodeBodyProps) {
+type CropInset = { top: number; right: number; bottom: number; left: number };
+
+function normalizeCrop(value: unknown): CropInset {
+  const raw = value && typeof value === 'object' ? value as Partial<CropInset> : {};
+  return {
+    top: Math.min(45, Math.max(0, Number(raw.top) || 0)),
+    right: Math.min(45, Math.max(0, Number(raw.right) || 0)),
+    bottom: Math.min(45, Math.max(0, Number(raw.bottom) || 0)),
+    left: Math.min(45, Math.max(0, Number(raw.left) || 0))
+  };
+}
+
+export function ImageNode({ node, onPayload }: NodeBodyProps) {
   const url = node.payload.url;
   const isSessionOnly = node.payload.ephemeral === true;
+  const [editingCrop, setEditingCrop] = useState(false);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const crop = normalizeCrop(node.payload.crop);
   if (typeof url !== 'string' || !url) {
     return (
       <div className="grid h-full place-items-center px-4 text-center font-mono text-[11px] text-neutral-400">
@@ -97,10 +113,66 @@ export function ImageNode({ node }: NodeBodyProps) {
       </div>
     );
   }
+
+  const renderCrop = (action: 'extract' | 'export') => {
+    const image = imageRef.current;
+    if (!image?.naturalWidth || !image.naturalHeight) return;
+    const sourceX = Math.round(image.naturalWidth * crop.left / 100);
+    const sourceY = Math.round(image.naturalHeight * crop.top / 100);
+    const sourceWidth = Math.max(1, Math.round(image.naturalWidth * (100 - crop.left - crop.right) / 100));
+    const sourceHeight = Math.max(1, Math.round(image.naturalHeight * (100 - crop.top - crop.bottom) / 100));
+    const canvas = document.createElement('canvas');
+    canvas.width = sourceWidth;
+    canvas.height = sourceHeight;
+    canvas.getContext('2d')?.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, sourceWidth, sourceHeight);
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const base = String(node.payload.name || 'image').replace(/\.[^.]+$/, '');
+      const fileName = `${base}-crop.png`;
+      if (action === 'extract') {
+        window.dispatchEvent(new CustomEvent('hii:media-file', { detail: new File([blob], fileName, { type: 'image/png' }) }));
+        return;
+      }
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = fileName;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+    }, 'image/png');
+  };
+
   return (
-    <div className="relative h-full w-full">
-      <img src={url} alt={String(node.payload.name ?? '')} draggable={false} className="h-full w-full object-contain" />
+    <div className="relative h-full w-full overflow-hidden bg-[linear-gradient(45deg,#f7f7f5_25%,transparent_25%),linear-gradient(-45deg,#f7f7f5_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#f7f7f5_75%),linear-gradient(-45deg,transparent_75%,#f7f7f5_75%)] bg-[length:16px_16px]">
+      <img
+        ref={imageRef}
+        src={url}
+        alt={String(node.payload.name ?? '')}
+        draggable={false}
+        className="h-full w-full object-contain"
+        style={{ clipPath: `inset(${crop.top}% ${crop.right}% ${crop.bottom}% ${crop.left}%)` }}
+      />
       <SessionBadge show={isSessionOnly} />
+      <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 gap-1 rounded-full bg-neutral-950/85 p-1 opacity-0 shadow-lg backdrop-blur transition-opacity group-hover:opacity-100">
+        <button type="button" onClick={() => setEditingCrop((value) => !value)} className="rounded-full px-2.5 py-1 font-mono text-[9px] text-white hover:bg-white/15">crop</button>
+        <button type="button" onClick={() => renderCrop('extract')} className="rounded-full px-2.5 py-1 font-mono text-[9px] text-white hover:bg-white/15">extract</button>
+        <button type="button" onClick={() => renderCrop('export')} className="rounded-full px-2.5 py-1 font-mono text-[9px] text-white hover:bg-white/15">export</button>
+      </div>
+      {editingCrop && (
+        <div className="absolute right-2 top-2 w-44 rounded-lg bg-white/95 p-3 shadow-[0_8px_30px_rgba(23,23,23,0.18),0_0_0_1px_rgba(23,23,23,0.1)] backdrop-blur">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="font-mono text-[9px] uppercase tracking-widest text-neutral-500">crop inset</span>
+            <button type="button" onClick={() => onPayload({ crop: { top: 0, right: 0, bottom: 0, left: 0 } })} className="font-mono text-[9px] text-neutral-400 hover:text-neutral-800">reset</button>
+          </div>
+          {(['top', 'right', 'bottom', 'left'] as const).map((edge) => (
+            <label key={edge} className="mb-1.5 grid grid-cols-[42px_1fr_25px] items-center gap-1 font-mono text-[9px] text-neutral-500">
+              {edge}
+              <input type="range" min="0" max="45" value={crop[edge]} onChange={(event) => onPayload({ crop: { ...crop, [edge]: Number(event.target.value) } })} className="h-1 accent-[var(--hii-electric-blue)]" />
+              {crop[edge]}%
+            </label>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,9 +1,10 @@
-import type { WorkspaceNode, WorkspaceNodeType } from './types';
+import type { SpatialObjectMetadata, WorkspaceNode, WorkspaceNodeType } from './types';
 
 export type NodeSeed = {
   type: WorkspaceNodeType;
   w: number;
   h: number;
+  object?: SpatialObjectMetadata;
   payload: Record<string, unknown>;
 };
 
@@ -21,8 +22,11 @@ const MODEL_3D = /\.(glb|gltf|obj|stl|fbx|usdz|usd|usdc|dae|blend|3ds|ply)$/i;
 const CAD = /\.(3dm|dwg|dxf|step|stp|iges|igs|ifc|sat|skp|rvt|3mf)$/i;
 
 export const defaultSize: Record<WorkspaceNodeType, { w: number; h: number }> = {
+  chat: { w: 420, h: 560 },
   note: { w: 280, h: 200 },
   text: { w: 440, h: 320 },
+  'canvas-text': { w: 280, h: 96 },
+  ink: { w: 140, h: 80 },
   link: { w: 340, h: 96 },
   file: { w: 280, h: 92 },
   image: { w: 380, h: 300 },
@@ -33,7 +37,8 @@ export const defaultSize: Record<WorkspaceNodeType, { w: number; h: number }> = 
   browser: { w: 760, h: 540 },
   context: { w: 360, h: 440 },
   board: { w: 360, h: 440 },
-  job: { w: 360, h: 300 }
+  job: { w: 360, h: 300 },
+  'sound-field': { w: 820, h: 600 }
 };
 
 export function makeNode(seed: NodeSeed, x: number, y: number, z: number): WorkspaceNode {
@@ -48,12 +53,70 @@ export function makeNode(seed: NodeSeed, x: number, y: number, z: number): Works
     z,
     createdAt: now,
     updatedAt: now,
+    object: seed.object,
     payload: seed.payload
   };
 }
 
 export function seedFor(type: WorkspaceNodeType, payload: Record<string, unknown> = {}): NodeSeed {
+  if (type === 'sound-field') {
+    return {
+      type,
+      ...defaultSize[type],
+      object: {
+        kind: 'scene',
+        owner: 'hii',
+        status: 'ready',
+        source: 'modeled South Berkeley sound scenario',
+        capabilityId: 'hii.scene.sound-field',
+        proofRefs: ['City of Berkeley Open Data Portal checked; no continuous municipal sound sensor feed found'],
+        audit: [
+          {
+            ts: new Date().toISOString(),
+            actor: 'human',
+            action: 'created sound-field object',
+            note: 'Modeled values only; replace with calibrated measurements before analytical use.'
+          }
+        ]
+      },
+      payload: {
+        title: 'South Berkeley Sound Field',
+        dataMode: 'modeled',
+        scenario: 'weekday',
+        hour: 18,
+        ...payload
+      }
+    };
+  }
   return { type, ...defaultSize[type], payload };
+}
+
+export type StoredWorkspaceAsset = {
+  name: string;
+  mime: string;
+  size: number;
+  path: string;
+  url: string;
+};
+
+export async function storeWorkspaceAsset(file: File): Promise<StoredWorkspaceAsset | null> {
+  try {
+    const form = new FormData();
+    form.set('file', file, file.name || 'pasted-media');
+    const response = await fetch('/api/workspace/assets', { method: 'POST', body: form });
+    if (!response.ok) return null;
+    const asset = (await response.json()) as Partial<StoredWorkspaceAsset>;
+    if (!asset.url || !asset.path || !asset.name) return null;
+    return {
+      name: asset.name,
+      mime: asset.mime || file.type,
+      size: Number(asset.size ?? file.size),
+      path: asset.path,
+      url: asset.url
+    };
+  } catch {
+    return null;
+  }
 }
 
 function extensionFor(name: string) {
@@ -97,12 +160,20 @@ export async function seedFromFile(file: File): Promise<NodeSeed> {
   const t = file.type || '';
   const extension = extensionFor(name);
   if (t.startsWith('image/') || IMAGE_FILE.test(name)) {
-    return seedFor('image', { url: URL.createObjectURL(file), name, mime: t, size: file.size, extension, ephemeral: true });
+    const stored = await storeWorkspaceAsset(file);
+    const asset = stored
+      ? { url: stored.url, path: stored.path, name: stored.name, mime: stored.mime, size: stored.size }
+      : { url: URL.createObjectURL(file), name, mime: t, size: file.size, ephemeral: true };
+    return seedFor('image', { ...asset, extension });
   }
   if (t.startsWith('video/') || VIDEO_FILE.test(name) || t.startsWith('audio/') || AUDIO_FILE.test(name) || t === 'application/pdf' || PDF_FILE.test(name)) {
+    const stored = await storeWorkspaceAsset(file);
+    const asset = stored
+      ? { url: stored.url, path: stored.path, name: stored.name, mime: stored.mime, size: stored.size }
+      : { url: URL.createObjectURL(file), name, mime: t, size: file.size, ephemeral: true };
     const kind = t === 'application/pdf' || PDF_FILE.test(name) ? 'pdf' : t.startsWith('audio/') || AUDIO_FILE.test(name) ? 'audio' : 'video';
     const size = kind === 'audio' ? { w: 420, h: 132 } : kind === 'pdf' ? { w: 520, h: 420 } : { w: 480, h: 320 };
-    return { ...seedFor('media', { url: URL.createObjectURL(file), name, kind, mime: t, size: file.size, extension, ephemeral: true }), ...size };
+    return { ...seedFor('media', { ...asset, kind, extension }), ...size };
   }
   if (FONT.test(name)) {
     const fam = 'f' + Math.random().toString(36).slice(2);

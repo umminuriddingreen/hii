@@ -1,3 +1,5 @@
+mod browser;
+
 use serde::Serialize;
 use std::{
     fs::{create_dir_all, OpenOptions},
@@ -116,18 +118,22 @@ pub fn run() {
 
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
-                for _ in 0..40 {
-                    if hii_is_reachable() {
-                        break;
+                let hii_url = Url::parse(HII_URL).expect("valid local HII URL");
+                for _ in 0..80 {
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let loaded = window
+                            .url()
+                            .map(|url| url.as_str().starts_with(HII_URL))
+                            .unwrap_or(false);
+                        if loaded {
+                            let _ = window.set_focus();
+                            return;
+                        }
+                        if hii_is_reachable() {
+                            let _ = window.navigate(hii_url.clone());
+                        }
                     }
                     std::thread::sleep(Duration::from_millis(250));
-                }
-
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    if let Ok(url) = Url::parse(HII_URL) {
-                        let _ = window.navigate(url);
-                    }
-                    let _ = window.set_focus();
                 }
             });
 
@@ -138,7 +144,7 @@ pub fn run() {
                 stop_hii_server(window.app_handle());
             }
         })
-        .invoke_handler(tauri::generate_handler![desktop_surface])
+        .invoke_handler(tauri::generate_handler![desktop_surface, browser::browser_navigate])
         .build(tauri::generate_context!())
         .expect("error while building HII desktop interface");
 

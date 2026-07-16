@@ -1,6 +1,9 @@
 export type WorkspaceNodeType =
+  | 'chat'
   | 'note'
   | 'text'
+  | 'canvas-text'
+  | 'ink'
   | 'link'
   | 'file'
   | 'image'
@@ -11,7 +14,8 @@ export type WorkspaceNodeType =
   | 'browser'
   | 'context'
   | 'board'
-  | 'job';
+  | 'job'
+  | 'sound-field';
 
 export type SpatialObjectKind =
   | 'agent'
@@ -64,8 +68,11 @@ export type SpatialObjectMetadata = {
 };
 
 export const workspaceNodeTypes: WorkspaceNodeType[] = [
+  'chat',
   'note',
   'text',
+  'canvas-text',
+  'ink',
   'link',
   'file',
   'image',
@@ -76,7 +83,8 @@ export const workspaceNodeTypes: WorkspaceNodeType[] = [
   'browser',
   'context',
   'board',
-  'job'
+  'job',
+  'sound-field'
 ];
 
 export type WorkspaceNode = {
