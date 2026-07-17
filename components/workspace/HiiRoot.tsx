@@ -10,6 +10,7 @@ import { useWorkspace } from './useWorkspace';
 import { NodeFrame } from './NodeFrame';
 import { CommandBar } from './CommandBar';
 import { DaemonButton } from './DaemonButton';
+import { HiiLogo } from '../brand/HiiLogo';
 import { FileNode, FontNode, HtmlNode, ImageNode, LinkNode, MediaNode, NoteNode, TextNode } from './nodes/StaticNodes';
 import { CanvasTextNode, InkNode } from './nodes/CreativeNodes';
 import { ptyKill } from './usePtySocket';
@@ -351,7 +352,7 @@ export function HiiRoot() {
       <CommandBar spawn={spawn} resetView={camera.reset} getAnchor={getOmnibarAnchor} onOpenChange={setOmnibarOpen} />
       <DaemonButton onPin={pinDaemonEvent} />
       <div data-workspace-ui className="pointer-events-none absolute left-5 top-4 select-none">
-        <span className="font-mono text-[14px] font-semibold lowercase tracking-tight text-[var(--hii-graphite)]">hii</span>
+        <HiiLogo className="h-4 w-auto text-[var(--hii-graphite)]" />
       </div>
     </div>
   );

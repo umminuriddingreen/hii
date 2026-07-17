@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { AliveBars } from '../../AliveBars';
+import { HiiLogo } from '../../../components/brand/HiiLogo';
 
 export default function KnowledgeLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -7,7 +8,9 @@ export default function KnowledgeLayout({ children }: { children: React.ReactNod
       <AliveBars />
       <header className="hii-knowledge-topbar">
         <div className="flex min-w-0 items-center gap-3">
-          <Link href="/" className="hii-knowledge-mark">hii</Link>
+          <Link href="/" className="hii-knowledge-mark" aria-label="HII home">
+            <HiiLogo />
+          </Link>
           <span className="hii-knowledge-slash">/</span>
           <span className="truncate font-mono text-xs font-semibold uppercase tracking-[0.16em]">knowledge</span>
         </div>

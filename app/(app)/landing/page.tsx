@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
+import { HiiLogo } from '../../../components/brand/HiiLogo';
 
 export const metadata: Metadata = {
   title: 'HII — Turn thought into proof',
@@ -53,7 +54,8 @@ export default function LandingPage() {
     <div className="hii-investor-page">
       <header className="hii-investor-nav">
         <Link href="/landing" className="hii-investor-mark" aria-label="HII investor home">
-          HII<span>LOCAL 01</span>
+          <HiiLogo />
+          <span>LOCAL 01</span>
         </Link>
         <nav aria-label="Investor page navigation">
           <a href="#product">Product</a>
@@ -228,13 +230,13 @@ export default function LandingPage() {
               Open the local MVP <Arrow />
             </Link>
           </div>
-          <span className="hii-close-mark">HII</span>
+          <HiiLogo className="hii-close-mark" />
         </section>
       </main>
 
       <footer className="hii-investor-footer">
         <div>
-          <strong>HII</strong>
+          <HiiLogo className="hii-footer-logo" />
           <span>Human Information Interface</span>
         </div>
         <p>Local-first. Human-controlled. Proof-backed.</p>

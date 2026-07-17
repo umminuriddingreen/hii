@@ -296,12 +296,13 @@ html {
 }
 
 .hii-investor-mark {
+  display: inline-flex;
   width: max-content;
-  font-size: 28px;
-  font-weight: 950;
-  letter-spacing: -0.09em;
-  line-height: 1;
+  align-items: flex-start;
+  color: var(--investor-ink);
 }
+
+.hii-investor-mark > svg { width: auto; height: 28px; }
 
 .hii-investor-mark span {
   margin-left: 4px;
@@ -654,11 +655,11 @@ html {
 .hii-investor-close > div { position: relative; z-index: 3; display: flex; align-items: center; justify-content: space-between; margin-top: 70px; }
 .hii-investor-close > div p { font-size: 20px; font-weight: 600; }
 .hii-investor-primary-light { background: white; color: var(--investor-ink); }
-.hii-close-mark { position: absolute; right: -38px; bottom: -136px; color: rgba(17,20,26,.07); font-family: "Arial Narrow", "Helvetica Neue", sans-serif; font-size: clamp(300px, 40vw, 720px); font-weight: 950; letter-spacing: -.12em; line-height: .7; }
+.hii-close-mark { position: absolute; right: -38px; bottom: -82px; width: clamp(300px, 40vw, 720px); height: auto; color: rgba(17,20,26,.07); }
 
 .hii-investor-footer { display: grid; min-height: 150px; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 30px clamp(28px, 6vw, 96px); background: var(--investor-ink); color: white; }
 .hii-investor-footer div { display: flex; align-items: baseline; gap: 14px; }
-.hii-investor-footer strong { font-size: 30px; letter-spacing: -.09em; }
+.hii-footer-logo { width: auto; height: 30px; }
 .hii-investor-footer span,
 .hii-investor-footer p,
 .hii-investor-footer a { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
@@ -778,13 +779,11 @@ html {
 }
 
 .hii-knowledge-mark {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 17px;
-  font-weight: 900;
+  display: block;
   color: var(--knowledge-blue);
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
+
+.hii-knowledge-mark svg { width: auto; height: 17px; }
 
 .hii-knowledge-slash { color: #b5b9bf; }
 .hii-knowledge-local { display: inline-flex; align-items: center; gap: 6px; color: #4d535a; }

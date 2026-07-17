@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { AliveBars } from '../AliveBars';
+import { HiiLogo } from '../../components/brand/HiiLogo';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -17,8 +18,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <header className="hii-topbar sticky top-0 z-40 px-4 py-3 sm:px-6">
         <div className="mx-auto flex max-w-7xl flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex items-baseline gap-3">
-            <Link href="/" className="font-mono text-lg font-black uppercase text-[var(--hii-electric-blue)] underline underline-offset-2">
-              hii
+            <Link href="/" className="text-[var(--hii-electric-blue)]" aria-label="HII home">
+              <HiiLogo className="h-5 w-auto" />
             </Link>
             <span className="font-mono text-xs uppercase text-neutral-600">control plane</span>
           </div>
