@@ -260,7 +260,7 @@ html {
   text-underline-offset: 2px;
 }
 
-/* Investor MVP — HII's context-to-proof thesis, rendered as product rather than pitchware. */
+/* Public HII homepage — the context-to-proof thesis rendered as a product trace. */
 .hii-investor-page {
   --investor-paper: #f2f3ee;
   --investor-ink: #11141a;
@@ -302,7 +302,7 @@ html {
   color: var(--investor-ink);
 }
 
-.hii-investor-mark > svg { width: auto; height: 28px; }
+.hii-investor-mark > .hii-wordmark { font-size: 35px; }
 
 .hii-investor-mark span {
   margin-left: 4px;
@@ -655,11 +655,11 @@ html {
 .hii-investor-close > div { position: relative; z-index: 3; display: flex; align-items: center; justify-content: space-between; margin-top: 70px; }
 .hii-investor-close > div p { font-size: 20px; font-weight: 600; }
 .hii-investor-primary-light { background: white; color: var(--investor-ink); }
-.hii-close-mark { position: absolute; right: -38px; bottom: -82px; width: clamp(300px, 40vw, 720px); height: auto; color: rgba(17,20,26,.07); }
+.hii-close-mark { position: absolute; right: -38px; bottom: -82px; color: rgba(17,20,26,.07); font-size: clamp(300px, 40vw, 720px) !important; }
 
 .hii-investor-footer { display: grid; min-height: 150px; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 30px clamp(28px, 6vw, 96px); background: var(--investor-ink); color: white; }
 .hii-investor-footer div { display: flex; align-items: baseline; gap: 14px; }
-.hii-footer-logo { width: auto; height: 30px; }
+.hii-footer-logo { font-size: 30px !important; }
 .hii-investor-footer span,
 .hii-investor-footer p,
 .hii-investor-footer a { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
