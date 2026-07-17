@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@/lib/supabase/server';
 import { r2Configured, uploadObject } from '@/lib/server/r2';
+import type { Actions } from './$types';
 
-export const actions = { default: async ({ request, url }) => {
+export const actions: Actions = { default: async ({ request, url }) => {
   const data = await request.formData();
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
