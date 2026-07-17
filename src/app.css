@@ -1,0 +1,13 @@
+@import '../app/globals.css';
+
+body {
+  margin: 0;
+  color: var(--hii-graphite);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}

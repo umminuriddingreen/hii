@@ -185,9 +185,23 @@ npm install
 npm run dev
 ```
 
-The app uses Next.js 14 with a Tauri desktop shell. Local runtime state belongs
-under `~/.hii`; repo-local `.hii` files that remain are migration debt and must
-not be multiplied.
+The primary app uses SvelteKit 5 and Vite with a Tauri desktop shell. Legacy
+Next route modules remain temporarily behind compatibility adapters while the
+parity migration finishes. Local runtime state belongs under `~/.hii`;
+repo-local `.hii` files that remain are migration debt and must not be
+multiplied.
+
+Vitest is the fast feedback layer for unit and component contracts:
+
+```sh
+npm run test:watch  # local Vite-powered watch loop
+npm run ci:fast     # typecheck + one-shot Vitest suite
+npm run ci:full     # fast gate + HII smoke contracts + production build
+```
+
+Vite now powers development, Vitest, and the SvelteKit production build. GitHub
+CI runs the fast gate first, then starts the production build only after the
+fast lane passes.
 
 Build the standalone macOS application with:
 
@@ -196,12 +210,16 @@ npm run build:tauri
 ```
 
 The resulting `src-tauri/target/release/bundle/macos/HII.app` contains its own
-production server and Node runtime. It reads user-owned state from `~/.hii` and
-does not require the source repository to launch.
+SvelteKit adapter-node server, local terminal websocket gateway, and Node
+runtime. It reads user-owned state from `~/.hii` and does not require the source
+repository to launch. Because the web runtime is embedded, source commits do
+not update an existing `.app`; rebuild and restart the bundle whenever shipped
+UI, server code, public assets, or native resources change.
 
 ## Verification
 
 ```sh
+npm run ci:fast
 hii check
 npm run hii:sdk:check
 npm run hii:skills:check

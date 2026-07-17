@@ -1,17 +1,18 @@
 {
   "name": "hii",
+  "type": "module",
   "version": "0.0.1",
   "private": true,
   "scripts": {
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true",
-    "dev": "node server.mjs",
-    "dev:web": "node server.mjs",
-    "dev:web:tauri": "PORT=3042 HII_TAURI=1 node server.mjs",
+    "dev": "vite dev --host 127.0.0.1",
+    "dev:web": "vite dev --host 127.0.0.1",
+    "dev:web:tauri": "vite dev --host 127.0.0.1 --port 3042",
     "dev:tauri": "tauri dev",
     "dev:next": "next dev",
-    "build": "next build",
-    "build:web": "next build",
-    "build:web:tauri": "node scripts/hii-tauri-build.mjs",
+    "build": "vite build",
+    "build:web": "vite build",
+    "build:web:tauri": "node scripts/hii-svelte-tauri-build.mjs",
     "build:tauri": "tauri build",
     "start": "NODE_ENV=production node server.mjs",
     "start:web:tauri": "node scripts/hii-tauri-start.mjs",
@@ -26,7 +27,12 @@
     "hii:knowledge:check": "node --experimental-strip-types scripts/hii-knowledge-smoke.mjs",
     "hii:windows:check": "node --experimental-strip-types scripts/hii-window-state-smoke.mjs",
     "hii:workspace:check": "node --experimental-strip-types scripts/hii-workspace-store-smoke.mjs",
-    "lint": "next lint"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "ci:fast": "npm run check && npm run test",
+    "ci:full": "npm run ci:fast && npm run hii:sdk:check && npm run hii:skills:check && npm run hii:knowledge:check && npm run hii:windows:check && npm run hii:workspace:check && npm run build",
+    "check": "svelte-kit sync && svelte-check --workspace src --config ../svelte.config.js --tsconfig ../tsconfig.json --fail-on-warnings",
+    "lint": "svelte-check --workspace src --config ../svelte.config.js --tsconfig ../tsconfig.json --fail-on-warnings"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",
@@ -49,14 +55,24 @@
     "ws": "^8.21.0"
   },
   "devDependencies": {
+    "@sveltejs/adapter-node": "^5.5.7",
+    "@sveltejs/kit": "^2.69.3",
+    "@sveltejs/vite-plugin-svelte": "^7.2.0",
     "@tauri-apps/cli": "^2",
-    "@types/node": "^20.16.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/svelte": "^5.4.2",
+    "@types/node": "^26.1.1",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
     "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.20",
+    "jsdom": "^29.1.1",
     "postcss": "^8.4.47",
+    "svelte": "^5.56.6",
+    "svelte-check": "^4.7.3",
     "tailwindcss": "^3.4.14",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
   }
 }

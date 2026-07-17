@@ -1,77 +1,30 @@
-import { createServer } from 'http';
-import { readFileSync } from 'node:fs';
-import { getRequestHandlers } from 'next/dist/server/lib/start-server.js';
+import { createServer } from 'node:http';
+import { handler } from './build/handler.js';
 import { WebSocketServer } from 'ws';
 import { attachPtyGateway, isLocalRequest } from './server/pty-gateway.mjs';
 
-const dev = process.env.NODE_ENV !== 'production';
 const port = Number(process.env.PORT || 3000);
 const host = process.env.HOST || '127.0.0.1';
-const PTY_PATH = '/api/pty';
-
-// The desktop bundle uses Next's standalone output while retaining this small
-// local PTY gateway. Reuse the exact serialized build config so Next runs in
-// supported standalone mode instead of treating this process as `next start`.
-if (!dev) {
-  const manifestUrl = new URL('./.next/required-server-files.json', import.meta.url);
-  const { config } = JSON.parse(readFileSync(manifestUrl, 'utf8'));
-  process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = JSON.stringify(config);
-}
-
-let handleRequest;
-let handleUpgrade;
-const server = createServer(async (req, res) => {
-  try {
-    await handleRequest(req, res);
-  } catch (error) {
+const server = createServer((request, response) => {
+  Promise.resolve(handler(request, response)).catch((error) => {
     console.error('hii request failed', error);
-    if (!res.headersSent) res.statusCode = 500;
-    if (!res.writableEnded) res.end('Internal Server Error');
-  }
-});
-
-try {
-  console.log(`hii preparing ${dev ? 'development' : 'production'} server on ${host}:${port}`);
-  [handleRequest, handleUpgrade] = await getRequestHandlers({
-    dir: process.cwd(),
-    port,
-    isDev: dev,
-    server,
-    hostname: host,
-    minimalMode: false
+    if (!response.headersSent) response.statusCode = 500;
+    if (!response.writableEnded) response.end('Internal Server Error');
   });
-} catch (error) {
-  console.error('hii server prepare failed');
-  console.error(error);
-  process.exit(1);
-}
+});
 
 const wss = new WebSocketServer({ noServer: true });
 attachPtyGateway(wss);
-
-server.on('upgrade', (req, socket, head) => {
-  const { pathname } = new URL(req.url ?? '/', 'http://localhost');
-  if (pathname === PTY_PATH) {
-    if (!isLocalRequest(req)) {
-      socket.destroy();
-      return;
-    }
-    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+server.on('upgrade', (request, socket, head) => {
+  const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
+  if (pathname !== '/api/pty' || !isLocalRequest(request)) {
+    socket.destroy();
     return;
   }
-  Promise.resolve(handleUpgrade(req, socket, head)).catch((error) => {
-    console.error('hii upgrade failed', error);
-    socket.destroy();
-  });
+  wss.handleUpgrade(request, socket, head, (client) => wss.emit('connection', client, request));
 });
-
 server.on('error', (error) => {
-  console.error('hii server listen failed');
-  console.error(error);
+  console.error('hii server listen failed', error);
   process.exit(1);
 });
-
-console.log(`hii listening on ${host}:${port}`);
-server.listen(port, host, () => {
-  console.log(`hii ready on http://${host}:${port} (pty gateway at ws://${host}:${port}${PTY_PATH})`);
-});
+server.listen(port, host, () => console.log(`hii ready on http://${host}:${port} (SvelteKit + Vite)`));

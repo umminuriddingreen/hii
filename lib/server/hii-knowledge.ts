@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -494,7 +494,7 @@ function summaryFromRow(database: DatabaseSync, row: NoteRow): KnowledgeNoteSumm
 export function listKnowledgeNotes(options: { includeDeleted?: boolean; folder?: string; tag?: string; limit?: number } = {}) {
   const database = db();
   const where = [options.includeDeleted ? '1 = 1' : 'n.deleted_at IS NULL'];
-  const params: unknown[] = [];
+  const params: SQLInputValue[] = [];
   if (options.folder !== undefined) {
     where.push('n.folder = ?');
     params.push(cleanFolder(options.folder));
