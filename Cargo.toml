@@ -1,0 +1,10 @@
+[workspace]
+members = ["cli"]
+exclude = ["src-tauri", "aii/workstation/src-tauri"]
+resolver = "2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+

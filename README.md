@@ -88,33 +88,47 @@ summaries.
 
 ## Terminal Control Plane
 
-The `hii` command is a classical, Unicode-first terminal surface for the same
-governed workflow—not a generic agent chat shell. In a terminal, running it
-without arguments opens the full-screen conversational interface. In a pipe or
-script it safely falls back to a static snapshot instead of waiting for input.
+The `hii` command is a fast Rust workspace agent for the same governed HII/AII
+loop. Bare `hii` opens a clean, ongoing conversation with session memory and
+quiet access to workspace tools. A quoted intent or `hii run` starts explicit
+non-interactive work.
 
 ```sh
 hii
-hii chat
-hii now
+hii "fix the failing tests and prove the result"
+hii run --review "ship the smallest verified patch"
+hii status
+hii doctor
+hii models
+hii proof
+
+# Existing HII contracts remain available during the Rust migration.
+hii context --json
+hii caps show
 hii task "Add source provenance to the import receipt" --coordinate /Users/ummi/hii
 hii work
-hii proof
 ```
 
-The TUI provides an animated Unicode state mark, a persistent multiline
-composer, history, an editable follow-up queue, managed-run progress, and
-slash commands such as `/now`, `/work`, `/proof`, `/status`, `/stop`, and
-`/help`. Set `HII_MOTION=off` for a steady reduced-motion display.
+The default workhorse is local `qwen3.6:27b-mlx`. `--review` asks
+`qwen3.6:35b-mlx` for a stronger final proof review. Each run is bounded by an
+explicit workspace and step limit, uses typed read/search/write/shell/verify
+tools, and persists events plus a receipt under `~/.hii/runs/cli/`.
 
-`hii task` captures intent locally as a board task. `hii work` shows active
-human and agent work. `hii proof` makes receipts, logs, and artifacts visible
-before a completion claim is trusted. Scriptable equivalents remain available
-through `hii now --json` and `hii work --json`.
+Conversational turns show only HII's natural response. Model selection, tool
+steps, run IDs, and receipt bookkeeping remain backend state. Conversation
+events are stored under `~/.hii/conversations/cli/`; when a turn uses workspace
+tools, its proof remains available through `hii proof` without cluttering chat.
+Explicit runs are quiet by default too; `hii run --verbose` exposes diagnostic
+plumbing when it is genuinely useful.
 
-Execution is still explicit: use `hii codex run <prompt>` only to queue a
-managed local run, then inspect its proof. The CLI never infers permission to
-ship, push, publish, spend, or contact anyone.
+The native surface is intentionally small: `run`, `status`, `doctor`, `models`,
+and `proof`. Existing command families are delegated to the current Node
+implementation until Rust parity tests prove each migration. This keeps one
+public `hii` doorway while avoiding a flag-day loss of capabilities.
+
+The local shell boundary blocks known destructive patterns and paths outside
+the selected workspace, but it is not an operating-system sandbox. HII never
+infers permission to push, publish, spend, message, delete, or expose secrets.
 
 ## Verified-Work Loop
 

@@ -27,9 +27,11 @@
     "hii:knowledge:check": "node --experimental-strip-types scripts/hii-knowledge-smoke.mjs",
     "hii:windows:check": "node --experimental-strip-types scripts/hii-window-state-smoke.mjs",
     "hii:workspace:check": "node --experimental-strip-types scripts/hii-workspace-store-smoke.mjs",
+    "cli:check": "cargo fmt --all -- --check && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings",
+    "cli:build": "cargo build --workspace --release",
     "test": "vitest run",
     "test:watch": "vitest",
-    "ci:fast": "npm run check && npm run test",
+    "ci:fast": "npm run check && npm run test && npm run cli:check",
     "ci:full": "npm run ci:fast && npm run hii:sdk:check && npm run hii:skills:check && npm run hii:knowledge:check && npm run hii:windows:check && npm run hii:workspace:check && npm run build",
     "check": "svelte-kit sync && svelte-check --workspace src --config ../svelte.config.js --tsconfig ../tsconfig.json --fail-on-warnings",
     "lint": "svelte-check --workspace src --config ../svelte.config.js --tsconfig ../tsconfig.json --fail-on-warnings"
