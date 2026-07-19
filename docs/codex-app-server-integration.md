@@ -36,9 +36,24 @@ hii codex schema pin
 This stores the bundled v2 JSON Schema and a SHA-256 manifest under
 `aii/codex/schema/<codex-version>/`.
 
+Read threads without starting or mutating a session:
+
+```sh
+hii codex threads --limit 10
+hii codex threads --cwd /Users/ummi/hii --json
+```
+
+The client connects through the private Unix socket, completes the app-server
+handshake, and calls `thread/list` with `useStateDbOnly: true`. HII writes a
+metadata-only read receipt to `~/.hii/codex/app-server/reads.jsonl`; names and
+previews are displayed locally but are not copied into the durable receipt.
+Notification method names and counts are retained as protocol evidence; their
+payloads are not duplicated.
+
 ## Integration order
 
-1. Map Codex thread, turn, item, approval, and token events into HII run events.
+1. Map live thread, turn, item, approval, and token notifications into HII run
+   events.
 2. Present approvals and live proof in HII before enabling mutations.
 3. Patch the fork only where the public protocol cannot express a required
    HII contract; keep `upstream` mergeable and changes isolated.

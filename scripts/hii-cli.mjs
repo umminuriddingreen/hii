@@ -31,6 +31,7 @@ const HIID = path.join(ROOT, "aii", "daemon", "hiid.mjs");
 const HII_TUI = path.join(ROOT, "scripts", "hii-tui.mjs");
 const CODEX_APP_SERVER_PROBE = path.join(ROOT, "scripts", "hii-codex-app-server-probe.mjs");
 const CODEX_SCHEMA_PIN = path.join(ROOT, "scripts", "hii-codex-schema-pin.mjs");
+const CODEX_THREADS = path.join(ROOT, "scripts", "hii-codex-threads.mjs");
 const LINK_POSTS = path.join(ROOT, ".hii", "link-posts.jsonl");
 const LINK_CACHE = path.join(ROOT, ".hii", "link-cache.jsonl");
 const RUNNER_CAPABILITIES = ["termite.rhino.managed_job"];
@@ -2150,6 +2151,10 @@ function cmdBridge(args) {
 
 function cmdCodex(args) {
   const sub = args[0] || "status";
+  if (sub === "threads") {
+    const r = spawnSync(process.execPath, [CODEX_THREADS, ...args.slice(1)], { cwd: ROOT, stdio: "inherit", env: process.env });
+    process.exit(r.status ?? 1);
+  }
   if (sub === "schema" && args[1] === "pin") {
     const r = spawnSync(process.execPath, [CODEX_SCHEMA_PIN], { cwd: ROOT, stdio: "inherit", env: process.env });
     process.exit(r.status ?? 1);
@@ -2503,6 +2508,8 @@ usage: hii <command>
   codex app-server <start|status|logs|stop>
                       manage the HII-owned Codex app-server
   codex schema pin    generate the versioned Codex v2 protocol contract
+  codex threads [--limit n] [--cwd path] [--search text] [--json]
+                      list Codex threads through the read-only app-server path
   mcp [args]          codex mcp passthrough (default: list)`);
     process.exit(cmd ? 1 : 0);
 }
