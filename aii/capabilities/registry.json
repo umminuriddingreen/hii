@@ -63,6 +63,42 @@
     "trustLevel": "operator-reviewed"
   },
   {
+    "id": "hii.agent.workspace_run",
+    "name": "Run Bounded Local Workspace Agent",
+    "owner": "aii",
+    "runtime": "local-cli",
+    "summary": "Complete a bounded workspace goal with local Ollama tools, verification, durable events, and an inspectable receipt.",
+    "inputs": [
+      "goal",
+      "approved workspace root",
+      "model profile",
+      "step limit"
+    ],
+    "outputs": [
+      "workspace changes",
+      "redacted run events",
+      "verification records",
+      "local receipt"
+    ],
+    "permissions": [
+      "local-only Ollama",
+      "selected workspace only",
+      "no secret-bearing files",
+      "no destructive or external actions"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "cli/src/agent.rs",
+      "cli/src/tools.rs",
+      "~/.hii/runs/cli"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
     "id": "hii.og.operational_graph",
     "name": "OG Operational Graph",
     "owner": "hii",
@@ -1089,5 +1125,65 @@
     ],
     "status": "ready",
     "trustLevel": "operator-reviewed"
+  },
+  {
+    "id": "hii.skills.conversation_draft",
+    "name": "Learn Draft Skills From Verified Conversations",
+    "owner": "aii",
+    "runtime": "local-cli",
+    "summary": "Conservatively turn a verified conversational workspace workflow and active HII session context into an automatically updated draft skill for operator review.",
+    "inputs": ["conversation context", "verified run receipt", "active HII sessions"],
+    "outputs": ["agent-action receipt", "draft SKILL.md", "draft manifest"],
+    "permissions": ["local-only model analysis", "verified receipts only", "draft creation only", "registration and execution remain operator-reviewed"],
+    "visibility": "local",
+    "costModel": {"type": "free"},
+    "evidence": ["cli/src/skills.rs", "~/.hii/skills/proposed", "~/.hii/skills/action-receipts.jsonl"],
+    "status": "ready",
+    "trustLevel": "operator-reviewed"
+  },
+  {
+    "id": "hii.schedule.local_cron",
+    "name": "Schedule Local HII Work",
+    "owner": "aii",
+    "runtime": "local-cli",
+    "summary": "Create local cron schedules that queue bounded tasks through the HII daemon supervisor with append-only schedule events.",
+    "inputs": ["five-field cron expression", "bounded task"],
+    "outputs": ["local schedule", "managed Codex run", "schedule event log"],
+    "permissions": ["local crontab dispatcher", "HII supervisor only", "no external publication"],
+    "visibility": "local",
+    "costModel": {"type": "free"},
+    "evidence": ["cli/src/schedule.rs", "~/.hii/schedules"],
+    "status": "partial",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.calendar.apple",
+    "name": "Read and Sync Apple Calendar",
+    "owner": "aii",
+    "runtime": "local-cli",
+    "summary": "Read upcoming Apple Calendar events and, only from explicit CLI commands, create events or sync the next occurrence of active HII schedules.",
+    "inputs": ["date and optional time", "event title", "explicit sync command"],
+    "outputs": ["local Calendar event", "calendar sync event receipt"],
+    "permissions": ["local Calendar Automation access", "read by default", "explicit command required for writes"],
+    "visibility": "local",
+    "costModel": {"type": "free"},
+    "evidence": ["cli/src/schedule.rs", "~/.hii/schedules/events.jsonl"],
+    "status": "partial",
+    "trustLevel": "operator-reviewed"
+  },
+  {
+    "id": "hii.system.monitor",
+    "name": "Monitor Local System Resources",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Show a fast CPU, memory, storage, HII runtime, and Ollama snapshot or open btop inside the conversational terminal.",
+    "inputs": ["local monitor request"],
+    "outputs": ["resource snapshot", "interactive btop view"],
+    "permissions": ["read local process and filesystem usage", "no process mutation"],
+    "visibility": "local",
+    "costModel": {"type": "free"},
+    "evidence": ["cli/src/system_monitor.rs", "/top", "/resources"],
+    "status": "ready",
+    "trustLevel": "first-party"
   }
 ]

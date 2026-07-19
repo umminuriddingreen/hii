@@ -277,6 +277,61 @@ function processSpawnIntents() {
   writeJson(INTENTS_CURSOR, { processed: lines.length });
 }
 
+function enqueueClaude(prompt, options = {}) {
+  ensureDirs();
+  const cleanPrompt = redact(prompt).trim();
+  if (!cleanPrompt) throw new Error("Claude prompt required.");
+  if (!fs.existsSync(INTENTS_CURSOR)) {
+    writeJson(INTENTS_CURSOR, { processed: safeReadJsonl(INTENTS).length });
+  }
+  const id = `claude-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+  const intent = {
+    id,
+    kind: "agent.spawn",
+    preset: options.preset || "custom",
+    prompt: cleanPrompt,
+    name: cleanSessionName(options.name || id),
+    requestedAt: now(),
+    requestedBy: "hii.cli"
+  };
+  appendJsonl(INTENTS, intent);
+  event("agent.spawn.queued", {
+    actor: "hii.cli",
+    target: intent.name,
+    status: "queued",
+    text: `Queued managed Claude session ${intent.name}`
+  });
+  return intent;
+}
+
+function printClaudeSessions() {
+  const result = spawnSync(CLAUDE_BIN, ["agents", "--json", "--all"], {
+    cwd: ROOT,
+    encoding: "utf8",
+    timeout: 15000,
+    maxBuffer: 1024 * 1024
+  });
+  if (result.status !== 0) throw new Error(redact(result.stderr || result.stdout || "Claude session query failed"));
+  let sessions = [];
+  try {
+    const parsed = JSON.parse(result.stdout || "[]");
+    sessions = Array.isArray(parsed) ? parsed : (parsed.sessions || parsed.agents || []);
+  } catch {
+    console.log(redact(result.stdout || "No Claude sessions."));
+    return;
+  }
+  if (!sessions.length) {
+    console.log("No Claude sessions.");
+    return;
+  }
+  for (const session of sessions.slice(0, 30)) {
+    const id = session.id || session.sessionId || session.name || "claude";
+    const status = session.status || session.state || "observed";
+    const title = session.name || session.title || session.prompt || "";
+    console.log(`${id} ${status} ${String(title).slice(0, 100)}`.trim());
+  }
+}
+
 function publishCapabilities() {
   let mtime;
   try {
@@ -807,8 +862,20 @@ try {
     } else {
       throw new Error("usage: hiid codex <run|status|logs|stop>");
     }
+  } else if (cmd === "claude") {
+    const sub = args[0] || "status";
+    if (sub === "run" || sub === "enqueue") {
+      if (!currentDaemonPid()) startDaemon();
+      const intent = enqueueClaude(args.slice(1).join(" "));
+      console.log(`queued ${intent.id}`);
+      console.log(`session ${intent.name}`);
+    } else if (sub === "status") {
+      printClaudeSessions();
+    } else {
+      throw new Error("usage: hiid claude <run|status>");
+    }
   } else {
-    throw new Error("usage: hiid <start|stop|restart|status|feed|logs|config|instances|runs|codex>");
+    throw new Error("usage: hiid <start|stop|restart|status|feed|logs|config|instances|runs|codex|claude>");
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
