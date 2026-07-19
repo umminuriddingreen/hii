@@ -17,8 +17,11 @@ describe('public HII homepage', () => {
 
   it('states the product truth and carries canonical metadata', () => {
     expect(homepage).toContain('https://humaninformationinterface.com/');
-    expect(homepage).toContain('Turn thought<br />into <em>proof.</em>');
-    expect(homepage).toContain('Local-first. Human-controlled. Proof-backed.');
-    expect(homepage).toContain('Request early access');
+    expect(homepage).toContain('Your work,<br /><em>alive.</em>');
+    expect(homepage).toContain('Create your account');
+    expect(homepage).toContain('Mac installer · preparing');
+    expect(homepage).toContain('/marketing/hii-workspace-live.png');
+    expect(homepage).toContain('/marketing/hii-command-palette-live.png');
+    expect(homepage).toContain('Actual HII interface · staged founder-beta project content · captured locally');
   });
 });
