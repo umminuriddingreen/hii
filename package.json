@@ -25,6 +25,7 @@
     "hii:sdk:check": "node scripts/hii-sdk-contract-smoke.mjs",
     "hii:skills:check": "node scripts/hii-skill-registry-smoke.mjs",
     "hii:knowledge:check": "node --experimental-strip-types scripts/hii-knowledge-smoke.mjs",
+    "hii:knowledge-runs:check": "node --experimental-strip-types scripts/hii-knowledge-run-smoke.mjs",
     "hii:knowledge:import": "node --experimental-strip-types scripts/hii-knowledge-import.mjs",
     "hii:contextdock:check": "node --experimental-strip-types scripts/hii-contextdock-smoke.mjs",
     "hii:activation:check": "node --experimental-strip-types scripts/hii-activation-smoke.mjs",
@@ -36,7 +37,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "ci:fast": "npm run check && npm run test && npm run cli:check",
-    "ci:full": "npm run ci:fast && npm run hii:sdk:check && npm run hii:skills:check && npm run hii:knowledge:check && npm run hii:windows:check && npm run hii:workspace:check && npm run build",
+    "ci:full": "npm run ci:fast && npm run hii:sdk:check && npm run hii:skills:check && npm run hii:knowledge:check && npm run hii:knowledge-runs:check && npm run hii:windows:check && npm run hii:workspace:check && npm run build",
     "check": "svelte-kit sync && svelte-check --workspace src --config ../svelte.config.js --tsconfig ../tsconfig.json --fail-on-warnings",
     "lint": "svelte-check --workspace src --config ../svelte.config.js --tsconfig ../tsconfig.json --fail-on-warnings"
   },

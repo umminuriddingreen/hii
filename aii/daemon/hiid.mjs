@@ -153,8 +153,9 @@ function cmdConfig(args) {
 // to HII's capability job ledger.
 const INTENTS = path.join(DAEMON_DIR, "intents.jsonl");
 const INTENTS_CURSOR = path.join(DAEMON_DIR, "intents.cursor.json");
-const CAPABILITY_JOBS = path.join(ROOT, ".hii", "capability-jobs.jsonl");
+const CAPABILITY_JOBS = path.join(RUNTIME, "capability-jobs.jsonl");
 const CLAUDE_BIN = "/opt/homebrew/bin/claude";
+const HII_BIN = path.join(os.homedir(), "bin", "hii");
 
 function cleanSessionName(value) {
   return String(value || "")
@@ -237,6 +238,75 @@ function reportSpawnJob(intent, { status, output, startedAt }) {
   appendJsonl(CAPABILITY_JOBS, job);
 }
 
+function latestCapabilityJob(id) {
+  return safeReadJsonl(CAPABILITY_JOBS).filter((job) => job?.id === id).at(-1) || null;
+}
+
+function findWorkspaceReceipt(intent, startedAt) {
+  const receiptsRoot = path.join(RUNTIME, "runs", "cli");
+  let candidates = [];
+  try {
+    candidates = fs.readdirSync(receiptsRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(receiptsRoot, entry.name, "receipt.json"))
+      .filter((file) => {
+        try { return fs.statSync(file).mtimeMs >= Date.parse(startedAt) - 1000; } catch { return false; }
+      });
+  } catch { return null; }
+  for (const file of candidates.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)) {
+    const receipt = safeReadJson(file, null);
+    if (receipt?.goal === intent.goal && receipt?.workspace === intent.workspaceRoot) return { receipt, file };
+  }
+  return null;
+}
+
+function reportWorkspaceJob(intent, { status, output, startedAt, receiptMatch = null }) {
+  const ts = now();
+  const previous = latestCapabilityJob(intent.id);
+  const receipt = receiptMatch?.receipt || null;
+  const proofArtifacts = [];
+  if (receiptMatch?.file) {
+    proofArtifacts.push({
+      id: randomUUID(), kind: "receipt", label: "HII workspace receipt", path: receiptMatch.file,
+      summary: redact(receipt?.summary || "Bounded workspace receipt."), createdAt: ts
+    });
+  }
+  for (const check of Array.isArray(receipt?.verification) ? receipt.verification : []) {
+    proofArtifacts.push({
+      id: randomUUID(), kind: "log", label: `Verification · ${String(check.command || "check").slice(0, 120)}`,
+      summary: redact(`${check.ok ? "passed" : "failed"}: ${check.output || ""}`), createdAt: ts
+    });
+  }
+  const job = {
+    id: intent.id,
+    capabilityId: "hii.agent.workspace_run",
+    inputSummary: String(intent.goal).slice(0, 240),
+    userId: "local",
+    userEmail: null,
+    status,
+    budget: `local · ${intent.maxSteps} steps`,
+    logs: [...(previous?.logs || []), `[${ts}] ${redact(output || `workspace run ${status}`)}`].slice(-40),
+    ledger: [
+      ...(previous?.ledger || []),
+      {
+        id: randomUUID(), jobId: intent.id, capabilityId: "hii.agent.workspace_run", actor: "aii.hiid",
+        type: status === "completed" ? "proof" : "reconciliation",
+        summary: status === "running" ? "AII started the approved bounded run." : `AII recorded workspace run as ${status}.`,
+        createdAt: ts
+      }
+    ],
+    proofArtifacts: proofArtifacts.length ? proofArtifacts : (previous?.proofArtifacts || []),
+    createdAt: previous?.createdAt || intent.requestedAt || startedAt,
+    updatedAt: ts,
+    metadata: {
+      ...(previous?.metadata || {}), knowledgeRunId: intent.id, projectId: intent.projectId,
+      workspaceRoot: intent.workspaceRoot, model: intent.model, maxSteps: intent.maxSteps,
+      receiptId: receipt?.id || null
+    }
+  };
+  appendJsonl(CAPABILITY_JOBS, job);
+}
+
 export function approvedSpawnCwd(requestedCwd) {
   let database;
   try {
@@ -256,6 +326,24 @@ export function approvedSpawnCwd(requestedCwd) {
     const reason = error instanceof Error ? error.message : String(error);
     console.warn(`hiid: rejected spawn cwd ${redact(requestedCwd)}; falling back to ${ROOT}: ${redact(reason)}`);
     return ROOT;
+  } finally {
+    try { database?.close(); } catch { /* read-only validation cleanup */ }
+  }
+}
+
+function approvedWorkspaceCwd(requestedCwd) {
+  if (typeof requestedCwd !== "string" || !requestedCwd) throw new Error("intent.workspaceRoot must be a non-empty string");
+  let database;
+  try {
+    database = new DatabaseSync(CONTEXT_DB, { readOnly: true });
+    const approved = database.prepare(`
+      SELECT root_path AS rootPath
+      FROM context_projects
+      WHERE root_path = ? AND approved_root = 1 AND excluded = 0
+      LIMIT 1
+    `).get(requestedCwd);
+    if (!approved?.rootPath) throw new Error("workspace root is not an approved Context Dock project");
+    return approved.rootPath;
   } finally {
     try { database?.close(); } catch { /* read-only validation cleanup */ }
   }
@@ -290,6 +378,43 @@ function executeSpawnIntent(intent) {
   });
 }
 
+function executeWorkspaceIntent(intent) {
+  const startedAt = now();
+  const maxSteps = Math.max(1, Math.min(24, Number(intent.maxSteps) || 8));
+  const model = ["qwen3.6:27b-mlx", "qwen3.6:35b-mlx"].includes(intent.model)
+    ? intent.model
+    : "qwen3.6:27b-mlx";
+  let workspaceRoot;
+  try {
+    workspaceRoot = approvedWorkspaceCwd(intent.workspaceRoot);
+  } catch (error) {
+    const output = error instanceof Error ? error.message : String(error);
+    reportWorkspaceJob(intent, { status: "failed", output, startedAt });
+    event("workspace.run.failed", { actor: "aii.hiid", target: intent.id, status: "failed", text: output });
+    return;
+  }
+  reportWorkspaceJob(intent, { status: "running", output: "AII started the approved bounded workspace run.", startedAt });
+  const args = ["--cwd", workspaceRoot, "--model", model, "--max-steps", String(maxSteps), "run", String(intent.goal).slice(0, 4000)];
+  execFile(HII_BIN, args, { cwd: workspaceRoot, timeout: 30 * 60 * 1000, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
+    const output = redact(`${stdout ?? ""}${stderr ?? ""}`.trim());
+    const receiptMatch = findWorkspaceReceipt({ ...intent, workspaceRoot }, startedAt);
+    const receiptStatus = receiptMatch?.receipt?.status;
+    const hasVerifiedProof = Array.isArray(receiptMatch?.receipt?.verification)
+      && receiptMatch.receipt.verification.some((check) => check?.ok === true);
+    const status = error || receiptStatus !== "completed" || !hasVerifiedProof ? "failed" : "completed";
+    reportWorkspaceJob({ ...intent, workspaceRoot }, {
+      status,
+      output: output || receiptMatch?.receipt?.summary || (error ? String(error.message) : "Bounded workspace run finished."),
+      startedAt,
+      receiptMatch
+    });
+    event(`workspace.run.${status}`, {
+      actor: "aii.hiid", target: intent.id, status,
+      text: receiptMatch?.receipt?.summary || output || `Workspace run ${status}`
+    });
+  });
+}
+
 function processSpawnIntents() {
   let lines;
   try {
@@ -312,6 +437,7 @@ function processSpawnIntents() {
       continue;
     }
     if (intent?.kind === "agent.spawn" && intent.id) executeSpawnIntent(intent);
+    if (intent?.kind === "workspace.run" && intent.id) executeWorkspaceIntent(intent);
   }
   writeJson(INTENTS_CURSOR, { processed: lines.length });
 }

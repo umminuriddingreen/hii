@@ -41,6 +41,7 @@ import {
   rollbackKnowledgeImport,
   verifyKnowledgeImport
 } from '@/lib/server/hii-knowledge-import';
+import { approveKnowledgeRun, prepareKnowledgeRun, syncKnowledgeRun } from '@/lib/server/hii-knowledge-runs';
 
 function denied() {
   return json({ error: 'Local HII access required.' }, { status: 401 });
@@ -164,14 +165,10 @@ export const POST: RequestHandler = async ({ request }) => {
       return json({ task, object }, { status: 201 });
     }
     if (action === 'prepare-run') {
-      const snapshot = knowledgeSystemSnapshot(String(body?.projectId || '') || undefined);
-      const source = snapshot.objects.find((object) => object.id === String(body?.id || ''));
-      if (!source || !['accepted', 'active'].includes(source.status)) return json({ error: 'Accept the source object before preparing execution.' }, { status: 409 });
-      const run = createKnowledgeObject({ projectId: source.projectId, kind: 'run', title: `Run · ${source.title}`, summary: `Proposed bounded execution for ${source.title}. Approval and capability selection are still required.`, status: 'proposed', owner: 'aii', provenance: source.provenance });
-      createKnowledgeRelation({ projectId: source.projectId, fromId: run.id, toId: source.id, kind: 'depends_on', status: 'proposed' });
-      ensureSystemMap(source.projectId);
-      return json({ object: run, requiresApproval: true }, { status: 201 });
+      return json(prepareKnowledgeRun(body ?? {}), { status: 201 });
     }
+    if (action === 'approve-run') return json(await approveKnowledgeRun(body ?? {}), { status: 202 });
+    if (action === 'sync-run') return json(await syncKnowledgeRun(body ?? {}));
     if (action === 'attach-runtime') return json({ object: attachRuntimeObject(body ?? {}) }, { status: 201 });
     if (action === 'pin-object') {
       const snapshot = knowledgeSystemSnapshot(String(body?.projectId || '') || undefined);

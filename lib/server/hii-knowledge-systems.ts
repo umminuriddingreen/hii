@@ -221,6 +221,7 @@ export function updateKnowledgeObject(id: string, patch: {
   summary?: unknown;
   status?: unknown;
   owner?: unknown;
+  externalRef?: unknown;
   ifRevision?: unknown;
 }, root = knowledgeVaultPath()) {
   const store = readStore(root);
@@ -238,6 +239,7 @@ export function updateKnowledgeObject(id: string, patch: {
     summary: patch.summary === undefined ? current.summary : clean(patch.summary, 20_000),
     status: patch.status === undefined ? current.status : objectStatus(patch.status),
     owner: patch.owner === undefined ? current.owner : clean(patch.owner, 120) || current.owner,
+    externalRef: patch.externalRef === undefined ? current.externalRef : clean(patch.externalRef, 500) || null,
     revision: current.revision + 1,
     updatedAt: timestamp()
   };
