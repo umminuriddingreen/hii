@@ -188,7 +188,7 @@ export function ensureNoteKnowledgeObject(note: {
       ...current,
       title: note.title,
       projectId: note.projectId,
-      summary: `Canonical Markdown note: ${note.path}`,
+      summary: `Canonical HII knowledge note: ${note.path}`,
       provenance,
       revision: current.revision + 1,
       updatedAt: now
@@ -201,7 +201,7 @@ export function ensureNoteKnowledgeObject(note: {
     projectId: note.projectId || 'shared',
     kind: 'note',
     title: note.title,
-    summary: `Canonical Markdown note: ${note.path}`,
+    summary: `Canonical HII knowledge note: ${note.path}`,
     status: 'accepted',
     owner: 'human',
     provenance,
@@ -356,7 +356,7 @@ export function proposeSystemFromNote(note: {
     projectId,
     kind: 'source',
     title: note.title,
-    summary: `Canonical Markdown source: ${note.path}`,
+    summary: `Canonical HII knowledge source: ${note.path}`,
     status: 'proposed',
     proposalBatchId: batchId,
     externalRef: `note:${note.id}`,
@@ -457,6 +457,29 @@ export function knowledgeSystemSnapshot(projectId?: string, root = knowledgeVaul
       proposed: objects.filter((object) => object.status === 'proposed').length,
       accepted: objects.filter((object) => object.status === 'accepted' || object.status === 'active' || object.status === 'completed').length
     }
+  };
+}
+
+export function removeKnowledgeObjectsByExternalRefs(externalRefs: string[], root = knowledgeVaultPath()) {
+  const refs = new Set(externalRefs.map((value) => clean(value, 500)).filter(Boolean));
+  if (refs.size === 0) return { removedObjects: 0, removedRelations: 0, updatedViews: 0 };
+  const store = readStore(root);
+  const removedIds = new Set(store.objects.filter((object) => object.externalRef && refs.has(object.externalRef)).map((object) => object.id));
+  if (removedIds.size === 0) return { removedObjects: 0, removedRelations: 0, updatedViews: 0 };
+  const relationCount = store.relations.length;
+  let updatedViews = 0;
+  store.objects = store.objects.filter((object) => !removedIds.has(object.id));
+  store.relations = store.relations.filter((relation) => !removedIds.has(relation.fromId) && !removedIds.has(relation.toId));
+  store.views = store.views.map((view) => {
+    const layout = view.layout.filter((item) => !removedIds.has(item.objectId));
+    if (layout.length !== view.layout.length) updatedViews += 1;
+    return layout.length === view.layout.length ? view : { ...view, layout, updatedAt: timestamp() };
+  });
+  writeStore(store, root);
+  return {
+    removedObjects: removedIds.size,
+    removedRelations: relationCount - store.relations.length,
+    updatedViews
   };
 }
 

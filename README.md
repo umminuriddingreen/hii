@@ -34,12 +34,13 @@ selected project
 → durable receipt and project memory
 ```
 
-Authored knowledge lives in one user-selected, visible Markdown vault (default
-recommendation: `~/Documents/HII`). SQLite under `~/.hii/hii.db` provides the
-rebuildable FTS5 index, provenance, history, events, and operational state. An
-asset can be copied into the vault or explicitly linked in place. Project
-System Maps are source-linked views over the same knowledge—not a separate
-diagram product or chat transcript.
+Authored knowledge lives canonically in the local HII instance at
+`~/.hii/hii.db`. Complete Obsidian or Markdown vaults can be hash-locked,
+imported without source mutation, verified, rolled back, and exported back to
+portable files. HII-managed assets live under `~/.hii/knowledge/`; externally
+linked assets retain their paths and hashes. Project System Maps are
+source-linked views over the same knowledge—not a separate diagram product or
+chat transcript.
 
 The knowledge and Context Dock loop is not yet complete. Existing boards, console, daemon, jobs,
 capabilities, bridge, packs, link, credit, exchange, and Termite
@@ -74,7 +75,7 @@ Repository:       /Users/ummi/hii
 Runtime:          /Users/ummi/.hii
 Launcher:         /Users/ummi/bin/hii
 Context database: /Users/ummi/.hii/hii.db
-Knowledge vault:  user-selected Markdown folder (recommended ~/Documents/HII)
+Knowledge store:  /Users/ummi/.hii/hii.db + /Users/ummi/.hii/knowledge
 AII source:       /Users/ummi/hii/aii
 Capability source:/Users/ummi/hii/aii/capabilities/registry.json
 ```
@@ -190,7 +191,7 @@ or licensed by the export command.
 ## Context Dock Architectural Constraints
 
 - Use this repository and the current HII/AII runtime.
-- Use the selected Markdown vault for authored knowledge and `~/.hii/hii.db` for canonical Context Dock indexing and operational state.
+- Use `~/.hii/hii.db` for canonical authored knowledge, Context Dock indexing, and operational state; preserve imported vaults as immutable provenance and portable export sources.
 - Do not create another daemon, runtime, database, or product repository.
 - Use SQLite FTS5 and deterministic retrieval before embeddings.
 - Keep user source files in place.

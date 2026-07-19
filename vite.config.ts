@@ -47,6 +47,9 @@ export default defineConfig({
     allowedHosts: ['humaninformationinterface.com', 'www.humaninformationinterface.com']
   },
   ssr: {
-    noExternal: true
+    noExternal: true,
+    // yaml publishes a CommonJS Node entry. Keep it external so Vite's SSR
+    // evaluator uses Node's ESM/CJS interop instead of inlining `require`.
+    external: ['yaml']
   }
 });

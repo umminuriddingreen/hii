@@ -799,8 +799,15 @@ html {
 .hii-inspector-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 18px; }
 .hii-inspector-actions .primary, .hii-modal-actions .primary { border-color: #176bff; background: #176bff; color: white; }
 .hii-vault-card { width: min(560px, calc(100vw - 32px)); }
-.hii-vault-card p { margin: 12px 0; color: #68645d; font-size: 12px; line-height: 1.55; }
+.hii-vault-card p { margin: 16px 16px 0; color: #68645d; font-size: 12px; line-height: 1.55; }
+.hii-vault-card > label { margin: 14px 16px 0; }
+.hii-vault-card input { box-sizing: border-box; }
+.hii-vault-card > .hii-note-properties { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px; border: 0; padding: 0; }
+.hii-vault-card > .hii-note-properties span { border: 1px solid rgba(23,23,23,.1); border-radius: 999px; background: #f6f5f1; padding: 5px 8px; color: #555; font: 9px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.hii-vault-card > .hii-note-properties span:last-child { border-color: rgba(38,133,85,.2); background: #f0f8f3; color: #267b50; }
 .hii-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.hii-vault-card > .hii-modal-actions { margin: 18px 16px 16px; }
+.hii-modal-actions button:disabled { cursor: default; opacity: .72; }
 .hii-intent-overlay .hii-command-input > div { display: flex; min-width: 0; flex: 1; flex-direction: column; }
 .hii-intent-overlay .hii-command-input strong { font-size: 14px; }
 .hii-intent-overlay .hii-command-input small { margin-top: 3px; color: #777; font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }

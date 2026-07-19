@@ -956,10 +956,10 @@
     "name": "HII Local Knowledge Workspace",
     "owner": "aii",
     "runtime": "next-route",
-    "summary": "Create, connect, search, version, graph, and system-map user-owned Markdown knowledge and copied or linked assets through a rebuildable local HII index.",
+    "summary": "Merge complete approved vaults into canonical local HII knowledge, then create, connect, search, version, graph, system-map, verify, roll back, and export it portably.",
     "inputs": [
       "local note or Markdown import",
-      "user-selected Markdown vault",
+      "approved Obsidian or Markdown vault import",
       "copied or explicitly linked local asset",
       "source material for reviewed system exploration",
       "bounded note mutation",
@@ -980,8 +980,8 @@
     ],
     "permissions": [
       "local HII origin only",
-      "read and write the explicitly selected Markdown vault",
-      "read and write bounded knowledge and index state in ~/.hii/hii.db",
+      "read approved source vault without mutation",
+      "read and write canonical bounded knowledge and index state in ~/.hii/hii.db",
       "revision-hash conflict detection",
       "secret-like value redaction",
       "no upload, publish, sync, or external transmission"
@@ -998,7 +998,7 @@
       "lib/server/hii-knowledge-systems.ts",
       "scripts/hii-knowledge-smoke.mjs",
       "~/.hii/hii.db",
-      "user-selected Markdown vault"
+      "~/.hii/knowledge"
     ],
     "status": "ready",
     "trustLevel": "first-party"

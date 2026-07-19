@@ -111,7 +111,7 @@ export type WorkspaceNode = {
   updatedAt: string;
   object?: SpatialObjectMetadata;
   objectRef?: {
-    authority: 'knowledge-vault' | 'hii-runtime';
+    authority: 'hii-knowledge' | 'knowledge-vault' | 'hii-runtime';
     id: string;
     projectId?: string;
     kind?: string;
@@ -254,9 +254,9 @@ export function normalizeNode(raw: unknown): WorkspaceNode | null {
   if (![node.x, node.y, node.w, node.h].every(isFiniteNumber)) return null;
   const now = new Date().toISOString();
   const objectRef = node.objectRef && typeof node.objectRef === 'object' ? node.objectRef as Record<string, unknown> : null;
-  const normalizedRef = objectRef && (objectRef.authority === 'knowledge-vault' || objectRef.authority === 'hii-runtime') && typeof objectRef.id === 'string'
+  const normalizedRef = objectRef && (objectRef.authority === 'hii-knowledge' || objectRef.authority === 'knowledge-vault' || objectRef.authority === 'hii-runtime') && typeof objectRef.id === 'string'
     ? {
-        authority: objectRef.authority as 'knowledge-vault' | 'hii-runtime',
+        authority: objectRef.authority as 'hii-knowledge' | 'knowledge-vault' | 'hii-runtime',
         id: objectRef.id.slice(0, 160),
         projectId: sanitizeText(objectRef.projectId, 120),
         kind: sanitizeText(objectRef.kind, 80)

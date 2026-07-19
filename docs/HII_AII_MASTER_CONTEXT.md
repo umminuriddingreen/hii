@@ -277,11 +277,11 @@ A user should be able to:
 
 - Use `/Users/ummi/hii`; do not create a parallel product repository.
 - Use the existing HII/AII runtime; do not create another daemon.
-- Use one user-selected Markdown vault as the authority for authored notes and copied assets.
-- Use `~/.hii/hii.db` as the canonical Context Dock index and operational ledger; its knowledge index must be rebuildable from the vault.
+- Use the local HII instance and `~/.hii/hii.db` as authority for authored notes, typed knowledge, indexing, and the operational ledger.
+- Import complete user-approved vaults through hash-locked, non-mutating batches and preserve portable Markdown export so HII authority never becomes data lock-in.
 - Do not revive obsolete parallel databases.
 - Use SQLite FTS5 and deterministic retrieval before embeddings.
-- Let each asset import explicitly copy into the vault or preserve the user file in place; store references, metadata, extracted text, hashes, and provenance.
+- Let each asset import explicitly copy into HII-managed content-addressed storage or preserve the user file in place; store references, metadata, extracted text, hashes, and provenance.
 - Use MCP as the agent integration contract.
 - Require a source path and line/page range for important context.
 - Make source transmission explicit and visible.

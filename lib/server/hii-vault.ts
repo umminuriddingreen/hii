@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs, { type FSWatcher } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { parseDocument } from 'yaml';
 
 export type VaultConfig = {
   schemaVersion: 1;
@@ -53,7 +54,7 @@ function runtimeDir() {
 }
 
 function configPath() {
-  return path.join(runtimeDir(), 'vault.json');
+  return path.join(runtimeDir(), 'knowledge', 'vault-config.json');
 }
 
 function expandHome(value: string) {
@@ -79,6 +80,9 @@ function validateRoot(input: string) {
   if (resolved === path.parse(resolved).root || resolved === os.homedir()) {
     throw new Error('Choose a dedicated folder, not the filesystem or home directory.');
   }
+  if (resolved === path.join(runtimeDir(), 'vault.json')) {
+    throw new Error('The encrypted HII secrets vault can never be used as knowledge storage.');
+  }
   return resolved;
 }
 
@@ -88,9 +92,9 @@ export function knowledgeVaultPath() {
     const parsed = JSON.parse(fs.readFileSync(configPath(), 'utf8')) as Partial<VaultConfig>;
     if (typeof parsed.root === 'string') return validateRoot(parsed.root);
   } catch {
-    // The visible Documents vault is the local-first default until the user chooses another root.
+    // HII-owned files stay under the knowledge runtime; imported source vaults are never mutated.
   }
-  return path.join(os.homedir(), 'Documents', 'HII');
+  return path.join(runtimeDir(), 'knowledge');
 }
 
 export function configureKnowledgeVault(root: unknown): VaultConfig {
@@ -142,30 +146,15 @@ export function vaultAbsolute(relative: unknown, root = knowledgeVaultPath()) {
   return target;
 }
 
-function scalar(value: string) {
-  const trimmed = value.trim();
-  if (trimmed === 'true') return true;
-  if (trimmed === 'false') return false;
-  if (trimmed === 'null') return null;
-  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return Number(trimmed);
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    return trimmed.replace(/^['"]|['"]$/g, '');
-  }
-}
-
 export function parseVaultMarkdown(raw: string) {
-  if (!raw.startsWith('---\n')) return { metadata: {} as Record<string, unknown>, content: raw };
-  const end = raw.indexOf('\n---\n', 4);
-  if (end < 0) return { metadata: {} as Record<string, unknown>, content: raw };
-  const metadata: Record<string, unknown> = {};
-  for (const line of raw.slice(4, end).split('\n')) {
-    const separator = line.indexOf(':');
-    if (separator < 1) continue;
-    metadata[line.slice(0, separator).trim()] = scalar(line.slice(separator + 1));
-  }
-  return { metadata, content: raw.slice(end + 5) };
+  const normalized = raw.replace(/\r\n/g, '\n');
+  if (!normalized.startsWith('---\n')) return { metadata: {} as Record<string, unknown>, content: normalized, frontmatter: '' };
+  const end = normalized.indexOf('\n---\n', 4);
+  if (end < 0) return { metadata: {} as Record<string, unknown>, content: normalized, frontmatter: '' };
+  const frontmatter = normalized.slice(4, end);
+  const parsed = parseDocument(frontmatter, { keepSourceTokens: true }).toJS();
+  const metadata = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  return { metadata, content: normalized.slice(end + 5), frontmatter };
 }
 
 function yamlValue(value: unknown) {
@@ -199,6 +188,10 @@ function projectFromPath(relative: string, fallback = 'shared') {
   return match?.[1] || fallback;
 }
 
+function deterministicNoteId(relative: string) {
+  return `note-${createHash('sha256').update(relative.normalize('NFC').toLowerCase()).digest('hex').slice(0, 32)}`;
+}
+
 export function readVaultNote(relative: string, root = knowledgeVaultPath()): VaultNote {
   const safePath = safeVaultRelativePath(relative);
   const absolute = vaultAbsolute(safePath, root);
@@ -212,7 +205,11 @@ export function readVaultNote(relative: string, root = knowledgeVaultPath()): Va
     ? metadata.title.trim()
     : path.basename(safePath, path.extname(safePath));
   return {
-    id: typeof metadata.hii_id === 'string' && metadata.hii_id ? metadata.hii_id : randomUUID(),
+    id: typeof metadata.hii_id === 'string' && metadata.hii_id
+      ? metadata.hii_id
+      : typeof metadata.id === 'string' && metadata.id
+        ? metadata.id
+        : deterministicNoteId(safePath),
     title,
     path: safePath,
     folder: path.posix.dirname(safePath) === '.' ? '' : path.posix.dirname(safePath),

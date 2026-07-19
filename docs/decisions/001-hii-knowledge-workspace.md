@@ -16,8 +16,8 @@ existing HII/AII boundary:
 
 ```text
 human notes, sources, assets, and decisions
-→ user-selected Markdown vault (canonical authored knowledge)
-→ ~/.hii/hii.db (rebuildable index and operational ledger)
+→ approved Obsidian/Markdown vault (immutable import provenance)
+→ ~/.hii/hii.db (canonical HII knowledge and operational ledger)
 → deterministic links, tags, FTS5, graph, systems objects, and provenance
 → bounded AII capabilities
 → agent context, receipts, and reusable skills
@@ -40,7 +40,7 @@ human notes, sources, assets, and decisions
 - command palette and keyboard navigation
 - copied or explicitly linked assets with hashes and availability checks
 - source-linked system objects, relations, saved views, and proposal review
-- Markdown-vault authority with rebuildable SQLite indexing
+- canonical HII knowledge with complete portable Markdown-vault export
 - local persistence, events, receipts, and capability metadata
 
 Plugins, proprietary sync behavior, publishing, payments, and external
@@ -50,9 +50,9 @@ dependency; it does not authorize copying proprietary code or branding.
 
 ## Constraints
 
-- Use `/Users/ummi/hii`, one user-selected Markdown vault, and `~/.hii/hii.db`.
-- Markdown files and copied original assets are authoritative for authored knowledge.
-- Use SQLite for deterministic indexing, history, provenance, events, and operational state; the note index must be rebuildable from the vault.
+- Use `/Users/ummi/hii`, `~/.hii/hii.db`, and HII-managed knowledge storage.
+- HII records are authoritative after an approved import; source vaults remain unchanged as rollback evidence.
+- Use SQLite for canonical note content, deterministic indexing, history, provenance, events, and operational state; provide complete portable export.
 - Use explicit migrations and typed server contracts.
 - Keep note content local unless the user explicitly sends or exports it.
 - Keep agent mutations bounded and receipt-producing.
@@ -63,7 +63,7 @@ dependency; it does not authorize copying proprietary code or branding.
 ## First proof
 
 A user can create, edit, link, search, graph, version, trash, restore, import,
-export, and externally edit real Markdown notes from `/knowledge`; add copied
+and export portable Markdown notes from `/knowledge`; add copied
 or linked assets; turn a source into a reviewed System Map; and restart without
 losing the vault, object relationships, or local receipts. Every mutation
 produces local evidence and no content leaves the machine implicitly.

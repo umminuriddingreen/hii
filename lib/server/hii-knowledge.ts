@@ -1,20 +1,12 @@
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  configureKnowledgeVault,
-  ensureKnowledgeVault,
   knowledgeVaultPath,
   listKnowledgeAssets,
-  readVaultNote,
-  resetKnowledgeVaultForTests,
-  restoreVaultNote,
-  scanVaultNotes,
-  trashVaultNote,
-  writeVaultNote,
-  type VaultNote
+  resetKnowledgeVaultForTests
 } from './hii-vault.ts';
 import { ensureNoteKnowledgeObject, knowledgeSystemSnapshot, resetKnowledgeSystemsForTests } from './hii-knowledge-systems.ts';
 
@@ -48,6 +40,8 @@ export type KnowledgeLink = {
   targetTitle: string;
   targetNoteId: string | null;
   targetNoteTitle: string | null;
+  resolutionStatus: 'resolved' | 'unresolved' | 'ambiguous';
+  candidateIds: string[];
 };
 
 type NoteRow = {
@@ -65,7 +59,6 @@ type NoteRow = {
 };
 
 const databases = new Map<string, DatabaseSync>();
-const syncing = new Set<string>();
 
 export function knowledgeDbPath() {
   return process.env.HII_DB_PATH || path.join(process.env.HII_RUNTIME_DIR || path.join(os.homedir(), '.hii'), 'hii.db');
@@ -141,17 +134,12 @@ function noteFromRow(row: NoteRow): KnowledgeNote {
 function db() {
   const file = knowledgeDbPath();
   const existing = databases.get(file);
-  if (existing) {
-    synchronizeVault(existing, file);
-    return existing;
-  }
+  if (existing) return existing;
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const database = new DatabaseSync(file);
   database.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
   migrate(database);
   databases.set(file, database);
-  initializeVault(database);
-  synchronizeVault(database, file);
   return database;
 }
 
@@ -204,6 +192,8 @@ function migrate(database: DatabaseSync) {
       source_note_id TEXT NOT NULL,
       target_title TEXT NOT NULL,
       target_note_id TEXT,
+      resolution_status TEXT NOT NULL DEFAULT 'unresolved',
+      candidate_ids_json TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL,
       PRIMARY KEY(source_note_id, target_title),
       FOREIGN KEY (source_note_id) REFERENCES knowledge_notes(id) ON DELETE CASCADE,
@@ -225,6 +215,36 @@ function migrate(database: DatabaseSync) {
 
     CREATE INDEX IF NOT EXISTS idx_knowledge_events_created ON knowledge_events(created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS knowledge_import_batches (
+      id TEXT PRIMARY KEY,
+      source_root TEXT NOT NULL,
+      plan_hash TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL CHECK (status IN ('planned', 'importing', 'completed', 'failed', 'rolled_back')),
+      manifest_json TEXT NOT NULL,
+      summary_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      completed_at TEXT,
+      rolled_back_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS knowledge_import_files (
+      batch_id TEXT NOT NULL,
+      source_path TEXT NOT NULL,
+      source_kind TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      modified_at TEXT NOT NULL,
+      note_id TEXT,
+      content_blob BLOB,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      imported_at TEXT,
+      PRIMARY KEY(batch_id, source_path),
+      FOREIGN KEY(batch_id) REFERENCES knowledge_import_batches(id) ON DELETE CASCADE,
+      FOREIGN KEY(note_id) REFERENCES knowledge_notes(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_knowledge_import_files_note ON knowledge_import_files(note_id);
+
     CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_notes_fts USING fts5(
       note_id UNINDEXED,
       title,
@@ -235,6 +255,12 @@ function migrate(database: DatabaseSync) {
 
     INSERT OR IGNORE INTO schema_migrations(version) VALUES ('knowledge-v1');
   `);
+  for (const statement of [
+    "ALTER TABLE knowledge_links ADD COLUMN resolution_status TEXT NOT NULL DEFAULT 'unresolved'",
+    "ALTER TABLE knowledge_links ADD COLUMN candidate_ids_json TEXT NOT NULL DEFAULT '[]'"
+  ]) {
+    try { database.exec(statement); } catch { /* existing column */ }
+  }
 }
 
 function emitEvent(database: DatabaseSync, type: string, noteId: string | null, summary: string, metadata: Record<string, unknown> = {}, actor = 'hii.knowledge') {
@@ -286,24 +312,25 @@ function syncTagsAndLinks(database: DatabaseSync, note: KnowledgeNote) {
   }
   database.prepare('DELETE FROM knowledge_links WHERE source_note_id = ?').run(note.id);
   for (const targetTitle of extractWikiLinks(note.content)) {
-    const target = database.prepare(`
+    const candidates = database.prepare(`
       SELECT id FROM knowledge_notes
       WHERE lower(title) = lower(?) AND deleted_at IS NULL
-      ORDER BY updated_at DESC LIMIT 1
-    `).get(targetTitle) as { id?: string } | undefined;
+      ORDER BY path COLLATE NOCASE
+    `).all(targetTitle) as unknown as Array<{ id: string }>;
+    const resolution = candidates.length === 1 ? 'resolved' : candidates.length > 1 ? 'ambiguous' : 'unresolved';
     database.prepare(`
-      INSERT INTO knowledge_links(source_note_id, target_title, target_note_id, created_at)
-      VALUES (?, ?, ?, ?)
-    `).run(note.id, targetTitle, target?.id ?? null, timestamp());
+      INSERT INTO knowledge_links(source_note_id, target_title, target_note_id, resolution_status, candidate_ids_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(note.id, targetTitle, candidates.length === 1 ? candidates[0].id : null, resolution, JSON.stringify(candidates.map((candidate) => candidate.id)), timestamp());
   }
-  database.prepare(`
-    UPDATE knowledge_links
-    SET target_note_id = (
-      SELECT id FROM knowledge_notes
-      WHERE lower(title) = lower(knowledge_links.target_title) AND deleted_at IS NULL
-      ORDER BY updated_at DESC LIMIT 1
-    )
-  `).run();
+  const targets = database.prepare('SELECT DISTINCT target_title FROM knowledge_links').all() as unknown as Array<{ target_title: string }>;
+  for (const target of targets) {
+    const candidates = database.prepare(`SELECT id FROM knowledge_notes WHERE lower(title) = lower(?) AND deleted_at IS NULL ORDER BY path COLLATE NOCASE`)
+      .all(target.target_title) as unknown as Array<{ id: string }>;
+    const resolution = candidates.length === 1 ? 'resolved' : candidates.length > 1 ? 'ambiguous' : 'unresolved';
+    database.prepare('UPDATE knowledge_links SET target_note_id = ?, resolution_status = ?, candidate_ids_json = ? WHERE target_title = ?')
+      .run(candidates.length === 1 ? candidates[0].id : null, resolution, JSON.stringify(candidates.map((candidate) => candidate.id)), target.target_title);
+  }
 }
 
 function writeVersion(database: DatabaseSync, note: KnowledgeNote, source: string) {
@@ -319,21 +346,33 @@ function noteMetadata(note: Pick<KnowledgeNote, 'revision' | 'kind' | 'projectId
   return JSON.stringify({ revision: note.revision, kind: note.kind, projectId: note.projectId, aliases: note.aliases });
 }
 
-function fromVault(note: VaultNote): KnowledgeNote {
-  return { ...note, deletedAt: null };
+function canonicalRevision(input: Pick<KnowledgeNote, 'title' | 'path' | 'content' | 'kind' | 'projectId' | 'aliases'>) {
+  return createHash('sha256').update(JSON.stringify({
+    title: input.title,
+    path: input.path,
+    content: input.content,
+    kind: input.kind,
+    projectId: input.projectId,
+    aliases: input.aliases
+  })).digest('hex');
 }
 
-function upsertVaultNote(database: DatabaseSync, vaultNote: VaultNote, source = 'vault.scan') {
-  const note = fromVault(vaultNote);
-  const existingRow = (database.prepare('SELECT * FROM knowledge_notes WHERE id = ? OR path = ? ORDER BY id = ? DESC LIMIT 1')
-    .get(note.id, note.path, note.id) as NoteRow | undefined);
+function upsertCanonicalNote(database: DatabaseSync, note: KnowledgeNote, source: string, extraMetadata: Record<string, unknown> = {}) {
+  const existingRow = getNoteRow(database, note.id);
   const existing = existingRow ? noteFromRow(existingRow) : null;
-  if (existingRow && existingRow.id !== note.id) {
-    note.id = existingRow.id;
-  }
+  let preservedMetadata: Record<string, unknown> = {};
+  try { preservedMetadata = existingRow ? JSON.parse(existingRow.metadata_json || '{}') as Record<string, unknown> : {}; } catch { /* invalid legacy metadata */ }
+  const metadata = JSON.stringify({
+    ...preservedMetadata,
+    revision: note.revision,
+    kind: note.kind,
+    projectId: note.projectId,
+    aliases: note.aliases,
+    ...extraMetadata
+  });
   database.prepare(`
     INSERT INTO knowledge_notes(id, title, path, folder, content, pinned, daily_date, metadata_json, created_at, updated_at, deleted_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       title = excluded.title,
       path = excluded.path,
@@ -343,76 +382,16 @@ function upsertVaultNote(database: DatabaseSync, vaultNote: VaultNote, source = 
       daily_date = excluded.daily_date,
       metadata_json = excluded.metadata_json,
       updated_at = excluded.updated_at,
-      deleted_at = NULL
+      deleted_at = excluded.deleted_at
   `).run(
     note.id, note.title, note.path, note.folder, note.content, note.pinned ? 1 : 0,
-    note.dailyDate, noteMetadata(note), note.createdAt, note.updatedAt
+    note.dailyDate, metadata, note.createdAt, note.updatedAt, note.deletedAt
   );
   syncFts(database, note);
   syncTagsAndLinks(database, note);
   ensureNoteKnowledgeObject(note);
-  if (!existing || existing.revision !== note.revision) {
-    writeVersion(database, note, existing ? source : 'vault.imported');
-  }
+  if (!existing || existing.revision !== note.revision) writeVersion(database, note, source);
   return note;
-}
-
-function initializeVault(database: DatabaseSync) {
-  const root = ensureKnowledgeVault();
-  const migrated = database.prepare("SELECT version FROM schema_migrations WHERE version = 'knowledge-vault-v2'").get();
-  if (migrated) return;
-  const vaultNotes = scanVaultNotes(root);
-  if (vaultNotes.length === 0) {
-    const legacyRows = database.prepare('SELECT * FROM knowledge_notes WHERE deleted_at IS NULL ORDER BY created_at').all() as unknown as NoteRow[];
-    for (const row of legacyRows) {
-      const note = noteFromRow(row);
-      writeVaultNote({
-        id: note.id,
-        title: note.title,
-        path: note.path,
-        folder: note.folder,
-        content: note.content,
-        pinned: note.pinned,
-        dailyDate: note.dailyDate,
-        kind: note.kind,
-        projectId: note.projectId === 'shared' ? (note.path.match(/^Projects\/([^/]+)/i)?.[1] || 'shared') : note.projectId,
-        aliases: note.aliases,
-        createdAt: note.createdAt,
-        updatedAt: note.updatedAt
-      }, undefined, root);
-    }
-  }
-  database.prepare("INSERT OR IGNORE INTO schema_migrations(version) VALUES ('knowledge-vault-v2')").run();
-}
-
-function synchronizeVault(database: DatabaseSync, key = knowledgeDbPath()) {
-  if (syncing.has(key)) return;
-  syncing.add(key);
-  try {
-    const notes = scanVaultNotes();
-    const liveIds = new Set(notes.map((note) => note.id));
-    database.exec('BEGIN IMMEDIATE');
-    try {
-      for (const note of notes) upsertVaultNote(database, note);
-      const indexed = database.prepare("SELECT id, metadata_json FROM knowledge_notes WHERE deleted_at IS NULL").all() as unknown as Array<{ id: string; metadata_json: string }>;
-      for (const row of indexed) {
-        let revision = '';
-        try { revision = String((JSON.parse(row.metadata_json || '{}') as Record<string, unknown>).revision || ''); } catch { /* legacy row */ }
-        if (revision && !liveIds.has(row.id)) {
-          const deletedAt = timestamp();
-          database.prepare('UPDATE knowledge_notes SET deleted_at = ?, updated_at = ? WHERE id = ?').run(deletedAt, deletedAt, row.id);
-          database.prepare('DELETE FROM knowledge_notes_fts WHERE note_id = ?').run(row.id);
-          database.prepare('UPDATE knowledge_links SET target_note_id = NULL WHERE target_note_id = ?').run(row.id);
-        }
-      }
-      database.exec('COMMIT');
-    } catch (error) {
-      database.exec('ROLLBACK');
-      throw error;
-    }
-  } finally {
-    syncing.delete(key);
-  }
 }
 
 function uniquePath(database: DatabaseSync, desired: string, excludeId?: string) {
@@ -433,6 +412,7 @@ function getNoteRow(database: DatabaseSync, id: string) {
 }
 
 export function createKnowledgeNote(input: {
+  id?: unknown;
   title?: unknown;
   content?: unknown;
   folder?: unknown;
@@ -442,16 +422,20 @@ export function createKnowledgeNote(input: {
   kind?: unknown;
   projectId?: unknown;
   aliases?: unknown;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+  sourceMetadata?: Record<string, unknown>;
   actor?: string;
 }) {
   const database = db();
   const title = cleanTitle(input.title) || 'Untitled';
   const folder = cleanFolder(input.folder);
   const content = cleanText(input.content);
-  const notePath = uniquePath(database, normalizePath(input.path, title, folder));
-  const createdAt = timestamp();
-  const written = writeVaultNote({
-    id: randomUUID(),
+  const noteId = cleanText(input.id, 160) || randomUUID();
+  const notePath = uniquePath(database, normalizePath(input.path, title, folder), noteId);
+  const createdAt = typeof input.createdAt === 'string' && input.createdAt ? input.createdAt : timestamp();
+  const note: KnowledgeNote = {
+    id: noteId,
     title,
     path: notePath,
     folder: cleanFolder(path.posix.dirname(notePath) === '.' ? folder : path.posix.dirname(notePath)),
@@ -462,13 +446,15 @@ export function createKnowledgeNote(input: {
     projectId: cleanText(input.projectId, 120) || notePath.match(/^Projects\/([^/]+)/i)?.[1] || 'shared',
     aliases: Array.isArray(input.aliases) ? input.aliases.map((alias) => cleanTitle(alias)).filter(Boolean).slice(0, 50) : [],
     createdAt,
-    updatedAt: createdAt
-  });
-  const note = fromVault(written);
+    updatedAt: typeof input.updatedAt === 'string' && input.updatedAt ? input.updatedAt : createdAt,
+    deletedAt: null,
+    revision: ''
+  };
+  note.revision = canonicalRevision(note);
   database.exec('BEGIN IMMEDIATE');
   try {
-    upsertVaultNote(database, written, 'created');
-    emitEvent(database, 'note.created', note.id, `Created ${note.path}`, { path: note.path, revision: note.revision, vault: knowledgeVaultPath() }, input.actor);
+    upsertCanonicalNote(database, note, input.sourceMetadata ? 'imported' : 'created', input.sourceMetadata);
+    emitEvent(database, 'note.created', note.id, `Created ${note.path}`, { path: note.path, revision: note.revision, authority: 'hii-database' }, input.actor);
     database.exec('COMMIT');
   } catch (error) {
     database.exec('ROLLBACK');
@@ -505,7 +491,7 @@ export function updateKnowledgeNote(id: string, input: {
   const desiredPath = input.path === undefined
     ? (title === existing.title && folder === existing.folder ? existing.path : normalizePath('', title, folder))
     : normalizePath(input.path, title, folder);
-  const written = writeVaultNote({
+  const next: KnowledgeNote = {
     ...existing,
     title,
     folder: cleanFolder(path.posix.dirname(desiredPath) === '.' ? folder : path.posix.dirname(desiredPath)),
@@ -515,12 +501,14 @@ export function updateKnowledgeNote(id: string, input: {
     kind: input.kind === undefined ? existing.kind : cleanText(input.kind, 40) || existing.kind,
     projectId: input.projectId === undefined ? existing.projectId : cleanText(input.projectId, 120) || existing.projectId,
     aliases: input.aliases === undefined ? existing.aliases : Array.isArray(input.aliases) ? input.aliases.map((alias) => cleanTitle(alias)).filter(Boolean).slice(0, 50) : existing.aliases,
-    updatedAt: timestamp()
-  }, existing.path);
-  const next = fromVault(written);
+    updatedAt: timestamp(),
+    deletedAt: existing.deletedAt,
+    revision: ''
+  };
+  next.revision = canonicalRevision(next);
   database.exec('BEGIN IMMEDIATE');
   try {
-    upsertVaultNote(database, written, 'saved');
+    upsertCanonicalNote(database, next, 'saved');
     emitEvent(database, 'note.updated', id, `Saved ${next.path}`, { previousPath: existing.path, path: next.path, revision: next.revision }, input.actor);
     database.exec('COMMIT');
   } catch (error) {
@@ -535,12 +523,11 @@ export function trashKnowledgeNote(id: string, actor = 'hii.knowledge') {
   const row = getNoteRow(database, id);
   if (!row) throw new Error(`Note not found: ${id}`);
   const deletedAt = timestamp();
-  trashVaultNote(noteFromRow(row));
   database.prepare('UPDATE knowledge_notes SET deleted_at = ?, updated_at = ? WHERE id = ?').run(deletedAt, deletedAt, id);
   const note = noteFromRow({ ...row, deleted_at: deletedAt, updated_at: deletedAt });
   syncFts(database, note);
   database.prepare('UPDATE knowledge_links SET target_note_id = NULL WHERE target_note_id = ?').run(id);
-  emitEvent(database, 'note.trashed', id, `Moved ${note.path} to trash`, {}, actor);
+  emitEvent(database, 'note.trashed', id, `Moved ${note.path} to HII trash`, {}, actor);
   return note;
 }
 
@@ -549,10 +536,8 @@ export function restoreKnowledgeNote(id: string, actor = 'hii.knowledge') {
   const row = getNoteRow(database, id);
   if (!row) throw new Error(`Note not found: ${id}`);
   const updatedAt = timestamp();
-  const restored = restoreVaultNote(noteFromRow(row));
-  const note = { ...fromVault(restored), updatedAt };
+  const note = { ...noteFromRow(row), deletedAt: null, updatedAt };
   database.prepare('UPDATE knowledge_notes SET deleted_at = NULL, updated_at = ? WHERE id = ?').run(updatedAt, id);
-  upsertVaultNote(database, { ...restored, updatedAt }, 'restored');
   syncFts(database, note);
   syncTagsAndLinks(database, note);
   emitEvent(database, 'note.restored', id, `Restored ${note.path}`, {}, actor);
@@ -584,19 +569,21 @@ export function getKnowledgeNote(id: string) {
   const note = noteFromRow(row);
   const tags = (database.prepare('SELECT tag FROM knowledge_tags WHERE note_id = ? ORDER BY tag').all(id) as Array<{ tag: string }>).map((item) => item.tag);
   const outgoing = database.prepare(`
-    SELECT l.source_note_id, s.title AS source_title, l.target_title, l.target_note_id, t.title AS target_note_title
+    SELECT l.source_note_id, s.title AS source_title, l.target_title, l.target_note_id, t.title AS target_note_title,
+      l.resolution_status, l.candidate_ids_json
     FROM knowledge_links l
     JOIN knowledge_notes s ON s.id = l.source_note_id
     LEFT JOIN knowledge_notes t ON t.id = l.target_note_id
     WHERE l.source_note_id = ? ORDER BY l.target_title COLLATE NOCASE
-  `).all(id) as unknown as Array<{ source_note_id: string; source_title: string; target_title: string; target_note_id: string | null; target_note_title: string | null }>;
+  `).all(id) as unknown as Array<{ source_note_id: string; source_title: string; target_title: string; target_note_id: string | null; target_note_title: string | null; resolution_status: KnowledgeLink['resolutionStatus']; candidate_ids_json: string }>;
   const backlinks = database.prepare(`
-    SELECT l.source_note_id, s.title AS source_title, l.target_title, l.target_note_id, t.title AS target_note_title
+    SELECT l.source_note_id, s.title AS source_title, l.target_title, l.target_note_id, t.title AS target_note_title,
+      l.resolution_status, l.candidate_ids_json
     FROM knowledge_links l
     JOIN knowledge_notes s ON s.id = l.source_note_id
     LEFT JOIN knowledge_notes t ON t.id = l.target_note_id
     WHERE l.target_note_id = ? AND s.deleted_at IS NULL ORDER BY s.updated_at DESC
-  `).all(id) as unknown as Array<{ source_note_id: string; source_title: string; target_title: string; target_note_id: string | null; target_note_title: string | null }>;
+  `).all(id) as unknown as Array<{ source_note_id: string; source_title: string; target_title: string; target_note_id: string | null; target_note_title: string | null; resolution_status: KnowledgeLink['resolutionStatus']; candidate_ids_json: string }>;
   const versions = database.prepare(`
     SELECT id, version, title, path, created_at AS createdAt, source
     FROM knowledge_note_versions WHERE note_id = ? ORDER BY version DESC LIMIT 50
@@ -606,7 +593,9 @@ export function getKnowledgeNote(id: string) {
     sourceTitle: link.source_title,
     targetTitle: link.target_title,
     targetNoteId: link.target_note_id,
-    targetNoteTitle: link.target_note_title
+    targetNoteTitle: link.target_note_title,
+    resolutionStatus: link.resolution_status || (link.target_note_id ? 'resolved' : 'unresolved'),
+    candidateIds: (() => { try { return JSON.parse(link.candidate_ids_json || '[]') as string[]; } catch { return []; } })()
   });
   return { note, tags, outgoing: outgoing.map(mapLink), backlinks: backlinks.map(mapLink), versions, outline: extractOutline(note.content) };
 }
@@ -686,9 +675,9 @@ export function knowledgeGraph() {
     FROM knowledge_links WHERE target_note_id IS NOT NULL
   `).all() as unknown as Array<{ source: string; target: string; targetTitle: string }>;
   const unresolved = database.prepare(`
-    SELECT source_note_id AS source, target_title AS targetTitle
+    SELECT source_note_id AS source, target_title AS targetTitle, resolution_status AS resolutionStatus, candidate_ids_json AS candidateIdsJson
     FROM knowledge_links WHERE target_note_id IS NULL
-  `).all() as unknown as Array<{ source: string; targetTitle: string }>;
+  `).all() as unknown as Array<{ source: string; targetTitle: string; resolutionStatus: string; candidateIdsJson: string }>;
   return { nodes, edges, unresolved };
 }
 
@@ -723,8 +712,8 @@ export function knowledgeWorkspace() {
   }));
   return {
     dbPath: knowledgeDbPath(),
-    vaultPath: knowledgeVaultPath(),
-    authority: 'markdown-vault',
+    vaultPath: null,
+    authority: 'hii-database',
     notes,
     projects,
     assets,
@@ -777,8 +766,8 @@ export function exportKnowledgeWorkspace() {
     exportKind: 'hii.knowledge.workspace',
     exportedAt: timestamp(),
     localOnly: true,
-    authority: 'markdown-vault',
-    vaultPath: knowledgeVaultPath(),
+    authority: 'hii-database',
+    vaultPath: null,
     notes,
     assets: listKnowledgeAssets(),
     graph: knowledgeGraph(),
@@ -794,17 +783,12 @@ export function exportKnowledgeNote(id: string) {
 export function resetKnowledgeDbForTests() {
   for (const database of databases.values()) database.close();
   databases.clear();
-  syncing.clear();
   resetKnowledgeVaultForTests();
   resetKnowledgeSystemsForTests();
 }
 
 export function configureKnowledgeWorkspaceVault(root: unknown) {
-  const config = configureKnowledgeVault(root);
-  const database = db();
-  synchronizeVault(database);
-  emitEvent(database, 'vault.configured', null, `Configured Markdown vault at ${config.root}`, { root: config.root });
-  return { config, workspace: knowledgeWorkspace() };
+  throw new Error(`HII is canonical. Use plan-import for source vault ${String(root ?? '')}.`);
 }
 
 export function rebuildKnowledgeIndex() {
@@ -812,9 +796,13 @@ export function rebuildKnowledgeIndex() {
   database.exec('BEGIN IMMEDIATE');
   try {
     database.exec('DELETE FROM knowledge_notes_fts; DELETE FROM knowledge_tags; DELETE FROM knowledge_links;');
-    database.prepare('UPDATE knowledge_notes SET deleted_at = ?').run(timestamp());
-    for (const note of scanVaultNotes()) upsertVaultNote(database, note, 'vault.rebuild');
-    emitEvent(database, 'vault.rebuilt', null, 'Rebuilt the knowledge index from canonical Markdown files', { vault: knowledgeVaultPath() });
+    const rows = database.prepare('SELECT * FROM knowledge_notes').all() as unknown as NoteRow[];
+    for (const row of rows) {
+      const note = noteFromRow(row);
+      syncFts(database, note);
+      syncTagsAndLinks(database, note);
+    }
+    emitEvent(database, 'knowledge.index_rebuilt', null, 'Rebuilt derived search, tag, and link indexes from canonical HII records', { authority: 'hii-database' });
     database.exec('COMMIT');
   } catch (error) {
     database.exec('ROLLBACK');

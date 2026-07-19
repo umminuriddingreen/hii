@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { localTerminalAllowed } from '@/lib/server/hii-terminal';
 import {
-  configureKnowledgeWorkspaceVault,
   createKnowledgeNote,
   exportKnowledgeNote,
   exportKnowledgeWorkspace,
@@ -33,6 +32,14 @@ import {
 import { createBoardTask } from '@/lib/server/hii-board';
 import { readWorkspace, writeWorkspace } from '@/lib/server/workspace-store';
 import type { SpatialObjectKind, WorkspaceNode } from '@/lib/workspace/types';
+import {
+  executeKnowledgeImport,
+  exportKnowledgeVault,
+  knowledgeImportStatus,
+  planKnowledgeImport,
+  rollbackKnowledgeImport,
+  verifyKnowledgeImport
+} from '@/lib/server/hii-knowledge-import';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -55,7 +62,7 @@ async function migrateWorkspaceRefs() {
     changed += 1;
     return {
       ...node,
-      objectRef: { authority: 'knowledge-vault' as const, id: object.id, projectId: object.projectId, kind: object.kind },
+      objectRef: { authority: 'hii-knowledge' as const, id: object.id, projectId: object.projectId, kind: object.kind },
       object: node.object || { kind: object.kind as SpatialObjectKind, owner: object.owner, status: object.status === 'accepted' ? 'approved' as const : 'unknown' as const, source: object.provenance?.path, memoryRefs: [object.id] }
     };
   });
@@ -76,6 +83,7 @@ export async function GET(request: Request) {
     if (mode === 'graph') return NextResponse.json(knowledgeGraph());
     if (mode === 'assets') return NextResponse.json({ assets: listKnowledgeAssets() });
     if (mode === 'systems') return NextResponse.json(knowledgeSystemSnapshot(url.searchParams.get('project') || undefined));
+    if (mode === 'imports') return NextResponse.json({ imports: knowledgeImportStatus(url.searchParams.get('batch') || undefined) });
     if (mode === 'asset-file') {
       const result = readKnowledgeAsset(url.searchParams.get('id') || '');
       if (!result) return NextResponse.json({ error: 'Asset not found.' }, { status: 404 });
@@ -137,10 +145,11 @@ export async function POST(request: Request) {
     if (action === 'restore-version') return NextResponse.json(restoreKnowledgeVersion(String(body?.id || ''), Number(body?.version), body?.ifMatch, 'api.knowledge'));
     if (action === 'daily') return NextResponse.json(openDailyNote(String(body?.date || new Date().toISOString().slice(0, 10)), 'api.knowledge'));
     if (action === 'import') return NextResponse.json({ notes: importKnowledgeNotes(body?.files, 'api.knowledge') }, { status: 201 });
-    if (action === 'configure-vault') {
-      const configured = configureKnowledgeWorkspaceVault(body?.root);
-      return NextResponse.json({ ...configured, workspaceRefs: await migrateWorkspaceRefs() });
-    }
+    if (action === 'plan-import') return NextResponse.json(planKnowledgeImport(body?.sourceRoot), { status: 201 });
+    if (action === 'execute-import') return NextResponse.json(executeKnowledgeImport(body?.batchId, body?.planHash, body?.approvalToken));
+    if (action === 'verify-import') return NextResponse.json(verifyKnowledgeImport(body?.batchId));
+    if (action === 'rollback-import') return NextResponse.json(rollbackKnowledgeImport(body?.batchId));
+    if (action === 'export-vault') return NextResponse.json(exportKnowledgeVault(body?.destination), { status: 201 });
     if (action === 'rebuild-index') return NextResponse.json({ workspace: rebuildKnowledgeIndex() });
     if (action === 'migrate-workspace-refs') return NextResponse.json(await migrateWorkspaceRefs());
     if (action === 'asset-copy' || action === 'asset-link') {
@@ -222,8 +231,8 @@ export async function POST(request: Request) {
         id: crypto.randomUUID(), type: 'note', x: 120 + workspace.nodes.length * 24, y: 120 + workspace.nodes.length * 24,
         w: 320, h: 220, z: workspace.nextZ + 1, createdAt: now, updatedAt: now,
         object: { kind: kindMap[object.kind] || object.kind as SpatialObjectKind, owner: object.owner, status: object.status === 'accepted' ? 'approved' : object.status === 'active' ? 'running' : object.status as any, source: object.provenance?.path, memoryRefs: [object.id] },
-        objectRef: { authority: 'knowledge-vault', id: object.id, projectId: object.projectId, kind: object.kind },
-        payload: { title: object.title, content: object.summary, knowledgeObjectId: object.id, projectId: object.projectId, canonical: 'markdown-vault' }
+        objectRef: { authority: 'hii-knowledge', id: object.id, projectId: object.projectId, kind: object.kind },
+        payload: { title: object.title, content: object.summary, knowledgeObjectId: object.id, projectId: object.projectId, canonical: 'hii-database' }
       };
       workspace.nodes.push(node); workspace.nextZ = node.z;
       await writeWorkspace(workspace);
