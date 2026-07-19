@@ -56,9 +56,17 @@ the UI shows it in `detect` results but routes execution through codex.
 ### `status`
 Request: `{ "action": "status", "activationId": string }`
 Response: `{ "status": "running" | "completed" | "failed" | "unknown", "receipt": Receipt | null }`
-`completed` requires a receipt at `~/.hii/runs/cli/*/receipt.json` (via the
-`latest` pointer) with mtime > `startedAt`; its parsed JSON is returned as
-`Receipt` and its path recorded on the activation record.
+`completed` requires a receipt newer than `startedAt` from either source, in
+this order (amended 2026-07-19 after the first live end-to-end run):
+1. `~/.hii/runs/cli/*/receipt.json` via the `latest` pointer (Rust CLI runs).
+2. The newest `~/.hii/skills/actions.jsonl` entry (`hii skill report`, which is
+   what the orientation contract instructs agents to run) with
+   `createdAt > startedAt` and a matching `agent.id`; it is copied to
+   `~/.hii/activations/<activationId>.receipt.json`.
+The parsed JSON is returned as `Receipt` and its path recorded on the record.
+`failed`: for codex activations, `status` cross-checks the daemon run linked by
+`activationId` under `~/.hii/daemon/runs/` — a failed run marks the activation
+failed instead of polling forever.
 
 ## UI step mapping (A2)
 

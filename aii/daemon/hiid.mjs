@@ -757,7 +757,10 @@ function startQueuedRuns() {
   for (const run of queued) {
     if (activeRuns.has(run.id)) continue;
     const logFd = fs.openSync(run.log, "a");
-    const child = spawn(codexBin(), ["exec", "--cd", run.coordinate || ROOT, run.prompt], {
+    // Managed runs target coordinates a human already approved (activation wizard
+    // or operator queue), which may not be trusted git repos — e.g. a partner's
+    // plain project folder — so codex's repo trust check must be bypassed here.
+    const child = spawn(codexBin(), ["exec", "--skip-git-repo-check", "--cd", run.coordinate || ROOT, run.prompt], {
       cwd: run.coordinate || ROOT,
       stdio: ["ignore", logFd, logFd],
       env: { ...process.env, HII_DAEMON_RUN_ID: run.id }

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -41,6 +41,8 @@ type ActivationRecord = {
 
 const REPORTING_INSTRUCTIONS = [
   'After meaningful work, record a structured after-work receipt with `hii skill report`.',
+  'Record exactly one receipt, only after verification — the activation status reads the newest receipt, so trial or duplicate receipts corrupt what the human reviews.',
+  'Pass the project root as --coordinate so the receipt is attributed to the right project.',
   'Mark repeatable verified work with `--repeatable` to create a draft skill candidate; do not register, publish, sell, or license it yourself.'
 ];
 
@@ -222,6 +224,19 @@ export async function startActivationRun(input: {
       };
       const intentsPath = path.join(runtimeRoot(), 'daemon', 'intents.jsonl');
       await mkdir(path.dirname(intentsPath), { recursive: true });
+      // Prime the daemon's cursor before appending (same as enqueueClaude in
+      // hiid.mjs) — without it, hiid's first poll treats a fresh intents file
+      // as history and silently drops the spawn.
+      const cursorPath = path.join(runtimeRoot(), 'daemon', 'intents.cursor.json');
+      if (!existsSync(cursorPath)) {
+        let existingLines = 0;
+        try {
+          existingLines = (await readFile(intentsPath, 'utf8')).split('\n').filter(Boolean).length;
+        } catch {
+          existingLines = 0;
+        }
+        await writeFile(cursorPath, `${JSON.stringify({ processed: existingLines }, null, 2)}\n`, 'utf8');
+      }
       await appendFile(intentsPath, `${JSON.stringify(intent)}\n`, 'utf8');
     }
   } catch (error) {
@@ -252,25 +267,87 @@ export async function readActivationReceipt(activationId: string) {
     }
   }
 
+  // A failed daemon run would otherwise leave the wizard polling forever:
+  // the receipt never appears, so cross-check the run linked to this activation.
+  if (record.agent === 'codex') {
+    try {
+      const runsDir = path.join(runtimeRoot(), 'daemon', 'runs');
+      for (const name of await readdir(runsDir)) {
+        if (!name.endsWith('.json')) continue;
+        const run = JSON.parse(await readFile(path.join(runsDir, name), 'utf8')) as Record<string, unknown>;
+        if (run.activationId !== activationId) continue;
+        if (run.status === 'failed') {
+          await writeJson(path.join(runtimeRoot(), 'activations', `${activationId}.json`), {
+            ...record,
+            status: 'failed'
+          });
+          return { status: 'failed' as const, receipt: null };
+        }
+        break;
+      }
+    } catch {
+      // runs dir unreadable — fall through to receipt polling
+    }
+  }
+
   try {
     const latestPath = path.join(runtimeRoot(), 'runs', 'cli', 'latest');
     const latest = (await readFile(latestPath, 'utf8')).trim();
-    if (!latest || latest.includes('/') || latest === '.' || latest === '..') {
-      return { status: 'running' as const, receipt: null };
+    if (latest && !latest.includes('/') && latest !== '.' && latest !== '..') {
+      const receiptPath = path.join(path.dirname(latestPath), latest, 'receipt.json');
+      const receiptStat = await stat(receiptPath);
+      if (receiptStat.mtimeMs > new Date(record.startedAt).getTime()) {
+        const receipt = JSON.parse(await readFile(receiptPath, 'utf8')) as Record<string, unknown>;
+        await writeJson(path.join(runtimeRoot(), 'activations', `${activationId}.json`), {
+          ...record,
+          status: 'completed',
+          receiptPath
+        });
+        return { status: 'completed' as const, receipt };
+      }
     }
-    const receiptPath = path.join(path.dirname(latestPath), latest, 'receipt.json');
-    const receiptStat = await stat(receiptPath);
-    if (receiptStat.mtimeMs <= new Date(record.startedAt).getTime()) {
-      return { status: 'running' as const, receipt: null };
-    }
-    const receipt = JSON.parse(await readFile(receiptPath, 'utf8')) as Record<string, unknown>;
+  } catch {
+    // no CLI receipt — fall through to skill-report receipts
+  }
+
+  // `hii skill report` (the receipt path the orientation contract instructs)
+  // appends to skills/actions.jsonl rather than runs/cli — accept the newest
+  // matching entry recorded after this activation started.
+  const actionReceipt = await readSkillActionReceipt(record);
+  if (actionReceipt) {
+    const receiptPath = path.join(runtimeRoot(), 'activations', `${activationId}.receipt.json`);
+    await writeJson(receiptPath, actionReceipt);
     await writeJson(path.join(runtimeRoot(), 'activations', `${activationId}.json`), {
       ...record,
       status: 'completed',
       receiptPath
     });
-    return { status: 'completed' as const, receipt };
+    return { status: 'completed' as const, receipt: actionReceipt };
+  }
+  return { status: 'running' as const, receipt: null };
+}
+
+async function readSkillActionReceipt(record: ActivationRecord): Promise<Record<string, unknown> | null> {
+  try {
+    const actionsPath = path.join(runtimeRoot(), 'skills', 'actions.jsonl');
+    const lines = (await readFile(actionsPath, 'utf8')).trim().split('\n');
+    const startedMs = new Date(record.startedAt).getTime();
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      let entry: Record<string, unknown>;
+      try {
+        entry = JSON.parse(lines[i]) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      const createdMs = new Date(String(entry.createdAt ?? '')).getTime();
+      // entries append chronologically — anything at or before start ends the scan
+      if (!Number.isFinite(createdMs) || createdMs <= startedMs) break;
+      const agent = entry.agent as { id?: string } | undefined;
+      if (agent?.id && agent.id !== record.agent) continue;
+      return entry;
+    }
+    return null;
   } catch {
-    return { status: 'running' as const, receipt: null };
+    return null;
   }
 }
