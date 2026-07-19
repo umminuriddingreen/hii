@@ -4,7 +4,7 @@
   import HiiLogo from '$lib/components/HiiLogo.svelte';
 </script>
 
-{#if $page.url.pathname === '/landing'}
+{#if new Set(['/landing', '/pilot']).has($page.url.pathname)}
   <slot />
 {:else}
   <div class="hii-app-shell">
