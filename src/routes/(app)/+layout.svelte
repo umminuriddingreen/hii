@@ -1,29 +1,29 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import AliveBars from '$lib/components/AliveBars.svelte';
-  import HiiLogo from '$lib/components/HiiLogo.svelte';
+  import DeskSurfaceShell from '$lib/components/DeskSurfaceShell.svelte';
+
+  const surfaces: Record<string, { title: string; id: string; flush?: boolean }> = {
+    '/activate': { title: 'Activation', id: 'activate', flush: true },
+    '/boards': { title: 'Boards', id: 'boards' },
+    '/console': { title: 'Console', id: 'console', flush: true },
+    '/credits': { title: 'Credits', id: 'credits' },
+    '/dashboard': { title: 'Dashboard', id: 'dashboard' },
+    '/feed': { title: 'Feed', id: 'feed' },
+    '/login': { title: 'Sign in', id: 'login' },
+    '/pilot': { title: 'Founder pilot', id: 'pilot', flush: true },
+    '/terminal': { title: 'Terminal', id: 'console', flush: true },
+    '/termite': { title: 'Termite', id: 'termite' },
+    '/upload': { title: 'Exchange', id: 'upload' }
+  };
+
+  $: embedded = $page.url.searchParams.get('desk') === '1';
+  $: current = surfaces[$page.url.pathname] || { title: 'HII', id: 'workspace' };
 </script>
 
-{#if new Set(['/landing', '/pilot']).has($page.url.pathname)}
+{#if $page.url.pathname === '/landing'}
   <slot />
+{:else if embedded}
+  <div class="hii-desk-embedded" data-surface={current.id}><slot /></div>
 {:else}
-  <div class="hii-app-shell">
-    <AliveBars />
-    <header class="hii-topbar sticky top-0 z-40 px-4 py-3 sm:px-6">
-      <div class="mx-auto flex max-w-7xl flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div class="flex items-baseline gap-3">
-          <a href="/" class="text-[var(--hii-electric-blue)]" aria-label="HII home"><HiiLogo className="h-5 w-auto" /></a>
-          <span class="font-mono text-xs uppercase text-neutral-600">control plane</span>
-        </div>
-        <nav class="flex flex-wrap gap-x-4 gap-y-2 text-xs" aria-label="HII product">
-          <a href="/" class="hii-nav-link">Desk</a><a href="/landing" class="hii-nav-link">Playbook</a>
-          <a href="/feed" class="hii-nav-link">Feed</a><a href="/knowledge" class="hii-nav-link">Knowledge</a>
-          <a href="/boards" class="hii-nav-link">Boards</a><a href="/console" class="hii-nav-link">Console</a>
-          <a href="/credits" class="hii-nav-link">Credits</a><a href="/termite" class="hii-nav-link">Termite</a>
-          <a href="/upload" class="hii-nav-link">Exchange</a><a href="/dashboard" class="hii-nav-link">Dashboard</a>
-        </nav>
-      </div>
-    </header>
-    <main class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:py-10"><slot /></main>
-  </div>
+  <DeskSurfaceShell title={current.title} surface={current.id} flush={Boolean(current.flush)}><slot /></DeskSurfaceShell>
 {/if}

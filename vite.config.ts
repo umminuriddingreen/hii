@@ -48,8 +48,9 @@ export default defineConfig({
   },
   ssr: {
     noExternal: true,
-    // yaml publishes a CommonJS Node entry. Keep it external so Vite's SSR
-    // evaluator uses Node's ESM/CJS interop instead of inlining `require`.
-    external: ['yaml']
+    // These packages publish CommonJS Node entries. Keep them external so
+    // Vite's SSR evaluator uses Node's ESM/CJS interop instead of inlining
+    // their `require` calls into Desk-hosted same-origin surfaces.
+    external: ['yaml', 'qs']
   }
 });

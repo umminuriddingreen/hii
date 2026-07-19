@@ -14,6 +14,7 @@ export type WorkspaceNodeType =
   | 'browser'
   | 'context'
   | 'board'
+  | 'surface'
   | 'job'
   | 'sound-field';
 
@@ -95,6 +96,7 @@ export const workspaceNodeTypes: WorkspaceNodeType[] = [
   'browser',
   'context',
   'board',
+  'surface',
   'job',
   'sound-field'
 ];
