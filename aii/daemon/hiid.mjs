@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 
 const ROOT = path.join(os.homedir(), "hii");
 const RUNTIME = process.env.HII_RUNTIME_DIR || path.join(os.homedir(), ".hii");
@@ -17,6 +18,7 @@ const STATUS = path.join(DAEMON_DIR, "status.json");
 const PID = path.join(DAEMON_DIR, "daemon.pid");
 const LOG = path.join(DAEMON_DIR, "daemon.log");
 const CODEX_INDEX = path.join(RUNTIME, "codex", "index.json");
+const CONTEXT_DB = path.join(RUNTIME, "hii.db");
 
 const OWNED_PATTERNS = [
   `${ROOT}/aii/daemon/hiid.mjs`,
@@ -167,6 +169,12 @@ const SPAWN_PRESETS = {
     "Improve the HII product surface only when the requested scope is clear.",
     "Do not delete or revert user work. Do not touch secrets. Verify with npm run build when editing HII."
   ],
+  "partner-onboard": [
+    "You are an agent working inside a design partner's own project folder.",
+    "Stay strictly within the provided workspace folder and never touch files outside it.",
+    "Never install anything, push, publish, or contact the network.",
+    "Complete exactly the one bounded task given and verify the result before claiming completion."
+  ],
   "termite-demo": [
     "You are a Termite demo operator for HII.",
     "Prepare or monitor a Rhino/Termite alpha demo and report exact blockers and proof artifacts.",
@@ -223,11 +231,36 @@ function reportSpawnJob(intent, { status, output, startedAt }) {
   appendJsonl(CAPABILITY_JOBS, job);
 }
 
+export function approvedSpawnCwd(requestedCwd) {
+  let database;
+  try {
+    if (typeof requestedCwd !== "string" || !requestedCwd) {
+      throw new Error("intent.cwd must be a non-empty string");
+    }
+    database = new DatabaseSync(CONTEXT_DB, { readOnly: true });
+    const approved = database.prepare(`
+      SELECT 1 AS approved
+      FROM context_projects
+      WHERE root_path = ? AND approved_root = 1 AND excluded = 0
+      LIMIT 1
+    `).get(requestedCwd);
+    if (!approved) throw new Error("intent.cwd is not an approved context project root");
+    return requestedCwd;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(`hiid: rejected spawn cwd ${redact(requestedCwd)}; falling back to ${ROOT}: ${redact(reason)}`);
+    return ROOT;
+  } finally {
+    try { database?.close(); } catch { /* read-only validation cleanup */ }
+  }
+}
+
 function executeSpawnIntent(intent) {
   const preset = Object.hasOwn(SPAWN_PRESETS, intent.preset) || intent.preset === "custom" ? intent.preset : "observer";
   const prompt = presetPrompt(preset, intent.prompt).slice(0, 12000);
   const name = cleanSessionName(intent.name || `hii-${preset}-${Date.now().toString(36)}`);
   const startedAt = now();
+  const spawnCwd = Object.hasOwn(intent, "cwd") ? approvedSpawnCwd(intent.cwd) : ROOT;
   const args = [
     prompt,
     "--bg",
@@ -239,7 +272,7 @@ function executeSpawnIntent(intent) {
     "--permission-mode",
     preset === "observer" ? "default" : "auto"
   ];
-  execFile(CLAUDE_BIN, args, { cwd: ROOT, timeout: 15000, maxBuffer: 512 * 1024 }, (error, stdout, stderr) => {
+  execFile(CLAUDE_BIN, args, { cwd: spawnCwd, timeout: 15000, maxBuffer: 512 * 1024 }, (error, stdout, stderr) => {
     const output = redact(`${stdout ?? ""}${stderr ?? ""}`.trim());
     if (error) {
       reportSpawnJob({ ...intent, preset, name }, { status: "failed", output: output || String(error.message), startedAt });
