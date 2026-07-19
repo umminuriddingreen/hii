@@ -6,6 +6,7 @@ pub const LEGACY_COMMANDS: &[&str] = &[
     "task",
     "capture",
     "work",
+    "schedule",
     "check",
     "ship",
     "health",
@@ -40,7 +41,7 @@ pub const LEGACY_COMMANDS: &[&str] = &[
 ];
 
 pub fn is_legacy(command: &str) -> bool {
-    LEGACY_COMMANDS.contains(&command)
+    LEGACY_COMMANDS.contains(&command) && !(cfg!(feature = "preview") && command == "schedule")
 }
 
 pub fn run(repo: &Path, args: &[String]) -> Result<i32, String> {

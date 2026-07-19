@@ -9,6 +9,10 @@ license = "UNLICENSED"
 name = "hii"
 path = "src/main.rs"
 
+[features]
+default = []
+preview = []
+
 [dependencies]
 chrono = { version = "0.4.42", features = ["clock", "serde"] }
 clap = { version = "4.5.58", features = ["derive"] }

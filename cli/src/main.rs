@@ -5,8 +5,10 @@ mod conversation;
 mod legacy;
 mod ollama;
 mod receipt;
+#[cfg(feature = "preview")]
 mod schedule;
 mod skills;
+#[cfg(feature = "preview")]
 mod system_monitor;
 mod tools;
 
@@ -94,6 +96,7 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    #[cfg(feature = "preview")]
     #[command(hide = true)]
     Schedule { action: String },
     #[command(hide = true)]
@@ -109,13 +112,11 @@ fn main() -> ExitCode {
         Err(error) => return fail(error),
     };
     let raw: Vec<String> = env::args().collect();
-    if let Some(command) = first_command(&raw[1..]) {
-        if legacy::is_legacy(command) {
-            return match legacy::run(&paths.repo, &raw[1..]) {
-                Ok(code) => ExitCode::from(code as u8),
-                Err(error) => fail(error),
-            };
-        }
+    if let Some(result) = delegate_legacy(&paths.repo, &raw[1..]) {
+        return match result {
+            Ok(code) => ExitCode::from(code as u8),
+            Err(error) => fail(error),
+        };
     }
     let normalized = normalize_goal_args(raw);
     let cli = Cli::parse_from(normalized);
@@ -186,6 +187,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             proof(&paths, id.as_deref(), json)?;
             Ok(ExitCode::SUCCESS)
         }
+        #[cfg(feature = "preview")]
         Some(Commands::Schedule { action }) => {
             if action != "tick" {
                 return Err("usage: hii schedule tick".into());
@@ -253,19 +255,25 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Some(SlashCommand::Agent { id, action }) => {
                 agents::AgentManager::new(conversation.paths()).operate(&id, &action)
             }
+            #[cfg(feature = "preview")]
             Some(SlashCommand::Resources) => {
                 system_monitor::snapshot(conversation.paths(), conversation.workspace())
             }
+            #[cfg(feature = "preview")]
             Some(SlashCommand::Top) => system_monitor::launch_btop(),
+            #[cfg(feature = "preview")]
             Some(SlashCommand::Schedule { cron, task }) => {
                 schedule::ScheduleService::new(conversation.paths())?.add(&cron, &task)
             }
+            #[cfg(feature = "preview")]
             Some(SlashCommand::Schedules) => {
                 schedule::ScheduleService::new(conversation.paths())?.list()
             }
+            #[cfg(feature = "preview")]
             Some(SlashCommand::Calendar) => {
                 schedule::ScheduleService::new(conversation.paths())?.calendar_list(7)
             }
+            #[cfg(feature = "preview")]
             Some(SlashCommand::CalendarAdd { date, time, title }) => {
                 schedule::ScheduleService::new(conversation.paths())?.calendar_add(
                     &date,
@@ -273,6 +281,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     &title,
                 )
             }
+            #[cfg(feature = "preview")]
             Some(SlashCommand::SyncCalendar) => {
                 schedule::ScheduleService::new(conversation.paths())?.sync_calendar()
             }
@@ -318,19 +327,26 @@ enum SlashCommand {
         id: String,
         action: String,
     },
+    #[cfg(feature = "preview")]
     Resources,
+    #[cfg(feature = "preview")]
     Top,
+    #[cfg(feature = "preview")]
     Schedule {
         cron: String,
         task: String,
     },
+    #[cfg(feature = "preview")]
     Schedules,
+    #[cfg(feature = "preview")]
     Calendar,
+    #[cfg(feature = "preview")]
     CalendarAdd {
         date: String,
         time: Option<String>,
         title: String,
     },
+    #[cfg(feature = "preview")]
     SyncCalendar,
     Unknown(String),
 }
@@ -370,8 +386,11 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
                 SlashCommand::Unknown(input.into())
             }
         }
+        #[cfg(feature = "preview")]
         "/resources" if rest.is_empty() => SlashCommand::Resources,
+        #[cfg(feature = "preview")]
         "/top" if rest.is_empty() => SlashCommand::Top,
+        #[cfg(feature = "preview")]
         "/schedule" => match rest.split_once("::") {
             Some((cron, task)) if !cron.trim().is_empty() && !task.trim().is_empty() => {
                 SlashCommand::Schedule {
@@ -381,20 +400,29 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
             }
             _ => SlashCommand::Unknown(input.into()),
         },
+        #[cfg(feature = "preview")]
         "/schedules" if rest.is_empty() => SlashCommand::Schedules,
+        #[cfg(feature = "preview")]
         "/calendar" if rest.is_empty() => SlashCommand::Calendar,
+        #[cfg(feature = "preview")]
         "/calendar" if rest.starts_with("add ") => {
             parse_calendar_add(rest).unwrap_or_else(|| SlashCommand::Unknown(input.into()))
         }
+        #[cfg(feature = "preview")]
         "/sync" if rest == "calendar" => SlashCommand::SyncCalendar,
         _ => SlashCommand::Unknown(input.to_string()),
     })
 }
 
 fn slash_help() -> &'static str {
-    "/help                         show commands\n/compact                      summarize and shrink this conversation\n/clear                        start with fresh context\n/status                       show session, workspace, model, and usage\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | detailed activity\n/model [name]                 list or switch local models\n/proof [run-id]               inspect execution proof\n/skills                       show automatically learned skill drafts\n/agents                       show HII-managed and observed agents\n/codex <task>                 start a managed Codex run\n/claude <task>                start a managed Claude session\n/agent <id> status|logs|stop  manage an agent by id\n/resources                    quick CPU, memory, storage, and Ollama view\n/top                          open the embedded btop resource monitor\n/schedule <cron> :: <task>    create a local recurring HII task\n/schedules                    list HII schedules\n/calendar                     show the next 7 days\n/calendar add DATE [TIME] :: TITLE\n/sync calendar                sync next HII runs to Apple Calendar\n/exit                         leave HII"
+    if cfg!(feature = "preview") {
+        "/help                         show commands\n/compact                      summarize and shrink this conversation\n/clear                        start with fresh context\n/status                       show session, workspace, model, and usage\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | detailed activity\n/model [name]                 list or switch local models\n/proof [run-id]               inspect execution proof\n/skills                       show automatically learned skill drafts\n/agents                       show HII-managed and observed agents\n/codex <task>                 start a managed Codex run\n/claude <task>                start a managed Claude session\n/agent <id> status|logs|stop  manage an agent by id\n/resources                    quick CPU, memory, storage, and Ollama view\n/top                          open the embedded btop resource monitor\n/schedule <cron> :: <task>    create a local recurring HII task\n/schedules                    list HII schedules\n/calendar                     show the next 7 days\n/calendar add DATE [TIME] :: TITLE\n/sync calendar                sync next HII runs to Apple Calendar\n/exit                         leave HII"
+    } else {
+        "/help                         show commands\n/compact                      summarize and shrink this conversation\n/clear                        start with fresh context\n/status                       show session, workspace, model, and usage\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | detailed activity\n/model [name]                 list or switch local models\n/proof [run-id]               inspect execution proof\n/skills                       show automatically learned skill drafts\n/agents                       show HII-managed and observed agents\n/codex <task>                 start a managed Codex run\n/claude <task>                start a managed Claude session\n/agent <id> status|logs|stop  manage an agent by id\n/exit                         leave HII"
+    }
 }
 
+#[cfg(feature = "preview")]
 fn parse_calendar_add(rest: &str) -> Option<SlashCommand> {
     let (when, title) = rest.strip_prefix("add ")?.split_once("::")?;
     let mut fields = when.split_whitespace();
@@ -576,15 +604,23 @@ fn first_command(args: &[String]) -> Option<&str> {
     None
 }
 
+fn delegate_legacy(repo: &std::path::Path, args: &[String]) -> Option<Result<i32, String>> {
+    let command = first_command(args)?;
+    legacy::is_legacy(command).then(|| legacy::run(repo, args))
+}
+
+fn is_native_command(command: &str) -> bool {
+    matches!(
+        command,
+        "run" | "agent" | "status" | "doctor" | "models" | "proof" | "receipt" | "legacy" | "help"
+    ) || (cfg!(feature = "preview") && command == "schedule")
+}
+
 fn normalize_goal_args(mut args: Vec<String>) -> Vec<String> {
     let Some(command) = first_command(&args[1..]).map(str::to_string) else {
         return args;
     };
-    let native = [
-        "run", "agent", "status", "doctor", "models", "proof", "receipt", "schedule", "legacy",
-        "help",
-    ];
-    if native.contains(&command.as_str()) {
+    if is_native_command(&command) {
         return args;
     }
     let insertion = args.iter().position(|arg| arg == &command).unwrap_or(1);
@@ -612,6 +648,45 @@ fn fail(error: impl std::fmt::Display) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        path::{Path, PathBuf},
+        process,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    const FROZEN_LEGACY_FAMILIES: &[&str] = &[
+        "ship", "bridge", "og", "caps", "context", "health", "task", "work", "skill", "codex",
+        "daemon", "loop", "feed", "probe", "check",
+    ];
+
+    struct TempRepo(PathBuf);
+
+    impl TempRepo {
+        fn new() -> Self {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock should be after the Unix epoch")
+                .as_nanos();
+            let path = env::temp_dir().join(format!("hii-cli-parity-{}-{nonce}", process::id()));
+            fs::create_dir_all(path.join("scripts")).expect("create temporary scripts directory");
+            fs::write(
+                path.join("scripts/hii-cli.mjs"),
+                "import { appendFileSync } from 'node:fs';\nappendFileSync(new URL('../delegations.log', import.meta.url), `${process.argv[2]}\\n`);\n",
+            )
+            .expect("write temporary compatibility script");
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
 
     #[test]
     fn unknown_words_become_a_goal() {
@@ -634,6 +709,57 @@ mod tests {
             parse_slash_command("/model qwen3.6:35b-mlx"),
             Some(SlashCommand::Model(Some("qwen3.6:35b-mlx".into())))
         );
+    }
+
+    #[test]
+    fn frozen_command_families_reach_legacy_run() {
+        let repo = TempRepo::new();
+        for family in FROZEN_LEGACY_FAMILIES {
+            let args = vec![family.to_string(), "--help".to_string()];
+            let code = delegate_legacy(repo.path(), &args)
+                .unwrap_or_else(|| panic!("{family} did not select legacy delegation"))
+                .unwrap_or_else(|error| panic!("{family} delegation failed: {error}"));
+            assert_eq!(code, 0, "{family} compatibility command failed");
+        }
+        let calls = fs::read_to_string(repo.path().join("delegations.log"))
+            .expect("read compatibility calls");
+        assert_eq!(calls.lines().collect::<Vec<_>>(), FROZEN_LEGACY_FAMILIES);
+    }
+
+    #[test]
+    fn node_cli_help_round_trip_exits_cleanly() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("CLI crate should live directly beneath the repository");
+        let code =
+            legacy::run(repo, &["--help".to_string()]).expect("Node compatibility help should run");
+        assert_eq!(code, 0);
+    }
+
+    #[cfg(not(feature = "preview"))]
+    #[test]
+    fn preview_commands_are_unreachable_by_default() {
+        assert!(!is_native_command("schedule"));
+        assert!(legacy::is_legacy("schedule"));
+        for command in [
+            "/resources",
+            "/top",
+            "/schedule 0 * * * * :: inspect",
+            "/schedules",
+            "/calendar",
+            "/calendar add 2026-07-20 :: Review",
+            "/sync calendar",
+        ] {
+            assert_eq!(
+                parse_slash_command(command),
+                Some(SlashCommand::Unknown(command.into()))
+            );
+        }
+    }
+
+    #[cfg(feature = "preview")]
+    #[test]
+    fn parses_preview_conversational_controls() {
         assert_eq!(
             parse_slash_command("/schedule */15 * * * * :: inspect build health"),
             Some(SlashCommand::Schedule {

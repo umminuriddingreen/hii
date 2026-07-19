@@ -309,6 +309,7 @@ impl Conversation {
         &self.paths
     }
 
+    #[cfg(feature = "preview")]
     pub fn workspace(&self) -> &std::path::Path {
         self.tools.workspace()
     }

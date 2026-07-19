@@ -20,6 +20,15 @@ The native surface stays deliberately small. Existing HII command families
 are delegated to `scripts/hii-cli.mjs` with inherited standard I/O and
 environment until their schemas and exit behavior have Rust parity tests.
 
+## Parity freeze
+
+The default native command surface is frozen to `run`, `status`, `doctor`,
+`models`, and `proof`. Every other command family must continue through
+`legacy::run` and `scripts/hii-cli.mjs` until family-specific parity tests prove
+its aliases, flags, output, JSON schema, and exit behavior. Unmigrated schedule,
+calendar, and system-monitor experiments remain available only in builds made
+with the non-default Cargo feature `preview`.
+
 Interactive conversation preserves context across turns and renders only the
 assistant's useful response. Internal model actions and tool observations are
 persisted silently; they are not terminal UI.
@@ -28,6 +37,7 @@ Type `/help` inside bare `hii` for the conversational control surface. It
 includes model switching, automatic/manual compaction, token and throughput
 activity, managed Codex and Claude sessions, local schedules, Apple Calendar,
 system resources, proof inspection, and automatically learned skill drafts.
+Schedule, Calendar, and system-resource controls require a `preview` build.
 `/thinking off|compact|detailed` changes only the activity rail; raw hidden
 reasoning is never printed.
 
