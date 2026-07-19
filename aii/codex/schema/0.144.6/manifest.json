@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "codexVersion": "0.144.6",
+  "codexVersionText": "codex-cli 0.144.6",
+  "generatedAt": "2026-07-19T09:23:32.510Z",
+  "generator": "/Users/ummi/.local/bin/codex app-server generate-json-schema",
+  "protocol": "v2",
+  "file": "codex_app_server_protocol.v2.schemas.json",
+  "sha256": "ce855f79f5da7a4689bd2978237e47780611d7c0537f8eb864ddf1bed4419944"
+}

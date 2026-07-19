@@ -18,13 +18,19 @@ const STATUS = path.join(DAEMON_DIR, "status.json");
 const PID = path.join(DAEMON_DIR, "daemon.pid");
 const LOG = path.join(DAEMON_DIR, "daemon.log");
 const CODEX_INDEX = path.join(RUNTIME, "codex", "index.json");
+const CODEX_APP_SERVER_DIR = path.join(RUNTIME, "codex", "app-server");
+const CODEX_APP_SERVER_PID = path.join(CODEX_APP_SERVER_DIR, "app-server.pid");
+const CODEX_APP_SERVER_STATUS = path.join(CODEX_APP_SERVER_DIR, "status.json");
+const CODEX_APP_SERVER_LOG = path.join(CODEX_APP_SERVER_DIR, "app-server.log");
+const CODEX_APP_SERVER_SOCKET = path.join(CODEX_APP_SERVER_DIR, "app-server.sock");
 const CONTEXT_DB = path.join(RUNTIME, "hii.db");
 
 const OWNED_PATTERNS = [
   `${ROOT}/aii/daemon/hiid.mjs`,
   `${ROOT}/server.mjs`,
   `${ROOT}/node_modules/.bin/next`,
-  "codex exec"
+  "codex exec",
+  "codex app-server"
 ];
 
 const activeRuns = new Map();
@@ -389,6 +395,7 @@ function ensureDirs() {
   fs.mkdirSync(DAEMON_DIR, { recursive: true });
   fs.mkdirSync(RUNS_DIR, { recursive: true });
   fs.mkdirSync(path.dirname(CODEX_INDEX), { recursive: true });
+  fs.mkdirSync(CODEX_APP_SERVER_DIR, { recursive: true });
 }
 
 function now() {
@@ -467,6 +474,90 @@ function pidAlive(pid) {
     if (error && typeof error === "object" && error.code === "EPERM") return true;
     return false;
   }
+}
+
+function appServerPid() {
+  const pid = Number(fs.existsSync(CODEX_APP_SERVER_PID) ? fs.readFileSync(CODEX_APP_SERVER_PID, "utf8").trim() : "");
+  return pidAlive(pid) ? pid : null;
+}
+
+function writeAppServerStatus(state, patch = {}) {
+  const status = {
+    schemaVersion: 1,
+    state,
+    pid: appServerPid(),
+    socket: CODEX_APP_SERVER_SOCKET,
+    log: CODEX_APP_SERVER_LOG,
+    transport: "unix-websocket",
+    updatedAt: now(),
+    ...patch
+  };
+  writeJson(CODEX_APP_SERVER_STATUS, status);
+  return status;
+}
+
+function startCodexAppServer() {
+  ensureDirs();
+  const existing = appServerPid();
+  if (existing) {
+    console.log(`Codex app-server already running pid=${existing}`);
+    printCodexAppServerStatus();
+    return;
+  }
+  if (fs.existsSync(CODEX_APP_SERVER_SOCKET)) fs.rmSync(CODEX_APP_SERVER_SOCKET, { force: true });
+  const out = fs.openSync(CODEX_APP_SERVER_LOG, "a");
+  const child = spawn(codexBin(), ["app-server", "--listen", `unix://${CODEX_APP_SERVER_SOCKET}`], {
+    cwd: ROOT,
+    detached: true,
+    stdio: ["ignore", out, out],
+    env: { ...process.env, LOG_FORMAT: "json" }
+  });
+  child.unref();
+  fs.closeSync(out);
+  fs.writeFileSync(CODEX_APP_SERVER_PID, String(child.pid));
+  writeAppServerStatus("starting", { pid: child.pid, startedAt: now(), codex: codexBin() });
+  event("codex.app_server.started", {
+    actor: "hii.cli",
+    target: CODEX_APP_SERVER_SOCKET,
+    status: "starting",
+    pid: child.pid,
+    text: "Started HII-owned Codex app-server"
+  });
+  console.log(`started Codex app-server pid=${child.pid}`);
+  console.log(`socket ${CODEX_APP_SERVER_SOCKET}`);
+}
+
+function printCodexAppServerStatus() {
+  const pid = appServerPid();
+  const previous = safeReadJson(CODEX_APP_SERVER_STATUS, {});
+  const socketReady = Boolean(pid && fs.existsSync(CODEX_APP_SERVER_SOCKET));
+  const status = writeAppServerStatus(socketReady ? "ready" : pid ? "starting" : "stopped", {
+    ...previous,
+    state: socketReady ? "ready" : pid ? "starting" : "stopped",
+    pid,
+    socketReady,
+    updatedAt: now()
+  });
+  console.log(JSON.stringify(status, null, 2));
+}
+
+function stopCodexAppServer() {
+  const pid = appServerPid();
+  if (!pid) {
+    writeAppServerStatus("stopped", { pid: null, socketReady: false });
+    console.log("Codex app-server is not running");
+    return;
+  }
+  process.kill(pid, "SIGTERM");
+  writeAppServerStatus("stopped", { pid: null, socketReady: false, stoppedAt: now() });
+  event("codex.app_server.stopped", {
+    actor: "hii.cli",
+    target: CODEX_APP_SERVER_SOCKET,
+    status: "stopped",
+    pid,
+    text: "Stopped HII-owned Codex app-server"
+  });
+  console.log(`stopped Codex app-server pid=${pid}`);
 }
 
 function runningDaemonPids() {
@@ -876,7 +967,14 @@ try {
   else if (cmd === "runs") printRuns(Number(args[0] || 20));
   else if (cmd === "codex") {
     const sub = args[0] || "status";
-    if (sub === "run" || sub === "enqueue") {
+    if (sub === "app-server") {
+      const action = args[1] || "status";
+      if (action === "start") startCodexAppServer();
+      else if (action === "status") printCodexAppServerStatus();
+      else if (action === "stop") stopCodexAppServer();
+      else if (action === "logs") tailFile(CODEX_APP_SERVER_LOG, Number(args[2] || 80));
+      else throw new Error("usage: hiid codex app-server <start|status|logs|stop>");
+    } else if (sub === "run" || sub === "enqueue") {
       if (!currentDaemonPid()) startDaemon();
       const run = enqueueCodex(args.slice(1).join(" "));
       console.log(`queued ${run.id}`);
@@ -893,7 +991,7 @@ try {
       if (!id) throw new Error("usage: hiid codex stop <run-id>");
       stopRun(id);
     } else {
-      throw new Error("usage: hiid codex <run|status|logs|stop>");
+      throw new Error("usage: hiid codex <run|status|logs|stop|app-server>");
     }
   } else if (cmd === "claude") {
     const sub = args[0] || "status";

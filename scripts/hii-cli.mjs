@@ -29,6 +29,8 @@ const BOARD_DIR = path.join(RUNTIME, "board");
 const BOARD_TASKS = path.join(BOARD_DIR, "tasks.jsonl");
 const HIID = path.join(ROOT, "aii", "daemon", "hiid.mjs");
 const HII_TUI = path.join(ROOT, "scripts", "hii-tui.mjs");
+const CODEX_APP_SERVER_PROBE = path.join(ROOT, "scripts", "hii-codex-app-server-probe.mjs");
+const CODEX_SCHEMA_PIN = path.join(ROOT, "scripts", "hii-codex-schema-pin.mjs");
 const LINK_POSTS = path.join(ROOT, ".hii", "link-posts.jsonl");
 const LINK_CACHE = path.join(ROOT, ".hii", "link-cache.jsonl");
 const RUNNER_CAPABILITIES = ["termite.rhino.managed_job"];
@@ -2148,7 +2150,15 @@ function cmdBridge(args) {
 
 function cmdCodex(args) {
   const sub = args[0] || "status";
-  if (["run", "enqueue", "status", "logs", "stop"].includes(sub)) {
+  if (sub === "schema" && args[1] === "pin") {
+    const r = spawnSync(process.execPath, [CODEX_SCHEMA_PIN], { cwd: ROOT, stdio: "inherit", env: process.env });
+    process.exit(r.status ?? 1);
+  }
+  if (sub === "app-server-probe") {
+    const r = spawnSync(process.execPath, [CODEX_APP_SERVER_PROBE], { cwd: ROOT, stdio: "inherit", env: process.env });
+    process.exit(r.status ?? 1);
+  }
+  if (["run", "enqueue", "status", "logs", "stop", "app-server"].includes(sub)) {
     const r = spawnSync(process.execPath, [HIID, "codex", ...args], { cwd: ROOT, stdio: "inherit", env: process.env });
     process.exit(r.status ?? 1);
   }
@@ -2488,6 +2498,11 @@ usage: hii <command>
   codex run <prompt>  queue a managed HII Codex run through hiid
   codex status        list managed HII Codex runs
   codex logs <id>     show a managed HII Codex run log
+  codex app-server-probe
+                      verify HII can initialize Codex app-server
+  codex app-server <start|status|logs|stop>
+                      manage the HII-owned Codex app-server
+  codex schema pin    generate the versioned Codex v2 protocol contract
   mcp [args]          codex mcp passthrough (default: list)`);
     process.exit(cmd ? 1 : 0);
 }
