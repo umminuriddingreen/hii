@@ -25,6 +25,7 @@
     "hii:sdk:check": "node scripts/hii-sdk-contract-smoke.mjs",
     "hii:skills:check": "node scripts/hii-skill-registry-smoke.mjs",
     "hii:knowledge:check": "node --experimental-strip-types scripts/hii-knowledge-smoke.mjs",
+    "hii:contextdock:check": "node --experimental-strip-types scripts/hii-contextdock-smoke.mjs",
     "hii:windows:check": "node --experimental-strip-types scripts/hii-window-state-smoke.mjs",
     "hii:workspace:check": "node --experimental-strip-types scripts/hii-workspace-store-smoke.mjs",
     "cli:check": "cargo fmt --all -- --check && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings",
