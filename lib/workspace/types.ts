@@ -19,9 +19,21 @@ export type WorkspaceNodeType =
 
 export type SpatialObjectKind =
   | 'agent'
+  | 'actor'
+  | 'intent'
+  | 'idea'
+  | 'constraint'
+  | 'component'
+  | 'interface'
+  | 'decision'
+  | 'alternative'
   | 'task'
+  | 'run'
   | 'model'
   | 'source'
+  | 'asset'
+  | 'artifact'
+  | 'note'
   | 'browser'
   | 'terminal'
   | 'receipt'
@@ -98,6 +110,12 @@ export type WorkspaceNode = {
   createdAt: string;
   updatedAt: string;
   object?: SpatialObjectMetadata;
+  objectRef?: {
+    authority: 'knowledge-vault' | 'hii-runtime';
+    id: string;
+    projectId?: string;
+    kind?: string;
+  };
   payload: Record<string, unknown>;
 };
 
@@ -150,9 +168,21 @@ export function normalizeSpatialObject(raw: unknown): SpatialObjectMetadata | un
   const object = raw as Record<string, unknown>;
   const kinds: SpatialObjectKind[] = [
     'agent',
+    'actor',
+    'intent',
+    'idea',
+    'constraint',
+    'component',
+    'interface',
+    'decision',
+    'alternative',
     'task',
+    'run',
     'model',
     'source',
+    'asset',
+    'artifact',
+    'note',
     'browser',
     'terminal',
     'receipt',
@@ -223,6 +253,15 @@ export function normalizeNode(raw: unknown): WorkspaceNode | null {
   if (!workspaceNodeTypes.includes(node.type as WorkspaceNodeType)) return null;
   if (![node.x, node.y, node.w, node.h].every(isFiniteNumber)) return null;
   const now = new Date().toISOString();
+  const objectRef = node.objectRef && typeof node.objectRef === 'object' ? node.objectRef as Record<string, unknown> : null;
+  const normalizedRef = objectRef && (objectRef.authority === 'knowledge-vault' || objectRef.authority === 'hii-runtime') && typeof objectRef.id === 'string'
+    ? {
+        authority: objectRef.authority as 'knowledge-vault' | 'hii-runtime',
+        id: objectRef.id.slice(0, 160),
+        projectId: sanitizeText(objectRef.projectId, 120),
+        kind: sanitizeText(objectRef.kind, 80)
+      }
+    : undefined;
   return {
     id: node.id.slice(0, 64),
     type: node.type as WorkspaceNodeType,
@@ -234,6 +273,7 @@ export function normalizeNode(raw: unknown): WorkspaceNode | null {
     createdAt: typeof node.createdAt === 'string' ? node.createdAt : now,
     updatedAt: typeof node.updatedAt === 'string' ? node.updatedAt : now,
     object: normalizeSpatialObject(node.object),
+    objectRef: normalizedRef,
     payload: node.payload && typeof node.payload === 'object' ? (node.payload as Record<string, unknown>) : {}
   };
 }

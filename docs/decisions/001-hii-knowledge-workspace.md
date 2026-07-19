@@ -1,7 +1,7 @@
 # ADR 001 — HII Knowledge Workspace
 
-**Status:** accepted by founder instruction  
-**Date:** 2026-07-14  
+**Status:** accepted by founder instruction
+**Date:** 2026-07-14; amended 2026-07-18
 **Owner:** Ummi Nuriddin Green
 
 ## Decision
@@ -15,10 +15,10 @@ database. It extends Context Dock's source-linked project model and uses the
 existing HII/AII boundary:
 
 ```text
-human notes, sources, and decisions
-→ HII knowledge workspace
-→ ~/.hii/hii.db
-→ deterministic links, tags, FTS5, graph, and provenance
+human notes, sources, assets, and decisions
+→ user-selected Markdown vault (canonical authored knowledge)
+→ ~/.hii/hii.db (rebuildable index and operational ledger)
+→ deterministic links, tags, FTS5, graph, systems objects, and provenance
 → bounded AII capabilities
 → agent context, receipts, and reusable skills
 ```
@@ -38,6 +38,9 @@ human notes, sources, and decisions
 - trash and restore
 - Markdown and JSON import/export
 - command palette and keyboard navigation
+- copied or explicitly linked assets with hashes and availability checks
+- source-linked system objects, relations, saved views, and proposal review
+- Markdown-vault authority with rebuildable SQLite indexing
 - local persistence, events, receipts, and capability metadata
 
 Plugins, proprietary sync behavior, publishing, payments, and external
@@ -47,7 +50,9 @@ dependency; it does not authorize copying proprietary code or branding.
 
 ## Constraints
 
-- Use `/Users/ummi/hii` and `~/.hii/hii.db`.
+- Use `/Users/ummi/hii`, one user-selected Markdown vault, and `~/.hii/hii.db`.
+- Markdown files and copied original assets are authoritative for authored knowledge.
+- Use SQLite for deterministic indexing, history, provenance, events, and operational state; the note index must be rebuildable from the vault.
 - Use explicit migrations and typed server contracts.
 - Keep note content local unless the user explicitly sends or exports it.
 - Keep agent mutations bounded and receipt-producing.
@@ -58,5 +63,7 @@ dependency; it does not authorize copying proprietary code or branding.
 ## First proof
 
 A user can create, edit, link, search, graph, version, trash, restore, import,
-and export real notes from `/knowledge`; restarting the app preserves state and
-every mutation produces a local event.
+export, and externally edit real Markdown notes from `/knowledge`; add copied
+or linked assets; turn a source into a reviewed System Map; and restart without
+losing the vault, object relationships, or local receipts. Every mutation
+produces local evidence and no content leaves the machine implicitly.

@@ -3,6 +3,20 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {
+  configureKnowledgeVault,
+  ensureKnowledgeVault,
+  knowledgeVaultPath,
+  listKnowledgeAssets,
+  readVaultNote,
+  resetKnowledgeVaultForTests,
+  restoreVaultNote,
+  scanVaultNotes,
+  trashVaultNote,
+  writeVaultNote,
+  type VaultNote
+} from './hii-vault.ts';
+import { ensureNoteKnowledgeObject, knowledgeSystemSnapshot, resetKnowledgeSystemsForTests } from './hii-knowledge-systems.ts';
 
 export type KnowledgeNote = {
   id: string;
@@ -15,6 +29,10 @@ export type KnowledgeNote = {
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
+  revision: string;
+  kind: string;
+  projectId: string;
+  aliases: string[];
 };
 
 export type KnowledgeNoteSummary = Omit<KnowledgeNote, 'content'> & {
@@ -43,9 +61,11 @@ type NoteRow = {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+  metadata_json: string;
 };
 
 const databases = new Map<string, DatabaseSync>();
+const syncing = new Set<string>();
 
 export function knowledgeDbPath() {
   return process.env.HII_DB_PATH || path.join(process.env.HII_RUNTIME_DIR || path.join(os.homedir(), '.hii'), 'hii.db');
@@ -98,6 +118,8 @@ function normalizePath(value: unknown, title: string, folder: string) {
 }
 
 function noteFromRow(row: NoteRow): KnowledgeNote {
+  let metadata: Record<string, unknown> = {};
+  try { metadata = JSON.parse(row.metadata_json || '{}') as Record<string, unknown>; } catch { /* legacy row */ }
   return {
     id: row.id,
     title: row.title,
@@ -108,19 +130,28 @@ function noteFromRow(row: NoteRow): KnowledgeNote {
     dailyDate: row.daily_date,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    deletedAt: row.deleted_at
+    deletedAt: row.deleted_at,
+    revision: typeof metadata.revision === 'string' ? metadata.revision : '',
+    kind: typeof metadata.kind === 'string' ? metadata.kind : 'note',
+    projectId: typeof metadata.projectId === 'string' ? metadata.projectId : 'shared',
+    aliases: Array.isArray(metadata.aliases) ? metadata.aliases.map(String) : []
   };
 }
 
 function db() {
   const file = knowledgeDbPath();
   const existing = databases.get(file);
-  if (existing) return existing;
+  if (existing) {
+    synchronizeVault(existing, file);
+    return existing;
+  }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const database = new DatabaseSync(file);
   database.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
   migrate(database);
   databases.set(file, database);
+  initializeVault(database);
+  synchronizeVault(database, file);
   return database;
 }
 
@@ -284,6 +315,106 @@ function writeVersion(database: DatabaseSync, note: KnowledgeNote, source: strin
   `).run(randomUUID(), note.id, Number(current.version) + 1, note.title, note.path, note.content, timestamp(), source);
 }
 
+function noteMetadata(note: Pick<KnowledgeNote, 'revision' | 'kind' | 'projectId' | 'aliases'>) {
+  return JSON.stringify({ revision: note.revision, kind: note.kind, projectId: note.projectId, aliases: note.aliases });
+}
+
+function fromVault(note: VaultNote): KnowledgeNote {
+  return { ...note, deletedAt: null };
+}
+
+function upsertVaultNote(database: DatabaseSync, vaultNote: VaultNote, source = 'vault.scan') {
+  const note = fromVault(vaultNote);
+  const existingRow = (database.prepare('SELECT * FROM knowledge_notes WHERE id = ? OR path = ? ORDER BY id = ? DESC LIMIT 1')
+    .get(note.id, note.path, note.id) as NoteRow | undefined);
+  const existing = existingRow ? noteFromRow(existingRow) : null;
+  if (existingRow && existingRow.id !== note.id) {
+    note.id = existingRow.id;
+  }
+  database.prepare(`
+    INSERT INTO knowledge_notes(id, title, path, folder, content, pinned, daily_date, metadata_json, created_at, updated_at, deleted_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+    ON CONFLICT(id) DO UPDATE SET
+      title = excluded.title,
+      path = excluded.path,
+      folder = excluded.folder,
+      content = excluded.content,
+      pinned = excluded.pinned,
+      daily_date = excluded.daily_date,
+      metadata_json = excluded.metadata_json,
+      updated_at = excluded.updated_at,
+      deleted_at = NULL
+  `).run(
+    note.id, note.title, note.path, note.folder, note.content, note.pinned ? 1 : 0,
+    note.dailyDate, noteMetadata(note), note.createdAt, note.updatedAt
+  );
+  syncFts(database, note);
+  syncTagsAndLinks(database, note);
+  ensureNoteKnowledgeObject(note);
+  if (!existing || existing.revision !== note.revision) {
+    writeVersion(database, note, existing ? source : 'vault.imported');
+  }
+  return note;
+}
+
+function initializeVault(database: DatabaseSync) {
+  const root = ensureKnowledgeVault();
+  const migrated = database.prepare("SELECT version FROM schema_migrations WHERE version = 'knowledge-vault-v2'").get();
+  if (migrated) return;
+  const vaultNotes = scanVaultNotes(root);
+  if (vaultNotes.length === 0) {
+    const legacyRows = database.prepare('SELECT * FROM knowledge_notes WHERE deleted_at IS NULL ORDER BY created_at').all() as unknown as NoteRow[];
+    for (const row of legacyRows) {
+      const note = noteFromRow(row);
+      writeVaultNote({
+        id: note.id,
+        title: note.title,
+        path: note.path,
+        folder: note.folder,
+        content: note.content,
+        pinned: note.pinned,
+        dailyDate: note.dailyDate,
+        kind: note.kind,
+        projectId: note.projectId === 'shared' ? (note.path.match(/^Projects\/([^/]+)/i)?.[1] || 'shared') : note.projectId,
+        aliases: note.aliases,
+        createdAt: note.createdAt,
+        updatedAt: note.updatedAt
+      }, undefined, root);
+    }
+  }
+  database.prepare("INSERT OR IGNORE INTO schema_migrations(version) VALUES ('knowledge-vault-v2')").run();
+}
+
+function synchronizeVault(database: DatabaseSync, key = knowledgeDbPath()) {
+  if (syncing.has(key)) return;
+  syncing.add(key);
+  try {
+    const notes = scanVaultNotes();
+    const liveIds = new Set(notes.map((note) => note.id));
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      for (const note of notes) upsertVaultNote(database, note);
+      const indexed = database.prepare("SELECT id, metadata_json FROM knowledge_notes WHERE deleted_at IS NULL").all() as unknown as Array<{ id: string; metadata_json: string }>;
+      for (const row of indexed) {
+        let revision = '';
+        try { revision = String((JSON.parse(row.metadata_json || '{}') as Record<string, unknown>).revision || ''); } catch { /* legacy row */ }
+        if (revision && !liveIds.has(row.id)) {
+          const deletedAt = timestamp();
+          database.prepare('UPDATE knowledge_notes SET deleted_at = ?, updated_at = ? WHERE id = ?').run(deletedAt, deletedAt, row.id);
+          database.prepare('DELETE FROM knowledge_notes_fts WHERE note_id = ?').run(row.id);
+          database.prepare('UPDATE knowledge_links SET target_note_id = NULL WHERE target_note_id = ?').run(row.id);
+        }
+      }
+      database.exec('COMMIT');
+    } catch (error) {
+      database.exec('ROLLBACK');
+      throw error;
+    }
+  } finally {
+    syncing.delete(key);
+  }
+}
+
 function uniquePath(database: DatabaseSync, desired: string, excludeId?: string) {
   const extension = desired.toLowerCase().endsWith('.md') ? '.md' : '';
   const stem = extension ? desired.slice(0, -3) : desired;
@@ -308,6 +439,9 @@ export function createKnowledgeNote(input: {
   path?: unknown;
   pinned?: unknown;
   dailyDate?: unknown;
+  kind?: unknown;
+  projectId?: unknown;
+  aliases?: unknown;
   actor?: string;
 }) {
   const database = db();
@@ -315,7 +449,8 @@ export function createKnowledgeNote(input: {
   const folder = cleanFolder(input.folder);
   const content = cleanText(input.content);
   const notePath = uniquePath(database, normalizePath(input.path, title, folder));
-  const note: KnowledgeNote = {
+  const createdAt = timestamp();
+  const written = writeVaultNote({
     id: randomUUID(),
     title,
     path: notePath,
@@ -323,20 +458,17 @@ export function createKnowledgeNote(input: {
     content,
     pinned: Boolean(input.pinned),
     dailyDate: /^\d{4}-\d{2}-\d{2}$/.test(String(input.dailyDate ?? '')) ? String(input.dailyDate) : null,
-    createdAt: timestamp(),
-    updatedAt: timestamp(),
-    deletedAt: null
-  };
+    kind: cleanText(input.kind, 40) || 'note',
+    projectId: cleanText(input.projectId, 120) || notePath.match(/^Projects\/([^/]+)/i)?.[1] || 'shared',
+    aliases: Array.isArray(input.aliases) ? input.aliases.map((alias) => cleanTitle(alias)).filter(Boolean).slice(0, 50) : [],
+    createdAt,
+    updatedAt: createdAt
+  });
+  const note = fromVault(written);
   database.exec('BEGIN IMMEDIATE');
   try {
-    database.prepare(`
-      INSERT INTO knowledge_notes(id, title, path, folder, content, pinned, daily_date, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(note.id, note.title, note.path, note.folder, note.content, note.pinned ? 1 : 0, note.dailyDate, note.createdAt, note.updatedAt);
-    syncFts(database, note);
-    syncTagsAndLinks(database, note);
-    writeVersion(database, note, 'created');
-    emitEvent(database, 'note.created', note.id, `Created ${note.path}`, { path: note.path }, input.actor);
+    upsertVaultNote(database, written, 'created');
+    emitEvent(database, 'note.created', note.id, `Created ${note.path}`, { path: note.path, revision: note.revision, vault: knowledgeVaultPath() }, input.actor);
     database.exec('COMMIT');
   } catch (error) {
     database.exec('ROLLBACK');
@@ -351,6 +483,9 @@ export function updateKnowledgeNote(id: string, input: {
   folder?: unknown;
   path?: unknown;
   pinned?: unknown;
+  kind?: unknown;
+  projectId?: unknown;
+  aliases?: unknown;
   ifMatch?: unknown;
   actor?: string;
 }) {
@@ -358,7 +493,9 @@ export function updateKnowledgeNote(id: string, input: {
   const row = getNoteRow(database, id);
   if (!row) throw new Error(`Note not found: ${id}`);
   const existing = noteFromRow(row);
-  if (input.ifMatch && cleanText(input.ifMatch, 80) !== existing.updatedAt) {
+  const expected = cleanText(input.ifMatch, 100);
+  const matches = !expected || (expected.length === 64 ? expected === existing.revision : expected === existing.updatedAt);
+  if (!matches) {
     const error = new Error('This note changed after it was opened. Refresh before saving.') as Error & { code?: string };
     error.code = 'CONFLICT';
     throw error;
@@ -368,26 +505,23 @@ export function updateKnowledgeNote(id: string, input: {
   const desiredPath = input.path === undefined
     ? (title === existing.title && folder === existing.folder ? existing.path : normalizePath('', title, folder))
     : normalizePath(input.path, title, folder);
-  const next: KnowledgeNote = {
+  const written = writeVaultNote({
     ...existing,
     title,
     folder: cleanFolder(path.posix.dirname(desiredPath) === '.' ? folder : path.posix.dirname(desiredPath)),
     path: uniquePath(database, desiredPath, id),
     content: input.content === undefined ? existing.content : cleanText(input.content),
     pinned: input.pinned === undefined ? existing.pinned : Boolean(input.pinned),
+    kind: input.kind === undefined ? existing.kind : cleanText(input.kind, 40) || existing.kind,
+    projectId: input.projectId === undefined ? existing.projectId : cleanText(input.projectId, 120) || existing.projectId,
+    aliases: input.aliases === undefined ? existing.aliases : Array.isArray(input.aliases) ? input.aliases.map((alias) => cleanTitle(alias)).filter(Boolean).slice(0, 50) : existing.aliases,
     updatedAt: timestamp()
-  };
+  }, existing.path);
+  const next = fromVault(written);
   database.exec('BEGIN IMMEDIATE');
   try {
-    database.prepare(`
-      UPDATE knowledge_notes
-      SET title = ?, path = ?, folder = ?, content = ?, pinned = ?, updated_at = ?
-      WHERE id = ?
-    `).run(next.title, next.path, next.folder, next.content, next.pinned ? 1 : 0, next.updatedAt, id);
-    syncFts(database, next);
-    syncTagsAndLinks(database, next);
-    writeVersion(database, next, 'saved');
-    emitEvent(database, 'note.updated', id, `Saved ${next.path}`, { previousPath: existing.path, path: next.path }, input.actor);
+    upsertVaultNote(database, written, 'saved');
+    emitEvent(database, 'note.updated', id, `Saved ${next.path}`, { previousPath: existing.path, path: next.path, revision: next.revision }, input.actor);
     database.exec('COMMIT');
   } catch (error) {
     database.exec('ROLLBACK');
@@ -401,6 +535,7 @@ export function trashKnowledgeNote(id: string, actor = 'hii.knowledge') {
   const row = getNoteRow(database, id);
   if (!row) throw new Error(`Note not found: ${id}`);
   const deletedAt = timestamp();
+  trashVaultNote(noteFromRow(row));
   database.prepare('UPDATE knowledge_notes SET deleted_at = ?, updated_at = ? WHERE id = ?').run(deletedAt, deletedAt, id);
   const note = noteFromRow({ ...row, deleted_at: deletedAt, updated_at: deletedAt });
   syncFts(database, note);
@@ -414,8 +549,10 @@ export function restoreKnowledgeNote(id: string, actor = 'hii.knowledge') {
   const row = getNoteRow(database, id);
   if (!row) throw new Error(`Note not found: ${id}`);
   const updatedAt = timestamp();
+  const restored = restoreVaultNote(noteFromRow(row));
+  const note = { ...fromVault(restored), updatedAt };
   database.prepare('UPDATE knowledge_notes SET deleted_at = NULL, updated_at = ? WHERE id = ?').run(updatedAt, id);
-  const note = noteFromRow({ ...row, deleted_at: null, updated_at: updatedAt });
+  upsertVaultNote(database, { ...restored, updatedAt }, 'restored');
   syncFts(database, note);
   syncTagsAndLinks(database, note);
   emitEvent(database, 'note.restored', id, `Restored ${note.path}`, {}, actor);
@@ -558,6 +695,8 @@ export function knowledgeGraph() {
 export function knowledgeWorkspace() {
   const database = db();
   const notes = listKnowledgeNotes();
+  const assets = listKnowledgeAssets();
+  const systems = knowledgeSystemSnapshot();
   const folders = database.prepare(`
     SELECT folder, COUNT(*) AS count FROM knowledge_notes
     WHERE deleted_at IS NULL GROUP BY folder ORDER BY folder COLLATE NOCASE
@@ -572,9 +711,24 @@ export function knowledgeWorkspace() {
     SELECT id, type, note_id AS noteId, actor, summary, created_at AS createdAt
     FROM knowledge_events ORDER BY created_at DESC LIMIT 30
   `).all() as unknown as Array<{ id: string; type: string; noteId: string | null; actor: string; summary: string; createdAt: string }>;
+  const projects = [...new Set([
+    ...notes.map((note) => note.projectId).filter((project) => project && project !== 'shared'),
+    ...assets.map((asset) => asset.projectId).filter((project) => project && project !== 'Shared')
+  ])].sort((a, b) => a.localeCompare(b)).map((projectId) => ({
+    id: projectId,
+    name: projectId,
+    noteCount: notes.filter((note) => note.projectId === projectId || note.path.startsWith(`Projects/${projectId}/`)).length,
+    assetCount: assets.filter((asset) => asset.projectId === projectId).length,
+    objectCount: systems.objects.filter((object) => object.projectId === projectId).length
+  }));
   return {
     dbPath: knowledgeDbPath(),
+    vaultPath: knowledgeVaultPath(),
+    authority: 'markdown-vault',
     notes,
+    projects,
+    assets,
+    systems: systems.stats,
     folders,
     tags,
     trashCount: Number(trash.count),
@@ -584,7 +738,9 @@ export function knowledgeWorkspace() {
       folders: folders.length,
       tags: tags.length,
       links: Number((database.prepare('SELECT COUNT(*) AS count FROM knowledge_links').get() as { count: number }).count),
-      words: notes.reduce((sum, note) => sum + note.excerpt.split(/\s+/).filter(Boolean).length, 0)
+      words: notes.reduce((sum, note) => sum + note.excerpt.split(/\s+/).filter(Boolean).length, 0),
+      assets: assets.length,
+      objects: systems.stats.objects
     }
   };
 }
@@ -617,12 +773,16 @@ export function importKnowledgeNotes(files: Array<{ name?: unknown; path?: unkno
 export function exportKnowledgeWorkspace() {
   const notes = listKnowledgeNotes({ limit: 2000 }).map((summary) => getKnowledgeNote(summary.id)?.note).filter(Boolean);
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     exportKind: 'hii.knowledge.workspace',
     exportedAt: timestamp(),
     localOnly: true,
+    authority: 'markdown-vault',
+    vaultPath: knowledgeVaultPath(),
     notes,
+    assets: listKnowledgeAssets(),
     graph: knowledgeGraph(),
+    systems: knowledgeSystemSnapshot(),
     guardrails: ['Local export only.', 'No content was uploaded or published.', 'Review note contents before external sharing.']
   };
 }
@@ -634,4 +794,31 @@ export function exportKnowledgeNote(id: string) {
 export function resetKnowledgeDbForTests() {
   for (const database of databases.values()) database.close();
   databases.clear();
+  syncing.clear();
+  resetKnowledgeVaultForTests();
+  resetKnowledgeSystemsForTests();
+}
+
+export function configureKnowledgeWorkspaceVault(root: unknown) {
+  const config = configureKnowledgeVault(root);
+  const database = db();
+  synchronizeVault(database);
+  emitEvent(database, 'vault.configured', null, `Configured Markdown vault at ${config.root}`, { root: config.root });
+  return { config, workspace: knowledgeWorkspace() };
+}
+
+export function rebuildKnowledgeIndex() {
+  const database = db();
+  database.exec('BEGIN IMMEDIATE');
+  try {
+    database.exec('DELETE FROM knowledge_notes_fts; DELETE FROM knowledge_tags; DELETE FROM knowledge_links;');
+    database.prepare('UPDATE knowledge_notes SET deleted_at = ?').run(timestamp());
+    for (const note of scanVaultNotes()) upsertVaultNote(database, note, 'vault.rebuild');
+    emitEvent(database, 'vault.rebuilt', null, 'Rebuilt the knowledge index from canonical Markdown files', { vault: knowledgeVaultPath() });
+    database.exec('COMMIT');
+  } catch (error) {
+    database.exec('ROLLBACK');
+    throw error;
+  }
+  return knowledgeWorkspace();
 }

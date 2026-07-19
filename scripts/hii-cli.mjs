@@ -893,7 +893,7 @@ function agentCommandCatalog() {
     { command: "hii board add <title>", purpose: "Create a local task with owner, coordinate, priority, tags, and notes." },
     { command: "hii board move <id> <lane>", purpose: "Move a task between kanban lanes." },
     { command: "hii board dedupe", purpose: "Archive duplicate open cards through append-only board events." },
-    { command: "hii knowledge", purpose: "Show the local HII Knowledge Workspace and canonical database coordinate." },
+    { command: "hii knowledge", purpose: "Show the user-owned Markdown vault and rebuildable HII knowledge index." },
     { command: "hii knowledge check", purpose: "Run the isolated notes, links, search, graph, history, lifecycle, and export smoke test." },
     { command: "hii money idea <idea>", purpose: "Use local models to turn a rough idea into a sellable offer and execution handoff." },
     { command: "hii money list", purpose: "List recent local idea-to-offer receipts." },
@@ -2004,6 +2004,14 @@ function cmdKnowledge(args) {
   }
   const url = "http://localhost:3000/knowledge";
   const database = path.join(RUNTIME, "hii.db");
+  const vaultConfigPath = path.join(RUNTIME, "vault.json");
+  let vault = process.env.HII_VAULT_PATH || path.join(os.homedir(), "Documents", "HII");
+  try {
+    const configured = JSON.parse(fs.readFileSync(vaultConfigPath, "utf8"));
+    if (typeof configured.root === "string" && configured.root) vault = configured.root;
+  } catch {
+    // Report the visible default until the user selects another vault.
+  }
   if (sub === "open" || args.includes("--open")) {
     spawnSync("open", [url], { stdio: "inherit" });
     return;
@@ -2017,10 +2025,12 @@ function cmdKnowledge(args) {
     : null;
   console.log("HII Knowledge Workspace\n");
   console.log(`ui:       ${url}`);
+  console.log(`vault:    ${vault}`);
+  console.log(`authority:${fs.existsSync(vault) ? " Markdown files" : " not initialized"}`);
   console.log(`database: ${database}`);
   console.log(`exists:   ${fs.existsSync(database) ? "yes" : "not initialized"}`);
   console.log(`notes:    ${count?.status === 0 ? count.stdout.trim() : "-"}`);
-  console.log("local-only; no sync or publish");
+  console.log("SQLite is a rebuildable local index; no sync or publish");
 }
 
 function cmdLinks(args) {

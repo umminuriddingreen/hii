@@ -956,9 +956,12 @@
     "name": "HII Local Knowledge Workspace",
     "owner": "aii",
     "runtime": "next-route",
-    "summary": "Create, connect, search, version, graph, import, and export local Markdown knowledge through the canonical HII database.",
+    "summary": "Create, connect, search, version, graph, and system-map user-owned Markdown knowledge and copied or linked assets through a rebuildable local HII index.",
     "inputs": [
       "local note or Markdown import",
+      "user-selected Markdown vault",
+      "copied or explicitly linked local asset",
+      "source material for reviewed system exploration",
       "bounded note mutation",
       "search query",
       "daily-note date",
@@ -970,14 +973,16 @@
       "wikilinks and backlinks",
       "FTS5 search results",
       "knowledge graph",
+      "typed system objects, relations, saved views, and proposal review",
+      "asset hashes, previews, provenance, and availability",
       "local Markdown or JSON export",
       "append-only knowledge event"
     ],
     "permissions": [
       "local HII origin only",
-      "read and write ~/.hii/hii.db",
-      "bounded knowledge tables only",
-      "optimistic conflict detection",
+      "read and write the explicitly selected Markdown vault",
+      "read and write bounded knowledge and index state in ~/.hii/hii.db",
+      "revision-hash conflict detection",
       "secret-like value redaction",
       "no upload, publish, sync, or external transmission"
     ],
@@ -989,8 +994,11 @@
       "/knowledge",
       "/api/knowledge",
       "lib/server/hii-knowledge.ts",
+      "lib/server/hii-vault.ts",
+      "lib/server/hii-knowledge-systems.ts",
       "scripts/hii-knowledge-smoke.mjs",
-      "~/.hii/hii.db"
+      "~/.hii/hii.db",
+      "user-selected Markdown vault"
     ],
     "status": "ready",
     "trustLevel": "first-party"
