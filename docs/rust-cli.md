@@ -14,6 +14,7 @@ hii status          show workspace, Git, Ollama, and latest-proof state
 hii doctor          check the local execution prerequisites
 hii models          show installed local model roles
 hii proof [id]      inspect a durable run receipt
+hii board [action]  local kanban/todo board (list/add/move/done/edit/dedupe)
 ```
 
 The native surface stays deliberately small. Existing HII command families
@@ -23,11 +24,18 @@ environment until their schemas and exit behavior have Rust parity tests.
 ## Parity freeze
 
 The default native command surface is frozen to `run`, `status`, `doctor`,
-`models`, and `proof`. Every other command family must continue through
-`legacy::run` and `scripts/hii-cli.mjs` until family-specific parity tests prove
-its aliases, flags, output, JSON schema, and exit behavior. Unmigrated schedule,
-calendar, and system-monitor experiments remain available only in builds made
-with the non-default Cargo feature `preview`.
+`models`, `proof`, and `board`. Every other command family must continue
+through `legacy::run` and `scripts/hii-cli.mjs` until family-specific parity
+tests prove its aliases, flags, output, JSON schema, and exit behavior.
+Unmigrated schedule, calendar, and system-monitor experiments remain
+available only in builds made with the non-default Cargo feature `preview`.
+
+`board` was migrated 2026-07-21 (see `cli/src/board.rs`): append-only local
+writes to `~/.hii/board/tasks.jsonl`, no network or managed-runtime
+dependency, matching the migration order below. Verified against the live
+production board (`~/.hii/board/tasks.jsonl`, 23 tasks including duplicate
+archival) with `diff <(hii board list --all) <(node scripts/hii-cli.mjs board
+list --all)` producing zero diff, plus unit tests in `cli/src/board.rs`.
 
 Interactive conversation preserves context across turns and renders only the
 assistant's useful response. Internal model actions and tool observations are

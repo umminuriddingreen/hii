@@ -45,6 +45,7 @@
       <span>Human Information Interface</span>
     </a>
     <nav>
+      <a href="/learn">Learner</a>
       <a href="#how">How it works</a>
       <a href="#trust">Trust</a>
       <a href="#download">Mac beta</a>
@@ -63,7 +64,7 @@
         <p class="hii-launch-deck">A local-first workspace for thinking with your files, directing agent work, and seeing the proof before you trust the result.</p>
         <div class="hii-launch-actions">
           <a class="hii-launch-primary" href="/login?next=/dashboard">Create your account <span aria-hidden="true">↗</span></a>
-          <a class="hii-launch-secondary" href="#product">See HII in use <span aria-hidden="true">↓</span></a>
+          <a class="hii-launch-secondary" href="/learn">Try HII Learner <span aria-hidden="true">↗</span></a>
         </div>
         <p class="hii-launch-note">macOS founder beta · local by default · human approval before publish</p>
       </div>
