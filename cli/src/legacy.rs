@@ -23,7 +23,6 @@ pub const LEGACY_COMMANDS: &[&str] = &[
     "daemon",
     "instances",
     "feed",
-    "board",
     "money",
     "links",
     "pack",

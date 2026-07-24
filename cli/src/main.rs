@@ -1,5 +1,6 @@
 mod agent;
 mod agents;
+mod board;
 mod config;
 mod conversation;
 mod legacy;
@@ -96,6 +97,11 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    #[command(about = "Local kanban/todo board")]
+    Board {
+        #[command(subcommand)]
+        action: Option<BoardCommand>,
+    },
     #[cfg(feature = "preview")]
     #[command(hide = true)]
     Schedule { action: String },
@@ -103,6 +109,57 @@ enum Commands {
     Legacy {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum BoardCommand {
+    #[command(alias = "show", about = "List open tasks")]
+    List {
+        #[arg(long)]
+        done: bool,
+        #[arg(long)]
+        all: bool,
+    },
+    #[command(about = "Add a new task")]
+    Add {
+        #[arg(required = true, num_args = 1..)]
+        title: Vec<String>,
+        #[arg(long)]
+        lane: Option<String>,
+        #[arg(long)]
+        priority: Option<String>,
+        #[arg(long)]
+        owner: Option<String>,
+        #[arg(long)]
+        coordinate: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long)]
+        tags: Option<String>,
+    },
+    #[command(about = "Move a task to a different lane")]
+    Move { id: String, lane: String },
+    #[command(about = "Mark a task done")]
+    Done { id: String },
+    #[command(about = "Edit a task's fields")]
+    Edit {
+        id: String,
+        #[arg(long)]
+        priority: Option<String>,
+        #[arg(long)]
+        owner: Option<String>,
+        #[arg(long)]
+        coordinate: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long)]
+        tags: Option<String>,
+    },
+    #[command(about = "Merge duplicate tasks")]
+    Dedupe {
+        #[arg(long = "dry-run")]
+        dry_run: bool,
     },
 }
 
@@ -187,6 +244,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             proof(&paths, id.as_deref(), json)?;
             Ok(ExitCode::SUCCESS)
         }
+        Some(Commands::Board { action }) => board_command(&paths, cli.cwd, action),
         #[cfg(feature = "preview")]
         Some(Commands::Schedule { action }) => {
             if action != "tick" {
@@ -585,6 +643,124 @@ fn proof(paths: &AppPaths, id: Option<&str>, json: bool) -> Result<(), String> {
     Ok(())
 }
 
+fn board_command(
+    paths: &AppPaths,
+    cwd: Option<PathBuf>,
+    action: Option<BoardCommand>,
+) -> Result<ExitCode, String> {
+    let root = cwd.unwrap_or(paths.repo.clone());
+    let store = board::Board::open(&paths.runtime);
+    match action.unwrap_or(BoardCommand::List {
+        done: false,
+        all: false,
+    }) {
+        BoardCommand::List { done, all } => {
+            let include_done = done || all;
+            let tasks = store.tasks(include_done)?;
+            board::print_board(store.store_path(), &tasks, include_done);
+            Ok(ExitCode::SUCCESS)
+        }
+        BoardCommand::Add {
+            title,
+            lane,
+            priority,
+            owner,
+            coordinate,
+            notes,
+            tags,
+        } => {
+            let task = store.add(
+                &root,
+                board::AddOptions {
+                    title: title.join(" "),
+                    lane,
+                    priority,
+                    owner,
+                    coordinate,
+                    notes,
+                    tags,
+                },
+            )?;
+            println!("added {}  {}", &task.id[..8.min(task.id.len())], task.title);
+            println!("lane: {}  priority: {}", task.lane, task.priority);
+            println!("store: {}", store.store_path().display());
+            Ok(ExitCode::SUCCESS)
+        }
+        BoardCommand::Move { id, lane } => {
+            let task = store.update(
+                &id,
+                board::EditPatch {
+                    lane: Some(lane),
+                    ..Default::default()
+                },
+            )?;
+            println!(
+                "moved {} -> {}",
+                &task.id[..8.min(task.id.len())],
+                task.lane
+            );
+            println!("{}", task.title);
+            Ok(ExitCode::SUCCESS)
+        }
+        BoardCommand::Done { id } => {
+            let task = store.update(
+                &id,
+                board::EditPatch {
+                    lane: Some("done".to_string()),
+                    ..Default::default()
+                },
+            )?;
+            println!("done {}", &task.id[..8.min(task.id.len())]);
+            println!("{}", task.title);
+            Ok(ExitCode::SUCCESS)
+        }
+        BoardCommand::Edit {
+            id,
+            priority,
+            owner,
+            coordinate,
+            notes,
+            tags,
+        } => {
+            let task = store.update(
+                &id,
+                board::EditPatch {
+                    lane: None,
+                    priority,
+                    owner,
+                    coordinate,
+                    notes,
+                    tags,
+                },
+            )?;
+            println!(
+                "updated {}  {}",
+                &task.id[..8.min(task.id.len())],
+                task.title
+            );
+            Ok(ExitCode::SUCCESS)
+        }
+        BoardCommand::Dedupe { dry_run } => {
+            let reconciled = store.dedupe(dry_run)?;
+            println!("HII board deduplication\n");
+            println!(
+                "mode:       {}",
+                if dry_run { "dry-run" } else { "append-only" }
+            );
+            println!("duplicates: {}", reconciled.len());
+            for (duplicate, keep) in &reconciled {
+                println!(
+                    "  {} -> done; keep {}  {}",
+                    &duplicate.id[..8.min(duplicate.id.len())],
+                    &keep.id[..8.min(keep.id.len())],
+                    keep.title
+                );
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+    }
+}
+
 fn first_command(args: &[String]) -> Option<&str> {
     let mut skip_value = false;
     for arg in args {
@@ -612,7 +788,16 @@ fn delegate_legacy(repo: &std::path::Path, args: &[String]) -> Option<Result<i32
 fn is_native_command(command: &str) -> bool {
     matches!(
         command,
-        "run" | "agent" | "status" | "doctor" | "models" | "proof" | "receipt" | "legacy" | "help"
+        "run"
+            | "agent"
+            | "status"
+            | "doctor"
+            | "models"
+            | "proof"
+            | "receipt"
+            | "board"
+            | "legacy"
+            | "help"
     ) || (cfg!(feature = "preview") && command == "schedule")
 }
 

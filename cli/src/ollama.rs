@@ -1,3 +1,4 @@
+use crate::config::ModelProvider;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -82,35 +83,67 @@ struct ModelTag {
     name: String,
 }
 
+/// OpenAI-compatible `/v1/models` listing (served by LM Studio and Ollama).
+#[derive(Debug, Deserialize)]
+struct OpenAiModels {
+    #[serde(default)]
+    data: Vec<OpenAiModel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiModel {
+    id: String,
+}
+
 #[derive(Clone)]
 pub struct Ollama {
     base_url: String,
+    provider: ModelProvider,
     agent: ureq::Agent,
 }
 
 impl Ollama {
     pub fn new(base_url: String) -> Self {
+        let provider = ModelProvider::discover(&base_url);
         let agent = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(2))
             .timeout_read(Duration::from_secs(600))
             .timeout_write(Duration::from_secs(30))
             .build();
-        Self { base_url, agent }
+        Self {
+            base_url,
+            provider,
+            agent,
+        }
     }
 
     pub fn models(&self) -> Result<Vec<String>, String> {
-        let response: TagsResponse = self
-            .agent
-            .get(&format!("{}/api/tags", self.base_url))
-            .call()
-            .map_err(format_ureq)?
-            .into_json()
-            .map_err(|error| format!("invalid Ollama model response: {error}"))?;
-        Ok(response
-            .models
-            .into_iter()
-            .map(|model| model.name)
-            .collect())
+        match self.provider {
+            ModelProvider::Ollama => {
+                let response: TagsResponse = self
+                    .agent
+                    .get(&format!("{}/api/tags", self.base_url))
+                    .call()
+                    .map_err(format_ureq)?
+                    .into_json()
+                    .map_err(|error| format!("invalid Ollama model response: {error}"))?;
+                Ok(response
+                    .models
+                    .into_iter()
+                    .map(|model| model.name)
+                    .collect())
+            }
+            ModelProvider::LmStudio => {
+                let response: OpenAiModels = self
+                    .agent
+                    .get(&format!("{}/v1/models", self.base_url))
+                    .call()
+                    .map_err(format_ureq)?
+                    .into_json()
+                    .map_err(|error| format!("invalid model listing: {error}"))?;
+                Ok(response.data.into_iter().map(|model| model.id).collect())
+            }
+        }
     }
 
     pub fn chat_json(&self, model: &str, messages: &[Message]) -> Result<String, String> {
@@ -127,12 +160,17 @@ impl Ollama {
             "required": ["type"],
             "properties": {
                 "type": { "enum": ["tool", "final", "message"] },
-                "tool": { "enum": ["read", "list", "search", "write", "shell", "verify", "http"] },
+                "tool": { "enum": ["read", "list", "search", "write", "edit", "shell", "verify", "http"] },
                 "path": { "type": "string" },
                 "query": { "type": "string" },
                 "command": { "type": "string" },
                 "content": { "type": "string" },
                 "url": { "type": "string" },
+                "old": { "type": "string" },
+                "new": { "type": "string" },
+                "replace_all": { "type": "boolean" },
+                "offset": { "type": "integer" },
+                "limit": { "type": "integer" },
                 "reason": { "type": "string" },
                 "summary": { "type": "string" },
                 "message": { "type": "string" },
@@ -156,6 +194,18 @@ impl Ollama {
     }
 
     fn chat(
+        &self,
+        model: &str,
+        messages: &[Message],
+        format: Option<Value>,
+    ) -> Result<ChatResult, String> {
+        match self.provider {
+            ModelProvider::Ollama => self.chat_ollama(model, messages, format),
+            ModelProvider::LmStudio => self.chat_openai(model, messages, format),
+        }
+    }
+
+    fn chat_ollama(
         &self,
         model: &str,
         messages: &[Message],
@@ -192,6 +242,45 @@ impl Ollama {
                 total_duration_ms: response.total_duration / 1_000_000,
             },
         })
+    }
+
+    /// OpenAI-compatible chat (`/v1/chat/completions`), used for LM Studio. A
+    /// requested JSON schema maps to `response_format: json_object` since not
+    /// all backends honor a full schema constraint.
+    fn chat_openai(
+        &self,
+        model: &str,
+        messages: &[Message],
+        format: Option<Value>,
+    ) -> Result<ChatResult, String> {
+        let mut body = json!({
+            "model": model,
+            "messages": messages,
+            "stream": false,
+            "temperature": 0.1,
+        });
+        if format.is_some() {
+            body["response_format"] = json!({ "type": "json_object" });
+        }
+        let value: Value = self
+            .agent
+            .post(&format!("{}/v1/chat/completions", self.base_url))
+            .send_json(body)
+            .map_err(format_ureq)?
+            .into_json()
+            .map_err(|error| format!("invalid chat response: {error}"))?;
+        let content = value["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let usage = ChatUsage {
+            prompt_tokens: value["usage"]["prompt_tokens"].as_u64().unwrap_or(0),
+            completion_tokens: value["usage"]["completion_tokens"].as_u64().unwrap_or(0),
+            prompt_duration_ms: 0,
+            completion_duration_ms: 0,
+            total_duration_ms: 0,
+        };
+        Ok(ChatResult { content, usage })
     }
 }
 

@@ -188,12 +188,18 @@ impl Conversation {
                     command,
                     content,
                     url,
+                    old,
+                    new,
+                    replace_all,
+                    offset,
+                    limit,
                     ..
                 } => {
                     used_tools = true;
                     let shell_evidence = tool == "shell"
                         && command.as_deref().is_some_and(shell_command_is_read_only);
-                    mutating_work |= tool == "write" || (tool == "shell" && !shell_evidence);
+                    mutating_work |=
+                        tool == "write" || tool == "edit" || (tool == "shell" && !shell_evidence);
                     if run.is_none() {
                         let created = RunStore::create(&self.paths.runtime)?;
                         created.event(
@@ -209,12 +215,19 @@ impl Conversation {
                     }
                     let result = execute_tool(
                         &self.tools,
-                        &tool,
-                        path.as_deref(),
-                        query.as_deref(),
-                        command.as_deref(),
-                        content.as_deref(),
-                        url.as_deref(),
+                        crate::agent::ToolCall {
+                            tool: &tool,
+                            path: path.as_deref(),
+                            query: query.as_deref(),
+                            command: command.as_deref(),
+                            content: content.as_deref(),
+                            url: url.as_deref(),
+                            old: old.as_deref(),
+                            new: new.as_deref(),
+                            replace_all,
+                            offset,
+                            limit,
+                        },
                         false,
                     );
                     let safe_output = redact_text(&result.output);

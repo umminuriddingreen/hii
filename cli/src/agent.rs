@@ -34,6 +34,16 @@ pub(crate) enum Action {
         content: Option<String>,
         url: Option<String>,
         reason: Option<String>,
+        #[serde(default)]
+        old: Option<String>,
+        #[serde(default)]
+        new: Option<String>,
+        #[serde(default)]
+        replace_all: bool,
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        limit: Option<usize>,
     },
     Final {
         summary: String,
@@ -136,6 +146,11 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 content,
                 url,
                 reason,
+                old,
+                new,
+                replace_all,
+                offset,
+                limit,
             } => {
                 let label = reason.as_deref().unwrap_or("using workspace tool");
                 if options.verbose {
@@ -143,12 +158,19 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 }
                 let result = execute_tool(
                     &tools,
-                    &tool,
-                    path.as_deref(),
-                    query.as_deref(),
-                    command.as_deref(),
-                    content.as_deref(),
-                    url.as_deref(),
+                    ToolCall {
+                        tool: &tool,
+                        path: path.as_deref(),
+                        query: query.as_deref(),
+                        command: command.as_deref(),
+                        content: content.as_deref(),
+                        url: url.as_deref(),
+                        old: old.as_deref(),
+                        new: new.as_deref(),
+                        replace_all,
+                        offset,
+                        limit,
+                    },
                     options.dry_run,
                 );
                 let safe_output = redact_text(&result.output);
@@ -312,12 +334,12 @@ Step limit: {max_steps}
 Dry run: {dry_run}
 
 Loop: inspect -> choose one tool -> act -> observe -> adjust -> verify -> final receipt.
-Use the smallest relevant context. Read AGENTS.md before editing when it exists. Preserve unclear work. Do not publish, push, spend, message, delete, read secrets, or access paths outside the workspace. The shell guard is a safety backstop, not permission. Use `write` for file edits and `verify` for actual checks. The `http` tool only reaches local services.
+Use the smallest relevant context. Read AGENTS.md before editing when it exists. Preserve unclear work. Do not publish, push, spend, message, delete, read secrets, or access paths outside the workspace. The shell guard is a safety backstop, not permission. Prefer `edit` for changing existing files (exact, minimal), `write` for new files or full rewrites, and `verify` for actual checks. For large files, read a slice with `offset`/`limit`. The `http` tool only reaches local services.
 
 Return exactly one JSON object per turn.
 
 Tool action:
-{{"type":"tool","tool":"read|list|search|write|shell|verify|http","path":"optional relative path","query":"for search","command":"for shell or verify","content":"for write","url":"for http","reason":"short reason"}}
+{{"type":"tool","tool":"read|list|search|write|edit|shell|verify|http","path":"relative path","query":"for search","command":"for shell or verify","content":"for write","old":"exact text to replace (edit)","new":"replacement text (edit)","replace_all":false,"offset":1,"limit":200,"url":"for http","reason":"short reason"}}
 
 Final action:
 {{"type":"final","summary":"what is now true","verification":["checks actually run"],"next":"highest-value next action or null"}}
@@ -343,38 +365,49 @@ pub(crate) fn parse_action(raw: &str) -> Result<Action, String> {
     serde_json::from_str(candidate).map_err(|error| error.to_string())
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn execute_tool(
-    tools: &Toolbelt,
-    tool: &str,
-    path: Option<&str>,
-    query: Option<&str>,
-    command: Option<&str>,
-    content: Option<&str>,
-    url: Option<&str>,
-    dry_run: bool,
-) -> ToolResult {
-    match tool {
-        "read" => tools.read(path.unwrap_or("")),
-        "list" => tools.list(path),
-        "search" => tools.search(query.unwrap_or(""), path),
-        "write" if dry_run => ToolResult {
+/// One decoded tool invocation. Grouping the arguments keeps the dispatcher's
+/// signature stable as new tools (edit, ranged read) add parameters, and lets
+/// both the run loop and the REPL share one call path.
+pub(crate) struct ToolCall<'a> {
+    pub tool: &'a str,
+    pub path: Option<&'a str>,
+    pub query: Option<&'a str>,
+    pub command: Option<&'a str>,
+    pub content: Option<&'a str>,
+    pub url: Option<&'a str>,
+    pub old: Option<&'a str>,
+    pub new: Option<&'a str>,
+    pub replace_all: bool,
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
+}
+
+pub(crate) fn execute_tool(tools: &Toolbelt, call: ToolCall, dry_run: bool) -> ToolResult {
+    let blocked = |what: &str| ToolResult {
+        ok: false,
+        output: format!("dry run: {what} skipped"),
+        verification: false,
+    };
+    match call.tool {
+        "read" => tools.read_range(call.path.unwrap_or(""), call.offset, call.limit),
+        "list" => tools.list(call.path),
+        "search" => tools.search(call.query.unwrap_or(""), call.path),
+        "write" if dry_run => blocked("write"),
+        "write" => tools.write(call.path.unwrap_or(""), call.content.unwrap_or("")),
+        "edit" if dry_run => blocked("edit"),
+        "edit" => tools.edit(
+            call.path.unwrap_or(""),
+            call.old.unwrap_or(""),
+            call.new.unwrap_or(""),
+            call.replace_all,
+        ),
+        "shell" if dry_run => blocked("shell"),
+        "shell" => tools.shell(call.command.unwrap_or(""), false),
+        "verify" => tools.shell(call.command.unwrap_or(""), true),
+        "http" => tools.http(call.url.unwrap_or("")),
+        other => ToolResult {
             ok: false,
-            output: "dry run: write skipped".into(),
-            verification: false,
-        },
-        "write" => tools.write(path.unwrap_or(""), content.unwrap_or("")),
-        "shell" if dry_run => ToolResult {
-            ok: false,
-            output: "dry run: shell skipped".into(),
-            verification: false,
-        },
-        "shell" => tools.shell(command.unwrap_or(""), false),
-        "verify" => tools.shell(command.unwrap_or(""), true),
-        "http" => tools.http(url.unwrap_or("")),
-        _ => ToolResult {
-            ok: false,
-            output: format!("unknown or malformed tool: {tool}"),
+            output: format!("unknown or malformed tool: {other}"),
             verification: false,
         },
     }

@@ -46,25 +46,158 @@ impl Toolbelt {
         &self.workspace
     }
 
-    pub fn read(&self, path: &str) -> ToolResult {
+    /// Read a file, optionally windowed to `[offset, offset+limit)` lines
+    /// (1-indexed, `cat -n` style). Large files are readable in slices instead
+    /// of being rejected; binary files return a clear hint rather than an error
+    /// the model cannot recover from.
+    pub fn read_range(
+        &self,
+        path: &str,
+        offset: Option<usize>,
+        limit: Option<usize>,
+    ) -> ToolResult {
         let result = (|| {
             let path = self.resolve_existing(path)?;
             let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
             if !metadata.is_file() {
                 return Err(format!("not a file: {}", path.display()));
             }
-            if metadata.len() > MAX_OUTPUT_BYTES as u64 {
+            let bytes = fs::read(&path).map_err(|error| error.to_string())?;
+            let text = match String::from_utf8(bytes) {
+                Ok(text) => text,
+                Err(_) => {
+                    return Ok(format!(
+                        "binary file ({} bytes); not readable as text. Use search for content or shell for a hex/metadata view.",
+                        metadata.len()
+                    ))
+                }
+            };
+            let windowed = offset.is_some() || limit.is_some();
+            if !windowed && metadata.len() > MAX_OUTPUT_BYTES as u64 {
                 return Err(format!(
-                    "file is larger than {} KiB; use search or a narrower file",
+                    "file is {} KiB (> {} KiB); pass offset/limit to read a line range, or use search",
+                    metadata.len() / 1024,
                     MAX_OUTPUT_BYTES / 1024
                 ));
             }
-            let bytes = fs::read(&path).map_err(|error| error.to_string())?;
-            let text = String::from_utf8(bytes)
-                .map_err(|_| "binary files are not readable by this tool".to_string())?;
-            Ok(text)
+            if !windowed {
+                return Ok(text);
+            }
+            let start = offset.unwrap_or(1).max(1);
+            let lines: Vec<&str> = text.lines().collect();
+            let total = lines.len();
+            if start > total {
+                return Err(format!(
+                    "offset {start} is past end of file ({total} lines)"
+                ));
+            }
+            let take = limit.unwrap_or(total);
+            let slice = lines
+                .iter()
+                .enumerate()
+                .skip(start - 1)
+                .take(take)
+                .map(|(index, line)| format!("{:>6}\t{}", index + 1, line))
+                .collect::<Vec<_>>()
+                .join("\n");
+            Ok(slice)
         })();
         tool_result(result, false)
+    }
+
+    /// Replace an exact, unique occurrence of `old` with `new`. Fails when the
+    /// match is absent or ambiguous (unless `replace_all`), mirroring the
+    /// discipline of an editor's precise edit rather than a blind rewrite.
+    pub fn edit(&self, path: &str, old: &str, new: &str, replace_all: bool) -> ToolResult {
+        let result = (|| {
+            if old.is_empty() {
+                return Err("edit requires a non-empty target string".into());
+            }
+            if old == new {
+                return Err("edit target and replacement are identical".into());
+            }
+            let resolved = self.resolve_existing(path)?;
+            self.ensure_inside(resolved.clone())?;
+            let content = fs::read_to_string(&resolved)
+                .map_err(|error| format!("cannot edit {}: {error}", resolved.display()))?;
+            let count = content.matches(old).count();
+            if count == 0 {
+                return Err("edit target string was not found".into());
+            }
+            if count > 1 && !replace_all {
+                return Err(format!(
+                    "edit target is ambiguous: {count} matches. Add more context or set replace_all"
+                ));
+            }
+            let updated = if replace_all {
+                content.replace(old, new)
+            } else {
+                content.replacen(old, new, 1)
+            };
+            fs::write(&resolved, updated).map_err(|error| error.to_string())?;
+            let relative = resolved.strip_prefix(&self.workspace).unwrap_or(&resolved);
+            let replacements = if replace_all { count } else { 1 };
+            let plural = if replacements == 1 { "" } else { "s" };
+            Ok(format!(
+                "edited {} ({replacements} replacement{plural})",
+                relative.display()
+            ))
+        })();
+        tool_result(result, false)
+    }
+
+    fn list_native(&self, base: &Path) -> Result<String, String> {
+        let mut files = Vec::new();
+        for entry in ignore::WalkBuilder::new(base)
+            .hidden(false)
+            .git_ignore(true)
+            .build()
+        {
+            let entry = entry.map_err(|error| error.to_string())?;
+            if entry.file_type().is_some_and(|kind| kind.is_file()) {
+                let path = entry.path();
+                if path.components().any(|c| c.as_os_str() == ".git") {
+                    continue;
+                }
+                let shown = path.strip_prefix(&self.workspace).unwrap_or(path);
+                files.push(shown.display().to_string());
+            }
+        }
+        files.sort();
+        Ok(files.join("\n"))
+    }
+
+    fn search_native(&self, query: &str, base: &Path) -> Result<String, String> {
+        let regex =
+            regex::Regex::new(query).map_err(|error| format!("invalid pattern: {error}"))?;
+        let mut hits = Vec::new();
+        for entry in ignore::WalkBuilder::new(base)
+            .hidden(false)
+            .git_ignore(true)
+            .build()
+        {
+            let entry = entry.map_err(|error| error.to_string())?;
+            if !entry.file_type().is_some_and(|kind| kind.is_file()) {
+                continue;
+            }
+            let path = entry.path();
+            if path.components().any(|c| c.as_os_str() == ".git") {
+                continue;
+            }
+            let Ok(content) = fs::read_to_string(path) else {
+                continue;
+            };
+            let shown = path.strip_prefix(&self.workspace).unwrap_or(path);
+            for (number, line) in content.lines().enumerate() {
+                if regex.is_match(line) {
+                    hits.push(format!("{}:{}:{}", shown.display(), number + 1, line));
+                    if hits.len() >= 2000 {
+                        return Ok(hits.join("\n"));
+                    }
+                }
+            }
+        }
+        Ok(hits.join("\n"))
     }
 
     pub fn list(&self, path: Option<&str>) -> ToolResult {
@@ -75,13 +208,16 @@ impl Toolbelt {
             },
             None => self.workspace.clone(),
         };
-        let relative = base.strip_prefix(&self.workspace).unwrap_or(Path::new("."));
-        let mut command = Command::new("rg");
-        command.args(["--files", "--hidden", "-g", "!.git"]);
-        if relative != Path::new("") && relative != Path::new(".") {
-            command.arg(relative);
+        if has_ripgrep() {
+            let relative = base.strip_prefix(&self.workspace).unwrap_or(Path::new("."));
+            let mut command = Command::new("rg");
+            command.args(["--files", "--hidden", "-g", "!.git"]);
+            if relative != Path::new("") && relative != Path::new(".") {
+                command.arg(relative);
+            }
+            return self.run_command(command, false, DEFAULT_TIMEOUT_SECS);
         }
-        self.run_command(command, false, DEFAULT_TIMEOUT_SECS)
+        tool_result(self.list_native(&base), false)
     }
 
     pub fn search(&self, query: &str, path: Option<&str>) -> ToolResult {
@@ -98,10 +234,14 @@ impl Toolbelt {
             },
             None => PathBuf::from("."),
         };
-        let mut command = Command::new("rg");
-        command.args(["-n", "--hidden", "-g", "!.git", "--"]);
-        command.arg(query).arg(relative);
-        self.run_command(command, false, DEFAULT_TIMEOUT_SECS)
+        if has_ripgrep() {
+            let mut command = Command::new("rg");
+            command.args(["-n", "--hidden", "-g", "!.git", "--"]);
+            command.arg(query).arg(&relative);
+            return self.run_command(command, false, DEFAULT_TIMEOUT_SECS);
+        }
+        let base = self.workspace.join(&relative);
+        tool_result(self.search_native(query, &base), false)
     }
 
     pub fn write(&self, path: &str, content: &str) -> ToolResult {
@@ -125,8 +265,7 @@ impl Toolbelt {
         if let Err(error) = validate_shell(command, &self.workspace) {
             return tool_result(Err(error), verification);
         }
-        let mut process = Command::new("/bin/zsh");
-        process.args(["-lc", command]);
+        let process = platform_shell(command);
         self.run_command(process, verification, DEFAULT_TIMEOUT_SECS)
     }
 
@@ -298,9 +437,73 @@ impl Toolbelt {
     }
 }
 
+/// Whether ripgrep is on `PATH`. Cached for the process so repeated `list`/
+/// `search` calls do not re-probe. When absent, the toolbelt falls back to a
+/// native Rust walk so the agent works on systems without `rg` installed.
+fn has_ripgrep() -> bool {
+    use std::sync::OnceLock;
+    static PRESENT: OnceLock<bool> = OnceLock::new();
+    *PRESENT.get_or_init(|| which_on_path("rg"))
+}
+
+/// Minimal cross-platform `which`: is `program` resolvable on `PATH`?
+fn which_on_path(program: &str) -> bool {
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    let exe_suffixes: &[&str] = if cfg!(windows) {
+        &["", ".exe", ".cmd", ".bat"]
+    } else {
+        &[""]
+    };
+    std::env::split_paths(&paths).any(|dir| {
+        exe_suffixes.iter().any(|suffix| {
+            let candidate = dir.join(format!("{program}{suffix}"));
+            candidate.is_file()
+        })
+    })
+}
+
+/// Build the OS-appropriate shell invocation. Honors `HII_SHELL` when set
+/// (`powershell`, `pwsh`, `cmd`, or an explicit shell path), otherwise picks a
+/// sensible default per platform. On Unix we drop the login flag (`-c`, not
+/// `-lc`) so behavior does not depend on the user's interactive profile.
+fn platform_shell(command: &str) -> Command {
+    if let Ok(shell) = std::env::var("HII_SHELL") {
+        let shell = shell.trim();
+        let lower = shell.to_ascii_lowercase();
+        if lower == "powershell" || lower == "pwsh" {
+            let mut process = Command::new(shell);
+            process.args(["-NoProfile", "-Command", command]);
+            return process;
+        }
+        if lower == "cmd" || lower.ends_with("cmd.exe") {
+            let mut process = Command::new(shell);
+            process.args(["/C", command]);
+            return process;
+        }
+        if !shell.is_empty() {
+            let mut process = Command::new(shell);
+            process.args(["-c", command]);
+            return process;
+        }
+    }
+    if cfg!(windows) {
+        let mut process = Command::new("powershell");
+        process.args(["-NoProfile", "-Command", command]);
+        process
+    } else {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+        let mut process = Command::new(shell);
+        process.args(["-c", command]);
+        process
+    }
+}
+
 fn validate_shell(command: &str, workspace: &Path) -> Result<(), String> {
     let normalized = command.to_ascii_lowercase();
     let blocked = [
+        // POSIX
         "sudo ",
         "rm ",
         "rm\t",
@@ -317,6 +520,14 @@ fn validate_shell(command: &str, workspace: &Path) -> Result<(), String> {
         "> /dev/",
         "dd if=",
         "chmod -r",
+        // Windows equivalents
+        "del ",
+        "erase ",
+        "rmdir ",
+        "rd ",
+        "format ",
+        "remove-item ",
+        "diskpart",
     ];
     if let Some(pattern) = blocked
         .iter()
@@ -414,7 +625,57 @@ mod tests {
         let path = workspace();
         fs::write(path.join(".env"), "TOKEN=nope").unwrap();
         let tools = Toolbelt::new(path.clone()).unwrap();
-        assert!(!tools.read(".env").ok);
+        assert!(!tools.read_range(".env", None, None).ok);
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn edit_replaces_unique_and_rejects_ambiguous() {
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        assert!(tools.write("a.txt", "one two one").ok);
+        // ambiguous single edit fails
+        assert!(!tools.edit("a.txt", "one", "X", false).ok);
+        // replace_all succeeds
+        assert!(tools.edit("a.txt", "one", "X", true).ok);
+        assert_eq!(fs::read_to_string(path.join("a.txt")).unwrap(), "X two X");
+        // missing target fails
+        assert!(!tools.edit("a.txt", "zzz", "Y", false).ok);
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn read_range_windows_lines() {
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        assert!(tools.write("f.txt", "l1\nl2\nl3\nl4").ok);
+        let result = tools.read_range("f.txt", Some(2), Some(2));
+        assert!(result.ok);
+        assert!(result.output.contains("l2") && result.output.contains("l3"));
+        assert!(!result.output.contains("l1") && !result.output.contains("l4"));
+        // offset past end fails
+        assert!(!tools.read_range("f.txt", Some(99), None).ok);
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn native_search_and_list_find_content() {
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        assert!(tools.write("src/x.rs", "fn needle() {}").ok);
+        let found = tools.search_native("needle", &tools.workspace().to_path_buf());
+        assert!(found.is_ok() && found.unwrap().contains("needle"));
+        let listed = tools.list_native(&tools.workspace().to_path_buf());
+        assert!(listed.unwrap().contains("x.rs"));
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn windows_destructive_patterns_are_blocked() {
+        let path = workspace();
+        assert!(validate_shell("del important.txt", &path).is_err());
+        assert!(validate_shell("Remove-Item x", &path).is_err());
+        assert!(validate_shell("cargo test", &path).is_ok());
         let _ = fs::remove_dir_all(path);
     }
 }
