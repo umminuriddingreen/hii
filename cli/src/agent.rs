@@ -10,7 +10,22 @@ use serde_json::json;
 use std::{
     io::{self, IsTerminal, Write},
     path::PathBuf,
+    sync::atomic::{AtomicBool, Ordering},
+    sync::OnceLock,
 };
+
+/// Set by the Ctrl-C handler so an in-flight run can stop at the next step and
+/// still finalize a receipt, rather than being killed mid-work.
+static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+/// Install the interrupt handler once per process. Idempotent and best-effort:
+/// if the host already owns the signal, the run simply won't be interruptible.
+fn arm_interrupt() {
+    static ARMED: OnceLock<()> = OnceLock::new();
+    ARMED.get_or_init(|| {
+        let _ = ctrlc::set_handler(|| INTERRUPTED.store(true, Ordering::SeqCst));
+    });
+}
 
 #[derive(Debug)]
 pub struct RunOptions {
@@ -113,6 +128,9 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         let _ = io::stdout().flush();
     }
     let mut approvals: Vec<String> = Vec::new();
+    arm_interrupt();
+    INTERRUPTED.store(false, Ordering::SeqCst);
+    let mut interrupted = false;
 
     let system = system_prompt(tools.workspace(), options.max_steps, options.dry_run);
     let mut messages = vec![Message::system(system), Message::user(options.goal.clone())];
@@ -123,6 +141,11 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let mut steps = 0usize;
 
     while steps < options.max_steps {
+        if INTERRUPTED.load(Ordering::SeqCst) {
+            interrupted = true;
+            store.event("run.interrupted", json!({ "step": steps }))?;
+            break;
+        }
         steps += 1;
         if options.verbose {
             print!("[{steps}/{}] thinking…\r", options.max_steps);
@@ -270,10 +293,14 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
 
     let completed = final_summary.is_some();
     let summary = redact_text(&final_summary.unwrap_or_else(|| {
-        format!(
-            "Step limit reached before the model returned a final result ({} steps).",
-            options.max_steps
-        )
+        if interrupted {
+            format!("Interrupted by operator after {steps} step(s); partial work preserved.")
+        } else {
+            format!(
+                "Step limit reached before the model returned a final result ({} steps).",
+                options.max_steps
+            )
+        }
     }));
     let git_status = tools.git_snapshot();
     let review = match review_model.as_deref() {
@@ -305,7 +332,13 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         id: store.id.clone(),
         created_at_unix_ms: store.started_at_unix_ms,
         finished_at_unix_ms: unix_ms(),
-        status: if completed { "completed".into() } else { "incomplete".into() },
+        status: if completed {
+            "completed".into()
+        } else if interrupted {
+            "interrupted".into()
+        } else {
+            "incomplete".into()
+        },
         goal: options.goal,
         workspace: tools.workspace().display().to_string(),
         model,
