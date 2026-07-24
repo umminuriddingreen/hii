@@ -663,9 +663,9 @@ mod tests {
         let path = workspace();
         let tools = Toolbelt::new(path.clone()).unwrap();
         assert!(tools.write("src/x.rs", "fn needle() {}").ok);
-        let found = tools.search_native("needle", &tools.workspace().to_path_buf());
+        let found = tools.search_native("needle", tools.workspace());
         assert!(found.is_ok() && found.unwrap().contains("needle"));
-        let listed = tools.list_native(&tools.workspace().to_path_buf());
+        let listed = tools.list_native(tools.workspace());
         assert!(listed.unwrap().contains("x.rs"));
         let _ = fs::remove_dir_all(path);
     }
