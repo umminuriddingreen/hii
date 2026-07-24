@@ -160,7 +160,7 @@ impl Ollama {
             "required": ["type"],
             "properties": {
                 "type": { "enum": ["tool", "final", "message"] },
-                "tool": { "enum": ["read", "list", "search", "write", "edit", "shell", "verify", "http"] },
+                "tool": { "enum": ["read", "list", "search", "write", "edit", "shell", "verify", "http", "hii_context", "og_next", "caps_check", "board_read", "board_write", "skill_search", "bridge_send", "bridge_read"] },
                 "path": { "type": "string" },
                 "query": { "type": "string" },
                 "command": { "type": "string" },
@@ -199,10 +199,14 @@ impl Ollama {
         messages: &[Message],
         format: Option<Value>,
     ) -> Result<ChatResult, String> {
-        match self.provider {
+        let result = match self.provider {
             ModelProvider::Ollama => self.chat_ollama(model, messages, format),
             ModelProvider::LmStudio => self.chat_openai(model, messages, format),
+        };
+        if let Ok(chat) = &result {
+            log_llm_request(model, self.provider, &chat.usage);
         }
+        result
     }
 
     fn chat_ollama(
@@ -282,6 +286,46 @@ impl Ollama {
         };
         Ok(ChatResult { content, usage })
     }
+}
+
+/// Append a compact record of a model call to `~/.hii/traces/llm_requests.jsonl`
+/// (per the HII LLM-tracking rule). Best-effort: logging never fails a run.
+fn log_llm_request(model: &str, provider: ModelProvider, usage: &ChatUsage) {
+    use std::io::Write;
+    let runtime = std::env::var_os("HII_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| crate::config::home_dir().ok().map(|home| home.join(".hii")));
+    let Some(runtime) = runtime else {
+        return;
+    };
+    let dir = runtime.join("traces");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let provider = match provider {
+        ModelProvider::Ollama => "ollama",
+        ModelProvider::LmStudio => "lmstudio",
+    };
+    let entry = json!({
+        "ts": chrono_now(),
+        "source": "hii-cli",
+        "provider": provider,
+        "model": model,
+        "prompt_tokens": usage.prompt_tokens,
+        "completion_tokens": usage.completion_tokens,
+        "total_duration_ms": usage.total_duration_ms,
+    });
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("llm_requests.jsonl"))
+    {
+        let _ = writeln!(file, "{entry}");
+    }
+}
+
+fn chrono_now() -> String {
+    chrono::Utc::now().to_rfc3339()
 }
 
 fn format_ureq(error: ureq::Error) -> String {

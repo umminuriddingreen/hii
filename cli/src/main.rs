@@ -4,6 +4,7 @@ mod board;
 mod config;
 mod contract;
 mod conversation;
+mod hii_tools;
 mod legacy;
 mod ollama;
 mod receipt;

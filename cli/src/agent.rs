@@ -172,8 +172,10 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 if options.verbose {
                     println!("[{steps}/{}] ◆ {tool}: {label}", options.max_steps);
                 }
+                let is_hii = crate::hii_tools::is_hii_tool(&tool);
                 let mutates = matches!(tool.as_str(), "write" | "edit")
-                    || (tool == "shell" && command.is_some());
+                    || (tool == "shell" && command.is_some())
+                    || (is_hii && crate::hii_tools::is_mutating(&tool));
                 let sensitive = (tool == "shell" || tool == "verify")
                     && command.as_deref().is_some_and(sensitive_shell);
                 let decision = options.authority.decide(mutates, sensitive);
@@ -188,23 +190,27 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     messages.push(Message::user(blocked));
                     continue;
                 }
-                let result = execute_tool(
-                    &tools,
-                    ToolCall {
-                        tool: &tool,
-                        path: path.as_deref(),
-                        query: query.as_deref(),
-                        command: command.as_deref(),
-                        content: content.as_deref(),
-                        url: url.as_deref(),
-                        old: old.as_deref(),
-                        new: new.as_deref(),
-                        replace_all,
-                        offset,
-                        limit,
-                    },
-                    options.dry_run,
-                );
+                let result = if is_hii {
+                    crate::hii_tools::execute(&paths.repo, &tool, query.as_deref())
+                } else {
+                    execute_tool(
+                        &tools,
+                        ToolCall {
+                            tool: &tool,
+                            path: path.as_deref(),
+                            query: query.as_deref(),
+                            command: command.as_deref(),
+                            content: content.as_deref(),
+                            url: url.as_deref(),
+                            old: old.as_deref(),
+                            new: new.as_deref(),
+                            replace_all,
+                            offset,
+                            limit,
+                        },
+                        options.dry_run,
+                    )
+                };
                 let safe_output = redact_text(&result.output);
                 if result.verification {
                     verification.push(VerificationRecord {
@@ -375,10 +381,12 @@ Dry run: {dry_run}
 Loop: inspect -> choose one tool -> act -> observe -> adjust -> verify -> final receipt.
 Use the smallest relevant context. Read AGENTS.md before editing when it exists. Preserve unclear work. Do not publish, push, spend, message, delete, read secrets, or access paths outside the workspace. The shell guard is a safety backstop, not permission. Prefer `edit` for changing existing files (exact, minimal), `write` for new files or full rewrites, and `verify` for actual checks. For large files, read a slice with `offset`/`limit`. The `http` tool only reaches local services.
 
+HII operating-logic tools (work through HII, not around it): hii_context (repo/runtime snapshot), og_next (operational-graph next path), caps_check (capabilities), board_read / board_write (local task board; put the title in `query`), skill_search (find a registered skill via `query`), bridge_send / bridge_read (inter-agent handoff; message in `query`). Prefer skill_search before doing repeatable work by hand.
+
 Return exactly one JSON object per turn.
 
 Tool action:
-{{"type":"tool","tool":"read|list|search|write|edit|shell|verify|http","path":"relative path","query":"for search","command":"for shell or verify","content":"for write","old":"exact text to replace (edit)","new":"replacement text (edit)","replace_all":false,"offset":1,"limit":200,"url":"for http","reason":"short reason"}}
+{{"type":"tool","tool":"read|list|search|write|edit|shell|verify|http|hii_context|og_next|caps_check|board_read|board_write|skill_search|bridge_send|bridge_read","path":"relative path","query":"for search","command":"for shell or verify","content":"for write","old":"exact text to replace (edit)","new":"replacement text (edit)","replace_all":false,"offset":1,"limit":200,"url":"for http","reason":"short reason"}}
 
 Final action:
 {{"type":"final","summary":"what is now true","verification":["checks actually run"],"next":"highest-value next action or null"}}
