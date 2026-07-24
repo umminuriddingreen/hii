@@ -1,3 +1,4 @@
+mod acp;
 mod agent;
 mod agents;
 mod board;
@@ -118,6 +119,11 @@ enum Commands {
     #[cfg(feature = "preview")]
     #[command(hide = true)]
     Schedule { action: String },
+    #[command(
+        name = "tools-manifest",
+        about = "Print the agent tool capability manifest (ACP/MCP boundary) as JSON"
+    )]
+    ToolsManifest,
     #[command(hide = true)]
     Legacy {
         #[arg(trailing_var_arg = true)]
@@ -262,6 +268,10 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Board { action }) => board_command(&paths, cli.cwd, action),
+        Some(Commands::ToolsManifest) => {
+            println!("{}", acp::render());
+            Ok(ExitCode::SUCCESS)
+        }
         #[cfg(feature = "preview")]
         Some(Commands::Schedule { action }) => {
             if action != "tick" {
@@ -609,9 +619,38 @@ fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
             "git --version".into(),
         ),
         (
-            "ripgrep",
-            command_text("rg", &["--version"], &workspace).is_some(),
-            "rg --version".into(),
+            // Search backend is never fatal: absent rg falls back to a native walk.
+            "Search",
+            true,
+            if command_text("rg", &["--version"], &workspace).is_some() {
+                "ripgrep".into()
+            } else {
+                "native (rg not found)".into()
+            },
+        ),
+        (
+            "Shell",
+            true,
+            std::env::var("HII_SHELL")
+                .ok()
+                .or_else(|| std::env::var("SHELL").ok())
+                .unwrap_or_else(|| {
+                    if cfg!(windows) {
+                        "powershell"
+                    } else {
+                        "/bin/sh"
+                    }
+                    .to_string()
+                }),
+        ),
+        (
+            "Model endpoint",
+            true,
+            format!(
+                "{} ({:?})",
+                AppPaths::model_url(),
+                config::ModelProvider::discover(&AppPaths::model_url())
+            ),
         ),
     ];
     let mut ok = true;
@@ -830,6 +869,7 @@ fn is_native_command(command: &str) -> bool {
             | "board"
             | "legacy"
             | "help"
+            | "tools-manifest"
     ) || (cfg!(feature = "preview") && command == "schedule")
 }
 
