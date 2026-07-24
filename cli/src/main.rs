@@ -6,7 +6,9 @@ mod config;
 mod contract;
 mod conversation;
 mod hii_tools;
+mod keyboard;
 mod legacy;
+mod mcp;
 mod ollama;
 mod receipt;
 #[cfg(feature = "preview")]
@@ -124,6 +126,30 @@ enum Commands {
         about = "Print the agent tool capability manifest (ACP/MCP boundary) as JSON"
     )]
     ToolsManifest,
+    #[command(
+        name = "mcp-serve",
+        about = "Serve the tool surface as an MCP server over stdio (JSON-RPC 2.0, line-delimited)"
+    )]
+    McpServe {
+        #[arg(
+            long,
+            value_name = "LEVEL",
+            help = "Authority envelope for tools/call: read-only | workspace | external-preview | external-commit | yolo"
+        )]
+        authority: Option<String>,
+    },
+    #[command(
+        name = "acp-serve",
+        about = "Serve the ACP northbound handshake over stdio (JSON-RPC 2.0, minimal stub)"
+    )]
+    AcpServe {
+        #[arg(
+            long,
+            value_name = "LEVEL",
+            help = "Authority envelope for the session"
+        )]
+        authority: Option<String>,
+    },
     #[command(hide = true)]
     Legacy {
         #[arg(trailing_var_arg = true)]
@@ -272,6 +298,17 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             println!("{}", acp::render());
             Ok(ExitCode::SUCCESS)
         }
+        Some(Commands::McpServe { authority }) => {
+            let workspace = cli
+                .cwd
+                .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+            let authority = resolve_authority(false, authority.as_deref())?;
+            mcp::serve(&paths, &workspace, authority)
+        }
+        Some(Commands::AcpServe { authority }) => {
+            let authority = resolve_authority(false, authority.as_deref())?;
+            acp::serve(&paths, authority)
+        }
         #[cfg(feature = "preview")]
         Some(Commands::Schedule { action }) => {
             if action != "tick" {
@@ -301,17 +338,45 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
     let mut conversation = Conversation::new(paths, workspace, cli.model, cli.max_steps)?;
     println!("HII\n");
+    // A line queued with Tab is carried forward and prepended to the next Submit.
+    let mut queued: Option<String> = None;
+    let interactive = keyboard::is_interactive();
     loop {
-        print!("hii › ");
-        io::stdout().flush().map_err(|error| error.to_string())?;
-        let mut goal = String::new();
-        if io::stdin()
-            .read_line(&mut goal)
-            .map_err(|error| error.to_string())?
-            == 0
-        {
-            break;
-        }
+        let goal = if interactive {
+            // Raw-mode keyboard model: Enter=submit, Tab=queue, Esc/Ctrl+B/Ctrl+T
+            // are surfaced as events (interrupt/background/task-view meaning applies
+            // during a run; at the idle prompt they are informational).
+            match keyboard::read_event("hii › ").map_err(|error| error.to_string())? {
+                keyboard::InputEvent::Submit(line) => match queued.take() {
+                    Some(pending) if line.trim().is_empty() => pending,
+                    Some(pending) => format!("{pending}\n{line}"),
+                    None => line,
+                },
+                keyboard::InputEvent::Queue(line) => {
+                    if !line.trim().is_empty() {
+                        queued = Some(line);
+                        println!("  ⏸ queued for next turn");
+                    }
+                    continue;
+                }
+                keyboard::InputEvent::TaskView => {
+                    println!("{}\n", conversation.status());
+                    continue;
+                }
+                keyboard::InputEvent::Interrupt => break,
+                keyboard::InputEvent::Background => {
+                    println!("  (nothing running to background)");
+                    continue;
+                }
+            }
+        } else {
+            print!("hii › ");
+            io::stdout().flush().map_err(|error| error.to_string())?;
+            match keyboard::read_line_fallback().map_err(|error| error.to_string())? {
+                Some(keyboard::InputEvent::Submit(line)) => line,
+                _ => break,
+            }
+        };
         let goal = goal.trim();
         if matches!(goal, ":q" | ":quit" | "exit" | "/exit" | "/quit" | "/q") {
             break;
@@ -870,6 +935,8 @@ fn is_native_command(command: &str) -> bool {
             | "legacy"
             | "help"
             | "tools-manifest"
+            | "mcp-serve"
+            | "acp-serve"
     ) || (cfg!(feature = "preview") && command == "schedule")
 }
 

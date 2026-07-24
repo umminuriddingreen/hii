@@ -6,7 +6,11 @@
 //! of truth for what the agent can do — so an ACP/MCP adapter (or another agent)
 //! can discover the capability surface today via `hii tools-manifest`.
 
+use crate::config::AppPaths;
+use crate::contract::Authority;
 use serde_json::{json, Value};
+use std::io::{self, BufRead, Write};
+use std::process::ExitCode;
 
 /// One tool the agent exposes: name, side (filesystem vs HII operating logic),
 /// whether it mutates state, and a one-line description.
@@ -70,6 +74,116 @@ pub fn render() -> String {
     serde_json::to_string_pretty(&manifest()).unwrap_or_else(|_| "{}".into())
 }
 
+/// Is `name` a tool this agent exposes at all? The MCP dispatcher uses this to
+/// separate a filesystem tool from an unknown one, keeping the manifest the
+/// single source of truth for the capability surface.
+pub fn is_known_tool(name: &str) -> bool {
+    TOOLS.iter().any(|(tool, ..)| *tool == name)
+}
+
+// ---------------------------------------------------------------------------
+// ACP northbound server (plan Phase 11) — MINIMAL STUB.
+//
+// The Agent Client Protocol is how an operator/client drives HII: sessions,
+// streaming tool calls, permission requests. This function proves the
+// northbound boundary is wired — it speaks the same line-delimited JSON-RPC 2.0
+// framing as the MCP server (`mcp.rs`) and answers just enough to complete a
+// handshake:
+//
+//   COMPLETE:  `initialize` (advertises protocol + agent capabilities) and
+//              `session/new` (mints a session id, then streams a `session/update`
+//              acknowledgement notification back over stdout).
+//   STUBBED:   `session/prompt`, streaming tool-call updates, and permission
+//              requests are not implemented yet — the run loop is not bridged to
+//              ACP. Unknown methods return a JSON-RPC "method not found".
+// ---------------------------------------------------------------------------
+
+/// Run the minimal ACP northbound server over stdio. See the module note above
+/// for what is complete versus stubbed.
+pub fn serve(_paths: &AppPaths, _authority: Authority) -> Result<ExitCode, String> {
+    let stdin = io::stdin();
+    let mut stdout = io::stdout().lock();
+    let mut next_session = 1u64;
+    for line in stdin.lock().lines() {
+        let line = line.map_err(|error| error.to_string())?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let request: Value = match serde_json::from_str(&line) {
+            Ok(value) => value,
+            Err(error) => {
+                write_json(
+                    &mut stdout,
+                    &rpc_error(Value::Null, -32700, &error.to_string()),
+                )?;
+                continue;
+            }
+        };
+        // Notifications (no `id`) are acknowledged silently.
+        let Some(id) = request.get("id").cloned() else {
+            continue;
+        };
+        let method = request.get("method").and_then(Value::as_str).unwrap_or("");
+        match method {
+            "initialize" => {
+                write_json(
+                    &mut stdout,
+                    &rpc_ok(
+                        id,
+                        json!({
+                            "protocolVersion": 1,
+                            "agentInfo": { "name": "hii", "version": env!("CARGO_PKG_VERSION") },
+                            "agentCapabilities": { "promptCapabilities": { "streaming": true } },
+                        }),
+                    ),
+                )?;
+            }
+            "session/new" => {
+                let session_id = format!("hii-session-{next_session}");
+                next_session += 1;
+                write_json(&mut stdout, &rpc_ok(id, json!({ "sessionId": session_id })))?;
+                // Stream a first session/update acknowledgement (a notification,
+                // so it carries no id). This proves the northbound stream works.
+                write_json(
+                    &mut stdout,
+                    &json!({
+                        "jsonrpc": "2.0",
+                        "method": "session/update",
+                        "params": {
+                            "sessionId": session_id,
+                            "update": { "kind": "ready", "message": "session established" },
+                        },
+                    }),
+                )?;
+            }
+            other => {
+                write_json(
+                    &mut stdout,
+                    &rpc_error(id, -32601, &format!("method not found (stub): {other}")),
+                )?;
+            }
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Serialize `value` as one `\n`-terminated JSON line and flush it.
+fn write_json(out: &mut impl Write, value: &Value) -> Result<(), String> {
+    let text = serde_json::to_string(value).map_err(|error| error.to_string())?;
+    writeln!(out, "{text}").map_err(|error| error.to_string())?;
+    out.flush().map_err(|error| error.to_string())
+}
+
+/// A JSON-RPC 2.0 success envelope.
+fn rpc_ok(id: Value, result: Value) -> Value {
+    json!({ "jsonrpc": "2.0", "id": id, "result": result })
+}
+
+/// A JSON-RPC 2.0 error envelope.
+fn rpc_error(id: Value, code: i64, message: &str) -> Value {
+    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,5 +196,12 @@ mod tests {
         assert!(tools
             .iter()
             .all(|tool| tool["name"].is_string() && tool["mutates"].is_boolean()));
+    }
+
+    #[test]
+    fn recognizes_known_tools() {
+        assert!(is_known_tool("read"));
+        assert!(is_known_tool("bridge_send"));
+        assert!(!is_known_tool("nope"));
     }
 }
