@@ -2,6 +2,7 @@ mod agent;
 mod agents;
 mod board;
 mod config;
+mod contract;
 mod conversation;
 mod legacy;
 mod ollama;
@@ -78,6 +79,17 @@ enum Commands {
         dry_run: bool,
         #[arg(long, help = "Show internal run, model, tool, and receipt details")]
         verbose: bool,
+        #[arg(
+            long,
+            help = "Autonomous: no approval prompts, all tools allowed (workspace/secret guards still apply)"
+        )]
+        yolo: bool,
+        #[arg(
+            long,
+            value_name = "LEVEL",
+            help = "Authority envelope: read-only | workspace | external-preview | external-commit"
+        )]
+        authority: Option<String>,
     },
     #[command(about = "Show the local workspace-agent state")]
     Status {
@@ -191,10 +203,13 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             review_model,
             dry_run,
             verbose,
+            yolo,
+            authority,
         }) => {
             let workspace = cli
                 .cwd
                 .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+            let authority = resolve_authority(yolo, authority.as_deref())?;
             let receipt = agent::run(
                 &paths,
                 RunOptions {
@@ -206,6 +221,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     max_steps: cli.max_steps,
                     dry_run,
                     verbose,
+                    authority,
                 },
             )?;
             Ok(if receipt.status == "completed" {
@@ -823,6 +839,31 @@ fn command_text(program: &str, args: &[&str], cwd: &std::path::Path) -> Option<S
         .status
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Resolve the authority envelope from flags + env. `--yolo` (or `HII_YOLO=1`)
+/// wins; otherwise `--authority <level>` maps by name; default is `workspace`.
+fn resolve_authority(yolo: bool, level: Option<&str>) -> Result<contract::Authority, String> {
+    use contract::Authority;
+    if yolo
+        || matches!(
+            std::env::var("HII_YOLO").ok().as_deref(),
+            Some("1") | Some("true")
+        )
+    {
+        return Ok(Authority::Yolo);
+    }
+    match level.map(|value| value.trim().to_ascii_lowercase()).as_deref() {
+        None => Ok(Authority::Workspace),
+        Some("read-only") | Some("readonly") => Ok(Authority::ReadOnly),
+        Some("workspace") => Ok(Authority::Workspace),
+        Some("external-preview") | Some("preview") => Ok(Authority::ExternalPreview),
+        Some("external-commit") | Some("commit") => Ok(Authority::ExternalCommit),
+        Some("yolo") => Ok(Authority::Yolo),
+        Some(other) => Err(format!(
+            "unknown authority '{other}'; use read-only | workspace | external-preview | external-commit | yolo"
+        )),
+    }
 }
 
 fn fail(error: impl std::fmt::Display) -> ExitCode {

@@ -1,5 +1,6 @@
 use crate::{
     config::{AppPaths, DEFAULT_MODEL, DEFAULT_REVIEW_MODEL},
+    contract::{sensitive_shell, Authority, Contract, Decision},
     ollama::{Message, Ollama},
     receipt::{redact_text, unix_ms, Receipt, RunStore, VerificationRecord},
     tools::{ToolResult, Toolbelt},
@@ -21,6 +22,7 @@ pub struct RunOptions {
     pub max_steps: usize,
     pub dry_run: bool,
     pub verbose: bool,
+    pub authority: Authority,
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,15 +90,29 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         }),
     )?;
 
+    let contract = Contract::infer(&options.goal, options.authority);
+    store.event(
+        "contract",
+        json!({
+            "goal": contract.goal,
+            "authority": contract.authority.label(),
+            "done_when": contract.done_when,
+        }),
+    )?;
+    if options.authority == Authority::Yolo {
+        println!(
+            "⚡ YOLO — autonomous, no approval prompts. Authority: {}. Workspace/secret guards still apply; a full receipt is written.",
+            tools.workspace().display()
+        );
+    }
     if options.verbose {
         println!("HII run {}", store.id);
-        println!("workspace  {}", tools.workspace().display());
-        println!("model      {}", model);
-        println!("goal       {}\n", options.goal);
+        println!("{}\n", contract.banner());
     } else if io::stdout().is_terminal() {
         print!("HII is working…\r");
         let _ = io::stdout().flush();
     }
+    let mut approvals: Vec<String> = Vec::new();
 
     let system = system_prompt(tools.workspace(), options.max_steps, options.dry_run);
     let mut messages = vec![Message::system(system), Message::user(options.goal.clone())];
@@ -154,7 +170,23 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             } => {
                 let label = reason.as_deref().unwrap_or("using workspace tool");
                 if options.verbose {
-                    println!("[{steps}/{}] {tool}: {label}", options.max_steps);
+                    println!("[{steps}/{}] ◆ {tool}: {label}", options.max_steps);
+                }
+                let mutates = matches!(tool.as_str(), "write" | "edit")
+                    || (tool == "shell" && command.is_some());
+                let sensitive = (tool == "shell" || tool == "verify")
+                    && command.as_deref().is_some_and(sensitive_shell);
+                let decision = options.authority.decide(mutates, sensitive);
+                if let Some(blocked) =
+                    enforce_authority(decision, &tool, label, command.as_deref(), &mut approvals)
+                {
+                    store.event(
+                        "authority.block",
+                        json!({ "step": steps, "tool": tool, "decision": format!("{decision:?}") }),
+                    )?;
+                    messages.push(Message::assistant(raw));
+                    messages.push(Message::user(blocked));
+                    continue;
                 }
                 let result = execute_tool(
                     &tools,
@@ -260,8 +292,10 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         }
         None => None,
     };
+    let artifacts = artifact_inventory(&git_status);
+    let reversible = Some(git_status != "not a git workspace");
     let receipt = Receipt {
-        schema_version: 1,
+        schema_version: 2,
         id: store.id.clone(),
         created_at_unix_ms: store.started_at_unix_ms,
         finished_at_unix_ms: unix_ms(),
@@ -277,6 +311,11 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         next: final_next,
         review,
         risk: "Local shell execution is bounded by the selected workspace and destructive-pattern guard; it is not an OS sandbox.".into(),
+        authority: Some(contract.authority.label().to_string()),
+        done_when: Some(contract.done_when.clone()),
+        approvals,
+        artifacts,
+        reversible,
     };
     store.event(
         "run.finished",
@@ -413,6 +452,63 @@ pub(crate) fn execute_tool(tools: &Toolbelt, call: ToolCall, dry_run: bool) -> T
     }
 }
 
+/// Derive a changed-file inventory from a `git status --short` snapshot.
+fn artifact_inventory(git_status: &str) -> Vec<String> {
+    if git_status == "clean" || git_status == "not a git workspace" {
+        return Vec::new();
+    }
+    git_status
+        .lines()
+        .filter_map(|line| line.get(3..).map(str::to_string))
+        .collect()
+}
+
+/// Apply an authority [`Decision`] to a pending tool action. Returns `Some(msg)`
+/// to feed back to the model when the action must not run; `None` to proceed.
+/// A `Prompt` decision shows a semantic approval and, on a non-interactive
+/// stream, defaults to denial (the operator can re-run with higher authority
+/// or `--yolo`).
+fn enforce_authority(
+    decision: Decision,
+    tool: &str,
+    reason: &str,
+    command: Option<&str>,
+    approvals: &mut Vec<String>,
+) -> Option<String> {
+    match decision {
+        Decision::Allow => None,
+        Decision::Deny => Some(format!(
+            "BLOCKED by authority envelope: `{tool}` ({reason}) is outside the current authority. \
+             Choose a read-only or in-workspace step, or the operator must raise authority."
+        )),
+        Decision::Prompt => {
+            let target = command.unwrap_or(tool);
+            if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+                return Some(format!(
+                    "PAUSED (needs approval, none available non-interactively): {target}. \
+                     Proceed only under higher authority or --yolo."
+                ));
+            }
+            println!(
+                "\nAPPROVAL NEEDED\n  ACTION   {tool}\n  DETAIL   {target}\n  REASON   {reason}\n  EFFECT   crosses an external / hard-to-reverse boundary"
+            );
+            print!("  Allow this action? [y/N] ");
+            let _ = io::stdout().flush();
+            let mut answer = String::new();
+            if io::stdin().read_line(&mut answer).is_ok()
+                && matches!(answer.trim(), "y" | "Y" | "yes")
+            {
+                approvals.push(format!("{tool}: {target}"));
+                None
+            } else {
+                Some(format!(
+                    "DENIED by operator: {target}. Choose a different step."
+                ))
+            }
+        }
+    }
+}
+
 fn print_receipt(receipt: &Receipt, path: &std::path::Path) {
     println!("\nDone: {}", receipt.summary);
     println!(
@@ -423,6 +519,18 @@ fn print_receipt(receipt: &Receipt, path: &std::path::Path) {
             format!("{} check(s)", receipt.verification.len())
         }
     );
+    if let Some(authority) = receipt.authority.as_deref() {
+        println!("Authority: {authority}");
+    }
+    if !receipt.artifacts.is_empty() {
+        println!("Changed: {} file(s)", receipt.artifacts.len());
+        for artifact in receipt.artifacts.iter().take(10) {
+            println!("  {artifact}");
+        }
+    }
+    if !receipt.approvals.is_empty() {
+        println!("Approvals: {}", receipt.approvals.join(", "));
+    }
     println!("Proof: {}", path.display());
     println!("Risk: {}", receipt.risk);
     println!(

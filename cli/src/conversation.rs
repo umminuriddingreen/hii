@@ -598,6 +598,11 @@ impl Conversation {
             next: None,
             review: None,
             risk: "Conversation used bounded local workspace tools; details are stored in the backend receipt.".into(),
+            authority: Some("workspace".into()),
+            done_when: None,
+            approvals: Vec::new(),
+            artifacts: Vec::new(),
+            reversible: None,
         };
         run.event(
             "run.finished",

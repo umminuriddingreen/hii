@@ -32,6 +32,17 @@ pub struct Receipt {
     pub next: Option<String>,
     pub review: Option<String>,
     pub risk: String,
+    // --- schema v2: contract + inventory (plan Phases 1, 5, 7) ---
+    #[serde(default)]
+    pub authority: Option<String>,
+    #[serde(default)]
+    pub done_when: Option<String>,
+    #[serde(default)]
+    pub approvals: Vec<String>,
+    #[serde(default)]
+    pub artifacts: Vec<String>,
+    #[serde(default)]
+    pub reversible: Option<bool>,
 }
 
 pub struct RunStore {
