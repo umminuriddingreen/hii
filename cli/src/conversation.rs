@@ -213,23 +213,27 @@ impl Conversation {
                         )?;
                         run = Some(created);
                     }
-                    let result = execute_tool(
-                        &self.tools,
-                        crate::agent::ToolCall {
-                            tool: &tool,
-                            path: path.as_deref(),
-                            query: query.as_deref(),
-                            command: command.as_deref(),
-                            content: content.as_deref(),
-                            url: url.as_deref(),
-                            old: old.as_deref(),
-                            new: new.as_deref(),
-                            replace_all,
-                            offset,
-                            limit,
-                        },
-                        false,
-                    );
+                    let result = if crate::hii_tools::is_hii_tool(&tool) {
+                        crate::hii_tools::execute(&self.paths.repo, &tool, query.as_deref())
+                    } else {
+                        execute_tool(
+                            &self.tools,
+                            crate::agent::ToolCall {
+                                tool: &tool,
+                                path: path.as_deref(),
+                                query: query.as_deref(),
+                                command: command.as_deref(),
+                                content: content.as_deref(),
+                                url: url.as_deref(),
+                                old: old.as_deref(),
+                                new: new.as_deref(),
+                                replace_all,
+                                offset,
+                                limit,
+                            },
+                            false,
+                        )
+                    };
                     let safe_output = redact_text(&result.output);
                     if result.verification || shell_evidence {
                         verification.push(VerificationRecord {
@@ -302,6 +306,95 @@ impl Conversation {
         })
     }
 
+    /// Drop the most recent user↔assistant exchange from the working context so
+    /// the operator can steer away from a wrong turn (plan Phase 8, conversational
+    /// half). Environmental restore is git's job; this restores dialogue state.
+    pub fn undo(&mut self) -> Result<String, String> {
+        // Keep the leading system message(s); remove the last two entries.
+        if self.messages.len() <= 1 {
+            return Ok("Nothing to undo.".into());
+        }
+        let removed = self.messages.len().min(2);
+        for _ in 0..removed {
+            if self.messages.len() > 1 {
+                self.messages.pop();
+            }
+        }
+        self.store
+            .event("conversation.undo", json!({ "removed_messages": removed }))?;
+        let dirty = self.tools.git_snapshot();
+        let hint = if dirty == "clean" || dirty == "not a git workspace" {
+            String::new()
+        } else {
+            "\nWorkspace has uncommitted changes; use `git restore` / `git stash` to revert files."
+                .into()
+        };
+        Ok(format!("Undid the last exchange.{hint}"))
+    }
+
+    /// Snapshot the current conversation to a new fork the operator can resume,
+    /// leaving the live session untouched (plan Phase 8). Returns the fork id.
+    pub fn fork(&self) -> Result<String, String> {
+        let fork = ConversationStore::create(&self.paths.runtime)?;
+        for message in &self.messages {
+            fork.event(
+                "forked.message",
+                json!({ "role": message.role, "content": redact_text(&message.content) }),
+            )?;
+        }
+        Ok(format!(
+            "Forked this conversation to {}. The live session is unchanged.",
+            fork.id
+        ))
+    }
+
+    /// Graduate the session into a reusable skill in the HII registry (plan
+    /// Phase 10). Writes a skill record under `~/.hii/skills/`.
+    pub fn teach(&mut self, name: &str) -> Result<String, String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("usage: /teach <skill-name>".into());
+        }
+        let slug: String = name
+            .to_ascii_lowercase()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        let slug = slug.trim_matches('-').to_string();
+        if slug.is_empty() {
+            return Err("skill name must contain letters or digits".into());
+        }
+        let dir = self.paths.runtime.join("skills");
+        std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+        let recent: Vec<String> = self
+            .messages
+            .iter()
+            .filter(|m| m.role == "user")
+            .rev()
+            .take(3)
+            .map(|m| redact_text(&m.content))
+            .collect();
+        let record = json!({
+            "name": slug,
+            "title": name,
+            "source": "hii-cli:/teach",
+            "created_at": chrono::Utc::now().to_rfc3339(),
+            "workspace": self.tools.workspace().display().to_string(),
+            "model": self.model,
+            "goals": recent,
+        });
+        let path = dir.join(format!("{slug}.json"));
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&record).unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())?;
+        self.last_skill_draft = Some(slug.clone());
+        self.store
+            .event("conversation.teach", json!({ "skill": slug }))?;
+        Ok(format!("Taught skill `{slug}` → {}", path.display()))
+    }
+
     pub fn status(&self) -> String {
         let learning = self
             .last_skill_draft
@@ -320,6 +413,15 @@ impl Conversation {
 
     pub fn paths(&self) -> &AppPaths {
         &self.paths
+    }
+
+    /// Run a direct shell command from the `!` grammar, bounded by the same
+    /// workspace guards as the agent's shell tool.
+    pub fn shell(&self, command: &str) -> String {
+        if command.is_empty() {
+            return "usage: !<command>".into();
+        }
+        self.tools.shell(command, false).output
     }
 
     #[cfg(feature = "preview")]

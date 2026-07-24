@@ -309,6 +309,12 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         if goal.is_empty() {
             continue;
         }
+        // `!<command>` runs a shell command directly (interaction grammar).
+        if let Some(command) = goal.strip_prefix('!') {
+            let output = conversation.shell(command.trim());
+            println!("{output}\n");
+            continue;
+        }
         let mut show_activity = false;
         let result = match parse_slash_command(goal) {
             Some(SlashCommand::Help) => Ok(slash_help().to_string()),
@@ -324,6 +330,9 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Some(SlashCommand::Codex(task)) => {
                 agents::AgentManager::new(conversation.paths()).codex(&task)
             }
+            Some(SlashCommand::Undo) => conversation.undo(),
+            Some(SlashCommand::Fork) => conversation.fork(),
+            Some(SlashCommand::Teach(name)) => conversation.teach(&name),
             Some(SlashCommand::Claude(task)) => {
                 agents::AgentManager::new(conversation.paths()).claude(&task)
             }
@@ -398,6 +407,9 @@ enum SlashCommand {
     Agents,
     Codex(String),
     Claude(String),
+    Undo,
+    Fork,
+    Teach(String),
     Agent {
         id: String,
         action: String,
@@ -450,6 +462,9 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         "/agents" if rest.is_empty() => SlashCommand::Agents,
         "/codex" => SlashCommand::Codex(rest.to_string()),
         "/claude" => SlashCommand::Claude(rest.to_string()),
+        "/undo" if argument.is_none() => SlashCommand::Undo,
+        "/fork" if argument.is_none() => SlashCommand::Fork,
+        "/teach" => SlashCommand::Teach(rest.to_string()),
         "/agent" => {
             let parts = rest.split_whitespace().collect::<Vec<_>>();
             if parts.len() == 2 {
@@ -493,7 +508,7 @@ fn slash_help() -> &'static str {
     if cfg!(feature = "preview") {
         "/help                         show commands\n/compact                      summarize and shrink this conversation\n/clear                        start with fresh context\n/status                       show session, workspace, model, and usage\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | detailed activity\n/model [name]                 list or switch local models\n/proof [run-id]               inspect execution proof\n/skills                       show automatically learned skill drafts\n/agents                       show HII-managed and observed agents\n/codex <task>                 start a managed Codex run\n/claude <task>                start a managed Claude session\n/agent <id> status|logs|stop  manage an agent by id\n/resources                    quick CPU, memory, storage, and Ollama view\n/top                          open the embedded btop resource monitor\n/schedule <cron> :: <task>    create a local recurring HII task\n/schedules                    list HII schedules\n/calendar                     show the next 7 days\n/calendar add DATE [TIME] :: TITLE\n/sync calendar                sync next HII runs to Apple Calendar\n/exit                         leave HII"
     } else {
-        "/help                         show commands\n/compact                      summarize and shrink this conversation\n/clear                        start with fresh context\n/status                       show session, workspace, model, and usage\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | detailed activity\n/model [name]                 list or switch local models\n/proof [run-id]               inspect execution proof\n/skills                       show automatically learned skill drafts\n/agents                       show HII-managed and observed agents\n/codex <task>                 start a managed Codex run\n/claude <task>                start a managed Claude session\n/agent <id> status|logs|stop  manage an agent by id\n/exit                         leave HII"
+        "/help                         show commands\n/compact                      summarize and shrink this conversation\n/clear                        start with fresh context\n/status                       show session, workspace, model, and usage\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | detailed activity\n/model [name]                 list or switch local models\n/proof [run-id]               inspect execution proof\n/skills                       show automatically learned skill drafts\n/agents                       show HII-managed and observed agents\n/codex <task>                 start a managed Codex run\n/claude <task>                start a managed Claude session\n/agent <id> status|logs|stop  manage an agent by id\n/undo                         drop the last exchange to steer away\n/fork                         snapshot this session to a resumable fork\n/teach <name>                 graduate this session into a reusable skill\n!<command>                    run a shell command directly\n/exit                         leave HII"
     }
 }
 

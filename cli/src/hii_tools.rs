@@ -103,3 +103,23 @@ fn hii(repo: &Path, args: &[&str]) -> Result<String, String> {
     }
     Ok(combined.trim().to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_hii_tools() {
+        assert!(is_hii_tool("og_next"));
+        assert!(is_hii_tool("board_write"));
+        assert!(!is_hii_tool("write"));
+    }
+
+    #[test]
+    fn marks_mutating_hii_tools() {
+        assert!(is_mutating("board_write"));
+        assert!(is_mutating("bridge_send"));
+        assert!(!is_mutating("board_read"));
+        assert!(!is_mutating("og_next"));
+    }
+}
