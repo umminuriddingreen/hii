@@ -134,12 +134,26 @@ describe('workspace contract', () => {
           }),
           { status: 200, headers: { 'content-type': 'application/json' } }
         )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            name: 'plan.dxf',
+            mime: 'image/vnd.dxf',
+            size: 96,
+            path: '/Users/ummi/.hii/workspace/assets/plan.dxf',
+            url: '/api/workspace/assets/plan.dxf',
+            sha256: 'dxf789'
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
       );
 
     const model = await seedFromFile(new File(['o cube'], 'cube.obj', { type: 'model/obj' }));
     const document = await seedFromFile(new File(['%PDF'], 'brief.pdf', { type: 'application/pdf' }));
+    const cad = await seedFromFile(new File(['0\nSECTION\n2\nENTITIES'], 'plan.dxf', { type: 'image/vnd.dxf' }));
 
-    expect(workspaceNodeTypes).toEqual(expect.arrayContaining(['model', 'document']));
+    expect(workspaceNodeTypes).toEqual(expect.arrayContaining(['model', 'document', 'cad']));
     expect(model).toMatchObject({
       type: 'model',
       object: {
@@ -165,6 +179,20 @@ describe('workspace contract', () => {
         viewer: 'native-pdf',
         kind: 'pdf',
         sha256: 'def456'
+      }
+    });
+    expect(cad).toMatchObject({
+      type: 'cad',
+      object: {
+        kind: 'asset',
+        owner: 'human',
+        status: 'ready',
+        source: '/Users/ummi/.hii/workspace/assets/plan.dxf'
+      },
+      payload: {
+        viewer: 'dxf-svg',
+        extension: 'dxf',
+        sha256: 'dxf789'
       }
     });
   });

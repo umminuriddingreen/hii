@@ -13,7 +13,7 @@
     "build": "vite build",
     "build:web": "vite build",
     "build:web:tauri": "node scripts/hii-svelte-tauri-build.mjs",
-    "build:tauri": "tauri build",
+    "build:tauri": "node scripts/hii-tauri-build.mjs",
     "start": "NODE_ENV=production node server.mjs",
     "start:web:tauri": "node scripts/hii-tauri-start.mjs",
     "tauri": "tauri",

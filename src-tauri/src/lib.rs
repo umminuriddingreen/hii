@@ -164,6 +164,9 @@ pub fn run() {
                             let on_workspace =
                                 window.url().map(|url| url.path() == "/").unwrap_or(false);
                             if on_workspace {
+                                let _ = window.eval(
+                                    "window.dispatchEvent(new CustomEvent('hii:summon', { detail: { source: 'option-space' } }))",
+                                );
                                 let _ = window.emit(
                                     "hii://summon",
                                     serde_json::json!({

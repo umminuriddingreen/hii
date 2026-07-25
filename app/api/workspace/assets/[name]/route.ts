@@ -14,7 +14,7 @@ const mimeByExtension: Record<string, string> = {
   svg: 'image/svg+xml', heic: 'image/heic', heif: 'image/heif', mp3: 'audio/mpeg', wav: 'audio/wav', aiff: 'audio/aiff',
   m4a: 'audio/mp4', flac: 'audio/flac', ogg: 'audio/ogg', opus: 'audio/opus', mp4: 'video/mp4', mov: 'video/quicktime',
   webm: 'video/webm', pdf: 'application/pdf', glb: 'model/gltf-binary', gltf: 'model/gltf+json', obj: 'model/obj',
-  stl: 'model/stl', ply: 'application/octet-stream'
+  stl: 'model/stl', ply: 'application/octet-stream', dxf: 'image/vnd.dxf'
 };
 
 export async function GET(request: Request, { params }: { params: { name: string } }) {

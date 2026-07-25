@@ -35,6 +35,7 @@ export const defaultSize: Record<WorkspaceNodeType, { w: number; h: number }> = 
   image: { w: 380, h: 300 },
   media: { w: 420, h: 300 },
   document: { w: 620, h: 720 },
+  cad: { w: 760, h: 580 },
   model: { w: 720, h: 560 },
   html: { w: 480, h: 360 },
   font: { w: 440, h: 170 },
@@ -331,6 +332,21 @@ export async function seedFromFile(file: File): Promise<NodeSeed> {
         title: name,
         viewer: 'three',
         description: 'Self-contained local model rendered by HII. Orbit, pan, zoom, inspect, and reset.'
+      }
+    };
+  }
+  if (extension === 'dxf') {
+    const stored = await storeWorkspaceAsset(file);
+    return {
+      type: 'cad',
+      ...defaultSize.cad,
+      object: governedAsset(file, stored, 'asset', 'added interactive DXF drawing to workspace'),
+      payload: {
+        ...persistedAssetPayload(file, stored, extension),
+        title: name,
+        kind: 'cad',
+        viewer: 'dxf-svg',
+        description: 'Local DXF drawing with pan, zoom, framing, layer controls, and source integrity evidence.'
       }
     };
   }

@@ -6,6 +6,7 @@ const root = process.cwd();
 const workspace = readFileSync(resolve(root, 'src/routes/+page.svelte'), 'utf8');
 const model = readFileSync(resolve(root, 'src/lib/components/workspace/ModelPane.svelte'), 'utf8');
 const document = readFileSync(resolve(root, 'src/lib/components/workspace/DocumentPane.svelte'), 'utf8');
+const cad = readFileSync(resolve(root, 'src/lib/components/workspace/CadPane.svelte'), 'utf8');
 const assets = readFileSync(resolve(root, 'app/api/workspace/assets/route.ts'), 'utf8');
 const asset = readFileSync(resolve(root, 'app/api/workspace/assets/[name]/route.ts'), 'utf8');
 
@@ -16,6 +17,17 @@ describe('workspace asset viewer contract', () => {
     expect(workspace).toContain('<svelte:component this={ModelPaneComponent} {node}');
     expect(workspace).toContain("node.type==='document'");
     expect(workspace).toContain('<DocumentPane {node}');
+    expect(workspace).toContain("node.type==='cad'");
+    expect(workspace).toContain('<CadPane {node}');
+  });
+
+  it('renders persisted DXF drawings with bounded 2D interaction and layer controls', () => {
+    expect(cad).toContain('parseDxf');
+    expect(cad).toContain('Interactive DXF viewer');
+    expect(cad).toContain('drawing layers');
+    expect(cad).toContain('drag to pan · scroll to zoom · frame to reset');
+    expect(cad).toContain('sha256');
+    expect(asset).toContain("dxf: 'image/vnd.dxf'");
   });
 
   it('supports bounded interactive 3D formats with explicit lifecycle cleanup', () => {

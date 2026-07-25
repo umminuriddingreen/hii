@@ -11,6 +11,7 @@ export type WorkspaceNodeType =
   | 'image'
   | 'media'
   | 'document'
+  | 'cad'
   | 'model'
   | 'html'
   | 'font'
@@ -98,6 +99,7 @@ export const workspaceNodeTypes: WorkspaceNodeType[] = [
   'image',
   'media',
   'document',
+  'cad',
   'model',
   'html',
   'font',
