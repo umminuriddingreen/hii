@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 const root = process.cwd();
 const workspace = readFileSync(resolve(root, 'src/routes/+page.svelte'), 'utf8');
 const chat = readFileSync(resolve(root, 'src/lib/components/workspace/ChatPane.svelte'), 'utf8');
+const spatialRun = readFileSync(resolve(root, 'src/lib/components/workspace/SpatialRunPane.svelte'), 'utf8');
 const explorer = readFileSync(resolve(root, 'src/lib/components/workspace/ExplorerPane.svelte'), 'utf8');
 const terminal = readFileSync(resolve(root, 'src/lib/components/TerminalPane.svelte'), 'utf8');
 const desktop = readFileSync(resolve(root, 'src-tauri/src/lib.rs'), 'utf8');
@@ -15,7 +16,18 @@ describe('agentic workspace interaction contract', () => {
     expect(workspace).toContain("event.altKey&&event.code==='Space'");
     expect(workspace).toContain("listen('hii://summon'");
     expect(workspace).toContain('direct workspace intent');
-    expect(chat).toContain('node.payload.autoSend');
+    expect(workspace).toContain("seedFor('intent'");
+    expect(workspace).toContain("seedFor('run'");
+    expect(spatialRun).toContain('node.payload.autoStart');
+  });
+
+  it('streams managed output and branches follow-up intent on the canvas', () => {
+    expect(spatialRun).toContain('run.visibleOutput');
+    expect(spatialRun).toContain('setTimeout(resolve, 850)');
+    expect(spatialRun).toContain("action: 'codex.stop'");
+    expect(spatialRun).toContain('onFollowUp(text)');
+    expect(workspace).toContain('parentId:intentNode.id');
+    expect(chat).toContain('run.visibleOutput');
   });
 
   it('opens the combined browser and terminal explorer on workspace double-click', () => {

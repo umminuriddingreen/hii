@@ -67,24 +67,26 @@
     "name": "Run Bounded Local Workspace Agent",
     "owner": "aii",
     "runtime": "local-cli",
-    "summary": "Complete a bounded workspace goal with local Ollama tools, verification, durable events, and an inspectable receipt.",
+    "summary": "Run a bounded agent goal from the CLI or spatial workspace with explicit human intent, live user-facing output, durable evidence, and an inspectable receipt.",
     "inputs": [
       "goal",
       "approved workspace root",
-      "model profile",
-      "step limit"
+      "model or provider profile",
+      "step limit or managed runtime policy"
     ],
     "outputs": [
       "workspace changes",
-      "redacted run events",
+      "live user-facing run output",
+      "full local proof log",
       "verification records",
       "local receipt"
     ],
     "permissions": [
-      "local-only Ollama",
+      "explicit human-submitted intent",
+      "configured local or hosted agent runtime",
       "selected workspace only",
       "no secret-bearing files",
-      "no destructive or external actions"
+      "no destructive, publishing, messaging, spending, or irreversible external actions without separate explicit authority"
     ],
     "visibility": "local",
     "costModel": {
@@ -93,6 +95,8 @@
     "evidence": [
       "cli/src/agent.rs",
       "cli/src/tools.rs",
+      "src/lib/components/workspace/SpatialRunPane.svelte",
+      "app/api/daemon/runs",
       "~/.hii/runs/cli"
     ],
     "status": "ready",
@@ -874,7 +878,7 @@
     "name": "Create in the HII Spatial Workspace",
     "owner": "hii",
     "runtime": "next-route",
-    "summary": "Create with editable text and durable media, inspect source-linked PDF documents and local 3D models, and open managed HII chat directly in the spatial workspace.",
+    "summary": "Create with editable text and durable media, inspect source-linked PDF documents and local 3D models, and branch managed agent intents and live responses directly across the spatial workspace.",
     "inputs": [
       "typed canvas text",
       "local clipboard or dropped media",
@@ -882,7 +886,8 @@
       "self-contained GLB, GLTF, OBJ, STL, or PLY models",
       "pointer-based pen or marker strokes",
       "non-destructive crop insets",
-      "explicit managed chat message"
+      "explicit spatial agent intent",
+      "follow-up intent branched from a completed run"
     ],
     "outputs": [
       "persisted movable workspace nodes",
@@ -892,14 +897,16 @@
       "SHA-256 integrity evidence for stored workspace assets",
       "editable vector ink",
       "cropped image extraction or PNG download",
-      "inspectable managed Codex response"
+      "governed intent and run objects",
+      "incrementally visible managed agent response",
+      "durable run id and full local proof log"
     ],
     "permissions": [
       "local HII origin only",
       "write bounded assets under ~/.hii/workspace/assets",
       "render bounded local WebGL without external model upload",
       "no automatic external upload or publication",
-      "explicit Send action before prompt or attachment paths reach the configured Codex provider",
+      "explicit Send action before intent reaches the configured agent provider",
       "local export requires an explicit user click"
     ],
     "visibility": "local",
@@ -910,7 +917,10 @@
       "src/routes/+page.svelte",
       "src/lib/components/workspace/ModelPane.svelte",
       "src/lib/components/workspace/DocumentPane.svelte",
+      "src/lib/components/workspace/IntentPane.svelte",
+      "src/lib/components/workspace/SpatialRunPane.svelte",
       "lib/workspace/ingest.ts",
+      "lib/workspace/run-output.ts",
       "app/api/workspace/assets",
       "app/api/daemon/runs",
       "tests/unit/workspace-viewers-contract.test.ts",

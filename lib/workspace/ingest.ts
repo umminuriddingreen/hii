@@ -24,6 +24,8 @@ const CAD = /\.(3dm|dwg|dxf|step|stp|iges|igs|ifc|sat|skp|rvt|3mf)$/i;
 
 export const defaultSize: Record<WorkspaceNodeType, { w: number; h: number }> = {
   chat: { w: 420, h: 560 },
+  intent: { w: 520, h: 150 },
+  run: { w: 620, h: 460 },
   note: { w: 280, h: 200 },
   text: { w: 440, h: 320 },
   'canvas-text': { w: 280, h: 96 },
@@ -64,6 +66,60 @@ export function makeNode(seed: NodeSeed, x: number, y: number, z: number): Works
 }
 
 export function seedFor(type: WorkspaceNodeType, payload: Record<string, unknown> = {}): NodeSeed {
+  if (type === 'intent') {
+    return {
+      type,
+      ...defaultSize[type],
+      object: {
+        kind: 'intent',
+        owner: 'human',
+        status: 'approved',
+        source: 'HII direct workspace intent',
+        capabilityId: 'hii.agent.workspace_run',
+        parentId: typeof payload.parentId === 'string' ? payload.parentId : undefined,
+        audit: [
+          {
+            ts: new Date().toISOString(),
+            actor: 'human',
+            action: typeof payload.parentId === 'string' ? 'created follow-up workspace intent' : 'created workspace intent'
+          }
+        ]
+      },
+      payload: {
+        title: 'intent',
+        text: '',
+        ...payload
+      }
+    };
+  }
+  if (type === 'run') {
+    return {
+      type,
+      ...defaultSize[type],
+      object: {
+        kind: 'run',
+        owner: 'aii',
+        status: 'queued',
+        source: 'HII spatial managed agent run',
+        capabilityId: 'hii.agent.workspace_run',
+        parentId: typeof payload.parentId === 'string' ? payload.parentId : undefined,
+        audit: [
+          {
+            ts: new Date().toISOString(),
+            actor: 'hii',
+            action: 'prepared managed spatial agent run'
+          }
+        ]
+      },
+      payload: {
+        title: 'HII agent',
+        autoStart: false,
+        status: 'queued',
+        output: '',
+        ...payload
+      }
+    };
+  }
   if (type === 'explorer') {
     return {
       type,

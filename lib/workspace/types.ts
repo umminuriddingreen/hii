@@ -1,5 +1,7 @@
 export type WorkspaceNodeType =
   | 'chat'
+  | 'intent'
+  | 'run'
   | 'note'
   | 'text'
   | 'canvas-text'
@@ -85,6 +87,8 @@ export type SpatialObjectMetadata = {
 
 export const workspaceNodeTypes: WorkspaceNodeType[] = [
   'chat',
+  'intent',
+  'run',
   'note',
   'text',
   'canvas-text',

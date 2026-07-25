@@ -4,6 +4,7 @@ import { mkdir, readFile, readdir, writeFile } from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
 import { redactProcessLine } from '@/lib/server/hii-terminal';
+import { visibleRunOutput } from '@/lib/workspace/run-output';
 
 const execFileAsync = promisify(execFile);
 
@@ -62,6 +63,9 @@ export type HiiDaemonRun = {
   pid?: number | null;
   autonomy?: string;
   loop?: string[];
+  output?: string;
+  visibleOutput?: string;
+  outputBytes?: number;
 };
 
 async function readJson<T>(file: string, fallback: T): Promise<T> {
@@ -211,7 +215,12 @@ export async function getHiiDaemonRun(id: string) {
       /* the queued run may not have opened its log yet */
     }
   }
-  return { ...run, output };
+  return {
+    ...run,
+    output,
+    visibleOutput: visibleRunOutput(output),
+    outputBytes: Buffer.byteLength(output)
+  };
 }
 
 export async function createDaemonFeedPin(event: HiiDaemonEvent) {

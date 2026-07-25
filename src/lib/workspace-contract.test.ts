@@ -77,6 +77,35 @@ describe('workspace contract', () => {
     expect(seed.payload.sessionId).toEqual(expect.any(String));
   });
 
+  it('creates governed spatial intent and managed run seeds', () => {
+    const intent = seedFor('intent', { text: 'Inspect this workspace', parentId: 'run-parent' });
+    const run = seedFor('run', { prompt: 'Inspect this workspace', parentId: 'intent-1', autoStart: true });
+
+    expect(workspaceNodeTypes).toEqual(expect.arrayContaining(['intent', 'run']));
+    expect(intent).toMatchObject({
+      type: 'intent',
+      object: {
+        kind: 'intent',
+        owner: 'human',
+        status: 'approved',
+        parentId: 'run-parent'
+      }
+    });
+    expect(run).toMatchObject({
+      type: 'run',
+      object: {
+        kind: 'run',
+        owner: 'aii',
+        status: 'queued',
+        parentId: 'intent-1'
+      },
+      payload: {
+        autoStart: true,
+        status: 'queued'
+      }
+    });
+  });
+
   it('routes self-contained models and PDFs into governed viewer nodes', async () => {
     const fetch = vi.spyOn(globalThis, 'fetch');
     fetch
