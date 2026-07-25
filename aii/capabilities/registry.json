@@ -871,13 +871,15 @@
   },
   {
     "id": "hii.workspace.creative_canvas",
-    "name": "Create on the HII Spatial Canvas",
+    "name": "Create in the HII Spatial Workspace",
     "owner": "hii",
     "runtime": "next-route",
-    "summary": "Place editable text, paste and move durable media, sketch vector ink, crop and extract images, and open managed HII chat directly in the spatial workspace.",
+    "summary": "Create with editable text and durable media, inspect source-linked PDF documents and local 3D models, and open managed HII chat directly in the spatial workspace.",
     "inputs": [
       "typed canvas text",
       "local clipboard or dropped media",
+      "local PDF documents",
+      "self-contained GLB, GLTF, OBJ, STL, or PLY models",
       "pointer-based pen or marker strokes",
       "non-destructive crop insets",
       "explicit managed chat message"
@@ -885,6 +887,9 @@
     "outputs": [
       "persisted movable workspace nodes",
       "local workspace media assets",
+      "source-linked PDF document viewers",
+      "interactive orbit, pan, zoom, frame, grid, and wireframe model viewers",
+      "SHA-256 integrity evidence for stored workspace assets",
       "editable vector ink",
       "cropped image extraction or PNG download",
       "inspectable managed Codex response"
@@ -892,6 +897,7 @@
     "permissions": [
       "local HII origin only",
       "write bounded assets under ~/.hii/workspace/assets",
+      "render bounded local WebGL without external model upload",
       "no automatic external upload or publication",
       "explicit Send action before prompt or attachment paths reach the configured Codex provider",
       "local export requires an explicit user click"
@@ -901,11 +907,13 @@
       "type": "provider"
     },
     "evidence": [
-      "components/workspace/HiiRoot.tsx",
-      "components/workspace/nodes/ChatNode.tsx",
-      "components/workspace/nodes/CreativeNodes.tsx",
+      "src/routes/+page.svelte",
+      "src/lib/components/workspace/ModelPane.svelte",
+      "src/lib/components/workspace/DocumentPane.svelte",
+      "lib/workspace/ingest.ts",
       "app/api/workspace/assets",
       "app/api/daemon/runs",
+      "tests/unit/workspace-viewers-contract.test.ts",
       "~/.hii/workspace/workspace.json",
       "npm run build"
     ],

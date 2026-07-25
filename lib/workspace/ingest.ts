@@ -19,6 +19,7 @@ const IMG_URL = /\.(png|jpe?g|gif|webp|avif|svg)(\?|$)/i;
 const ARCHIVE = /\.(zip|tar|tgz|tar\.gz|rar|7z|gz|bz2|xz|dmg|pkg)$/i;
 const DESIGN = /\.(fig|sketch|psd|psb|ai|ait|eps|indd|idml|xd|afdesign|afphoto|afpub|kra)$/i;
 const MODEL_3D = /\.(glb|gltf|obj|stl|fbx|usdz|usd|usdc|dae|blend|3ds|ply)$/i;
+const VIEWABLE_MODEL = /\.(glb|gltf|obj|stl|ply)$/i;
 const CAD = /\.(3dm|dwg|dxf|step|stp|iges|igs|ifc|sat|skp|rvt|3mf)$/i;
 
 export const defaultSize: Record<WorkspaceNodeType, { w: number; h: number }> = {
@@ -31,6 +32,8 @@ export const defaultSize: Record<WorkspaceNodeType, { w: number; h: number }> = 
   file: { w: 280, h: 92 },
   image: { w: 380, h: 300 },
   media: { w: 420, h: 300 },
+  document: { w: 620, h: 720 },
+  model: { w: 720, h: 560 },
   html: { w: 480, h: 360 },
   font: { w: 440, h: 170 },
   terminal: { w: 680, h: 440 },
@@ -145,6 +148,7 @@ export type StoredWorkspaceAsset = {
   size: number;
   path: string;
   url: string;
+  sha256?: string;
 };
 
 export async function storeWorkspaceAsset(file: File): Promise<StoredWorkspaceAsset | null> {
@@ -160,7 +164,8 @@ export async function storeWorkspaceAsset(file: File): Promise<StoredWorkspaceAs
       mime: asset.mime || file.type,
       size: Number(asset.size ?? file.size),
       path: asset.path,
-      url: asset.url
+      url: asset.url,
+      sha256: asset.sha256
     };
   } catch {
     return null;
@@ -176,8 +181,11 @@ function extensionFor(name: string) {
 
 function fileSummary(name: string, mime: string) {
   const extension = extensionFor(name);
+  if (VIEWABLE_MODEL.test(name)) {
+    return { category: '3d model', emoji: '◇', label: 'Interactive 3D asset', description: 'Orbit, pan, zoom, inspect, and reset in HII.' };
+  }
   if (MODEL_3D.test(name)) {
-    return { category: '3d model', emoji: '🧊', label: '3D asset', description: 'Preview not embedded; metadata only.' };
+    return { category: '3d model', emoji: '◇', label: '3D asset', description: 'Format recognized; interactive preview is not available for this format yet.' };
   }
   if (CAD.test(name)) {
     return { category: 'cad', emoji: '📐', label: 'CAD / BIM asset', description: 'Preview not embedded; metadata only.' };
@@ -203,10 +211,73 @@ function fileSummary(name: string, mime: string) {
   return { category: extension || 'file', emoji: '📄', label: extension ? `${extension.toUpperCase()} file` : 'File', description: 'Preview not embedded; metadata only.' };
 }
 
+function persistedAssetPayload(file: File, stored: StoredWorkspaceAsset | null, extension: string) {
+  return stored
+    ? {
+        url: stored.url,
+        path: stored.path,
+        name: stored.name,
+        mime: stored.mime,
+        size: stored.size,
+        sha256: stored.sha256,
+        extension,
+        local: true
+      }
+    : {
+        url: URL.createObjectURL(file),
+        name: file.name,
+        mime: file.type,
+        size: file.size,
+        extension,
+        local: true,
+        ephemeral: true
+      };
+}
+
+function governedAsset(
+  file: File,
+  stored: StoredWorkspaceAsset | null,
+  kind: 'asset' | 'model',
+  action: string
+): SpatialObjectMetadata {
+  return {
+    kind,
+    owner: 'human',
+    status: stored ? 'ready' : 'partial',
+    source: stored?.path || `browser-session asset: ${file.name}`,
+    capabilityId: 'hii.workspace.creative_canvas',
+    proofRefs: [
+      ...(stored?.sha256 ? [`sha256:${stored.sha256}`] : []),
+      stored?.path || 'ephemeral object URL; not durable across browser sessions'
+    ],
+    audit: [
+      {
+        ts: new Date().toISOString(),
+        actor: 'human',
+        action
+      }
+    ]
+  };
+}
+
 export async function seedFromFile(file: File): Promise<NodeSeed> {
   const name = file.name || 'untitled';
   const t = file.type || '';
   const extension = extensionFor(name);
+  if (VIEWABLE_MODEL.test(name)) {
+    const stored = await storeWorkspaceAsset(file);
+    return {
+      type: 'model',
+      ...defaultSize.model,
+      object: governedAsset(file, stored, 'model', 'added interactive 3D model to workspace'),
+      payload: {
+        ...persistedAssetPayload(file, stored, extension),
+        title: name,
+        viewer: 'three',
+        description: 'Self-contained local model rendered by HII. Orbit, pan, zoom, inspect, and reset.'
+      }
+    };
+  }
   if (t.startsWith('image/') || IMAGE_FILE.test(name)) {
     const stored = await storeWorkspaceAsset(file);
     const asset = stored
@@ -214,13 +285,27 @@ export async function seedFromFile(file: File): Promise<NodeSeed> {
       : { url: URL.createObjectURL(file), name, mime: t, size: file.size, ephemeral: true };
     return seedFor('image', { ...asset, extension });
   }
-  if (t.startsWith('video/') || VIDEO_FILE.test(name) || t.startsWith('audio/') || AUDIO_FILE.test(name) || t === 'application/pdf' || PDF_FILE.test(name)) {
+  if (t === 'application/pdf' || PDF_FILE.test(name)) {
+    const stored = await storeWorkspaceAsset(file);
+    return {
+      type: 'document',
+      ...defaultSize.document,
+      object: governedAsset(file, stored, 'asset', 'added PDF document viewer to workspace'),
+      payload: {
+        ...persistedAssetPayload(file, stored, extension),
+        title: name,
+        kind: 'pdf',
+        viewer: 'native-pdf'
+      }
+    };
+  }
+  if (t.startsWith('video/') || VIDEO_FILE.test(name) || t.startsWith('audio/') || AUDIO_FILE.test(name)) {
     const stored = await storeWorkspaceAsset(file);
     const asset = stored
       ? { url: stored.url, path: stored.path, name: stored.name, mime: stored.mime, size: stored.size }
       : { url: URL.createObjectURL(file), name, mime: t, size: file.size, ephemeral: true };
-    const kind = t === 'application/pdf' || PDF_FILE.test(name) ? 'pdf' : t.startsWith('audio/') || AUDIO_FILE.test(name) ? 'audio' : 'video';
-    const size = kind === 'audio' ? { w: 420, h: 132 } : kind === 'pdf' ? { w: 520, h: 420 } : { w: 480, h: 320 };
+    const kind = t.startsWith('audio/') || AUDIO_FILE.test(name) ? 'audio' : 'video';
+    const size = kind === 'audio' ? { w: 420, h: 132 } : { w: 480, h: 320 };
     return { ...seedFor('media', { ...asset, kind, extension }), ...size };
   }
   if (FONT.test(name)) {

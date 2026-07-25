@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { mkdir, writeFile } from 'fs/promises';
 import path from 'path';
 import { NextResponse } from 'next/server';
@@ -29,12 +29,14 @@ export async function POST(request: Request) {
   await mkdir(assetsDir, { recursive: true });
   const storedName = `${randomUUID()}-${safeName(file.name)}`;
   const storedPath = path.join(assetsDir, storedName);
-  await writeFile(storedPath, Buffer.from(await file.arrayBuffer()));
+  const body = Buffer.from(await file.arrayBuffer());
+  await writeFile(storedPath, body);
   return NextResponse.json({
     name: safeName(file.name),
     mime: file.type || 'application/octet-stream',
     size: file.size,
     path: storedPath,
-    url: `/api/workspace/assets/${encodeURIComponent(storedName)}`
+    url: `/api/workspace/assets/${encodeURIComponent(storedName)}`,
+    sha256: createHash('sha256').update(body).digest('hex')
   });
 }

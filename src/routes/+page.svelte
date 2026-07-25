@@ -5,6 +5,7 @@
   import BrowserPane from '$lib/components/workspace/BrowserPane.svelte';
   import ChatPane from '$lib/components/workspace/ChatPane.svelte';
   import ExplorerPane from '$lib/components/workspace/ExplorerPane.svelte';
+  import DocumentPane from '$lib/components/workspace/DocumentPane.svelte';
   import SurfacePane from '$lib/components/workspace/SurfacePane.svelte';
   import StaticNode from '$lib/components/workspace/StaticNode.svelte';
   import type { PageData } from './$types';
@@ -26,15 +27,17 @@
   let ready=false; let selected:string|null=null; let omnibar=false; let query=''; let saveTimer:ReturnType<typeof setTimeout>|undefined;
   let context:any=null; let board:any[]=[]; let daemon:any=null; let canvas:HTMLElement; let mouse={x:400,y:300};
   let composerOpen=false; let composerText=''; let composerInput:HTMLTextAreaElement; let composerAt={x:400,y:280}; let lastSummon=0;
+  let ModelPaneComponent:any=null; let modelPanePromise:Promise<void>|null=null; let modelPaneError='';
   $: commands=[
     ...surfaceCatalog.map(item=>['surface',`Open ${item.title}`,item.detail,item.path,item.capabilityId]),
     ['terminal','New terminal','zsh · run Claude or Codex'],['browser','New browser','URL or web search'],['chat','New HII chat','local context object'],['note','New note','persistent workspace object'],['context','Pin live system context','git · capabilities · next actions'],['board','Open board object','~/.hii board lanes'],['sound-field','Open South Berkeley sound field','modeled dBA']
   ].filter(item=>`${item[1]} ${item[2]}`.toLowerCase().includes(query.toLowerCase()));
 
-  async function load(){ try{const response=await fetch('/api/workspace');if(response.ok)doc=await response.json();}finally{ready=true;} }
+  function ensureModelPane(){if(ModelPaneComponent||modelPanePromise)return;modelPanePromise=import('$lib/components/workspace/ModelPane.svelte').then(module=>{ModelPaneComponent=module.default;modelPaneError=''}).catch(error=>{modelPanePromise=null;modelPaneError=error instanceof Error?error.message:'3D viewer unavailable'})}
+  async function load(){ try{const response=await fetch('/api/workspace');if(response.ok){doc=await response.json();if(doc.nodes.some(node=>node.type==='model'))ensureModelPane();}}finally{ready=true;} }
   function persist(){ if(saveTimer)clearTimeout(saveTimer); saveTimer=setTimeout(async()=>{doc.updatedAt=new Date().toISOString();await fetch('/api/workspace',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(doc)});},500); }
   function patch(id:string,patch:Partial<WorkspaceNode>){doc={...doc,nodes:doc.nodes.map(n=>n.id===id?{...n,...patch,updatedAt:new Date().toISOString()}:n)};persist();}
-  function addSeeds(seeds:NodeSeed[],at:{x:number;y:number}){for(const [index,seed] of seeds.entries()){const node=makeNode(seed,at.x+index*28,at.y+index*28,++doc.nextZ);doc={...doc,nodes:[...doc.nodes,node]};selected=node.id}persist();}
+  function addSeeds(seeds:NodeSeed[],at:{x:number;y:number}){if(seeds.some(seed=>seed.type==='model'))ensureModelPane();for(const [index,seed] of seeds.entries()){const node=makeNode(seed,at.x+index*28,at.y+index*28,++doc.nextZ);doc={...doc,nodes:[...doc.nodes,node]};selected=node.id}persist();}
   function spawn(type:string,payload:Record<string,unknown>={}){const seed=seedFor(type as WorkspaceNodeType,type==='browser'?{url:'https://duckduckgo.com',...payload}:type==='terminal'?{sessionId:crypto.randomUUID(),...payload}:payload);const center={x:(-doc.viewport.x+innerWidth/2)/doc.viewport.zoom,y:(-doc.viewport.y+innerHeight/2)/doc.viewport.zoom};addSeeds([seed],{x:center.x-seed.w/2,y:center.y-seed.h/2});omnibar=false;query='';if(type==='context')void refreshContext();if(type==='board')void refreshBoard();}
   function workspacePoint(clientX:number,clientY:number){return{x:(clientX-doc.viewport.x)/doc.viewport.zoom,y:(clientY-doc.viewport.y)/doc.viewport.zoom}}
   async function summonComposer(at?:{x:number;y:number}){const now=Date.now();if(now-lastSummon<180)return;lastSummon=now;composerAt=at||workspacePoint(innerWidth/2,innerHeight/2);composerOpen=true;omnibar=false;await tick();composerInput?.focus();}
@@ -63,6 +66,8 @@
       <header class="flex h-7 shrink-0 items-center justify-between border-b border-neutral-900/10 px-2.5"><span class="truncate font-mono text-[11px] lowercase tracking-wide text-neutral-500">{String(node.payload.title||node.type)}</span><button class="opacity-0 group-hover:opacity-100" on:click={()=>close(node.id)} aria-label="close node">×</button></header>
       <div class="relative min-h-0 flex-1">
         {#if ['note','text','canvas-text','ink','link','file','image','media','html','font'].includes(node.type)}<StaticNode {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} />
+        {:else if node.type==='document'}<DocumentPane {node} />
+        {:else if node.type==='model'}{#if ModelPaneComponent}<svelte:component this={ModelPaneComponent} {node} />{:else}<div class="grid h-full place-items-center bg-[#f3f1ec] p-5 text-center font-mono text-[10px] uppercase tracking-[0.12em] text-neutral-400">{modelPaneError||'loading 3D viewer…'}</div>{/if}
         {:else if node.type==='terminal'}<TerminalPane sessionId={String(node.payload.sessionId)} cwd={String(node.payload.cwd||'')} />
         {:else if node.type==='browser'}<BrowserPane {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} />
         {:else if node.type==='explorer'}<ExplorerPane {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} />

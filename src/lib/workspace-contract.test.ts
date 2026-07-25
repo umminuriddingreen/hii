@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { seedFor, seedFromString, seedFromUrl } from '../../lib/workspace/ingest';
-import { emptyWorkspace, normalizeSpatialObject } from '../../lib/workspace/types';
+import { describe, expect, it, vi } from 'vitest';
+import { seedFor, seedFromFile, seedFromString, seedFromUrl } from '../../lib/workspace/ingest';
+import { emptyWorkspace, normalizeSpatialObject, workspaceNodeTypes } from '../../lib/workspace/types';
 
 describe('workspace contract', () => {
   it('starts from a durable empty workspace shape', () => {
@@ -75,5 +75,68 @@ describe('workspace contract', () => {
       }
     });
     expect(seed.payload.sessionId).toEqual(expect.any(String));
+  });
+
+  it('routes self-contained models and PDFs into governed viewer nodes', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch');
+    fetch
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            name: 'cube.obj',
+            mime: 'model/obj',
+            size: 32,
+            path: '/Users/ummi/.hii/workspace/assets/cube.obj',
+            url: '/api/workspace/assets/cube.obj',
+            sha256: 'abc123'
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            name: 'brief.pdf',
+            mime: 'application/pdf',
+            size: 128,
+            path: '/Users/ummi/.hii/workspace/assets/brief.pdf',
+            url: '/api/workspace/assets/brief.pdf',
+            sha256: 'def456'
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      );
+
+    const model = await seedFromFile(new File(['o cube'], 'cube.obj', { type: 'model/obj' }));
+    const document = await seedFromFile(new File(['%PDF'], 'brief.pdf', { type: 'application/pdf' }));
+
+    expect(workspaceNodeTypes).toEqual(expect.arrayContaining(['model', 'document']));
+    expect(model).toMatchObject({
+      type: 'model',
+      object: {
+        kind: 'model',
+        owner: 'human',
+        status: 'ready',
+        source: '/Users/ummi/.hii/workspace/assets/cube.obj'
+      },
+      payload: {
+        viewer: 'three',
+        extension: 'obj',
+        sha256: 'abc123'
+      }
+    });
+    expect(document).toMatchObject({
+      type: 'document',
+      object: {
+        kind: 'asset',
+        owner: 'human',
+        status: 'ready'
+      },
+      payload: {
+        viewer: 'native-pdf',
+        kind: 'pdf',
+        sha256: 'def456'
+      }
+    });
   });
 });

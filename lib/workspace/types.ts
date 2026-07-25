@@ -8,6 +8,8 @@ export type WorkspaceNodeType =
   | 'file'
   | 'image'
   | 'media'
+  | 'document'
+  | 'model'
   | 'html'
   | 'font'
   | 'terminal'
@@ -91,6 +93,8 @@ export const workspaceNodeTypes: WorkspaceNodeType[] = [
   'file',
   'image',
   'media',
+  'document',
+  'model',
   'html',
   'font',
   'terminal',
