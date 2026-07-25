@@ -35,6 +35,7 @@ export const defaultSize: Record<WorkspaceNodeType, { w: number; h: number }> = 
   font: { w: 440, h: 170 },
   terminal: { w: 680, h: 440 },
   browser: { w: 760, h: 540 },
+  explorer: { w: 1040, h: 640 },
   context: { w: 360, h: 440 },
   board: { w: 360, h: 440 },
   surface: { w: 1080, h: 720 },
@@ -60,6 +61,31 @@ export function makeNode(seed: NodeSeed, x: number, y: number, z: number): Works
 }
 
 export function seedFor(type: WorkspaceNodeType, payload: Record<string, unknown> = {}): NodeSeed {
+  if (type === 'explorer') {
+    return {
+      type,
+      ...defaultSize[type],
+      object: {
+        kind: 'interface',
+        owner: 'hii',
+        status: 'ready',
+        source: 'HII workspace operator-created exploration window',
+        audit: [
+          {
+            ts: new Date().toISOString(),
+            actor: 'human',
+            action: 'opened browser and terminal exploration window'
+          }
+        ]
+      },
+      payload: {
+        title: 'live exploration',
+        url: 'https://duckduckgo.com',
+        sessionId: crypto.randomUUID(),
+        ...payload
+      }
+    };
+  }
   if (type === 'surface') {
     return {
       type,

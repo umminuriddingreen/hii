@@ -56,4 +56,24 @@ describe('workspace contract', () => {
     });
     expect(seed.payload).toMatchObject({ dataMode: 'modeled', scenario: 'weekday' });
   });
+
+  it('creates a governed live exploration window with browser and terminal state', () => {
+    const seed = seedFor('explorer');
+
+    expect(seed).toMatchObject({
+      type: 'explorer',
+      w: 1040,
+      h: 640,
+      object: {
+        kind: 'interface',
+        owner: 'hii',
+        status: 'ready'
+      },
+      payload: {
+        title: 'live exploration',
+        url: 'https://duckduckgo.com'
+      }
+    });
+    expect(seed.payload.sessionId).toEqual(expect.any(String));
+  });
 });

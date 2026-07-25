@@ -12,6 +12,7 @@ export type WorkspaceNodeType =
   | 'font'
   | 'terminal'
   | 'browser'
+  | 'explorer'
   | 'context'
   | 'board'
   | 'surface'
@@ -94,6 +95,7 @@ export const workspaceNodeTypes: WorkspaceNodeType[] = [
   'font',
   'terminal',
   'browser',
+  'explorer',
   'context',
   'board',
   'surface',

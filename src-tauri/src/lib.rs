@@ -10,7 +10,7 @@ use std::{
     sync::Mutex,
     time::Duration,
 };
-use tauri::{Manager, RunEvent, Url, WindowEvent};
+use tauri::{Emitter, Manager, RunEvent, Url, WindowEvent};
 
 const DEFAULT_HII_PORT: u16 = 3042;
 
@@ -141,6 +141,48 @@ pub fn run() {
             url: String::new(),
         })))
         .setup(|app| {
+            #[cfg(desktop)]
+            {
+                use tauri_plugin_global_shortcut::{
+                    Code, GlobalShortcutExt, Modifiers, ShortcutState,
+                };
+
+                app.handle().plugin(
+                    tauri_plugin_global_shortcut::Builder::new()
+                        .with_handler(|app, shortcut, event| {
+                            if event.state != ShortcutState::Pressed
+                                || !shortcut.matches(Modifiers::ALT, Code::Space)
+                            {
+                                return;
+                            }
+                            let Some(window) = app.get_webview_window("main") else {
+                                return;
+                            };
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                            let on_workspace =
+                                window.url().map(|url| url.path() == "/").unwrap_or(false);
+                            if on_workspace {
+                                let _ = window.emit(
+                                    "hii://summon",
+                                    serde_json::json!({
+                                        "source": "option-space"
+                                    }),
+                                );
+                            } else if let Ok(mut url) = window.url() {
+                                url.set_path("/");
+                                url.set_query(Some("summon=1"));
+                                let _ = window.navigate(url);
+                            }
+                        })
+                        .build(),
+                )?;
+                if let Err(error) = app.global_shortcut().register("alt+space") {
+                    eprintln!("HII could not register Option+Space: {error}");
+                }
+            }
+
             let (port, child) = if hii_is_reachable(DEFAULT_HII_PORT) {
                 (DEFAULT_HII_PORT, None)
             } else {
