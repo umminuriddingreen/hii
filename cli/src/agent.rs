@@ -419,8 +419,8 @@ HII operating-logic tools (work through HII, not around it): hii_context (repo/r
 
 Return exactly one JSON object per turn.
 
-Tool action:
-{{"type":"tool","tool":"read|list|search|write|edit|shell|verify|http|hii_context|og_next|caps_check|board_read|board_write|skill_search|bridge_send|bridge_read","path":"relative path","query":"for search","command":"for shell or verify","content":"for write","old":"exact text to replace (edit)","new":"replacement text (edit)","replace_all":false,"offset":1,"limit":200,"url":"for http","reason":"short reason"}}
+Tool action (the tool name is the type):
+{{"type":"read|list|search|write|edit|shell|verify|http|hii_context|og_next|caps_check|board_read|board_write|skill_search|bridge_send|bridge_read","path":"relative path","query":"for search","command":"for shell or verify","content":"for write","old":"exact text to replace (edit)","new":"replacement text (edit)","replace_all":false,"offset":1,"limit":200,"url":"for http","reason":"short reason"}}
 
 Final action:
 {{"type":"final","summary":"what is now true","verification":["checks actually run"],"next":"highest-value next action or null"}}
@@ -443,7 +443,36 @@ pub(crate) fn parse_action(raw: &str) -> Result<Action, String> {
     } else {
         trimmed
     };
-    serde_json::from_str(candidate).map_err(|error| error.to_string())
+    let mut value: serde_json::Value =
+        serde_json::from_str(candidate).map_err(|error| error.to_string())?;
+    let action_type = value
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    if matches!(
+        action_type.as_str(),
+        "read"
+            | "list"
+            | "search"
+            | "write"
+            | "edit"
+            | "shell"
+            | "verify"
+            | "http"
+            | "hii_context"
+            | "og_next"
+            | "caps_check"
+            | "board_read"
+            | "board_write"
+            | "skill_search"
+            | "bridge_send"
+            | "bridge_read"
+    ) {
+        value["type"] = serde_json::Value::String("tool".into());
+        value["tool"] = serde_json::Value::String(action_type);
+    }
+    serde_json::from_value(value).map_err(|error| error.to_string())
 }
 
 /// One decoded tool invocation. Grouping the arguments keeps the dispatcher's
@@ -589,6 +618,13 @@ mod tests {
     fn parses_json_action() {
         let action = parse_action(r#"{"type":"tool","tool":"list","reason":"inspect"}"#).unwrap();
         assert!(matches!(action, Action::Tool { tool, .. } if tool == "list"));
+    }
+
+    #[test]
+    fn parses_flat_local_model_action() {
+        let action =
+            parse_action(r#"{"type":"write","path":"hello.txt","content":"hello\n"}"#).unwrap();
+        assert!(matches!(action, Action::Tool { tool, .. } if tool == "write"));
     }
 
     #[test]

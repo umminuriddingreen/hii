@@ -34,6 +34,7 @@
     "hii:bootstrap:check": "bash -n scripts/hii-bootstrap.sh",
     "cli:check": "cargo fmt --all -- --check && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings",
     "cli:build": "cargo build --workspace --release",
+    "cli:eval:local": "bash cli/scripts/local-model-eval.sh",
     "test": "vitest run",
     "test:watch": "vitest",
     "ci:fast": "npm run check && npm run test && npm run cli:check",

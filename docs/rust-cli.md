@@ -110,10 +110,17 @@ capability runner with stronger isolation rather than adding a `--force` mode.
 ```sh
 npm run cli:check
 npm run cli:build
+npm run cli:eval:local
 hii doctor
 hii --cwd /path/to/workspace "make the change and verify it"
 hii proof
 ```
+
+`npm run cli:eval:local` is the opt-in live local-model gate. It evaluates the
+Qwen work models through HII's real bounded run, tool, verification, and receipt
+path, then probes Gemma's bounded text-utility behavior. The suite uses isolated
+temporary workspaces and an isolated HII runtime; it does not add a public CLI
+command or write evaluation receipts into the user's normal `~/.hii` runtime.
 
 The global launcher at `/Users/ummi/bin/hii` executes
 `/Users/ummi/hii/target/release/hii` and builds it on first use when absent.

@@ -879,8 +879,8 @@ Only use workspace tools when the user asks you to inspect, change, build, diagn
 Workspace: {workspace}
 Maximum tool steps per turn: {max_steps}
 
-Tool action:
-{{"type":"tool","tool":"read|list|search|write|shell|verify|http","path":"optional relative path","query":"for search","command":"for shell or verify","content":"for write","url":"for local http","reason":"short internal reason"}}
+Tool action (the tool name is the type):
+{{"type":"read|list|search|write|edit|shell|verify|http","path":"optional relative path","query":"for search","command":"for shell or verify","content":"for write","old":"exact text to replace (edit)","new":"replacement text (edit)","replace_all":false,"url":"for local http","reason":"short internal reason"}}
 
 Do not publish, push, spend, message third parties, delete, read secrets, or leave the workspace. If you write or execute workspace state, verify it before replying. Return exactly one JSON object and no Markdown wrapper."#,
         workspace = workspace.display()

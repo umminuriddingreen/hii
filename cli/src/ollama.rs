@@ -155,30 +155,7 @@ impl Ollama {
         model: &str,
         messages: &[Message],
     ) -> Result<ChatResult, String> {
-        let schema = json!({
-            "type": "object",
-            "required": ["type"],
-            "properties": {
-                "type": { "enum": ["tool", "final", "message"] },
-                "tool": { "enum": ["read", "list", "search", "write", "edit", "shell", "verify", "http", "hii_context", "og_next", "caps_check", "board_read", "board_write", "skill_search", "bridge_send", "bridge_read"] },
-                "path": { "type": "string" },
-                "query": { "type": "string" },
-                "command": { "type": "string" },
-                "content": { "type": "string" },
-                "url": { "type": "string" },
-                "old": { "type": "string" },
-                "new": { "type": "string" },
-                "replace_all": { "type": "boolean" },
-                "offset": { "type": "integer" },
-                "limit": { "type": "integer" },
-                "reason": { "type": "string" },
-                "summary": { "type": "string" },
-                "message": { "type": "string" },
-                "verification": { "type": "array", "items": { "type": "string" } },
-                "next": { "type": ["string", "null"] }
-            }
-        });
-        self.chat(model, messages, Some(schema))
+        self.chat(model, messages, Some(action_schema()))
     }
 
     pub fn chat_text(&self, model: &str, messages: &[Message]) -> Result<String, String> {
@@ -288,6 +265,37 @@ impl Ollama {
     }
 }
 
+fn action_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+            "type": {
+                "enum": [
+                    "read", "list", "search", "write", "edit", "shell", "verify", "http",
+                    "hii_context", "og_next", "caps_check", "board_read", "board_write",
+                    "skill_search", "bridge_send", "bridge_read", "final", "message"
+                ]
+            },
+            "path": { "type": "string" },
+            "query": { "type": "string" },
+            "command": { "type": "string" },
+            "content": { "type": "string" },
+            "url": { "type": "string" },
+            "old": { "type": "string" },
+            "new": { "type": "string" },
+            "replace_all": { "type": "boolean" },
+            "offset": { "type": "integer" },
+            "limit": { "type": "integer" },
+            "reason": { "type": "string" },
+            "summary": { "type": "string" },
+            "message": { "type": "string" },
+            "verification": { "type": "array", "items": { "type": "string" } },
+            "next": { "type": ["string", "null"] }
+        }
+    })
+}
+
 /// Append a compact record of a model call to `~/.hii/traces/llm_requests.jsonl`
 /// (per the HII LLM-tracking rule). Best-effort: logging never fails a run.
 fn log_llm_request(model: &str, provider: ModelProvider, usage: &ChatUsage) {
@@ -335,5 +343,21 @@ fn format_ureq(error: ureq::Error) -> String {
             format!("Ollama returned HTTP {code}: {}", body.trim())
         }
         ureq::Error::Transport(error) => format!("cannot reach local Ollama: {error}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::action_schema;
+
+    #[test]
+    fn action_schema_uses_local_model_friendly_flat_types() {
+        let schema = action_schema();
+        let types = schema["properties"]["type"]["enum"]
+            .as_array()
+            .expect("type enum");
+        assert!(types.iter().any(|value| value == "write"));
+        assert!(types.iter().any(|value| value == "verify"));
+        assert!(!types.iter().any(|value| value == "tool"));
     }
 }
