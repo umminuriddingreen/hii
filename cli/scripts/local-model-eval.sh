@@ -54,7 +54,7 @@ run_actor() {
   if HII_ROOT="$ROOT" HII_RUNTIME_DIR="$runtime" "$BIN" \
     --cwd "$inspect_workspace" \
     --model "$model" \
-    --max-steps 8 \
+    --max-steps 10 \
     run "Inspect this workspace with list, verify the exact workspace path with pwd, then finish without changing files." \
     >"$inspect_log" 2>&1 && receipt_passes "$runtime"; then
     record "$model" "inspect-verify-receipt" "passed" "$inspect_log"

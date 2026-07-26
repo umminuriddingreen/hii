@@ -208,15 +208,9 @@ impl Toolbelt {
             },
             None => self.workspace.clone(),
         };
-        if has_ripgrep() {
-            let relative = base.strip_prefix(&self.workspace).unwrap_or(Path::new("."));
-            let mut command = Command::new("rg");
-            command.args(["--files", "--hidden", "-g", "!.git"]);
-            if relative != Path::new("") && relative != Path::new(".") {
-                command.arg(relative);
-            }
-            return self.run_command(command, false, DEFAULT_TIMEOUT_SECS);
-        }
+        // `rg --files` exits with status 1 when a directory contains no files.
+        // An empty directory is a valid listing, not a tool failure, so use the
+        // native ignore-aware walk whose empty result has the correct meaning.
         tool_result(self.list_native(&base), false)
     }
 
@@ -667,6 +661,16 @@ mod tests {
         assert!(found.is_ok() && found.unwrap().contains("needle"));
         let listed = tools.list_native(tools.workspace());
         assert!(listed.unwrap().contains("x.rs"));
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn list_empty_workspace_succeeds() {
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        let listed = tools.list(Some("."));
+        assert!(listed.ok);
+        assert!(listed.output.is_empty());
         let _ = fs::remove_dir_all(path);
     }
 
