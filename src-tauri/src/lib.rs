@@ -8,11 +8,16 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Mutex,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tauri::{Emitter, Manager, RunEvent, Url, WindowEvent};
+use tauri::{
+    Emitter, Manager, PhysicalPosition, RunEvent, Url, WebviewUrl, WebviewWindowBuilder,
+    WindowEvent,
+};
 
 const DEFAULT_HII_PORT: u16 = 3042;
+const CURSOR_BAR_WIDTH: f64 = 520.0;
+const CURSOR_BAR_HEIGHT: f64 = 76.0;
 
 struct HiiServer(Mutex<ServerState>);
 
@@ -33,8 +38,143 @@ fn desktop_surface(server: tauri::State<'_, HiiServer>) -> DesktopSurface {
     DesktopSurface {
         name: "HII",
         surface: "hii",
-        server: server.0.lock().map(|state| state.url.clone()).unwrap_or_default(),
+        server: server
+            .0
+            .lock()
+            .map(|state| state.url.clone())
+            .unwrap_or_default(),
     }
+}
+
+fn ensure_cursor_bar(app: &tauri::AppHandle, server_url: &str) -> Result<(), String> {
+    if app.get_webview_window("cursor-bar").is_some() {
+        return Ok(());
+    }
+    let url = Url::parse(&format!("{}/palette", server_url.trim_end_matches('/')))
+        .map_err(|error| error.to_string())?;
+    WebviewWindowBuilder::new(app, "cursor-bar", WebviewUrl::External(url))
+        .title("HII")
+        .inner_size(CURSOR_BAR_WIDTH, CURSOR_BAR_HEIGHT)
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
+        .closable(false)
+        .decorations(false)
+        .always_on_top(true)
+        .visible_on_all_workspaces(true)
+        .skip_taskbar(true)
+        .shadow(true)
+        .focused(true)
+        .visible(false)
+        .build()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+fn show_cursor_bar(app: &tauri::AppHandle) -> Result<(), String> {
+    let server_url = app
+        .state::<HiiServer>()
+        .0
+        .lock()
+        .map_err(|error| error.to_string())?
+        .url
+        .clone();
+    if server_url.is_empty() {
+        return Err("HII is still starting.".to_string());
+    }
+    ensure_cursor_bar(app, &server_url)?;
+    let window = app
+        .get_webview_window("cursor-bar")
+        .ok_or_else(|| "Cursor bar window is unavailable.".to_string())?;
+    let cursor = app.cursor_position().map_err(|error| error.to_string())?;
+    let monitor = app
+        .monitor_from_point(cursor.x, cursor.y)
+        .map_err(|error| error.to_string())?
+        .or_else(|| app.primary_monitor().ok().flatten());
+
+    let mut x = cursor.x + 18.0;
+    let mut y = cursor.y + 22.0;
+    if let Some(monitor) = monitor {
+        let area = monitor.work_area();
+        let scale = monitor.scale_factor();
+        let width = CURSOR_BAR_WIDTH * scale;
+        let height = CURSOR_BAR_HEIGHT * scale;
+        let left = f64::from(area.position.x);
+        let top = f64::from(area.position.y);
+        let right = left + f64::from(area.size.width);
+        let bottom = top + f64::from(area.size.height);
+        if x + width > right {
+            x = cursor.x - width - 18.0;
+        }
+        if y + height > bottom {
+            y = cursor.y - height - 22.0;
+        }
+        x = x.clamp(left + 8.0, (right - width - 8.0).max(left + 8.0));
+        y = y.clamp(top + 8.0, (bottom - height - 8.0).max(top + 8.0));
+    }
+
+    window
+        .set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32))
+        .map_err(|error| error.to_string())?;
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())?;
+    window
+        .emit("hii://cursor-bar-opened", ())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn hide_cursor_bar(app: tauri::AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("cursor-bar")
+        .ok_or_else(|| "Cursor bar window is unavailable.".to_string())?;
+    window.hide().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn run_cursor_intent(app: tauri::AppHandle, goal: String) -> Result<String, String> {
+    let goal = goal.trim();
+    if goal.is_empty() {
+        return Err("Tell HII what you want to happen.".to_string());
+    }
+    if goal.len() > 8_000 {
+        return Err("Keep the intent under 8,000 characters.".to_string());
+    }
+
+    let home = std::env::var_os("HOME").ok_or_else(|| "HOME is not available".to_string())?;
+    let home = PathBuf::from(home);
+    let hii = home.join("bin").join("hii");
+    if !hii.is_file() {
+        return Err(format!("HII launcher is missing at {}", hii.display()));
+    }
+    let runs = runtime_root()?.join("runs").join("cursor-bar");
+    create_dir_all(&runs).map_err(|error| error.to_string())?;
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_millis();
+    let log_path = runs.join(format!("{stamp}.log"));
+    let log = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&log_path)
+        .map_err(|error| error.to_string())?;
+    let error_log = log.try_clone().map_err(|error| error.to_string())?;
+    Command::new(hii)
+        .arg("run")
+        .arg("--cwd")
+        .arg(&home)
+        .arg(goal)
+        .current_dir(&home)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(log))
+        .stderr(Stdio::from(error_log))
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    if let Some(window) = app.get_webview_window("cursor-bar") {
+        let _ = window.hide();
+    }
+    Ok(log_path.display().to_string())
 }
 
 fn hii_is_reachable(port: u16) -> bool {
@@ -60,7 +200,10 @@ fn available_port() -> Result<u16, String> {
         return Ok(DEFAULT_HII_PORT);
     }
     let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|err| err.to_string())?;
-    listener.local_addr().map(|address| address.port()).map_err(|err| err.to_string())
+    listener
+        .local_addr()
+        .map(|address| address.port())
+        .map_err(|err| err.to_string())
 }
 
 fn runtime_root() -> Result<PathBuf, String> {
@@ -85,7 +228,10 @@ fn resource_root(app: &tauri::App) -> Result<PathBuf, String> {
     if resource_dir.is_dir() {
         Ok(resource_dir)
     } else {
-        Err(format!("HII resources are missing at {}", resource_dir.display()))
+        Err(format!(
+            "HII resources are missing at {}",
+            resource_dir.display()
+        ))
     }
 }
 
@@ -96,7 +242,10 @@ fn spawn_hii_server(app: &tauri::App, port: u16) -> Result<Child, String> {
     let server_dir = app_dir.join("server");
     let entry = server_dir.join("server.mjs");
     if !node.is_file() || !entry.is_file() {
-        return Err(format!("HII portable resources are incomplete at {}", app_dir.display()));
+        return Err(format!(
+            "HII portable resources are incomplete at {}",
+            app_dir.display()
+        ));
     }
 
     let runtime = runtime_root()?;
@@ -150,53 +299,53 @@ pub fn run() {
                 app.handle().plugin(
                     tauri_plugin_global_shortcut::Builder::new()
                         .with_handler(|app, shortcut, event| {
-                            if event.state != ShortcutState::Pressed
-                                || !shortcut.matches(Modifiers::ALT, Code::Space)
-                            {
+                            #[cfg(target_os = "macos")]
+                            let matches =
+                                shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::Space);
+                            #[cfg(not(target_os = "macos"))]
+                            let matches = shortcut
+                                .matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::Space);
+                            if event.state != ShortcutState::Pressed || !matches {
                                 return;
                             }
-                            let Some(window) = app.get_webview_window("main") else {
-                                return;
-                            };
-                            let _ = window.show();
-                            let _ = window.unminimize();
-                            let _ = window.set_focus();
-                            let on_workspace =
-                                window.url().map(|url| url.path() == "/").unwrap_or(false);
-                            if on_workspace {
-                                let _ = window.eval(
-                                    "window.dispatchEvent(new CustomEvent('hii:summon', { detail: { source: 'option-space' } }))",
-                                );
-                                let _ = window.emit(
-                                    "hii://summon",
-                                    serde_json::json!({
-                                        "source": "option-space"
-                                    }),
-                                );
-                            } else if let Ok(mut url) = window.url() {
-                                url.set_path("/");
-                                url.set_query(Some("summon=1"));
-                                let _ = window.navigate(url);
+                            if let Err(error) = show_cursor_bar(app) {
+                                eprintln!("HII could not show the cursor bar: {error}");
                             }
                         })
                         .build(),
                 )?;
-                if let Err(error) = app.global_shortcut().register("alt+space") {
-                    eprintln!("HII could not register Option+Space: {error}");
+                #[cfg(target_os = "macos")]
+                let shortcut = "super+shift+space";
+                #[cfg(not(target_os = "macos"))]
+                let shortcut = "ctrl+shift+space";
+                if let Err(error) = app.global_shortcut().register(shortcut) {
+                    eprintln!("HII could not register {shortcut}: {error}");
                 }
             }
 
+            #[cfg(dev)]
             let (port, child) = if hii_is_reachable(DEFAULT_HII_PORT) {
                 (DEFAULT_HII_PORT, None)
             } else {
                 let port = available_port()?;
                 (port, Some(spawn_hii_server(app, port)?))
             };
+            #[cfg(not(dev))]
+            let (port, child) = {
+                let port = available_port()?;
+                (port, Some(spawn_hii_server(app, port)?))
+            };
             let hii_url = format!("http://127.0.0.1:{port}");
-            *app.state::<HiiServer>().0.lock().map_err(|err| err.to_string())? = ServerState {
+            *app.state::<HiiServer>()
+                .0
+                .lock()
+                .map_err(|err| err.to_string())? = ServerState {
                 child,
                 url: hii_url.clone(),
             };
+            if let Err(error) = ensure_cursor_bar(app.handle(), &hii_url) {
+                eprintln!("HII could not prepare the cursor bar: {error}");
+            }
 
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
@@ -222,11 +371,19 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == "cursor-bar" && matches!(event, WindowEvent::Focused(false)) {
+                let _ = window.hide();
+            }
             if matches!(event, WindowEvent::CloseRequested { .. }) {
                 stop_hii_server(window.app_handle());
             }
         })
-        .invoke_handler(tauri::generate_handler![desktop_surface, browser::browser_navigate])
+        .invoke_handler(tauri::generate_handler![
+            desktop_surface,
+            browser::browser_navigate,
+            hide_cursor_bar,
+            run_cursor_intent
+        ])
         .build(tauri::generate_context!())
         .expect("error while building HII desktop interface");
 

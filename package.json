@@ -14,6 +14,7 @@
     "build:web": "vite build",
     "build:web:tauri": "node scripts/hii-svelte-tauri-build.mjs",
     "build:tauri": "node scripts/hii-tauri-build.mjs",
+    "install:tauri": "npm run build:tauri && node scripts/hii-tauri-install.mjs",
     "start": "NODE_ENV=production node server.mjs",
     "start:web:tauri": "node scripts/hii-tauri-start.mjs",
     "tauri": "tauri",

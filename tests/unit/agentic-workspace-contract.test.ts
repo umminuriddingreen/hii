@@ -12,6 +12,8 @@ const desktop = readFileSync(resolve(root, 'src-tauri/src/lib.rs'), 'utf8');
 const cargo = readFileSync(resolve(root, 'src-tauri/Cargo.toml'), 'utf8');
 const packageJson = readFileSync(resolve(root, 'package.json'), 'utf8');
 const desktopBuild = readFileSync(resolve(root, 'scripts/hii-tauri-build.mjs'), 'utf8');
+const desktopInstall = readFileSync(resolve(root, 'scripts/hii-tauri-install.mjs'), 'utf8');
+const cursorBar = readFileSync(resolve(root, 'src/routes/palette/+page.svelte'), 'utf8');
 
 describe('agentic workspace interaction contract', () => {
   it('summons direct workspace intent from Option+Space', () => {
@@ -46,17 +48,40 @@ describe('agentic workspace interaction contract', () => {
     expect(terminal).toContain("window.addEventListener('hii:terminal-command'");
   });
 
-  it('registers a non-fatal native global shortcut in the Tauri shell', () => {
+  it('registers a portable cursor-bar shortcut in the Tauri shell', () => {
     expect(cargo).toContain('tauri-plugin-global-shortcut');
-    expect(desktop).toContain('shortcut.matches(Modifiers::ALT, Code::Space)');
-    expect(desktop).toContain('app.global_shortcut().register("alt+space")');
-    expect(desktop).toContain("new CustomEvent('hii:summon'");
-    expect(desktop).toMatch(/window\.emit\(\s*"hii:\/\/summon"/);
+    expect(desktop).toContain('Modifiers::SUPER | Modifiers::SHIFT');
+    expect(desktop).toContain('Modifiers::CONTROL | Modifiers::SHIFT');
+    expect(desktop).toContain('"super+shift+space"');
+    expect(desktop).toContain('"ctrl+shift+space"');
+    expect(desktop).toContain('show_cursor_bar(app)');
+    expect(desktop).toContain('app.cursor_position()');
+  });
+
+  it('keeps cursor intent inside the shared HII runner', () => {
+    expect(desktop).toContain('fn run_cursor_intent');
+    expect(desktop).toContain('.arg("run")');
+    expect(desktop).toContain('.join("cursor-bar")');
+    expect(cursorBar).toContain("invoke<string>('run_cursor_intent'");
+    expect(cursorBar).toContain("invoke('hide_cursor_bar')");
+    expect(cursorBar).toContain('What do you want to happen?');
+  });
+
+  it('starts the baked HII runtime in production instead of attaching to stale UI', () => {
+    expect(desktop).toContain('#[cfg(dev)]');
+    expect(desktop).toContain('#[cfg(not(dev))]');
+    expect(desktop).toMatch(
+      /#\[cfg\(not\(dev\)\)\][\s\S]*available_port\(\)\?[\s\S]*spawn_hii_server\(app, port\)/
+    );
   });
 
   it('seals and strictly verifies the packaged macOS app', () => {
     expect(packageJson).toContain('node scripts/hii-tauri-build.mjs');
     expect(desktopBuild).toContain("'codesign'");
     expect(desktopBuild).toContain("'--strict'");
+    expect(packageJson).toContain('install:tauri');
+    expect(desktopInstall).toContain("'/Applications/HII.app'");
+    expect(desktopInstall).toContain("'.Trash'");
+    expect(desktopInstall).toContain("'--strict'");
   });
 });
