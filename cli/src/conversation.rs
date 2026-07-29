@@ -1,7 +1,7 @@
 use crate::{
     agent::{choose_model, execute_tool, parse_action, Action},
     config::AppPaths,
-    ollama::{ChatResult, ChatUsage, Message, Ollama},
+    ollama::{ChatResult, ChatStreamEvent, ChatUsage, Message, Ollama},
     receipt::{
         find_receipt, redact_text, unix_ms, ConversationStore, Receipt, RunStore,
         VerificationRecord,
@@ -11,6 +11,7 @@ use crate::{
 };
 use serde_json::json;
 use std::{
+    collections::VecDeque,
     io::{self, IsTerminal, Write},
     path::PathBuf,
     sync::mpsc,
@@ -41,7 +42,7 @@ struct SessionUsage {
 enum ThinkingMode {
     Off,
     Compact,
-    Detailed,
+    Raw,
 }
 
 impl SessionUsage {
@@ -78,6 +79,8 @@ pub struct Conversation {
     usage: SessionUsage,
     last_skill_draft: Option<String>,
     thinking_mode: ThinkingMode,
+    steering: Option<String>,
+    queued_inputs: VecDeque<String>,
 }
 
 impl Conversation {
@@ -105,7 +108,13 @@ impl Conversation {
             max_steps,
             usage: SessionUsage::default(),
             last_skill_draft: None,
-            thinking_mode: ThinkingMode::Compact,
+            thinking_mode: match std::env::var("HII_THINKING").as_deref() {
+                Ok("compact") => ThinkingMode::Compact,
+                Ok("raw") | Ok("live") => ThinkingMode::Raw,
+                _ => ThinkingMode::Off,
+            },
+            steering: None,
+            queued_inputs: VecDeque::new(),
         })
     }
 
@@ -127,6 +136,17 @@ impl Conversation {
             let raw = self
                 .call_activity("thinking", self.messages.clone(), true)?
                 .content;
+            if let Some(steering) = self.steering.take() {
+                self.messages.push(Message::assistant(raw));
+                self.messages.push(Message::user(format!(
+                    "OPERATOR STEERING (latest instruction): {steering}\nDiscard the prior proposed action and follow this instruction before executing anything."
+                )));
+                self.store.event(
+                    "conversation.steered",
+                    json!({ "content": redact_text(&steering), "step": step }),
+                )?;
+                continue;
+            }
             self.store.event(
                 "model.action",
                 json!({ "step": step, "content": redact_text(&raw) }),
@@ -478,19 +498,28 @@ impl Conversation {
         (self.usage.calls > 0).then(|| self.usage.summary())
     }
 
+    pub fn take_queued(&mut self) -> Option<String> {
+        self.queued_inputs.pop_front()
+    }
+
     pub fn skills(&self) -> Result<String, String> {
         skills::list(&self.paths)
     }
 
     pub fn thinking(&mut self, requested: Option<&str>) -> Result<String, String> {
         let Some(requested) = requested else {
-            return Ok("Thinking activity: off | compact | detailed".into());
+            let current = match self.thinking_mode {
+                ThinkingMode::Off => "off",
+                ThinkingMode::Compact => "compact",
+                ThinkingMode::Raw => "raw",
+            };
+            return Ok(format!("Thinking: {current}\nModes: off | compact | raw"));
         };
         self.thinking_mode = match requested {
             "off" => ThinkingMode::Off,
             "compact" => ThinkingMode::Compact,
-            "detailed" => ThinkingMode::Detailed,
-            _ => return Err("thinking mode must be off, compact, or detailed".into()),
+            "raw" | "live" | "detailed" => ThinkingMode::Raw,
+            _ => return Err("thinking mode must be off, compact, or raw".into()),
         };
         self.store
             .event("conversation.thinking_mode", json!({"mode": requested}))?;
@@ -628,13 +657,9 @@ impl Conversation {
         let model = self.model.clone();
         let model_for_thread = model.clone();
         let (sender, receiver) = mpsc::channel();
+        let raw_thinking = matches!(self.thinking_mode, ThinkingMode::Raw);
         thread::spawn(move || {
-            let result = if json {
-                ollama.chat_json_with_usage(&model_for_thread, &messages)
-            } else {
-                ollama.chat_text_with_usage(&model_for_thread, &messages)
-            };
-            let _ = sender.send(result);
+            ollama.chat_with_stream(&model_for_thread, &messages, json, raw_thinking, sender);
         });
 
         self.receive_activity(phase, model, receiver)
@@ -644,18 +669,67 @@ impl Conversation {
         &mut self,
         phase: &str,
         model: String,
-        receiver: mpsc::Receiver<Result<ChatResult, String>>,
+        receiver: mpsc::Receiver<ChatStreamEvent>,
     ) -> Result<ChatResult, String> {
         let started = Instant::now();
         let frames = ["◐", "◓", "◑", "◒"];
         let mut frame = 0usize;
+        let mut raw_started = false;
+        let mut live_input = crate::keyboard::LiveInput::enter()?;
         let interactive =
             io::stdout().is_terminal() && !matches!(self.thinking_mode, ThinkingMode::Off);
         loop {
+            if let Some(input) = live_input.as_mut() {
+                if let Some(event) = input.poll()? {
+                    match event {
+                        crate::keyboard::InputEvent::Submit(value) if !value.trim().is_empty() => {
+                            self.steering = Some(value);
+                            crate::tui::steered();
+                        }
+                        crate::keyboard::InputEvent::Queue(value) if !value.trim().is_empty() => {
+                            self.queued_inputs.push_back(value);
+                            crate::tui::queued();
+                        }
+                        crate::keyboard::InputEvent::Interrupt => {
+                            if interactive {
+                                print!("\x1b[2K\r");
+                            }
+                            return Err("Interrupted before the next action.".into());
+                        }
+                        crate::keyboard::InputEvent::TaskView => {
+                            crate::tui::system(&self.status());
+                        }
+                        crate::keyboard::InputEvent::Background => {
+                            self.store.event(
+                                "conversation.background_requested",
+                                json!({ "phase": phase }),
+                            )?;
+                            crate::tui::system(
+                                "This local call will finish here; the next queued intent will continue afterward.",
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+            }
             match receiver.recv_timeout(Duration::from_millis(120)) {
-                Ok(result) => {
+                Ok(ChatStreamEvent::Thinking(delta)) => {
+                    if matches!(self.thinking_mode, ThinkingMode::Raw) {
+                        if !raw_started {
+                            print!("\x1b[2K\r  THINKING\n  ");
+                            raw_started = true;
+                        }
+                        print!("{}", delta.replace('\n', "\n  "));
+                        let _ = io::stdout().flush();
+                    }
+                }
+                Ok(ChatStreamEvent::Done(result)) => {
                     if interactive {
-                        print!("\x1b[2K\r");
+                        if raw_started {
+                            println!();
+                        } else {
+                            print!("\x1b[2K\r");
+                        }
                         let _ = io::stdout().flush();
                     }
                     let result = result?;
@@ -673,6 +747,16 @@ impl Conversation {
                             "tokens_per_second": result.usage.tokens_per_second()
                         }),
                     )?;
+                    if !result.thinking.is_empty() {
+                        self.store.event(
+                            "model.thinking",
+                            json!({
+                                "model": model,
+                                "phase": phase,
+                                "content": redact_text(&result.thinking)
+                            }),
+                        )?;
+                    }
                     return Ok(result);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -685,14 +769,14 @@ impl Conversation {
                                 phase,
                                 started.elapsed().as_secs_f64()
                             ),
-                            ThinkingMode::Detailed => print!(
-                                "\r{} {} · {:.1}s · {} · ~{} ctx",
+                            ThinkingMode::Raw if !raw_started => print!(
+                                "\r{} waiting for thought · {:.1}s · {} · ~{} ctx",
                                 frames[frame % frames.len()],
-                                phase,
                                 started.elapsed().as_secs_f64(),
                                 compact_model_name(&model),
                                 format_count(estimated_context as u64)
                             ),
+                            ThinkingMode::Raw => {}
                             ThinkingMode::Off => {}
                         }
                         let _ = io::stdout().flush();

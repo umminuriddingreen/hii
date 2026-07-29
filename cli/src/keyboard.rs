@@ -58,6 +58,45 @@ impl RawModeGuard {
     }
 }
 
+/// Non-blocking input used while a model call is active. It deliberately
+/// shares the same key grammar as the idle composer.
+pub struct LiveInput {
+    _guard: RawModeGuard,
+    buf: String,
+}
+
+impl LiveInput {
+    pub fn enter() -> Result<Option<Self>> {
+        if !is_interactive() {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            _guard: RawModeGuard::enter()?,
+            buf: String::new(),
+        }))
+    }
+
+    pub fn poll(&mut self) -> Result<Option<InputEvent>> {
+        if !event::poll(Duration::ZERO)
+            .map_err(|e| format!("failed to poll active-run input: {e}"))?
+        {
+            return Ok(None);
+        }
+        let Event::Key(key) =
+            event::read().map_err(|e| format!("failed to read active-run input: {e}"))?
+        else {
+            return Ok(None);
+        };
+        if key.kind != event::KeyEventKind::Press {
+            return Ok(None);
+        }
+        Ok(match apply_key(key, &mut self.buf) {
+            KeyOutcome::Emit(event) => Some(event),
+            KeyOutcome::Continue => None,
+        })
+    }
+}
+
 impl Drop for RawModeGuard {
     fn drop(&mut self) {
         // Best-effort: nothing useful to do if restoring fails.

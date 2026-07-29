@@ -24,6 +24,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/help", "all controls"),
     ("/status", "session state"),
     ("/usage", "tokens and speed"),
+    ("/thinking", "thought stream"),
     ("/model", "choose local model"),
     ("/proof", "latest receipt"),
     ("/agents", "managed workers"),
@@ -133,7 +134,10 @@ pub fn welcome(workspace: &Path, model: &str, max_steps: usize, git: &str) {
     );
     println!(
         "  {}",
-        paint("state the outcome  ·  /help for controls", &[DIM, SLATE])
+        paint(
+            "state the outcome  ·  Enter steer  Tab queue  Esc stop  ·  / commands",
+            &[DIM, SLATE]
+        )
     );
     println!();
 }
@@ -190,6 +194,14 @@ pub fn queued() {
         "  {} {}",
         paint("◇ QUEUED", &[AMBER]),
         paint("carried into the next intent", &[DIM, SLATE])
+    );
+}
+
+pub fn steered() {
+    println!(
+        "\n  {} {}",
+        paint("↳ STEER", &[CYAN]),
+        paint("applies before the next action", &[DIM, SLATE])
     );
 }
 

@@ -1,7 +1,11 @@
 use crate::config::ModelProvider;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::time::Duration;
+use std::{
+    io::{BufRead, BufReader},
+    sync::mpsc,
+    time::Duration,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
@@ -32,9 +36,17 @@ impl Message {
     }
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct ResponseMessage {
+    #[serde(default)]
+    content: String,
+    #[serde(default)]
+    thinking: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct ChatResponse {
-    message: Message,
+    message: ResponseMessage,
     #[serde(default)]
     prompt_eval_count: u64,
     #[serde(default)]
@@ -69,7 +81,14 @@ impl ChatUsage {
 #[derive(Clone, Debug)]
 pub struct ChatResult {
     pub content: String,
+    pub thinking: String,
     pub usage: ChatUsage,
+}
+
+#[derive(Debug)]
+pub enum ChatStreamEvent {
+    Thinking(String),
+    Done(Result<ChatResult, String>),
 }
 
 #[derive(Debug, Deserialize)]
@@ -215,6 +234,7 @@ impl Ollama {
             .map_err(|error| format!("invalid Ollama chat response: {error}"))?;
         Ok(ChatResult {
             content: response.message.content,
+            thinking: response.message.thinking,
             usage: ChatUsage {
                 prompt_tokens: response.prompt_eval_count,
                 completion_tokens: response.eval_count,
@@ -261,7 +281,99 @@ impl Ollama {
             completion_duration_ms: 0,
             total_duration_ms: 0,
         };
-        Ok(ChatResult { content, usage })
+        Ok(ChatResult {
+            content,
+            thinking: String::new(),
+            usage,
+        })
+    }
+
+    /// Stream an Ollama response so provider-supplied thinking can be rendered
+    /// without inserting it into the next model request.
+    pub fn chat_with_stream(
+        &self,
+        model: &str,
+        messages: &[Message],
+        json_format: bool,
+        think: bool,
+        sender: mpsc::Sender<ChatStreamEvent>,
+    ) {
+        if self.provider != ModelProvider::Ollama {
+            let result = if json_format {
+                self.chat_json_with_usage(model, messages)
+            } else {
+                self.chat_text_with_usage(model, messages)
+            };
+            let _ = sender.send(ChatStreamEvent::Done(result));
+            return;
+        }
+
+        let mut body = json!({
+            "model": model,
+            "messages": messages,
+            "stream": true,
+            "think": think,
+            "keep_alive": "10m",
+            "options": { "temperature": 0.1, "num_ctx": 32768 }
+        });
+        if json_format {
+            body["format"] = action_schema();
+        }
+        let response = match self
+            .agent
+            .post(&format!("{}/api/chat", self.base_url))
+            .send_json(body)
+            .map_err(format_ureq)
+        {
+            Ok(response) => response,
+            Err(error) => {
+                let _ = sender.send(ChatStreamEvent::Done(Err(error)));
+                return;
+            }
+        };
+
+        let mut content = String::new();
+        let mut thinking = String::new();
+        let mut usage = ChatUsage::default();
+        for line in BufReader::new(response.into_reader()).lines() {
+            let line = match line {
+                Ok(line) => line,
+                Err(error) => {
+                    let _ = sender.send(ChatStreamEvent::Done(Err(format!(
+                        "failed to read Ollama stream: {error}"
+                    ))));
+                    return;
+                }
+            };
+            let chunk: ChatResponse = match serde_json::from_str(&line) {
+                Ok(chunk) => chunk,
+                Err(error) => {
+                    let _ = sender.send(ChatStreamEvent::Done(Err(format!(
+                        "invalid Ollama stream response: {error}"
+                    ))));
+                    return;
+                }
+            };
+            if !chunk.message.thinking.is_empty() {
+                thinking.push_str(&chunk.message.thinking);
+                let _ = sender.send(ChatStreamEvent::Thinking(chunk.message.thinking));
+            }
+            content.push_str(&chunk.message.content);
+            usage = ChatUsage {
+                prompt_tokens: chunk.prompt_eval_count,
+                completion_tokens: chunk.eval_count,
+                prompt_duration_ms: chunk.prompt_eval_duration / 1_000_000,
+                completion_duration_ms: chunk.eval_duration / 1_000_000,
+                total_duration_ms: chunk.total_duration / 1_000_000,
+            };
+        }
+        let result = ChatResult {
+            content,
+            thinking,
+            usage,
+        };
+        log_llm_request(model, self.provider, &result.usage);
+        let _ = sender.send(ChatStreamEvent::Done(Ok(result)));
     }
 }
 
