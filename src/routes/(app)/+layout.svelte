@@ -13,6 +13,7 @@
     '/pilot': { title: 'Founder pilot', id: 'pilot', flush: true },
     '/terminal': { title: 'Terminal', id: 'console', flush: true },
     '/termite': { title: 'Termite', id: 'termite' },
+    '/trader': { title: 'Trader', id: 'trader', flush: true },
     '/upload': { title: 'Exchange', id: 'upload' }
   };
 

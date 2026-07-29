@@ -30,6 +30,7 @@
     "hii:contextdock:check": "node --experimental-strip-types scripts/hii-contextdock-smoke.mjs",
     "hii:activation:check": "node --experimental-strip-types scripts/hii-activation-smoke.mjs",
     "hii:windows:check": "node --experimental-strip-types scripts/hii-window-state-smoke.mjs",
+    "hii:trader:check": "vitest run src/lib/hii-trader.test.ts",
     "hii:workspace:check": "node --experimental-strip-types scripts/hii-workspace-store-smoke.mjs",
     "hii:bootstrap:check": "bash -n scripts/hii-bootstrap.sh",
     "cli:check": "cargo fmt --all -- --check && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings",

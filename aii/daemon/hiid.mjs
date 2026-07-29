@@ -24,6 +24,7 @@ const CODEX_APP_SERVER_STATUS = path.join(CODEX_APP_SERVER_DIR, "status.json");
 const CODEX_APP_SERVER_LOG = path.join(CODEX_APP_SERVER_DIR, "app-server.log");
 const CODEX_APP_SERVER_SOCKET = path.join(CODEX_APP_SERVER_DIR, "app-server.sock");
 const CONTEXT_DB = path.join(RUNTIME, "hii.db");
+const TRADER_TICK = path.join(ROOT, "scripts", "hii-trader-tick.mjs");
 
 const OWNED_PATTERNS = [
   `${ROOT}/aii/daemon/hiid.mjs`,
@@ -34,6 +35,7 @@ const OWNED_PATTERNS = [
 ];
 
 const activeRuns = new Map();
+let traderTick = null;
 
 // AII owns the capability registry (aii/capabilities/registry.json) and
 // publishes it to the shared runtime substrate; HII reads the published copy.
@@ -958,6 +960,38 @@ function runLoop() {
   writeStatus("running");
   ensureConfig();
   publishCapabilities();
+  function tickTrader() {
+    if (traderTick) return;
+    traderTick = execFile(process.execPath, ["--experimental-strip-types", TRADER_TICK], {
+      cwd: ROOT,
+      timeout: 2 * 60 * 1000,
+      maxBuffer: 512 * 1024
+    }, (error, stdout, stderr) => {
+      const output = redact(`${stdout ?? ""}${stderr ?? ""}`.trim());
+      traderTick = null;
+      if (error) {
+        event("trader.tick.failed", {
+          actor: "aii.hiid",
+          target: "hii.trader.autonomous_paper",
+          status: "failed",
+          text: output || String(error.message)
+        });
+        return;
+      }
+      let result = null;
+      try { result = JSON.parse(stdout); } catch { /* retain redacted output */ }
+      if (!result?.skipped) {
+        event("trader.tick.completed", {
+          actor: "aii.hiid",
+          target: "hii.trader.autonomous_paper",
+          status: "completed",
+          text: output || "Autonomous paper trader cycle completed"
+        });
+      }
+    });
+  }
+  setTimeout(tickTrader, 1500);
+  setInterval(tickTrader, 60_000);
   setInterval(() => {
     try {
       publishCapabilities();
