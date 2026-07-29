@@ -43,6 +43,13 @@ describe('agentic workspace interaction contract', () => {
     expect(explorer).toContain('<TerminalPane');
   });
 
+  it('supports natural trackpad pan and cursor-anchored zoom', () => {
+    expect(workspace).toContain('on:wheel={trackpad}');
+    expect(workspace).toContain('canNestedSurfaceScroll');
+    expect(workspace).toContain('panWorkspaceViewport');
+    expect(workspace).toContain('zoomWorkspaceViewportAt');
+  });
+
   it('bridges an explicit browser request into its paired terminal', () => {
     expect(explorer).toContain('curl -I -L --max-time 20 --');
     expect(explorer).toContain("new CustomEvent('hii:terminal-command'");

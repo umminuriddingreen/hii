@@ -14,6 +14,7 @@
   import type { PageData } from './$types';
   import type { WorkspaceDoc, WorkspaceNode, WorkspaceNodeType } from '@/lib/workspace/types';
   import { makeNode, seedFor, seedFromFile, seedFromString, seedsFromDataTransfer, type NodeSeed } from '@/lib/workspace/ingest';
+  import { panWorkspaceViewport, zoomWorkspaceViewportAt } from '@/lib/workspace/viewport';
 
   export let data: PageData;
   const surfaceCatalog = [
@@ -64,7 +65,30 @@
   function drag(event:PointerEvent,node:WorkspaceNode){if((event.target as HTMLElement).closest('button,input,textarea,iframe,a,.scroll,.xterm'))return;event.preventDefault();select(node);const sx=event.clientX,sy=event.clientY,ox=node.x,oy=node.y;const move=(e:PointerEvent)=>patch(node.id,{x:ox+(e.clientX-sx)/doc.viewport.zoom,y:oy+(e.clientY-sy)/doc.viewport.zoom});const up=()=>{removeEventListener('pointermove',move);removeEventListener('pointerup',up)};addEventListener('pointermove',move);addEventListener('pointerup',up);}
   function resize(event:PointerEvent,node:WorkspaceNode){event.preventDefault();event.stopPropagation();const sx=event.clientX,sy=event.clientY,ow=node.w,oh=node.h;const move=(e:PointerEvent)=>patch(node.id,{w:Math.max(140,ow+(e.clientX-sx)/doc.viewport.zoom),h:Math.max(80,oh+(e.clientY-sy)/doc.viewport.zoom)});const up=()=>{removeEventListener('pointermove',move);removeEventListener('pointerup',up)};addEventListener('pointermove',move);addEventListener('pointerup',up);}
   function pan(event:PointerEvent){if(event.target!==canvas)return;const sx=event.clientX,sy=event.clientY,ox=doc.viewport.x,oy=doc.viewport.y;const move=(e:PointerEvent)=>doc={...doc,viewport:{...doc.viewport,x:ox+e.clientX-sx,y:oy+e.clientY-sy}};const up=()=>{removeEventListener('pointermove',move);removeEventListener('pointerup',up);persist()};addEventListener('pointermove',move);addEventListener('pointerup',up);}
-  function zoom(event:WheelEvent){if(!event.metaKey&&!event.ctrlKey)return;event.preventDefault();doc={...doc,viewport:{...doc.viewport,zoom:Math.min(2.5,Math.max(.25,doc.viewport.zoom*Math.exp(-event.deltaY*.002)))}};persist();}
+  function canNestedSurfaceScroll(event:WheelEvent){
+    let element=event.target instanceof HTMLElement?event.target:null;
+    while(element&&element!==canvas){
+      const style=getComputedStyle(element),vertical=/(auto|scroll)/.test(style.overflowY),horizontal=/(auto|scroll)/.test(style.overflowX);
+      const canY=vertical&&element.scrollHeight>element.clientHeight&&((event.deltaY<0&&element.scrollTop>0)||(event.deltaY>0&&element.scrollTop+element.clientHeight<element.scrollHeight-1));
+      const canX=horizontal&&element.scrollWidth>element.clientWidth&&((event.deltaX<0&&element.scrollLeft>0)||(event.deltaX>0&&element.scrollLeft+element.clientWidth<element.scrollWidth-1));
+      if(canX||canY)return true;
+      element=element.parentElement;
+    }
+    return false;
+  }
+  function trackpad(event:WheelEvent){
+    const zooming=event.metaKey||event.ctrlKey;
+    if(!zooming&&canNestedSurfaceScroll(event))return;
+    event.preventDefault();
+    const unit=event.deltaMode===WheelEvent.DOM_DELTA_LINE?16:event.deltaMode===WheelEvent.DOM_DELTA_PAGE?innerHeight:1;
+    if(zooming){
+      doc={...doc,viewport:zoomWorkspaceViewportAt(doc.viewport,{x:event.clientX,y:event.clientY},event.deltaY*unit)};
+    }else{
+      const horizontal=event.shiftKey&&event.deltaX===0?event.deltaY: event.deltaX;
+      doc={...doc,viewport:panWorkspaceViewport(doc.viewport,horizontal*unit,(event.shiftKey&&event.deltaX===0?0:event.deltaY)*unit)};
+    }
+    persist();
+  }
   async function refreshContext(){try{context=await (await fetch('/api/context')).json()}catch{}}
   async function refreshBoard(){try{board=(await (await fetch('/api/board/tasks')).json()).tasks||[]}catch{}}
   async function refreshDaemon(){try{daemon=await (await fetch('/api/daemon')).json()}catch{}}
@@ -75,8 +99,8 @@
 </script>
 
 {#if !data.enabled}<div class="hii-page flex min-h-[60vh] flex-col items-center justify-center gap-3"><p class="hii-kicker">surface off</p><h1 class="hii-page-title">HII is turned off</h1></div>
-{:else}<main bind:this={canvas} class="absolute inset-0 touch-none overflow-hidden" on:pointerdown={pan} on:dblclick={openExplorer} on:wheel={zoom} on:dragover|preventDefault on:drop={drop} style="background:#fff radial-gradient(circle,rgba(23,23,23,.08) 1px,transparent 1px);background-size:32px 32px">
-  <div class="absolute left-0 top-0 origin-top-left" style={`transform:translate(${doc.viewport.x}px,${doc.viewport.y}px) scale(${doc.viewport.zoom})`}>
+{:else}<main bind:this={canvas} class="absolute inset-0 touch-none overflow-hidden" on:pointerdown={pan} on:dblclick={openExplorer} on:wheel={trackpad} on:dragover|preventDefault on:drop={drop} style="background:#fff radial-gradient(circle,rgba(23,23,23,.08) 1px,transparent 1px);background-size:32px 32px">
+  <div class="absolute left-0 top-0 origin-top-left will-change-transform" style={`transform:translate(${doc.viewport.x}px,${doc.viewport.y}px) scale(${doc.viewport.zoom})`}>
     {#each doc.nodes as node (node.id)}<section role="group" aria-label={`${node.type} workspace node`} class="group absolute left-0 top-0 flex flex-col overflow-hidden" on:pointerdown={(event)=>drag(event,node)} style={`transform:translate(${node.x}px,${node.y}px);width:${node.w}px;height:${node.h}px;z-index:${Math.round(node.z)}`}>
       <header class="pointer-events-none absolute right-1 top-1 z-20"><span class="sr-only">{String(node.payload.title||node.type)}</span><button class="pointer-events-auto grid h-6 w-6 place-items-center rounded-full bg-neutral-950/80 text-sm text-white opacity-0 shadow-sm transition-opacity hover:bg-neutral-950 group-hover:opacity-100 focus:opacity-100" on:click={()=>close(node.id)} aria-label="close node">×</button></header>
       <div class="relative min-h-0 flex-1">
