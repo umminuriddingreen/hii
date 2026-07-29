@@ -65,7 +65,7 @@
 </script>
 
 {#if !data.enabled}<div class="hii-page flex min-h-[60vh] flex-col items-center justify-center gap-3"><p class="hii-kicker">surface off</p><h1 class="hii-page-title">HII is turned off</h1></div>
-{:else}<main bind:this={canvas} class="absolute inset-0 touch-none overflow-hidden" on:pointerdown={pan} on:dblclick={openExplorer} on:wheel={zoom} on:dragover|preventDefault on:drop={drop} style="background:var(--hii-warm-white) radial-gradient(circle,rgba(23,23,23,.08) 1px,transparent 1px);background-size:32px 32px">
+{:else}<main bind:this={canvas} class="absolute inset-0 touch-none overflow-hidden" on:pointerdown={pan} on:dblclick={openExplorer} on:wheel={zoom} on:dragover|preventDefault on:drop={drop} style="background:#fff radial-gradient(circle,rgba(23,23,23,.08) 1px,transparent 1px);background-size:32px 32px">
   <div class="absolute left-0 top-0 origin-top-left" style={`transform:translate(${doc.viewport.x}px,${doc.viewport.y}px) scale(${doc.viewport.zoom})`}>
     {#each doc.nodes as node (node.id)}<section role="group" aria-label={`${node.type} workspace node`} class="group absolute left-0 top-0 flex flex-col overflow-hidden" on:pointerdown={(event)=>drag(event,node)} style={`transform:translate(${node.x}px,${node.y}px);width:${node.w}px;height:${node.h}px;z-index:${Math.round(node.z)}`}>
       <header class="pointer-events-none absolute right-1 top-1 z-20"><span class="sr-only">{String(node.payload.title||node.type)}</span><button class="pointer-events-auto grid h-6 w-6 place-items-center rounded-full bg-neutral-950/80 text-sm text-white opacity-0 shadow-sm transition-opacity hover:bg-neutral-950 group-hover:opacity-100 focus:opacity-100" on:click={()=>close(node.id)} aria-label="close node">×</button></header>
