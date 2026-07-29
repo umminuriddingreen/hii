@@ -2,8 +2,10 @@
   import type { WorkspaceNode } from '@/lib/workspace/types';
   export let node:WorkspaceNode;
   export let onPayload:(patch:Record<string,unknown>)=>void;
+  export let onSize:(size:{w:number;h:number})=>void=()=>{};
   const text=(key:string)=>String(node.payload[key]??'');
   const size=(value:unknown)=>{const n=Number(value);return Number.isFinite(n)?n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:`${(n/1048576).toFixed(1)} MB`:''};
+  const fitImage=(event:Event)=>{const image=event.currentTarget as HTMLImageElement;if(!image.naturalWidth||!image.naturalHeight)return;const ratio=image.naturalWidth/image.naturalHeight,current=node.w/node.h;const next=current>ratio?{w:node.h*ratio,h:node.h}:{w:node.w,h:node.w/ratio};if(Math.abs(next.w-node.w)>1||Math.abs(next.h-node.h)>1)onSize(next)};
 </script>
 
 {#if node.type==='note'}
@@ -19,7 +21,7 @@
 {:else if node.type==='file'}
   <div class="flex h-full items-center gap-3 p-3"><span class="text-2xl">{text('emoji')||'📄'}</span><div class="min-w-0"><strong class="block truncate text-[12px]">{text('name')}</strong><small class="block font-mono text-[9px] uppercase text-neutral-400">{text('label')||text('category')||'file'} · {size(node.payload.size)}</small><p class="mt-1 text-[10px] text-neutral-500">{text('description')}</p></div></div>
 {:else if node.type==='image'}
-  <figure class="relative h-full bg-neutral-100"><img src={text('url')} alt={text('name')||'Workspace image'} class="h-full w-full object-contain"/><figcaption class="absolute bottom-0 left-0 right-0 truncate bg-black/55 px-2 py-1 font-mono text-[9px] text-white">{text('name')}</figcaption></figure>
+  <figure class="h-full w-full overflow-hidden"><img src={text('url')} alt={text('name')||'Workspace image'} class="h-full w-full object-cover" on:load={fitImage}/></figure>
 {:else if node.type==='media'}
   {#if text('kind')==='audio'}<div class="grid h-full place-items-center bg-neutral-950 p-4 text-white"><div class="w-full"><p class="mb-3 truncate font-mono text-[10px]">{text('name')}</p><audio controls src={text('url')} class="w-full"><track kind="captions"/></audio></div></div>
   {:else if text('kind')==='pdf'}<iframe src={text('url')} title={text('name')||'PDF'} class="h-full w-full border-0"></iframe>
