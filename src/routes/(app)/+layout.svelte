@@ -18,7 +18,9 @@
   };
 
   $: embedded = $page.url.searchParams.get('desk') === '1';
-  $: current = surfaces[$page.url.pathname] || { title: 'HII', id: 'workspace' };
+  $: current = $page.url.pathname.startsWith('/docs')
+    ? { title: 'Documentation', id: 'docs', flush: true }
+    : surfaces[$page.url.pathname] || { title: 'HII', id: 'workspace' };
 </script>
 
 {#if $page.url.pathname === '/landing'}

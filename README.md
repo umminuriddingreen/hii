@@ -11,6 +11,19 @@ and records proof through shared runtime state under `~/.hii`.
 Read [the HII/AII master context](docs/HII_AII_MASTER_CONTEXT.md) before making
 product or architecture changes.
 
+## Documentation
+
+HII compiles its repository documentation into a source-linked web manual at
+`/docs`. Run `npm run dev`, then open:
+
+```text
+http://127.0.0.1:5173/docs
+```
+
+The web manual reads the Markdown files in this repository at request time.
+Those source files remain canonical; the web surface adds navigation,
+provenance, status, readable code and tables, and stable document URLs.
+
 ## Current Product Decision
 
 The active product is **HII Knowledge Workspace**, built on the Context Dock
