@@ -1,6 +1,6 @@
 use std::{env, path::PathBuf};
 
-pub const DEFAULT_MODEL: &str = "qwen3.6:27b-mlx";
+pub const DEFAULT_MODEL: &str = "qwen3.6:35b-mlx";
 pub const DEFAULT_REVIEW_MODEL: &str = "qwen3.6:35b-mlx";
 pub const DEFAULT_MAX_STEPS: usize = 12;
 
