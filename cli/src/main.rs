@@ -17,6 +17,7 @@ mod skills;
 #[cfg(feature = "preview")]
 mod system_monitor;
 mod tools;
+mod tui;
 
 use agent::RunOptions;
 use clap::{Parser, Subcommand};
@@ -337,7 +338,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         .cwd
         .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
     let mut conversation = Conversation::new(paths, workspace, cli.model, cli.max_steps)?;
-    println!("HII\n");
+    conversation.welcome();
     // A line queued with Tab is carried forward and prepended to the next Submit.
     let mut queued: Option<String> = None;
     let interactive = keyboard::is_interactive();
@@ -346,7 +347,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             // Raw-mode keyboard model: Enter=submit, Tab=queue, Esc/Ctrl+B/Ctrl+T
             // are surfaced as events (interrupt/background/task-view meaning applies
             // during a run; at the idle prompt they are informational).
-            match keyboard::read_event("hii › ").map_err(|error| error.to_string())? {
+            match keyboard::read_event(&tui::prompt()).map_err(|error| error.to_string())? {
                 keyboard::InputEvent::Submit(line) => match queued.take() {
                     Some(pending) if line.trim().is_empty() => pending,
                     Some(pending) => format!("{pending}\n{line}"),
@@ -355,17 +356,17 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 keyboard::InputEvent::Queue(line) => {
                     if !line.trim().is_empty() {
                         queued = Some(line);
-                        println!("  ⏸ queued for next turn");
+                        tui::queued();
                     }
                     continue;
                 }
                 keyboard::InputEvent::TaskView => {
-                    println!("{}\n", conversation.status());
+                    tui::system(&conversation.status());
                     continue;
                 }
                 keyboard::InputEvent::Interrupt => break,
                 keyboard::InputEvent::Background => {
-                    println!("  (nothing running to background)");
+                    tui::idle_background();
                     continue;
                 }
             }
@@ -387,7 +388,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         // `!<command>` runs a shell command directly (interaction grammar).
         if let Some(command) = goal.strip_prefix('!') {
             let output = conversation.shell(command.trim());
-            println!("{output}\n");
+            tui::system(&output);
             continue;
         }
         let mut show_activity = false;
@@ -454,15 +455,12 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         };
         match result {
             Ok(reply) => {
-                println!("\n{reply}");
-                if show_activity {
-                    if let Some(activity) = conversation.activity_footer() {
-                        println!("\x1b[2m{activity}\x1b[0m");
-                    }
-                }
-                println!();
+                let activity = show_activity
+                    .then(|| conversation.activity_footer())
+                    .flatten();
+                tui::reply(&reply, activity.as_deref());
             }
-            Err(error) => println!("\nI hit a local problem: {error}\n"),
+            Err(error) => tui::error(&error),
         }
     }
     Ok(ExitCode::SUCCESS)

@@ -405,27 +405,17 @@ fn choose_review_model(requested: Option<&str>, installed: &[String]) -> Result<
 
 fn system_prompt(workspace: &std::path::Path, max_steps: usize, dry_run: bool) -> String {
     format!(
-        r#"You are the local HII workspace agent. Complete the user's goal; do not stop at advice.
+        r#"You are HII's local workspace agent. Finish the goal with proof.
+Workspace: {workspace}
+Limit: {max_steps} steps. Dry run: {dry_run}.
 
-Workspace boundary: {workspace}
-Step limit: {max_steps}
-Dry run: {dry_run}
+Loop: inspect -> act -> verify each change -> adjust -> final.
+Return one JSON object/turn. The action `type` is the tool:
+read,list,search,write,edit,shell,verify,http,hii_context,og_next,caps_check,board_read,board_write,skill_search,bridge_send,bridge_read.
+Use only needed fields: path,query,command,content,old,new,replace_all,offset,limit,url.
+Finish: {{"type":"final","summary":"result","verification":["checks run"],"next":null}}
 
-Loop: inspect -> choose one tool -> act -> observe -> verify THIS step -> adjust -> final receipt.
-Verify each change as you make it (run the test/build/check for the step you just did); do not batch all verification to the end. If a step's proof fails, stop and re-plan rather than compounding on a broken step.
-Use the smallest relevant context. Read AGENTS.md before editing when it exists. Preserve unclear work. Do not publish, push, spend, message, delete, read secrets, or access paths outside the workspace. The shell guard is a safety backstop, not permission. Prefer `edit` for changing existing files (exact, minimal), `write` for new files or full rewrites, and `verify` for actual checks. For large files, read a slice with `offset`/`limit`. The `http` tool only reaches local services.
-
-HII operating-logic tools (work through HII, not around it): hii_context (repo/runtime snapshot), og_next (operational-graph next path), caps_check (capabilities), board_read / board_write (local task board; put the title in `query`), skill_search (find a registered skill via `query`), bridge_send / bridge_read (inter-agent handoff; message in `query`). Prefer skill_search before doing repeatable work by hand.
-
-Return exactly one JSON object per turn.
-
-Tool action (the tool name is the type):
-{{"type":"read|list|search|write|edit|shell|verify|http|hii_context|og_next|caps_check|board_read|board_write|skill_search|bridge_send|bridge_read","path":"relative path","query":"for search","command":"for shell or verify","content":"for write","old":"exact text to replace (edit)","new":"replacement text (edit)","replace_all":false,"offset":1,"limit":200,"url":"for http","reason":"short reason"}}
-
-Final action:
-{{"type":"final","summary":"what is now true","verification":["checks actually run"],"next":"highest-value next action or null"}}
-
-Never claim a check ran unless you invoked verify or http and saw its output. Do not wrap JSON in Markdown."#,
+Read AGENTS.md before editing. Use minimal context; read large files in slices. Preserve unclear work. Prefer edit for small changes and verify for checks. HII tools expose context, graph, capabilities, board, skills, and bridge. Stay inside the workspace; never publish, push, spend, message, delete, or read secrets. Never claim unrun proof."#,
         workspace = workspace.display()
     )
 }
@@ -634,5 +624,15 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(action, Action::Final { summary, .. } if summary == "done"));
+    }
+
+    #[test]
+    fn agent_prompt_stays_lean() {
+        let prompt = system_prompt(std::path::Path::new("/workspace"), 12, false);
+        assert!(
+            prompt.len() <= 1_000,
+            "agent prompt grew to {} bytes",
+            prompt.len()
+        );
     }
 }

@@ -359,5 +359,7 @@ mod tests {
         assert!(types.iter().any(|value| value == "write"));
         assert!(types.iter().any(|value| value == "verify"));
         assert!(!types.iter().any(|value| value == "tool"));
+        let bytes = serde_json::to_vec(&schema).expect("serialize schema").len();
+        assert!(bytes <= 1_000, "action schema grew to {bytes} bytes");
     }
 }

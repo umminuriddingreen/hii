@@ -196,6 +196,16 @@ impl Conversation {
                     ..
                 } => {
                     used_tools = true;
+                    let target = tool_target(
+                        &tool,
+                        path.as_deref(),
+                        query.as_deref(),
+                        command.as_deref(),
+                        url.as_deref(),
+                    );
+                    if io::stdout().is_terminal() {
+                        crate::tui::tool_start(step, &tool, &target);
+                    }
                     let shell_evidence = tool == "shell"
                         && command.as_deref().is_some_and(shell_command_is_read_only);
                     mutating_work |=
@@ -235,6 +245,9 @@ impl Conversation {
                         )
                     };
                     let safe_output = redact_text(&result.output);
+                    if io::stdout().is_terminal() {
+                        crate::tui::tool_result(result.ok, result.verification || shell_evidence);
+                    }
                     if result.verification || shell_evidence {
                         verification.push(VerificationRecord {
                             command: command
@@ -409,6 +422,15 @@ impl Conversation {
             self.usage.summary(),
             learning
         )
+    }
+
+    pub fn welcome(&self) {
+        crate::tui::welcome(
+            self.tools.workspace(),
+            &self.model,
+            self.max_steps,
+            &self.tools.git_snapshot(),
+        );
     }
 
     pub fn paths(&self) -> &AppPaths {
@@ -789,6 +811,22 @@ fn compact_model_name(model: &str) -> &str {
     model.strip_suffix("-mlx").unwrap_or(model)
 }
 
+fn tool_target(
+    tool: &str,
+    path: Option<&str>,
+    query: Option<&str>,
+    command: Option<&str>,
+    url: Option<&str>,
+) -> String {
+    match tool {
+        "shell" | "verify" => command.unwrap_or("workspace command"),
+        "http" => url.unwrap_or("local endpoint"),
+        "search" => query.or(path).unwrap_or("workspace search"),
+        _ => path.or(query).unwrap_or("workspace"),
+    }
+    .to_string()
+}
+
 fn format_count(value: u64) -> String {
     if value >= 1_000_000 {
         format!("{:.1}m", value as f64 / 1_000_000.0)
@@ -869,27 +907,23 @@ fn explicit_skill_signal(input: &str) -> bool {
 
 fn conversation_prompt(workspace: &std::path::Path, max_steps: usize) -> String {
     format!(
-        r#"You are HII, Ummi's conversational local workspace partner. Sound natural, direct, warm, and concise. Maintain continuity across the conversation.
-
-For greetings, questions, reflection, or ordinary conversation, respond immediately with:
-{{"type":"message","message":"your natural response"}}
-
-Only use workspace tools when the user asks you to inspect, change, build, diagnose, or verify something. Use one tool at a time. After workspace work, answer naturally with what matters; never expose run IDs, model names, step counters, internal event paths, action JSON, or receipt boilerplate unless explicitly asked.
-
+        r#"You are HII, Ummi's concise local workspace partner.
 Workspace: {workspace}
-Maximum tool steps per turn: {max_steps}
+Limit: {max_steps} tool steps/turn.
 
-Tool action (the tool name is the type):
-{{"type":"read|list|search|write|edit|shell|verify|http","path":"optional relative path","query":"for search","command":"for shell or verify","content":"for write","old":"exact text to replace (edit)","new":"replacement text (edit)","replace_all":false,"url":"for local http","reason":"short internal reason"}}
+Return one JSON object:
+- Talk: {{"type":"message","message":"natural reply"}}
+- Work: {{"type":"read|list|search|write|edit|shell|verify|http", ...needed fields}}
 
-Do not publish, push, spend, message third parties, delete, read secrets, or leave the workspace. If you write or execute workspace state, verify it before replying. Return exactly one JSON object and no Markdown wrapper."#,
+Use one tool at a time only for requested inspection or work. Fields: path, query, command, content, old, new, replace_all, offset, limit, url. After a mutation, verify before replying. Preserve unclear work. Stay inside the workspace; never publish, push, spend, message, delete, or read secrets. Final replies are natural and omit internal IDs, protocol, and receipt bookkeeping."#,
         workspace = workspace.display()
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::shell_command_is_read_only;
+    use super::{conversation_prompt, shell_command_is_read_only};
+    use std::path::Path;
 
     #[test]
     fn recognizes_read_only_shell_evidence() {
@@ -908,5 +942,15 @@ mod tests {
         ));
         assert!(super::explicit_skill_signal("Make this a skill"));
         assert!(!super::explicit_skill_signal("hello there"));
+    }
+
+    #[test]
+    fn conversation_prompt_stays_lean() {
+        let prompt = conversation_prompt(Path::new("/workspace"), 12);
+        assert!(
+            prompt.len() <= 800,
+            "conversation prompt grew to {} bytes",
+            prompt.len()
+        );
     }
 }
