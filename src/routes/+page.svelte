@@ -10,6 +10,7 @@
   import SpatialRunPane from '$lib/components/workspace/SpatialRunPane.svelte';
   import SurfacePane from '$lib/components/workspace/SurfacePane.svelte';
   import StaticNode from '$lib/components/workspace/StaticNode.svelte';
+  import HiiLogo from '$lib/components/HiiLogo.svelte';
   import type { PageData } from './$types';
   import type { WorkspaceDoc, WorkspaceNode, WorkspaceNodeType } from '@/lib/workspace/types';
   import { makeNode, seedFor, seedFromFile, seedFromString, seedsFromDataTransfer, type NodeSeed } from '@/lib/workspace/ingest';
@@ -20,10 +21,7 @@
     { id:'activate', title:'Activation', path:'/activate', capabilityId:'hii.agent.workspace_run', detail:'choose agent · approve context · run' },
     { id:'boards', title:'Boards', path:'/boards', capabilityId:'hii.board.task_kanban', detail:'bounded work · owners · blockers' },
     { id:'console', title:'Console', path:'/console', capabilityId:'hii.terminal.observe', detail:'agents · logs · receipts' },
-    { id:'pilot', title:'Founder pilot', path:'/pilot', capabilityId:'hii.agent.workspace_run', detail:'one real task · one proved win' },
-    { id:'dashboard', title:'Dashboard', path:'/dashboard', capabilityId:'hii.og.operational_graph', detail:'live control-plane overview' },
-    { id:'termite', title:'Termite', path:'/termite', capabilityId:'termite.rhino.managed_job', detail:'Rhino jobs · evidence · receipts' },
-    { id:'exchange', title:'Exchange', path:'/upload', capabilityId:'hii.exchange.asset_link', detail:'approved assets · controlled delivery' }
+    { id:'dashboard', title:'System', path:'/dashboard', capabilityId:'hii.og.operational_graph', detail:'live status · capabilities · next actions' }
   ];
   let doc:WorkspaceDoc={version:1,updatedAt:new Date().toISOString(),viewport:{x:0,y:0,zoom:1},nextZ:1,nodes:[]};
   let ready=false; let selected:string|null=null; let omnibar=false; let query=''; let saveTimer:ReturnType<typeof setTimeout>|undefined;
@@ -107,7 +105,34 @@
       <footer class="flex items-center justify-between border-t px-4 py-2 font-mono text-[9px] uppercase tracking-[0.12em] text-neutral-400"><span>direct workspace intent · Shift Enter for a new line</span><button class="rounded-full bg-neutral-950 px-3 py-1.5 text-white disabled:opacity-30" disabled={!composerText.trim()} on:click={submitIntent}>send to HII ↵</button></footer>
     </section>{/if}
   </div>
-  {#if ready&&doc.nodes.length===0}<div class="pointer-events-none absolute inset-0 grid place-items-center text-center text-[13px] tracking-wide text-neutral-400"><span>⌥ Space to tell HII · double-click to explore<br/>paste or drop media · ⌘K commands · ⌘scroll zoom</span></div>{/if}
+  {#if ready&&doc.nodes.length===0}
+    <section class="absolute inset-0 grid place-items-center p-6" aria-labelledby="empty-workspace-title">
+      <div data-workspace-ui class="w-[min(720px,92vw)] rounded-[28px] border border-neutral-900/10 bg-white/94 p-7 shadow-[0_28px_90px_rgba(16,24,40,.13)] backdrop-blur-xl sm:p-10">
+        <div class="flex items-center justify-between">
+          <HiiLogo />
+          <span class="rounded-full bg-[var(--hii-soft-green)] px-3 py-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-emerald-800">local workspace</span>
+        </div>
+        <p class="mt-12 font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--hii-electric-blue)]">Start with what you already have</p>
+        <h1 id="empty-workspace-title" class="mt-3 max-w-[620px] text-[clamp(40px,7vw,72px)] font-semibold leading-[.92] tracking-[-.065em] text-neutral-950">Bring your information. Give it an intention.</h1>
+        <p class="mt-5 max-w-[570px] text-[16px] leading-7 text-neutral-500">HII keeps your sources, agent work, and proof together on this canvas.</p>
+        <div class="mt-8 grid gap-3 sm:grid-cols-3">
+          <button class="rounded-2xl bg-[var(--hii-electric-blue)] p-4 text-left text-white shadow-lg shadow-blue-500/15" on:click={()=>void summonComposer()}>
+            <span class="block font-mono text-[9px] uppercase tracking-[0.1em] text-white/70">⌥ Space</span>
+            <strong class="mt-3 block text-[15px]">Tell HII the outcome</strong>
+          </button>
+          <button class="rounded-2xl border border-neutral-900/10 bg-neutral-50 p-4 text-left hover:border-neutral-900/25" on:click={()=>fileInput?.click()}>
+            <span class="block font-mono text-[9px] uppercase tracking-[0.1em] text-neutral-400">Files + folders</span>
+            <strong class="mt-3 block text-[15px]">Bring in information</strong>
+          </button>
+          <button class="rounded-2xl border border-neutral-900/10 bg-neutral-50 p-4 text-left hover:border-neutral-900/25" on:click={()=>spawn('explorer')}>
+            <span class="block font-mono text-[9px] uppercase tracking-[0.1em] text-neutral-400">Workspace objects</span>
+            <strong class="mt-3 block text-[15px]">Explore what HII can do</strong>
+          </button>
+        </div>
+        <p class="mt-6 text-center font-mono text-[9px] uppercase tracking-[0.1em] text-neutral-400">paste or drop anywhere · ⌘K for every command · your files stay local</p>
+      </div>
+    </section>
+  {/if}
   <input bind:this={fileInput} type="file" multiple class="sr-only" aria-label="Upload files to workspace" on:change={(event)=>{void addFiles([...(event.currentTarget.files||[])]);event.currentTarget.value=''}}/>
   <button class="absolute right-5 top-4 rounded-full bg-[var(--hii-electric-blue)] px-4 py-2 font-mono text-[11px] text-white shadow-lg" on:click={refreshDaemon}><i class="mr-2 inline-block h-2 w-2 rounded-full bg-[var(--hii-acid-green)]"></i>hiid {daemon?.instances?.length||context?.capabilities?.length||'…'}</button>
   {#if omnibar}<div class="absolute inset-0 z-50 bg-white/80 backdrop-blur-sm"><button type="button" class="absolute inset-0 cursor-default" aria-label="Close command palette" on:click={()=>omnibar=false}></button><div class="absolute left-1/2 top-1/2 w-[min(620px,90vw)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog" aria-modal="true" aria-label="Create workspace object"><div class="flex items-center gap-3 border-b p-4"><span>⌘K</span><input bind:this={commandInput} bind:value={query} class="w-full outline-none" placeholder="Open a tool, create an object, or upload…" /></div><div class="max-h-[420px] overflow-auto p-2">{#each commands as command}<button class="flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-neutral-50" on:click={()=>runCommand(command)}><span class="text-xl">{command[0]==='surface'?'↗':'+'}</span><span class="flex-1"><strong class="block">{command[1]}</strong><small class="text-neutral-400">{command[2]}</small></span><kbd class="font-mono text-[10px] text-neutral-400">{command[0]==='surface'?'open':command[0]==='upload'?'choose':'create'}</kbd></button>{/each}</div></div></div>{/if}

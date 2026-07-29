@@ -17,11 +17,19 @@ describe('public HII homepage', () => {
 
   it('states the product truth and carries canonical metadata', () => {
     expect(homepage).toContain('https://humaninformationinterface.com/');
-    expect(homepage).toContain('Your work,<br /><em>alive.</em>');
-    expect(homepage).toContain('Create your account');
-    expect(homepage).toContain('Mac installer · preparing');
+    expect(homepage).toContain('Your information.<br />Your agents.<br /><em>One workspace.</em>');
+    expect(homepage).toContain('Get the Mac beta');
+    expect(homepage).toContain('Signed Mac installer · preparing');
     expect(homepage).toContain('/marketing/hii-workspace-live.png');
     expect(homepage).toContain('/marketing/hii-command-palette-live.png');
-    expect(homepage).toContain('Actual HII interface · staged founder-beta project content · captured locally');
+    expect(homepage).toContain('Actual interface · local project · no concept render');
+  });
+
+  it('presents one truthful free product and one concrete paid activation', () => {
+    expect(homepage).toContain('Local beta');
+    expect(homepage).toContain('Founder activation');
+    expect(homepage).toContain('$500 <small>one time</small>');
+    expect(homepage).toContain('Developer ID signing and Apple notarization pass');
+    expect(homepage).toContain('We will never ask you to bypass Gatekeeper');
   });
 });

@@ -13,6 +13,7 @@ const cargo = readFileSync(resolve(root, 'src-tauri/Cargo.toml'), 'utf8');
 const packageJson = readFileSync(resolve(root, 'package.json'), 'utf8');
 const desktopBuild = readFileSync(resolve(root, 'scripts/hii-tauri-build.mjs'), 'utf8');
 const desktopInstall = readFileSync(resolve(root, 'scripts/hii-tauri-install.mjs'), 'utf8');
+const desktopRelease = readFileSync(resolve(root, 'scripts/hii-macos-release.mjs'), 'utf8');
 const cursorBar = readFileSync(resolve(root, 'src/routes/palette/+page.svelte'), 'utf8');
 
 describe('agentic workspace interaction contract', () => {
@@ -83,5 +84,16 @@ describe('agentic workspace interaction contract', () => {
     expect(desktopInstall).toContain("'/Applications/HII.app'");
     expect(desktopInstall).toContain("'.Trash'");
     expect(desktopInstall).toContain("'--strict'");
+  });
+
+  it('keeps public Mac releases behind Developer ID and notarization proof', () => {
+    expect(packageJson).toContain('release:mac');
+    expect(desktopRelease).toContain('HII_SIGNING_IDENTITY');
+    expect(desktopRelease).toContain('HII_NOTARY_PROFILE');
+    expect(desktopRelease).toContain("'notarytool'");
+    expect(desktopRelease).toContain("'stapler'");
+    expect(desktopRelease).toContain("'spctl'");
+    expect(desktopRelease).toContain('sha256');
+    expect(desktopRelease).toContain("'latest.json'");
   });
 });
