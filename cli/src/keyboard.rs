@@ -11,7 +11,10 @@
 //! non-interactive use) the caller should fall back to [`read_line_fallback`],
 //! which never touches raw mode.
 
-use std::io::{self, IsTerminal, Write};
+use std::{
+    io::{self, IsTerminal, Write},
+    time::Duration,
+};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -97,10 +100,31 @@ fn apply_key(key: KeyEvent, buf: &mut String) -> KeyOutcome {
 }
 
 /// Redraw the prompt and current buffer on one line (carriage-return refresh).
-fn redraw(prompt: &str, buf: &str) -> Result<()> {
+fn clear_menu(out: &mut impl Write, rows: usize) {
+    if rows == 0 {
+        return;
+    }
+    let _ = write!(out, "\x1b[s");
+    for _ in 0..rows {
+        let _ = write!(out, "\r\n\x1b[2K");
+    }
+    let _ = write!(out, "\x1b[u");
+}
+
+fn redraw(prompt: &str, buf: &str, selected: usize, previous_rows: &mut usize) -> Result<()> {
     let mut out = io::stdout();
-    // \r to column 0, clear to end of line, then reprint.
+    clear_menu(&mut out, *previous_rows);
     write!(out, "\r\x1b[2K{prompt}{buf}").map_err(|e| format!("failed to write prompt: {e}"))?;
+    let menu = crate::tui::command_menu(buf, selected);
+    if !menu.is_empty() {
+        write!(out, "\x1b[s").map_err(|e| format!("failed to save cursor: {e}"))?;
+        for line in &menu {
+            write!(out, "\r\n\x1b[2K{line}")
+                .map_err(|e| format!("failed to draw command menu: {e}"))?;
+        }
+        write!(out, "\x1b[u").map_err(|e| format!("failed to restore cursor: {e}"))?;
+    }
+    *previous_rows = menu.len();
     out.flush()
         .map_err(|e| format!("failed to flush stdout: {e}"))?;
     Ok(())
@@ -110,28 +134,96 @@ fn redraw(prompt: &str, buf: &str) -> Result<()> {
 ///
 /// `prompt` is redrawn as the user edits. Raw mode is entered for the duration
 /// and restored on return (or panic) via [`RawModeGuard`].
-pub fn read_event(prompt: &str) -> Result<InputEvent> {
+pub fn read_event() -> Result<InputEvent> {
     let _guard = RawModeGuard::enter()?;
     let mut buf = String::new();
-    redraw(prompt, &buf)?;
+    let mut frame = 0usize;
+    let mut selected = 0usize;
+    let mut menu_rows = 0usize;
+    redraw(
+        &crate::tui::prompt_frame(frame),
+        &buf,
+        selected,
+        &mut menu_rows,
+    )?;
     loop {
-        if let Event::Key(key) =
-            event::read().map_err(|e| format!("failed to read terminal event: {e}"))?
+        if !event::poll(Duration::from_millis(140))
+            .map_err(|e| format!("failed to poll terminal event: {e}"))?
         {
+            if crate::tui::motion_enabled() {
+                frame += 1;
+                redraw(
+                    &crate::tui::prompt_frame(frame),
+                    &buf,
+                    selected,
+                    &mut menu_rows,
+                )?;
+            }
+            continue;
+        }
+        if let Event::Key(key) = event::read().map_err(|e| format!("failed to read key: {e}"))? {
             // crossterm may deliver key-release events on some platforms; only
             // act on presses (the default `Press` kind).
             if key.kind != event::KeyEventKind::Press {
                 continue;
             }
+            let matches = crate::tui::command_matches(&buf);
+            match key.code {
+                KeyCode::Up if !matches.is_empty() => {
+                    selected = selected
+                        .checked_sub(1)
+                        .unwrap_or_else(|| matches.len().saturating_sub(1));
+                    redraw(
+                        &crate::tui::prompt_frame(frame),
+                        &buf,
+                        selected,
+                        &mut menu_rows,
+                    )?;
+                    continue;
+                }
+                KeyCode::Down if !matches.is_empty() => {
+                    selected = (selected + 1) % matches.len();
+                    redraw(
+                        &crate::tui::prompt_frame(frame),
+                        &buf,
+                        selected,
+                        &mut menu_rows,
+                    )?;
+                    continue;
+                }
+                KeyCode::Enter if !matches.is_empty() => {
+                    let choice = matches
+                        .iter()
+                        .find(|(command, _)| *command == buf)
+                        .or_else(|| matches.get(selected))
+                        .map(|(command, _)| (*command).to_string())
+                        .unwrap_or_else(|| std::mem::take(&mut buf));
+                    let mut out = io::stdout();
+                    clear_menu(&mut out, menu_rows);
+                    let _ = write!(out, "\r\n");
+                    let _ = out.flush();
+                    return Ok(InputEvent::Submit(choice));
+                }
+                _ => {}
+            }
             match apply_key(key, &mut buf) {
                 KeyOutcome::Emit(ev) => {
                     // Move to a fresh line so subsequent output is not clobbered.
                     let mut out = io::stdout();
+                    clear_menu(&mut out, menu_rows);
                     let _ = write!(out, "\r\n");
                     let _ = out.flush();
                     return Ok(ev);
                 }
-                KeyOutcome::Continue => redraw(prompt, &buf)?,
+                KeyOutcome::Continue => {
+                    selected = 0;
+                    redraw(
+                        &crate::tui::prompt_frame(frame),
+                        &buf,
+                        selected,
+                        &mut menu_rows,
+                    )?;
+                }
             }
         }
     }

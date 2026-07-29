@@ -133,6 +133,21 @@ impl Conversation {
             )?;
             let action = match parse_action(&raw) {
                 Ok(action) => action,
+                Err(_) if plain_message(&raw).is_some() => {
+                    if mutating_work && verification.is_empty() {
+                        self.messages.push(Message::assistant(raw));
+                        self.messages.push(Message::user(
+                            "Verify the workspace result before replying.",
+                        ));
+                        continue;
+                    }
+                    let message = redact_text(plain_message(&raw).unwrap_or_default());
+                    self.messages.push(Message::assistant(message.clone()));
+                    self.finish_backend_run(run, input, step, &message, verification)?;
+                    self.store
+                        .event("assistant.message", json!({ "content": message }))?;
+                    return Ok(message);
+                }
                 Err(error) => {
                     parse_failures += 1;
                     self.messages.push(Message::assistant(raw));
@@ -439,11 +454,11 @@ impl Conversation {
 
     /// Run a direct shell command from the `!` grammar, bounded by the same
     /// workspace guards as the agent's shell tool.
-    pub fn shell(&self, command: &str) -> String {
+    pub fn shell_interactive(&self, command: &str) -> String {
         if command.is_empty() {
             return "usage: !<command>".into();
         }
-        self.tools.shell(command, false).output
+        self.tools.shell_interactive(command).output
     }
 
     #[cfg(feature = "preview")]
@@ -905,24 +920,32 @@ fn explicit_skill_signal(input: &str) -> bool {
     .any(|signal| input.contains(signal))
 }
 
+fn plain_message(raw: &str) -> Option<&str> {
+    let value = raw.trim();
+    (!value.is_empty()
+        && !value.starts_with('{')
+        && !value.starts_with("```")
+        && !value.starts_with('['))
+    .then_some(value)
+}
+
 fn conversation_prompt(workspace: &std::path::Path, max_steps: usize) -> String {
     format!(
         r#"You are HII, Ummi's concise local workspace partner.
 Workspace: {workspace}
 Limit: {max_steps} tool steps/turn.
 
-Return one JSON object:
-- Talk: {{"type":"message","message":"natural reply"}}
-- Work: {{"type":"read|list|search|write|edit|shell|verify|http", ...needed fields}}
+Reply naturally in plain text. For work, return one JSON tool action:
+{{"type":"read|list|search|write|edit|shell|verify|http|hii_context", ...needed fields}}
 
-Use one tool at a time only for requested inspection or work. Fields: path, query, command, content, old, new, replace_all, offset, limit, url. After a mutation, verify before replying. Preserve unclear work. Stay inside the workspace; never publish, push, spend, message, delete, or read secrets. Final replies are natural and omit internal IDs, protocol, and receipt bookkeeping."#,
+Use hii_context for continuity or current-work questions. Paths are literal, never Markdown links. Avoid generic greetings. Use one tool at a time only for requested work. After a mutation, verify before replying. Preserve unclear work. Stay inside the workspace; never publish, push, spend, message, delete, or read secrets. Final replies omit internal protocol and bookkeeping."#,
         workspace = workspace.display()
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{conversation_prompt, shell_command_is_read_only};
+    use super::{conversation_prompt, plain_message, shell_command_is_read_only};
     use std::path::Path;
 
     #[test]
@@ -952,5 +975,13 @@ mod tests {
             "conversation prompt grew to {} bytes",
             prompt.len()
         );
+    }
+
+    #[test]
+    fn accepts_plain_conversational_final_but_not_broken_json() {
+        assert_eq!(plain_message("natural reply"), Some("natural reply"));
+        assert_eq!(plain_message("  "), None);
+        assert_eq!(plain_message(r#"{"type":"read""#), None);
+        assert_eq!(plain_message("```json"), None);
     }
 }

@@ -347,7 +347,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             // Raw-mode keyboard model: Enter=submit, Tab=queue, Esc/Ctrl+B/Ctrl+T
             // are surfaced as events (interrupt/background/task-view meaning applies
             // during a run; at the idle prompt they are informational).
-            match keyboard::read_event(&tui::prompt()).map_err(|error| error.to_string())? {
+            match keyboard::read_event().map_err(|error| error.to_string())? {
                 keyboard::InputEvent::Submit(line) => match queued.take() {
                     Some(pending) if line.trim().is_empty() => pending,
                     Some(pending) => format!("{pending}\n{line}"),
@@ -387,8 +387,10 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         }
         // `!<command>` runs a shell command directly (interaction grammar).
         if let Some(command) = goal.strip_prefix('!') {
-            let output = conversation.shell(command.trim());
-            tui::system(&output);
+            let output = conversation.shell_interactive(command.trim());
+            if output != "ok" {
+                tui::system(&output);
+            }
             continue;
         }
         let mut show_activity = false;

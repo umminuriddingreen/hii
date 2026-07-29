@@ -20,10 +20,34 @@ const AMBER: &str = "\x1b[38;5;215m";
 const RED: &str = "\x1b[38;5;203m";
 const SLATE: &str = "\x1b[38;5;245m";
 
+const COMMANDS: &[(&str, &str)] = &[
+    ("/help", "all controls"),
+    ("/status", "session state"),
+    ("/usage", "tokens and speed"),
+    ("/model", "choose local model"),
+    ("/proof", "latest receipt"),
+    ("/agents", "managed workers"),
+    ("/skills", "learned workflows"),
+    ("/compact", "shrink context"),
+    ("/clear", "fresh conversation"),
+    ("/undo", "drop last exchange"),
+    ("/fork", "snapshot session"),
+    ("/teach", "save as skill"),
+    ("/codex", "start Codex task"),
+    ("/claude", "start Claude task"),
+    ("/exit", "leave HII"),
+];
+
 fn color_enabled() -> bool {
     io::stdout().is_terminal()
         && env::var_os("NO_COLOR").is_none()
         && env::var("TERM").map_or(true, |term| term != "dumb")
+}
+
+pub fn motion_enabled() -> bool {
+    color_enabled()
+        && env::var("HII_MOTION").map_or(true, |value| value != "off")
+        && env::var("HII_REDUCED_MOTION").map_or(true, |value| value != "1")
 }
 
 fn paint(text: &str, codes: &[&str]) -> String {
@@ -85,50 +109,80 @@ pub fn welcome(workspace: &Path, model: &str, max_steps: usize, git: &str) {
     let workspace = short_path(workspace);
     let model = model.strip_suffix("-mlx").unwrap_or(model);
     let git = workspace_state(git);
+    let workspace = if git == "clean" || git == "not a Git workspace" {
+        workspace
+    } else {
+        format!("{workspace} · {git}")
+    };
 
     println!();
     println!(
-        "  {}  {}",
-        paint("hii", &[BOLD, CYAN]),
-        paint("HUMAN INFORMATION INTERFACE", &[DIM, SLATE])
+        "  {} {}  {}",
+        paint("◈", &[BOLD, CYAN]),
+        paint("hii", &[BOLD]),
+        paint(&workspace, &[DIM, SLATE])
     );
     println!("  {}", paint(&rule, &[DIM, BLUE]));
     println!(
         "  {}  {}",
-        paint("◆ READY", &[BOLD, GREEN]),
-        paint("local · bounded · receipts on", &[DIM, SLATE])
-    );
-    println!(
-        "  {} {} · {}",
-        paint("┃ workspace", &[BLUE]),
-        workspace,
-        git
-    );
-    println!("  {} {}", paint("┃ model    ", &[BLUE]), model);
-    println!(
-        "  {} {} · {} steps",
-        paint("┃ authority", &[BLUE]),
-        "workspace-only",
-        max_steps
-    );
-    println!(
-        "  {}",
-        paint("┗ proof     every action stays inspectable", &[BLUE])
-    );
-    println!();
-    println!("  {}", paint("Tell HII what should be true.", &[BOLD]));
-    println!(
-        "  {}",
+        paint("ready", &[GREEN]),
         paint(
-            "/help commands  ·  ! shell  ·  Tab queue  ·  Esc exit",
+            &format!("{model} · workspace · {max_steps} steps · receipts"),
             &[DIM, SLATE]
         )
+    );
+    println!(
+        "  {}",
+        paint("state the outcome  ·  /help for controls", &[DIM, SLATE])
     );
     println!();
 }
 
-pub fn prompt() -> String {
-    format!("  {} ", paint("❯", &[BOLD, CYAN]))
+pub fn prompt_frame(frame: usize) -> String {
+    let glyphs = ["◇", "◈", "◆", "◈"];
+    let glyph = if motion_enabled() {
+        glyphs[frame % glyphs.len()]
+    } else {
+        "◈"
+    };
+    format!("  {} ", paint(glyph, &[BOLD, CYAN]))
+}
+
+pub fn command_matches(input: &str) -> Vec<(&'static str, &'static str)> {
+    if !input.starts_with('/') || input.chars().any(char::is_whitespace) {
+        return Vec::new();
+    }
+    let query = input.trim_start_matches('/').to_ascii_lowercase();
+    let mut matches = COMMANDS
+        .iter()
+        .copied()
+        .filter(|(command, _)| command[1..].contains(&query))
+        .collect::<Vec<_>>();
+    matches.sort_by_key(|(command, _)| !command[1..].starts_with(&query));
+    matches.truncate(6);
+    matches
+}
+
+pub fn command_menu(input: &str, selected: usize) -> Vec<String> {
+    command_matches(input)
+        .into_iter()
+        .enumerate()
+        .map(|(index, (command, description))| {
+            let active = index == selected;
+            let marker = if active { "›" } else { " " };
+            let command = if active {
+                paint(command, &[BOLD, CYAN])
+            } else {
+                paint(command, &[SLATE])
+            };
+            format!(
+                "    {} {:<12} {}",
+                paint(marker, &[CYAN]),
+                command,
+                paint(description, &[DIM, SLATE])
+            )
+        })
+        .collect()
 }
 
 pub fn queued() {
@@ -207,7 +261,7 @@ pub fn error(message: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{short_path, truncate, workspace_state};
+    use super::{command_matches, prompt_frame, short_path, truncate, workspace_state};
     use std::path::Path;
 
     #[test]
@@ -225,5 +279,18 @@ mod tests {
     fn workspace_state_counts_porcelain_lines() {
         assert_eq!(workspace_state("clean"), "clean");
         assert_eq!(workspace_state(" M one.rs\n?? two.rs"), "2 changes");
+    }
+
+    #[test]
+    fn prompt_frame_is_always_present() {
+        assert!(!prompt_frame(0).trim().is_empty());
+    }
+
+    #[test]
+    fn slash_palette_filters_commands() {
+        let matches = command_matches("/sta");
+        assert_eq!(matches.first().map(|item| item.0), Some("/status"));
+        assert!(command_matches("status").is_empty());
+        assert!(command_matches("/model qwen").is_empty());
     }
 }

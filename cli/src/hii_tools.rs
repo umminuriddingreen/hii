@@ -7,6 +7,7 @@
 //! the compatibility layer); they are local-first and carry no network effect.
 
 use crate::tools::ToolResult;
+use serde_json::Value;
 use std::{
     path::Path,
     process::{Command, Stdio},
@@ -39,7 +40,7 @@ pub fn is_mutating(tool: &str) -> bool {
 pub fn execute(repo: &Path, tool: &str, query: Option<&str>) -> ToolResult {
     let arg = query.unwrap_or("").trim();
     let result = match tool {
-        "hii_context" => hii(repo, &["context", "--json"]),
+        "hii_context" => hii(repo, &["context", "--json"]).and_then(compact_context),
         "og_next" => hii(repo, &["og", "status"]),
         "caps_check" => hii(repo, &["caps", "show"]),
         "board_read" => hii(repo, &["board"]),
@@ -73,6 +74,94 @@ pub fn execute(repo: &Path, tool: &str, query: Option<&str>) -> ToolResult {
             verification: false,
         },
     }
+}
+
+fn compact_context(raw: String) -> Result<String, String> {
+    let context: Value =
+        serde_json::from_str(&raw).map_err(|error| format!("invalid HII context: {error}"))?;
+    let paths = context["git"]["worktree"]["files"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .take(12)
+        .filter_map(|file| file["path"].as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let commits = context["git"]["recent"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .take(5)
+        .filter_map(Value::as_str)
+        .map(|commit| format!("- {commit}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tasks = context["localState"]["boardTasks"]["recent"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .take(5)
+        .filter_map(|task| {
+            Some(format!(
+                "- [{}] {} ({})",
+                task["lane"].as_str()?,
+                task["title"].as_str()?,
+                task["coordinate"].as_str().unwrap_or("no coordinate")
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let jobs = context["localState"]["recentJobs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .take(3)
+        .filter_map(|job| {
+            let summary = job["inputSummary"]
+                .as_str()?
+                .chars()
+                .take(140)
+                .collect::<String>()
+                .replace('\n', " ");
+            Some(format!(
+                "- {} [{}]: {}",
+                job["capabilityId"].as_str()?,
+                job["status"].as_str().unwrap_or("unknown"),
+                summary
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let next = context["nextActions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .take(3)
+        .filter_map(|item| {
+            Some(format!(
+                "- {}: {}",
+                item["track"].as_str()?,
+                item["action"].as_str()?
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let repo = context["identity"]["repo"].as_str().unwrap_or("unknown");
+    let branch = context["git"]["branch"].as_str().unwrap_or("unknown");
+    let total = context["git"]["worktree"]["counts"]["total"]
+        .as_u64()
+        .unwrap_or(0);
+    let open = context["localState"]["boardTasks"]["open"]
+        .as_u64()
+        .unwrap_or(0);
+    Ok(format!(
+        "HII CURRENT CONTEXT\nrepo: {repo}\nbranch: {branch}\nworktree: {total} change(s)\nfiles: {}\n\nRECENT COMMITS\n{}\n\nOPEN BOARD ({open})\n{}\n\nRECENT RUNS\n{}\n\nLIKELY NEXT\n{}",
+        if paths.is_empty() { "none" } else { &paths },
+        if commits.is_empty() { "none" } else { &commits },
+        if tasks.is_empty() { "none" } else { &tasks },
+        if jobs.is_empty() { "none" } else { &jobs },
+        if next.is_empty() { "none" } else { &next }
+    ))
 }
 
 /// Invoke the `hii` front controller with the given args, returning combined
@@ -121,5 +210,43 @@ mod tests {
         assert!(is_mutating("bridge_send"));
         assert!(!is_mutating("board_read"));
         assert!(!is_mutating("og_next"));
+    }
+
+    #[test]
+    fn compacts_context_to_model_relevant_state() {
+        let raw = serde_json::json!({
+            "identity": {"repo": "/repo", "runtime": "/runtime"},
+            "git": {
+                "branch": "main",
+                "worktree": {
+                    "clean": false,
+                    "counts": {"total": 1},
+                    "files": [{"path": "src/main.rs"}]
+                },
+                "recent": ["abc change"]
+            },
+            "localState": {
+                "boardTasks": {
+                    "open": 1,
+                    "byLane": {"doing": 1},
+                    "recent": [{"title": "Ship", "lane": "doing", "coordinate": "/repo"}]
+                },
+                "recentJobs": [{
+                    "capabilityId": "hii.agent",
+                    "status": "completed",
+                    "createdAt": "now",
+                    "inputSummary": "work"
+                }]
+            },
+            "nextActions": [{"track": "build", "coordinate": "cargo test", "action": "verify"}],
+            "capabilities": vec![serde_json::json!({"large": "unused"}); 100]
+        })
+        .to_string();
+        let compact = compact_context(raw).expect("compact context");
+        assert!(compact.contains("src/main.rs"));
+        assert!(compact.contains("abc change"));
+        assert!(!compact.contains("large"));
+        assert!(compact.contains("HII CURRENT CONTEXT"));
+        assert!(compact.len() < 2_000);
     }
 }

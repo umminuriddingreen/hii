@@ -263,6 +263,27 @@ impl Toolbelt {
         self.run_command(process, verification, DEFAULT_TIMEOUT_SECS)
     }
 
+    pub fn shell_interactive(&self, command: &str) -> ToolResult {
+        if let Err(error) = validate_shell(command, &self.workspace) {
+            return tool_result(Err(error), false);
+        }
+        let result = platform_shell(command)
+            .current_dir(&self.workspace)
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .map_err(|error| error.to_string())
+            .and_then(|status| {
+                if status.success() {
+                    Ok("ok".into())
+                } else {
+                    Err(format!("exit {}", status.code().unwrap_or(-1)))
+                }
+            });
+        tool_result(result, false)
+    }
+
     pub fn http(&self, url: &str) -> ToolResult {
         let result = (|| {
             if !(url.starts_with("http://127.0.0.1:") || url.starts_with("http://localhost:")) {
