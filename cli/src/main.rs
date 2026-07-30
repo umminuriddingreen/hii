@@ -11,6 +11,7 @@ mod conversation;
 mod hii_tools;
 mod hooks;
 mod keyboard;
+mod keymap;
 mod legacy;
 mod mcp;
 mod ollama;
@@ -475,8 +476,12 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             // Raw-mode keyboard model: Enter=submit, Tab=queue, Esc/Ctrl+B/Ctrl+T
             // are surfaced as events (interrupt/background/task-view meaning applies
             // during a run; at the idle prompt they are informational).
-            match keyboard::read_event(conversation.is_public_test(), &input_history)
-                .map_err(|error| error.to_string())?
+            match keyboard::read_event(
+                conversation.is_public_test(),
+                &input_history,
+                conversation.keymap(),
+            )
+            .map_err(|error| error.to_string())?
             {
                 keyboard::InputEvent::Submit(line) => {
                     if !line.trim().is_empty()
@@ -579,6 +584,9 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Some(SlashCommand::Usage) => Ok(conversation.usage()),
             Some(SlashCommand::Thinking(mode)) => conversation.thinking(mode.as_deref()),
             Some(SlashCommand::Theme(theme)) => conversation.theme(theme.as_deref()),
+            Some(SlashCommand::Keymap(requested)) => {
+                conversation.keymap_command(requested.as_deref())
+            }
             Some(SlashCommand::Model(model)) => conversation.model(model.as_deref()),
             Some(SlashCommand::Proof(id)) => conversation.proof(id.as_deref()),
             Some(SlashCommand::Diff) => conversation.diff(),
@@ -687,6 +695,7 @@ enum SlashCommand {
     Usage,
     Thinking(Option<String>),
     Theme(Option<String>),
+    Keymap(Option<String>),
     Model(Option<String>),
     Proof(Option<String>),
     Diff,
@@ -763,6 +772,7 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         "/usage" if argument.is_none() => SlashCommand::Usage,
         "/thinking" => SlashCommand::Thinking(argument),
         "/theme" => SlashCommand::Theme(argument),
+        "/keymap" => SlashCommand::Keymap(argument),
         "/raw" => match rest {
             "" | "on" => SlashCommand::Thinking(Some("raw".into())),
             "off" => SlashCommand::Thinking(Some("compact".into())),
@@ -863,10 +873,14 @@ fn slash_help() -> String {
         "/status                       show session, workspace, model, and usage\n",
         "/status                       show session, workspace, model, and usage\n/attach <path>                add workspace text/image context\n/attachments                  show pending context and size\n/detach [number|all]          remove pending context\n",
     )
+    .replace(
+        "/theme [name]                 switch the persistent visual signature\n",
+        "/theme [name]                 switch the persistent visual signature\n/keymap [default|vim]          inspect or switch keyboard profile\n/keymap bind ACTION CHORD      add a safe custom binding\n",
+    )
 }
 
 fn public_test_slash_help() -> &'static str {
-    "/help                         show commands\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/status                       show isolated session, workspace, model, and usage\n/attach <path>                add workspace text/image context\n/attachments                  show pending context and size\n/detach [number|all]          remove pending context\n/theme [name]                 switch the terminal theme\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n/model [name]                 list or switch available models\n/proof [run-id]               inspect isolated execution proof\n/permissions                  show the tester-safe authority boundary\n/undo                         drop the last exchange\n/exit                         leave HII\n\nAttachments must already exist inside this disposable workspace. Installed Mac tools are available to HII inside it. Direct shell input and deletion are unavailable."
+    "/help                         show commands\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/status                       show isolated session, workspace, model, and usage\n/attach <path>                add workspace text/image context\n/attachments                  show pending context and size\n/detach [number|all]          remove pending context\n/theme [name]                 switch the terminal theme\n/keymap [default|vim]          inspect or switch keyboard profile\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n/model [name]                 list or switch available models\n/proof [run-id]               inspect isolated execution proof\n/permissions                  show the tester-safe authority boundary\n/undo                         drop the last exchange\n/exit                         leave HII\n\nAttachments must already exist inside this disposable workspace. Installed Mac tools are available to HII inside it. Direct shell input and deletion are unavailable."
 }
 
 fn lifecycle_hooks_enabled(no_hooks: bool, profile: SessionProfile) -> bool {
@@ -1234,6 +1248,7 @@ fn public_test_slash_allowed(command: &SlashCommand) -> bool {
             | SlashCommand::Usage
             | SlashCommand::Thinking(_)
             | SlashCommand::Theme(_)
+            | SlashCommand::Keymap(_)
             | SlashCommand::Model(_)
             | SlashCommand::Proof(_)
             | SlashCommand::Permissions(None)
@@ -1519,6 +1534,14 @@ mod tests {
         assert_eq!(
             parse_slash_command("/theme heritage"),
             Some(SlashCommand::Theme(Some("heritage".into())))
+        );
+        assert_eq!(
+            parse_slash_command("/keymap vim"),
+            Some(SlashCommand::Keymap(Some("vim".into())))
+        );
+        assert_eq!(
+            parse_slash_command("/keymap bind background ctrl+g"),
+            Some(SlashCommand::Keymap(Some("bind background ctrl+g".into())))
         );
         assert_eq!(parse_slash_command("/copy"), Some(SlashCommand::Copy));
         assert_eq!(

@@ -8,6 +8,7 @@ use crate::{
     config::AppPaths,
     contract::{deletion_shell, sensitive_shell, Authority, Decision},
     hooks::{HookBatch, HookEvent, HookRunner},
+    keymap::Keymap,
     ollama::{ChatResult, ChatStreamEvent, ChatUsage, Message, Ollama},
     receipt::{
         find_receipt, redact_text, unix_ms, ConversationStore, HookRecord, Receipt, RunStore,
@@ -160,6 +161,7 @@ pub struct Conversation {
     attachments: AttachmentQueue,
     background_jobs: BackgroundJobs,
     pending_backgrounds: VecDeque<String>,
+    keymap: Keymap,
 }
 
 impl Conversation {
@@ -183,6 +185,7 @@ impl Conversation {
         )?;
         let attachments = AttachmentQueue::new(tools.workspace(), public_test);
         let background_jobs = BackgroundJobs::new(&paths.runtime, tools.workspace())?;
+        let keymap = Keymap::load(&paths.runtime)?;
         let capsule = if public_test {
             crate::context::ContextCapsule::default()
         } else {
@@ -221,6 +224,7 @@ impl Conversation {
             attachments,
             background_jobs,
             pending_backgrounds: VecDeque::new(),
+            keymap,
         };
         conversation.sync_authority_context();
         let session_hooks = conversation.hooks.fire(
@@ -992,7 +996,7 @@ impl Conversation {
         };
         let mode = if self.plan_mode { "plan" } else { "workspace" };
         format!(
-            "{} messages · {} characters\n{}\n{}\n{}\nAttachments: {} pending · {}\nMode: {}\nAuthority: {}\nTheme: {}\nGoal: {}\nLearning draft: {}",
+            "{} messages · {} characters\n{}\n{}\n{}\nAttachments: {} pending · {}\nMode: {}\nAuthority: {}\nTheme: {}\nKeymap: {}\nGoal: {}\nLearning draft: {}",
             self.messages.len().saturating_sub(1),
             self.context_chars(),
             self.model,
@@ -1003,6 +1007,7 @@ impl Conversation {
             mode,
             self.authority.label(),
             crate::tui::theme_name(),
+            self.keymap.profile_name(),
             goal,
             learning
         )
@@ -1068,6 +1073,19 @@ impl Conversation {
             .list()
             .unwrap_or_else(|error| format!("Background jobs unavailable: {error}"));
         format!("{}\n\nBACKGROUND JOBS\n{jobs}", self.status())
+    }
+
+    pub fn keymap(&self) -> &Keymap {
+        &self.keymap
+    }
+
+    pub fn keymap_command(&mut self, requested: Option<&str>) -> Result<String, String> {
+        let result = self.keymap.command(requested)?;
+        self.store.event(
+            "conversation.keymap",
+            json!({ "profile": self.keymap.profile_name() }),
+        )?;
+        Ok(result)
     }
 
     pub fn poll_background_updates(&mut self) -> Result<Vec<String>, String> {
@@ -1679,7 +1697,7 @@ impl Conversation {
         let started = Instant::now();
         let mut reasoning = VisibleReasoning::default();
         let mut reasoning_started = false;
-        let mut live_input = crate::keyboard::LiveInput::enter()?;
+        let mut live_input = crate::keyboard::LiveInput::enter(self.keymap.clone())?;
         let interactive = io::stdout().is_terminal();
         let mut content_started = false;
         loop {

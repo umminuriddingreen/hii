@@ -69,6 +69,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/plan", "inspect before acting"),
     ("/side", "ask without derailing"),
     ("/theme", "visual signature"),
+    ("/keymap", "keyboard profile"),
     ("/usage", "tokens and speed"),
     ("/thinking", "thought stream"),
     ("/raw", "raw model stream"),
@@ -321,6 +322,7 @@ fn public_command(command: &str) -> bool {
             | "/thinking"
             | "/raw"
             | "/theme"
+            | "/keymap"
             | "/model"
             | "/models"
             | "/proof"
@@ -603,6 +605,7 @@ mod tests {
         assert!(matches.iter().any(|(command, _)| *command == "/new"));
         assert!(matches.iter().any(|(command, _)| *command == "/raw"));
         assert!(matches.iter().any(|(command, _)| *command == "/theme"));
+        assert!(matches.iter().any(|(command, _)| *command == "/keymap"));
         assert!(matches.iter().any(|(command, _)| *command == "/attach"));
         assert!(matches
             .iter()
