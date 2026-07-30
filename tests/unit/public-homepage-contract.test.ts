@@ -17,12 +17,23 @@ describe('public HII homepage', () => {
 
   it('states the product truth and carries canonical metadata', () => {
     expect(homepage).toContain('https://humaninformationinterface.com/');
-    expect(homepage).toContain('Your information.<br />Your agents.<br /><em>One workspace.</em>');
-    expect(homepage).toContain('Get the Mac beta');
+    expect(homepage).toContain('Turn what is<br />on your Mac into<br /><em>finished work.</em>');
+    expect(homepage).toContain('Try one win in your browser');
+    expect(homepage).toContain('Join the Mac beta');
     expect(homepage).toContain('Signed Mac installer · preparing');
     expect(homepage).toContain('/marketing/hii-workspace-live.png');
     expect(homepage).toContain('/marketing/hii-command-palette-live.png');
     expect(homepage).toContain('Actual interface · local project · no concept render');
+  });
+
+  it('targets people who make and learn with concrete, truthful first wins', () => {
+    expect(homepage).toContain('For people making and learning on a Mac');
+    expect(homepage).toContain('For makers · creators · designers · researchers · independent operators');
+    expect(homepage).toContain('Learn a hard tool');
+    expect(homepage).toContain('Finish something');
+    expect(homepage).toContain('Improve my work');
+    expect(homepage).toContain('No agent runs on the demo page');
+    expect(homepage).toContain('href="/learn"');
   });
 
   it('presents one truthful free product and one concrete paid activation', () => {

@@ -26,19 +26,37 @@
   ];
 
   const lineage = [
-    ['01', 'Your intention'],
-    ['02', 'Approved information'],
-    ['03', 'Agent work'],
-    ['04', 'Verified result']
+    ['01', 'Say what you want'],
+    ['02', 'Choose what it can use'],
+    ['03', 'Let HII do the work'],
+    ['04', 'Open the result and proof']
+  ];
+
+  const firstWins = [
+    {
+      label: 'Learn a hard tool',
+      example: 'Help me understand this project and show me what to do next.',
+      result: 'A source-linked explanation and one clear next move.'
+    },
+    {
+      label: 'Finish something',
+      example: 'Turn these rough files and notes into one portfolio-ready artifact.',
+      result: 'A finished artifact, the changes, and the checks that passed.'
+    },
+    {
+      label: 'Improve my work',
+      example: 'Find the highest-value improvement I can complete today.',
+      result: 'A before-and-after result with an inspectable receipt.'
+    }
   ];
 </script>
 
 <svelte:head>
-  <title>HII — Your information and agents in one workspace</title>
-  <meta name="description" content="HII is the local-first Mac workspace where your information and agents work together—with visible context, bounded execution, and proof." />
+  <title>HII — Turn what is on your Mac into finished work</title>
+  <meta name="description" content="HII helps makers, learners, creators, and independent operators give AI one real job, choose what it can use, and get a finished result with proof." />
   <link rel="canonical" href="https://humaninformationinterface.com/" />
-  <meta property="og:title" content="HII — Your information and agents in one workspace" />
-  <meta property="og:description" content="Bring your information. Direct your agents. Keep the proof." />
+  <meta property="og:title" content="HII — One idea in. Finished work and proof out." />
+  <meta property="og:description" content="A local-first Mac workspace for people who make and learn with AI." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://humaninformationinterface.com/" />
   <meta property="og:image" content="https://humaninformationinterface.com/marketing/hii-workspace-live.png" />
@@ -52,12 +70,12 @@
       <span>Human Information Interface</span>
     </a>
     <nav>
-      <a href="#product">Product</a>
-      <a href="#how">How it works</a>
+      <a href="#first-win">First wins</a>
+      <a href="#product">See HII</a>
       <a href="#trust">Trust</a>
       <a href="#pricing">Pricing</a>
     </nav>
-    <a class="hii-account-link" href="#download">Get HII for Mac <span aria-hidden="true">↓</span></a>
+    <a class="hii-account-link" href="/learn">Try one win <span aria-hidden="true">↗</span></a>
   </header>
 
   <main id="top">
@@ -66,14 +84,14 @@
       <div class="hii-live-pill"><i></i> local workspace</div>
 
       <div class="hii-launch-copy">
-        <p class="hii-launch-eyebrow"><span></span> Human Information Interface</p>
-        <h1 id="hero-title">Your information.<br />Your agents.<br /><em>One workspace.</em></h1>
-        <p class="hii-launch-deck">HII is the local-first Mac app where you bring the information, direct the work, and inspect the result—all in the same place.</p>
+        <p class="hii-launch-eyebrow"><span></span> For people making and learning on a Mac</p>
+        <h1 id="hero-title">Turn what is<br />on your Mac into<br /><em>finished work.</em></h1>
+        <p class="hii-launch-deck">Give HII one real job. Choose the files and information it may use. Watch the work happen, then open the result and the proof.</p>
         <div class="hii-launch-actions">
-          <a class="hii-launch-primary" href="#download">Get the Mac beta <span aria-hidden="true">↓</span></a>
-          <a class="hii-launch-secondary" href="/pilot">Build my first workflow <span aria-hidden="true">↗</span></a>
+          <a class="hii-launch-primary" href="/learn">Try one win in your browser <span aria-hidden="true">↗</span></a>
+          <a class="hii-launch-secondary" href="#download">Join the Mac beta <span aria-hidden="true">↓</span></a>
         </div>
-        <p class="hii-launch-note">Apple Silicon · macOS 13+ · local by default · no credit card for the beta</p>
+        <p class="hii-launch-note">For makers · creators · designers · researchers · independent operators</p>
       </div>
 
       <figure class="hii-palette-proof">
@@ -83,11 +101,36 @@
       </figure>
     </section>
 
+    <section class="hii-first-win-section" id="first-win" aria-labelledby="first-win-title">
+      <header>
+        <p class="hii-launch-eyebrow"><span></span> Start with something you care about</p>
+        <h2 id="first-win-title">One useful win.<br />Then do it again.</h2>
+        <p>You do not need to learn agent infrastructure. Start with a real outcome in plain language and keep control of the information behind it.</p>
+      </header>
+      <div class="hii-first-wins">
+        {#each firstWins as win}
+          <article>
+            <p>{win.label}</p>
+            <blockquote>“{win.example}”</blockquote>
+            <div><span>You keep</span><strong>{win.result}</strong></div>
+          </article>
+        {/each}
+      </div>
+      <div class="hii-demo-callout">
+        <div>
+          <span>NO INSTALL NEEDED</span>
+          <h3>Shape your first task before HII touches a file.</h3>
+          <p>The guided demo turns a rough intention into a plan, visible boundaries, and a proof target. No agent runs on the demo page.</p>
+        </div>
+        <a class="hii-launch-primary" href="/learn">Open the guided demo <span aria-hidden="true">↗</span></a>
+      </div>
+    </section>
+
     <section class="hii-product-proof" id="product" aria-labelledby="product-title">
       <div class="hii-product-intro">
-        <p class="hii-launch-eyebrow"><span></span> One interface for human information</p>
-        <h2 id="product-title">The work stays<br />in view.</h2>
-        <p>Files, notes, live context, agent conversation, and proof stay together as objects you can arrange, inspect, and return to.</p>
+        <p class="hii-launch-eyebrow"><span></span> The actual HII workspace</p>
+        <h2 id="product-title">See the work,<br />not just the answer.</h2>
+        <p>Your intention, source material, agent work, finished artifacts, and proof stay together as things you can inspect and return to.</p>
       </div>
 
       <div class="hii-lineage" aria-label="HII verified work loop">
@@ -109,7 +152,7 @@
     <section class="hii-use-section" id="how" aria-labelledby="use-title">
       <header>
         <p class="hii-launch-eyebrow"><span></span> Using HII</p>
-        <h2 id="use-title">One loop.<br />No handoff fog.</h2>
+        <h2 id="use-title">From “I want to…”<br />to “it is done.”</h2>
       </header>
       <div class="hii-use-steps">
         {#each useSteps as step, index}
@@ -125,9 +168,9 @@
 
     <section class="hii-trust-section" id="trust" aria-labelledby="trust-title">
       <div class="hii-trust-copy">
-        <p class="hii-launch-eyebrow hii-launch-eyebrow-light"><span></span> Local-first by design</p>
-        <h2 id="trust-title">Your context is not the price of admission.</h2>
-        <p>HII is useful because it remembers what the work means—not because it quietly owns the work.</p>
+        <p class="hii-launch-eyebrow hii-launch-eyebrow-light"><span></span> Private by default, clear by design</p>
+        <h2 id="trust-title">Your Mac should not become a mystery box.</h2>
+        <p>HII shows what information an agent may use, separates risky actions, and returns evidence you can inspect.</p>
       </div>
       <div class="hii-trust-list">
         {#each trustPoints as point}
@@ -163,10 +206,10 @@
     <section class="hii-download-section" id="download" aria-labelledby="download-title">
       <div>
         <p class="hii-launch-eyebrow"><span></span> HII for macOS</p>
-        <h2 id="download-title">Free local beta.<br />Coming to your Mac.</h2>
+        <h2 id="download-title">Make one thing<br />real with HII.</h2>
       </div>
       <div class="hii-download-actions">
-        <a class="hii-launch-primary" href="mailto:hello@humaninformationinterface.com?subject=HII%20Mac%20beta">Get release updates <span aria-hidden="true">↗</span></a>
+        <a class="hii-launch-primary" href="mailto:hello@humaninformationinterface.com?subject=Join%20the%20HII%20Mac%20beta&body=The%20first%20thing%20I%20want%20to%20make%2C%20learn%2C%20or%20improve%20with%20HII%20is%3A%0A">Join the Mac beta <span aria-hidden="true">↗</span></a>
         <button type="button" disabled aria-describedby="download-status">Signed Mac installer · preparing</button>
         <p id="download-status">The app works locally. Public download opens after Developer ID signing and Apple notarization pass. We will never ask you to bypass Gatekeeper.</p>
       </div>
@@ -216,6 +259,20 @@
   .hii-window-meta { display:flex; height:42px; align-items:center; justify-content:space-between; padding:0 17px; color:#929694; font-size:8px; }
   .hii-palette-proof img, .hii-workspace-proof img { display:block; width:100%; height:auto; }
   .hii-palette-proof figcaption { padding:12px 17px 14px; color:#929694; font-size:7px; }
+  .hii-first-win-section { padding:130px clamp(24px,7vw,108px); background:var(--acid); }
+  .hii-first-win-section > header { display:grid; grid-template-columns:.55fr 1.1fr .8fr; gap:50px; align-items:start; }
+  .hii-first-win-section h2 { margin:0; font-size:clamp(54px,7vw,108px); font-weight:680; letter-spacing:-.075em; line-height:.86; }
+  .hii-first-win-section > header > p:last-child { max-width:520px; margin:7px 0 0; font-size:18px; letter-spacing:-.02em; line-height:1.5; }
+  .hii-first-wins { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:80px; }
+  .hii-first-wins article { display:flex; min-height:380px; flex-direction:column; border-radius:22px; background:rgba(255,255,255,.78); padding:24px; }
+  .hii-first-wins article > p, .hii-first-wins article span, .hii-demo-callout span { margin:0; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; font-weight:700; letter-spacing:.11em; text-transform:uppercase; }
+  .hii-first-wins blockquote { margin:44px 0 0; font-size:clamp(24px,2.3vw,37px); font-weight:650; letter-spacing:-.045em; line-height:1.08; }
+  .hii-first-wins article > div { display:grid; gap:12px; margin-top:auto; border-top:1px solid rgba(21,21,21,.14); padding-top:20px; }
+  .hii-first-wins article strong { max-width:360px; font-size:14px; line-height:1.45; }
+  .hii-demo-callout { display:grid; grid-template-columns:1fr auto; gap:50px; align-items:end; margin-top:12px; border-radius:22px; background:var(--blue); padding:clamp(25px,4vw,48px); color:white; }
+  .hii-demo-callout h3 { max-width:740px; margin:16px 0 0; font-size:clamp(30px,4vw,58px); font-weight:670; letter-spacing:-.055em; line-height:.98; }
+  .hii-demo-callout p { max-width:660px; margin:22px 0 0; color:#dce7ff; font-size:15px; line-height:1.5; }
+  .hii-demo-callout .hii-launch-primary { background:white; color:var(--blue); box-shadow:none; white-space:nowrap; }
   .hii-product-proof { padding:130px clamp(24px,7vw,108px) 140px; background:white; }
   .hii-product-intro { display:grid; grid-template-columns:minmax(0,.8fr) minmax(300px,.45fr); align-items:end; gap:80px; }
   .hii-product-intro .hii-launch-eyebrow { grid-column:1/-1; }
@@ -280,7 +337,10 @@
     .hii-launch-hero { min-height:auto; padding-top:100px; }
     .hii-launch-rail { display:none; }
     .hii-live-pill { top:22px; }
-    .hii-product-intro, .hii-use-section, .hii-trust-section, .hii-pricing-section, .hii-download-section { grid-template-columns:1fr; }
+    .hii-first-win-section > header, .hii-product-intro, .hii-use-section, .hii-trust-section, .hii-pricing-section, .hii-download-section { grid-template-columns:1fr; }
+    .hii-first-wins { grid-template-columns:1fr; }
+    .hii-first-wins article { min-height:300px; }
+    .hii-demo-callout { grid-template-columns:1fr; align-items:start; }
     .hii-product-intro { gap:28px; }
     .hii-use-section, .hii-trust-section, .hii-pricing-section, .hii-download-section { gap:70px; }
     .hii-use-section header { position:static; }
@@ -302,8 +362,12 @@
     .hii-palette-proof { margin-top:56px; border-radius:15px; }
     .hii-window-meta { height:34px; padding:0 11px; }
     .hii-palette-proof figcaption { display:none; }
-    .hii-product-proof, .hii-use-section, .hii-trust-section, .hii-pricing-section, .hii-download-section { padding:92px 16px; }
-    .hii-product-intro h2, .hii-use-section h2, .hii-trust-section h2, .hii-download-section h2 { font-size:clamp(48px,15vw,76px); }
+    .hii-first-win-section, .hii-product-proof, .hii-use-section, .hii-trust-section, .hii-pricing-section, .hii-download-section { padding:92px 16px; }
+    .hii-first-win-section h2, .hii-product-intro h2, .hii-use-section h2, .hii-trust-section h2, .hii-download-section h2 { font-size:clamp(48px,15vw,76px); }
+    .hii-first-win-section > header { gap:28px; }
+    .hii-first-wins { margin-top:55px; }
+    .hii-first-wins article { min-height:270px; border-radius:16px; }
+    .hii-demo-callout { border-radius:16px; }
     .hii-workspace-proof { margin-top:50px; border-radius:15px; }
     .hii-workspace-proof figcaption { grid-template-columns:1fr 1fr; }
     .hii-workspace-proof figcaption span { text-align:left !important; }
