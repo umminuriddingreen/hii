@@ -56,8 +56,7 @@ This closes “one legible governed run,” the first capability-draft path,
 installed-model truth, and the bounded run stop/retry/reconciliation path. It
 does not close the entire maturity matrix. The highest remaining product gates
 are image/native creative artifact adapters, clean-machine onboarding,
-packaged-app recovery, human-readable runtime health, and media organization at
-scale.
+packaged-app recovery, and media organization at scale.
 
 ### Verified lifecycle checkpoint
 
@@ -110,6 +109,27 @@ unlisted-path rejection, symlink-boundary rejection, and durable human-edit
 provenance. Markdown, text, code, structured data, SVG, and other bounded UTF-8
 formats are supported up to 2 MB. Image, drawing, model, and richer native-file
 adapters remain the next artifact layer.
+
+### Verified runtime-health checkpoint
+
+HII Space no longer displays a raw `hiid 44` count. That number mixed one real
+daemon, historical terminal run records, and observed workstation processes,
+so it looked like dozens of active agents when there were none.
+
+The shared health model now reports one operator-facing state:
+
+- `AII ready` when the owned daemon heartbeat is fresh and no approved work is
+  active.
+- `AII working` when approved runs are active or queued.
+- `AII needs attention` when the heartbeat is stale or a recent daemon error
+  needs recovery.
+- `AII offline` when approved local work cannot start.
+
+Only attention and offline states offer recovery actions, and those actions are
+explicit local Start or Restart buttons. The expanded panel shows active and
+queued run counts, heartbeat age, and explains that observed Mac processes are
+inspectable context rather than active HII agents. Historical failed runs do
+not degrade current runtime health.
 
 ## Evidence reviewed
 

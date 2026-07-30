@@ -179,7 +179,7 @@
     "name": "HII Daemon Instance Supervisor",
     "owner": "hii",
     "runtime": "local-cli",
-    "summary": "Run hiid as the local-first persistent supervisor for HII daemon instances, managed Codex runs, redacted raw daemon output, live action feed, and HII-owned process visibility.",
+    "summary": "Run hiid as the local-first persistent supervisor with operator-meaningful ready, working, attention, and offline health; managed runs; redacted output; and HII-owned process control.",
     "inputs": [
       "daemon command",
       "managed Codex prompt",
@@ -192,7 +192,8 @@
       "instance registry",
       "live feed event",
       "managed Codex run receipt",
-      "whiteboard daemon panel"
+      "HII Space runtime health and recovery panel",
+      "observed-process count separated from active HII work"
     ],
     "permissions": [
       "local-only",
@@ -214,6 +215,8 @@
       "hii feed",
       "hii codex run",
       "aii/daemon/hiid.mjs",
+      "lib/workspace/daemon-health.ts",
+      "tests/unit/daemon-health.test.ts",
       "/api/daemon",
       "~/.hii/daemon/status.json",
       "~/.hii/daemon/events.jsonl",

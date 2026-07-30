@@ -13,6 +13,8 @@ const workspaceArtifactRoute = readFileSync(resolve(root, 'app/api/workspace/art
 const apiBridge = readFileSync(resolve(root, 'src/routes/api/[...path]/+server.ts'), 'utf8');
 const runArtifactPane = readFileSync(resolve(root, 'src/lib/components/workspace/RunArtifactPane.svelte'), 'utf8');
 const hiid = readFileSync(resolve(root, 'aii/daemon/hiid.mjs'), 'utf8');
+const daemonHealth = readFileSync(resolve(root, 'lib/workspace/daemon-health.ts'), 'utf8');
+const hiiDaemon = readFileSync(resolve(root, 'lib/server/hii-daemon.ts'), 'utf8');
 const knowledgeRuns = readFileSync(resolve(root, 'lib/server/hii-knowledge-runs.ts'), 'utf8');
 const explorer = readFileSync(resolve(root, 'src/lib/components/workspace/ExplorerPane.svelte'), 'utf8');
 const terminal = readFileSync(resolve(root, 'src/lib/components/TerminalPane.svelte'), 'utf8');
@@ -75,6 +77,16 @@ describe('agentic workspace interaction contract', () => {
     expect(hiid).toContain('cancelWorkspaceIntent');
     expect(hiid).toContain('reconcileWorkspaceRuns');
     expect(hiid).toContain('if (terminal?.status === "cancelled") return');
+  });
+
+  it('shows operator-meaningful runtime health instead of unexplained process counts', () => {
+    expect(workspace).not.toContain("hiid {daemon?.instances?.length");
+    expect(workspace).toContain('runtimeHealth.label');
+    expect(workspace).toContain('AII runtime health');
+    expect(workspace).toContain('observed workstation processes');
+    expect(workspace).toContain('controlDaemon(runtimeHealth.recoveryAction)');
+    expect(daemonHealth).toContain("'ready' | 'busy' | 'attention' | 'offline'");
+    expect(hiiDaemon).toContain('summarizeHiiDaemonHealth');
   });
 
   it('materializes proof lineage and keeps capability promotion operator-reviewed', () => {

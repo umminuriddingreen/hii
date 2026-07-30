@@ -5,6 +5,8 @@ import path from 'path';
 import { promisify } from 'util';
 import { redactProcessLine } from '@/lib/server/hii-terminal';
 import { visibleRunOutput } from '@/lib/workspace/run-output';
+import { listCapabilityJobs } from '@/lib/capabilities/local-store';
+import { summarizeHiiDaemonHealth } from '@/lib/workspace/daemon-health';
 
 const execFileAsync = promisify(execFile);
 
@@ -139,11 +141,23 @@ export async function getHiiDaemonSnapshot() {
   const instancesDoc = await readJson<{ instances?: HiiDaemonInstance[] }>(instancesPath, { instances: [] });
   const events = (await readJsonl<HiiDaemonEvent>(eventsPath)).slice(-120).reverse();
   const runs = (await readRuns()).slice(0, 40);
+  const workspaceJobs = (await listCapabilityJobs({ limit: 500 }))
+    .filter((job) => job.capabilityId === 'hii.agent.workspace_run');
   const alive = await pidAlive(typeof status.pid === 'number' ? status.pid : null);
   const rawOutput = await readDaemonOutput();
+  const instances = instancesDoc.instances ?? [];
+  const health = summarizeHiiDaemonHealth({
+    alive,
+    status,
+    instances,
+    runs,
+    workspaceJobs,
+    events
+  });
 
   return {
     alive,
+    health,
     status: {
       state: alive ? status.state || 'running' : 'stopped',
       pid: alive ? status.pid ?? null : null,
@@ -159,7 +173,7 @@ export async function getHiiDaemonSnapshot() {
       },
       runtime: daemonDir
     },
-    instances: instancesDoc.instances ?? [],
+    instances,
     events,
     runs,
     rawOutput,
