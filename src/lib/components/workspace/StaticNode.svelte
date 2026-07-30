@@ -5,7 +5,13 @@
     workspaceContextAnchorLabel,
     type WorkspaceContextAnchor
   } from '@/lib/workspace/context-anchor';
-  import { normalizeContactSheetItems, normalizeContactSheetSelection } from '@/lib/workspace/contact-sheet';
+  import {
+    filterContactSheetItems,
+    labelContactSheetItems,
+    normalizeContactSheetItems,
+    normalizeContactSheetLabels,
+    normalizeContactSheetSelection
+  } from '@/lib/workspace/contact-sheet';
 
   export let node:WorkspaceNode;
   export let onPayload:(patch:Record<string,unknown>)=>void;
@@ -24,15 +30,31 @@
   let markOut=initialAnchor?.kind==='media-range'?initialAnchor.endSeconds:0;
   let designFrame=initialAnchor?.kind==='design-selection'?initialAnchor.frame||'':'';
   let designLayers=initialAnchor?.kind==='design-selection'?initialAnchor.layers.join(', '):'';
+  let contactQuery='';
+  let batchContactLabel='';
   $: anchor=normalizeWorkspaceContextAnchor(node.payload.contextAnchor);
   $: imageRegion=anchor?.kind==='image-region'?anchor:draftRegion;
   $: contactItems=normalizeContactSheetItems(node.payload.items);
-  $: selectedContactItems=normalizeContactSheetSelection(contactItems,node.payload.selectedItems);
+  $: contactLabels=normalizeContactSheetLabels(contactItems,node.payload.itemLabels);
+  $: selectedContactItems=normalizeContactSheetSelection(contactItems,node.payload.selectedItems,contactLabels);
+  $: shownContactItems=filterContactSheetItems(contactItems,contactLabels,contactQuery);
   function toggleContactItem(item:(typeof contactItems)[number]){
     const selected=selectedContactItems.some(candidate=>candidate.sha256===item.sha256);
     onPayload({selectedItems:selected?selectedContactItems.filter(candidate=>candidate.sha256!==item.sha256):selectedContactItems.length<12?[...selectedContactItems,item]:selectedContactItems});
   }
-  function labelContactItem(sha256:string,label:string){onPayload({selectedItems:selectedContactItems.map(item=>item.sha256===sha256?{...item,label}:item)})}
+  function labelContactItem(sha256:string,label:string){
+    onPayload({itemLabels:labelContactSheetItems({items:contactItems,labels:contactLabels,selectedItems:[{sha256}],label})});
+  }
+  function labelSelectedContactItems(){
+    if(!selectedContactItems.length||!batchContactLabel.trim())return;
+    onPayload({itemLabels:labelContactSheetItems({items:contactItems,labels:contactLabels,selectedItems:selectedContactItems,label:batchContactLabel})});
+    batchContactLabel='';
+  }
+  function selectShownContactItems(){
+    const selected=new Map(selectedContactItems.map(item=>[item.sha256,item]));
+    for(const item of shownContactItems){if(selected.size>=12)break;selected.set(item.sha256,item)}
+    onPayload({selectedItems:[...selected.values()]});
+  }
 
   function normalizedPoint(event:PointerEvent) {
     const bounds=imageHost.getBoundingClientRect();
@@ -113,25 +135,38 @@
   <div class="flex h-full items-center gap-3 p-3"><span class="text-2xl">{text('emoji')||'📄'}</span><div class="min-w-0"><strong class="block truncate text-[12px]">{text('name')}</strong><small class="block font-mono text-[9px] uppercase text-neutral-400">{text('label')||text('category')||'file'} · {size(node.payload.size)}</small><p class="mt-1 text-[10px] text-neutral-500">{text('description')}</p></div></div>
 {:else if node.type==='image'&&text('adapter')==='contact-sheet'}
   <section class="flex h-full min-h-0 flex-col overflow-hidden bg-white">
-    <header class="flex items-center justify-between gap-3 border-b px-4 py-3">
-      <div class="min-w-0"><strong class="block truncate text-[13px]">{text('title')||'Reference contact sheet'}</strong><small class="font-mono text-[8px] uppercase tracking-[.08em] text-neutral-400">{Number(node.payload.uniqueCount)||0} unique references · {selectedContactItems.length} selected for context</small></div>
-      {#if Number(node.payload.duplicateCount)>0}<span class="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 font-mono text-[8px] uppercase text-amber-700">{Number(node.payload.duplicateCount)} exact duplicate{Number(node.payload.duplicateCount)===1?'':'s'} omitted</span>{/if}
+    <header class="border-b px-4 py-3">
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0"><strong class="block truncate text-[13px]">{text('title')||'Reference contact sheet'}</strong><small class="font-mono text-[8px] uppercase tracking-[.08em] text-neutral-400">{shownContactItems.length} shown · {Number(node.payload.uniqueCount)||0} unique · {selectedContactItems.length} selected for context</small></div>
+        {#if Number(node.payload.duplicateCount)>0}<span class="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 font-mono text-[8px] uppercase text-amber-700">{Number(node.payload.duplicateCount)} exact duplicate{Number(node.payload.duplicateCount)===1?'':'s'} omitted</span>{/if}
+      </div>
+      <div role="group" aria-label="Contact sheet review controls" class="mt-2 flex items-center gap-1.5" on:pointerdown|stopPropagation>
+        <input aria-label="Filter contact sheet" bind:value={contactQuery} class="min-w-0 flex-1 rounded-full border border-neutral-900/10 bg-neutral-50 px-3 py-1.5 font-mono text-[8px] outline-none focus:border-blue-400" placeholder="filter names, paths, or labels"/>
+        <button class="shrink-0 rounded-full bg-neutral-100 px-2.5 py-1.5 font-mono text-[8px] uppercase text-neutral-600 disabled:opacity-35" disabled={!shownContactItems.length||selectedContactItems.length>=12} on:click={selectShownContactItems}>Select shown</button>
+        {#if selectedContactItems.length}
+          <input aria-label="Batch label selected references" bind:value={batchContactLabel} class="min-w-0 max-w-32 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 font-mono text-[8px] outline-none focus:border-blue-500" placeholder="label selected"/>
+          <button class="shrink-0 rounded-full bg-blue-600 px-2.5 py-1.5 font-mono text-[8px] uppercase text-white disabled:opacity-35" disabled={!batchContactLabel.trim()} on:click={labelSelectedContactItems}>Label selected</button>
+          <button class="shrink-0 rounded-full px-2 py-1.5 font-mono text-[8px] uppercase text-neutral-400 hover:bg-neutral-100" on:click={()=>onPayload({selectedItems:[]})}>Clear</button>
+        {/if}
+      </div>
     </header>
     <div class="scroll min-h-0 flex-1 overflow-auto p-3">
       <div class="grid gap-2" style={`grid-template-columns:repeat(${Number(node.payload.columns)||4},minmax(0,1fr))`}>
-        {#each contactItems as item}
+        {#each shownContactItems as item}
           <div class={`group/item overflow-hidden rounded-xl border bg-neutral-50 ${selectedContactItems.some(candidate=>candidate.sha256===item.sha256)?'border-blue-500 ring-2 ring-blue-200':'border-neutral-900/10 hover:border-blue-400'}`} title={item.path||item.name}>
             <button aria-label={`Use ${item.name} as run context`} aria-pressed={selectedContactItems.some(candidate=>candidate.sha256===item.sha256)} class="block w-full text-left" on:click={()=>toggleContactItem(item)}>
               <img src={item.url} alt={item.name} loading="lazy" class="aspect-video w-full bg-neutral-100 object-contain"/>
               <span class="block truncate px-2 py-1.5 font-mono text-[8px] text-neutral-500 group-hover/item:text-blue-700">{item.name}</span>
+              {#if contactLabels[item.sha256]}<span class="mx-1.5 mb-1.5 block truncate rounded-full bg-violet-50 px-2 py-1 font-mono text-[8px] text-violet-700">{contactLabels[item.sha256]}</span>{/if}
             </button>
             {#if selectedContactItems.some(candidate=>candidate.sha256===item.sha256)}
-              <input aria-label={`Context label for ${item.name}`} value={selectedContactItems.find(candidate=>candidate.sha256===item.sha256)?.label||''} on:change={(event)=>labelContactItem(item.sha256,event.currentTarget.value)} on:pointerdown|stopPropagation class="m-1.5 mt-0 w-[calc(100%-12px)] rounded border border-blue-200 bg-white px-2 py-1 font-mono text-[8px] outline-none" placeholder="optional focus label"/>
+              <input aria-label={`Context label for ${item.name}`} value={contactLabels[item.sha256]||''} on:change={(event)=>labelContactItem(item.sha256,event.currentTarget.value)} on:pointerdown|stopPropagation class="m-1.5 mt-0 w-[calc(100%-12px)] rounded border border-blue-200 bg-white px-2 py-1 font-mono text-[8px] outline-none" placeholder="optional focus label"/>
               <button class="mx-1.5 mb-1.5 rounded-full bg-blue-600 px-2.5 py-1 font-mono text-[8px] uppercase text-white" on:click={()=>onPromote(item,selectedContactItems.find(candidate=>candidate.sha256===item.sha256)?.label)}>Focus region ↗</button>
             {/if}
           </div>
         {/each}
       </div>
+      {#if !shownContactItems.length}<p class="grid min-h-32 place-items-center font-mono text-[9px] text-neutral-400">No references match this filter.</p>{/if}
     </div>
   </section>
 {:else if node.type==='image'}

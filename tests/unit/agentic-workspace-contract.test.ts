@@ -318,8 +318,13 @@ describe('agentic workspace interaction contract', () => {
   it('turns exact contact-sheet thumbnail choices into governed run context', () => {
     expect(workspace).toContain('contactSheetContextItems');
     expect(workspace).toContain('contextNodes.flatMap(contextItemsForNode)');
-    expect(readFileSync(resolve(root, 'src/lib/components/workspace/StaticNode.svelte'), 'utf8')).toContain('selected for context');
-    expect(readFileSync(resolve(root, 'src/lib/components/workspace/StaticNode.svelte'), 'utf8')).toContain('optional focus label');
+    const staticNode = readFileSync(resolve(root, 'src/lib/components/workspace/StaticNode.svelte'), 'utf8');
+    expect(staticNode).toContain('selected for context');
+    expect(staticNode).toContain('optional focus label');
+    expect(staticNode).toContain('Filter contact sheet');
+    expect(staticNode).toContain('Label selected');
+    expect(staticNode).toContain('labelContactSheetItems');
+    expect(workspace).toContain('itemLabels:node.payload.itemLabels');
   });
 
   it('promotes a chosen sheet item into the existing image-region workflow', () => {

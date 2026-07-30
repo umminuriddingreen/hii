@@ -926,7 +926,7 @@
     "name": "Create in the HII Spatial Workspace",
     "owner": "hii",
     "runtime": "next-route",
-    "summary": "Create with editable text and durable media, organize exact human selections into reversible Scenes, navigate large canvases through a searchable governed Scene and object outline, inspect source-linked PDF documents, local DXF drawings, and 3D models, bind human-selected pages, regions, layers, time ranges, and views into governed agent runs, keep managed chat readable while preserving raw run evidence, branch verified work, and edit receipt-linked text artifacts beside their source context.",
+    "summary": "Create with editable text and durable media, organize exact human selections into reversible Scenes, classify large reference sheets with durable human labels, navigate large canvases through a searchable governed Scene and object outline, inspect source-linked PDF documents, local DXF drawings, and 3D models, bind human-selected pages, regions, layers, time ranges, and views into governed agent runs, keep managed chat readable while preserving raw run evidence, branch verified work, and edit receipt-linked text artifacts beside their source context.",
     "inputs": [
       "typed canvas text",
       "local clipboard or dropped media",
@@ -940,7 +940,8 @@
       "receipt-listed local workspace artifact",
       "two or more explicitly selected workspace objects",
       "named scene with explicitly captured object membership",
-      "batch of local reference images"
+      "batch of local reference images",
+      "explicitly selected contact-sheet references and human-authored batch label"
     ],
     "outputs": [
       "persisted movable workspace nodes",
@@ -959,7 +960,8 @@
       "append-only human artifact-edit receipt",
       "reversible human-owned scene with exact selected membership",
       "ordered scene navigation with compact membership summaries",
-      "bounded contact sheets with exact-duplicate counts and source hashes"
+      "bounded contact sheets with exact-duplicate counts and source hashes",
+      "durable filterable labels bound to exact reference hashes"
     ],
     "permissions": [
       "local HII origin only",
@@ -985,6 +987,7 @@
       "src/lib/components/workspace/ChatPane.svelte",
       "src/lib/components/workspace/RunArtifactPane.svelte",
       "lib/workspace/ingest.ts",
+      "lib/workspace/contact-sheet.ts",
       "lib/workspace/organize.ts",
       "lib/workspace/scenes.ts",
       "lib/workspace/dxf.ts",
@@ -995,6 +998,7 @@
       "app/api/daemon/runs",
       "tests/unit/workspace-viewers-contract.test.ts",
       "tests/unit/workspace-organize.test.ts",
+      "tests/unit/workspace-contact-sheet.test.ts",
       "tests/unit/chat-output.test.ts",
       "tests/unit/dxf.test.ts",
       "scripts/hii-spatial-run-smoke.mjs",

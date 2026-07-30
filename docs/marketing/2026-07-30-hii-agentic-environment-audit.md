@@ -349,8 +349,8 @@ The isolated `hii:scenes:check` product gate proves ordering, wrapping
 navigation, explicit membership, exact-selection organization at 240 objects,
 type summaries, deterministic viewport framing, and persistence after reload.
 This closes the named Scenes and explicit existing-object organization portions
-of orientation at scale. Stacking, batch labels, and reviewed near-duplicate
-handling remain open.
+of orientation at scale. Stacking and reviewed near-duplicate handling remain
+open.
 
 ### Verified governed-outline and first-win checkpoint
 
@@ -415,8 +415,7 @@ batch behavior. That distinction keeps the visual and import claims separate.
 
 This is intentionally non-destructive. Existing flat image fields are not
 silently rewritten, and near-duplicate visual matching is not claimed. A
-future stacking action, batch labels, and perceptual-deduplication review
-remain open.
+future stacking action and perceptual-deduplication review remain open.
 
 Contact sheets are now also direct context surfaces rather than terminal
 collages. A person can select up to twelve exact thumbnails, optionally label
@@ -425,6 +424,15 @@ expands only those reviewed choices into separate run-context entries with
 their own local path, SHA-256 identity, annotation, and proof lineage. The
 approval fingerprint therefore changes with the exact selected references;
 unselected images do not silently enter the run.
+
+Human classification now survives beyond the immediate selection. A person
+can apply one bounded label to the selected references, filter the sheet by
+name, local path, media type, or those durable labels, and select the visible
+result without expanding approval beyond twelve images. Labels remain attached
+to each source hash when the context selection is cleared, and they reappear
+in the exact run-context annotation when that source is selected again. This
+adds the useful batch organization learned from Figma, Miro, and Freeform
+without turning AI guesses into silent project structure.
 
 Any selected thumbnail can now be promoted beside its sheet as an ordinary HII
 image object. Promotion is idempotent for the sheet plus source hash, retains a
@@ -618,7 +626,7 @@ cloud sync, credits, or a general “AI operating system.”
 | 0 | Artifact-first closure | The output opens beside its inputs, is editable or launches its native editor, and reports exactly what changed. |
 | 0 | Trustworthy context selection | Before approval, the user can see the exact files/nodes/sources and sub-asset regions included, exclusions, provenance, content identity, and likely network boundary. |
 | 0 | Human-readable runtime health | One instance model, one clear status, failures with cause and recovery action, no unexplained process counts. |
-| 1 | Media organization | New multi-image imports become bounded proof-linked contact sheets, exact duplicates are visibly counted, and filtered existing nodes become an exact reversible Scene. Stacking, batch labels, and reviewed perceptual dedupe remain open. |
+| 1 | Media organization | New multi-image imports become bounded proof-linked contact sheets, exact duplicates are visibly counted, selected references accept durable filterable batch labels, and filtered existing nodes become an exact reversible Scene. Stacking and reviewed perceptual dedupe remain open. |
 | 1 | Run focus and log hygiene | Governed Runs use a five-step progress summary, raw logs require two disclosures, and legacy Chat transcripts render only the readable response by default while preserving inspectable evidence. Preventing duplicate or low-quality generated board tasks remains open. |
 | 1 | Capability reuse | A successful approved trace can become a draft capability, show required inputs and permissions, and be re-run on new context. |
 | 1 | Onboarding | The first-session journey and privacy-safe local funnel are implemented. A clean Mac install must still reach the first verified artifact in under ten minutes with no repository knowledge. |
@@ -652,7 +660,8 @@ cloud sync, credits, or a general “AI operating system.”
 ### Build next
 
 1. Extend the verified contact-sheet and exact-selection organization flow
-   with stacking, batch labels, and reviewed perceptual dedupe.
+   with stacking and reviewed perceptual dedupe. Durable filterable batch
+   labels are implemented without weakening the exact-context bound.
 2. Keep contact-sheet selection and promotion reliable at real-project scale.
    Exact sheet items, optional labels, local paths, hashes, proof lineage, and
    promoted per-thumbnail image-region focus now enter approval without

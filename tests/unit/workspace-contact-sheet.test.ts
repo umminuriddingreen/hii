@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { seedsFromFiles } from '../../lib/workspace/ingest';
-import { contactSheetContextItems, contactSheetItemSeed, normalizeContactSheetSelection } from '../../lib/workspace/contact-sheet';
+import {
+  contactSheetContextItems,
+  contactSheetItemSeed,
+  filterContactSheetItems,
+  labelContactSheetItems,
+  normalizeContactSheetLabels,
+  normalizeContactSheetSelection
+} from '../../lib/workspace/contact-sheet';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -101,6 +108,46 @@ describe('workspace contact-sheet import', () => {
     });
     expect(context[2].proofRefs).toContain(`sha256:${'3'.padStart(64, '0')}`);
     expect(context.some((item) => item.source === '/project/13.png')).toBe(false);
+  });
+
+  it('keeps human batch labels durable, filterable, and exact in run context', () => {
+    const items = Array.from({ length: 4 }, (_, index) => ({
+      url: `/asset/${index}.png`, path: `/project/${index}.png`, name: `${index}-reference.png`,
+      mime: 'image/png', size: 10, sha256: (index + 1).toString(16).padStart(64, '0')
+    }));
+    const selectedItems = [items[0], items[2]];
+    const labels = labelContactSheetItems({
+      items,
+      labels: {
+        [items[1].sha256]: 'material study',
+        ['f'.repeat(64)]: 'unknown source'
+      },
+      selectedItems,
+      label: 'facade rhythm'
+    });
+
+    expect(normalizeContactSheetLabels(items, labels)).toEqual({
+      [items[0].sha256]: 'facade rhythm',
+      [items[1].sha256]: 'material study',
+      [items[2].sha256]: 'facade rhythm'
+    });
+    expect(filterContactSheetItems(items, labels, 'facade')).toEqual([items[0], items[2]]);
+    expect(filterContactSheetItems(items, labels, 'material 1-reference')).toEqual([items[1]]);
+
+    const context = contactSheetContextItems({
+      nodeId: 'sheet',
+      items,
+      selectedItems: [items[2]],
+      itemLabels: labels,
+      proofRefs: ['import-receipt']
+    });
+    expect(context).toHaveLength(1);
+    expect(context[0]).toMatchObject({
+      title: 'facade rhythm',
+      source: '/project/2.png',
+      expectedSha256: '3'.padStart(64, '0'),
+      excerpt: 'Human annotation: facade rhythm'
+    });
   });
 
   it('promotes one durable thumbnail into a region-focusable child object', () => {

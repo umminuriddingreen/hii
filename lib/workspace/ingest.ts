@@ -477,6 +477,7 @@ function contactSheetSeed(
       adapter: 'contact-sheet',
       title,
       items,
+      itemLabels: {},
       uniqueCount: items.length,
       duplicateCount: sheetIndex === 0 ? duplicateNames.length : 0,
       duplicateNames: sheetIndex === 0 ? duplicateNames.slice(0, 40) : [],
