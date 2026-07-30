@@ -44,6 +44,7 @@ export const defaultSize: Record<WorkspaceNodeType, { w: number; h: number }> = 
   explorer: { w: 1040, h: 640 },
   context: { w: 360, h: 440 },
   board: { w: 360, h: 440 },
+  frame: { w: 720, h: 480 },
   surface: { w: 1080, h: 720 },
   job: { w: 360, h: 300 },
   'sound-field': { w: 820, h: 600 }
@@ -67,6 +68,14 @@ export function makeNode(seed: NodeSeed, x: number, y: number, z: number): Works
 }
 
 export function seedFor(type: WorkspaceNodeType, payload: Record<string, unknown> = {}): NodeSeed {
+  if (type === 'frame') {
+    return {
+      type,
+      ...defaultSize[type],
+      object: { kind: 'component', owner: 'human', status: 'ready' },
+      payload: { title: 'New frame', collapsed: false, ...payload }
+    };
+  }
   if (type === 'intent') {
     return {
       type,

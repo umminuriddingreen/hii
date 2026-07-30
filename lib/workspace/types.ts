@@ -20,6 +20,7 @@ export type WorkspaceNodeType =
   | 'explorer'
   | 'context'
   | 'board'
+  | 'frame'
   | 'surface'
   | 'job'
   | 'sound-field';
@@ -108,6 +109,7 @@ export const workspaceNodeTypes: WorkspaceNodeType[] = [
   'explorer',
   'context',
   'board',
+  'frame',
   'surface',
   'job',
   'sound-field'
@@ -130,6 +132,7 @@ export type WorkspaceNode = {
     projectId?: string;
     kind?: string;
   };
+  frameId?: string;
   payload: Record<string, unknown>;
 };
 
@@ -290,6 +293,7 @@ export function normalizeNode(raw: unknown): WorkspaceNode | null {
     updatedAt: typeof node.updatedAt === 'string' ? node.updatedAt : now,
     object: normalizeSpatialObject(node.object),
     objectRef: normalizedRef,
+    frameId: sanitizeText(node.frameId, 64),
     payload: node.payload && typeof node.payload === 'object' ? (node.payload as Record<string, unknown>) : {}
   };
 }
