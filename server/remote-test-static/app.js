@@ -12,15 +12,44 @@ let savedSourceArtifactId;
 let savedUrl;
 let terminal;
 let reconnectTimer;
+let activityTail = '';
+
+function setSignal(state = 'idle') {
+  session.dataset.signal = state;
+}
+
+function trackActivity(data) {
+  activityTail = `${activityTail}${data}`
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+    .slice(-1600);
+  const markers = [
+    ['model', /\bMODEL\b/g],
+    ['tool', /\b(?:BUILDING|CHECKING|RESEARCHING)\b/g],
+    ['verify', /\bVERIFYING\b/g],
+    ['proof', /\bDONE\b/g],
+    ['error', /(?:! LOCAL PROBLEM|! INTERRUPTED|REPAIR STALLED|\bfailed\b)/g]
+  ];
+  let latest = { state: 'idle', index: -1 };
+  for (const [state, pattern] of markers) {
+    for (const match of activityTail.matchAll(pattern)) {
+      if (match.index > latest.index) latest = { state, index: match.index };
+    }
+  }
+  if (latest.index >= 0) setSignal(latest.state);
+}
 
 function setConnection(message = '') {
   connection.textContent = message;
   connection.hidden = !message;
+  if (message) setSignal('reconnect');
 }
 
 function setPreviewStatus(state, message) {
   previewStatus.dataset.state = state;
   previewStatus.textContent = message;
+  if (state === 'updating') setSignal('verify');
+  if (state === 'ready') setSignal('proof');
+  if (state === 'failed') setSignal('error');
 }
 
 function sendInput(data) {
@@ -44,26 +73,26 @@ function ensureTerminal() {
       lineHeight: 1.18,
       scrollback: 5000,
       theme: {
-        background: '#0b0d10',
-        foreground: '#f3f4f1',
-        cursor: '#67e8f9',
-        cursorAccent: '#0b0d10',
-        selectionBackground: '#21404a',
-        black: '#88919d',
-        brightBlack: '#a7b0bc',
-        blue: '#7dd3fc',
-        brightBlue: '#bae6fd',
-        cyan: '#67e8f9',
-        brightCyan: '#a5f3fc',
-        green: '#86efac',
-        brightGreen: '#bbf7d0',
-        yellow: '#fde68a',
-        brightYellow: '#fef3c7',
-        red: '#fda4af',
-        brightRed: '#fecdd3',
-        magenta: '#c4b5fd',
-        brightMagenta: '#ddd6fe',
-        white: '#f3f4f1',
+        background: '#07080d',
+        foreground: '#f3efe5',
+        cursor: '#45d6e8',
+        cursorAccent: '#07080d',
+        selectionBackground: '#173d47',
+        black: '#77808f',
+        brightBlack: '#a6afbd',
+        blue: '#6ab9e8',
+        brightBlue: '#a9dcf5',
+        cyan: '#45d6e8',
+        brightCyan: '#9ceaf2',
+        green: '#69d391',
+        brightGreen: '#a8e7ba',
+        yellow: '#d99a52',
+        brightYellow: '#efc27f',
+        red: '#f07178',
+        brightRed: '#f6a1a6',
+        magenta: '#a99adf',
+        brightMagenta: '#cfc5ef',
+        white: '#f3efe5',
         brightWhite: '#ffffff'
       }
     });
@@ -90,6 +119,7 @@ function ensureTerminal() {
 
 function showSession() {
   session.hidden = false;
+  setSignal('idle');
   ensureTerminal();
   fitTerminal();
   terminal.focus();
@@ -106,11 +136,13 @@ function connect() {
   socket.addEventListener('open', () => {
     clearTimeout(reconnectTimer);
     setConnection();
+    setSignal('idle');
     fitTerminal();
   });
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data);
     if (message.type === 'data') {
+      trackActivity(message.data);
       terminal.write(message.data);
     }
     if (message.type === 'artifact') refreshArtifact();

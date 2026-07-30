@@ -334,6 +334,7 @@ test('Three.js import-map fixture renders a canvas and captures a screenshot in 
 test('public screen stays one work stream and one result with minimal preview controls', async () => {
   const html = await fs.readFile(path.join(repository, 'server', 'remote-test-static', 'index.html'), 'utf8');
   const css = await fs.readFile(path.join(repository, 'server', 'remote-test-static', 'style.css'), 'utf8');
+  const app = await fs.readFile(path.join(repository, 'server', 'remote-test-static', 'app.js'), 'utf8');
   const main = html.match(/<main id="session" hidden>([\s\S]*?)<\/main>/)?.[1] ?? '';
   assert.match(main, /id="terminal"/);
   assert.match(main, /id="artifact"/);
@@ -343,9 +344,15 @@ test('public screen stays one work stream and one result with minimal preview co
   assert.match(main, /data-action="save"/);
   assert.doesNotMatch(html, /passcode|claim/i);
   assert.match(css, /#terminal \.xterm-rows/);
-  assert.match(css, /--terminal-text:\s*#f3f4f1/);
+  assert.match(css, /--terminal-text:\s*var\(--bone\)/);
+  assert.match(css, /#session\[data-signal="model"\]/);
+  assert.match(css, /#session\[data-signal="tool"\]/);
+  assert.match(css, /#session\[data-signal="verify"\]/);
+  assert.match(css, /#session\[data-signal="proof"\]/);
+  assert.match(css, /#session\[data-signal="error"\]/);
   assert.match(css, /@media \(max-width: 480px\)/);
-  assert.match(await fs.readFile(path.join(repository, 'server', 'remote-test-static', 'app.js'), 'utf8'), /artifact\.style\.background/);
+  assert.match(app, /artifact\.style\.background/);
+  assert.match(app, /trackActivity\(message\.data\)/);
   assert.match(css, /grid-template-columns:\s*1fr 1fr/);
   assert.match(css, /grid-template-rows:\s*1fr 1fr/);
   assert.match(css, /#preview\s*\{\s*grid-row:\s*1/);

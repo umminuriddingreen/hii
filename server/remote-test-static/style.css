@@ -4,10 +4,18 @@
 
 :root {
   color-scheme: dark;
-  --terminal: #0b0d10;
-  --terminal-text: #f3f4f1;
-  --preview: #12151b;
-  --divider: rgba(255, 255, 255, 0.12);
+  --ink: #07080d;
+  --indigo: #11152a;
+  --bone: #f3efe5;
+  --signal-cyan: #45d6e8;
+  --signal-copper: #d99a52;
+  --signal-proof: #69d391;
+  --signal-error: #f07178;
+  --terminal: var(--ink);
+  --terminal-text: var(--bone);
+  --preview: var(--indigo);
+  --divider: rgba(243, 239, 229, 0.14);
+  --signal: rgba(243, 239, 229, 0.22);
 }
 
 html,
@@ -20,10 +28,47 @@ body {
 }
 
 #session {
+  position: relative;
   width: 100%;
   height: var(--app-height, 100dvh);
   display: grid;
   grid-template-columns: 1fr 1fr;
+}
+
+#session::before {
+  content: "";
+  position: absolute;
+  z-index: 10;
+  inset: 0 auto 0 calc(50% - 1px);
+  width: 2px;
+  pointer-events: none;
+  background: var(--signal);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--signal) 42%, transparent);
+  transition: background-color 180ms ease, box-shadow 180ms ease;
+}
+
+#session[data-signal="model"] {
+  --signal: var(--signal-cyan);
+}
+
+#session[data-signal="tool"] {
+  --signal: var(--signal-copper);
+}
+
+#session[data-signal="verify"] {
+  --signal: #8ca8ff;
+}
+
+#session[data-signal="proof"] {
+  --signal: var(--signal-proof);
+}
+
+#session[data-signal="error"] {
+  --signal: var(--signal-error);
+}
+
+#session[data-signal="reconnect"] {
+  --signal: rgba(243, 239, 229, 0.35);
 }
 
 #session[hidden] {
@@ -49,6 +94,25 @@ body {
   touch-action: manipulation;
 }
 
+#terminal::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.14;
+  background-image:
+    linear-gradient(rgba(69, 214, 232, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(217, 154, 82, 0.05) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: linear-gradient(to right, black, transparent 72%);
+}
+
+#terminal .xterm {
+  position: relative;
+  z-index: 1;
+}
+
 #connection {
   position: absolute;
   z-index: 8;
@@ -57,8 +121,8 @@ body {
   padding: 0.3rem 0.55rem;
   border: 1px solid var(--divider);
   border-radius: 999px;
-  background: rgba(11, 13, 16, 0.9);
-  color: #fde68a;
+  background: rgba(7, 8, 13, 0.9);
+  color: var(--signal-copper);
   font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
@@ -85,7 +149,7 @@ body {
   position: relative;
   overflow: hidden;
   background: var(--preview);
-  box-shadow: inset 1px 0 0 var(--divider);
+  box-shadow: inset 1px 0 0 rgba(0, 0, 0, 0.32);
   transition: background-color 180ms ease;
 }
 
@@ -109,8 +173,8 @@ body {
   top: 0.7rem;
   border: 1px solid var(--divider);
   border-radius: 999px;
-  background: rgba(11, 13, 16, 0.78);
-  color: #8b949e;
+  background: rgba(7, 8, 13, 0.8);
+  color: #a6afbd;
   font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
   backdrop-filter: blur(10px);
 }
@@ -122,22 +186,22 @@ body {
 }
 
 #preview-status[data-state="updating"] {
-  color: #fde68a;
+  color: var(--signal-copper);
 }
 
 #preview-status[data-state="ready"] {
-  color: #86efac;
+  color: var(--signal-proof);
 }
 
 #preview-status[data-state="failed"] {
-  color: #fda4af;
+  color: var(--signal-error);
 }
 
 #preview-controls {
   right: 0.7rem;
   display: flex;
   padding: 0.15rem;
-  opacity: 0.25;
+  opacity: 0.55;
   transition: opacity 160ms ease;
 }
 
@@ -153,7 +217,7 @@ body {
   border: 0;
   border-radius: 999px;
   background: transparent;
-  color: #f3f4f1;
+  color: var(--bone);
   font: 16px/1 system-ui, sans-serif;
   cursor: pointer;
 }
@@ -181,6 +245,12 @@ body {
     box-shadow: inset 0 -1px 0 var(--divider);
   }
 
+  #session::before {
+    inset: calc(50% - 1px) 0 auto;
+    width: 100%;
+    height: 2px;
+  }
+
   #terminal {
     grid-row: 2;
     padding: 0.55rem 0.65rem;
@@ -206,6 +276,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  #session::before,
   #preview,
   #artifact,
   #preview-status,
