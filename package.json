@@ -37,6 +37,7 @@
     "hii:windows:check": "node --experimental-strip-types scripts/hii-window-state-smoke.mjs",
     "hii:workspace:check": "node --experimental-strip-types scripts/hii-workspace-store-smoke.mjs",
     "hii:scenes:check": "node --experimental-strip-types scripts/hii-workspace-scenes-smoke.mjs",
+    "hii:layout:check": "node --experimental-strip-types scripts/hii-workspace-layout-smoke.mjs",
     "hii:media:check": "node --experimental-strip-types scripts/hii-workspace-media-smoke.mjs",
     "hii:space:check": "node scripts/hii-space-smoke.mjs",
     "hii:spatial-runs:check": "node --experimental-strip-types scripts/hii-spatial-run-smoke.mjs",
@@ -50,7 +51,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "ci:fast": "npm run check && npm run test && npm run cli:check",
-    "ci:product": "npm run hii:sdk:check && npm run hii:skills:check && npm run hii:knowledge:check && npm run hii:knowledge-runs:check && npm run hii:contextdock:check && npm run hii:activation:check && npm run hii:windows:check && npm run hii:workspace:check && npm run hii:scenes:check && npm run hii:media:check && npm run hii:space:check && npm run hii:spatial-runs:check && npm run hii:workspace-lifecycle:check && npm run hii:bootstrap:check && npm run hii:launcher:check",
+    "ci:product": "npm run hii:sdk:check && npm run hii:skills:check && npm run hii:knowledge:check && npm run hii:knowledge-runs:check && npm run hii:contextdock:check && npm run hii:activation:check && npm run hii:windows:check && npm run hii:workspace:check && npm run hii:scenes:check && npm run hii:layout:check && npm run hii:media:check && npm run hii:space:check && npm run hii:spatial-runs:check && npm run hii:workspace-lifecycle:check && npm run hii:bootstrap:check && npm run hii:launcher:check",
     "ci:full": "npm run ci:fast && npm run cli:build && npm run ci:product && npm run build",
     "check": "svelte-kit sync && svelte-check --workspace src --config ../svelte.config.js --tsconfig ../tsconfig.json --fail-on-warnings",
     "lint": "svelte-check --workspace src --config ../svelte.config.js --tsconfig ../tsconfig.json --fail-on-warnings"

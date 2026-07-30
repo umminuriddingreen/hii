@@ -21,6 +21,7 @@
   import { adjacentWorkspaceScene, workspaceSceneMembers, workspaceScenes, workspaceSceneTypeSummary } from '@/lib/workspace/scenes';
   import { emptyWorkspaceHistory, recordWorkspaceChange, redoWorkspace, undoWorkspace } from '@/lib/workspace/history';
   import { workspaceConnections } from '@/lib/workspace/connections';
+  import { findOpenWorkspacePosition } from '@/lib/workspace/layout';
 
   export let data: { enabled: boolean };
   const surfaceCatalog = [
@@ -135,14 +136,22 @@
   async function openCommands(){omnibar=true;query='';await tick();commandInput?.focus();}
   function fitNodes(nodes:WorkspaceNode[],maxZoom=1){const rect=canvas?.getBoundingClientRect();if(!rect)return;const viewport=fitWorkspaceViewport(nodes,{width:rect.width,height:rect.height},{maxZoom});if(!viewport)return;doc={...doc,viewport};persist();}
   function fitAll(){fitNodes(doc.nodes);selected=null;contextSelection=[];currentSceneId=null;mapMenu=false;}
-  function focusNode(node:WorkspaceNode){selected=node.id;contextSelection=[node.id];currentSceneId=node.frameId||null;fitNodes([node],1.25);omnibar=false;query='';}
+  function focusNode(node:WorkspaceNode){select(node);currentSceneId=node.frameId||null;fitNodes([node],1.25);omnibar=false;query='';}
   function sceneMembers(id:string){return workspaceSceneMembers(doc.nodes,id)}
   function fitScene(node:WorkspaceNode){const contents=sceneMembers(node.id);fitNodes(contents.length?[node,...contents]:[node],1.25);selected=node.id;contextSelection=[];currentSceneId=node.id;}
   function openScene(node:WorkspaceNode){fitScene(node);mapMenu=false;}
   function openAdjacentScene(direction:-1|1){const scene=adjacentWorkspaceScene(scenes,currentSceneId,direction);if(scene)openScene(scene)}
   function captureScene(id:string){const before=doc;const captured=assignNodesToFrame(doc,id);const now=new Date().toISOString();doc={...captured,nodes:captured.nodes.map(node=>node.id===id?{...node,updatedAt:now,object:{...node.object,kind:'scene',owner:'human',status:'ready',source:'HII spatial workspace',audit:[...(node.object?.audit||[]),{ts:now,actor:'human' as const,action:'captured workspace scene membership'}].slice(-20)}}:node)};currentSceneId=id;remember(before);persist();}
   function runCommand(command:string[]){if(command[0]==='fit'){fitAll();omnibar=false;query=''}else if(command[0]==='surface')spawn('surface',{title:command[1].replace('Open ',''),path:command[3],capabilityId:command[4]});else if(command[0]==='intent')void summonComposer();else if(command[0]==='upload'){omnibar=false;fileInput?.click()}else spawn(command[0]);}
-  function followUp(node:WorkspaceNode,text:string){createSpatialRun(text,{x:node.x+node.w+48,y:node.y},node.id,[node])}
+  function followUp(node:WorkspaceNode,text:string){
+    const intentSeed=seedFor('intent'),runSeed=seedFor('run');
+    const at=findOpenWorkspacePosition(
+      doc.nodes,
+      {x:node.x+node.w+48,y:node.y},
+      {w:Math.max(intentSeed.w,runSeed.w),h:intentSeed.h+20+runSeed.h}
+    );
+    createSpatialRun(text,at,node.id,[node]);
+  }
   function completedRunNodes(runNode:WorkspaceNode,result:Record<string,unknown>){
     const runId=String(result.runId||runNode.id);
     if(doc.nodes.some(node=>node.object?.kind==='receipt'&&String(node.payload.runId||'')===runId))return;
@@ -155,9 +164,16 @@
     const summary=String(receipt.summary||'The bounded workspace run completed and returned a receipt.');
     const before=doc;
     let z=doc.nextZ;
+    const artifactWidth=artifacts.length?460:430;
+    const artifactHeight=artifacts.length?340:260;
+    const resultAt=findOpenWorkspacePosition(
+      doc.nodes,
+      {x:runNode.x+runNode.w+40,y:runNode.y},
+      {w:artifactWidth+Math.max(0,artifacts.length-1)*28,h:artifactHeight+20+360}
+    );
     const artifactNodes=artifacts.length
-      ? artifacts.map((artifactPath,index)=>makeNode({type:'text',w:460,h:340,object:{kind:'artifact',owner:'aii',status:'completed',source:artifactPath,capabilityId:'hii.agent.workspace_run',runId,parentId:runNode.id,proofRefs:[String(result.receiptPath||''),artifactPath].filter(Boolean),audit:[{ts:new Date().toISOString(),actor:'hii',action:'materialized receipt-linked run artifact'}]},payload:{adapter:'run-artifact',title:artifactPath.split('/').at(-1)||'Run artifact',artifactPath,runId,receiptPath:String(result.receiptPath||''),summary}},runNode.x+runNode.w+40+index*28,runNode.y+index*28,++z))
-      : [makeNode({type:'text',w:430,h:260,object:{kind:'artifact',owner:'aii',status:'completed',source:String(result.receiptPath||'HII workspace run receipt'),capabilityId:'hii.agent.workspace_run',runId,parentId:runNode.id,proofRefs:[String(result.receiptPath||'')].filter(Boolean),audit:[{ts:new Date().toISOString(),actor:'hii',action:'materialized verified run summary'}]},payload:{title:'Agent result',name:'verified artifact',summary,content:summary,path:'',runId}},runNode.x+runNode.w+40,runNode.y,++z)];
+      ? artifacts.map((artifactPath,index)=>makeNode({type:'text',w:460,h:340,object:{kind:'artifact',owner:'aii',status:'completed',source:artifactPath,capabilityId:'hii.agent.workspace_run',runId,parentId:runNode.id,proofRefs:[String(result.receiptPath||''),artifactPath].filter(Boolean),audit:[{ts:new Date().toISOString(),actor:'hii',action:'materialized receipt-linked run artifact'}]},payload:{adapter:'run-artifact',title:artifactPath.split('/').at(-1)||'Run artifact',artifactPath,runId,receiptPath:String(result.receiptPath||''),summary}},resultAt.x+index*28,resultAt.y+index*28,++z))
+      : [makeNode({type:'text',w:430,h:260,object:{kind:'artifact',owner:'aii',status:'completed',source:String(result.receiptPath||'HII workspace run receipt'),capabilityId:'hii.agent.workspace_run',runId,parentId:runNode.id,proofRefs:[String(result.receiptPath||'')].filter(Boolean),audit:[{ts:new Date().toISOString(),actor:'hii',action:'materialized verified run summary'}]},payload:{title:'Agent result',name:'verified artifact',summary,content:summary,path:'',runId}},resultAt.x,resultAt.y,++z)];
     const receiptAnchor=artifactNodes.at(-1)||runNode;
     const receiptSeed:NodeSeed={type:'note',w:430,h:360,object:{kind:'receipt',owner:'aii',status:'completed',source:'HII append-only workspace receipt',capabilityId:'hii.agent.workspace_run',runId,parentId:runNode.id,proofRefs:[String(result.receiptPath||'')].filter(Boolean),audit:[{ts:new Date().toISOString(),actor:'hii',action:'returned verified workspace receipt'}]},payload:{title:'Run receipt',summary,intent:String(result.intent||''),context:contextItems,checks,artifactCount:allArtifacts.length,materializedArtifactCount:artifacts.length,receiptPath:String(result.receiptPath||''),runId,status:String(job.status||'completed')}};
     const receiptNode=makeNode(receiptSeed,receiptAnchor.x,receiptAnchor.y+receiptAnchor.h+20,++z);

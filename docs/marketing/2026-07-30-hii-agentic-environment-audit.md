@@ -278,6 +278,22 @@ flat noise, raw error output is not actionable, and product routes had grown
 beyond the spatial wedge. Recent work already narrowed HII back to the spatial
 workspace; the next step is to make that workspace legible under real load.
 
+### Opus 5 launch collaboration
+
+Claude Opus 5 reviewed the verified product state and proposed a 42-second
+context → boundary → lifecycle → artifact → receipt demo. Its most useful
+product critique matched the live inspection: a special clean recording Scene
+is not enough if normal follow-up and result placement can still obscure prior
+work. HII now raises a Map-focused object above overlapping nodes and places new
+run/result groups in the nearest open lane.
+
+The external critique was treated as input, not product truth. Its unsupported
+scroll-to-enable approval behavior, per-tool approval claim, guaranteed partial
+artifact after cancellation, and continuous 42-second timing were removed. The
+vetted working copy is `docs/launch/hii-x-launch-kit-opus5.md`. It keeps one
+first-cohort action, one honest labeled time jump when the local model takes
+longer than the published cut, and a claim table tied to current proof.
+
 ### Current product comparisons
 
 | Product | What it teaches HII | What HII should not copy |

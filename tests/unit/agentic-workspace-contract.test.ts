@@ -152,6 +152,8 @@ describe('agentic workspace interaction contract', () => {
     expect(workspace).toContain('openAdjacentScene(1)');
     expect(workspace).toContain('captureScene(node.id)');
     expect(workspace).toContain('Scene name');
+    expect(workspace).toContain('findOpenWorkspacePosition');
+    expect(workspace).toContain('function focusNode(node:WorkspaceNode){select(node);');
   });
 
   it('organizes large image imports into proof-linked contact sheets', () => {
