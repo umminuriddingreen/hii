@@ -753,7 +753,16 @@ fn escape_literal_control_chars_in_json_strings(candidate: &str) -> String {
     for character in candidate.chars() {
         if in_string {
             if escaped {
-                repaired.push(character);
+                match character {
+                    '\n' => repaired.push('n'),
+                    '\r' => repaired.push('r'),
+                    '\t' => repaired.push('t'),
+                    control if control <= '\u{001f}' => {
+                        use std::fmt::Write as _;
+                        let _ = write!(repaired, "u{:04x}", control as u32);
+                    }
+                    _ => repaired.push(character),
+                }
                 escaped = false;
                 continue;
             }
@@ -981,6 +990,22 @@ mod tests {
                 content: Some(content),
                 ..
             } if tool == "write" && content == "<h1>\nhello</h1>"
+        ));
+    }
+
+    #[test]
+    fn repairs_backslash_before_literal_newline_in_write_content() {
+        let action = parse_action(
+            "{\"type\":\"write\",\"path\":\"public/index.html\",\"content\":\"first\\\nsecond\"}",
+        )
+        .unwrap();
+        assert!(matches!(
+            action,
+            Action::Tool {
+                tool,
+                content: Some(content),
+                ..
+            } if tool == "write" && content == "first\nsecond"
         ));
     }
 
