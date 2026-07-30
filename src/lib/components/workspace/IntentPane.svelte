@@ -9,7 +9,7 @@
     {String(node.payload.text || node.payload.prompt || 'Untitled intent')}
   </p>
   <footer class="flex items-center justify-between font-mono text-[9px] uppercase tracking-[0.12em] text-neutral-400">
-    <span>you · approved intent</span>
+    <span>you · stated intent</span>
     <span>{node.object?.parentId ? 'follow-up branch' : 'workspace root'}</span>
   </footer>
 </article>

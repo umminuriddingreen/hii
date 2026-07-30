@@ -6,6 +6,8 @@ const root = process.cwd();
 const workspace = readFileSync(resolve(root, 'src/lib/components/workspace/WorkspacePage.svelte'), 'utf8');
 const chat = readFileSync(resolve(root, 'src/lib/components/workspace/ChatPane.svelte'), 'utf8');
 const spatialRun = readFileSync(resolve(root, 'src/lib/components/workspace/SpatialRunPane.svelte'), 'utf8');
+const workspaceRuns = readFileSync(resolve(root, 'lib/server/hii-workspace-runs.ts'), 'utf8');
+const workspaceRunRoute = readFileSync(resolve(root, 'app/api/workspace/runs/route.ts'), 'utf8');
 const explorer = readFileSync(resolve(root, 'src/lib/components/workspace/ExplorerPane.svelte'), 'utf8');
 const terminal = readFileSync(resolve(root, 'src/lib/components/TerminalPane.svelte'), 'utf8');
 const desktop = readFileSync(resolve(root, 'src-tauri/src/lib.rs'), 'utf8');
@@ -21,19 +23,43 @@ describe('agentic workspace interaction contract', () => {
     expect(workspace).toContain("event.altKey&&event.code==='Space'");
     expect(workspace).toContain("listen('hii://summon'");
     expect(workspace).toContain("window.addEventListener('hii:summon'");
-    expect(workspace).toContain('direct workspace intent');
+    expect(workspace).toContain('approved context');
     expect(workspace).toContain("seedFor('intent'");
     expect(workspace).toContain("seedFor('run'");
-    expect(spatialRun).toContain('node.payload.autoStart');
+    expect(spatialRun).toContain('Approve bounded run');
+    expect(spatialRun).toContain("action: 'approve'");
   });
 
-  it('streams managed output and branches follow-up intent on the canvas', () => {
-    expect(spatialRun).toContain('run.visibleOutput');
-    expect(spatialRun).toContain('setTimeout(resolve, 850)');
-    expect(spatialRun).toContain("action: 'codex.stop'");
+  it('hands selected context to the real AII workspace runner and branches from its receipt', () => {
+    expect(workspace).toContain('selectedContextNodes');
+    expect(spatialRun).toContain('Approved canvas context');
+    expect(spatialRun).toContain('/api/workspace/runs');
+    expect(spatialRun).toContain('setTimeout(resolve, 1000)');
+    expect(workspaceRuns).toContain("kind: 'workspace.run'");
+    expect(workspaceRuns).toContain('Explicit approval is required');
+    expect(workspaceRunRoute).toContain('queueApprovedWorkspaceRun');
     expect(spatialRun).toContain('onFollowUp(text)');
     expect(workspace).toContain('parentId:intentNode.id');
     expect(chat).toContain('run.visibleOutput');
+  });
+
+  it('uses the installed HII model default and preserves truthful terminal failures', () => {
+    expect(workspace).toContain("model:'qwen3.6:35b-mlx'");
+    expect(workspaceRuns).toContain("defaultWorkspaceRunModel = 'qwen3.6:35b-mlx'");
+    expect(spatialRun).toContain("let error = String(node.payload.error || '')");
+    expect(spatialRun).toContain("error: failureError");
+    expect(spatialRun).toContain('Branch a revised intent from this run…');
+  });
+
+  it('materializes proof lineage and keeps capability promotion operator-reviewed', () => {
+    expect(workspace).toContain("kind:'artifact'");
+    expect(workspace).toContain("kind:'receipt'");
+    expect(workspace).toContain("kind:'capability'");
+    expect(workspace).toContain('workspaceConnections');
+    expect(spatialRun).toContain('Save verified run as capability draft');
+    expect(workspaceRuns).toContain('createWorkspaceRunCapabilityDraft');
+    expect(workspaceRuns).toContain("'--repeatable'");
+    expect(workspaceRuns).not.toContain('skill register');
   });
 
   it('opens the combined browser and terminal explorer on workspace double-click', () => {

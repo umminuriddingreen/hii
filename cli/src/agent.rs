@@ -428,13 +428,23 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 serde_json::to_string(&verification).unwrap_or_default(),
                 git_status
             );
-            Some(redact_text(&ollama.chat_text(
-                reviewer,
-                &[
-                    Message::system("You are HII's strict final proof reviewer."),
-                    Message::user(prompt),
-                ],
-            )?))
+            Some(
+                match ollama.chat_text(
+                    reviewer,
+                    &[
+                        Message::system("You are HII's strict final proof reviewer."),
+                        Message::user(prompt),
+                    ],
+                ) {
+                    Ok(review) => redact_text(&review),
+                    Err(error) => {
+                        let fallback = format!(
+                            "Review unavailable; the run receipt and verification remain preserved. {error}"
+                        );
+                        redact_text(&fallback)
+                    }
+                },
+            )
         }
         None => None,
     };
@@ -548,6 +558,7 @@ Done when: {done_when}
 Acceptance checks: {declared_verification}
 
 Loop: inspect -> act -> verify change -> adjust -> final.
+Proof MUST be one flat {{"type":"verify","command":"npm test"}} action (or `http`); shell/read/list/search and nested checks never count
 Return one JSON action/turn. `type` is:
 read,list,search,write,edit,shell,verify,http,hii_context,og_next,caps_check,board_read,board_write,skill_search,bridge_send,bridge_read.
 Fields: path,query,command,content,old,new,replace_all,offset,limit,url.
@@ -818,6 +829,11 @@ pub(crate) fn execute_tool(tools: &Toolbelt, call: ToolCall, dry_run: bool) -> T
         output: format!("dry run: {what} skipped"),
         verification: false,
     };
+    let malformed = |what: &str| ToolResult {
+        ok: false,
+        output: format!("malformed {what}: a non-empty value is required"),
+        verification: false,
+    };
     match call.tool {
         "read" => tools.read_range(call.path.unwrap_or(""), call.offset, call.limit),
         "list" => tools.list(call.path),
@@ -832,6 +848,9 @@ pub(crate) fn execute_tool(tools: &Toolbelt, call: ToolCall, dry_run: bool) -> T
             call.new.unwrap_or(""),
             call.replace_all,
         ),
+        "shell" | "verify" if call.command.is_none_or(|command| command.trim().is_empty()) => {
+            malformed("command")
+        }
         "shell" if dry_run => blocked("shell"),
         "shell" => {
             tools.shell_with_delete_approval(call.command.unwrap_or(""), false, call.allow_delete)
@@ -839,6 +858,7 @@ pub(crate) fn execute_tool(tools: &Toolbelt, call: ToolCall, dry_run: bool) -> T
         "verify" => {
             tools.shell_with_delete_approval(call.command.unwrap_or(""), true, call.allow_delete)
         }
+        "http" if call.url.is_none_or(|url| url.trim().is_empty()) => malformed("url"),
         "http" => tools.http(call.url.unwrap_or("")),
         other => ToolResult {
             ok: false,
@@ -1032,6 +1052,46 @@ mod tests {
             "agent prompt grew to {} bytes",
             prompt.len()
         );
+    }
+
+    #[test]
+    fn agent_prompt_makes_receipt_verification_explicit() {
+        let prompt = system_prompt(
+            std::path::Path::new("/workspace"),
+            8,
+            false,
+            "verified",
+            &[],
+        );
+        assert!(prompt.contains("Proof MUST be one flat"));
+        assert!(prompt.contains("shell/read/list/search and nested checks never count"));
+        assert!(prompt.contains(r#"{"type":"verify","command":"npm test"}"#));
+    }
+
+    #[test]
+    fn empty_verification_commands_cannot_become_proof() {
+        let tools = Toolbelt::new(std::env::temp_dir()).unwrap();
+        let result = execute_tool(
+            &tools,
+            ToolCall {
+                tool: "verify",
+                path: None,
+                query: None,
+                command: None,
+                content: None,
+                url: None,
+                old: None,
+                new: None,
+                replace_all: false,
+                offset: None,
+                limit: None,
+                allow_delete: false,
+            },
+            false,
+        );
+        assert!(!result.ok);
+        assert!(!result.verification);
+        assert!(result.output.contains("non-empty"));
     }
 
     #[test]

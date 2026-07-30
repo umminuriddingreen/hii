@@ -37,7 +37,7 @@
   let runProposal:any = null;
   let runGoal = '';
   let runWorkspace = '/Users/ummi/hii';
-  let runModel = 'qwen3.6:27b-mlx';
+  let runModel = 'qwen3.6:35b-mlx';
   let runMaxSteps = 8;
   let sourceRoot = '/Users/ummi/Desktop/ummi';
   let importPlan:any = null;

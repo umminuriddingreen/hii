@@ -1,10 +1,5 @@
-import { appendFile, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { appendCapabilityJob, listCapabilityJobs } from '../capabilities/local-store.ts';
-import type { CapabilityJob, CapabilityJobStatus } from '../capabilities/types.ts';
-import { createContextProject } from './hii-context-dock.ts';
+import { listCapabilityJobs } from '../capabilities/local-store.ts';
+import type { CapabilityJobStatus } from '../capabilities/types.ts';
 import {
   createKnowledgeObject,
   createKnowledgeRelation,
@@ -12,13 +7,10 @@ import {
   knowledgeSystemSnapshot,
   updateKnowledgeObject
 } from './hii-knowledge-systems.ts';
+import { defaultWorkspaceRunModel, queueApprovedWorkspaceRun } from './hii-workspace-runs.ts';
 
 const capabilityId = 'hii.agent.workspace_run';
 const supportedModels = new Set(['qwen3.6:27b-mlx', 'qwen3.6:35b-mlx']);
-
-function runtimeRoot() {
-  return process.env.HII_RUNTIME_DIR || path.join(os.homedir(), '.hii');
-}
 
 function clean(value: unknown, max: number) {
   return String(value ?? '').replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -59,7 +51,7 @@ export function prepareKnowledgeRun(input: { id?: unknown; projectId?: unknown; 
       capabilityId,
       goal,
       workspaceRoot: '/Users/ummi/hii',
-      model: 'qwen3.6:27b-mlx',
+      model: defaultWorkspaceRunModel,
       maxSteps: 8,
       permissions: [
         'selected workspace only',
@@ -70,18 +62,6 @@ export function prepareKnowledgeRun(input: { id?: unknown; projectId?: unknown; 
       requiresApproval: true
     }
   };
-}
-
-async function initializeIntentCursor(intentsPath: string, cursorPath: string) {
-  try {
-    await stat(cursorPath);
-  } catch {
-    let processed = 0;
-    try {
-      processed = (await readFile(intentsPath, 'utf8')).split('\n').filter(Boolean).length;
-    } catch { /* first intent */ }
-    await writeFile(cursorPath, `${JSON.stringify({ processed })}\n`, { flag: 'wx' }).catch(() => undefined);
-  }
 }
 
 export async function approveKnowledgeRun(input: {
@@ -97,55 +77,16 @@ export async function approveKnowledgeRun(input: {
   if (!run || run.kind !== 'run' || run.status !== 'proposed') throw new Error('Only a proposed run can be approved.');
   const goal = clean(input.goal, 4000);
   if (goal.length < 8) throw new Error('Describe the bounded goal in at least 8 characters.');
-  const requestedRoot = clean(input.workspaceRoot, 1000);
-  const resolvedRoot = await realpath(requestedRoot).catch(() => '');
-  if (!resolvedRoot) throw new Error('The selected workspace root does not exist.');
-  if ([path.parse(resolvedRoot).root, os.homedir()].includes(resolvedRoot)) {
-    throw new Error('Choose a specific project folder, not a filesystem or home-directory root.');
-  }
-  const project = createContextProject({ name: `${run.projectId} execution`, rootPath: resolvedRoot, approved: true });
-  if (project.excluded || !project.approvedRoot) throw new Error('The selected workspace root is not approved.');
-  const model = supportedModels.has(String(input.model)) ? String(input.model) : 'qwen3.6:27b-mlx';
-  const maxSteps = Math.max(1, Math.min(24, Math.round(Number(input.maxSteps) || 8)));
-  const now = new Date().toISOString();
-  const intent = {
-    kind: 'workspace.run',
+  const { job } = await queueApprovedWorkspaceRun({
     id: run.id,
-    capabilityId,
+    projectId: run.projectId,
     goal,
-    workspaceRoot: project.rootPath,
-    model,
-    maxSteps,
-    requestedAt: now,
-    requestedBy: 'hii.knowledge',
-    projectId: run.projectId
-  };
-  const daemonDir = path.join(runtimeRoot(), 'daemon');
-  const intentsPath = path.join(daemonDir, 'intents.jsonl');
-  const cursorPath = path.join(daemonDir, 'intents.cursor.json');
-  await mkdir(daemonDir, { recursive: true });
-  await initializeIntentCursor(intentsPath, cursorPath);
-
-  const job: CapabilityJob = {
-    id: run.id,
-    capabilityId,
-    inputSummary: goal.slice(0, 240),
-    userId: 'local',
-    userEmail: null,
-    status: 'queued',
-    budget: `local · ${maxSteps} steps`,
-    logs: [`[${now}] operator approved bounded workspace run`],
-    ledger: [{
-      id: randomUUID(), jobId: run.id, capabilityId, actor: 'operator', type: 'approval',
-      summary: `Approved local execution inside ${project.rootPath} with a ${maxSteps}-step limit.`, createdAt: now
-    }],
-    proofArtifacts: [],
-    createdAt: now,
-    updatedAt: now,
-    metadata: { knowledgeRunId: run.id, projectId: run.projectId, workspaceRoot: project.rootPath, model, maxSteps }
-  };
-  await appendCapabilityJob(job);
-  await appendFile(intentsPath, `${JSON.stringify(intent)}\n`, 'utf8');
+    workspaceRoot: input.workspaceRoot,
+    model: supportedModels.has(String(input.model)) ? input.model : defaultWorkspaceRunModel,
+    maxSteps: input.maxSteps,
+    approved: true,
+    requestedBy: 'hii.knowledge'
+  });
   const object = updateKnowledgeObject(run.id, { status: 'active', externalRef: `capability-job:${job.id}`, ifRevision: run.revision });
   return { object, job, queued: true };
 }

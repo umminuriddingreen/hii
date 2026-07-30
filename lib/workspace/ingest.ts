@@ -109,7 +109,7 @@ export function seedFor(type: WorkspaceNodeType, payload: Record<string, unknown
       object: {
         kind: 'run',
         owner: 'aii',
-        status: 'queued',
+        status: 'waiting_approval',
         source: 'HII spatial managed agent run',
         capabilityId: 'hii.agent.workspace_run',
         parentId: typeof payload.parentId === 'string' ? payload.parentId : undefined,
@@ -123,10 +123,10 @@ export function seedFor(type: WorkspaceNodeType, payload: Record<string, unknown
       },
       payload: {
         title: 'HII agent',
-        autoStart: false,
-        status: 'queued',
         output: '',
-        ...payload
+        ...payload,
+        autoStart: false,
+        status: 'waiting_approval'
       }
     };
   }

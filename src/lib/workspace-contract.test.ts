@@ -96,12 +96,12 @@ describe('workspace contract', () => {
       object: {
         kind: 'run',
         owner: 'aii',
-        status: 'queued',
+        status: 'waiting_approval',
         parentId: 'intent-1'
       },
       payload: {
-        autoStart: true,
-        status: 'queued'
+        autoStart: false,
+        status: 'waiting_approval'
       }
     });
   });

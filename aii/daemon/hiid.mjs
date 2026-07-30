@@ -385,7 +385,7 @@ function executeWorkspaceIntent(intent) {
   const maxSteps = Math.max(1, Math.min(24, Number(intent.maxSteps) || 8));
   const model = ["qwen3.6:27b-mlx", "qwen3.6:35b-mlx"].includes(intent.model)
     ? intent.model
-    : "qwen3.6:27b-mlx";
+    : "qwen3.6:35b-mlx";
   let workspaceRoot;
   try {
     workspaceRoot = approvedWorkspaceCwd(intent.workspaceRoot);

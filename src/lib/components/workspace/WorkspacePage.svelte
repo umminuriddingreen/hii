@@ -8,6 +8,7 @@
   import CadPane from '$lib/components/workspace/CadPane.svelte';
   import IntentPane from '$lib/components/workspace/IntentPane.svelte';
   import SpatialRunPane from '$lib/components/workspace/SpatialRunPane.svelte';
+  import GovernedResultPane from '$lib/components/workspace/GovernedResultPane.svelte';
   import SurfacePane from '$lib/components/workspace/SurfacePane.svelte';
   import StaticNode from '$lib/components/workspace/StaticNode.svelte';
   import HiiLogo from '$lib/components/HiiLogo.svelte';
@@ -17,6 +18,7 @@
   import { searchWorkspaceNodes, workspaceNodeTitle } from '@/lib/workspace/search';
   import { assignNodesToFrame, moveNodeAndFrameContents, removeFrame } from '@/lib/workspace/frames';
   import { emptyWorkspaceHistory, recordWorkspaceChange, redoWorkspace, undoWorkspace } from '@/lib/workspace/history';
+  import { workspaceConnections } from '@/lib/workspace/connections';
 
   export let data: { enabled: boolean };
   const surfaceCatalog = [
@@ -28,7 +30,7 @@
   let doc:WorkspaceDoc={version:1,revision:0,updatedAt:new Date().toISOString(),viewport:{x:0,y:0,zoom:1},nextZ:1,nodes:[]};
   let ready=false; let loadState:'loading'|'ready'|'recovery'='loading'; let loadError=''; let recoveryPath=''; let saveError='';
   let workspaceId='default'; let workspaces:Array<{id:string;selected:boolean;status:'ready'|'recovery';revision?:number}>=[]; let workspaceMenu=false;
-  let selected:string|null=null; let omnibar=false; let query=''; let mapMenu=false; let canvasWidth=0; let canvasHeight=0; let saveTimer:ReturnType<typeof setTimeout>|undefined; let saveInFlight=false; let savePending=false;
+  let selected:string|null=null; let contextSelection:string[]=[]; let omnibar=false; let query=''; let mapMenu=false; let canvasWidth=0; let canvasHeight=0; let saveTimer:ReturnType<typeof setTimeout>|undefined; let saveInFlight=false; let savePending=false;
   let context:any=null; let board:any[]=[]; let daemon:any=null; let canvas:HTMLElement; let mouse={x:400,y:300};
   let commandInput:HTMLInputElement; let fileInput:HTMLInputElement;
   let composerOpen=false; let composerText=''; let composerInput:HTMLTextAreaElement; let composerAt={x:400,y:280}; let lastSummon=0;
@@ -55,6 +57,8 @@
   $: frames=doc.nodes.filter(node=>node.type==='frame');
   $: mapAnchors=doc.nodes.filter(node=>!['frame','image','media','ink','canvas-text','text'].includes(node.type)).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).slice(0,8);
   $: mapKinds=Object.entries(doc.nodes.reduce<Record<string,number>>((counts,node)=>({...counts,[node.type]:(counts[node.type]||0)+1}),{})).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  $: selectedContextNodes=contextSelection.map(id=>doc.nodes.find(node=>node.id===id)).filter((node):node is WorkspaceNode=>Boolean(node));
+  $: connections=workspaceConnections(doc.nodes);
   $: visibleNodeCount=countWorkspaceNodesInViewport(doc.nodes,doc.viewport,{width:canvasWidth,height:canvasHeight});
   $: contentOutsideView=loadState==='ready'&&doc.nodes.length>0&&canvasWidth>0&&canvasHeight>0&&visibleNodeCount===0;
 
@@ -68,7 +72,7 @@
       if(!response.ok||result.status==='recovery'){
         loadState='recovery';loadError=result.error||'HII could not load this workspace.';recoveryPath=result.recoveryPath||'';return;
       }
-      workspaceId=result.workspaceId||requestedWorkspaceId||'default';doc=result.workspace;workspaceHistory=emptyWorkspaceHistory();loadState='ready';
+      workspaceId=result.workspaceId||requestedWorkspaceId||'default';doc=result.workspace;workspaceHistory=emptyWorkspaceHistory();selected=null;contextSelection=[];loadState='ready';
       void refreshWorkspaces();
       if(doc.nodes.some(node=>node.type==='model'))ensureModelPane();
     }catch(error){
@@ -103,7 +107,7 @@
     const response=await fetch('/api/workspace',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'select',workspaceId:id})});
     const result=await response.json().catch(()=>({}));
     if(!response.ok){saveError=result.error||'HII could not switch workspaces.';return}
-    workspaceMenu=false;selected=null;await load(id);
+    workspaceMenu=false;selected=null;contextSelection=[];await load(id);
   }
   async function createNamedWorkspace(){
     const id=window.prompt('Name this workspace (lowercase letters, numbers, hyphens, or underscores):')?.trim();
@@ -115,29 +119,58 @@
     const response=await fetch('/api/workspace',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'create',workspaceId:id,select:true})});
     const result=await response.json().catch(()=>({}));
     if(!response.ok){saveError=result.error||'HII could not create the workspace.';return}
-    workspaceMenu=false;selected=null;await load(id);
+    workspaceMenu=false;selected=null;contextSelection=[];await load(id);
   }
   function patch(id:string,patch:Partial<WorkspaceNode>){const before=doc;doc={...doc,nodes:doc.nodes.map(n=>n.id===id?{...n,...patch,updatedAt:new Date().toISOString()}:n)};remember(before);persist();}
   function addSeeds(seeds:NodeSeed[],at:{x:number;y:number}){const before=doc;if(seeds.some(seed=>seed.type==='model'))ensureModelPane();for(const [index,seed] of seeds.entries()){const node=makeNode(seed,at.x+index*28,at.y+index*28,++doc.nextZ);doc={...doc,nodes:[...doc.nodes,node]};selected=node.id}remember(before);persist();}
   function spawn(type:string,payload:Record<string,unknown>={}){const seed=seedFor(type as WorkspaceNodeType,type==='browser'?{url:'https://duckduckgo.com',...payload}:type==='terminal'?{sessionId:crypto.randomUUID(),...payload}:payload);const center={x:(-doc.viewport.x+innerWidth/2)/doc.viewport.zoom,y:(-doc.viewport.y+innerHeight/2)/doc.viewport.zoom};addSeeds([seed],{x:center.x-seed.w/2,y:center.y-seed.h/2});omnibar=false;query='';if(type==='context')void refreshContext();if(type==='board')void refreshBoard();}
   function workspacePoint(clientX:number,clientY:number){return{x:(clientX-doc.viewport.x)/doc.viewport.zoom,y:(clientY-doc.viewport.y)/doc.viewport.zoom}}
   async function summonComposer(at?:{x:number;y:number}){const now=Date.now();if(now-lastSummon<180)return;lastSummon=now;composerAt=at||workspacePoint(innerWidth/2,innerHeight/2);composerOpen=true;omnibar=false;await tick();composerInput?.focus();}
-  function createSpatialRun(intent:string,at:{x:number;y:number},parentId?:string){const before=doc;const title=intent.length>44?`${intent.slice(0,44)}…`:intent;let z=doc.nextZ;const intentSeed=seedFor('intent',{title:'your intent',text:intent,parentId}),intentNode=makeNode(intentSeed,at.x,at.y,++z),runSeed=seedFor('run',{title, prompt:intent,parentId:intentNode.id,autoStart:true}),runNode=makeNode(runSeed,at.x,at.y+intentSeed.h+20,++z);doc={...doc,nextZ:z,nodes:[...doc.nodes,intentNode,runNode]};selected=runNode.id;remember(before);persist();}
-  function submitIntent(){const intent=composerText.trim();if(!intent)return;const width=seedFor('intent').w;createSpatialRun(intent,{x:composerAt.x-width/2,y:composerAt.y-72});composerText='';composerOpen=false;}
+  function contextItem(node:WorkspaceNode){return{id:node.id,title:workspaceNodeTitle(node),type:node.type,source:String(node.object?.source||node.payload.path||node.payload.url||'').slice(0,1000)}}
+  function createSpatialRun(intent:string,at:{x:number;y:number},parentId?:string,contextNodes:WorkspaceNode[]=[]){const before=doc;const title=intent.length>44?`${intent.slice(0,44)}…`:intent;const approvedContext=contextNodes.map(contextItem);let z=doc.nextZ;const intentSeed=seedFor('intent',{title:'your intent',text:intent,parentId,context:approvedContext}),intentNode=makeNode(intentSeed,at.x,at.y,++z),runSeed=seedFor('run',{title,prompt:intent,parentId:intentNode.id,autoStart:false,status:'waiting_approval',context:approvedContext,workspaceRoot:String(context?.identity?.repo||'/Users/ummi/hii'),model:'qwen3.6:35b-mlx',maxSteps:8}),runNode=makeNode(runSeed,at.x,at.y+intentSeed.h+20,++z);doc={...doc,nextZ:z,nodes:[...doc.nodes,intentNode,runNode]};selected=runNode.id;contextSelection=[];remember(before);persist();}
+  function submitIntent(){const intent=composerText.trim();if(!intent)return;const width=seedFor('intent').w;createSpatialRun(intent,{x:composerAt.x-width/2,y:composerAt.y-72},undefined,selectedContextNodes);composerText='';composerOpen=false;}
   async function openCommands(){omnibar=true;query='';await tick();commandInput?.focus();}
   function fitNodes(nodes:WorkspaceNode[],maxZoom=1){const rect=canvas?.getBoundingClientRect();if(!rect)return;const viewport=fitWorkspaceViewport(nodes,{width:rect.width,height:rect.height},{maxZoom});if(!viewport)return;doc={...doc,viewport};persist();}
-  function fitAll(){fitNodes(doc.nodes);selected=null;mapMenu=false;}
-  function focusNode(node:WorkspaceNode){selected=node.id;fitNodes([node],1.25);omnibar=false;query='';}
+  function fitAll(){fitNodes(doc.nodes);selected=null;contextSelection=[];mapMenu=false;}
+  function focusNode(node:WorkspaceNode){selected=node.id;contextSelection=[node.id];fitNodes([node],1.25);omnibar=false;query='';}
   function fitFrame(node:WorkspaceNode){const contents=doc.nodes.filter(candidate=>candidate.frameId===node.id);fitNodes(contents.length?[node,...contents]:[node],1.25);selected=node.id;}
   function openFrame(node:WorkspaceNode){fitFrame(node);mapMenu=false;}
   function regroupFrame(id:string){const before=doc;doc=assignNodesToFrame(doc,id);remember(before);persist();}
   function runCommand(command:string[]){if(command[0]==='fit'){fitAll();omnibar=false;query=''}else if(command[0]==='surface')spawn('surface',{title:command[1].replace('Open ',''),path:command[3],capabilityId:command[4]});else if(command[0]==='intent')void summonComposer();else if(command[0]==='upload'){omnibar=false;fileInput?.click()}else spawn(command[0]);}
-  function followUp(node:WorkspaceNode,text:string){createSpatialRun(text,{x:node.x+node.w+48,y:node.y},node.id)}
+  function followUp(node:WorkspaceNode,text:string){createSpatialRun(text,{x:node.x+node.w+48,y:node.y},node.id,[node])}
+  function completedRunNodes(runNode:WorkspaceNode,result:Record<string,unknown>){
+    const runId=String(result.runId||runNode.id);
+    if(doc.nodes.some(node=>node.object?.kind==='receipt'&&String(node.payload.runId||'')===runId))return;
+    const receipt=(result.receipt&&typeof result.receipt==='object'?result.receipt:{}) as Record<string,unknown>;
+    const job=(result.job&&typeof result.job==='object'?result.job:{}) as Record<string,unknown>;
+    const contextItems=Array.isArray(result.context)?result.context:[];
+    const checks=Array.isArray(receipt.verification)?receipt.verification.filter(check=>check&&typeof check==='object'&&(check as Record<string,unknown>).ok===true):[];
+    const artifacts=Array.isArray(receipt.artifacts)?receipt.artifacts.map(String):[];
+    const summary=String(receipt.summary||'The bounded workspace run completed and returned a receipt.');
+    const before=doc;
+    let z=doc.nextZ;
+    const artifactSeed:NodeSeed={type:'text',w:430,h:260,object:{kind:'artifact',owner:'aii',status:'completed',source:String(result.receiptPath||'HII workspace run receipt'),capabilityId:'hii.agent.workspace_run',runId,parentId:runNode.id,proofRefs:[String(result.receiptPath||''),...artifacts].filter(Boolean),audit:[{ts:new Date().toISOString(),actor:'hii',action:'materialized verified run artifact'}]},payload:{title:'Agent result',name:'verified artifact',summary,content:[summary,...artifacts.map(path=>`artifact: ${path}`)].join('\n\n'),path:artifacts[0]||'',runId}};
+    const artifactNode=makeNode(artifactSeed,runNode.x+runNode.w+40,runNode.y,++z);
+    const receiptSeed:NodeSeed={type:'note',w:430,h:360,object:{kind:'receipt',owner:'aii',status:'completed',source:'HII append-only workspace receipt',capabilityId:'hii.agent.workspace_run',runId,parentId:runNode.id,proofRefs:[String(result.receiptPath||'')].filter(Boolean),audit:[{ts:new Date().toISOString(),actor:'hii',action:'returned verified workspace receipt'}]},payload:{title:'Run receipt',summary,intent:String(result.intent||''),context:contextItems,checks,receiptPath:String(result.receiptPath||''),runId,status:String(job.status||'completed')}};
+    const receiptNode=makeNode(receiptSeed,artifactNode.x,artifactNode.y+artifactNode.h+20,++z);
+    doc={...doc,nextZ:z,nodes:[...doc.nodes,artifactNode,receiptNode]};
+    selected=receiptNode.id;contextSelection=[receiptNode.id];remember(before);persist();fitNodes([runNode,artifactNode,receiptNode],1);
+  }
+  function materializeCapabilityDraft(runNode:WorkspaceNode,result:Record<string,unknown>){
+    const id=String(result.id||'');
+    if(!id||doc.nodes.some(node=>node.object?.kind==='capability'&&String(node.payload.skillId||'')===id))return;
+    const before=doc;
+    const relatedReceipt=doc.nodes.find(node=>node.object?.kind==='receipt'&&String(node.payload.runId||'')===String(result.runId||runNode.id));
+    const seed:NodeSeed={type:'note',w:430,h:300,object:{kind:'capability',owner:'aii',status:'proposed',source:'HII proof-backed skill draft',capabilityId:id,runId:String(result.runId||runNode.id),parentId:relatedReceipt?.id||runNode.id,proofRefs:[String(result.receiptPath||''),String(result.bundle||'')].filter(Boolean),audit:[{ts:new Date().toISOString(),actor:'hii',action:'created proof-backed capability draft',note:'Operator review is required before registration.'}]},payload:{title:String(result.title||id),summary:'Verified work preserved as a draft capability. It is not executable until operator review and registration.',skillId:id,bundle:String(result.bundle||''),runId:String(result.runId||runNode.id)}};
+    const anchor=relatedReceipt||runNode;
+    const node=makeNode(seed,anchor.x,anchor.y+anchor.h+20,doc.nextZ+1);
+    doc={...doc,nextZ:doc.nextZ+1,nodes:[...doc.nodes,node]};selected=node.id;contextSelection=[node.id];remember(before);persist();fitNodes([runNode,...(relatedReceipt?[relatedReceipt]:[]),node],1);
+  }
   function openExplorer(event:MouseEvent){if(event.target!==canvas)return;const at=workspacePoint(event.clientX,event.clientY),seed=seedFor('explorer'),topLeft=workspacePoint(24,52),bottomRight=workspacePoint(innerWidth-24,innerHeight-72),x=Math.max(topLeft.x,Math.min(at.x-seed.w/2,bottomRight.x-seed.w)),y=Math.max(topLeft.y,Math.min(at.y-seed.h/2,bottomRight.y-seed.h));addSeeds([seed],{x,y});}
   function openSurface(id:string){const item=surfaceCatalog.find(candidate=>candidate.id===id);if(item)spawn('surface',{surface:item.id,title:item.title,path:item.path,capabilityId:item.capabilityId});}
-  function close(id:string){const before=doc;const node=doc.nodes.find(candidate=>candidate.id===id);doc=node?.type==='frame'?removeFrame(doc,id):{...doc,nodes:doc.nodes.filter(n=>n.id!==id)};selected=null;remember(before);persist();}
-  function select(node:WorkspaceNode){selected=node.id;if(node.z<doc.nextZ)doc={...doc,nextZ:doc.nextZ+1,nodes:doc.nodes.map(candidate=>candidate.id===node.id?{...candidate,z:doc.nextZ+1}:candidate)}}
-  function drag(event:PointerEvent,node:WorkspaceNode){if((event.target as HTMLElement).closest('button,input,textarea,iframe,a,.scroll,.xterm'))return;event.preventDefault();const before=doc;select(node);const sx=event.clientX,sy=event.clientY,ox=node.x,oy=node.y;let changed=false;const move=(e:PointerEvent)=>{changed=true;doc=moveNodeAndFrameContents(doc,node.id,ox+(e.clientX-sx)/doc.viewport.zoom,oy+(e.clientY-sy)/doc.viewport.zoom)};const up=()=>{removeEventListener('pointermove',move);removeEventListener('pointerup',up);if(changed){remember(before);persist()}};addEventListener('pointermove',move);addEventListener('pointerup',up);}
+  function close(id:string){const before=doc;const node=doc.nodes.find(candidate=>candidate.id===id);doc=node?.type==='frame'?removeFrame(doc,id):{...doc,nodes:doc.nodes.filter(n=>n.id!==id)};selected=null;contextSelection=contextSelection.filter(item=>item!==id);remember(before);persist();}
+  function select(node:WorkspaceNode,additive=false){if(additive){const removing=contextSelection.includes(node.id);contextSelection=removing?contextSelection.filter(id=>id!==node.id):[...contextSelection,node.id];selected=removing?contextSelection.at(-1)||null:node.id}else{selected=node.id;contextSelection=[node.id]}if(node.z<doc.nextZ)doc={...doc,nextZ:doc.nextZ+1,nodes:doc.nodes.map(candidate=>candidate.id===node.id?{...candidate,z:doc.nextZ+1}:candidate)}}
+  function drag(event:PointerEvent,node:WorkspaceNode){if((event.target as HTMLElement).closest('button,input,textarea,iframe,a,.scroll,.xterm'))return;event.preventDefault();if(event.shiftKey){select(node,true);return}const before=doc;select(node);const sx=event.clientX,sy=event.clientY,ox=node.x,oy=node.y;let changed=false;const move=(e:PointerEvent)=>{changed=true;doc=moveNodeAndFrameContents(doc,node.id,ox+(e.clientX-sx)/doc.viewport.zoom,oy+(e.clientY-sy)/doc.viewport.zoom)};const up=()=>{removeEventListener('pointermove',move);removeEventListener('pointerup',up);if(changed){remember(before);persist()}};addEventListener('pointermove',move);addEventListener('pointerup',up);}
   function resize(event:PointerEvent,node:WorkspaceNode){event.preventDefault();event.stopPropagation();const before=doc,sx=event.clientX,sy=event.clientY,ow=node.w,oh=node.h;let changed=false;const move=(e:PointerEvent)=>{changed=true;doc={...doc,nodes:doc.nodes.map(candidate=>candidate.id===node.id?{...candidate,w:Math.max(140,ow+(e.clientX-sx)/doc.viewport.zoom),h:Math.max(80,oh+(e.clientY-sy)/doc.viewport.zoom)}:candidate)}};const up=()=>{removeEventListener('pointermove',move);removeEventListener('pointerup',up);if(changed){if(node.type==='frame')doc=assignNodesToFrame(doc,node.id);remember(before);persist()}};addEventListener('pointermove',move);addEventListener('pointerup',up);}
   function pan(event:PointerEvent){if(event.target!==canvas)return;const sx=event.clientX,sy=event.clientY,ox=doc.viewport.x,oy=doc.viewport.y;const move=(e:PointerEvent)=>doc={...doc,viewport:{...doc.viewport,x:ox+e.clientX-sx,y:oy+e.clientY-sy}};const up=()=>{removeEventListener('pointermove',move);removeEventListener('pointerup',up);persist()};addEventListener('pointermove',move);addEventListener('pointerup',up);}
   function canNestedSurfaceScroll(event:WheelEvent){
@@ -203,8 +236,25 @@
       <button class="shrink-0 rounded-full bg-neutral-950 px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-white" on:click={fitAll}>Show my work</button>
     </section>
   {/if}
+  {#if contextSelection.length&&!composerOpen}
+    <section data-workspace-ui role="status" class="absolute left-1/2 top-4 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-blue-900/10 bg-white/95 p-1.5 pl-4 shadow-xl backdrop-blur-xl">
+      <span class="font-mono text-[9px] uppercase tracking-[.1em] text-blue-700">{contextSelection.length} context object{contextSelection.length===1?'':'s'} selected</span>
+      <button class="rounded-full bg-[var(--hii-electric-blue)] px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-white" on:click={()=>void summonComposer()}>Give intent <kbd class="ml-1 text-white/60">⌥Space</kbd></button>
+      <button class="rounded-full px-2 py-2 font-mono text-[9px] uppercase text-neutral-400 hover:text-neutral-900" aria-label="Clear context selection" on:click={()=>{contextSelection=[];selected=null}}>×</button>
+    </section>
+  {/if}
   <div class="absolute left-0 top-0 origin-top-left will-change-transform" style={`transform:translate(${doc.viewport.x}px,${doc.viewport.y}px) scale(${doc.viewport.zoom})`}>
-    {#each doc.nodes as node (node.id)}<section role="group" aria-label={`${node.type} workspace node`} class="group absolute left-0 top-0 flex flex-col overflow-hidden" class:hidden={Boolean(node.frameId&&collapsedFrameIds.has(node.frameId))} class:pointer-events-none={node.type==='frame'} class:ring-2={selected===node.id} class:ring-blue-500={selected===node.id} on:pointerdown={(event)=>drag(event,node)} style={`transform:translate(${node.x}px,${node.y}px);width:${node.w}px;height:${node.h}px;z-index:${Math.round(node.z)}`}>
+    <svg class="pointer-events-none absolute left-0 top-0 overflow-visible" width="1" height="1" aria-hidden="true">
+      {#each connections as connection (connection.id)}
+        <line x1={connection.x1} y1={connection.y1} x2={connection.x2} y2={connection.y2}
+          stroke={connection.kind==='context'?'#8aa4c8':'#176bff'}
+          stroke-width={connection.kind==='context'?1.5:2.5}
+          stroke-dasharray={connection.kind==='context'?'6 7':'0'}
+          opacity={connection.kind==='context'?0.55:0.72}
+          vector-effect="non-scaling-stroke" />
+      {/each}
+    </svg>
+    {#each doc.nodes as node (node.id)}<section role="group" aria-label={`${node.type} workspace node`} data-context-selected={contextSelection.includes(node.id)} class="group absolute left-0 top-0 flex flex-col overflow-hidden" class:hidden={Boolean(node.frameId&&collapsedFrameIds.has(node.frameId))} class:pointer-events-none={node.type==='frame'} class:ring-2={contextSelection.includes(node.id)||selected===node.id} class:ring-blue-500={contextSelection.includes(node.id)||selected===node.id} on:pointerdown={(event)=>drag(event,node)} style={`transform:translate(${node.x}px,${node.y}px);width:${node.w}px;height:${node.h}px;z-index:${Math.round(node.z)}`}>
       <header class="pointer-events-none absolute right-1 top-1 z-20"><span class="sr-only">{String(node.payload.title||node.type)}</span><button class="pointer-events-auto grid h-6 w-6 place-items-center rounded-full bg-neutral-950/80 text-sm text-white opacity-0 shadow-sm transition-opacity hover:bg-neutral-950 group-hover:opacity-100 focus:opacity-100" on:click={()=>close(node.id)} aria-label="close node">×</button></header>
       <div class="relative min-h-0 flex-1">
         {#if node.type==='frame'}<div class="h-full rounded-2xl border-2 border-dashed border-blue-500/60 bg-blue-50/10">
@@ -215,9 +265,10 @@
             <button class="rounded-full px-2 py-1 font-mono text-[9px] uppercase hover:bg-white" on:click|stopPropagation={()=>patch(node.id,{payload:{...node.payload,collapsed:node.payload.collapsed!==true}})}>{node.payload.collapsed===true?'Expand':'Collapse'}</button>
           </div>
         </div>
+        {:else if ['artifact','receipt','capability'].includes(node.object?.kind||'')}<GovernedResultPane {node} />
         {:else if ['note','text','canvas-text','ink','link','file','image','media','html','font'].includes(node.type)}<StaticNode {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} onSize={(size)=>patch(node.id,size)} />
         {:else if node.type==='intent'}<IntentPane {node} />
-        {:else if node.type==='run'}<SpatialRunPane {node} onPatch={(next)=>patch(node.id,next)} onFollowUp={(text)=>followUp(node,text)} />
+        {:else if node.type==='run'}<SpatialRunPane {node} onPatch={(next)=>patch(node.id,next)} onFollowUp={(text)=>followUp(node,text)} onComplete={(result)=>completedRunNodes(node,result)} onCapabilityDraft={(result)=>materializeCapabilityDraft(node,result)} />
         {:else if node.type==='document'}<DocumentPane {node} />
         {:else if node.type==='cad'}<CadPane {node} />
         {:else if node.type==='model'}{#if ModelPaneComponent}<svelte:component this={ModelPaneComponent} {node} />{:else}<div class="grid h-full place-items-center bg-[#f3f1ec] p-5 text-center font-mono text-[10px] uppercase tracking-[0.12em] text-neutral-400">{modelPaneError||'loading 3D viewer…'}</div>{/if}
@@ -233,11 +284,12 @@
       </div><button type="button" aria-label={`Resize ${node.type} node`} class="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize" on:pointerdown={(event)=>resize(event,node)}></button>
     </section>{/each}
     {#if composerOpen}<section data-workspace-ui class="absolute z-[9999] w-[min(620px,80vw)] -translate-x-1/2 overflow-hidden rounded-2xl border border-neutral-900/10 bg-white/95 shadow-2xl backdrop-blur-xl" style={`left:${composerAt.x}px;top:${composerAt.y}px`}>
+      {#if selectedContextNodes.length}<div class="flex max-h-24 flex-wrap gap-1.5 overflow-auto border-b px-4 py-3">{#each selectedContextNodes as contextNode}<span class="max-w-[220px] truncate rounded-full bg-blue-50 px-2.5 py-1 font-mono text-[8px] uppercase tracking-[.06em] text-blue-700">{workspaceNodeTitle(contextNode)}</span>{/each}</div>{/if}
       <div class="flex items-start gap-3 p-4">
         <span class="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[var(--hii-electric-blue)] text-sm text-white">✦</span>
         <textarea bind:this={composerInput} bind:value={composerText} rows="3" class="min-h-[76px] flex-1 resize-none bg-transparent text-[22px] font-medium leading-tight outline-none" placeholder="Tell HII what to create, explore, or do…" on:keydown={(event)=>{event.stopPropagation();if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitIntent()}}}></textarea>
       </div>
-      <footer class="flex items-center justify-between border-t px-4 py-2 font-mono text-[9px] uppercase tracking-[0.12em] text-neutral-400"><span>direct workspace intent · Shift Enter for a new line</span><button class="rounded-full bg-neutral-950 px-3 py-1.5 text-white disabled:opacity-30" disabled={!composerText.trim()} on:click={submitIntent}>send to HII ↵</button></footer>
+      <footer class="flex items-center justify-between border-t px-4 py-2 font-mono text-[9px] uppercase tracking-[0.12em] text-neutral-400"><span>{selectedContextNodes.length} approved context · Shift Enter for a new line</span><button class="rounded-full bg-neutral-950 px-3 py-1.5 text-white disabled:opacity-30" disabled={!composerText.trim()} on:click={submitIntent}>prepare run ↵</button></footer>
     </section>{/if}
   </div>
   {#if ready&&doc.nodes.length===0}
