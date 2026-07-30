@@ -1,15 +1,65 @@
 # HII — Human Information Interface
 
-HII is a local-first, user-owned interface that turns human intent into
-verified agent work across context, tools, files, machines, memory, and
-reusable capabilities.
+HII is a local-first context manager and spatial control plane for verified
+agent work. It gives people one human-facing workspace for turning intent,
+source-linked knowledge, tools, files, machines, and memory into work that can
+be reviewed, proved, and reused.
+
+HII is not another AI chat UI and it is not an autonomous system that silently
+owns the user's state. The user owns the workspace and final decisions. Agents
+propose, annotate, execute within explicit bounds, and return evidence.
 
 AII—the Agent Information Interface—is the coordination, policy, and execution
 layer beneath HII. It publishes capabilities, manages agents, governs actions,
 and records proof through shared runtime state under `~/.hii`.
 
+The durable product loop is:
+
+```text
+human intent
+→ source-linked context
+→ bounded agent work
+→ proof and verification
+→ durable receipt
+→ reviewed reusable capability
+```
+
 Read [the HII/AII master context](docs/HII_AII_MASTER_CONTEXT.md) before making
 product or architecture changes.
+
+## Product Shape
+
+HII brings the loop together as one spatial workspace:
+
+- **Sidebar:** durable projects, sources, memory, capabilities, and recent work.
+- **Canvas:** the active 2D workspace where people arrange knowledge and work;
+  3D may become another view over the same state, not a separate product model.
+- **`⌘I` palette:** contextual actions for the selected project, source, node,
+  or result.
+- **Governed HII nodes:** visible units for context, permissions, agent work,
+  artifacts, verification, and receipts.
+- **Context Dock:** the source-aware knowledge layer that makes selected
+  material useful to agents without losing provenance.
+- **AII:** bounded coordination and execution behind the interface.
+
+External apps, models, local runtimes, and specialist systems such as Termite
+are capabilities HII coordinates. HII should not recreate every tool it can
+govern.
+
+The interface should feel bright, spatial, calm, and playful: native to people
+who grew up on the internet without excluding anyone else. Terminal power
+remains available, but it is not the product metaphor.
+
+## Privacy and Human Authority
+
+The governing rule is: **my computer decides what leaves my computer**.
+
+HII keeps source selection, outbound context, redaction, and approval visible.
+Before external transmission, a user should be able to preview what will leave,
+remove sensitive material, approve or deny it, and retain a receipt of the
+decision. Sharing and export mean user-approved workflow traces, decisions, and
+verified capabilities—not an opaque reasoning stream or an automatic upload of
+private project state.
 
 ## Documentation
 
@@ -26,8 +76,9 @@ provenance, status, readable code and tables, and stable document URLs.
 
 ## Current Product Decision
 
-The active product is **HII Knowledge Workspace**, built on the Context Dock
-foundation:
+The active wedge is **HII Knowledge Workspace**, built on the Context Dock
+foundation. It is the first complete proof of the broader HII control plane,
+not a separate product identity:
 
 > Build knowledge once. HII keeps it linked, source-aware, agent-ready, and
 > accountable.
@@ -55,11 +106,46 @@ linked assets retain their paths and hashes. Project System Maps are
 source-linked views over the same knowledge—not a separate diagram product or
 chat transcript.
 
-The knowledge and Context Dock loop is not yet complete. Existing boards, console, daemon, jobs,
-capabilities, bridge, packs, link, credit, exchange, and Termite
-surfaces are implementation history or substrate. They are not permission to
-widen the Context Dock 0.1 release into a marketplace, AI chat product,
+The knowledge and Context Dock loop is not yet complete. Existing boards,
+console, daemon, jobs, capabilities, bridge, packs, link, credit, exchange,
+and Termite surfaces are implementation history or substrate. They are not
+permission to widen Context Dock 0.1 into a marketplace, AI chat product,
 decentralized compute network, geometry platform, or personal-data harvester.
+
+## Build Now / Build Next / Later
+
+### Build now
+
+- Close the local Knowledge → Agent → Receipt loop.
+- Make project selection, source permissions, provenance, and outbound context
+  understandable before work begins.
+- Provide reliable notes, links, backlinks, tags, search, graph, history,
+  import/export, and recovery on the canonical local store.
+- Deliver bounded agent actions with visible verification, artifacts, and
+  receipts.
+- Prove one useful workflow outside HII development repeatedly, measuring
+  prompting burden, intervention, elapsed time, reliability, and proof quality.
+
+### Build next
+
+- Unify the sidebar, canvas, `⌘I` palette, and governed HII nodes around the
+  same workspace state.
+- Promote repeatable work into reviewed capabilities only when receipts prove
+  that later runs are genuinely easier and reliable.
+- Deepen specialist capability integrations without weakening permissions,
+  provenance, or the user's ownership of final state.
+- Evolve the canvas from a strong 2D workspace toward optional spatial and 3D
+  views over the same durable model.
+
+### Later
+
+- Collaboration, exchange, marketplace, credits, cloud sync, and broader
+  network effects remain deferred until the local governed loop is dependable.
+- A first-party browser engine, generalized geometry platform, and autonomous
+  publishing are separate product decisions, not implied by the current
+  substrate.
+- No future surface may bypass preview, permission, proof, or user approval
+  merely because the underlying agent or model can act.
 
 ## HII / AII Boundary
 
