@@ -216,7 +216,9 @@ impl Ollama {
             "keep_alive": "10m",
             "options": {
                 "temperature": 0.1,
-                "num_ctx": 32768
+                "num_ctx": 32768,
+                "repeat_penalty": 1.1,
+                "repeat_last_n": 256
             }
         });
         if let Some(format) = format {
@@ -319,7 +321,12 @@ impl Ollama {
             "stream": true,
             "think": think,
             "keep_alive": "10m",
-            "options": { "temperature": 0.1, "num_ctx": 32768 }
+            "options": {
+                "temperature": 0.1,
+                "num_ctx": 32768,
+                "repeat_penalty": 1.1,
+                "repeat_last_n": 256
+            }
         });
         if json_format {
             body["format"] = action_schema();
@@ -340,6 +347,7 @@ impl Ollama {
         let mut content = String::new();
         let mut thinking = String::new();
         let mut usage = ChatUsage::default();
+        let mut repetition = RepetitionGuard::default();
         for line in BufReader::new(response.into_reader()).lines() {
             let line = match line {
                 Ok(line) => line,
@@ -361,9 +369,23 @@ impl Ollama {
             };
             if !chunk.message.thinking.is_empty() {
                 thinking.push_str(&chunk.message.thinking);
+                if repetition.observe(&chunk.message.thinking) {
+                    let _ = sender.send(ChatStreamEvent::Done(Err(
+                        "MODEL LOOP DETECTED — the current generation repeated the same substantial block three times. The session is preserved; revise or retry the request."
+                            .into(),
+                    )));
+                    return;
+                }
                 let _ = sender.send(ChatStreamEvent::Thinking(chunk.message.thinking));
             }
             if !chunk.message.content.is_empty() {
+                if repetition.observe(&chunk.message.content) {
+                    let _ = sender.send(ChatStreamEvent::Done(Err(
+                        "MODEL LOOP DETECTED — the current generation repeated the same substantial block three times. The session is preserved; revise or retry the request."
+                            .into(),
+                    )));
+                    return;
+                }
                 let _ = sender.send(ChatStreamEvent::Content(chunk.message.content.clone()));
             }
             content.push_str(&chunk.message.content);
@@ -382,6 +404,42 @@ impl Ollama {
         };
         log_llm_request(model, self.provider, &result.usage);
         let _ = sender.send(ChatStreamEvent::Done(Ok(result)));
+    }
+}
+
+#[derive(Default)]
+struct RepetitionGuard {
+    text: String,
+    last_checked_at: usize,
+}
+
+impl RepetitionGuard {
+    fn observe(&mut self, delta: &str) -> bool {
+        self.text.push_str(delta);
+        if self.text.len().saturating_sub(self.last_checked_at) < 128 {
+            return false;
+        }
+        self.last_checked_at = self.text.len();
+        let words = self
+            .text
+            .split_whitespace()
+            .map(|word| {
+                word.trim_matches(|character: char| !character.is_alphanumeric())
+                    .to_ascii_lowercase()
+            })
+            .filter(|word| !word.is_empty())
+            .collect::<Vec<_>>();
+        const BLOCK_WORDS: usize = 28;
+        if words.len() < BLOCK_WORDS * 3 {
+            return false;
+        }
+        let tail = &words[words.len() - BLOCK_WORDS..];
+        words
+            .windows(BLOCK_WORDS)
+            .filter(|window| *window == tail)
+            .take(3)
+            .count()
+            >= 3
     }
 }
 
@@ -468,6 +526,25 @@ fn format_ureq(error: ureq::Error) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::RepetitionGuard;
+
+    #[test]
+    fn detects_three_substantial_repeated_blocks() {
+        let block = "I should stop checking the same file and run one actual verification command before I answer the operator because another read is only observation and cannot prove the changed website works. ";
+        let mut guard = RepetitionGuard::default();
+        assert!(!guard.observe(block));
+        assert!(!guard.observe(block));
+        assert!(guard.observe(block));
+    }
+
+    #[test]
+    fn does_not_treat_short_or_distinct_activity_as_a_loop() {
+        let mut guard = RepetitionGuard::default();
+        assert!(!guard.observe("checking the workspace "));
+        assert!(!guard.observe("running the test "));
+        assert!(!guard.observe("returning the result "));
+    }
+
     use super::action_schema;
 
     #[test]

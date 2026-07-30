@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HII</title>
+    <link rel="stylesheet" href="./style.css" />
+    <link rel="stylesheet" href="./xterm.css" />
+  </head>
+  <body>
+    <form id="gate" autocomplete="off">
+      <input id="passcode" type="password" autocomplete="current-password" aria-label="Passcode" autofocus />
+    </form>
+    <main id="session" hidden>
+      <section id="terminal" aria-label="Live HII terminal"></section>
+      <iframe id="artifact" title="Latest verified artifact"></iframe>
+    </main>
+    <script src="./xterm.js"></script>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

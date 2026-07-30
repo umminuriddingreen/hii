@@ -12,7 +12,7 @@ use crate::{
 };
 use serde_json::json;
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     io::{self, IsTerminal, Write},
     path::PathBuf,
     sync::mpsc,
@@ -82,6 +82,7 @@ pub struct Conversation {
     thinking_mode: ThinkingMode,
     steering: Option<String>,
     queued_inputs: VecDeque<String>,
+    public_test: bool,
 }
 
 impl Conversation {
@@ -90,15 +91,21 @@ impl Conversation {
         workspace: PathBuf,
         requested_model: Option<String>,
         max_steps: usize,
+        public_test: bool,
     ) -> Result<Self, String> {
         let tools = Toolbelt::new(workspace)?;
         let ollama = Ollama::new(AppPaths::ollama_url());
         let model = choose_model(requested_model.as_deref(), &ollama.models()?)?;
         let store = ConversationStore::create(&paths.runtime)?;
-        let capsule = crate::context::ContextCapsule::build(&paths.runtime, tools.workspace());
+        let capsule = if public_test {
+            crate::context::ContextCapsule::default()
+        } else {
+            crate::context::ContextCapsule::build(&paths.runtime, tools.workspace())
+        };
         let mut messages = vec![Message::system(conversation_prompt(
             tools.workspace(),
             max_steps,
+            public_test,
         ))];
         if !capsule.text.is_empty() {
             messages.push(Message::system(capsule.text));
@@ -120,6 +127,7 @@ impl Conversation {
             },
             steering: None,
             queued_inputs: VecDeque::new(),
+            public_test,
         })
     }
 
@@ -134,7 +142,9 @@ impl Conversation {
         let mut run: Option<RunStore> = None;
         let mut verification = Vec::new();
         let mut used_tools = false;
-        let mut mutating_work = false;
+        let mut mutation_epoch = 0usize;
+        let mut verified_epoch = None;
+        let mut observations = HashSet::new();
         let mut steps = 0usize;
 
         loop {
@@ -164,11 +174,10 @@ impl Conversation {
             let action = match parse_action(&raw) {
                 Ok(action) => action,
                 Err(_) if plain_message(&raw).is_some() => {
-                    if mutating_work && verification.is_empty() {
+                    if needs_verification(mutation_epoch, verified_epoch) {
                         self.messages.push(Message::assistant(raw));
-                        self.messages.push(Message::user(
-                            "Verify the workspace result before replying.",
-                        ));
+                        self.messages
+                            .push(Message::user(verification_required_message()));
                         continue;
                     }
                     let message = redact_text(plain_message(&raw).unwrap_or_default());
@@ -188,11 +197,10 @@ impl Conversation {
             };
             match action {
                 Action::Message { message } => {
-                    if mutating_work && verification.is_empty() {
+                    if needs_verification(mutation_epoch, verified_epoch) {
                         self.messages.push(Message::assistant(raw));
-                        self.messages.push(Message::user(
-                            "You changed or executed workspace state. Verify the result with the verify or http tool before replying.",
-                        ));
+                        self.messages
+                            .push(Message::user(verification_required_message()));
                         continue;
                     }
                     let message = redact_text(&message);
@@ -203,11 +211,10 @@ impl Conversation {
                     return Ok(message);
                 }
                 Action::Final { summary, next, .. } => {
-                    if mutating_work && verification.is_empty() {
+                    if needs_verification(mutation_epoch, verified_epoch) {
                         self.messages.push(Message::assistant(raw));
-                        self.messages.push(Message::user(
-                            "Verify the workspace result before answering conversationally.",
-                        ));
+                        self.messages
+                            .push(Message::user(verification_required_message()));
                         continue;
                     }
                     let message = match next.filter(|value| !value.trim().is_empty()) {
@@ -246,27 +253,79 @@ impl Conversation {
                     if io::stdout().is_terminal() {
                         crate::tui::tool_start(step, &tool, &target);
                     }
+                    let observation = matches!(tool.as_str(), "read" | "list" | "search");
+                    let observation_key = observation.then(|| {
+                        observation_signature(
+                            mutation_epoch,
+                            &tool,
+                            path.as_deref(),
+                            query.as_deref(),
+                            offset,
+                            limit,
+                        )
+                    });
+                    if observation_key
+                        .as_ref()
+                        .is_some_and(|key| observations.contains(key))
+                    {
+                        let blocked = format!(
+                            "REPEATED_ACTION: this exact {tool} observation already ran after the latest workspace change. \
+                             Do not repeat read/list/search. {}",
+                            verification_required_message()
+                        );
+                        self.store.event(
+                            "convergence.repeated_action",
+                            json!({ "step": step, "tool": tool, "target": target, "mutation_epoch": mutation_epoch }),
+                        )?;
+                        self.messages.push(Message::assistant(raw));
+                        self.messages.push(Message::user(blocked));
+                        continue;
+                    }
                     let shell_evidence = tool == "shell"
                         && command.as_deref().is_some_and(shell_command_is_read_only);
-                    mutating_work |=
-                        tool == "write" || tool == "edit" || (tool == "shell" && !shell_evidence);
+                    let mutation = tool == "write"
+                        || tool == "edit"
+                        || (tool == "shell"
+                            && !shell_evidence
+                            && !command.as_deref().is_some_and(shell_command_is_preview))
+                        || (crate::hii_tools::is_hii_tool(&tool)
+                            && crate::hii_tools::is_mutating(&tool));
                     let deletion = (tool == "shell" || tool == "verify")
                         && command.as_deref().is_some_and(deletion_shell);
                     let deletion_approved = if deletion {
-                        let command = command.as_deref().unwrap_or(&tool);
-                        crate::agent::request_deletion_approval(command)
+                        if self.public_test {
+                            false
+                        } else {
+                            let command = command.as_deref().unwrap_or(&tool);
+                            crate::agent::request_deletion_approval(command)
+                        }
                     } else {
                         false
                     };
                     if deletion && !deletion_approved {
-                        let blocked = "Deletion was not approved. Choose a non-destructive action."
-                            .to_string();
+                        let blocked = if self.public_test {
+                            "Deletion is unavailable in the public test. Choose a non-destructive action."
+                        } else {
+                            "Deletion was not approved. Choose a non-destructive action."
+                        }
+                        .to_string();
                         self.store.event(
                             "authority.block",
                             json!({ "step": step, "tool": tool, "reason": "deletion not approved" }),
                         )?;
                         self.messages.push(Message::assistant(raw));
                         self.messages.push(Message::user(blocked));
+                        continue;
+                    }
+                    if self.public_test && crate::hii_tools::is_hii_tool(&tool) {
+                        self.store.event(
+                            "authority.block",
+                            json!({ "step": step, "tool": tool, "reason": "host HII state is outside the public test" }),
+                        )?;
+                        self.messages.push(Message::assistant(raw));
+                        self.messages.push(Message::user(
+                            "BLOCKED: host HII context and control-plane tools are unavailable in this isolated test. Use workspace and installed host tools only.",
+                        ));
                         continue;
                     }
                     if run.is_none() {
@@ -305,6 +364,16 @@ impl Conversation {
                         )
                     };
                     let safe_output = redact_text(&result.output);
+                    if result.ok {
+                        if mutation {
+                            mutation_epoch += 1;
+                            verified_epoch = None;
+                            verification.clear();
+                            observations.clear();
+                        } else if let Some(key) = observation_key {
+                            observations.insert(key);
+                        }
+                    }
                     if io::stdout().is_terminal() {
                         crate::tui::tool_result(result.ok, result.verification || shell_evidence);
                     }
@@ -317,6 +386,9 @@ impl Conversation {
                             ok: result.ok,
                             output: safe_output.clone(),
                         });
+                        if result.ok {
+                            verified_epoch = Some(mutation_epoch);
+                        }
                     }
                     if let Some(run) = &run {
                         run.event(
@@ -331,10 +403,19 @@ impl Conversation {
                         )?;
                     }
                     self.messages.push(Message::assistant(raw));
+                    let proof_hint = if result.ok && mutation {
+                        format!(
+                            "\n\nMUTATION EPOCH {mutation_epoch} RECORDED. {}",
+                            verification_required_message()
+                        )
+                    } else {
+                        String::new()
+                    };
                     self.messages.push(Message::user(format!(
-                        "TOOL RESULT [{}]:\n{}",
+                        "TOOL RESULT [{}]:\n{}{}",
                         if result.ok { "ok" } else { "error" },
-                        safe_output
+                        safe_output,
+                        proof_hint
                     )));
                 }
             }
@@ -491,10 +572,19 @@ impl Conversation {
             self.max_steps,
             &self.tools.git_snapshot(),
         );
+        if self.public_test {
+            crate::tui::system(
+                "PUBLIC TEST · disposable workspace · installed Mac tools available · deletion denied",
+            );
+        }
     }
 
     pub fn paths(&self) -> &AppPaths {
         &self.paths
+    }
+
+    pub fn is_public_test(&self) -> bool {
+        self.public_test
     }
 
     /// Run a direct shell command from the `!` grammar, bounded by the same
@@ -864,17 +954,30 @@ impl Conversation {
             git_status: self.tools.git_snapshot(),
             next: None,
             review: None,
-            risk: "Conversation used bounded local workspace tools; details are stored in the backend receipt.".into(),
-            authority: Some("workspace".into()),
+            risk: if self.public_test {
+                "Public test used installed host tools inside an isolated disposable workspace; deletion and host context were unavailable."
+            } else {
+                "Conversation used bounded local workspace tools; details are stored in the backend receipt."
+            }
+            .into(),
+            authority: Some(if self.public_test {
+                "public-test".into()
+            } else {
+                "workspace".into()
+            }),
             done_when: None,
             approvals: Vec::new(),
             artifacts: Vec::new(),
             reversible: None,
-            context_sources: crate::context::ContextCapsule::build(
-                &self.paths.runtime,
-                self.tools.workspace(),
-            )
-            .sources,
+            context_sources: if self.public_test {
+                Vec::new()
+            } else {
+                crate::context::ContextCapsule::build(
+                    &self.paths.runtime,
+                    self.tools.workspace(),
+                )
+                .sources
+            },
             preexisting_changes: Vec::new(),
         };
         run.event(
@@ -882,7 +985,7 @@ impl Conversation {
             json!({ "status": receipt.status, "summary": receipt.summary }),
         )?;
         let receipt_path = run.finish(&self.paths.runtime, &receipt)?;
-        if receipt.verification.iter().any(|check| check.ok) {
+        if !self.public_test && receipt.verification.iter().any(|check| check.ok) {
             let checks = receipt
                 .verification
                 .iter()
@@ -1041,6 +1144,38 @@ fn shell_command_is_read_only(command: &str) -> bool {
     read_only.iter().any(|prefix| lowered.starts_with(prefix))
 }
 
+fn shell_command_is_preview(command: &str) -> bool {
+    let lowered = command.trim().to_ascii_lowercase();
+    ["open ", "xdg-open ", "start "]
+        .iter()
+        .any(|prefix| lowered.starts_with(prefix))
+}
+
+fn needs_verification(mutation_epoch: usize, verified_epoch: Option<usize>) -> bool {
+    mutation_epoch > 0 && verified_epoch != Some(mutation_epoch)
+}
+
+fn verification_required_message() -> &'static str {
+    r#"The latest workspace mutation has no passing proof. `read`, `list`, and `search` are observations and do not verify completion. Run exactly one real acceptance action next, for example {"type":"verify","command":"test -s public/index.html"} or {"type":"http","url":"http://127.0.0.1:PORT"}; then finish if it passes."#
+}
+
+fn observation_signature(
+    mutation_epoch: usize,
+    tool: &str,
+    path: Option<&str>,
+    query: Option<&str>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> String {
+    format!(
+        "{mutation_epoch}|{tool}|{}|{}|{}|{}",
+        path.unwrap_or(""),
+        query.unwrap_or(""),
+        offset.map_or_else(String::new, |value| value.to_string()),
+        limit.map_or_else(String::new, |value| value.to_string())
+    )
+}
+
 fn explicit_skill_signal(input: &str) -> bool {
     let input = input.to_ascii_lowercase();
     [
@@ -1063,11 +1198,21 @@ fn plain_message(raw: &str) -> Option<&str> {
     .then_some(value)
 }
 
-fn conversation_prompt(workspace: &std::path::Path, max_steps: usize) -> String {
+fn conversation_prompt(workspace: &std::path::Path, max_steps: usize, public_test: bool) -> String {
     let limit = if max_steps == 0 {
         "No tool-step ceiling; continue until finished or interrupted.".to_string()
     } else {
         format!("Operator ceiling: {max_steps} tool steps/turn.")
+    };
+    let boundary = if public_test {
+        "Public test: installed host executables are available through shell, but only this disposable workspace and isolated runtime are readable or writable. Host HII state, credentials, provider controls, direct shell input, and deletion are unavailable. Put previewable output under public/."
+    } else {
+        "Use hii_context for continuity or current-work questions. File deletion requires explicit live operator approval."
+    };
+    let tools = if public_test {
+        "read|list|search|write|edit|shell|verify|http"
+    } else {
+        "read|list|search|write|edit|shell|verify|http|hii_context"
     };
     format!(
         r#"You are HII, Ummi's concise local workspace partner.
@@ -1075,16 +1220,20 @@ Workspace: {workspace}
 {limit}
 
 Reply naturally in plain text. For work, return one JSON tool action:
-{{"type":"read|list|search|write|edit|shell|verify|http|hii_context", ...needed fields}}
+{{"type":"{tools}", ...needed fields}}
 
-Use hii_context for continuity or current-work questions. Paths are literal, never Markdown links. Avoid generic greetings. Use one tool at a time only for requested work. After a mutation, verify before replying. Preserve unclear work. Stay inside the workspace; never publish, push, spend, message, or read secrets. File deletion requires explicit live operator approval. Never hide deletion inside an opaque script. Final replies omit internal protocol and bookkeeping."#,
+{boundary}
+Paths are literal, never Markdown links. Avoid generic greetings. Use one tool at a time. After a mutation, use verify or http; reads are observation only. Preserve unclear work. Never publish, push, spend, message, or read secrets. Never hide deletion in a script. Final replies omit protocol bookkeeping."#,
         workspace = workspace.display()
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{conversation_prompt, plain_message, shell_command_is_read_only};
+    use super::{
+        conversation_prompt, needs_verification, observation_signature, plain_message,
+        shell_command_is_preview, shell_command_is_read_only, verification_required_message,
+    };
     use std::path::Path;
 
     #[test]
@@ -1098,6 +1247,32 @@ mod tests {
     }
 
     #[test]
+    fn recognizes_preview_shell_without_treating_it_as_workspace_mutation() {
+        assert!(shell_command_is_preview("open public/index.html"));
+        assert!(shell_command_is_preview("xdg-open http://localhost:3000"));
+        assert!(!shell_command_is_preview("cp source target"));
+    }
+
+    #[test]
+    fn mutation_epoch_requires_fresh_passing_proof() {
+        assert!(!needs_verification(0, None));
+        assert!(needs_verification(1, None));
+        assert!(needs_verification(2, Some(1)));
+        assert!(!needs_verification(2, Some(2)));
+        assert!(verification_required_message().contains("observations"));
+        assert!(verification_required_message().contains(r#""type":"verify""#));
+    }
+
+    #[test]
+    fn repeated_observation_signature_is_stable_until_mutation() {
+        let first = observation_signature(1, "read", Some("public/index.html"), None, None, None);
+        let same = observation_signature(1, "read", Some("public/index.html"), None, None, None);
+        let changed = observation_signature(2, "read", Some("public/index.html"), None, None, None);
+        assert_eq!(first, same);
+        assert_ne!(first, changed);
+    }
+
+    #[test]
     fn recognizes_explicit_skill_requests() {
         assert!(super::explicit_skill_signal(
             "Treat this as a repeatable workflow"
@@ -1108,7 +1283,7 @@ mod tests {
 
     #[test]
     fn conversation_prompt_stays_lean() {
-        let prompt = conversation_prompt(Path::new("/workspace"), 12);
+        let prompt = conversation_prompt(Path::new("/workspace"), 12, false);
         assert!(
             prompt.len() <= 800,
             "conversation prompt grew to {} bytes",
@@ -1118,9 +1293,18 @@ mod tests {
 
     #[test]
     fn conversation_is_unlimited_when_step_ceiling_is_zero() {
-        let prompt = conversation_prompt(Path::new("/workspace"), 0);
+        let prompt = conversation_prompt(Path::new("/workspace"), 0, false);
         assert!(prompt.contains("No tool-step ceiling"));
         assert!(!prompt.contains("Operator ceiling:"));
+    }
+
+    #[test]
+    fn public_test_prompt_exposes_host_tools_without_host_state() {
+        let prompt = conversation_prompt(Path::new("/workspace"), 0, true);
+        assert!(prompt.contains("installed host executables"));
+        assert!(prompt.contains("Put previewable output under public/"));
+        assert!(!prompt.contains("hii_context"));
+        assert!(prompt.contains("deletion are unavailable"));
     }
 
     #[test]

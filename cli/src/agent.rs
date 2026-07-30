@@ -8,7 +8,7 @@ use crate::{
 use serde::Deserialize;
 use serde_json::json;
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashSet},
     io::{self, IsTerminal, Write},
     path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
@@ -159,6 +159,9 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let mut touched_artifacts = BTreeSet::new();
     let mut final_summary = None;
     let mut final_next = None;
+    let mut mutation_epoch = 0usize;
+    let mut verified_epoch = None;
+    let mut observations = HashSet::new();
     let mut steps = 0usize;
 
     loop {
@@ -209,8 +212,36 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     crate::tui::tool_start(steps, &tool, label);
                 }
                 let is_hii = crate::hii_tools::is_hii_tool(&tool);
+                let observation = matches!(tool.as_str(), "read" | "list" | "search");
+                let observation_key = observation.then(|| {
+                    observation_signature(
+                        mutation_epoch,
+                        &tool,
+                        path.as_deref(),
+                        query.as_deref(),
+                        offset,
+                        limit,
+                    )
+                });
+                if observation_key
+                    .as_ref()
+                    .is_some_and(|key| observations.contains(key))
+                {
+                    store.event(
+                        "convergence.repeated_action",
+                        json!({ "step": steps, "tool": tool, "mutation_epoch": mutation_epoch }),
+                    )?;
+                    messages.push(Message::assistant(raw));
+                    messages.push(Message::user(
+                        "REPEATED_ACTION: this exact observation already ran after the latest workspace change. Do not repeat read/list/search. Run one actual verify or http acceptance check next, then return final if it passes.",
+                    ));
+                    continue;
+                }
                 let mutates = matches!(tool.as_str(), "write" | "edit")
-                    || (tool == "shell" && command.is_some())
+                    || (tool == "shell"
+                        && command
+                            .as_deref()
+                            .is_some_and(shell_command_changes_workspace))
                     || (is_hii && crate::hii_tools::is_mutating(&tool));
                 let sensitive = (tool == "shell" || tool == "verify")
                     && command.as_deref().is_some_and(sensitive_shell);
@@ -256,6 +287,16 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     )
                 };
                 let safe_output = redact_text(&result.output);
+                if result.ok {
+                    if mutates && !options.dry_run {
+                        mutation_epoch += 1;
+                        verified_epoch = None;
+                        verification.clear();
+                        observations.clear();
+                    } else if let Some(key) = observation_key {
+                        observations.insert(key);
+                    }
+                }
                 if io::stdout().is_terminal() {
                     crate::tui::tool_result(result.ok, result.verification);
                 }
@@ -270,6 +311,9 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                         ok: result.ok,
                         output: safe_output.clone(),
                     });
+                    if result.ok {
+                        verified_epoch = Some(mutation_epoch);
+                    }
                 }
                 store.event(
                     "tool.result",
@@ -282,10 +326,18 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     }),
                 )?;
                 messages.push(Message::assistant(raw));
+                let proof_hint = if result.ok && mutates && !options.dry_run {
+                    format!(
+                        "\n\nMUTATION EPOCH {mutation_epoch} RECORDED. Run one actual verify or http acceptance check next. Read/list/search are observation only."
+                    )
+                } else {
+                    String::new()
+                };
                 messages.push(Message::user(format!(
-                    "TOOL RESULT [{}]:\n{}",
+                    "TOOL RESULT [{}]:\n{}{}",
                     if result.ok { "ok" } else { "error" },
-                    safe_output
+                    safe_output,
+                    proof_hint
                 )));
             }
             Action::Final {
@@ -293,10 +345,14 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 verification: claimed,
                 next,
             } => {
-                if !verification.iter().any(|check| check.ok) && options.verify.is_empty() {
+                let current_proof_missing =
+                    mutation_epoch > 0 && verified_epoch != Some(mutation_epoch);
+                if options.verify.is_empty()
+                    && (!verification.iter().any(|check| check.ok) || current_proof_missing)
+                {
                     messages.push(Message::assistant(raw));
                     messages.push(Message::user(format!(
-                        "No HII verification result exists yet (model claim: {}). Run the actual check with verify or http before finalizing.",
+                        "No passing HII verification exists for the latest workspace mutation (model claim: {}). Read/list/search are observation only. Run one actual check with verify or http before finalizing.",
                         if claimed.is_empty() { "none" } else { "present" }
                     )));
                     if options.verbose {
@@ -569,6 +625,57 @@ fn validate_declared_verification(commands: &[String]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn shell_command_changes_workspace(command: &str) -> bool {
+    let lowered = command.trim().to_ascii_lowercase();
+    let non_mutating = [
+        "open ",
+        "xdg-open ",
+        "start ",
+        "rg ",
+        "ls ",
+        "cat ",
+        "head ",
+        "tail ",
+        "sed -n",
+        "find ",
+        "pwd",
+        "wc ",
+        "stat ",
+        "file ",
+        "git status",
+        "git diff",
+        "git log",
+        "git show",
+        "cargo test",
+        "cargo check",
+        "cargo clippy",
+        "npm test",
+        "npm run check",
+        "npm run build",
+        "node --check",
+    ];
+    !non_mutating
+        .iter()
+        .any(|prefix| lowered.starts_with(prefix))
+}
+
+fn observation_signature(
+    mutation_epoch: usize,
+    tool: &str,
+    path: Option<&str>,
+    query: Option<&str>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> String {
+    format!(
+        "{mutation_epoch}|{tool}|{}|{}|{}|{}",
+        path.unwrap_or(""),
+        query.unwrap_or(""),
+        offset.map_or_else(String::new, |value| value.to_string()),
+        limit.map_or_else(String::new, |value| value.to_string())
+    )
 }
 
 fn acceptance_passed(commands: &[String], records: &[VerificationRecord]) -> bool {
@@ -859,6 +966,22 @@ mod tests {
             output: "ok".into(),
         }];
         assert!(!acceptance_passed(&commands, &records));
+    }
+
+    #[test]
+    fn preview_commands_do_not_create_a_workspace_mutation_epoch() {
+        assert!(!shell_command_changes_workspace("open public/index.html"));
+        assert!(!shell_command_changes_workspace("npm run build"));
+        assert!(shell_command_changes_workspace("cp a.txt b.txt"));
+    }
+
+    #[test]
+    fn repeated_observations_change_signature_after_mutation() {
+        let first = observation_signature(1, "read", Some("site.html"), None, None, None);
+        let repeated = observation_signature(1, "read", Some("site.html"), None, None, None);
+        let after_write = observation_signature(2, "read", Some("site.html"), None, None, None);
+        assert_eq!(first, repeated);
+        assert_ne!(first, after_write);
     }
 
     #[test]

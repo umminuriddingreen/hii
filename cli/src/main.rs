@@ -21,7 +21,7 @@ mod tools;
 mod tui;
 
 use agent::RunOptions;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use config::{AppPaths, DEFAULT_MAX_STEPS, DEFAULT_MODEL, DEFAULT_REVIEW_MODEL};
 use conversation::Conversation;
 use ollama::Ollama;
@@ -66,8 +66,24 @@ struct Cli {
     )]
     max_steps: usize,
 
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        default_value_t = SessionProfile::Local,
+        help = "Session boundary: local | public-test"
+    )]
+    session_profile: SessionProfile,
+
     #[command(subcommand)]
     command: Option<Commands>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+enum SessionProfile {
+    #[default]
+    Local,
+    PublicTest,
 }
 
 #[derive(Subcommand, Debug)]
@@ -260,6 +276,12 @@ fn main() -> ExitCode {
 }
 
 fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
+    if cli.session_profile == SessionProfile::PublicTest && cli.command.is_some() {
+        return Err(
+            "--session-profile public-test is only valid for the interactive bare `hii` session"
+                .into(),
+        );
+    }
     match cli.command {
         Some(Commands::Run {
             goal,
@@ -381,7 +403,13 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
     let workspace = cli
         .cwd
         .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
-    let mut conversation = Conversation::new(paths, workspace, cli.model, cli.max_steps)?;
+    let mut conversation = Conversation::new(
+        paths,
+        workspace,
+        cli.model,
+        cli.max_steps,
+        cli.session_profile == SessionProfile::PublicTest,
+    )?;
     conversation.welcome();
     // A line queued with Tab is carried forward and prepended to the next Submit.
     let mut queued: Option<String> = None;
@@ -435,6 +463,12 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         }
         // `!<command>` runs a shell command directly (interaction grammar).
         if let Some(command) = goal.strip_prefix('!') {
+            if conversation.is_public_test() {
+                tui::system(
+                    "Direct shell input is unavailable in the public test. Ask HII to use the host tool inside this workspace.",
+                );
+                continue;
+            }
             let output = conversation.shell_interactive(command.trim());
             if output != "ok" {
                 tui::system(&output);
@@ -442,8 +476,22 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             continue;
         }
         let mut show_activity = false;
-        let result = match parse_slash_command(goal) {
-            Some(SlashCommand::Help) => Ok(slash_help().to_string()),
+        let slash = parse_slash_command(goal);
+        if conversation.is_public_test()
+            && slash
+                .as_ref()
+                .is_some_and(|command| !public_test_slash_allowed(command))
+        {
+            tui::system("That control is unavailable in the isolated public test.");
+            continue;
+        }
+        let result = match slash {
+            Some(SlashCommand::Help) => Ok(if conversation.is_public_test() {
+                public_test_slash_help()
+            } else {
+                slash_help()
+            }
+            .to_string()),
             Some(SlashCommand::Compact) => conversation.compact(),
             Some(SlashCommand::Clear) => conversation.clear(),
             Some(SlashCommand::Status) => Ok(conversation.status()),
@@ -502,7 +550,12 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 schedule::ScheduleService::new(conversation.paths())?.sync_calendar()
             }
             Some(SlashCommand::Unknown(command)) => {
-                Ok(format!("Unknown command: {command}\n\n{}", slash_help()))
+                let help = if conversation.is_public_test() {
+                    public_test_slash_help()
+                } else {
+                    slash_help()
+                };
+                Ok(format!("Unknown command: {command}\n\n{help}"))
             }
             None => {
                 show_activity = true;
@@ -649,6 +702,10 @@ fn slash_help() -> &'static str {
     } else {
         "/help                         show commands\n/providers                    show local, Codex, and Claude access\n/login codex|claude           connect an existing provider plan\n/compact                      summarize and shrink this conversation\n/clear                        start with fresh context\n/status                       show session, workspace, model, and usage\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/model [name]                 list or switch local models\n/proof [run-id]               inspect execution proof\n/skills                       show automatically learned skill drafts\n/agents                       show HII-managed and observed agents\n/codex <task>                 use authenticated Codex CLI\n/claude <task>                use authenticated Claude CLI\n/agent <id> status|logs|stop  manage an agent by id\n/undo                         drop the last exchange to steer away\n/fork                         snapshot this session to a resumable fork\n/teach <name>                 graduate this session into a reusable skill\n!<command>                    run a shell command directly\n/exit                         leave HII\n\nWhile running: type + Enter steers · type + Tab queues · Esc stops"
     }
+}
+
+fn public_test_slash_help() -> &'static str {
+    "/help                         show commands\n/compact                      summarize and shrink this conversation\n/clear                        start with fresh context\n/status                       show isolated session, workspace, model, and usage\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/model [name]                 list or switch local models\n/proof [run-id]               inspect isolated execution proof\n/undo                         drop the last exchange\n/exit                         leave HII\n\nInstalled Mac tools are available to HII inside the disposable workspace. Direct shell input and deletion are unavailable."
 }
 
 #[cfg(feature = "preview")]
@@ -984,7 +1041,10 @@ fn first_command(args: &[String]) -> Option<&str> {
             skip_value = false;
             continue;
         }
-        if matches!(arg.as_str(), "--cwd" | "--model" | "--max-steps") {
+        if matches!(
+            arg.as_str(),
+            "--cwd" | "--model" | "--max-steps" | "--session-profile"
+        ) {
             skip_value = true;
             continue;
         }
@@ -994,6 +1054,22 @@ fn first_command(args: &[String]) -> Option<&str> {
         return Some(arg);
     }
     None
+}
+
+fn public_test_slash_allowed(command: &SlashCommand) -> bool {
+    matches!(
+        command,
+        SlashCommand::Help
+            | SlashCommand::Compact
+            | SlashCommand::Clear
+            | SlashCommand::Status
+            | SlashCommand::Usage
+            | SlashCommand::Thinking(_)
+            | SlashCommand::Model(_)
+            | SlashCommand::Proof(_)
+            | SlashCommand::Undo
+            | SlashCommand::Unknown(_)
+    )
 }
 
 fn delegate_legacy(repo: &std::path::Path, args: &[String]) -> Option<Result<i32, String>> {
@@ -1138,6 +1214,28 @@ mod tests {
     fn cli_has_no_step_ceiling_by_default() {
         let cli = Cli::try_parse_from(["hii"]).expect("parse default CLI");
         assert_eq!(cli.max_steps, 0);
+        assert_eq!(cli.session_profile, SessionProfile::Local);
+    }
+
+    #[test]
+    fn parses_public_test_profile_without_turning_it_into_a_goal() {
+        let args = normalize_goal_args(
+            [
+                "hii",
+                "--cwd",
+                "/tmp/arry",
+                "--model",
+                "qwen3.6:35b-mlx",
+                "--session-profile",
+                "public-test",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        );
+        let cli = Cli::try_parse_from(args).expect("parse public test CLI");
+        assert_eq!(cli.session_profile, SessionProfile::PublicTest);
+        assert!(cli.command.is_none());
     }
 
     #[test]
