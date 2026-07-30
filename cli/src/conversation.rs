@@ -1120,6 +1120,20 @@ impl Conversation {
         Ok(review)
     }
 
+    pub fn side(&mut self, prompt: &str) -> Result<String, String> {
+        let prompt = prompt.trim();
+        if prompt.is_empty() {
+            return Err("usage: /side <question>".into());
+        }
+        let messages = side_context(&self.messages, prompt);
+        let answer = redact_text(&self.call_activity("side chat", messages, true)?.content);
+        self.store.event(
+            "conversation.side",
+            json!({ "prompt": redact_text(prompt), "answer": redact_text(&answer) }),
+        )?;
+        Ok(answer)
+    }
+
     pub fn permissions(&mut self, requested: Option<&str>) -> Result<String, String> {
         if self.public_test {
             return Ok([
@@ -1766,6 +1780,19 @@ fn render_permissions(authority: Authority) -> String {
     )
 }
 
+fn side_context(messages: &[Message], prompt: &str) -> Vec<Message> {
+    let mut context = messages
+        .iter()
+        .filter(|message| message.role == "system")
+        .cloned()
+        .collect::<Vec<_>>();
+    context.push(Message::system(
+        "SIDE CHAT: answer the operator's question directly. Do not emit tool actions and do not claim to have changed or verified the workspace. This answer will not enter the main conversation.",
+    ));
+    context.push(Message::user(prompt));
+    context
+}
+
 fn authority_decision(
     authority: Authority,
     mutates: bool,
@@ -2107,7 +2134,7 @@ mod tests {
         plain_message, plan_tool_allowed, public_test_sensitive_shell, render_permissions,
         resumable_messages, session_authority, session_goal, session_plan_mode, session_title,
         shell_command_is_observation_only, shell_command_is_preview, shell_command_is_read_only,
-        verification_required_message,
+        side_context, verification_required_message,
     };
     use crate::contract::{Authority, Decision};
     use std::path::Path;
@@ -2315,5 +2342,23 @@ mod tests {
             authority_decision(Authority::ExternalCommit, true, true, true),
             Decision::Prompt
         );
+    }
+
+    #[test]
+    fn side_context_excludes_main_conversation_messages() {
+        let main = vec![
+            crate::ollama::Message::system("base"),
+            crate::ollama::Message::user("main question"),
+            crate::ollama::Message::assistant("main answer"),
+        ];
+        let side = side_context(&main, "side question");
+        assert!(side.iter().any(|message| message.content == "base"));
+        assert!(side
+            .iter()
+            .any(|message| message.content == "side question"));
+        assert!(!side
+            .iter()
+            .any(|message| message.content == "main question"));
+        assert!(!side.iter().any(|message| message.content == "main answer"));
     }
 }
