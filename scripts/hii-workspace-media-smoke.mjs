@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
 const { seedsFromFiles } = await import('../lib/workspace/ingest.ts');
-const { contactSheetContextItems } = await import('../lib/workspace/contact-sheet.ts');
+const { contactSheetContextItems, contactSheetItemSeed } = await import('../lib/workspace/contact-sheet.ts');
 
 const stored = [];
 globalThis.fetch = async (_input, init) => {
@@ -54,6 +54,10 @@ assert.equal(contextItems.length, 2);
 assert.equal(contextItems[0].title, 'material palette');
 assert.equal(contextItems[0].source, sheet.payload.items[1].path);
 assert.equal(contextItems[0].expectedSha256, sheet.payload.items[1].sha256);
+const promoted = contactSheetItemSeed(sheet.payload.items[1], 'proof-sheet', 'material palette');
+assert.equal(promoted.object.parentId, 'proof-sheet');
+assert.deepEqual(promoted.object.proofRefs, [`sha256:${sheet.payload.items[1].sha256}`]);
+assert.equal(promoted.payload.adapter, 'contact-sheet-item');
 
 console.log('HII workspace media smoke');
 console.log('status:       ok');
@@ -61,4 +65,5 @@ console.log('organization: image batch -> bounded contact sheet verified');
 console.log('dedupe:       exact SHA-256 duplicate omitted before storage');
 console.log('proof:        unique source paths + hashes preserved');
 console.log('focus:        exact labeled thumbnails -> separate hashed run context');
+console.log('promotion:    sheet item -> provenance-linked region-focusable image');
 console.log('mixed batch:  non-image artifact remains directly editable');

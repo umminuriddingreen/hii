@@ -1,3 +1,4 @@
+import type { NodeSeed } from './ingest';
 export type ContactSheetItem = { url:string; path:string; name:string; mime:string; size:number; sha256:string };
 export type ContactSheetSelection = ContactSheetItem & { label?:string };
 const text=(value:unknown,max=1000)=>String(value??'').replace(/[\u0000-\u001F\u007F]/g,' ').trim().slice(0,max);
@@ -22,4 +23,23 @@ export function contactSheetContextItems(input:{nodeId:string;items:unknown;sele
     expectedSha256:item.sha256,excerpt:item.label?`Human annotation: ${item.label}`:'',
     objectKind:'asset',owner:'human',proofRefs:Array.from(new Set([...(input.proofRefs||[]),`sha256:${item.sha256}`])).slice(0,12)
   }));
+}
+
+export function contactSheetItemSeed(itemValue:unknown,parentId:string,label?:string):NodeSeed{
+  const item=normalizeContactSheetItems([itemValue])[0];
+  if(!item)throw new Error('A durable contact-sheet image is required.');
+  const title=text(label,160)||item.name;
+  return{
+    type:'image',w:520,h:360,
+    object:{
+      kind:'asset',owner:'human',status:'ready',source:item.path,
+      capabilityId:'hii.workspace.creative_canvas',parentId,
+      proofRefs:[`sha256:${item.sha256}`],
+      audit:[{ts:new Date().toISOString(),actor:'human',action:'promoted contact-sheet image for exact focus',note:title}]
+    },
+    payload:{
+      adapter:'contact-sheet-item',title,name:item.name,url:item.url,path:item.path,mime:item.mime,
+      size:item.size,sha256:item.sha256,sourceContactSheetId:parentId
+    }
+  };
 }

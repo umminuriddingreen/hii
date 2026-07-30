@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { seedsFromFiles } from '../../lib/workspace/ingest';
-import { contactSheetContextItems, normalizeContactSheetSelection } from '../../lib/workspace/contact-sheet';
+import { contactSheetContextItems, contactSheetItemSeed, normalizeContactSheetSelection } from '../../lib/workspace/contact-sheet';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -101,5 +101,35 @@ describe('workspace contact-sheet import', () => {
     });
     expect(context[2].proofRefs).toContain(`sha256:${'3'.padStart(64, '0')}`);
     expect(context.some((item) => item.source === '/project/13.png')).toBe(false);
+  });
+
+  it('promotes one durable thumbnail into a region-focusable child object', () => {
+    const sha256 = 'a'.repeat(64);
+    const seed = contactSheetItemSeed({
+      url: '/api/workspace/assets/reference.png',
+      path: '/project/reference.png',
+      name: 'reference.png',
+      mime: 'image/png',
+      size: 1024,
+      sha256
+    }, 'sheet-one', 'facade rhythm');
+    expect(seed).toMatchObject({
+      type: 'image',
+      object: {
+        kind: 'asset',
+        owner: 'human',
+        status: 'ready',
+        source: '/project/reference.png',
+        parentId: 'sheet-one',
+        proofRefs: [`sha256:${sha256}`]
+      },
+      payload: {
+        adapter: 'contact-sheet-item',
+        title: 'facade rhythm',
+        path: '/project/reference.png',
+        sha256,
+        sourceContactSheetId: 'sheet-one'
+      }
+    });
   });
 });

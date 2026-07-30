@@ -322,6 +322,13 @@ describe('agentic workspace interaction contract', () => {
     expect(readFileSync(resolve(root, 'src/lib/components/workspace/StaticNode.svelte'), 'utf8')).toContain('optional focus label');
   });
 
+  it('promotes a chosen sheet item into the existing image-region workflow', () => {
+    expect(workspace).toContain('contactSheetItemSeed');
+    expect(workspace).toContain('promoteContactSheetItem');
+    expect(readFileSync(resolve(root, 'lib/workspace/contact-sheet.ts'), 'utf8')).toContain('sourceContactSheetId');
+    expect(readFileSync(resolve(root, 'src/lib/components/workspace/StaticNode.svelte'), 'utf8')).toContain('Focus region ↗');
+  });
+
   it('bridges an explicit browser request into its paired terminal', () => {
     expect(explorer).toContain('curl -I -L --max-time 20 --');
     expect(explorer).toContain("new CustomEvent('hii:terminal-command'");

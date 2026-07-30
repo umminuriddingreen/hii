@@ -25,7 +25,7 @@
   import { workspaceConnections } from '@/lib/workspace/connections';
   import { findOpenWorkspacePosition } from '@/lib/workspace/layout';
   import { normalizeWorkspaceContextAnchor } from '@/lib/workspace/context-anchor';
-  import { contactSheetContextItems } from '@/lib/workspace/contact-sheet';
+  import { contactSheetContextItems, contactSheetItemSeed } from '@/lib/workspace/contact-sheet';
   import { rebindPendingWorkspaceContext } from '@/lib/workspace/pending-context';
   import { organizeWorkspaceSelection } from '@/lib/workspace/organize';
   import { boardPatchForRunState, boardRunSyncKey } from '@/lib/workspace/board-run';
@@ -148,6 +148,15 @@
     persist();
   }
   function addSeeds(seeds:NodeSeed[],at:{x:number;y:number}){const before=doc;if(seeds.some(seed=>seed.type==='model'))ensureModelPane();for(const [index,seed] of seeds.entries()){const node=makeNode(seed,at.x+index*28,at.y+index*28,++doc.nextZ);doc={...doc,nodes:[...doc.nodes,node]};selected=node.id}remember(before);persist();}
+  function promoteContactSheetItem(sheet:WorkspaceNode,item:Record<string,unknown>,label?:string){
+    const sha256=String(item.sha256||'');
+    const existing=doc.nodes.find(node=>node.object?.parentId===sheet.id&&String(node.payload.sha256||'')===sha256);
+    if(existing){select(existing);contextSelection=[existing.id];fitNodes([existing],1);return}
+    const before=doc,seed=contactSheetItemSeed(item,sheet.id,label);
+    const at=findOpenWorkspacePosition(doc.nodes,{x:sheet.x+sheet.w+32,y:sheet.y},{w:seed.w,h:seed.h});
+    const promoted=makeNode(seed,at.x,at.y,doc.nextZ+1);
+    doc={...doc,nextZ:doc.nextZ+1,nodes:[...doc.nodes,promoted]};selected=promoted.id;contextSelection=[promoted.id];remember(before);persist();fitNodes([sheet,promoted],1);
+  }
   function spawn(type:string,payload:Record<string,unknown>={}){const typedPayload=type==='frame'?{sceneOrder:scenes.length+1,...payload}:payload;const seed=seedFor(type as WorkspaceNodeType,type==='browser'?{url:'https://duckduckgo.com',...typedPayload}:type==='terminal'?{sessionId:crypto.randomUUID(),...typedPayload}:typedPayload);const center={x:(-doc.viewport.x+innerWidth/2)/doc.viewport.zoom,y:(-doc.viewport.y+innerHeight/2)/doc.viewport.zoom};addSeeds([seed],{x:center.x-seed.w/2,y:center.y-seed.h/2});omnibar=false;query='';if(type==='context')void refreshContext();if(type==='board')void refreshBoard();}
   function workspacePoint(clientX:number,clientY:number){return{x:(clientX-doc.viewport.x)/doc.viewport.zoom,y:(clientY-doc.viewport.y)/doc.viewport.zoom}}
   async function summonComposer(at?:{x:number;y:number}){const now=Date.now();if(now-lastSummon<180)return;lastSummon=now;composerAt=at||workspacePoint(innerWidth/2,innerHeight/2);composerOpen=true;omnibar=false;await tick();composerInput?.focus();}
@@ -483,7 +492,7 @@
         {:else if node.object?.kind==='artifact'&&node.payload.adapter==='run-artifact'}<RunArtifactPane {node} onPatch={(next)=>patch(node.id,next)} />
         {:else if node.object?.kind==='capability'}<GovernedCapabilityPane {node} onPatch={(next)=>patch(node.id,next)} />
         {:else if ['artifact','receipt'].includes(node.object?.kind||'')}<GovernedResultPane {node} />
-        {:else if ['note','text','canvas-text','ink','link','file','image','media','html','font'].includes(node.type)}<StaticNode {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} onSize={(size)=>patch(node.id,size)} />
+        {:else if ['note','text','canvas-text','ink','link','file','image','media','html','font'].includes(node.type)}<StaticNode {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} onSize={(size)=>patch(node.id,size)} onPromote={(item,label)=>promoteContactSheetItem(node,item,label)} />
         {:else if node.type==='intent'}<IntentPane {node} />
         {:else if node.type==='run'}<SpatialRunPane {node} onPatch={(next)=>patchRunNode(node,next)} onFollowUp={(text)=>followUp(node,text)} onComplete={(result)=>completedRunNodes(node,result)} onCapabilityDraft={(result)=>materializeCapabilityDraft(node,result)} />
         {:else if node.type==='document'}<DocumentPane {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} />

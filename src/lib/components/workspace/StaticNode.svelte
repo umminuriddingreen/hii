@@ -10,6 +10,7 @@
   export let node:WorkspaceNode;
   export let onPayload:(patch:Record<string,unknown>)=>void;
   export let onSize:(size:{w:number;h:number})=>void=()=>{};
+  export let onPromote:(item:Record<string,unknown>,label?:string)=>void=()=>{};
   const text=(key:string)=>String(node.payload[key]??'');
   const size=(value:unknown)=>{const n=Number(value);return Number.isFinite(n)?n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:`${(n/1048576).toFixed(1)} MB`:''};
   const fitImage=(event:Event)=>{const image=event.currentTarget as HTMLImageElement;if(!image.naturalWidth||!image.naturalHeight)return;const ratio=image.naturalWidth/image.naturalHeight,current=node.w/node.h;const next=current>ratio?{w:node.h*ratio,h:node.h}:{w:node.w,h:node.w/ratio};if(Math.abs(next.w-node.w)>1||Math.abs(next.h-node.h)>1)onSize(next)};
@@ -126,6 +127,7 @@
             </button>
             {#if selectedContactItems.some(candidate=>candidate.sha256===item.sha256)}
               <input aria-label={`Context label for ${item.name}`} value={selectedContactItems.find(candidate=>candidate.sha256===item.sha256)?.label||''} on:change={(event)=>labelContactItem(item.sha256,event.currentTarget.value)} on:pointerdown|stopPropagation class="m-1.5 mt-0 w-[calc(100%-12px)] rounded border border-blue-200 bg-white px-2 py-1 font-mono text-[8px] outline-none" placeholder="optional focus label"/>
+              <button class="mx-1.5 mb-1.5 rounded-full bg-blue-600 px-2.5 py-1 font-mono text-[8px] uppercase text-white" on:click={()=>onPromote(item,selectedContactItems.find(candidate=>candidate.sha256===item.sha256)?.label)}>Focus region ↗</button>
             {/if}
           </div>
         {/each}

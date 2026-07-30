@@ -426,6 +426,14 @@ their own local path, SHA-256 identity, annotation, and proof lineage. The
 approval fingerprint therefore changes with the exact selected references;
 unselected images do not silently enter the run.
 
+Any selected thumbnail can now be promoted beside its sheet as an ordinary HII
+image object. Promotion is idempotent for the sheet plus source hash, retains a
+parent link to the sheet and the exact SHA-256 proof, chooses an open canvas
+lane, and immediately exposes the existing `Focus region` interaction. The
+resulting normalized region follows the already verified fingerprint,
+read-only staging, and stale-review rules. This reuses HII's image object and
+governed context loop rather than creating a second contact-sheet crop tool.
+
 ### Verified exact-selection organization checkpoint
 
 Map search now acts as a human-reviewed organization boundary. A person can
@@ -645,11 +653,12 @@ cloud sync, credits, or a general “AI operating system.”
 
 1. Extend the verified contact-sheet and exact-selection organization flow
    with stacking, batch labels, and reviewed perceptual dedupe.
-2. Extend the implemented contact-sheet thumbnail selection into per-thumbnail
-   image-region focus. Exact sheet items, optional labels, local paths, hashes,
-   and proof lineage now enter approval without expanding the run to every
-   image. PDF ranges, single-image regions, design frame/layer, drawing
-   view/layer, media ranges, and 3D views are implemented and fingerprint-bound.
+2. Keep contact-sheet selection and promotion reliable at real-project scale.
+   Exact sheet items, optional labels, local paths, hashes, proof lineage, and
+   promoted per-thumbnail image-region focus now enter approval without
+   expanding the run to every image. PDF ranges, single-image regions, design
+   frame/layer, drawing view/layer, media ranges, and 3D views are implemented
+   and fingerprint-bound.
 3. Artifact adapters for the first audience: Markdown, image/reference board,
    code/site preview, and a native-file handoff.
 4. Run one real operator-approved registered-capability replay, then preserve
