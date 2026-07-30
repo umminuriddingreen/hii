@@ -510,6 +510,40 @@ proved both old messages readable, the raw marker hidden by default, and the
 preserved transcript available on inspection. `hii:chat:check` makes that
 compatibility boundary part of the permanent product CI gate.
 
+### Verified proposal-definition checkpoint
+
+Generated board work can no longer become active from a title alone. Agent and
+system proposals may still enter the append-only backlog, but approval now
+requires a deterministic work definition: a bounded outcome, enough why/context
+to review the request, and at least one concrete `Done when` criterion. Human
+intent remains immediately approved because the human is the source of
+authority rather than a generated suggestion.
+
+The board makes this contract visible instead of hiding it in an API error.
+Each proposal shows `Definition ready` or the exact missing fields, exposes
+inline outcome, why/context, acceptance, and coordinate editing, and keeps
+`Approve` disabled until the persisted definition passes. `Archive` records a
+done-lane event without granting authority; archived proposals can be restored
+for later definition.
+
+The Svelte server, Next-compatible API, knowledge-decision handoff,
+compatibility CLI, and native Rust CLI enforce the same boundary. Focused web
+tests prove draft capture, refinement, explicit activation, compatibility CLI
+parity, archive/UI controls, duplicate handling, and receipt-gated completion.
+Rust tests independently prove that an underdefined proposal cannot be
+approved and that adding why plus `Done when` unlocks the existing approval
+path. This closes the low-quality generated-task activation gap without using
+an LLM as a policy judge. The localhost browser capture route also ignores a
+caller-supplied origin and always records direct board entry as human intent;
+agent and system provenance must come from trusted internal HII/AII producers.
+
+An isolated live browser pass then exercised the rendered Svelte surface. A
+title-only agent proposal opened with three exact definition issues and disabled
+approval. Saving a concrete outcome, why/context, and one acceptance criterion
+changed the same append-only task to `Definition ready`; approval then moved it
+to `doing` with the `Done when` proof still visible. This verifies the actual
+interaction path, not only the policy helper and static UI contract.
+
 ## Evidence reviewed
 
 ### Live HII
@@ -527,8 +561,10 @@ compatibility boundary part of the permanent product CI gate.
   still intentionally raw. The board now records human, agent, and system
   origin; holds generated active requests as proposals; rejects exact open
   duplicates before append; and requires explicit approval before a proposal
-  enters `next` or `doing`. An approved active card can now prepare the existing
-  bounded HII Space run with a content fingerprint and a second execution
+  enters `next` or `doing`. Generated proposals must also name a bounded
+  outcome, why/context, and at least one `Done when` criterion before that
+  approval can be recorded. An approved active card can now prepare the
+  existing bounded HII Space run with a content fingerprint and a second execution
   approval; queued, running, blocked, completed, and receipt-linked state then
   return to the same append-only board ledger. The authority now rejects
   illegal lifecycle jumps, repeated state writes, receipt replacement, and
@@ -660,7 +696,7 @@ cloud sync, credits, or a general “AI operating system.”
 | 0 | Trustworthy context selection | Before approval, the user can see the exact files/nodes/sources and sub-asset regions included, exclusions, provenance, content identity, and likely network boundary. |
 | 0 | Human-readable runtime health | One instance model, one clear status, failures with cause and recovery action, no unexplained process counts. |
 | 1 | Media organization | New multi-image imports become bounded proof-linked contact sheets, exact duplicates are visibly counted, selected references accept durable filterable batch labels and compact reversible stacks, local difference-hash pairs require an explicit keep-separate or stack decision, and filtered existing nodes become an exact reversible Scene. Real-project false-positive calibration remains open. |
-| 1 | Run focus and log hygiene | Governed Runs use a five-step progress summary, raw logs require two disclosures, and legacy Chat transcripts render only the readable response by default while preserving inspectable evidence. Preventing duplicate or low-quality generated board tasks remains open. |
+| 1 | Run focus and log hygiene | Governed Runs use a five-step progress summary, raw logs require two disclosures, and legacy Chat transcripts render only the readable response by default while preserving inspectable evidence. Exact open duplicates are rejected before append, and generated proposals cannot enter active work without why/context plus a concrete `Done when` criterion. |
 | 1 | Capability reuse | A successful approved trace can become a draft capability, show required inputs and permissions, and be re-run on new context. |
 | 1 | Onboarding | The first-session journey and privacy-safe local funnel are implemented. A clean Mac install must still reach the first verified artifact in under ten minutes with no repository knowledge. |
 | 1 | Recovery | Interrupted runs, stale surfaces, conflicting writes, and app restarts recover without duplicate work or lost provenance. |
@@ -679,8 +715,9 @@ cloud sync, credits, or a general “AI operating system.”
    Scene proof are complete. Exact contact-sheet review sets now become
    provenance-linked named Scenes; next live-prove several useful human
    classifications without losing orientation.
-3. Preserve the verified Run and Chat focus hierarchy; next prevent duplicate
-   or low-quality generated board tasks from becoming active work.
+3. Preserve the verified Run and Chat focus hierarchy and the deterministic
+   proposal-definition gate. Next measure whether first users can refine or
+   archive generated work without needing implementation vocabulary.
 4. Keep runtime and desktop-space health operator-readable; live-verify the
    repaired Space snapshot when AeroSpace is intentionally started.
 5. Keep the verified seven-object `launch-proof` workspace as the launch

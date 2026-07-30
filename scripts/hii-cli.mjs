@@ -261,11 +261,47 @@ function parseCsvTags(value) {
     .slice(0, 12);
 }
 
+function parseAcceptanceCriteria(value) {
+  const values = Array.isArray(value) ? value : String(value || "").split(/\r?\n/);
+  return [...new Set(values
+    .map((criterion) => redactText(criterion).trim().slice(0, 240))
+    .filter(Boolean))]
+    .slice(0, 8);
+}
+
+function proposalQualityIssues(task) {
+  if ((task.origin || "system") === "human") return [];
+  const issues = [];
+  const title = String(task.title || "").trim();
+  const vague = /^(?:review|fix|improve|update|task|todo|tbd|do this|work on it)$/i.test(title);
+  if (title.split(/\s+/).filter(Boolean).length < 2 || vague) {
+    issues.push("Name a bounded outcome, not a vague activity.");
+  }
+  if (String(task.notes || "").trim().length < 20) {
+    issues.push("Explain why this work matters and what context it uses.");
+  }
+  if (parseAcceptanceCriteria(task.acceptanceCriteria).length === 0) {
+    issues.push("Add at least one concrete “done when” criterion.");
+  }
+  return issues;
+}
+
 function parseFlagValue(args, name, fallback) {
   const index = args.indexOf(name);
   if (index === -1) return fallback;
   const value = args[index + 1];
   return value && !value.startsWith("--") ? value : fallback;
+}
+
+function parseFlagValues(args, name) {
+  const values = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === name && args[index + 1] && !args[index + 1].startsWith("--")) {
+      values.push(args[index + 1]);
+      index += 1;
+    }
+  }
+  return values;
 }
 
 function withoutFlags(args, flagsWithValues = [], booleanFlags = []) {
@@ -491,7 +527,7 @@ function appendBoardEvent(event) {
   return appendJsonl(BOARD_TASKS, event);
 }
 
-function createBoardTask({ title, lane, priority, owner, coordinate, notes, tags, source = "hii board" }) {
+function createBoardTask({ title, lane, priority, owner, coordinate, notes, acceptanceCriteria, tags, source = "hii board" }) {
   const cleanTitle = redactText(title).trim();
   if (cleanTitle.length < 2) {
     console.error("usage: hii board add <title> [--lane backlog|next|doing|blocked|done] [--priority low|normal|high|urgent]");
@@ -523,6 +559,7 @@ function createBoardTask({ title, lane, priority, owner, coordinate, notes, tags
     owner: redactText(owner || "main agent").slice(0, 80),
     coordinate: cleanCoordinate,
     notes: redactText(notes || "").slice(0, 2000),
+    acceptanceCriteria: parseAcceptanceCriteria(acceptanceCriteria),
     tags: parseCsvTags(tags),
     source,
     origin: "human",
@@ -566,10 +603,9 @@ function updateBoardTask(idOrPrefix, patch) {
       if (cleanPatch.lane === "done") cleanPatch.completedAt = now;
     }
   }
-  if (approvalRequested && task.reviewState !== "approved") {
-    cleanPatch.reviewState = "approved";
-    cleanPatch.approvedAt = now;
-    cleanPatch.approvedBy = redactText(patch.approvedBy || "local operator").trim().slice(0, 80);
+  if (patch.title !== undefined) {
+    const title = redactText(patch.title).trim().slice(0, 240);
+    if (title && title !== task.title) cleanPatch.title = title;
   }
   if (patch.priority !== undefined) {
     const priority = normalizeBoardPriority(patch.priority);
@@ -587,9 +623,25 @@ function updateBoardTask(idOrPrefix, patch) {
     const notes = redactText(patch.notes).trim().slice(0, 2000);
     if (notes !== task.notes) cleanPatch.notes = notes;
   }
+  if (patch.acceptanceCriteria !== undefined) {
+    const acceptanceCriteria = parseAcceptanceCriteria(patch.acceptanceCriteria);
+    if (JSON.stringify(acceptanceCriteria) !== JSON.stringify(task.acceptanceCriteria || [])) {
+      cleanPatch.acceptanceCriteria = acceptanceCriteria;
+    }
+  }
   if (patch.tags !== undefined) {
     const tags = parseCsvTags(patch.tags);
     if (JSON.stringify(tags) !== JSON.stringify(task.tags || [])) cleanPatch.tags = tags;
+  }
+  if (approvalRequested && task.reviewState !== "approved") {
+    const issues = proposalQualityIssues({ ...task, ...cleanPatch });
+    if (issues.length) {
+      console.error(`Define this proposal before approval: ${issues.join(" ")}`);
+      process.exit(1);
+    }
+    cleanPatch.reviewState = "approved";
+    cleanPatch.approvedAt = now;
+    cleanPatch.approvedBy = redactText(patch.approvedBy || "local operator").trim().slice(0, 80);
   }
   if (Object.keys(cleanPatch).length === 0) return task;
   cleanPatch.updatedAt = now;
@@ -1168,6 +1220,11 @@ function printBoard(tasks, { includeDone = false } = {}) {
       console.log(`      owner: ${task.owner}  origin: ${task.origin || "legacy"}  coordinate: ${task.coordinate}`);
       if (task.reviewState === "proposed") {
         console.log(`      approval: required  requested: ${task.requestedLane || "review"}`);
+        const issues = proposalQualityIssues(task);
+        console.log(`      definition: ${issues.length ? `needs ${issues.join(" ")}` : "ready"}`);
+      }
+      for (const criterion of parseAcceptanceCriteria(task.acceptanceCriteria)) {
+        console.log(`      done when: ${criterion}`);
       }
       if (task.runStatus) {
         console.log(`      run: ${task.runStatus}  id: ${task.runId || "pending"}  receipt: ${task.receiptRef ? "linked" : "pending"}`);
@@ -1187,7 +1244,7 @@ function cmdBoard(args) {
   }
   if (sub === "add") {
     const rest = args.slice(1);
-    const title = withoutFlags(rest, ["--lane", "--priority", "--owner", "--coordinate", "--notes", "--tags"]).join(" ").trim();
+    const title = withoutFlags(rest, ["--lane", "--priority", "--owner", "--coordinate", "--notes", "--check", "--tags"]).join(" ").trim();
     const task = createBoardTask({
       title,
       lane: parseFlagValue(rest, "--lane", "backlog"),
@@ -1195,6 +1252,7 @@ function cmdBoard(args) {
       owner: parseFlagValue(rest, "--owner", "main agent"),
       coordinate: parseFlagValue(rest, "--coordinate", ROOT),
       notes: parseFlagValue(rest, "--notes", ""),
+      acceptanceCriteria: parseFlagValues(rest, "--check"),
       tags: parseFlagValue(rest, "--tags", "")
     });
     console.log(`added ${task.id.slice(0, 8)}  ${task.title}`);
@@ -1257,14 +1315,18 @@ function cmdBoard(args) {
     const id = args[1];
     const rest = args.slice(2);
     if (!id) {
-      console.error("usage: hii board edit <task-id-prefix> [--priority high] [--owner name] [--coordinate path] [--notes text] [--tags a,b]");
+      console.error("usage: hii board edit <task-id-prefix> [--title outcome] [--priority high] [--owner name] [--coordinate path] [--notes text] [--check criterion] [--tags a,b]");
       process.exit(1);
     }
     const task = updateBoardTask(id, {
+      title: parseFlagValue(rest, "--title", undefined),
       priority: parseFlagValue(rest, "--priority", undefined),
       owner: parseFlagValue(rest, "--owner", undefined),
       coordinate: parseFlagValue(rest, "--coordinate", undefined),
       notes: parseFlagValue(rest, "--notes", undefined),
+      acceptanceCriteria: parseFlagValues(rest, "--check").length
+        ? parseFlagValues(rest, "--check")
+        : undefined,
       tags: parseFlagValue(rest, "--tags", undefined)
     });
     console.log(`updated ${task.id.slice(0, 8)}  ${task.title}`);
@@ -2004,9 +2066,9 @@ function cmdNow(args = []) {
 
 function cmdTask(args) {
   const rest = args.slice();
-  const title = withoutFlags(rest, ["--owner", "--coordinate", "--priority", "--notes", "--tags"]).join(" ").trim();
+  const title = withoutFlags(rest, ["--owner", "--coordinate", "--priority", "--notes", "--check", "--tags"]).join(" ").trim();
   if (!title) {
-    console.error("usage: hii task <intent> [--owner name] [--coordinate path] [--priority low|normal|high|urgent] [--notes text] [--tags a,b]");
+    console.error("usage: hii task <intent> [--owner name] [--coordinate path] [--priority low|normal|high|urgent] [--notes text] [--check criterion] [--tags a,b]");
     process.exit(1);
   }
   const task = createBoardTask({
@@ -2016,6 +2078,7 @@ function cmdTask(args) {
     owner: parseFlagValue(rest, "--owner", "operator"),
     coordinate: parseFlagValue(rest, "--coordinate", ROOT),
     notes: parseFlagValue(rest, "--notes", "Intent captured through HII CLI. Define acceptance proof before execution."),
+    acceptanceCriteria: parseFlagValues(rest, "--check"),
     tags: parseFlagValue(rest, "--tags", "")
   });
   logBridge({ type: "intent-captured", taskId: task.id, title: task.title, coordinate: task.coordinate });

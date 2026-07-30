@@ -184,6 +184,9 @@ export async function POST(request: Request) {
         owner: 'main agent',
         coordinate: decision.provenance?.path || '/Users/ummi/hii',
         notes: `${decision.summary}\n\nKnowledge decision: ${decision.id}`,
+        acceptanceCriteria: [
+          `Record a verified receipt showing “${decision.title}” completed within the linked project coordinate.`
+        ],
         tags: ['knowledge', decision.projectId, 'decision'],
         source: 'hii.knowledge.system-map',
         origin: 'system'

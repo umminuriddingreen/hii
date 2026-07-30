@@ -257,6 +257,8 @@ enum BoardCommand {
         coordinate: Option<String>,
         #[arg(long)]
         notes: Option<String>,
+        #[arg(long = "check", value_name = "CRITERION")]
+        acceptance_criteria: Vec<String>,
         #[arg(long)]
         tags: Option<String>,
     },
@@ -274,6 +276,8 @@ enum BoardCommand {
     Edit {
         id: String,
         #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
         priority: Option<String>,
         #[arg(long)]
         owner: Option<String>,
@@ -281,6 +285,8 @@ enum BoardCommand {
         coordinate: Option<String>,
         #[arg(long)]
         notes: Option<String>,
+        #[arg(long = "check", value_name = "CRITERION")]
+        acceptance_criteria: Vec<String>,
         #[arg(long)]
         tags: Option<String>,
     },
@@ -1129,6 +1135,7 @@ fn board_command(
             owner,
             coordinate,
             notes,
+            acceptance_criteria,
             tags,
         } => {
             let task = store.add(
@@ -1143,6 +1150,17 @@ fn board_command(
                     tags,
                 },
             )?;
+            let task = if acceptance_criteria.is_empty() {
+                task
+            } else {
+                store.update(
+                    &task.id,
+                    board::EditPatch {
+                        acceptance_criteria: Some(acceptance_criteria),
+                        ..Default::default()
+                    },
+                )?
+            };
             println!("added {}  {}", &task.id[..8.min(task.id.len())], task.title);
             println!("lane: {}  priority: {}", task.lane, task.priority);
             println!("store: {}", store.store_path().display());
@@ -1188,20 +1206,28 @@ fn board_command(
         }
         BoardCommand::Edit {
             id,
+            title,
             priority,
             owner,
             coordinate,
             notes,
+            acceptance_criteria,
             tags,
         } => {
             let task = store.update(
                 &id,
                 board::EditPatch {
                     lane: None,
+                    title,
                     priority,
                     owner,
                     coordinate,
                     notes,
+                    acceptance_criteria: if acceptance_criteria.is_empty() {
+                        None
+                    } else {
+                        Some(acceptance_criteria)
+                    },
                     tags,
                     review_state: None,
                     approved_by: None,

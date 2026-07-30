@@ -15,6 +15,11 @@ export type BoardTaskRunStatus =
   | 'failed'
   | 'cancelled';
 
+export type BoardTaskQuality = {
+  ready: boolean;
+  issues: string[];
+};
+
 export type BoardTask = {
   id: string;
   title: string;
@@ -23,6 +28,7 @@ export type BoardTask = {
   owner: string;
   coordinate: string;
   notes: string;
+  acceptanceCriteria?: string[];
   tags: string[];
   source: string;
   origin?: BoardTaskOrigin;
@@ -157,6 +163,47 @@ function parseTags(value: unknown): string[] {
   return [];
 }
 
+function parseAcceptanceCriteria(value: unknown): string[] {
+  const values = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(/\r?\n/)
+      : [];
+  return Array.from(new Set(
+    values
+      .map((criterion) => sanitizeText(criterion, 240))
+      .filter(Boolean)
+  )).slice(0, 8);
+}
+
+export function assessBoardTaskQuality(
+  task: Pick<BoardTask, 'title' | 'notes' | 'acceptanceCriteria' | 'origin'>
+): BoardTaskQuality {
+  if ((task.origin ?? 'system') === 'human') return { ready: true, issues: [] };
+
+  const issues: string[] = [];
+  const title = task.title.trim();
+  const vagueTitle = /^(?:review|fix|improve|update|task|todo|tbd|do this|work on it)$/i.test(title);
+  if (title.split(/\s+/).filter(Boolean).length < 2 || vagueTitle) {
+    issues.push('Name a bounded outcome, not a vague activity.');
+  }
+  if (task.notes.trim().length < 20) {
+    issues.push('Explain why this work matters and what context it uses.');
+  }
+  if (!parseAcceptanceCriteria(task.acceptanceCriteria).length) {
+    issues.push('Add at least one concrete “done when” criterion.');
+  }
+  return { ready: issues.length === 0, issues };
+}
+
+export function boardTaskView(task: BoardTask) {
+  return {
+    ...task,
+    acceptanceCriteria: parseAcceptanceCriteria(task.acceptanceCriteria),
+    proposalQuality: assessBoardTaskQuality(task)
+  };
+}
+
 async function readEvents(): Promise<BoardTaskEvent[]> {
   try {
     const raw = await readFile(taskEventsPath, 'utf8');
@@ -210,6 +257,7 @@ export async function createBoardTask(input: {
   owner?: unknown;
   coordinate?: unknown;
   notes?: unknown;
+  acceptanceCriteria?: unknown;
   tags?: unknown;
   source?: unknown;
   origin?: unknown;
@@ -255,6 +303,7 @@ export async function createBoardTask(input: {
     owner: sanitizeText(input.owner, 80) || 'main agent',
     coordinate,
     notes: sanitizeText(input.notes, 2000),
+    acceptanceCriteria: parseAcceptanceCriteria(input.acceptanceCriteria),
     tags: parseTags(input.tags),
     source,
     origin,
@@ -277,6 +326,7 @@ export async function updateBoardTask(
     owner?: unknown;
     coordinate?: unknown;
     notes?: unknown;
+    acceptanceCriteria?: unknown;
     tags?: unknown;
     title?: unknown;
     reviewState?: unknown;
@@ -311,17 +361,29 @@ export async function updateBoardTask(
         : now
       : undefined;
   }
+  if (input.priority !== undefined) patch.priority = normalizePriority(input.priority);
+  if (typeof input.owner === 'string') patch.owner = sanitizeText(input.owner, 80) || task.owner;
+  if (typeof input.coordinate === 'string') patch.coordinate = sanitizeText(input.coordinate, 240) || task.coordinate;
+  if (typeof input.notes === 'string') patch.notes = sanitizeText(input.notes, 2000);
+  if (input.acceptanceCriteria !== undefined) {
+    patch.acceptanceCriteria = parseAcceptanceCriteria(input.acceptanceCriteria);
+  }
+  if (input.tags !== undefined) patch.tags = parseTags(input.tags);
+  if (typeof input.title === 'string' && sanitizeText(input.title, 240)) patch.title = sanitizeText(input.title, 240);
+  if (approvalRequested && effectiveReviewState(task) === 'proposed') {
+    const quality = assessBoardTaskQuality({ ...task, ...patch });
+    if (!quality.ready) {
+      throw new BoardTaskError(
+        'BOARD_TASK_LOW_QUALITY',
+        `Define this proposal before approval: ${quality.issues.join(' ')}`
+      );
+    }
+  }
   if (approvalRequested) {
     patch.reviewState = 'approved';
     patch.approvedAt = now;
     patch.approvedBy = sanitizeText(input.approvedBy, 80) || 'local operator';
   }
-  if (input.priority !== undefined) patch.priority = normalizePriority(input.priority);
-  if (typeof input.owner === 'string') patch.owner = sanitizeText(input.owner, 80) || task.owner;
-  if (typeof input.coordinate === 'string') patch.coordinate = sanitizeText(input.coordinate, 240) || task.coordinate;
-  if (typeof input.notes === 'string') patch.notes = sanitizeText(input.notes, 2000);
-  if (input.tags !== undefined) patch.tags = parseTags(input.tags);
-  if (typeof input.title === 'string' && sanitizeText(input.title, 240)) patch.title = sanitizeText(input.title, 240);
   if (input.runId !== undefined || input.runStatus !== undefined || input.receiptRef !== undefined) {
     if (effectiveReviewState(task) === 'proposed' && !approvalRequested) {
       throw new BoardTaskError(

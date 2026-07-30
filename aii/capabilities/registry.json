@@ -267,7 +267,7 @@
     "name": "Task Kanban Board",
     "owner": "hii",
     "runtime": "local-cli",
-    "summary": "Track human intent and generated work in one append-only local board, govern proposals before active work, and carry approved cards through bounded HII Space runs to receipt-linked completion.",
+    "summary": "Track human intent and generated work in one append-only local board, require generated proposals to name why and done-when proof before approval, and carry approved cards through bounded HII Space runs to receipt-linked completion.",
     "inputs": [
       "task title",
       "lane",
@@ -275,6 +275,7 @@
       "owner",
       "coordinate",
       "notes",
+      "acceptance criteria",
       "tags",
       "origin",
       "review state",
@@ -285,6 +286,7 @@
       "kanban board",
       "agent context task summary",
       "approval provenance",
+      "deterministic proposal-definition readiness",
       "run and receipt lineage"
     ],
     "permissions": [

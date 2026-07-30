@@ -21,6 +21,8 @@ pub struct Task {
     pub owner: String,
     pub coordinate: String,
     pub notes: String,
+    #[serde(default, rename = "acceptanceCriteria")]
+    pub acceptance_criteria: Vec<String>,
     pub tags: Vec<String>,
     pub source: String,
     pub origin: Option<String>,
@@ -53,10 +55,12 @@ pub struct Board {
 #[derive(Default)]
 pub struct EditPatch {
     pub lane: Option<String>,
+    pub title: Option<String>,
     pub priority: Option<String>,
     pub owner: Option<String>,
     pub coordinate: Option<String>,
     pub notes: Option<String>,
+    pub acceptance_criteria: Option<Vec<String>>,
     pub tags: Option<String>,
     pub review_state: Option<String>,
     pub approved_by: Option<String>,
@@ -207,6 +211,7 @@ impl Board {
                 redact_text(options.notes.as_deref().unwrap_or("")).trim(),
                 2000,
             ),
+            acceptance_criteria: Vec::new(),
             tags: parse_csv_tags(options.tags.as_deref().unwrap_or("")),
             source: "hii board".to_string(),
             origin: Some("human".to_string()),
@@ -277,6 +282,12 @@ impl Board {
                 }
             }
         }
+        if let Some(title) = &patch.title {
+            let clean = truncate_chars(redact_text(title).trim(), 240);
+            if !clean.is_empty() && clean != task.title {
+                event["title"] = Value::String(clean);
+            }
+        }
         if let Some(priority) = &patch.priority {
             let priority = normalize(Some(priority.as_str()), PRIORITIES, "normal");
             if priority != task.priority {
@@ -311,6 +322,12 @@ impl Board {
                 event["notes"] = Value::String(notes);
             }
         }
+        if let Some(criteria) = &patch.acceptance_criteria {
+            let criteria = normalize_acceptance(criteria);
+            if criteria != task.acceptance_criteria {
+                event["acceptanceCriteria"] = serde_json::to_value(criteria).unwrap();
+            }
+        }
         if let Some(tags) = &patch.tags {
             let tags = parse_csv_tags(tags);
             if tags != task.tags {
@@ -318,6 +335,17 @@ impl Board {
             }
         }
         if approval_requested && task.review_state.as_deref() != Some("approved") {
+            let mut candidate = task.clone();
+            if let Some(map) = event.as_object() {
+                apply_patch(&mut candidate, map);
+            }
+            let issues = proposal_quality_issues(&candidate);
+            if !issues.is_empty() {
+                return Err(format!(
+                    "Define this proposal before approval: {}",
+                    issues.join(" ")
+                ));
+            }
             event["reviewState"] = Value::String("approved".to_string());
             event["approvedAt"] = Value::String(now.clone());
             event["approvedBy"] = Value::String(truncate_chars(
@@ -413,6 +441,9 @@ fn apply_patch(task: &mut Task, patch: &serde_json::Map<String, Value>) {
     if let Some(lane) = patch.get("lane").and_then(Value::as_str) {
         task.lane = lane.to_string();
     }
+    if let Some(title) = patch.get("title").and_then(Value::as_str) {
+        task.title = title.to_string();
+    }
     if let Some(priority) = patch.get("priority").and_then(Value::as_str) {
         task.priority = priority.to_string();
     }
@@ -424,6 +455,13 @@ fn apply_patch(task: &mut Task, patch: &serde_json::Map<String, Value>) {
     }
     if let Some(notes) = patch.get("notes").and_then(Value::as_str) {
         task.notes = notes.to_string();
+    }
+    if let Some(criteria) = patch.get("acceptanceCriteria").and_then(Value::as_array) {
+        task.acceptance_criteria = criteria
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect();
     }
     if let Some(tags) = patch.get("tags").and_then(Value::as_array) {
         task.tags = tags
@@ -505,6 +543,50 @@ fn normalize(value: Option<&str>, allowed: &[&str], fallback: &str) -> String {
     }
 }
 
+fn normalize_acceptance(values: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for value in values {
+        let criterion = truncate_chars(redact_text(value).trim(), 240);
+        if !criterion.is_empty() && !out.contains(&criterion) {
+            out.push(criterion);
+        }
+        if out.len() == 8 {
+            break;
+        }
+    }
+    out
+}
+
+fn proposal_quality_issues(task: &Task) -> Vec<String> {
+    if task.origin.as_deref() == Some("human") {
+        return Vec::new();
+    }
+    let mut issues = Vec::new();
+    let title = task.title.trim();
+    let vague = matches!(
+        title.to_lowercase().as_str(),
+        "review"
+            | "fix"
+            | "improve"
+            | "update"
+            | "task"
+            | "todo"
+            | "tbd"
+            | "do this"
+            | "work on it"
+    );
+    if title.split_whitespace().count() < 2 || vague {
+        issues.push("Name a bounded outcome, not a vague activity.".to_string());
+    }
+    if task.notes.trim().chars().count() < 20 {
+        issues.push("Explain why this work matters and what context it uses.".to_string());
+    }
+    if normalize_acceptance(&task.acceptance_criteria).is_empty() {
+        issues.push("Add at least one concrete “done when” criterion.".to_string());
+    }
+    issues
+}
+
 fn parse_csv_tags(value: &str) -> Vec<String> {
     value
         .split(',')
@@ -574,10 +656,22 @@ pub fn print_board(store: &Path, tasks: &[Task], include_done: bool) {
                 task.coordinate
             );
             if task.review_state.as_deref() == Some("proposed") {
+                let issues = proposal_quality_issues(task);
                 println!(
                     "      approval: required  requested: {}",
                     task.requested_lane.as_deref().unwrap_or("review")
                 );
+                println!(
+                    "      definition: {}",
+                    if issues.is_empty() {
+                        "ready".to_string()
+                    } else {
+                        format!("needs {}", issues.join(" "))
+                    }
+                );
+            }
+            for criterion in &task.acceptance_criteria {
+                println!("      done when: {criterion}");
             }
             if let Some(run_status) = &task.run_status {
                 println!(
@@ -910,7 +1004,10 @@ mod tests {
             priority: "normal".into(),
             owner: "Opus".into(),
             coordinate: "/tmp/root".into(),
-            notes: String::new(),
+            notes: "Compare two launch variants against the verified product boundary.".into(),
+            acceptance_criteria: vec![
+                "One variant is selected with a receipt-linked rationale.".into()
+            ],
             tags: Vec::new(),
             source: "api.board.tasks".into(),
             origin: Some("system".into()),
@@ -947,6 +1044,57 @@ mod tests {
         assert_eq!(approved.lane, "doing");
         assert_eq!(approved.review_state.as_deref(), Some("approved"));
         assert!(approved.approved_at.is_some());
+    }
+
+    #[test]
+    fn underdefined_proposal_requires_definition_before_approval() {
+        let runtime = TempRuntime::new();
+        let board = Board::open(&runtime.0);
+        let task = Task {
+            id: Uuid::new_v4().to_string(),
+            title: "Improve launch receipt review".into(),
+            lane: "backlog".into(),
+            priority: "normal".into(),
+            owner: "Agent".into(),
+            coordinate: "/tmp/root".into(),
+            notes: String::new(),
+            acceptance_criteria: Vec::new(),
+            tags: Vec::new(),
+            source: "api.board.tasks".into(),
+            origin: Some("agent".into()),
+            review_state: Some("proposed".into()),
+            requested_lane: Some("doing".into()),
+            approved_at: None,
+            approved_by: None,
+            run_id: None,
+            run_status: None,
+            receipt_ref: None,
+            created_at: iso_now(),
+            updated_at: iso_now(),
+            completed_at: None,
+        };
+        board
+            .append(serde_json::json!({ "type": "created", "task": task, "ts": iso_now() }))
+            .unwrap();
+
+        let error = board.approve(&task.id, None).unwrap_err();
+        assert!(error.starts_with("Define this proposal before approval:"));
+
+        board
+            .update(
+                &task.id,
+                EditPatch {
+                    notes: Some("Make the receipt legible before this enters active work.".into()),
+                    acceptance_criteria: Some(vec![
+                        "The receipt names the artifact and one passing check.".into(),
+                    ]),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let approved = board.approve(&task.id, None).unwrap();
+        assert_eq!(approved.lane, "doing");
+        assert_eq!(approved.review_state.as_deref(), Some("approved"));
     }
 
     #[test]

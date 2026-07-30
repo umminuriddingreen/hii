@@ -16,14 +16,19 @@ assert.equal((brief.match(/^## Beat \d+ — \d+–\d+s$/gm) || []).length, 6);
 assert.match(brief, /session\s+`316086a5-c3b8-4ccf-91c7-f1857b1c64a6`/);
 assert.match(brief, /exact open duplicate returns HTTP 409/i);
 assert.match(brief, /BOARD_TASK_APPROVAL_REQUIRED/);
+assert.match(brief, /BOARD_TASK_LOW_QUALITY/);
+assert.match(brief, /Definition ready/);
+assert.match(brief, /Done when/);
+assert.match(brief, /archive recorded a done-lane event without approval or a run/i);
 assert.match(brief, /append-only ledger/);
 assert.match(brief, /origin: human/);
 assert.match(brief, /What would you never let an agent move on its own\?/);
 
 const postWithoutMarker = post.replace(/\s*\[video\]\s*$/i, '');
 assert.ok(postWithoutMarker.length <= 260, `X post is ${postWithoutMarker.length} characters`);
-assert.match(post, /exact open duplicate/i);
-assert.match(post, /until I approved/i);
+assert.match(post, /title alone/i);
+assert.match(post, /No done when/i);
+assert.match(post, /then approved/i);
 assert.ok(reply.endsWith('?'));
 assert.match(reply, /ship work under your own name/i);
 
@@ -47,5 +52,5 @@ console.log('HII governed proposal launch smoke');
 console.log('status:       ok');
 console.log('storyboard:   six verified beats / 31 seconds');
 console.log(`x post:       ${postWithoutMarker.length} characters before video marker`);
-console.log('claim gate:   literal lane, duplicate, approval, and availability boundaries verified');
+console.log('claim gate:   lane, definition, duplicate, approval, archive, and availability boundaries verified');
 console.log('opus review:  read-only session provenance retained');

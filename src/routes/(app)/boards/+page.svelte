@@ -8,10 +8,22 @@
   let title = '';
   let message = '';
   let busy = false;
+  type ProposalDraft = { title: string; notes: string; coordinate: string; acceptance: string };
 
   function reviewState(task: (typeof tasks)[number]) {
     return task.reviewState ?? 'approved';
   }
+
+  function draftsFor(list: typeof tasks) {
+    return Object.fromEntries(list.map((task) => [task.id, {
+      title: task.title,
+      notes: task.notes ?? '',
+      coordinate: task.coordinate ?? '',
+      acceptance: (task.acceptanceCriteria ?? []).join('\n')
+    }])) as Record<string, ProposalDraft>;
+  }
+
+  let proposalDrafts = draftsFor(tasks);
 
   async function request(method: 'POST' | 'PATCH', body: Record<string, unknown>) {
     const response = await fetch('/api/board/tasks', {
@@ -26,6 +38,7 @@
 
   async function refresh() {
     tasks = (await (await fetch('/api/board/tasks?includeDone=1')).json()).tasks || [];
+    proposalDrafts = draftsFor(tasks);
   }
 
   async function add() {
@@ -71,6 +84,36 @@
       await refresh();
     } catch (error) {
       message = error instanceof Error ? error.message : 'Proposal was not approved.';
+    }
+  }
+
+  async function saveDefinition(task: (typeof tasks)[number]) {
+    const draft = proposalDrafts[task.id];
+    if (!draft) return;
+    message = '';
+    try {
+      await request('PATCH', {
+        id: task.id,
+        title: draft.title,
+        notes: draft.notes,
+        coordinate: draft.coordinate,
+        acceptanceCriteria: draft.acceptance.split('\n')
+      });
+      message = 'Proposal definition saved. Review “done when” before approval.';
+      await refresh();
+    } catch (error) {
+      message = error instanceof Error ? error.message : 'Proposal definition was not saved.';
+    }
+  }
+
+  async function archive(task: (typeof tasks)[number]) {
+    message = '';
+    try {
+      await request('PATCH', { id: task.id, lane: 'done' });
+      message = 'Proposal archived without activation.';
+      await refresh();
+    } catch (error) {
+      message = error instanceof Error ? error.message : 'Proposal was not archived.';
     }
   }
 </script>
@@ -144,6 +187,15 @@
                 <strong>{task.title}</strong>
                 <p>{task.owner} · {task.origin ?? 'legacy'} · {task.source}</p>
                 {#if task.coordinate}<code class="coordinate">{task.coordinate}</code>{/if}
+                {#if task.notes}<p class="task-notes">{task.notes}</p>{/if}
+                {#if task.acceptanceCriteria?.length}
+                  <div class="acceptance">
+                    <span>Done when</span>
+                    <ul>
+                      {#each task.acceptanceCriteria as criterion}<li>{criterion}</li>{/each}
+                    </ul>
+                  </div>
+                {/if}
                 {#if task.runStatus}
                   <div class="run-state">
                     <span>run {task.runStatus.replace('_', ' ')}</span>
@@ -152,9 +204,40 @@
                   </div>
                 {/if}
                 {#if reviewState(task) === 'proposed' && task.lane !== 'done'}
+                  <div class:ready={task.proposalQuality.ready} class="proposal-quality">
+                    <strong>{task.proposalQuality.ready ? 'Definition ready' : 'Needs definition'}</strong>
+                    {#each task.proposalQuality.issues as issue}<span>{issue}</span>{/each}
+                  </div>
+                  {#if proposalDrafts[task.id]}
+                    <div class="proposal-definition">
+                      <label>
+                        Outcome
+                        <input bind:value={proposalDrafts[task.id].title} aria-label={`Outcome for ${task.title}`} />
+                      </label>
+                      <label>
+                        Why / context
+                        <textarea bind:value={proposalDrafts[task.id].notes} aria-label={`Why and context for ${task.title}`} rows="3"></textarea>
+                      </label>
+                      <label>
+                        Done when · one criterion per line
+                        <textarea bind:value={proposalDrafts[task.id].acceptance} aria-label={`Done when for ${task.title}`} rows="3"></textarea>
+                      </label>
+                      <label>
+                        Coordinate
+                        <input bind:value={proposalDrafts[task.id].coordinate} aria-label={`Coordinate for ${task.title}`} />
+                      </label>
+                      <button type="button" on:click={() => saveDefinition(task)}>Save definition</button>
+                    </div>
+                  {/if}
                   <div class="proposal-actions">
                     <span>Requested {task.requestedLane ?? 'review'}</span>
-                    <button on:click={() => approve(task)}>Approve to {task.requestedLane === 'doing' ? 'doing' : 'next'}</button>
+                    <button type="button" class="archive" on:click={() => archive(task)}>Archive</button>
+                    <button type="button" disabled={!task.proposalQuality.ready} on:click={() => approve(task)}>Approve to {task.requestedLane === 'doing' ? 'doing' : 'next'}</button>
+                  </div>
+                {:else if reviewState(task) === 'proposed'}
+                  <div class="proposal-actions archived">
+                    <span>Archived without activation</span>
+                    <button type="button" on:click={() => move(task.id, 'backlog')}>Restore proposal</button>
                   </div>
                 {:else}
                   <select
@@ -357,6 +440,86 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .task-notes {
+    white-space: pre-wrap;
+  }
+  .acceptance {
+    display: grid;
+    gap: 5px;
+    border-left: 2px solid #16a34a;
+    padding-left: 9px;
+    color: #42474e;
+    font-size: 10px;
+  }
+  .acceptance span,
+  .proposal-quality,
+  .proposal-definition label {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .acceptance span {
+    color: #15803d;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .acceptance ul {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+    padding-left: 16px;
+  }
+  .proposal-quality {
+    display: grid;
+    gap: 4px;
+    border-radius: 8px;
+    background: #fff7ed;
+    padding: 8px;
+    color: #9a3412;
+    font-size: 9px;
+    line-height: 1.4;
+  }
+  .proposal-quality.ready {
+    background: #f0fdf4;
+    color: #166534;
+  }
+  .proposal-definition {
+    display: grid;
+    gap: 8px;
+    border-top: 1px solid rgba(20, 20, 20, 0.1);
+    padding-top: 9px;
+  }
+  .proposal-definition label {
+    display: grid;
+    gap: 4px;
+    color: #686d74;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .proposal-definition input,
+  .proposal-definition textarea {
+    width: 100%;
+    resize: vertical;
+    border: 1px solid rgba(20, 20, 20, 0.14);
+    border-radius: 7px;
+    background: #fafafa;
+    padding: 7px 8px;
+    color: #222;
+    font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: normal;
+    text-transform: none;
+  }
+  .proposal-definition button {
+    border: 1px solid rgba(20, 20, 20, 0.16);
+    border-radius: 999px;
+    padding: 7px 9px;
+    color: #25282c;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
   .lane select {
     width: 100%;
     margin-top: 2px;
@@ -393,6 +556,18 @@
     font-size: 9px;
     font-weight: 700;
     text-transform: uppercase;
+  }
+  .proposal-actions button.archive {
+    border: 1px solid rgba(20, 20, 20, 0.14);
+    background: white;
+    color: #63666b;
+  }
+  .proposal-actions button:disabled {
+    cursor: not-allowed;
+    opacity: 0.35;
+  }
+  .proposal-actions.archived {
+    color: #777c83;
   }
   .empty {
     margin: 12px 0;

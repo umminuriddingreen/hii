@@ -1,5 +1,11 @@
 import { NextResponse } from 'next/server';
-import { BoardTaskError, createBoardTask, listBoardTasks, updateBoardTask } from '@/lib/server/hii-board';
+import {
+  BoardTaskError,
+  boardTaskView,
+  createBoardTask,
+  listBoardTasks,
+  updateBoardTask
+} from '@/lib/server/hii-board';
 import { localTerminalAllowed } from '@/lib/server/hii-terminal';
 
 export const dynamic = 'force-dynamic';
@@ -9,7 +15,7 @@ export async function GET(request: Request) {
   if (!localTerminalAllowed(request)) return NextResponse.json({ error: 'Local access required.' }, { status: 401 });
   const includeDone = new URL(request.url).searchParams.get('includeDone') === '1';
   const tasks = await listBoardTasks({ includeDone });
-  return NextResponse.json({ tasks });
+  return NextResponse.json({ tasks: tasks.map(boardTaskView) });
 }
 
 export async function POST(request: Request) {
@@ -24,12 +30,13 @@ export async function POST(request: Request) {
       owner: body?.owner,
       coordinate: body?.coordinate,
       notes: body?.notes,
+      acceptanceCriteria: body?.acceptanceCriteria,
       tags: body?.tags,
       source: 'api.board.tasks',
-      origin: body?.origin,
-      approvedBy: body?.approvedBy
+      origin: 'human',
+      approvedBy: 'local operator'
     });
-    return NextResponse.json({ task }, { status: 201 });
+    return NextResponse.json({ task: boardTaskView(task) }, { status: 201 });
   } catch (error) {
     const conflict = error instanceof BoardTaskError && error.code === 'BOARD_TASK_DUPLICATE';
     return NextResponse.json({
@@ -47,7 +54,7 @@ export async function PATCH(request: Request) {
   if (!id) return NextResponse.json({ error: 'Task id required.' }, { status: 400 });
   try {
     const task = await updateBoardTask(id, body ?? {});
-    return NextResponse.json({ task });
+    return NextResponse.json({ task: boardTaskView(task) });
   } catch (error) {
     const conflict = error instanceof BoardTaskError;
     return NextResponse.json({
