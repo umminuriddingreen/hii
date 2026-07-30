@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { seedsFromFiles } from '../../lib/workspace/ingest';
+import { contactSheetContextItems, normalizeContactSheetSelection } from '../../lib/workspace/contact-sheet';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -81,5 +82,24 @@ describe('workspace contact-sheet import', () => {
     expect(sheets.map((sheet) => (sheet.payload.items as unknown[]).length)).toEqual([80, 80, 4]);
     expect(sheets.reduce((total, sheet) => total + Number(sheet.payload.uniqueCount), 0)).toBe(164);
     expect(store).toHaveBeenCalledTimes(164);
+  });
+
+  it('promotes only exact selected thumbnails into separately hashed run context', () => {
+    const items = Array.from({ length: 14 }, (_, index) => ({
+      url: `/asset/${index}.png`, path: `/project/${index}.png`, name: `${index}.png`,
+      mime: 'image/png', size: 10, sha256: (index + 1).toString(16).padStart(64, '0')
+    }));
+    const selectedItems = items.map((item, index) => ({ ...item, label: index === 2 ? 'facade rhythm' : '' }));
+    expect(normalizeContactSheetSelection(items, selectedItems)).toHaveLength(12);
+    const context = contactSheetContextItems({ nodeId: 'sheet', items, selectedItems, proofRefs: ['import-receipt'] });
+    expect(context).toHaveLength(12);
+    expect(context[2]).toMatchObject({
+      title: 'facade rhythm',
+      source: '/project/2.png',
+      expectedSha256: '3'.padStart(64, '0'),
+      excerpt: 'Human annotation: facade rhythm'
+    });
+    expect(context[2].proofRefs).toContain(`sha256:${'3'.padStart(64, '0')}`);
+    expect(context.some((item) => item.source === '/project/13.png')).toBe(false);
   });
 });

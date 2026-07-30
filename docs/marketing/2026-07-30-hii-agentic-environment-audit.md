@@ -418,6 +418,14 @@ silently rewritten, and near-duplicate visual matching is not claimed. A
 future stacking action, batch labels, and perceptual-deduplication review
 remain open.
 
+Contact sheets are now also direct context surfaces rather than terminal
+collages. A person can select up to twelve exact thumbnails, optionally label
+the role of each image, and hand the sheet to the normal intent composer. HII
+expands only those reviewed choices into separate run-context entries with
+their own local path, SHA-256 identity, annotation, and proof lineage. The
+approval fingerprint therefore changes with the exact selected references;
+unselected images do not silently enter the run.
+
 ### Verified exact-selection organization checkpoint
 
 Map search now acts as a human-reviewed organization boundary. A person can
@@ -637,11 +645,11 @@ cloud sync, credits, or a general “AI operating system.”
 
 1. Extend the verified contact-sheet and exact-selection organization flow
    with stacking, batch labels, and reviewed perceptual dedupe.
-2. Extend sub-asset focus into contact sheets: promote one or more sheet items
-   into reviewed image-region context without expanding the run to every image,
-   and preserve optional human annotation labels beside each selected region.
-   PDF ranges, single-image regions, design frame/layer, drawing view/layer,
-   media ranges, and 3D views are implemented and fingerprint-bound.
+2. Extend the implemented contact-sheet thumbnail selection into per-thumbnail
+   image-region focus. Exact sheet items, optional labels, local paths, hashes,
+   and proof lineage now enter approval without expanding the run to every
+   image. PDF ranges, single-image regions, design frame/layer, drawing
+   view/layer, media ranges, and 3D views are implemented and fingerprint-bound.
 3. Artifact adapters for the first audience: Markdown, image/reference board,
    code/site preview, and a native-file handoff.
 4. Run one real operator-approved registered-capability replay, then preserve

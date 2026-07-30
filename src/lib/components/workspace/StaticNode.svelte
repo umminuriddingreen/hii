@@ -5,6 +5,7 @@
     workspaceContextAnchorLabel,
     type WorkspaceContextAnchor
   } from '@/lib/workspace/context-anchor';
+  import { normalizeContactSheetItems, normalizeContactSheetSelection } from '@/lib/workspace/contact-sheet';
 
   export let node:WorkspaceNode;
   export let onPayload:(patch:Record<string,unknown>)=>void;
@@ -24,6 +25,13 @@
   let designLayers=initialAnchor?.kind==='design-selection'?initialAnchor.layers.join(', '):'';
   $: anchor=normalizeWorkspaceContextAnchor(node.payload.contextAnchor);
   $: imageRegion=anchor?.kind==='image-region'?anchor:draftRegion;
+  $: contactItems=normalizeContactSheetItems(node.payload.items);
+  $: selectedContactItems=normalizeContactSheetSelection(contactItems,node.payload.selectedItems);
+  function toggleContactItem(item:(typeof contactItems)[number]){
+    const selected=selectedContactItems.some(candidate=>candidate.sha256===item.sha256);
+    onPayload({selectedItems:selected?selectedContactItems.filter(candidate=>candidate.sha256!==item.sha256):selectedContactItems.length<12?[...selectedContactItems,item]:selectedContactItems});
+  }
+  function labelContactItem(sha256:string,label:string){onPayload({selectedItems:selectedContactItems.map(item=>item.sha256===sha256?{...item,label}:item)})}
 
   function normalizedPoint(event:PointerEvent) {
     const bounds=imageHost.getBoundingClientRect();
@@ -105,16 +113,21 @@
 {:else if node.type==='image'&&text('adapter')==='contact-sheet'}
   <section class="flex h-full min-h-0 flex-col overflow-hidden bg-white">
     <header class="flex items-center justify-between gap-3 border-b px-4 py-3">
-      <div class="min-w-0"><strong class="block truncate text-[13px]">{text('title')||'Reference contact sheet'}</strong><small class="font-mono text-[8px] uppercase tracking-[.08em] text-neutral-400">{Number(node.payload.uniqueCount)||0} unique references</small></div>
+      <div class="min-w-0"><strong class="block truncate text-[13px]">{text('title')||'Reference contact sheet'}</strong><small class="font-mono text-[8px] uppercase tracking-[.08em] text-neutral-400">{Number(node.payload.uniqueCount)||0} unique references · {selectedContactItems.length} selected for context</small></div>
       {#if Number(node.payload.duplicateCount)>0}<span class="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 font-mono text-[8px] uppercase text-amber-700">{Number(node.payload.duplicateCount)} exact duplicate{Number(node.payload.duplicateCount)===1?'':'s'} omitted</span>{/if}
     </header>
     <div class="scroll min-h-0 flex-1 overflow-auto p-3">
       <div class="grid gap-2" style={`grid-template-columns:repeat(${Number(node.payload.columns)||4},minmax(0,1fr))`}>
-        {#each (node.payload.items as Array<Record<string,unknown>>||[]) as item}
-          <a href={String(item.url||'')} target="_blank" rel="noreferrer" class="group/item overflow-hidden rounded-xl border border-neutral-900/10 bg-neutral-50 hover:border-blue-400" title={String(item.path||item.name||'Reference image')}>
-            <img src={String(item.url||'')} alt={String(item.name||'Reference image')} loading="lazy" class="aspect-video w-full bg-neutral-100 object-contain"/>
-            <span class="block truncate px-2 py-1.5 font-mono text-[8px] text-neutral-500 group-hover/item:text-blue-700">{String(item.name||'image')}</span>
-          </a>
+        {#each contactItems as item}
+          <div class={`group/item overflow-hidden rounded-xl border bg-neutral-50 ${selectedContactItems.some(candidate=>candidate.sha256===item.sha256)?'border-blue-500 ring-2 ring-blue-200':'border-neutral-900/10 hover:border-blue-400'}`} title={item.path||item.name}>
+            <button aria-label={`Use ${item.name} as run context`} aria-pressed={selectedContactItems.some(candidate=>candidate.sha256===item.sha256)} class="block w-full text-left" on:click={()=>toggleContactItem(item)}>
+              <img src={item.url} alt={item.name} loading="lazy" class="aspect-video w-full bg-neutral-100 object-contain"/>
+              <span class="block truncate px-2 py-1.5 font-mono text-[8px] text-neutral-500 group-hover/item:text-blue-700">{item.name}</span>
+            </button>
+            {#if selectedContactItems.some(candidate=>candidate.sha256===item.sha256)}
+              <input aria-label={`Context label for ${item.name}`} value={selectedContactItems.find(candidate=>candidate.sha256===item.sha256)?.label||''} on:change={(event)=>labelContactItem(item.sha256,event.currentTarget.value)} on:pointerdown|stopPropagation class="m-1.5 mt-0 w-[calc(100%-12px)] rounded border border-blue-200 bg-white px-2 py-1 font-mono text-[8px] outline-none" placeholder="optional focus label"/>
+            {/if}
+          </div>
         {/each}
       </div>
     </div>

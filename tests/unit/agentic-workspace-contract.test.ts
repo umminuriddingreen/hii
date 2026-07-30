@@ -315,6 +315,13 @@ describe('agentic workspace interaction contract', () => {
     expect(staticNode).toContain('aspect-video w-full bg-neutral-100 object-contain');
   });
 
+  it('turns exact contact-sheet thumbnail choices into governed run context', () => {
+    expect(workspace).toContain('contactSheetContextItems');
+    expect(workspace).toContain('contextNodes.flatMap(contextItemsForNode)');
+    expect(readFileSync(resolve(root, 'src/lib/components/workspace/StaticNode.svelte'), 'utf8')).toContain('selected for context');
+    expect(readFileSync(resolve(root, 'src/lib/components/workspace/StaticNode.svelte'), 'utf8')).toContain('optional focus label');
+  });
+
   it('bridges an explicit browser request into its paired terminal', () => {
     expect(explorer).toContain('curl -I -L --max-time 20 --');
     expect(explorer).toContain("new CustomEvent('hii:terminal-command'");

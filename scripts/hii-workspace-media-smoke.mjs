@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 
 const { seedsFromFiles } = await import('../lib/workspace/ingest.ts');
+const { contactSheetContextItems } = await import('../lib/workspace/contact-sheet.ts');
 
 const stored = [];
 globalThis.fetch = async (_input, init) => {
@@ -12,7 +14,7 @@ globalThis.fetch = async (_input, init) => {
     size: file.size,
     path: `/tmp/hii-media-proof/${file.name}`,
     url: `/api/workspace/assets/${file.name}`,
-    sha256: `proof-${file.name}`
+    sha256: createHash('sha256').update(file.name).digest('hex')
   }), { status: 200, headers: { 'content-type': 'application/json' } });
 };
 
@@ -38,10 +40,25 @@ assert.equal(sheet.object.kind, 'asset');
 assert.equal(sheet.object.status, 'ready');
 assert.equal(sheet.object.proofRefs.length, 4);
 assert.equal(stored.length, 4);
+const selectedItems = [
+  { ...sheet.payload.items[1], label: 'material palette' },
+  sheet.payload.items[3]
+];
+const contextItems = contactSheetContextItems({
+  nodeId: 'proof-sheet',
+  items: sheet.payload.items,
+  selectedItems,
+  proofRefs: sheet.object.proofRefs
+});
+assert.equal(contextItems.length, 2);
+assert.equal(contextItems[0].title, 'material palette');
+assert.equal(contextItems[0].source, sheet.payload.items[1].path);
+assert.equal(contextItems[0].expectedSha256, sheet.payload.items[1].sha256);
 
 console.log('HII workspace media smoke');
 console.log('status:       ok');
 console.log('organization: image batch -> bounded contact sheet verified');
 console.log('dedupe:       exact SHA-256 duplicate omitted before storage');
 console.log('proof:        unique source paths + hashes preserved');
+console.log('focus:        exact labeled thumbnails -> separate hashed run context');
 console.log('mixed batch:  non-image artifact remains directly editable');
