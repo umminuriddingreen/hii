@@ -703,8 +703,13 @@ pub(crate) fn parse_action(raw: &str) -> Result<Action, String> {
     } else {
         trimmed
     };
-    let mut value: serde_json::Value =
-        serde_json::from_str(candidate).map_err(|error| error.to_string())?;
+    let mut value: serde_json::Value = match serde_json::from_str(candidate) {
+        Ok(value) => value,
+        Err(original_error) => {
+            let repaired = escape_literal_control_chars_in_json_strings(candidate);
+            serde_json::from_str(&repaired).map_err(|_| original_error.to_string())?
+        }
+    };
     let action_type = value
         .get("type")
         .and_then(serde_json::Value::as_str)
@@ -734,6 +739,50 @@ pub(crate) fn parse_action(raw: &str) -> Result<Action, String> {
         value["tool"] = serde_json::Value::String(action_type);
     }
     serde_json::from_value(value).map_err(|error| error.to_string())
+}
+
+/// Local models occasionally emit otherwise valid JSON tool actions with
+/// literal newlines or tabs inside a large `content` string. JSON requires
+/// those control characters to be escaped, so repair only that narrow defect
+/// before rejecting the action. Structural JSON errors remain errors.
+fn escape_literal_control_chars_in_json_strings(candidate: &str) -> String {
+    let mut repaired = String::with_capacity(candidate.len());
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for character in candidate.chars() {
+        if in_string {
+            if escaped {
+                repaired.push(character);
+                escaped = false;
+                continue;
+            }
+            match character {
+                '\\' => {
+                    repaired.push(character);
+                    escaped = true;
+                }
+                '"' => {
+                    repaired.push(character);
+                    in_string = false;
+                }
+                '\n' => repaired.push_str("\\n"),
+                '\r' => repaired.push_str("\\r"),
+                '\t' => repaired.push_str("\\t"),
+                control if control <= '\u{001f}' => {
+                    use std::fmt::Write as _;
+                    let _ = write!(repaired, "\\u{:04x}", control as u32);
+                }
+                _ => repaired.push(character),
+            }
+        } else {
+            repaired.push(character);
+            if character == '"' {
+                in_string = true;
+            }
+        }
+    }
+    repaired
 }
 
 /// One decoded tool invocation. Grouping the arguments keeps the dispatcher's
@@ -917,6 +966,22 @@ mod tests {
         let action =
             parse_action(r#"{"type":"write","path":"hello.txt","content":"hello\n"}"#).unwrap();
         assert!(matches!(action, Action::Tool { tool, .. } if tool == "write"));
+    }
+
+    #[test]
+    fn repairs_literal_newlines_in_local_model_write_content() {
+        let action = parse_action(
+            "{\"type\":\"write\",\"path\":\"public/index.html\",\"content\":\"<h1>\nhello</h1>\"}",
+        )
+        .unwrap();
+        assert!(matches!(
+            action,
+            Action::Tool {
+                tool,
+                content: Some(content),
+                ..
+            } if tool == "write" && content == "<h1>\nhello</h1>"
+        ));
     }
 
     #[test]
