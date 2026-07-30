@@ -10,8 +10,8 @@ import { createContextProject } from './hii-context-dock.ts';
 
 const execFileAsync = promisify(execFile);
 const capabilityId = 'hii.agent.workspace_run';
-const supportedModels = new Set(['qwen3.6:27b-mlx', 'qwen3.6:35b-mlx']);
 export const defaultWorkspaceRunModel = 'qwen3.6:35b-mlx';
+const preferredModels = [defaultWorkspaceRunModel, 'qwen3.6:27b-mlx'];
 
 export type WorkspaceRunContextItem = {
   id: string;
@@ -60,6 +60,67 @@ function normalizeContext(value: unknown): WorkspaceRunContextItem[] {
     })
     .filter((entry): entry is WorkspaceRunContextItem => Boolean(entry))
     .slice(0, 24);
+}
+
+export type WorkspaceRunModels = {
+  models: string[];
+  defaultModel: string | null;
+  available: boolean;
+  source: 'environment' | 'ollama' | 'unavailable';
+  message: string;
+};
+
+function normalizeModelNames(value: unknown) {
+  const names = Array.isArray(value)
+    ? value
+    : String(value ?? '').split(',');
+  return Array.from(new Set(names
+    .map((entry) => clean(typeof entry === 'object' && entry ? (entry as { name?: unknown }).name : entry, 160))
+    .filter(Boolean)));
+}
+
+export async function discoverWorkspaceRunModels(): Promise<WorkspaceRunModels> {
+  const configured = normalizeModelNames(process.env.HII_WORKSPACE_RUN_MODELS);
+  if (configured.length) {
+    const defaultModel = preferredModels.find((model) => configured.includes(model)) || configured[0];
+    return {
+      models: configured,
+      defaultModel,
+      available: true,
+      source: 'environment',
+      message: `${configured.length} configured local model${configured.length === 1 ? '' : 's'} available.`
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2500);
+  try {
+    const base = String(process.env.HII_OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+    const response = await fetch(`${base}/api/tags`, { signal: controller.signal });
+    if (!response.ok) throw new Error(`Ollama returned ${response.status}.`);
+    const payload = await response.json() as { models?: unknown[] };
+    const models = normalizeModelNames(payload.models);
+    const defaultModel = preferredModels.find((model) => models.includes(model)) || models[0] || null;
+    return {
+      models,
+      defaultModel,
+      available: models.length > 0,
+      source: 'ollama',
+      message: models.length
+        ? `${models.length} installed local model${models.length === 1 ? '' : 's'} available.`
+        : 'Ollama is reachable, but no local models are installed.'
+    };
+  } catch {
+    return {
+      models: [],
+      defaultModel: null,
+      available: false,
+      source: 'unavailable',
+      message: 'No local model runtime is available. Start Ollama or install a model before approval.'
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function initializeIntentCursor(intentsPath: string, cursorPath: string) {
@@ -118,7 +179,13 @@ export async function queueApprovedWorkspaceRun(input: {
   if (project.excluded || !project.approvedRoot) throw new Error('The selected workspace root is not approved.');
 
   const context = normalizeContext(input.context);
-  const model = supportedModels.has(String(input.model)) ? String(input.model) : defaultWorkspaceRunModel;
+  const discovered = await discoverWorkspaceRunModels();
+  if (!discovered.available || !discovered.defaultModel) throw new Error(discovered.message);
+  const requestedModel = clean(input.model, 160);
+  const model = requestedModel || discovered.defaultModel;
+  if (!discovered.models.includes(model)) {
+    throw new Error(`Local model "${model}" is not installed. Refresh the model list and choose an available model.`);
+  }
   const maxSteps = Math.max(1, Math.min(24, Math.round(Number(input.maxSteps) || 8)));
   const requestedBy = clean(input.requestedBy, 120) || 'hii.workspace';
   const now = new Date().toISOString();
@@ -165,6 +232,7 @@ export async function queueApprovedWorkspaceRun(input: {
     metadata: {
       projectId,
       workspaceRoot: project.rootPath,
+      goal: intent.goal,
       model,
       maxSteps,
       context,
@@ -180,6 +248,60 @@ export async function queueApprovedWorkspaceRun(input: {
   await appendCapabilityJob(job);
   await appendFile(intentsPath, `${JSON.stringify(intent)}\n`, 'utf8');
   return { job, intent, queued: true };
+}
+
+export async function requestWorkspaceRunCancellation(input: { id?: unknown; requestedBy?: unknown }) {
+  const id = cleanId(input.id);
+  if (!id) throw new Error('A workspace run id is required.');
+  const current = await getWorkspaceRun(id);
+  if (!current) throw new Error('Workspace run not found.');
+  if (['completed', 'failed', 'cancelled'].includes(current.job.status)) {
+    return { job: current.job, queued: false, terminal: true };
+  }
+  if (!['queued', 'running'].includes(current.job.status)) {
+    throw new Error(`Workspace run ${id} cannot be cancelled from ${current.job.status}.`);
+  }
+  if (current.job.metadata?.cancelRequestedAt) {
+    return { job: current.job, queued: false, terminal: false };
+  }
+
+  const now = new Date().toISOString();
+  const requestedBy = clean(input.requestedBy, 120) || 'hii.workspace';
+  const job: CapabilityJob = {
+    ...current.job,
+    updatedAt: now,
+    logs: [...current.job.logs, `[${now}] operator requested cancellation`].slice(-40),
+    ledger: [
+      ...current.job.ledger,
+      {
+        id: randomUUID(),
+        jobId: id,
+        capabilityId,
+        actor: 'operator',
+        type: 'reconciliation',
+        summary: 'Requested that AII stop the bounded local workspace run.',
+        createdAt: now
+      }
+    ],
+    metadata: {
+      ...current.job.metadata,
+      cancelRequestedAt: now,
+      cancelRequestedBy: requestedBy
+    }
+  };
+  const daemonDir = path.join(runtimeRoot(), 'daemon');
+  const intentsPath = path.join(daemonDir, 'intents.jsonl');
+  const cursorPath = path.join(daemonDir, 'intents.cursor.json');
+  await mkdir(daemonDir, { recursive: true });
+  await initializeIntentCursor(intentsPath, cursorPath);
+  await appendCapabilityJob(job);
+  await appendFile(intentsPath, `${JSON.stringify({
+    kind: 'workspace.cancel',
+    id,
+    requestedAt: now,
+    requestedBy
+  })}\n`, 'utf8');
+  return { job, queued: true, terminal: false };
 }
 
 async function receiptForJob(job: CapabilityJob) {

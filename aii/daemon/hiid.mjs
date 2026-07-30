@@ -35,6 +35,7 @@ const OWNED_PATTERNS = [
 ];
 
 const activeRuns = new Map();
+const activeWorkspaceRuns = new Map();
 let traderTick = null;
 
 // AII owns the capability registry (aii/capabilities/registry.json) and
@@ -157,7 +158,7 @@ const INTENTS = path.join(DAEMON_DIR, "intents.jsonl");
 const INTENTS_CURSOR = path.join(DAEMON_DIR, "intents.cursor.json");
 const CAPABILITY_JOBS = path.join(RUNTIME, "capability-jobs.jsonl");
 const CLAUDE_BIN = "/opt/homebrew/bin/claude";
-const HII_BIN = path.join(os.homedir(), "bin", "hii");
+const HII_BIN = process.env.HII_WORKSPACE_RUNNER_BIN || path.join(os.homedir(), "bin", "hii");
 
 function cleanSessionName(value) {
   return String(value || "")
@@ -262,7 +263,7 @@ function findWorkspaceReceipt(intent, startedAt) {
   return null;
 }
 
-function reportWorkspaceJob(intent, { status, output, startedAt, receiptMatch = null }) {
+function reportWorkspaceJob(intent, { status, output, startedAt, receiptMatch = null, pid = null }) {
   const ts = now();
   const previous = latestCapabilityJob(intent.id);
   const receipt = receiptMatch?.receipt || null;
@@ -302,11 +303,15 @@ function reportWorkspaceJob(intent, { status, output, startedAt, receiptMatch = 
     updatedAt: ts,
     metadata: {
       ...(previous?.metadata || {}), knowledgeRunId: intent.id, projectId: intent.projectId,
-      workspaceRoot: intent.workspaceRoot, model: intent.model, maxSteps: intent.maxSteps,
+      workspaceRoot: intent.workspaceRoot, goal: intent.goal, context: intent.context || [],
+      requestedBy: intent.requestedBy, model: intent.model, maxSteps: intent.maxSteps,
+      pid: status === "running" ? pid : null,
+      startedAt: previous?.metadata?.startedAt || startedAt,
       receiptId: receipt?.id || null
     }
   };
   appendJsonl(CAPABILITY_JOBS, job);
+  return job;
 }
 
 export function approvedSpawnCwd(requestedCwd) {
@@ -383,9 +388,13 @@ function executeSpawnIntent(intent) {
 function executeWorkspaceIntent(intent) {
   const startedAt = now();
   const maxSteps = Math.max(1, Math.min(24, Number(intent.maxSteps) || 8));
-  const model = ["qwen3.6:27b-mlx", "qwen3.6:35b-mlx"].includes(intent.model)
-    ? intent.model
-    : "qwen3.6:35b-mlx";
+  const model = String(intent.model || "").trim();
+  if (!model) {
+    const output = "AII rejected a workspace run without an approved installed model.";
+    reportWorkspaceJob(intent, { status: "failed", output, startedAt });
+    event("workspace.run.failed", { actor: "aii.hiid", target: intent.id, status: "failed", text: output });
+    return;
+  }
   let workspaceRoot;
   try {
     workspaceRoot = approvedWorkspaceCwd(intent.workspaceRoot);
@@ -395,16 +404,36 @@ function executeWorkspaceIntent(intent) {
     event("workspace.run.failed", { actor: "aii.hiid", target: intent.id, status: "failed", text: output });
     return;
   }
-  reportWorkspaceJob(intent, { status: "running", output: "AII started the approved bounded workspace run.", startedAt });
+  const latest = latestCapabilityJob(intent.id);
+  if (latest?.metadata?.cancelRequestedAt) {
+    reportWorkspaceJob({ ...intent, workspaceRoot }, {
+      status: "cancelled",
+      output: "AII honoured cancellation before execution started.",
+      startedAt
+    });
+    event("workspace.run.cancelled", {
+      actor: "aii.hiid", target: intent.id, status: "cancelled",
+      text: "Cancelled before bounded workspace execution started."
+    });
+    return;
+  }
   const args = ["--cwd", workspaceRoot, "--model", model, "--max-steps", String(maxSteps), "run", String(intent.goal).slice(0, 4000)];
-  execFile(HII_BIN, args, { cwd: workspaceRoot, timeout: 30 * 60 * 1000, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
+  const normalizedIntent = { ...intent, workspaceRoot, model, maxSteps };
+  const child = execFile(HII_BIN, args, {
+    cwd: workspaceRoot,
+    timeout: 30 * 60 * 1000,
+    maxBuffer: 2 * 1024 * 1024
+  }, (error, stdout, stderr) => {
+    activeWorkspaceRuns.delete(intent.id);
+    const terminal = latestCapabilityJob(intent.id);
+    if (terminal?.status === "cancelled") return;
     const output = redact(`${stdout ?? ""}${stderr ?? ""}`.trim());
-    const receiptMatch = findWorkspaceReceipt({ ...intent, workspaceRoot }, startedAt);
+    const receiptMatch = findWorkspaceReceipt(normalizedIntent, startedAt);
     const receiptStatus = receiptMatch?.receipt?.status;
     const hasVerifiedProof = Array.isArray(receiptMatch?.receipt?.verification)
       && receiptMatch.receipt.verification.some((check) => check?.ok === true);
     const status = error || receiptStatus !== "completed" || !hasVerifiedProof ? "failed" : "completed";
-    reportWorkspaceJob({ ...intent, workspaceRoot }, {
+    reportWorkspaceJob(normalizedIntent, {
       status,
       output: output || receiptMatch?.receipt?.summary || (error ? String(error.message) : "Bounded workspace run finished."),
       startedAt,
@@ -415,6 +444,115 @@ function executeWorkspaceIntent(intent) {
       text: receiptMatch?.receipt?.summary || output || `Workspace run ${status}`
     });
   });
+  activeWorkspaceRuns.set(intent.id, { child, intent: normalizedIntent, startedAt });
+  reportWorkspaceJob(normalizedIntent, {
+    status: "running",
+    output: "AII started the approved bounded workspace run.",
+    startedAt,
+    pid: child.pid
+  });
+  event("workspace.run.started", {
+    actor: "aii.hiid", target: intent.id, status: "running", pid: child.pid,
+    text: `Started approved bounded workspace run ${intent.id}.`
+  });
+}
+
+function workspaceIntentFromJob(job) {
+  const metadata = job?.metadata || {};
+  return {
+    kind: "workspace.run",
+    id: job.id,
+    capabilityId: "hii.agent.workspace_run",
+    goal: String(metadata.goal || job.inputSummary || ""),
+    workspaceRoot: String(metadata.workspaceRoot || ""),
+    model: String(metadata.model || ""),
+    maxSteps: Number(metadata.maxSteps) || 8,
+    requestedAt: job.createdAt,
+    requestedBy: String(metadata.requestedBy || "hii.workspace"),
+    projectId: String(metadata.projectId || "hii-spatial-workspace"),
+    context: Array.isArray(metadata.context) ? metadata.context : []
+  };
+}
+
+function ownedWorkspacePid(pid, intent) {
+  if (!pidAlive(pid)) return false;
+  const result = spawnSync("ps", ["-p", String(pid), "-o", "command="], {
+    encoding: "utf8",
+    timeout: 2000,
+    maxBuffer: 64 * 1024
+  });
+  if (result.status !== 0) return false;
+  const command = String(result.stdout || "");
+  const runnerNames = [HII_BIN, path.basename(HII_BIN), "hii-cli.mjs"];
+  return runnerNames.some((name) => name && command.includes(name))
+    && command.includes("--cwd")
+    && command.includes(String(intent.workspaceRoot));
+}
+
+function cancelWorkspaceIntent(intent) {
+  const current = latestCapabilityJob(intent.id);
+  if (!current || ["completed", "failed", "cancelled"].includes(current.status)) return;
+  const execution = activeWorkspaceRuns.get(intent.id);
+  const runIntent = execution?.intent || workspaceIntentFromJob(current);
+  const startedAt = String(current.metadata?.startedAt || current.createdAt || now());
+  let stopped = false;
+  if (execution?.child) {
+    stopped = execution.child.kill("SIGTERM");
+  } else {
+    const pid = Number(current.metadata?.pid);
+    if (ownedWorkspacePid(pid, runIntent)) {
+      process.kill(pid, "SIGTERM");
+      stopped = true;
+    }
+  }
+  reportWorkspaceJob(runIntent, {
+    status: "cancelled",
+    output: stopped
+      ? "AII stopped the bounded workspace run at the operator's request."
+      : "AII cancelled the queued or no-longer-running workspace run.",
+    startedAt
+  });
+  event("workspace.run.cancelled", {
+    actor: "aii.hiid", target: intent.id, status: "cancelled",
+    text: stopped
+      ? "Stopped bounded local execution and recorded cancellation."
+      : "Recorded cancellation; no owned local process remained."
+  });
+}
+
+function reconcileWorkspaceRuns() {
+  const latest = new Map();
+  for (const job of safeReadJsonl(CAPABILITY_JOBS)) {
+    if (job?.capabilityId === "hii.agent.workspace_run") latest.set(job.id, job);
+  }
+  for (const job of latest.values()) {
+    if (job.status !== "running" || activeWorkspaceRuns.has(job.id)) continue;
+    const intent = workspaceIntentFromJob(job);
+    const pid = Number(job.metadata?.pid);
+    if (ownedWorkspacePid(pid, intent)) continue;
+    const startedAt = String(job.metadata?.startedAt || job.createdAt || now());
+    const receiptMatch = findWorkspaceReceipt(intent, startedAt);
+    const verified = receiptMatch?.receipt?.status === "completed"
+      && Array.isArray(receiptMatch.receipt.verification)
+      && receiptMatch.receipt.verification.some((check) => check?.ok === true);
+    const status = job.metadata?.cancelRequestedAt ? "cancelled" : verified ? "completed" : "failed";
+    reportWorkspaceJob(intent, {
+      status,
+      output: verified
+        ? "AII recovered a verified receipt after an interrupted daemon lifecycle."
+        : status === "cancelled"
+          ? "AII reconciled the interrupted run as cancelled."
+          : "AII found no owned process or verified receipt after daemon interruption.",
+      startedAt,
+      receiptMatch
+    });
+    event(`workspace.run.${status}`, {
+      actor: "aii.hiid", target: job.id, status,
+      text: status === "completed"
+        ? "Recovered verified workspace receipt after daemon interruption."
+        : `Reconciled interrupted workspace run as ${status}.`
+    });
+  }
 }
 
 function processSpawnIntents() {
@@ -440,6 +578,7 @@ function processSpawnIntents() {
     }
     if (intent?.kind === "agent.spawn" && intent.id) executeSpawnIntent(intent);
     if (intent?.kind === "workspace.run" && intent.id) executeWorkspaceIntent(intent);
+    if (intent?.kind === "workspace.cancel" && intent.id) cancelWorkspaceIntent(intent);
   }
   writeJson(INTENTS_CURSOR, { processed: lines.length });
 }
@@ -990,12 +1129,15 @@ function runLoop() {
       }
     });
   }
-  setTimeout(tickTrader, 1500);
-  setInterval(tickTrader, 60_000);
+  if (process.env.HII_DISABLE_BACKGROUND_TICKS !== "1") {
+    setTimeout(tickTrader, 1500);
+    setInterval(tickTrader, 60_000);
+  }
   setInterval(() => {
     try {
       publishCapabilities();
       processSpawnIntents();
+      reconcileWorkspaceRuns();
       startQueuedRuns();
       writeStatus("running");
     } catch (error) {
@@ -1104,6 +1246,18 @@ function tailFile(file, lines = 80) {
 
 process.on("SIGTERM", () => {
   try {
+    for (const [id, execution] of activeWorkspaceRuns) {
+      execution.child.kill("SIGTERM");
+      reportWorkspaceJob(execution.intent, {
+        status: "cancelled",
+        output: "AII stopped the bounded workspace run during daemon shutdown.",
+        startedAt: execution.startedAt
+      });
+      event("workspace.run.cancelled", {
+        actor: "aii.hiid", target: id, status: "cancelled",
+        text: "Cancelled bounded workspace execution during daemon shutdown."
+      });
+    }
     writeStatus("stopped");
     event("daemon.exiting", { actor: "hii.daemon", target: "hiid", status: "stopped", text: "hiid exiting" });
   } finally {

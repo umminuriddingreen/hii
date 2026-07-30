@@ -25,6 +25,12 @@
     artifacts?: string[];
   };
   type RunResponse = { job: Job; path?: string | null; receipt?: Receipt | null };
+  type ModelsResponse = {
+    models: string[];
+    defaultModel: string | null;
+    available: boolean;
+    message: string;
+  };
 
   const terminalStatuses = new Set(['completed', 'failed', 'cancelled']);
   let active = true;
@@ -39,12 +45,17 @@
   let capabilityId = String(node.payload.skillDraftId || '');
   let capabilityError = '';
   let completedEmitted = Boolean(node.payload.resultNodesCreated);
+  let modelOptions: string[] = [];
+  let selectedModel = String(node.payload.model || '');
+  let modelsLoading = false;
+  let modelMessage = '';
+  let cancellationBusy = false;
 
   $: context = (Array.isArray(node.payload.context) ? node.payload.context : []) as ContextItem[];
   $: boundary = {
     capabilityId: 'hii.agent.workspace_run',
     workspaceRoot: String(node.payload.workspaceRoot || '/Users/ummi/hii'),
-    model: String(node.payload.model || 'qwen3.6:35b-mlx'),
+    model: selectedModel,
     maxSteps: Number(node.payload.maxSteps || 8),
     network: 'No publish, push, message, spend, or secret export'
   };
@@ -160,7 +171,7 @@
   }
 
   async function approveAndStart() {
-    if (busy || !String(node.payload.prompt || '').trim()) return;
+    if (busy || !selectedModel || !String(node.payload.prompt || '').trim()) return;
     busy = true;
     error = '';
     status = 'queued';
@@ -191,6 +202,7 @@
       runId = String(queued.job?.id || runId);
       patchRun('queued', {
         runId,
+        model: selectedModel,
         approvedAt: queued.job?.metadata?.approvedAt || new Date().toISOString(),
         boundary: queued.job?.metadata?.boundary || boundary
       });
@@ -201,6 +213,45 @@
       patchRun('failed', { error });
       busy = false;
     }
+  }
+
+  async function loadModels() {
+    if (modelsLoading) return;
+    modelsLoading = true;
+    try {
+      const result = await apiJson('/api/workspace/runs?mode=models') as ModelsResponse;
+      modelOptions = result.models;
+      modelMessage = result.message;
+      if (!modelOptions.includes(selectedModel)) selectedModel = result.defaultModel || '';
+    } catch (cause) {
+      modelOptions = [];
+      selectedModel = '';
+      modelMessage = cause instanceof Error ? cause.message : 'Could not discover installed local models.';
+    } finally {
+      modelsLoading = false;
+    }
+  }
+
+  async function requestCancellation() {
+    if (cancellationBusy || !['queued', 'running'].includes(status)) return;
+    cancellationBusy = true;
+    error = '';
+    try {
+      await apiJson('/api/workspace/runs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel', id: runId })
+      });
+      patchRun(status, { cancelRequestedAt: new Date().toISOString() });
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : 'Could not ask AII to stop the run.';
+      cancellationBusy = false;
+    }
+  }
+
+  function prepareRetry() {
+    const prompt = String(node.payload.prompt || '').trim();
+    if (prompt) onFollowUp(prompt);
   }
 
   async function createCapabilityDraft() {
@@ -248,6 +299,7 @@
       busy = true;
       void poll(runId);
     }
+    if (['waiting_approval', 'proposed'].includes(status)) void loadModels();
     return () => {
       active = false;
     };
@@ -295,7 +347,17 @@
           <div class="col-span-2 rounded-xl bg-neutral-100 p-3"><dt class="font-mono uppercase text-neutral-400">External boundary</dt><dd class="mt-1 text-neutral-700">{boundary.network}</dd></div>
         </dl>
 
-        <button class="mt-5 w-full rounded-full bg-neutral-950 px-4 py-3 font-mono text-[9px] uppercase tracking-[.1em] text-white disabled:opacity-40" disabled={busy} on:click={approveAndStart}>
+        <label class="mt-3 block rounded-xl bg-neutral-100 p-3 font-mono text-[8px] uppercase tracking-[.1em] text-neutral-400">
+          Installed local model
+          <select class="mt-1.5 w-full bg-transparent text-[10px] normal-case tracking-normal text-neutral-800 outline-none" bind:value={selectedModel} disabled={modelsLoading || modelOptions.length === 0}>
+            {#if modelsLoading}<option value="">Discovering installed models…</option>{/if}
+            {#each modelOptions as model}<option value={model}>{model}</option>{/each}
+            {#if !modelsLoading && modelOptions.length === 0}<option value="">No local model available</option>{/if}
+          </select>
+          <span class="mt-1.5 block normal-case tracking-normal text-neutral-500">{modelMessage}</span>
+        </label>
+
+        <button class="mt-5 w-full rounded-full bg-neutral-950 px-4 py-3 font-mono text-[9px] uppercase tracking-[.1em] text-white disabled:opacity-40" disabled={busy || modelsLoading || !selectedModel} on:click={approveAndStart}>
           {busy ? 'Queueing with AII…' : 'Approve bounded run'}
         </button>
       </section>
@@ -327,6 +389,12 @@
             </button>
           {/if}
           {#if capabilityError}<p class="mt-2 text-[10px] leading-5 text-red-700">{capabilityError}</p>{/if}
+        {:else if status === 'cancelled'}
+          <div class="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] leading-5 text-amber-900">{error || 'AII stopped this bounded run. No further work will execute under its approval.'}</div>
+          <button class="mt-4 w-full rounded-full border border-neutral-900/15 bg-white px-4 py-2.5 font-mono text-[9px] uppercase tracking-[.1em] text-neutral-800" on:click={prepareRetry}>Prepare fresh retry for approval</button>
+        {:else if status === 'failed'}
+          <div class="mt-6 rounded-xl border border-red-200 bg-red-50 p-3 text-[11px] leading-5 text-red-800">{error || 'AII recorded this bounded run as failed. Its authority has ended.'}</div>
+          <button class="mt-4 w-full rounded-full border border-neutral-900/15 bg-white px-4 py-2.5 font-mono text-[9px] uppercase tracking-[.1em] text-neutral-800" on:click={prepareRetry}>Prepare fresh retry for approval</button>
         {:else if error}
           <div class="mt-6 rounded-xl border border-red-200 bg-red-50 p-3 text-[11px] leading-5 text-red-800">{error}</div>
         {:else}
@@ -334,6 +402,9 @@
             <span class="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-[var(--hii-electric-blue)]"></span>
             <p class="mt-3 font-mono text-[9px] uppercase tracking-[0.12em] text-neutral-400">{status === 'queued' ? 'AII accepted the approved intent' : 'bounded local work in progress'}</p>
             <p class="mx-auto mt-2 max-w-[38ch] text-[10px] leading-5 text-neutral-400">Raw logs remain available as proof; this view shows the governed state.</p>
+            <button class="mt-5 rounded-full border border-neutral-900/15 bg-white px-4 py-2 font-mono text-[8px] uppercase tracking-[.1em] text-neutral-700 disabled:opacity-40" disabled={cancellationBusy} on:click={requestCancellation}>
+              {cancellationBusy ? 'Stop requested from AII…' : 'Stop bounded run'}
+            </button>
           </div>
         {/if}
       </section>

@@ -7,6 +7,7 @@ import path from 'node:path';
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hii-knowledge-run-'));
 process.env.HII_DB_PATH = path.join(directory, 'hii.db');
 process.env.HII_RUNTIME_DIR = path.join(directory, 'runtime');
+process.env.HII_WORKSPACE_RUN_MODELS = 'qwen3.6:35b-mlx';
 
 const systems = await import('../lib/server/hii-knowledge-systems.ts');
 const runs = await import('../lib/server/hii-knowledge-runs.ts');

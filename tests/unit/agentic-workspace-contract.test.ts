@@ -8,6 +8,8 @@ const chat = readFileSync(resolve(root, 'src/lib/components/workspace/ChatPane.s
 const spatialRun = readFileSync(resolve(root, 'src/lib/components/workspace/SpatialRunPane.svelte'), 'utf8');
 const workspaceRuns = readFileSync(resolve(root, 'lib/server/hii-workspace-runs.ts'), 'utf8');
 const workspaceRunRoute = readFileSync(resolve(root, 'app/api/workspace/runs/route.ts'), 'utf8');
+const hiid = readFileSync(resolve(root, 'aii/daemon/hiid.mjs'), 'utf8');
+const knowledgeRuns = readFileSync(resolve(root, 'lib/server/hii-knowledge-runs.ts'), 'utf8');
 const explorer = readFileSync(resolve(root, 'src/lib/components/workspace/ExplorerPane.svelte'), 'utf8');
 const terminal = readFileSync(resolve(root, 'src/lib/components/TerminalPane.svelte'), 'utf8');
 const desktop = readFileSync(resolve(root, 'src-tauri/src/lib.rs'), 'utf8');
@@ -44,11 +46,31 @@ describe('agentic workspace interaction contract', () => {
   });
 
   it('uses the installed HII model default and preserves truthful terminal failures', () => {
-    expect(workspace).toContain("model:'qwen3.6:35b-mlx'");
+    expect(workspace).toContain("model:''");
     expect(workspaceRuns).toContain("defaultWorkspaceRunModel = 'qwen3.6:35b-mlx'");
+    expect(workspaceRuns).toContain('discoverWorkspaceRunModels');
+    expect(workspaceRuns).toContain('is not installed');
+    expect(workspaceRunRoute).toContain("params.get('mode') === 'models'");
+    expect(knowledgeRuns).not.toContain('supportedModels');
+    expect(knowledgeRuns).toContain('model: input.model');
+    expect(spatialRun).toContain('Installed local model');
     expect(spatialRun).toContain("let error = String(node.payload.error || '')");
     expect(spatialRun).toContain("error: failureError");
+    expect(spatialRun).toContain("status === 'failed'");
+    expect(spatialRun).toContain('Its authority has ended.');
     expect(spatialRun).toContain('Branch a revised intent from this run…');
+  });
+
+  it('lets AII stop, reconcile, and safely retry bounded workspace runs', () => {
+    expect(spatialRun).toContain('Stop bounded run');
+    expect(spatialRun).toContain("action: 'cancel'");
+    expect(spatialRun).toContain('Prepare fresh retry for approval');
+    expect(workspaceRuns).toContain("kind: 'workspace.cancel'");
+    expect(workspaceRunRoute).toContain('requestWorkspaceRunCancellation');
+    expect(hiid).toContain('activeWorkspaceRuns');
+    expect(hiid).toContain('cancelWorkspaceIntent');
+    expect(hiid).toContain('reconcileWorkspaceRuns');
+    expect(hiid).toContain('if (terminal?.status === "cancelled") return');
   });
 
   it('materializes proof lineage and keeps capability promotion operator-reviewed', () => {

@@ -10,7 +10,6 @@ import {
 import { defaultWorkspaceRunModel, queueApprovedWorkspaceRun } from './hii-workspace-runs.ts';
 
 const capabilityId = 'hii.agent.workspace_run';
-const supportedModels = new Set(['qwen3.6:27b-mlx', 'qwen3.6:35b-mlx']);
 
 function clean(value: unknown, max: number) {
   return String(value ?? '').replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -82,7 +81,7 @@ export async function approveKnowledgeRun(input: {
     projectId: run.projectId,
     goal,
     workspaceRoot: input.workspaceRoot,
-    model: supportedModels.has(String(input.model)) ? input.model : defaultWorkspaceRunModel,
+    model: input.model,
     maxSteps: input.maxSteps,
     approved: true,
     requestedBy: 'hii.knowledge'

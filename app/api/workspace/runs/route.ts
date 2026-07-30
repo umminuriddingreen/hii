@@ -2,8 +2,10 @@ import { NextResponse } from 'next/server';
 import { localTerminalAllowed } from '@/lib/server/hii-terminal';
 import {
   createWorkspaceRunCapabilityDraft,
+  discoverWorkspaceRunModels,
   getWorkspaceRun,
-  queueApprovedWorkspaceRun
+  queueApprovedWorkspaceRun,
+  requestWorkspaceRunCancellation
 } from '@/lib/server/hii-workspace-runs';
 
 export const runtime = 'nodejs';
@@ -19,7 +21,11 @@ export async function GET(request: Request) {
   const denied = localOnly(request);
   if (denied) return denied;
   try {
-    const id = new URL(request.url).searchParams.get('id');
+    const params = new URL(request.url).searchParams;
+    if (params.get('mode') === 'models') {
+      return NextResponse.json(await discoverWorkspaceRunModels());
+    }
+    const id = params.get('id');
     const result = await getWorkspaceRun(id);
     return result
       ? NextResponse.json(result)
@@ -60,8 +66,14 @@ export async function POST(request: Request) {
         draft: await createWorkspaceRunCapabilityDraft({ id: body.id, name: body.name })
       });
     }
+    if (body.action === 'cancel') {
+      return NextResponse.json({
+        ok: true,
+        ...(await requestWorkspaceRunCancellation({ id: body.id, requestedBy: 'hii.workspace' }))
+      }, { status: 202 });
+    }
     return NextResponse.json(
-      { error: 'Action must be approve or draft-capability.' },
+      { error: 'Action must be approve, cancel, or draft-capability.' },
       { status: 400 }
     );
   } catch (error) {

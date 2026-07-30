@@ -52,11 +52,39 @@ commit is `53a70ca`. Full local CI passed: 105 web tests, 85 Rust tests, clippy,
 all product smoke suites including the new spatial-run gate, and the production
 build.
 
-This closes “one legible governed run” and the first capability-draft path. It
+This closes “one legible governed run,” the first capability-draft path,
+installed-model truth, and the bounded run stop/retry/reconciliation path. It
 does not close the entire maturity matrix. The highest remaining product gates
-are a real editable creative artifact adapter, governed cancellation/retry,
-installed-model discovery, clean-machine onboarding, restart recovery, and
-media organization at scale.
+are a real editable creative artifact adapter, clean-machine onboarding,
+packaged-app recovery, human-readable runtime health, and media organization at
+scale.
+
+### Verified lifecycle checkpoint
+
+The next maturity slice closed the lifecycle gaps that could turn a governed
+run into a dead end:
+
+- Approval now discovers the models actually installed in Ollama. The live Mac
+  exposes only `qwen3.6:35b-mlx`, so HII no longer offers the absent 27B model.
+- Stop is an append-only `workspace.cancel` request. AII owns the process,
+  persists its PID, terminates only the matching bounded workspace runner, and
+  records cancellation as a terminal receipt state.
+- A late child-process callback cannot overwrite cancellation.
+- A running job left behind by an interrupted daemon is reconciled from its
+  owned-process state and verified receipt instead of remaining “running”
+  forever.
+- Failed and cancelled cards explain that their authority has ended. Retry
+  creates a fresh proposal and therefore requires fresh approval.
+
+The isolated lifecycle product gate proves owned PID termination, idempotent
+cancellation, callback-race safety, and interrupted-run reconciliation. Live
+HII Space proves the installed-model approval control and the fresh-retry
+interaction. Full local CI now passes 106 web tests, 89 Rust tests, clippy,
+every product smoke suite, and the production build.
+
+This closes governed cancellation/retry and installed-model discovery. Recovery
+is now deterministic for the daemon/job boundary, while packaged-app crash and
+upgrade recovery remain clean-machine release gates.
 
 ## Evidence reviewed
 

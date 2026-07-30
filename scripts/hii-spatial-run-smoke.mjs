@@ -9,6 +9,7 @@ const workspaceRoot = path.join(directory, 'project');
 fs.mkdirSync(workspaceRoot, { recursive: true });
 process.env.HII_DB_PATH = path.join(directory, 'hii.db');
 process.env.HII_RUNTIME_DIR = path.join(directory, 'runtime');
+process.env.HII_WORKSPACE_RUN_MODELS = 'qwen3.6:35b-mlx,qwen3.6:27b-mlx';
 
 const runs = await import('../lib/server/hii-workspace-runs.ts');
 const jobs = await import('../lib/capabilities/local-store.ts');
@@ -23,6 +24,21 @@ try {
     }),
     /Explicit approval/
   );
+
+  await assert.rejects(
+    () => runs.queueApprovedWorkspaceRun({
+      id: 'missing-model-demo',
+      goal: 'Prove an unavailable model cannot be queued.',
+      workspaceRoot,
+      model: 'not-installed:latest',
+      approved: true
+    }),
+    /not installed/
+  );
+
+  const discovered = await runs.discoverWorkspaceRunModels();
+  assert.deepEqual(discovered.models, ['qwen3.6:35b-mlx', 'qwen3.6:27b-mlx']);
+  assert.equal(discovered.defaultModel, 'qwen3.6:35b-mlx');
 
   const queued = await runs.queueApprovedWorkspaceRun({
     id: 'spatial-demo',
@@ -86,6 +102,7 @@ try {
   console.log('HII spatial governed run smoke');
   console.log('status:       ok');
   console.log('approval:     explicit local boundary verified');
+  console.log('models:       installed-only discovery and rejection verified');
   console.log('handoff:      selected canvas context -> AII workspace.run verified');
   console.log('receipt:      completed job -> structured receipt verified');
   console.log('capability:   verified receipt -> idempotent review draft verified');
