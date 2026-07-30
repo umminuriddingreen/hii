@@ -15,6 +15,7 @@
     editable: boolean;
     mediaType: string | null;
     previewable: boolean;
+    sitePreviewable: boolean;
     content: string | null;
     revision: string;
     sourceReceipt?: string | null;
@@ -27,12 +28,16 @@
   let loading = true;
   let saving = false;
   let error = '';
+  let view: 'preview' | 'edit' = 'preview';
 
   $: dirty = Boolean(artifact?.editable) && content !== savedContent;
   $: artifactPath = String(node.payload.artifactPath || node.payload.path || '');
   $: runId = String(node.payload.runId || node.object?.runId || '');
   $: previewUrl = artifact?.previewable
     ? `/api/workspace/artifacts?mode=preview&runId=${encodeURIComponent(runId)}&artifact=${encodeURIComponent(artifactPath)}`
+    : '';
+  $: sitePreviewUrl = artifact?.sitePreviewable
+    ? `/api/workspace/artifacts?mode=site&runId=${encodeURIComponent(runId)}&artifact=${encodeURIComponent(artifactPath)}&revision=${encodeURIComponent(artifact.revision)}`
     : '';
 
   async function apiJson(url: string, init?: RequestInit) {
@@ -49,6 +54,7 @@
       artifact = await apiJson(`/api/workspace/artifacts?runId=${encodeURIComponent(runId)}&artifact=${encodeURIComponent(artifactPath)}`) as ArtifactResponse;
       content = artifact.content || '';
       savedContent = content;
+      if (!artifact.sitePreviewable) view = 'edit';
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'Could not open the receipt artifact.';
     } finally {
@@ -134,7 +140,13 @@
       <p class="truncate text-[12px] font-semibold text-neutral-900">{artifact?.name || String(node.payload.title || 'Run artifact')}</p>
       <p class="truncate font-mono text-[8px] uppercase tracking-[.08em] text-neutral-400">receipt-linked artifact · {artifact?.editable ? 'editable' : 'native file'}</p>
     </div>
-    <span class={`ml-2 rounded-full px-2 py-1 font-mono text-[7px] uppercase ${dirty ? 'bg-amber-100 text-amber-800' : 'bg-emerald-50 text-emerald-700'}`}>{dirty ? 'unsaved' : 'saved'}</span>
+    <div class="ml-2 flex items-center gap-1">
+      {#if artifact?.sitePreviewable}
+        <button class={`rounded-full px-2 py-1 font-mono text-[7px] uppercase ${view==='preview'?'bg-neutral-950 text-white':'bg-neutral-100 text-neutral-500'}`} on:click={()=>view='preview'}>Preview</button>
+        <button class={`rounded-full px-2 py-1 font-mono text-[7px] uppercase ${view==='edit'?'bg-neutral-950 text-white':'bg-neutral-100 text-neutral-500'}`} on:click={()=>view='edit'}>Edit</button>
+      {/if}
+      <span class={`rounded-full px-2 py-1 font-mono text-[7px] uppercase ${dirty ? 'bg-amber-100 text-amber-800' : 'bg-emerald-50 text-emerald-700'}`}>{dirty ? 'unsaved' : 'saved'}</span>
+    </div>
   </header>
 
   {#if loading}
@@ -143,6 +155,8 @@
     <div class="relative grid min-h-0 flex-1 place-items-center overflow-hidden bg-[#f3f1ec] p-3">
       <img src={previewUrl} alt={artifact.name} class="max-h-full max-w-full object-contain shadow-sm" />
     </div>
+  {:else if artifact?.sitePreviewable && view === 'preview'}
+    <iframe title={`Static preview of ${artifact.name}`} src={sitePreviewUrl} sandbox="" class="min-h-0 flex-1 bg-white"></iframe>
   {:else if artifact?.editable}
     <textarea bind:value={content} class="min-h-0 flex-1 resize-none bg-[#fffef8] p-4 font-mono text-[11px] leading-5 text-neutral-800 outline-none" aria-label={`Edit ${artifact.name}`}></textarea>
   {:else if artifact}

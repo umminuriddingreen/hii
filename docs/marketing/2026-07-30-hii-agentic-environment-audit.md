@@ -290,6 +290,15 @@ no-store content. The original file and immutable run receipt remain the
 authority; HII does not copy or silently rewrite the image. Drawing, model, and
 richer native-file adapters remain the next artifact layer.
 
+Receipt-named HTML now opens in the same Artifact object with explicit
+`Preview` and `Edit` modes. Preview is deliberately static: the iframe is
+sandboxed, its response blocks scripts, forms, navigation, and all network
+loads by default, and only inline styling plus data images/fonts are allowed.
+This gives creative technologists visual feedback without silently converting
+a completed local artifact into new execution or outbound authority. Saving
+still uses the existing optimistic revision check and appends a separate human
+edit receipt.
+
 ### Verified runtime-health checkpoint
 
 HII Space no longer displays a raw `hiid 44` count. That number mixed one real

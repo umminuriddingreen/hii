@@ -155,9 +155,11 @@ try {
 
   const changedArtifact = path.join(workspaceRoot, 'proof.txt');
   const imageArtifact = path.join(workspaceRoot, 'proof.png');
+  const siteArtifact = path.join(workspaceRoot, 'proof.html');
   const outsideArtifact = path.join(directory, 'outside.txt');
   fs.writeFileSync(changedArtifact, 'original proof\n');
   fs.writeFileSync(imageArtifact, Buffer.from('89504e470d0a1a0a', 'hex'));
+  fs.writeFileSync(siteArtifact, '<main style="color:blue">verified site</main><script>fetch("https://example.com")</script>');
   fs.writeFileSync(outsideArtifact, 'outside boundary\n');
   fs.symlinkSync(outsideArtifact, path.join(workspaceRoot, 'escape.txt'));
   const receiptPath = path.join(directory, 'receipt.json');
@@ -165,7 +167,7 @@ try {
     id: 'verified-receipt',
     status: 'completed',
     summary: 'Created the isolated proof artifact.',
-    artifacts: ['proof.txt', 'proof.png', 'escape.txt'],
+    artifacts: ['proof.txt', 'proof.png', 'proof.html', 'escape.txt'],
     verification: [{ command: 'test -f proof.txt', ok: true, output: 'passed' }]
   }, null, 2)}\n`);
   const completedAt = new Date().toISOString();
@@ -208,6 +210,11 @@ try {
   const imagePreview = await artifacts.readWorkspaceRunArtifactPreview({ runId: 'spatial-demo', artifact: 'proof.png' });
   assert.equal(imagePreview.mediaType, 'image/png');
   assert.deepEqual(imagePreview.body, fs.readFileSync(imageArtifact));
+  const openedSite = await artifacts.readWorkspaceRunArtifact({ runId: 'spatial-demo', artifact: 'proof.html' });
+  assert.equal(openedSite.sitePreviewable, true);
+  assert.equal(openedSite.editable, true);
+  const sitePreview = await artifacts.readWorkspaceRunArtifactSitePreview({ runId: 'spatial-demo', artifact: 'proof.html' });
+  assert.match(sitePreview.body.toString('utf8'), /verified site/);
   const editedArtifact = await artifacts.saveWorkspaceRunArtifact({
     runId: 'spatial-demo',
     artifact: 'proof.txt',
@@ -254,7 +261,7 @@ try {
   console.log('handoff:      selected canvas context -> AII workspace.run verified');
   console.log('receipt:      completed job -> structured receipt verified');
   console.log('focus:        concise lifecycle -> evidence -> raw log hierarchy verified');
-console.log('artifact:     receipt-listed text + bounded image preview verified');
+console.log('artifact:     receipt-listed text + bounded image + sandboxed site preview verified');
   console.log('edit proof:   atomic save + optimistic conflict + human receipt verified');
   console.log('boundary:     unlisted and symlink-escaped artifacts rejected');
   console.log('context:      executable manifest + snapshots + hashes + stale review rejection verified');

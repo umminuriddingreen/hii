@@ -15,6 +15,7 @@ const imageTypes: Record<string, string> = {
   webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml'
 };
 const maxPreviewBytes = 25 * 1024 * 1024;
+const sitePreviewExtensions = new Set(['html', 'htm']);
 
 function runtimeRoot() {
   return process.env.HII_RUNTIME_DIR || path.join(os.homedir(), '.hii');
@@ -92,6 +93,7 @@ export async function readWorkspaceRunArtifact(input: { runId?: unknown; artifac
     extension,
     mediaType: imageTypes[extension] || null,
     previewable: Boolean(imageTypes[extension]) && info.size <= maxPreviewBytes,
+    sitePreviewable: sitePreviewExtensions.has(extension) && info.size <= maxEditableBytes,
     size: info.size,
     editable,
     content,
@@ -111,6 +113,18 @@ export async function readWorkspaceRunArtifactPreview(input: { runId?: unknown; 
   if (info.size > maxPreviewBytes) throw new Error('Receipt image previews are limited to 25 MB.');
   const body = await readFile(resolved.target);
   return { body, mediaType, revision: hash(body) };
+}
+
+export async function readWorkspaceRunArtifactSitePreview(input: { runId?: unknown; artifact?: unknown }) {
+  const resolved = await resolveArtifact(input.runId, input.artifact);
+  const info = await stat(resolved.target);
+  if (!info.isFile()) throw new Error('The receipt artifact is not a regular file.');
+  const extension = path.extname(resolved.target).slice(1).toLowerCase();
+  if (!sitePreviewExtensions.has(extension)) throw new Error('Only receipt-linked HTML can be previewed as a site.');
+  if (info.size > maxEditableBytes) throw new Error('Receipt site previews are limited to 2 MB.');
+  const body = await readFile(resolved.target);
+  new TextDecoder('utf-8', { fatal: true }).decode(body);
+  return { body, revision: hash(body) };
 }
 
 export async function saveWorkspaceRunArtifact(input: {

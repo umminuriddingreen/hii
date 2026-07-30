@@ -266,6 +266,15 @@ describe('agentic workspace interaction contract', () => {
     expect(runArtifactPane).toContain('mode=preview');
   });
 
+  it('keeps receipt-linked HTML preview visual, editable, and network blocked', () => {
+    expect(workspaceArtifacts).toContain('readWorkspaceRunArtifactSitePreview');
+    expect(workspaceArtifactRoute).toContain("params.get('mode') === 'site'");
+    expect(workspaceArtifactRoute).toContain("sandbox; default-src 'none'");
+    expect(runArtifactPane).toContain("view: 'preview' | 'edit'");
+    expect(runArtifactPane).toContain('sandbox=""');
+    expect(runArtifactPane).toContain('mode=site');
+  });
+
   it('opens the combined browser and terminal explorer on workspace double-click', () => {
     expect(workspace).toContain('on:dblclick={openExplorer}');
     expect(workspace).toContain("seedFor('explorer')");

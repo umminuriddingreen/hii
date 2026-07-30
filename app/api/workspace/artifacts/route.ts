@@ -3,6 +3,7 @@ import { localTerminalAllowed } from '@/lib/server/hii-terminal';
 import {
   readWorkspaceRunArtifact,
   readWorkspaceRunArtifactPreview,
+  readWorkspaceRunArtifactSitePreview,
   saveWorkspaceRunArtifact
 } from '@/lib/server/hii-workspace-artifacts';
 
@@ -28,6 +29,21 @@ export async function GET(request: Request) {
       return new Response(preview.body, {
         headers: {
           'content-type': preview.mediaType,
+          'x-content-type-options': 'nosniff',
+          'cache-control': 'private, no-store',
+          etag: `"${preview.revision}"`
+        }
+      });
+    }
+    if (params.get('mode') === 'site') {
+      const preview = await readWorkspaceRunArtifactSitePreview({
+        runId: params.get('runId'),
+        artifact: params.get('artifact')
+      });
+      return new Response(preview.body, {
+        headers: {
+          'content-type': 'text/html; charset=utf-8',
+          'content-security-policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:",
           'x-content-type-options': 'nosniff',
           'cache-control': 'private, no-store',
           etag: `"${preview.revision}"`
