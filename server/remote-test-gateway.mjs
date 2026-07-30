@@ -8,6 +8,7 @@ import { WebSocketServer } from 'ws';
 import {
   ARTIFACT_HTTPS_PORT,
   ARTIFACT_PORT,
+  DEFAULT_SESSION_MODEL,
   DISCONNECT_GRACE_MS,
   MAX_MESSAGE_BYTES,
   MAX_MESSAGES_PER_MINUTE,
@@ -29,6 +30,8 @@ import {
   writeJsonAtomic
 } from './remote-test-core.mjs';
 import { verifyArtifact } from './remote-test-artifacts.mjs';
+import { createImprovementRecorder } from './remote-test-learning.mjs';
+import { startModelBridge } from './remote-test-model-bridge.mjs';
 import { createSandbox } from './remote-test-sandbox.mjs';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
@@ -95,8 +98,12 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
   const expose = dependencies.expose ?? config.expose ?? true;
   const terminalPort = config.terminalPort ?? TERMINAL_PORT;
   const artifactPort = config.artifactPort ?? ARTIFACT_PORT;
+  const modelPort = config.modelPort ?? artifactPort + 1;
+  const sessionModel = config.model ?? DEFAULT_SESSION_MODEL;
   const disconnectGraceMs = config.disconnectGraceMs ?? DISCONNECT_GRACE_MS;
   const layout = await ensureSessionLayout(config.root, config.sessionId);
+  const improvement = createImprovementRecorder({ root: config.root, layout });
+  await improvement.refreshContext();
   const sessionPath = config.sessionPath;
   const basePath = `/s/${sessionPath}`;
   const artifactCookie = newSecret();
@@ -106,8 +113,11 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
   let ptyStartPromise = null;
   let disconnectTimer = null;
   let artifactTimer = null;
+  let modelBridge = null;
   let shuttingDown = false;
   let latestArtifact = null;
+  let activeWriter = null;
+  let writerUntil = 0;
   const verifiedRevisions = new Map();
   const routesStarted = [];
   const subscribers = new Set();
@@ -117,7 +127,7 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
     id: config.sessionId,
     createdAt: new Date().toISOString(),
     endedAt: null,
-    model: MODEL,
+    model: sessionModel,
     sessionProfile: SESSION_PROFILE,
     workspace: layout.workspace,
     runtime: layout.runtime,
@@ -156,6 +166,7 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
       const revision = `${candidate.mtimeMs}:${candidate.bytes}:${publicRevision}`;
       if (verifiedRevisions.get(candidate.relativePath) === revision) continue;
       verifiedRevisions.set(candidate.relativePath, revision);
+      broadcast({ type: 'artifact-status', status: 'updating', path: candidate.relativePath });
       try {
         const verification = await verifyArtifact({
           publicDir: layout.publicDir,
@@ -173,15 +184,31 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
         };
         manifest.artifacts.push(record);
         if (verification.ok) {
+          await improvement.passed(candidate.relativePath, verification);
           latestArtifact = {
             ...record,
             previewBackground: verification.dom?.backgroundColor ?? null
           };
           broadcast({ type: 'artifact', id: record.id });
+          broadcast({ type: 'artifact-status', status: 'ready', path: candidate.relativePath });
+        } else {
+          await improvement.failed(candidate.relativePath, verification);
+          broadcast({
+            type: 'artifact-status',
+            status: 'failed',
+            path: candidate.relativePath,
+            message: verification.failures?.[0] ?? 'Browser verification failed'
+          });
         }
         await saveManifest();
         appendEvent(layout, { type: 'artifact-verified', path: candidate.relativePath, ok: verification.ok, engine: verification.engine });
       } catch (error) {
+        broadcast({
+          type: 'artifact-status',
+          status: 'failed',
+          path: candidate.relativePath,
+          message: error.message
+        });
         appendEvent(layout, { type: 'artifact-rejected', path: candidate.relativePath, error: error.message });
       }
     }
@@ -207,6 +234,7 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
 
   const terminalServer = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://loopback');
+    const verifyPrefix = `${basePath}/__verify/`;
     if (url.pathname === basePath) {
       res.writeHead(302, { location: `${basePath}/`, 'cache-control': 'no-store' }).end();
       return;
@@ -216,6 +244,27 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
     if (url.pathname === `${basePath}/app.js`) return await serveStatic('app.js', res);
     if (url.pathname === `${basePath}/xterm.js`) return await serveStatic('xterm.js', res);
     if (url.pathname === `${basePath}/xterm.css`) return await serveStatic('xterm.css', res);
+    if (url.pathname.startsWith(verifyPrefix) && req.method === 'GET') {
+      const relativePath = url.pathname.slice(verifyPrefix.length);
+      try {
+        const verification = await verifyArtifact({
+          publicDir: layout.publicDir,
+          relativePath,
+          artifactsDir: layout.artifacts,
+          chromePath: config.chromePath
+        });
+        return json(res, verification.ok ? 200 : 422, {
+          ok: verification.ok,
+          httpStatus: verification.httpStatus,
+          failures: verification.failures,
+          visible: verification.dom?.visible ?? 0,
+          canvases: verification.dom?.canvases?.length ?? 0,
+          screenshotCaptured: Boolean(verification.screenshot)
+        });
+      } catch (error) {
+        return json(res, 422, { ok: false, failures: [error.message] });
+      }
+    }
     if (url.pathname === `${basePath}/latest-ticket` && req.method === 'POST') {
       if (!latestArtifact) {
         res.writeHead(204, { 'cache-control': 'no-store' }).end();
@@ -283,10 +332,14 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
     if (ptyStartPromise) return await ptyStartPromise;
     ptyStartPromise = (async () => {
       const sandbox = await createSandbox({ layout, hiiBinary: config.hiiBinary });
+      sandbox.env.HII_PREVIEW_VERIFY_URL = `http://127.0.0.1:${terminalPort}${basePath}/__verify`;
+      sandbox.env.HII_VERIFIED_LESSONS_FILE = improvement.sessionLessons;
+      sandbox.env.HII_MODEL_URL = `http://127.0.0.1:${modelPort}`;
+      sandbox.env.HII_MODEL_PROVIDER = 'lmstudio';
       const args = [
         ...sandbox.args,
         '--cwd', layout.workspace,
-        '--model', MODEL,
+        '--model', sessionModel,
         '--session-profile', SESSION_PROFILE
       ];
       appendEvent(layout, { type: 'hii-spawn', binary: config.hiiBinary, args: args.slice(sandbox.args.length) });
@@ -351,8 +404,19 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
       try {
         const message = JSON.parse(raw.toString());
         if (message.type === 'input' && typeof message.data === 'string' && message.data.length <= 4096) {
+          const now = Date.now();
+          if (activeWriter && activeWriter !== clientId && writerUntil > now) {
+            ws.send(JSON.stringify({ type: 'input-locked', message: 'Another tester is typing…' }));
+            return;
+          }
+          activeWriter = clientId;
+          writerUntil = now + 5000;
           pty?.write(message.data);
           appendEvent(layout, { type: 'terminal-input', bytes: Buffer.byteLength(message.data) });
+          if (message.data.includes('\r') || message.data.includes('\n')) {
+            activeWriter = null;
+            writerUntil = 0;
+          }
         } else if (message.type === 'resize') {
           const columns = Math.max(20, Math.min(300, Math.floor(message.columns) || 80));
           const rows = Math.max(5, Math.min(120, Math.floor(message.rows) || 24));
@@ -364,6 +428,10 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
     });
     ws.on('close', () => {
       subscribers.delete(ws);
+      if (activeWriter === clientId) {
+        activeWriter = null;
+        writerUntil = 0;
+      }
       appendEvent(layout, { type: 'ws-disconnected', clientsRemaining: subscribers.size });
       if (subscribers.size === 0) {
         disconnectTimer = setTimeout(() => void shutdown('disconnect-timeout'), disconnectGraceMs);
@@ -399,7 +467,7 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
     } catch {}
     pty = null;
     for (const ws of subscribers) ws.close(1001, 'session ended');
-    await Promise.allSettled([close(terminalServer), close(artifactServer)]);
+    await Promise.allSettled([close(terminalServer), close(artifactServer), modelBridge ? close(modelBridge) : Promise.resolve()]);
     await stopOwnedRoutes();
     manifest.endedAt = new Date().toISOString();
     manifest.outcome = reason;
@@ -410,6 +478,12 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
     dependencies.onShutdown?.(reason);
   }
 
+  modelBridge = await startModelBridge({
+    port: modelPort,
+    workspace: layout.workspace,
+    codexBinary: config.codexBinary ?? 'codex',
+    localModel: MODEL
+  });
   await listen(terminalServer, terminalPort);
   await listen(artifactServer, artifactPort);
   if (expose) {

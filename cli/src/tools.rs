@@ -238,6 +238,48 @@ impl Toolbelt {
         tool_result(self.search_native(query, &base), false)
     }
 
+    /// Search the public web without giving the model a general-purpose
+    /// network shell. Results are intentionally compact and retain their source
+    /// URLs so the model can cite what it used.
+    pub fn web_search(&self, query: &str) -> ToolResult {
+        let query = query.trim();
+        if query.is_empty() {
+            return tool_result(Err("web search query cannot be empty".into()), false);
+        }
+        let result = (|| {
+            let url = format!(
+                "https://html.duckduckgo.com/html/?q={}",
+                percent_encode(query)
+            );
+            let response = self
+                .ollama_http
+                .get(&url)
+                .set("User-Agent", "HII/0.1 (+local agent web search)")
+                .call()
+                .map_err(|error| format!("web search failed: {error}"))?;
+            let mut bytes = Vec::new();
+            response
+                .into_reader()
+                .take(MAX_OUTPUT_BYTES as u64)
+                .read_to_end(&mut bytes)
+                .map_err(|error| error.to_string())?;
+            let html = String::from_utf8_lossy(&bytes);
+            let results = parse_web_results(&html, 8);
+            if results.is_empty() {
+                return Err("web search returned no readable results".into());
+            }
+            Ok(results
+                .into_iter()
+                .enumerate()
+                .map(|(index, (title, url, snippet))| {
+                    format!("{}. {}\n   {}\n   {}", index + 1, title, url, snippet)
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n"))
+        })();
+        tool_result(result, false)
+    }
+
     pub fn write(&self, path: &str, content: &str) -> ToolResult {
         let result = (|| {
             let path = self.resolve_write(path)?;
@@ -463,6 +505,96 @@ impl Toolbelt {
             ))
         }
     }
+}
+
+fn percent_encode(value: &str) -> String {
+    value
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (byte as char).to_string()
+            }
+            b' ' => "+".into(),
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
+}
+
+fn parse_web_results(html: &str, limit: usize) -> Vec<(String, String, String)> {
+    let anchor = regex::Regex::new(
+        r#"(?s)<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>"#,
+    )
+    .expect("valid result regex");
+    let snippet = regex::Regex::new(
+        r#"(?s)<(?:a|div)[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</(?:a|div)>"#,
+    )
+    .expect("valid snippet regex");
+    let mut snippets = snippet
+        .captures_iter(html)
+        .filter_map(|capture| capture.get(1))
+        .map(|value| clean_html(value.as_str()));
+    anchor
+        .captures_iter(html)
+        .take(limit)
+        .filter_map(|capture| {
+            let url = decode_entities(capture.get(1)?.as_str());
+            let url = extract_duckduckgo_target(&url);
+            let title = clean_html(capture.get(2)?.as_str());
+            let summary = snippets.next().unwrap_or_default();
+            Some((title, url, summary))
+        })
+        .collect()
+}
+
+fn clean_html(value: &str) -> String {
+    let tags = regex::Regex::new(r"(?s)<[^>]+>").expect("valid tag regex");
+    decode_entities(tags.replace_all(value, " ").trim())
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn decode_entities(value: &str) -> String {
+    value
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#x27;", "'")
+        .replace("&#39;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&nbsp;", " ")
+}
+
+fn extract_duckduckgo_target(url: &str) -> String {
+    let Some(encoded) = url
+        .split("uddg=")
+        .nth(1)
+        .and_then(|tail| tail.split('&').next())
+    else {
+        return url.to_string();
+    };
+    percent_decode(encoded).unwrap_or_else(|| url.to_string())
+}
+
+fn percent_decode(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hex = std::str::from_utf8(bytes.get(index + 1..index + 3)?).ok()?;
+            output.push(u8::from_str_radix(hex, 16).ok()?);
+            index += 3;
+        } else {
+            output.push(if bytes[index] == b'+' {
+                b' '
+            } else {
+                bytes[index]
+            });
+            index += 1;
+        }
+    }
+    String::from_utf8(output).ok()
 }
 
 /// Whether ripgrep is on `PATH`. Cached for the process so repeated `list`/
@@ -693,6 +825,19 @@ mod tests {
         let listed = tools.list_native(tools.workspace());
         assert!(listed.unwrap().contains("x.rs"));
         let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn parses_cited_web_results() {
+        let html = r#"
+          <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fguide">A &amp; B Guide</a>
+          <a class="result__snippet">A concise <b>verified</b> answer.</a>
+        "#;
+        let results = super::parse_web_results(html, 8);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "A & B Guide");
+        assert_eq!(results[0].1, "https://example.com/guide");
+        assert_eq!(results[0].2, "A concise verified answer.");
     }
 
     #[test]

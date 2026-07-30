@@ -2,15 +2,30 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
     <title>HII</title>
     <link rel="stylesheet" href="./style.css" />
     <link rel="stylesheet" href="./xterm.css" />
   </head>
   <body>
     <main id="session" hidden>
-      <section id="terminal" aria-label="Live HII terminal"></section>
-      <iframe id="artifact" title="Latest verified artifact"></iframe>
+      <section id="terminal" aria-label="Live HII terminal">
+        <div id="connection" role="status" aria-live="polite" hidden></div>
+      </section>
+      <section id="preview" aria-label="Live preview">
+        <iframe
+          id="artifact"
+          title="Latest verified artifact"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock allow-modals"
+        ></iframe>
+        <div id="preview-status" role="status" aria-live="polite">Preview</div>
+        <nav id="preview-controls" aria-label="Preview controls">
+          <button type="button" data-action="refresh" aria-label="Refresh preview" title="Refresh">↻</button>
+          <button type="button" data-action="fullscreen" aria-label="Open preview full screen" title="Full screen">⛶</button>
+          <button type="button" data-action="device" aria-label="Toggle mobile preview" title="Mobile size">▯</button>
+          <button type="button" data-action="latest" aria-label="Return to latest verified version" title="Latest verified">✓</button>
+        </nav>
+      </section>
     </main>
     <script src="./xterm.js"></script>
     <script type="module" src="./app.js"></script>

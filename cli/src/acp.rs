@@ -18,6 +18,12 @@ const TOOLS: &[(&str, &str, bool, &str)] = &[
     ("read", "fs", false, "read a file, optionally a line range"),
     ("list", "fs", false, "list files under a path"),
     ("search", "fs", false, "regex search across the workspace"),
+    (
+        "web_search",
+        "network",
+        false,
+        "search the public web and return compact cited results",
+    ),
     ("write", "fs", true, "create or overwrite a file"),
     (
         "edit",

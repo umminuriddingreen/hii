@@ -7,6 +7,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 export const MODEL = 'qwen3.6:35b-mlx';
+export const DEFAULT_SESSION_MODEL = 'gpt-5.5';
 export const SESSION_PROFILE = 'public-test';
 export const TERMINAL_PORT = 17171;
 export const ARTIFACT_PORT = 17172;

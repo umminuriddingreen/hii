@@ -1,10 +1,25 @@
 const base = new URL('.', location.href).pathname.replace(/\/$/, '');
 const session = document.querySelector('#session');
 const terminalPane = document.querySelector('#terminal');
+const preview = document.querySelector('#preview');
 const artifact = document.querySelector('#artifact');
+const connection = document.querySelector('#connection');
+const previewStatus = document.querySelector('#preview-status');
+const previewControls = document.querySelector('#preview-controls');
 let socket;
 let latestArtifactId;
 let terminal;
+let reconnectTimer;
+
+function setConnection(message = '') {
+  connection.textContent = message;
+  connection.hidden = !message;
+}
+
+function setPreviewStatus(state, message) {
+  previewStatus.dataset.state = state;
+  previewStatus.textContent = message;
+}
 
 function sendInput(data) {
   if (socket?.readyState === WebSocket.OPEN) {
@@ -81,17 +96,39 @@ function showSession() {
 }
 
 function connect() {
-  if (socket?.readyState === WebSocket.OPEN) return;
+  if ([WebSocket.OPEN, WebSocket.CONNECTING].includes(socket?.readyState)) return;
+  setConnection('Reconnecting to HII…');
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
   socket = new WebSocket(`${scheme}//${location.host}${base}/ws`);
+  socket.addEventListener('open', () => {
+    clearTimeout(reconnectTimer);
+    setConnection();
+    fitTerminal();
+  });
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data);
     if (message.type === 'data') {
       terminal.write(message.data);
     }
     if (message.type === 'artifact') refreshArtifact();
+    if (message.type === 'artifact-status') {
+      if (message.status === 'updating') setPreviewStatus('updating', 'Updating…');
+      if (message.status === 'ready') setPreviewStatus('ready', '✓ Preview verified');
+      if (message.status === 'failed') {
+        setPreviewStatus('failed', 'Browser check failed · Previous preview is still live');
+      }
+    }
+    if (message.type === 'input-locked') {
+      setConnection(message.message);
+      setTimeout(() => {
+        if (socket?.readyState === WebSocket.OPEN) setConnection();
+      }, 1800);
+    }
   });
-  socket.addEventListener('close', () => setTimeout(connect, 1000));
+  socket.addEventListener('close', () => {
+    setConnection('Reconnecting to HII…');
+    reconnectTimer = setTimeout(connect, 1000);
+  });
 }
 
 function fitTerminal() {
@@ -108,18 +145,47 @@ function fitTerminal() {
 
 window.addEventListener('resize', fitTerminal);
 
-async function refreshArtifact() {
+async function refreshArtifact(force = false) {
   const response = await fetch(`${base}/latest-ticket`, { method: 'POST' });
   if (response.status === 204) return;
   if (!response.ok) return;
   const latest = await response.json();
-  if (latest.id !== latestArtifactId) {
+  if (force || latest.id !== latestArtifactId) {
     latestArtifactId = latest.id;
     if (typeof latest.background === 'string') {
+      preview.style.background = latest.background;
       artifact.style.background = latest.background;
     }
     artifact.src = latest.url;
   }
+  setPreviewStatus('ready', '✓ Preview verified');
 }
 
+previewControls.addEventListener('click', async (event) => {
+  const button = event.target.closest('button[data-action]');
+  if (!button) return;
+  const action = button.dataset.action;
+  if (action === 'refresh') artifact.src = artifact.src;
+  if (action === 'fullscreen') await preview.requestFullscreen?.();
+  if (action === 'device') {
+    preview.classList.toggle('mobile');
+    const mobile = preview.classList.contains('mobile');
+    button.textContent = mobile ? '▰' : '▯';
+    button.title = mobile ? 'Desktop size' : 'Mobile size';
+    button.setAttribute('aria-label', mobile ? 'Use desktop preview' : 'Use mobile preview');
+  }
+  if (action === 'latest') await refreshArtifact(true);
+});
+
+function fitVisualViewport() {
+  const height = window.visualViewport?.height ?? window.innerHeight;
+  document.documentElement.style.setProperty('--app-height', `${height}px`);
+  const keyboardOpen = height < window.screen.height * 0.62;
+  document.documentElement.classList.toggle('keyboard-open', keyboardOpen);
+  fitTerminal();
+}
+
+window.visualViewport?.addEventListener('resize', fitVisualViewport);
+window.visualViewport?.addEventListener('scroll', fitVisualViewport);
+fitVisualViewport();
 showSession();

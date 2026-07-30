@@ -226,9 +226,38 @@ pub fn idle_background() {
     );
 }
 
-pub fn tool_start(step: usize, tool: &str, target: &str) {
+pub fn stage(label: &str, message: &str) {
     println!(
-        "  {}  {}  {}",
+        "  {}  {}",
+        paint(label, &[BOLD, CYAN]),
+        paint(
+            &truncate(message, terminal_width().saturating_sub(label.len() + 6)),
+            &[SLATE]
+        )
+    );
+}
+
+pub fn reasoning(message: &str) {
+    println!(
+        "  {}  {}",
+        paint("REASONING", &[BOLD, BLUE]),
+        paint(message, &[SLATE])
+    );
+}
+
+pub fn tool_start(step: usize, tool: &str, target: &str) {
+    let stage = if matches!(tool, "verify" | "http") {
+        "VERIFYING"
+    } else if tool == "web_search" {
+        "RESEARCHING"
+    } else if matches!(tool, "write" | "edit" | "shell") {
+        "BUILDING"
+    } else {
+        "CHECKING"
+    };
+    println!(
+        "  {}  {:02} {}  {}",
+        paint(stage, &[BOLD, BLUE]),
         paint(&format!("{step:02}"), &[DIM, SLATE]),
         paint(&tool.to_ascii_uppercase(), &[BOLD, BLUE]),
         paint(
@@ -255,18 +284,13 @@ pub fn tool_result(ok: bool, verification: bool) {
 
 pub fn reply(message: &str, activity: Option<&str>) {
     println!();
-    println!("  {}", paint("HII", &[BOLD, CYAN]));
+    println!("  {}", paint("DONE", &[BOLD, GREEN]));
     for line in message.lines() {
         println!("  {line}");
     }
     if let Some(activity) = activity {
         println!("  {}", paint(activity, &[DIM, SLATE]));
     }
-    println!();
-}
-
-pub fn activity(message: &str) {
-    println!("  {}", paint(message, &[DIM, SLATE]));
     println!();
 }
 
@@ -279,13 +303,19 @@ pub fn system(message: &str) {
     println!();
 }
 
+pub fn cue(message: &str) {
+    println!("  {}", paint(message, &[BOLD]));
+    println!();
+}
+
 pub fn error(message: &str) {
     println!();
-    println!("  {}  {}", paint("! LOCAL PROBLEM", &[BOLD, RED]), message);
-    println!(
-        "  {}",
-        paint("Nothing external was changed.", &[DIM, SLATE])
-    );
+    let label = if message.starts_with("Response interrupted") {
+        "! INTERRUPTED"
+    } else {
+        "! LOCAL PROBLEM"
+    };
+    println!("  {}  {}", paint(label, &[BOLD, RED]), message);
     println!();
 }
 

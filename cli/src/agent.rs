@@ -212,7 +212,8 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     crate::tui::tool_start(steps, &tool, label);
                 }
                 let is_hii = crate::hii_tools::is_hii_tool(&tool);
-                let observation = matches!(tool.as_str(), "read" | "list" | "search");
+                let observation =
+                    matches!(tool.as_str(), "read" | "list" | "search" | "web_search");
                 let observation_key = observation.then(|| {
                     observation_signature(
                         mutation_epoch,
@@ -711,6 +712,7 @@ pub(crate) fn parse_action(raw: &str) -> Result<Action, String> {
         "read"
             | "list"
             | "search"
+            | "web_search"
             | "write"
             | "edit"
             | "shell"
@@ -759,6 +761,7 @@ pub(crate) fn execute_tool(tools: &Toolbelt, call: ToolCall, dry_run: bool) -> T
         "read" => tools.read_range(call.path.unwrap_or(""), call.offset, call.limit),
         "list" => tools.list(call.path),
         "search" => tools.search(call.query.unwrap_or(""), call.path),
+        "web_search" => tools.web_search(call.query.unwrap_or("")),
         "write" if dry_run => blocked("write"),
         "write" => tools.write(call.path.unwrap_or(""), call.content.unwrap_or("")),
         "edit" if dry_run => blocked("edit"),

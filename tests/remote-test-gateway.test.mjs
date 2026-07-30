@@ -20,6 +20,7 @@ import {
 import { verifyArtifact } from '../server/remote-test-artifacts.mjs';
 import { createSandbox, sanitizedHostEnv } from '../server/remote-test-sandbox.mjs';
 import { replayTranscript, startRemoteTestGateway } from '../server/remote-test-gateway.mjs';
+import { createImprovementRecorder } from '../server/remote-test-learning.mjs';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -39,6 +40,20 @@ test('artifact boundary rejects traversal, dotfiles, and symlinks', async (conte
   await assert.rejects(() => resolvePublicArtifact(layout.publicDir, '%2e%2e/runtime/secret'));
   await assert.rejects(() => resolvePublicArtifact(layout.publicDir, '.secret'));
   await assert.rejects(() => resolvePublicArtifact(layout.publicDir, 'link.txt'));
+});
+
+test('a failed browser check followed by proof becomes a reusable lesson, not an installed patch', async (context) => {
+  const root = await temporary();
+  context.after(() => fs.rm(root, { recursive: true, force: true }));
+  const layout = await ensureSessionLayout(root, '20260730120000-abcdefabcdefabcdefabcdef');
+  const recorder = createImprovementRecorder({ root, layout });
+  await recorder.refreshContext();
+  await recorder.failed('site.html', { failures: ['js: import map missing at /Users/test/site.html'] });
+  await recorder.passed('site.html', { httpStatus: 200 });
+  const contextText = await fs.readFile(recorder.sessionLessons, 'utf8');
+  assert.match(contextText, /Verified reusable lessons/);
+  assert.match(contextText, /Chrome acceptance/);
+  await assert.rejects(fs.stat(path.join(root, 'improvement-proposals')));
 });
 
 test('preflight refuses occupied Funnel routes and never mutates them', async () => {
@@ -205,14 +220,15 @@ test('Three.js import-map fixture renders a canvas and captures a screenshot in 
   assert.ok((await fs.stat(result.screenshot)).size > 1000);
 });
 
-test('public screen is exactly two equal panes in both orientations', async () => {
+test('public screen stays one work stream and one result with minimal preview controls', async () => {
   const html = await fs.readFile(path.join(repository, 'server', 'remote-test-static', 'index.html'), 'utf8');
   const css = await fs.readFile(path.join(repository, 'server', 'remote-test-static', 'style.css'), 'utf8');
   const main = html.match(/<main id="session" hidden>([\s\S]*?)<\/main>/)?.[1] ?? '';
-  assert.equal((main.match(/<(?:section|iframe)\b/g) ?? []).length, 2);
   assert.match(main, /id="terminal"/);
   assert.match(main, /id="artifact"/);
-  assert.doesNotMatch(main, /<(?:header|nav|button|aside|footer)\b/);
+  assert.doesNotMatch(main, /<(?:header|aside|footer)\b/);
+  assert.equal((main.match(/<section\b/g) ?? []).length, 2);
+  assert.equal((main.match(/<button\b/g) ?? []).length, 4);
   assert.doesNotMatch(html, /passcode|claim/i);
   assert.match(css, /#terminal \.xterm-rows/);
   assert.match(css, /--terminal-text:\s*#f3f4f1/);
@@ -220,7 +236,7 @@ test('public screen is exactly two equal panes in both orientations', async () =
   assert.match(await fs.readFile(path.join(repository, 'server', 'remote-test-static', 'app.js'), 'utf8'), /artifact\.style\.background/);
   assert.match(css, /grid-template-columns:\s*1fr 1fr/);
   assert.match(css, /grid-template-rows:\s*1fr 1fr/);
-  assert.match(css, /#artifact\s*\{\s*grid-row:\s*1/);
+  assert.match(css, /#preview\s*\{\s*grid-row:\s*1/);
   assert.match(css, /#terminal\s*\{\s*grid-row:\s*2/);
   assert.match(css, /@media \(orientation: portrait\), \(max-aspect-ratio: 1\/1\)/);
 });
