@@ -8,6 +8,7 @@ use crate::{
 use serde::Deserialize;
 use serde_json::json;
 use std::{
+    collections::BTreeSet,
     io::{self, IsTerminal, Write},
     path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
@@ -38,6 +39,9 @@ pub struct RunOptions {
     pub dry_run: bool,
     pub verbose: bool,
     pub authority: Authority,
+    pub done_when: Option<String>,
+    pub verify: Vec<String>,
+    pub use_context: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,8 +84,10 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     if options.max_steps == 0 || options.max_steps > 64 {
         return Err("max steps must be between 1 and 64".into());
     }
+    validate_declared_verification(&options.verify)?;
 
     let tools = Toolbelt::new(options.workspace)?;
+    let git_before = tools.git_snapshot();
     let ollama = Ollama::new(AppPaths::ollama_url());
     let models = ollama.models()?;
     let model = choose_model(options.model.as_deref(), &models)?;
@@ -105,13 +111,21 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         }),
     )?;
 
-    let contract = Contract::infer(&options.goal, options.authority);
+    let contract = Contract::infer(&options.goal, options.authority)
+        .with_done_when(options.done_when.as_deref());
+    let capsule = if options.use_context {
+        crate::context::ContextCapsule::build(&paths.runtime, tools.workspace())
+    } else {
+        crate::context::ContextCapsule::default()
+    };
     store.event(
         "contract",
         json!({
             "goal": contract.goal,
             "authority": contract.authority.label(),
             "done_when": contract.done_when,
+            "context_sources": capsule.sources,
+            "declared_verification": options.verify,
         }),
     )?;
     if options.authority == Authority::Yolo {
@@ -132,9 +146,20 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     INTERRUPTED.store(false, Ordering::SeqCst);
     let mut interrupted = false;
 
-    let system = system_prompt(tools.workspace(), options.max_steps, options.dry_run);
-    let mut messages = vec![Message::system(system), Message::user(options.goal.clone())];
+    let system = system_prompt(
+        tools.workspace(),
+        options.max_steps,
+        options.dry_run,
+        &contract.done_when,
+        &options.verify,
+    );
+    let mut messages = vec![Message::system(system)];
+    if !capsule.text.is_empty() {
+        messages.push(Message::system(capsule.text.clone()));
+    }
+    messages.push(Message::user(options.goal.clone()));
     let mut verification = Vec::new();
+    let mut touched_artifacts = BTreeSet::new();
     let mut parse_failures = 0usize;
     let mut final_summary = None;
     let mut final_next = None;
@@ -235,6 +260,11 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     )
                 };
                 let safe_output = redact_text(&result.output);
+                if result.ok && matches!(tool.as_str(), "write" | "edit") {
+                    if let Some(path) = path.as_deref() {
+                        touched_artifacts.insert(path.to_string());
+                    }
+                }
                 if result.verification {
                     verification.push(VerificationRecord {
                         command: command.or(url).unwrap_or_else(|| tool.clone()),
@@ -264,7 +294,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 verification: claimed,
                 next,
             } => {
-                if verification.is_empty() {
+                if !verification.iter().any(|check| check.ok) && options.verify.is_empty() {
                     messages.push(Message::assistant(raw));
                     messages.push(Message::user(format!(
                         "No HII verification result exists yet (model claim: {}). Run the actual check with verify or http before finalizing.",
@@ -291,8 +321,30 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         }
     }
 
-    let completed = final_summary.is_some();
-    let summary = redact_text(&final_summary.unwrap_or_else(|| {
+    if final_summary.is_some() {
+        for command in &options.verify {
+            let result = tools.shell(command, true);
+            let safe_output = redact_text(&result.output);
+            store.event(
+                "acceptance.result",
+                json!({
+                    "command": command,
+                    "ok": result.ok,
+                    "output": safe_output,
+                }),
+            )?;
+            verification.push(VerificationRecord {
+                command: command.clone(),
+                ok: result.ok,
+                output: safe_output,
+            });
+        }
+    }
+    let declared_checks_passed = acceptance_passed(&options.verify, &verification);
+    let completed = final_summary.is_some()
+        && verification.iter().any(|check| check.ok)
+        && declared_checks_passed;
+    let mut summary = redact_text(&final_summary.unwrap_or_else(|| {
         if interrupted {
             format!("Interrupted by operator after {steps} step(s); partial work preserved.")
         } else {
@@ -302,6 +354,9 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             )
         }
     }));
+    if !declared_checks_passed {
+        summary.push_str(" Declared acceptance verification failed.");
+    }
     let git_status = tools.git_snapshot();
     let review = match review_model.as_deref() {
         Some(reviewer) => {
@@ -325,10 +380,15 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         }
         None => None,
     };
-    let artifacts = artifact_inventory(&git_status);
+    let mut artifacts = artifact_inventory(&git_before, &git_status)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    artifacts.extend(touched_artifacts);
+    let artifacts = artifacts.into_iter().collect::<Vec<_>>();
+    let preexisting_changes = artifact_inventory("clean", &git_before);
     let reversible = Some(git_status != "not a git workspace");
     let receipt = Receipt {
-        schema_version: 2,
+        schema_version: 3,
         id: store.id.clone(),
         created_at_unix_ms: store.started_at_unix_ms,
         finished_at_unix_ms: unix_ms(),
@@ -355,6 +415,8 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         approvals,
         artifacts,
         reversible,
+        context_sources: capsule.sources,
+        preexisting_changes,
     };
     store.event(
         "run.finished",
@@ -403,13 +465,26 @@ fn choose_review_model(requested: Option<&str>, installed: &[String]) -> Result<
     }
 }
 
-fn system_prompt(workspace: &std::path::Path, max_steps: usize, dry_run: bool) -> String {
+fn system_prompt(
+    workspace: &std::path::Path,
+    max_steps: usize,
+    dry_run: bool,
+    done_when: &str,
+    declared_verification: &[String],
+) -> String {
+    let declared_verification = if declared_verification.is_empty() {
+        "none; choose and run an explicit verification tool".to_string()
+    } else {
+        declared_verification.join(" ; ")
+    };
     format!(
         r#"You are HII's local workspace agent. Finish the goal with proof.
 Workspace: {workspace}
 Limit: {max_steps} steps. Dry run: {dry_run}.
+Done when: {done_when}
+Acceptance checks: {declared_verification}
 
-Loop: inspect -> act -> verify each change -> adjust -> final.
+Loop: inspect -> act -> verify change -> adjust -> final.
 Return one JSON object/turn. The action `type` is the tool:
 read,list,search,write,edit,shell,verify,http,hii_context,og_next,caps_check,board_read,board_write,skill_search,bridge_send,bridge_read.
 Use only needed fields: path,query,command,content,old,new,replace_all,offset,limit,url.
@@ -418,6 +493,28 @@ Finish: {{"type":"final","summary":"result","verification":["checks run"],"next"
 Read AGENTS.md before editing. Use minimal context; read large files in slices. Preserve unclear work. Prefer edit for small changes and verify for checks. HII tools expose context, graph, capabilities, board, skills, and bridge. Stay inside the workspace; never publish, push, spend, message, delete, or read secrets. Never claim unrun proof."#,
         workspace = workspace.display()
     )
+}
+
+fn validate_declared_verification(commands: &[String]) -> Result<(), String> {
+    for command in commands {
+        if command.trim().is_empty() {
+            return Err("--verify commands cannot be empty".into());
+        }
+        if sensitive_shell(command) {
+            return Err(format!(
+                "--verify must be a local acceptance check, not an external action: {command}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn acceptance_passed(commands: &[String], records: &[VerificationRecord]) -> bool {
+    commands.iter().all(|command| {
+        records
+            .iter()
+            .any(|record| record.command == *command && record.ok)
+    })
 }
 
 pub(crate) fn parse_action(raw: &str) -> Result<Action, String> {
@@ -513,15 +610,21 @@ pub(crate) fn execute_tool(tools: &Toolbelt, call: ToolCall, dry_run: bool) -> T
     }
 }
 
-/// Derive a changed-file inventory from a `git status --short` snapshot.
-fn artifact_inventory(git_status: &str) -> Vec<String> {
-    if git_status == "clean" || git_status == "not a git workspace" {
-        return Vec::new();
-    }
-    git_status
-        .lines()
-        .filter_map(|line| line.get(3..).map(str::to_string))
-        .collect()
+/// Derive only newly dirty paths between two porcelain snapshots. Direct
+/// write/edit targets are added separately, which also catches edits to files
+/// that were already dirty before the run.
+fn artifact_inventory(before: &str, after: &str) -> Vec<String> {
+    let paths = |snapshot: &str| {
+        if matches!(snapshot, "clean" | "not a git workspace") {
+            return BTreeSet::new();
+        }
+        snapshot
+            .lines()
+            .filter_map(|line| line.get(3..).map(str::to_string))
+            .collect::<BTreeSet<_>>()
+    };
+    let before = paths(before);
+    paths(after).difference(&before).cloned().collect()
 }
 
 /// Apply an authority [`Decision`] to a pending tool action. Returns `Some(msg)`
@@ -589,6 +692,12 @@ fn print_receipt(receipt: &Receipt, path: &std::path::Path) {
             println!("  {artifact}");
         }
     }
+    if !receipt.preexisting_changes.is_empty() {
+        println!(
+            "Baseline: {} pre-existing change(s) preserved",
+            receipt.preexisting_changes.len()
+        );
+    }
     if !receipt.approvals.is_empty() {
         println!("Approvals: {}", receipt.approvals.join(", "));
     }
@@ -628,11 +737,41 @@ mod tests {
 
     #[test]
     fn agent_prompt_stays_lean() {
-        let prompt = system_prompt(std::path::Path::new("/workspace"), 12, false);
+        let prompt = system_prompt(
+            std::path::Path::new("/workspace"),
+            12,
+            false,
+            "the focused tests pass",
+            &[],
+        );
         assert!(
             prompt.len() <= 1_000,
             "agent prompt grew to {} bytes",
             prompt.len()
         );
+    }
+
+    #[test]
+    fn declared_verification_rejects_external_actions() {
+        let commands = vec!["git push origin main".to_string()];
+        assert!(validate_declared_verification(&commands).is_err());
+    }
+
+    #[test]
+    fn every_declared_acceptance_check_must_pass() {
+        let commands = vec!["cargo test".to_string(), "cargo clippy".to_string()];
+        let records = vec![VerificationRecord {
+            command: "cargo test".into(),
+            ok: true,
+            output: "ok".into(),
+        }];
+        assert!(!acceptance_passed(&commands, &records));
+    }
+
+    #[test]
+    fn artifacts_exclude_preexisting_dirty_files() {
+        let before = " M existing.rs\n?? old.txt";
+        let after = " M existing.rs\n?? old.txt\n?? new.txt";
+        assert_eq!(artifact_inventory(before, after), vec!["new.txt"]);
     }
 }

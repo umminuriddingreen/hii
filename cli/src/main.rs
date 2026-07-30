@@ -3,6 +3,7 @@ mod agent;
 mod agents;
 mod board;
 mod config;
+mod context;
 mod contract;
 mod conversation;
 mod hii_tools;
@@ -95,6 +96,23 @@ enum Commands {
             help = "Authority envelope: read-only | workspace | external-preview | external-commit"
         )]
         authority: Option<String>,
+        #[arg(
+            long,
+            value_name = "CRITERIA",
+            help = "Operator-defined acceptance criterion recorded in the work contract"
+        )]
+        done_when: Option<String>,
+        #[arg(
+            long,
+            value_name = "COMMAND",
+            help = "Deterministic local acceptance check; repeat for multiple checks"
+        )]
+        verify: Vec<String>,
+        #[arg(
+            long,
+            help = "Do not preload workspace instructions, Git state, or prior HII receipts"
+        )]
+        no_context: bool,
     },
     #[command(about = "Show the local workspace-agent state")]
     Status {
@@ -246,6 +264,9 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             verbose,
             yolo,
             authority,
+            done_when,
+            verify,
+            no_context,
         }) => {
             let workspace = cli
                 .cwd
@@ -263,6 +284,9 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     dry_run,
                     verbose,
                     authority,
+                    done_when,
+                    verify,
+                    use_context: !no_context,
                 },
             )?;
             Ok(if receipt.status == "completed" {
@@ -795,6 +819,17 @@ fn proof(paths: &AppPaths, id: Option<&str>, json: bool) -> Result<(), String> {
     println!("model      {}", receipt.model);
     println!("steps      {}", receipt.steps);
     println!("summary    {}", receipt.summary);
+    if let Some(done_when) = receipt.done_when.as_deref() {
+        println!("done when  {done_when}");
+    }
+    println!("context    {} source(s)", receipt.context_sources.len());
+    for source in &receipt.context_sources {
+        println!("  <-  {source}");
+    }
+    println!(
+        "baseline   {} pre-existing change(s)",
+        receipt.preexisting_changes.len()
+    );
     println!("verified   {} check(s)", receipt.verification.len());
     for check in &receipt.verification {
         println!(

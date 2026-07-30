@@ -94,10 +94,14 @@ impl Conversation {
         let ollama = Ollama::new(AppPaths::ollama_url());
         let model = choose_model(requested_model.as_deref(), &ollama.models()?)?;
         let store = ConversationStore::create(&paths.runtime)?;
-        let messages = vec![Message::system(conversation_prompt(
+        let capsule = crate::context::ContextCapsule::build(&paths.runtime, tools.workspace());
+        let mut messages = vec![Message::system(conversation_prompt(
             tools.workspace(),
             max_steps,
         ))];
+        if !capsule.text.is_empty() {
+            messages.push(Message::system(capsule.text));
+        }
         Ok(Self {
             paths,
             ollama,
@@ -805,7 +809,7 @@ impl Conversation {
             return Ok(());
         };
         let receipt = Receipt {
-            schema_version: 1,
+            schema_version: 3,
             id: run.id.clone(),
             created_at_unix_ms: run.started_at_unix_ms,
             finished_at_unix_ms: unix_ms(),
@@ -826,6 +830,12 @@ impl Conversation {
             approvals: Vec::new(),
             artifacts: Vec::new(),
             reversible: None,
+            context_sources: crate::context::ContextCapsule::build(
+                &self.paths.runtime,
+                self.tools.workspace(),
+            )
+            .sources,
+            preexisting_changes: Vec::new(),
         };
         run.event(
             "run.finished",

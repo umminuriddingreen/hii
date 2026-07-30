@@ -57,6 +57,28 @@ execution remain proof-backed operator decisions.
 Explicit `hii run` uses the same quiet presentation. Add `--verbose` only when
 debugging the model/tool protocol or locating a specific backend receipt.
 
+Native runs preload a bounded, source-labelled context capsule containing the
+workspace's `AGENTS.md`, current Git state, and up to three prior HII receipts
+for the same workspace. Historical context is evidence, never a replacement
+for the current operator instruction. Use `--no-context` for an isolated run.
+
+Use `--done-when` to bind the receipt to a concrete acceptance criterion and
+repeat `--verify` for deterministic local checks that HII itself must run
+before marking the receipt complete:
+
+```sh
+hii run \
+  --done-when "the focused tests pass and help documents the new flag" \
+  --verify "cargo test --manifest-path cli/Cargo.toml" \
+  "add the feature with minimal changes"
+```
+
+Declared verification commands cannot perform external actions. Their exact
+commands, outputs, and pass/fail status are recorded in the receipt alongside
+the context source list. Receipts distinguish files touched by the run from
+pre-existing dirty worktree state, so concurrent user or agent work is not
+misattributed as a new artifact.
+
 ## Agent loop
 
 ```text

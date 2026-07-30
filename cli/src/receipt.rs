@@ -43,6 +43,10 @@ pub struct Receipt {
     pub artifacts: Vec<String>,
     #[serde(default)]
     pub reversible: Option<bool>,
+    #[serde(default)]
+    pub context_sources: Vec<String>,
+    #[serde(default)]
+    pub preexisting_changes: Vec<String>,
 }
 
 pub struct RunStore {

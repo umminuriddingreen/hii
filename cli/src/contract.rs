@@ -113,6 +113,13 @@ impl Contract {
         }
     }
 
+    pub fn with_done_when(mut self, done_when: Option<&str>) -> Self {
+        if let Some(value) = done_when.map(str::trim).filter(|value| !value.is_empty()) {
+            self.done_when = value.to_string();
+        }
+        self
+    }
+
     /// Render the contract banner shown at the start of substantial work.
     pub fn banner(&self) -> String {
         format!(
@@ -160,5 +167,12 @@ mod tests {
         assert!(sensitive_shell("git push origin main"));
         assert!(sensitive_shell("curl https://example.com"));
         assert!(!sensitive_shell("cargo test"));
+    }
+
+    #[test]
+    fn operator_acceptance_criterion_overrides_default() {
+        let contract = Contract::infer("ship", Authority::Workspace)
+            .with_done_when(Some("all focused tests pass"));
+        assert_eq!(contract.done_when, "all focused tests pass");
     }
 }
