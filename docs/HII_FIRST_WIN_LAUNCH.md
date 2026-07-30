@@ -137,6 +137,58 @@ Revenue. More platform surface will not validate them.
 
 ## First public post
 
+### Channel order
+
+The current founder-account evidence changes the channel order:
+
+1. **LinkedIn first.** The authenticated founder profile has 500+ connections
+   and overlaps architecture, design, construction, and technical education.
+2. **Direct invitations second.** Five individually relevant people or
+   discussions can produce stronger discovery evidence than broad reach.
+3. **X third.** `@ummigreen` currently has four followers. Use it as a public
+   build log and a place for reply-based participation, not the sole acquisition
+   engine.
+4. **Reddit after the founder post.** Enter existing job-specific discussions
+   and the r/macapps submission thread; do not cross-post an announcement.
+
+Before publishing, the LinkedIn headline should at least make the founder role
+legible. Prepared replacement:
+
+> Founder, HII — a local-first Mac workspace for finished AI work with visible
+> context and proof | Architecture + computation
+
+### LinkedIn
+
+Publish the video natively. Do not put a link in the primary post:
+
+> I built HII because useful AI work kept disappearing between chats, folders,
+> tools, and browser tabs.
+>
+> I gave it one real job on my Mac.
+>
+> HII kept the context I approved, the work, the finished artifact, and the proof
+> together.
+>
+> The video is 27 seconds. It is the actual interface—not a concept render.
+>
+> I am not opening a general beta yet. I am looking for five makers, designers,
+> researchers, or independent operators with one real thing on their Mac they
+> already want to finish.
+>
+> Reply “HII” and tell me the job. I will message you personally and stay with
+> it through the first result.
+
+First founder comment:
+
+> I am building HII. The browser demo uses sample data and cannot access your
+> Mac. A founder test begins only after we agree on the job and exactly what HII
+> may use.
+>
+> humaninformationinterface.com/learn
+> humaninformationinterface.com/privacy
+
+### X
+
 Post from `@ummigreen` with `public/marketing/hii-first-win-demo.mp4`.
 Keep the link out of the primary post so the invitation stays conversational:
 
