@@ -860,7 +860,9 @@ export async function runTraderCycle(options: {
     } catch (error) {
       proposals = fallbackIntelligence(assets, error instanceof Error ? error.message : String(error));
     }
-    proposals = ensureNonDegenerateProposals(assets, proposals);
+    // Paper-only: this synthesizes a buy the model never proposed, so it must never
+    // reach a live account even if the live lock is later opened.
+    if (state.mode === 'paper') proposals = ensureNonDegenerateProposals(assets, proposals);
     const proposalMap = new Map(proposals.map((proposal) => [proposal.symbol, proposal]));
     let positions = markPositions(listPositions(db), assets, at);
     for (const position of positions) savePosition(position, position.symbol, db);
