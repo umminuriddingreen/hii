@@ -20,6 +20,23 @@
   <a href={text('url')} target="_blank" rel="noreferrer" class="flex h-full items-center gap-3 p-3 hover:bg-neutral-50"><span class="grid h-9 w-9 place-items-center rounded-full bg-[var(--hii-soft-blue)] text-[var(--hii-electric-blue)]">↗</span><span class="min-w-0"><strong class="block truncate text-[13px]">{text('name')||text('host')||'link'}</strong><small class="block truncate font-mono text-[9px] text-neutral-400">{text('url')}</small></span></a>
 {:else if node.type==='file'}
   <div class="flex h-full items-center gap-3 p-3"><span class="text-2xl">{text('emoji')||'📄'}</span><div class="min-w-0"><strong class="block truncate text-[12px]">{text('name')}</strong><small class="block font-mono text-[9px] uppercase text-neutral-400">{text('label')||text('category')||'file'} · {size(node.payload.size)}</small><p class="mt-1 text-[10px] text-neutral-500">{text('description')}</p></div></div>
+{:else if node.type==='image'&&text('adapter')==='contact-sheet'}
+  <section class="flex h-full min-h-0 flex-col overflow-hidden bg-white">
+    <header class="flex items-center justify-between gap-3 border-b px-4 py-3">
+      <div class="min-w-0"><strong class="block truncate text-[13px]">{text('title')||'Reference contact sheet'}</strong><small class="font-mono text-[8px] uppercase tracking-[.08em] text-neutral-400">{Number(node.payload.uniqueCount)||0} unique references</small></div>
+      {#if Number(node.payload.duplicateCount)>0}<span class="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 font-mono text-[8px] uppercase text-amber-700">{Number(node.payload.duplicateCount)} exact duplicate{Number(node.payload.duplicateCount)===1?'':'s'} omitted</span>{/if}
+    </header>
+    <div class="scroll min-h-0 flex-1 overflow-auto p-3">
+      <div class="grid gap-2" style={`grid-template-columns:repeat(${Number(node.payload.columns)||4},minmax(0,1fr))`}>
+        {#each (node.payload.items as Array<Record<string,unknown>>||[]) as item}
+          <a href={String(item.url||'')} target="_blank" rel="noreferrer" class="group/item overflow-hidden rounded-xl border border-neutral-900/10 bg-neutral-50 hover:border-blue-400" title={String(item.path||item.name||'Reference image')}>
+            <img src={String(item.url||'')} alt={String(item.name||'Reference image')} loading="lazy" class="aspect-square w-full object-cover"/>
+            <span class="block truncate px-2 py-1.5 font-mono text-[8px] text-neutral-500 group-hover/item:text-blue-700">{String(item.name||'image')}</span>
+          </a>
+        {/each}
+      </div>
+    </div>
+  </section>
 {:else if node.type==='image'}
   <figure class="h-full w-full overflow-hidden"><img src={text('url')} alt={text('name')||'Workspace image'} class="h-full w-full object-cover" on:load={fitImage}/></figure>
 {:else if node.type==='media'}

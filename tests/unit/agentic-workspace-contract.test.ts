@@ -142,6 +142,14 @@ describe('agentic workspace interaction contract', () => {
     expect(workspace).toContain('Scene name');
   });
 
+  it('organizes large image imports into proof-linked contact sheets', () => {
+    expect(workspace).toContain('seedsFromFiles(files)');
+    expect(workspace).toContain('seedsFromDataTransfer(event.dataTransfer)');
+    expect(readFileSync(resolve(root, 'lib/workspace/ingest.ts'), 'utf8')).toContain("adapter: 'contact-sheet'");
+    expect(readFileSync(resolve(root, 'lib/workspace/ingest.ts'), 'utf8')).toContain("crypto.subtle.digest('SHA-256'");
+    expect(readFileSync(resolve(root, 'src/lib/components/workspace/StaticNode.svelte'), 'utf8')).toContain('exact duplicate');
+  });
+
   it('bridges an explicit browser request into its paired terminal', () => {
     expect(explorer).toContain('curl -I -L --max-time 20 --');
     expect(explorer).toContain("new CustomEvent('hii:terminal-command'");

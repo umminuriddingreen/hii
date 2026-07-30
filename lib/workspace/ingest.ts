@@ -21,6 +21,8 @@ const DESIGN = /\.(fig|sketch|psd|psb|ai|ait|eps|indd|idml|xd|afdesign|afphoto|a
 const MODEL_3D = /\.(glb|gltf|obj|stl|fbx|usdz|usd|usdc|dae|blend|3ds|ply)$/i;
 const VIEWABLE_MODEL = /\.(glb|gltf|obj|stl|ply)$/i;
 const CAD = /\.(3dm|dwg|dxf|step|stp|iges|igs|ifc|sat|skp|rvt|3mf)$/i;
+const CONTACT_SHEET_THRESHOLD = 4;
+const CONTACT_SHEET_LIMIT = 80;
 
 export const defaultSize: Record<WorkspaceNodeType, { w: number; h: number }> = {
   chat: { w: 420, h: 560 },
@@ -372,7 +374,7 @@ export async function seedFromFile(file: File): Promise<NodeSeed> {
   if (t.startsWith('image/') || IMAGE_FILE.test(name)) {
     const stored = await storeWorkspaceAsset(file);
     const asset = stored
-      ? { url: stored.url, path: stored.path, name: stored.name, mime: stored.mime, size: stored.size }
+      ? { url: stored.url, path: stored.path, name: stored.name, mime: stored.mime, size: stored.size, sha256: stored.sha256 }
       : { url: URL.createObjectURL(file), name, mime: t, size: file.size, ephemeral: true };
     return seedFor('image', { ...asset, extension });
   }
@@ -413,6 +415,94 @@ export async function seedFromFile(file: File): Promise<NodeSeed> {
   return seedFor('file', { name, size: file.size, mime: t, extension, metadataOnly: true, ...fileSummary(name, t) });
 }
 
+function isImageFile(file: File) {
+  return file.type.startsWith('image/') || IMAGE_FILE.test(file.name || '');
+}
+
+async function fileDigest(file: File) {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function contactSheetSeed(
+  imageSeeds: NodeSeed[],
+  sheetIndex: number,
+  sheetCount: number,
+  duplicateNames: string[]
+): NodeSeed {
+  const items = imageSeeds.map((seed) => ({
+    url: String(seed.payload.url || ''),
+    path: String(seed.payload.path || ''),
+    name: String(seed.payload.name || 'image'),
+    mime: String(seed.payload.mime || ''),
+    size: Number(seed.payload.size) || 0,
+    sha256: String(seed.payload.sha256 || '')
+  }));
+  const durable = items.every((item) => item.path && item.sha256);
+  const title = sheetCount > 1 ? `Reference contact sheet ${sheetIndex + 1} of ${sheetCount}` : 'Reference contact sheet';
+  return {
+    type: 'image',
+    w: 760,
+    h: 560,
+    object: {
+      kind: 'asset',
+      owner: 'human',
+      status: durable ? 'ready' : 'partial',
+      source: durable ? 'HII local workspace assets' : 'HII browser-session assets',
+      capabilityId: 'hii.workspace.creative_canvas',
+      proofRefs: items.flatMap((item) => item.sha256 ? [`sha256:${item.sha256}`] : []).slice(0, 24),
+      audit: [{
+        ts: new Date().toISOString(),
+        actor: 'human',
+        action: 'imported image contact sheet',
+        note: `${items.length} unique images; ${duplicateNames.length} exact duplicates omitted from this batch.`
+      }]
+    },
+    payload: {
+      adapter: 'contact-sheet',
+      title,
+      items,
+      uniqueCount: items.length,
+      duplicateCount: sheetIndex === 0 ? duplicateNames.length : 0,
+      duplicateNames: sheetIndex === 0 ? duplicateNames.slice(0, 40) : [],
+      columns: items.length <= 6 ? 3 : 4
+    }
+  };
+}
+
+export async function seedsFromFiles(files: File[]): Promise<NodeSeed[]> {
+  const imageFiles = files.filter(isImageFile);
+  if (imageFiles.length < CONTACT_SHEET_THRESHOLD) return Promise.all(files.map(seedFromFile));
+
+  const nonImages = files.filter((file) => !isImageFile(file));
+  const uniqueImages: File[] = [];
+  const duplicateNames: string[] = [];
+  const seen = new Set<string>();
+  for (const file of imageFiles) {
+    const digest = await fileDigest(file);
+    if (seen.has(digest)) duplicateNames.push(file.name || 'untitled');
+    else {
+      seen.add(digest);
+      uniqueImages.push(file);
+    }
+  }
+
+  const [imageSeeds, otherSeeds] = await Promise.all([
+    Promise.all(uniqueImages.map(seedFromFile)),
+    Promise.all(nonImages.map(seedFromFile))
+  ]);
+  const sheetCount = Math.max(1, Math.ceil(imageSeeds.length / CONTACT_SHEET_LIMIT));
+  const sheets = Array.from({ length: sheetCount }, (_, index) =>
+    contactSheetSeed(
+      imageSeeds.slice(index * CONTACT_SHEET_LIMIT, (index + 1) * CONTACT_SHEET_LIMIT),
+      index,
+      sheetCount,
+      duplicateNames
+    )
+  );
+  return [...sheets, ...otherSeeds];
+}
+
 export function seedFromUrl(u: string, html = ''): NodeSeed {
   const m = html && html.match(/<img[^>]+src="([^"]+)"/i);
   if (m) return seedFor('image', { url: m[1], name: u.split('/').pop() || u });
@@ -435,7 +525,7 @@ export function seedFromString(text: string): NodeSeed {
 
 export async function seedsFromDataTransfer(dt: DataTransfer): Promise<NodeSeed[]> {
   const files = [...dt.files];
-  if (files.length) return Promise.all(files.map((file) => seedFromFile(file)));
+  if (files.length) return seedsFromFiles(files);
   const uris = dt
     .getData('text/uri-list')
     .split('\n')

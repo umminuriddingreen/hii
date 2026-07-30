@@ -893,7 +893,8 @@
       "explicit spatial agent intent",
       "follow-up intent branched from a completed run",
       "receipt-listed local workspace artifact",
-      "named scene with explicitly captured object membership"
+      "named scene with explicitly captured object membership",
+      "batch of local reference images"
     ],
     "outputs": [
       "persisted movable workspace nodes",
@@ -909,7 +910,8 @@
       "durable run id and full local proof log",
       "editable receipt-linked text or code artifact",
       "append-only human artifact-edit receipt",
-      "ordered scene navigation with compact membership summaries"
+      "ordered scene navigation with compact membership summaries",
+      "bounded contact sheets with exact-duplicate counts and source hashes"
     ],
     "permissions": [
       "local HII origin only",
@@ -944,6 +946,7 @@
       "tests/unit/dxf.test.ts",
       "scripts/hii-spatial-run-smoke.mjs",
       "scripts/hii-workspace-scenes-smoke.mjs",
+      "scripts/hii-workspace-media-smoke.mjs",
       "~/.hii/workspace/workspace.json",
       "npm run build"
     ],

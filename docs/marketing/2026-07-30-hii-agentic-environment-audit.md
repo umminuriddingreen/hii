@@ -151,7 +151,28 @@ the real canvas.
 The isolated `hii:scenes:check` product gate proves ordering, wrapping
 navigation, explicit membership, type summaries, deterministic viewport
 framing, and persistence after reload. This closes the named Scenes portion of
-orientation at scale. Media stacking, contact sheets, and dedupe remain open.
+orientation at scale. Existing-media organization, stacking, and reviewed
+near-duplicate handling remain open.
+
+### Verified contact-sheet checkpoint
+
+New multi-image imports no longer become one equal-weight canvas node per file.
+When a batch contains four or more images, HII hashes the files locally,
+omits exact byte duplicates before storage, and creates bounded contact sheets
+of at most 80 references each. Every visible thumbnail retains its source name,
+local asset route, local path, size, and SHA-256 proof where persistence
+succeeds. Mixed non-image files remain independent editable or native-linked
+objects.
+
+The isolated `hii:media:check` proves grouping, pre-storage exact dedupe,
+source proof, and mixed-batch behavior. The unit gate additionally proves that
+the 164-image case observed in the live workspace becomes three sheets of
+80, 80, and 4 without dropping a unique source.
+
+This is intentionally non-destructive. Existing flat image fields are not
+silently rewritten, and near-duplicate visual matching is not claimed. A
+future explicit “organize this selection” action, batch labels, and
+perceptual-deduplication review remain open.
 
 ## Evidence reviewed
 
@@ -251,7 +272,7 @@ cloud sync, credits, or a general “AI operating system.”
 | 0 | Artifact-first closure | The output opens beside its inputs, is editable or launches its native editor, and reports exactly what changed. |
 | 0 | Trustworthy context selection | Before approval, the user can see the exact files/nodes/sources included, exclusions, provenance, and likely network boundary. |
 | 0 | Human-readable runtime health | One instance model, one clear status, failures with cause and recovery action, no unexplained process counts. |
-| 1 | Media organization | Imports become stacks, frames, or contact sheets rather than hundreds of equal-weight image nodes. Batch labeling and dedupe are visible. |
+| 1 | Media organization | New multi-image imports become bounded proof-linked contact sheets and exact duplicates are visibly counted. Explicit organization of existing nodes, batch labels, and reviewed perceptual dedupe remain open. |
 | 1 | Run focus and log hygiene | Default progress is a short step list; raw stdout/stderr stays one level deeper. Duplicate tasks and transcript debris are prevented. |
 | 1 | Capability reuse | A successful approved trace can become a draft capability, show required inputs and permissions, and be re-run on new context. |
 | 1 | Onboarding | A clean Mac install reaches the first verified artifact in under ten minutes with no repository knowledge. |
@@ -278,7 +299,8 @@ cloud sync, credits, or a general “AI operating system.”
 
 ### Build next
 
-1. Contact-sheet import, stacking, dedupe, and “organize into frames.”
+1. Extend the verified contact-sheet import with stacking, batch labels,
+   reviewed perceptual dedupe, and an explicit “organize this selection” action.
 2. Exact context preview with secrets/network warnings before approval.
 3. Artifact adapters for the first audience: Markdown, image/reference board,
    code/site preview, and a native-file handoff.
