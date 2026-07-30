@@ -8,6 +8,7 @@
   import CadPane from '$lib/components/workspace/CadPane.svelte';
   import IntentPane from '$lib/components/workspace/IntentPane.svelte';
   import SpatialRunPane from '$lib/components/workspace/SpatialRunPane.svelte';
+  import RunArtifactPane from '$lib/components/workspace/RunArtifactPane.svelte';
   import GovernedResultPane from '$lib/components/workspace/GovernedResultPane.svelte';
   import SurfacePane from '$lib/components/workspace/SurfacePane.svelte';
   import StaticNode from '$lib/components/workspace/StaticNode.svelte';
@@ -145,16 +146,19 @@
     const job=(result.job&&typeof result.job==='object'?result.job:{}) as Record<string,unknown>;
     const contextItems=Array.isArray(result.context)?result.context:[];
     const checks=Array.isArray(receipt.verification)?receipt.verification.filter(check=>check&&typeof check==='object'&&(check as Record<string,unknown>).ok===true):[];
-    const artifacts=Array.isArray(receipt.artifacts)?receipt.artifacts.map(String):[];
+    const allArtifacts=Array.isArray(receipt.artifacts)?receipt.artifacts.map(String):[];
+    const artifacts=allArtifacts.slice(0,6);
     const summary=String(receipt.summary||'The bounded workspace run completed and returned a receipt.');
     const before=doc;
     let z=doc.nextZ;
-    const artifactSeed:NodeSeed={type:'text',w:430,h:260,object:{kind:'artifact',owner:'aii',status:'completed',source:String(result.receiptPath||'HII workspace run receipt'),capabilityId:'hii.agent.workspace_run',runId,parentId:runNode.id,proofRefs:[String(result.receiptPath||''),...artifacts].filter(Boolean),audit:[{ts:new Date().toISOString(),actor:'hii',action:'materialized verified run artifact'}]},payload:{title:'Agent result',name:'verified artifact',summary,content:[summary,...artifacts.map(path=>`artifact: ${path}`)].join('\n\n'),path:artifacts[0]||'',runId}};
-    const artifactNode=makeNode(artifactSeed,runNode.x+runNode.w+40,runNode.y,++z);
-    const receiptSeed:NodeSeed={type:'note',w:430,h:360,object:{kind:'receipt',owner:'aii',status:'completed',source:'HII append-only workspace receipt',capabilityId:'hii.agent.workspace_run',runId,parentId:runNode.id,proofRefs:[String(result.receiptPath||'')].filter(Boolean),audit:[{ts:new Date().toISOString(),actor:'hii',action:'returned verified workspace receipt'}]},payload:{title:'Run receipt',summary,intent:String(result.intent||''),context:contextItems,checks,receiptPath:String(result.receiptPath||''),runId,status:String(job.status||'completed')}};
-    const receiptNode=makeNode(receiptSeed,artifactNode.x,artifactNode.y+artifactNode.h+20,++z);
-    doc={...doc,nextZ:z,nodes:[...doc.nodes,artifactNode,receiptNode]};
-    selected=receiptNode.id;contextSelection=[receiptNode.id];remember(before);persist();fitNodes([runNode,artifactNode,receiptNode],1);
+    const artifactNodes=artifacts.length
+      ? artifacts.map((artifactPath,index)=>makeNode({type:'text',w:460,h:340,object:{kind:'artifact',owner:'aii',status:'completed',source:artifactPath,capabilityId:'hii.agent.workspace_run',runId,parentId:runNode.id,proofRefs:[String(result.receiptPath||''),artifactPath].filter(Boolean),audit:[{ts:new Date().toISOString(),actor:'hii',action:'materialized receipt-linked run artifact'}]},payload:{adapter:'run-artifact',title:artifactPath.split('/').at(-1)||'Run artifact',artifactPath,runId,receiptPath:String(result.receiptPath||''),summary}},runNode.x+runNode.w+40+index*28,runNode.y+index*28,++z))
+      : [makeNode({type:'text',w:430,h:260,object:{kind:'artifact',owner:'aii',status:'completed',source:String(result.receiptPath||'HII workspace run receipt'),capabilityId:'hii.agent.workspace_run',runId,parentId:runNode.id,proofRefs:[String(result.receiptPath||'')].filter(Boolean),audit:[{ts:new Date().toISOString(),actor:'hii',action:'materialized verified run summary'}]},payload:{title:'Agent result',name:'verified artifact',summary,content:summary,path:'',runId}},runNode.x+runNode.w+40,runNode.y,++z)];
+    const receiptAnchor=artifactNodes.at(-1)||runNode;
+    const receiptSeed:NodeSeed={type:'note',w:430,h:360,object:{kind:'receipt',owner:'aii',status:'completed',source:'HII append-only workspace receipt',capabilityId:'hii.agent.workspace_run',runId,parentId:runNode.id,proofRefs:[String(result.receiptPath||'')].filter(Boolean),audit:[{ts:new Date().toISOString(),actor:'hii',action:'returned verified workspace receipt'}]},payload:{title:'Run receipt',summary,intent:String(result.intent||''),context:contextItems,checks,artifactCount:allArtifacts.length,materializedArtifactCount:artifacts.length,receiptPath:String(result.receiptPath||''),runId,status:String(job.status||'completed')}};
+    const receiptNode=makeNode(receiptSeed,receiptAnchor.x,receiptAnchor.y+receiptAnchor.h+20,++z);
+    doc={...doc,nextZ:z,nodes:[...doc.nodes,...artifactNodes,receiptNode]};
+    selected=receiptNode.id;contextSelection=[receiptNode.id];remember(before);persist();fitNodes([runNode,...artifactNodes,receiptNode],1);
   }
   function materializeCapabilityDraft(runNode:WorkspaceNode,result:Record<string,unknown>){
     const id=String(result.id||'');
@@ -265,6 +269,7 @@
             <button class="rounded-full px-2 py-1 font-mono text-[9px] uppercase hover:bg-white" on:click|stopPropagation={()=>patch(node.id,{payload:{...node.payload,collapsed:node.payload.collapsed!==true}})}>{node.payload.collapsed===true?'Expand':'Collapse'}</button>
           </div>
         </div>
+        {:else if node.object?.kind==='artifact'&&node.payload.adapter==='run-artifact'}<RunArtifactPane {node} onPatch={(next)=>patch(node.id,next)} />
         {:else if ['artifact','receipt','capability'].includes(node.object?.kind||'')}<GovernedResultPane {node} />
         {:else if ['note','text','canvas-text','ink','link','file','image','media','html','font'].includes(node.type)}<StaticNode {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} onSize={(size)=>patch(node.id,size)} />
         {:else if node.type==='intent'}<IntentPane {node} />

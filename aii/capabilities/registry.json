@@ -878,7 +878,7 @@
     "name": "Create in the HII Spatial Workspace",
     "owner": "hii",
     "runtime": "next-route",
-    "summary": "Create with editable text and durable media, inspect source-linked PDF documents, local DXF drawings, and 3D models, and branch managed agent intents and live responses directly across the spatial workspace.",
+    "summary": "Create with editable text and durable media, inspect source-linked PDF documents, local DXF drawings, and 3D models, branch governed agent work, and edit receipt-linked text artifacts directly beside their source context.",
     "inputs": [
       "typed canvas text",
       "local clipboard or dropped media",
@@ -888,7 +888,8 @@
       "pointer-based pen or marker strokes",
       "non-destructive crop insets",
       "explicit spatial agent intent",
-      "follow-up intent branched from a completed run"
+      "follow-up intent branched from a completed run",
+      "receipt-listed local workspace artifact"
     ],
     "outputs": [
       "persisted movable workspace nodes",
@@ -901,7 +902,9 @@
       "cropped image extraction or PNG download",
       "governed intent and run objects",
       "incrementally visible managed agent response",
-      "durable run id and full local proof log"
+      "durable run id and full local proof log",
+      "editable receipt-linked text or code artifact",
+      "append-only human artifact-edit receipt"
     ],
     "permissions": [
       "local HII origin only",
@@ -909,7 +912,9 @@
       "render bounded local WebGL without external model upload",
       "no automatic external upload or publication",
       "explicit Send action before intent reaches the configured agent provider",
-      "local export requires an explicit user click"
+      "local export requires an explicit user click",
+      "artifact edits stay inside the completed run's approved workspace root",
+      "optimistic revision match required before artifact overwrite"
     ],
     "visibility": "local",
     "costModel": {
@@ -922,13 +927,16 @@
       "src/lib/components/workspace/CadPane.svelte",
       "src/lib/components/workspace/IntentPane.svelte",
       "src/lib/components/workspace/SpatialRunPane.svelte",
+      "src/lib/components/workspace/RunArtifactPane.svelte",
       "lib/workspace/ingest.ts",
       "lib/workspace/dxf.ts",
       "lib/workspace/run-output.ts",
       "app/api/workspace/assets",
+      "app/api/workspace/artifacts",
       "app/api/daemon/runs",
       "tests/unit/workspace-viewers-contract.test.ts",
       "tests/unit/dxf.test.ts",
+      "scripts/hii-spatial-run-smoke.mjs",
       "~/.hii/workspace/workspace.json",
       "npm run build"
     ],

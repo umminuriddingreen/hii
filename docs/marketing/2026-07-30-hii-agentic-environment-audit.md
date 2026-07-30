@@ -55,7 +55,7 @@ build.
 This closes “one legible governed run,” the first capability-draft path,
 installed-model truth, and the bounded run stop/retry/reconciliation path. It
 does not close the entire maturity matrix. The highest remaining product gates
-are a real editable creative artifact adapter, clean-machine onboarding,
+are image/native creative artifact adapters, clean-machine onboarding,
 packaged-app recovery, human-readable runtime health, and media organization at
 scale.
 
@@ -85,6 +85,31 @@ every product smoke suite, and the production build.
 This closes governed cancellation/retry and installed-model discovery. Recovery
 is now deterministic for the daemon/job boundary, while packaged-app crash and
 upgrade recovery remain clean-machine release gates.
+
+### Verified artifact checkpoint
+
+HII now returns each text or code file named in a completed run receipt as its
+own editable canvas object beside the run. This is the first artifact-first
+adapter, not a generic summary pretending to be the output.
+
+The boundary remains proof-backed:
+
+- The artifact must be named in the completed run's immutable receipt.
+- The resolved file must remain inside that run's approved workspace root.
+- Symlink escapes and unlisted paths are rejected.
+- Saves are atomic and require the revision hash that was opened, preventing a
+  stale canvas from overwriting newer filesystem work.
+- A human edit does not rewrite the agent receipt. HII appends a separate
+  `workspace.artifact.edited` receipt and attaches its id to the canvas
+  object's audit history.
+- Unsupported binary/native files remain source-linked and open in their native
+  Mac app rather than being forced into a fake universal editor.
+
+The isolated spatial-run proof covers read, edit, stale-write conflict,
+unlisted-path rejection, symlink-boundary rejection, and durable human-edit
+provenance. Markdown, text, code, structured data, SVG, and other bounded UTF-8
+formats are supported up to 2 MB. Image, drawing, model, and richer native-file
+adapters remain the next artifact layer.
 
 ## Evidence reviewed
 

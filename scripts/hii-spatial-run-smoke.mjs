@@ -12,6 +12,7 @@ process.env.HII_RUNTIME_DIR = path.join(directory, 'runtime');
 process.env.HII_WORKSPACE_RUN_MODELS = 'qwen3.6:35b-mlx,qwen3.6:27b-mlx';
 
 const runs = await import('../lib/server/hii-workspace-runs.ts');
+const artifacts = await import('../lib/server/hii-workspace-artifacts.ts');
 const jobs = await import('../lib/capabilities/local-store.ts');
 
 try {
@@ -59,12 +60,17 @@ try {
   assert.equal(intent.kind, 'workspace.run');
   assert.match(intent.goal, /Approved HII canvas context/);
 
+  const changedArtifact = path.join(workspaceRoot, 'proof.txt');
+  const outsideArtifact = path.join(directory, 'outside.txt');
+  fs.writeFileSync(changedArtifact, 'original proof\n');
+  fs.writeFileSync(outsideArtifact, 'outside boundary\n');
+  fs.symlinkSync(outsideArtifact, path.join(workspaceRoot, 'escape.txt'));
   const receiptPath = path.join(directory, 'receipt.json');
   fs.writeFileSync(receiptPath, `${JSON.stringify({
     id: 'verified-receipt',
     status: 'completed',
     summary: 'Created the isolated proof artifact.',
-    artifacts: ['proof.txt'],
+    artifacts: ['proof.txt', 'escape.txt'],
     verification: [{ command: 'test -f proof.txt', ok: true, output: 'passed' }]
   }, null, 2)}\n`);
   const completedAt = new Date().toISOString();
@@ -87,6 +93,36 @@ try {
   assert.equal(completed.job.status, 'completed');
   assert.equal(completed.receipt.summary, 'Created the isolated proof artifact.');
 
+  const openedArtifact = await artifacts.readWorkspaceRunArtifact({ runId: 'spatial-demo', artifact: 'proof.txt' });
+  assert.equal(openedArtifact.content, 'original proof\n');
+  assert.equal(openedArtifact.editable, true);
+  const editedArtifact = await artifacts.saveWorkspaceRunArtifact({
+    runId: 'spatial-demo',
+    artifact: 'proof.txt',
+    content: 'human edited proof\n',
+    ifMatch: openedArtifact.revision
+  });
+  assert.equal(fs.readFileSync(changedArtifact, 'utf8'), 'human edited proof\n');
+  assert.equal(editedArtifact.edit.actor, 'human');
+  assert.ok(fs.existsSync(path.join(process.env.HII_RUNTIME_DIR, 'workspace', 'artifact-edits.jsonl')));
+  await assert.rejects(
+    () => artifacts.saveWorkspaceRunArtifact({
+      runId: 'spatial-demo',
+      artifact: 'proof.txt',
+      content: 'stale overwrite\n',
+      ifMatch: openedArtifact.revision
+    }),
+    /changed since it was opened/
+  );
+  await assert.rejects(
+    () => artifacts.readWorkspaceRunArtifact({ runId: 'spatial-demo', artifact: 'escape.txt' }),
+    /outside the approved workspace boundary/
+  );
+  await assert.rejects(
+    () => artifacts.readWorkspaceRunArtifact({ runId: 'spatial-demo', artifact: 'not-in-receipt.txt' }),
+    /not named in this run receipt/
+  );
+
   const draft = await runs.createWorkspaceRunCapabilityDraft({
     id: 'spatial-demo',
     name: 'Create isolated proof artifact'
@@ -105,6 +141,9 @@ try {
   console.log('models:       installed-only discovery and rejection verified');
   console.log('handoff:      selected canvas context -> AII workspace.run verified');
   console.log('receipt:      completed job -> structured receipt verified');
+  console.log('artifact:     receipt-listed file -> editable HII object verified');
+  console.log('edit proof:   atomic save + optimistic conflict + human receipt verified');
+  console.log('boundary:     unlisted and symlink-escaped artifacts rejected');
   console.log('capability:   verified receipt -> idempotent review draft verified');
 } finally {
   fs.rmSync(directory, { recursive: true, force: true });

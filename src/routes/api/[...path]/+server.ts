@@ -19,6 +19,7 @@ import * as skills from '@/app/api/skills/route';
 import * as terminalSessions from '@/app/api/terminal/sessions/route';
 import * as terminalStream from '@/app/api/terminal/stream/route';
 import * as workspaceAsset from '@/app/api/workspace/assets/[name]/route';
+import * as workspaceArtifacts from '@/app/api/workspace/artifacts/route';
 import * as workspaceAssets from '@/app/api/workspace/assets/route';
 import * as workspaceRuns from '@/app/api/workspace/runs/route';
 import * as workspaceSnapshot from '@/app/api/workspace/snapshot/route';
@@ -49,6 +50,7 @@ const routes: Array<{ pattern: RegExp; module: LegacyModule; keys?: string[] }> 
   { pattern: /^terminal\/sessions$/, module: terminalSessions },
   { pattern: /^terminal\/stream$/, module: terminalStream },
   { pattern: /^workspace\/assets\/([^/]+)$/, module: workspaceAsset, keys: ['name'] },
+  { pattern: /^workspace\/artifacts$/, module: workspaceArtifacts },
   { pattern: /^workspace\/assets$/, module: workspaceAssets },
   { pattern: /^workspace\/runs$/, module: workspaceRuns },
   { pattern: /^workspace\/snapshot$/, module: workspaceSnapshot },

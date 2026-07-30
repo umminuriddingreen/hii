@@ -8,6 +8,10 @@ const chat = readFileSync(resolve(root, 'src/lib/components/workspace/ChatPane.s
 const spatialRun = readFileSync(resolve(root, 'src/lib/components/workspace/SpatialRunPane.svelte'), 'utf8');
 const workspaceRuns = readFileSync(resolve(root, 'lib/server/hii-workspace-runs.ts'), 'utf8');
 const workspaceRunRoute = readFileSync(resolve(root, 'app/api/workspace/runs/route.ts'), 'utf8');
+const workspaceArtifacts = readFileSync(resolve(root, 'lib/server/hii-workspace-artifacts.ts'), 'utf8');
+const workspaceArtifactRoute = readFileSync(resolve(root, 'app/api/workspace/artifacts/route.ts'), 'utf8');
+const apiBridge = readFileSync(resolve(root, 'src/routes/api/[...path]/+server.ts'), 'utf8');
+const runArtifactPane = readFileSync(resolve(root, 'src/lib/components/workspace/RunArtifactPane.svelte'), 'utf8');
 const hiid = readFileSync(resolve(root, 'aii/daemon/hiid.mjs'), 'utf8');
 const knowledgeRuns = readFileSync(resolve(root, 'lib/server/hii-knowledge-runs.ts'), 'utf8');
 const explorer = readFileSync(resolve(root, 'src/lib/components/workspace/ExplorerPane.svelte'), 'utf8');
@@ -82,6 +86,21 @@ describe('agentic workspace interaction contract', () => {
     expect(workspaceRuns).toContain('createWorkspaceRunCapabilityDraft');
     expect(workspaceRuns).toContain("'--repeatable'");
     expect(workspaceRuns).not.toContain('skill register');
+  });
+
+  it('returns receipt-listed artifacts as editable, provenance-preserving HII objects', () => {
+    expect(workspace).toContain("adapter:'run-artifact'");
+    expect(workspace).toContain('<RunArtifactPane');
+    expect(workspaceArtifacts).toContain('The file is not named in this run receipt.');
+    expect(workspaceArtifacts).toContain('outside the approved workspace boundary');
+    expect(workspaceArtifacts).toContain('The artifact changed since it was opened.');
+    expect(workspaceArtifacts).toContain("'workspace.artifact.edited'");
+    expect(workspaceArtifactRoute).toContain('localTerminalAllowed');
+    expect(workspaceArtifactRoute).toContain('saveWorkspaceRunArtifact');
+    expect(apiBridge).toContain('/^workspace\\/artifacts$/');
+    expect(runArtifactPane).toContain('Save edit');
+    expect(runArtifactPane).toContain('human edit receipt');
+    expect(runArtifactPane).toContain("method: 'PATCH'");
   });
 
   it('opens the combined browser and terminal explorer on workspace double-click', () => {
