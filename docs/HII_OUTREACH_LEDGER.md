@@ -8,6 +8,10 @@ All targets are based on public work. No private contact data belongs here.
 > One real Mac job, one explicit context boundary, one finished result, and one
 > receipt. Founder-led. No general feature tour.
 
+Use `https://humaninformationinterface.com/architecture` only after the person
+responds or asks what HII is. The first message should remain about their job,
+not a link.
+
 ## First cohort: existing LinkedIn connections
 
 | # | Public target | Why this is a fit | Personalized opening | Status |

@@ -241,6 +241,7 @@
     <HiiLogo />
     <p>Human intent → bounded work → visible proof</p>
     <div>
+      <a href="/architecture">Architecture cohort</a>
       <a href="/privacy">Privacy</a>
       <a href="mailto:hello@humaninformationinterface.com">hello@humaninformationinterface.com</a>
     </div>

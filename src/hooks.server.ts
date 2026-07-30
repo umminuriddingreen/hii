@@ -6,6 +6,7 @@ const cloudflareLaunchRoutes = new Set([
   '/landing',
   '/learn',
   '/activate',
+  '/architecture',
   '/pilot',
   '/privacy'
 ]);

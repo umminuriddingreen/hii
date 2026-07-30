@@ -184,7 +184,7 @@ First founder comment:
 > Mac. A founder test begins only after we agree on the job and exactly what HII
 > may use.
 >
-> humaninformationinterface.com/learn
+> humaninformationinterface.com/architecture
 > humaninformationinterface.com/privacy
 
 ### X

@@ -7,6 +7,8 @@ const hooks = readFileSync(path.join(root, 'src/hooks.ts'), 'utf8');
 const vite = readFileSync(path.join(root, 'vite.config.ts'), 'utf8');
 const homepage = readFileSync(path.join(root, 'src/routes/(app)/landing/+page.svelte'), 'utf8');
 const privacy = readFileSync(path.join(root, 'src/routes/privacy/+page.svelte'), 'utf8');
+const architecture = readFileSync(path.join(root, 'src/routes/architecture/+page.svelte'), 'utf8');
+const serverHooks = readFileSync(path.join(root, 'src/hooks.server.ts'), 'utf8');
 
 describe('public HII homepage', () => {
   it('serves the homepage at the canonical domain without replacing the local workspace root', () => {
@@ -48,9 +50,24 @@ describe('public HII homepage', () => {
 
   it('links to a plain-language privacy boundary before public recruitment', () => {
     expect(homepage).toContain('href="/privacy"');
+    expect(homepage).toContain('href="/architecture"');
     expect(privacy).toContain('They do not run an agent, inspect your Mac, read your files');
     expect(privacy).toContain('Choosing a local Ollama model keeps model inference on your Mac');
     expect(privacy).toContain('Cloudflare serves this site');
     expect(privacy).toContain('HII does not sell applicant information');
+  });
+
+  it('offers architects and computational designers a truthful segment-specific first win', () => {
+    expect(serverHooks).toContain("'/architecture'");
+    expect(architecture).toContain('https://humaninformationinterface.com/architecture');
+    expect(architecture).toContain('HII for architecture + computational design');
+    expect(architecture).toContain('Trace a site decision');
+    expect(architecture).toContain('Prepare a design review');
+    expect(architecture).toContain('Debug a computational workflow');
+    expect(architecture).toContain('A model is not<br />a project boundary.');
+    expect(architecture).toContain('/marketing/hii-first-win-demo.mp4');
+    expect(architecture).toContain('The demonstration uses sample data and cannot inspect your Mac');
+    expect(architecture).toContain('Apply for founder activation · $500');
+    expect(architecture).toContain('href="/privacy"');
   });
 });
