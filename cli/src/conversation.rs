@@ -24,6 +24,7 @@ use std::{
 const AUTO_COMPACT_CHARS: usize = 64 * 1024;
 const COMPACTION_TRANSCRIPT_CHARS: usize = 56 * 1024;
 const GOAL_CONTEXT_PREFIX: &str = "ACTIVE SESSION GOAL:";
+const PLAN_CONTEXT_PREFIX: &str = "PLAN MODE:";
 
 struct CompactionStats {
     before_messages: usize,
@@ -122,6 +123,7 @@ pub struct Conversation {
     queued_inputs: VecDeque<String>,
     public_test: bool,
     goal: Option<SessionGoal>,
+    plan_mode: bool,
 }
 
 impl Conversation {
@@ -168,6 +170,7 @@ impl Conversation {
             queued_inputs: VecDeque::new(),
             public_test,
             goal: None,
+            plan_mode: false,
         })
     }
 
@@ -356,6 +359,17 @@ impl Conversation {
                             && !command.as_deref().is_some_and(shell_command_is_preview))
                         || (crate::hii_tools::is_hii_tool(&tool)
                             && crate::hii_tools::is_mutating(&tool));
+                    if self.plan_mode && !plan_tool_allowed(&tool, shell_evidence) {
+                        self.store.event(
+                            "authority.block",
+                            json!({ "step": step, "tool": tool, "reason": "plan mode" }),
+                        )?;
+                        self.messages.push(Message::assistant(raw));
+                        self.messages.push(Message::user(
+                            "PLAN MODE: do not write, edit, verify, or run mutating tools. Continue with read/list/search/web_search/http or read-only shell evidence, then return a concrete plan. The operator can use /plan off before implementation.",
+                        ));
+                        continue;
+                    }
                     let web_mutation =
                         mutation && path.as_deref().is_some_and(previewable_web_path);
                     let deletion = (tool == "shell" || tool == "verify")
@@ -573,7 +587,9 @@ impl Conversation {
             .messages
             .iter()
             .filter(|message| {
-                message.role != "system" || !message.content.starts_with(GOAL_CONTEXT_PREFIX)
+                message.role != "system"
+                    || (!message.content.starts_with(GOAL_CONTEXT_PREFIX)
+                        && !message.content.starts_with(PLAN_CONTEXT_PREFIX))
             })
             .count()
             .saturating_sub(1);
@@ -584,6 +600,7 @@ impl Conversation {
             .ok_or_else(|| "conversation system context is missing".to_string())?;
         self.messages = vec![system];
         self.sync_goal_context();
+        self.sync_plan_context();
         self.store.event(
             "conversation.cleared",
             json!({ "removed_messages": removed }),
@@ -631,6 +648,16 @@ impl Conversation {
                 json!({ "role": message.role, "content": redact_text(&message.content) }),
             )?;
         }
+        if let Some(goal) = &self.goal {
+            fork.event(
+                "conversation.goal",
+                json!({ "objective": goal.objective, "paused": goal.paused }),
+            )?;
+        }
+        fork.event(
+            "conversation.plan_mode",
+            json!({ "enabled": self.plan_mode }),
+        )?;
         Ok(format!(
             "Forked this conversation to {}. The live session is unchanged.",
             fork.id
@@ -694,16 +721,32 @@ impl Conversation {
             Some(goal) => goal.objective.clone(),
             None => "none".into(),
         };
+        let mode = if self.plan_mode { "plan" } else { "workspace" };
         format!(
-            "{} messages · {} characters\n{}\n{}\n{}\nGoal: {}\nLearning draft: {}",
+            "{} messages · {} characters\n{}\n{}\n{}\nMode: {}\nGoal: {}\nLearning draft: {}",
             self.messages.len().saturating_sub(1),
             self.context_chars(),
             self.model,
             self.tools.workspace().display(),
             self.usage.summary(),
+            mode,
             goal,
             learning
         )
+    }
+
+    pub fn plan(&mut self, enabled: bool) -> Result<String, String> {
+        self.plan_mode = enabled;
+        self.sync_plan_context();
+        self.store
+            .event("conversation.plan_mode", json!({ "enabled": enabled }))?;
+        Ok(if enabled {
+            "Plan mode enabled. HII can inspect and research, but cannot change the workspace."
+                .into()
+        } else {
+            "Plan mode disabled. Workspace actions are available under the active permissions."
+                .into()
+        })
     }
 
     pub fn goal(&mut self, requested: Option<&str>) -> Result<String, String> {
@@ -781,6 +824,21 @@ impl Conversation {
         );
     }
 
+    fn sync_plan_context(&mut self) {
+        self.messages.retain(|message| {
+            message.role != "system" || !message.content.starts_with(PLAN_CONTEXT_PREFIX)
+        });
+        if !self.plan_mode {
+            return;
+        }
+        self.messages.insert(
+            1.min(self.messages.len()),
+            Message::system(
+                "PLAN MODE: inspect and reason only. Use read, list, search, web_search, http, or read-only shell evidence. Do not write, edit, verify, or mutate anything. Return a concrete implementation plan when enough evidence is available.",
+            ),
+        );
+    }
+
     pub fn rename(&self, requested: &str) -> Result<String, String> {
         let title = requested.split_whitespace().collect::<Vec<_>>().join(" ");
         if title.is_empty() {
@@ -834,6 +892,10 @@ impl Conversation {
     pub fn shell_interactive(&self, command: &str) -> String {
         if command.is_empty() {
             return "usage: !<command>".into();
+        }
+        if self.plan_mode && !shell_command_is_read_only(command) {
+            return "Plan mode blocks workspace changes. Use a read-only command or /plan off."
+                .into();
         }
         let deletion = deletion_shell(command);
         if deletion && !crate::agent::request_deletion_approval(command) {
@@ -1032,7 +1094,9 @@ impl Conversation {
         let count = restored.len();
         self.messages = std::iter::once(system).chain(restored).collect();
         self.goal = session_goal(&raw);
+        self.plan_mode = session_plan_mode(&raw);
         self.sync_goal_context();
+        self.sync_plan_context();
         self.store.event(
             "conversation.resumed",
             json!({ "source": id, "messages": count }),
@@ -1112,6 +1176,8 @@ impl Conversation {
         );
         let after_chars = checkpoint.chars().count();
         self.messages = vec![system, Message::system(checkpoint)];
+        self.sync_goal_context();
+        self.sync_plan_context();
         self.store.event(
             "conversation.compacted",
             json!({
@@ -1518,6 +1584,11 @@ fn shell_command_is_preview(command: &str) -> bool {
         .any(|prefix| lowered.starts_with(prefix))
 }
 
+fn plan_tool_allowed(tool: &str, shell_evidence: bool) -> bool {
+    matches!(tool, "read" | "list" | "search" | "web_search" | "http")
+        || (tool == "shell" && shell_evidence)
+}
+
 fn needs_verification(mutation_epoch: usize, verified_epoch: Option<usize>) -> bool {
     mutation_epoch > 0 && verified_epoch != Some(mutation_epoch)
 }
@@ -1692,6 +1763,22 @@ fn session_goal(raw: &str) -> Option<SessionGoal> {
     goal
 }
 
+fn session_plan_mode(raw: &str) -> bool {
+    raw.lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|event| {
+            event.get("kind").and_then(|value| value.as_str()) == Some("conversation.plan_mode")
+        })
+        .filter_map(|event| {
+            event
+                .get("data")
+                .and_then(|data| data.get("enabled"))
+                .and_then(|value| value.as_bool())
+        })
+        .next_back()
+        .unwrap_or(false)
+}
+
 fn copy_to_clipboard(value: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let candidates = vec![("pbcopy", Vec::<&str>::new())];
@@ -1794,8 +1881,9 @@ Paths are literal, never Markdown links. Avoid generic greetings. Use one tool a
 mod tests {
     use super::{
         conversation_prompt, needs_verification, observation_signature, plain_message,
-        public_test_sensitive_shell, resumable_messages, session_goal, session_title,
-        shell_command_is_preview, shell_command_is_read_only, verification_required_message,
+        plan_tool_allowed, public_test_sensitive_shell, resumable_messages, session_goal,
+        session_plan_mode, session_title, shell_command_is_preview, shell_command_is_read_only,
+        verification_required_message,
     };
     use std::path::Path;
 
@@ -1944,5 +2032,26 @@ mod tests {
         );
         let cleared = format!("{active}{{\"kind\":\"conversation.goal_cleared\",\"data\":{{}}}}\n");
         assert_eq!(session_goal(&cleared), None);
+    }
+
+    #[test]
+    fn plan_mode_only_allows_observation_tools() {
+        assert!(plan_tool_allowed("read", false));
+        assert!(plan_tool_allowed("web_search", false));
+        assert!(plan_tool_allowed("http", false));
+        assert!(plan_tool_allowed("shell", true));
+        assert!(!plan_tool_allowed("shell", false));
+        assert!(!plan_tool_allowed("write", false));
+        assert!(!plan_tool_allowed("verify", false));
+    }
+
+    #[test]
+    fn session_plan_mode_restores_the_latest_state() {
+        let raw = concat!(
+            "{\"kind\":\"conversation.plan_mode\",\"data\":{\"enabled\":true}}\n",
+            "{\"kind\":\"conversation.plan_mode\",\"data\":{\"enabled\":false}}\n",
+            "{\"kind\":\"conversation.plan_mode\",\"data\":{\"enabled\":true}}\n",
+        );
+        assert!(session_plan_mode(raw));
     }
 }

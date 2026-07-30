@@ -24,6 +24,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/help", "all controls"),
     ("/status", "session state"),
     ("/goal", "persistent objective"),
+    ("/plan", "inspect before acting"),
     ("/usage", "tokens and speed"),
     ("/thinking", "thought stream"),
     ("/raw", "raw model stream"),
