@@ -378,7 +378,7 @@ pub fn read_event(public_test: bool, history: &[String]) -> Result<InputEvent> {
     let _guard = RawModeGuard::enter()?;
     let mut buf = String::new();
     let mut cursor = 0usize;
-    let mut frame = 0usize;
+    let frame = 0usize;
     let mut selected = 0usize;
     let mut menu_rows = 0usize;
     let mut history_index = history.len();
@@ -395,17 +395,6 @@ pub fn read_event(public_test: bool, history: &[String]) -> Result<InputEvent> {
         if !event::poll(Duration::from_millis(140))
             .map_err(|e| format!("failed to poll terminal event: {e}"))?
         {
-            if crate::tui::motion_enabled() {
-                frame += 1;
-                redraw(
-                    &crate::tui::prompt_frame(frame),
-                    &buf,
-                    cursor,
-                    selected,
-                    &mut menu_rows,
-                    public_test,
-                )?;
-            }
             continue;
         }
         if let Event::Key(key) = event::read().map_err(|e| format!("failed to read key: {e}"))? {

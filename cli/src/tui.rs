@@ -65,12 +65,6 @@ fn color_enabled() -> bool {
         && env::var("TERM").map_or(true, |term| term != "dumb")
 }
 
-pub fn motion_enabled() -> bool {
-    color_enabled()
-        && env::var("HII_MOTION").map_or(true, |value| value != "off")
-        && env::var("HII_REDUCED_MOTION").map_or(true, |value| value != "1")
-}
-
 fn paint(text: &str, codes: &[&str]) -> String {
     if !color_enabled() {
         return text.to_string();
@@ -173,14 +167,8 @@ pub fn welcome(workspace: &Path, model: &str, max_steps: usize, git: &str, publi
     println!();
 }
 
-pub fn prompt_frame(frame: usize) -> String {
-    let glyphs = ["◇", "◈", "◆", "◈"];
-    let glyph = if motion_enabled() {
-        glyphs[frame % glyphs.len()]
-    } else {
-        "◈"
-    };
-    format!("  {} ", paint(glyph, &[BOLD, CYAN]))
+pub fn prompt_frame(_frame: usize) -> String {
+    format!("  {} ", paint("◇", &[BOLD, CYAN]))
 }
 
 fn public_command(command: &str) -> bool {
@@ -436,6 +424,7 @@ mod tests {
     #[test]
     fn prompt_frame_is_always_present() {
         assert!(!prompt_frame(0).trim().is_empty());
+        assert_eq!(prompt_frame(0), prompt_frame(99));
     }
 
     #[test]
