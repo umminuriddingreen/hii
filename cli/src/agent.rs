@@ -6,11 +6,12 @@ use crate::{
     tools::{ToolResult, Toolbelt},
 };
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::{
     collections::{BTreeSet, HashSet},
+    fs,
     io::{self, IsTerminal, Write},
-    path::PathBuf,
+    path::{Component, Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
     sync::mpsc,
     sync::OnceLock,
@@ -45,6 +46,32 @@ pub struct RunOptions {
     pub done_when: Option<String>,
     pub verify: Vec<String>,
     pub use_context: bool,
+    pub output: RunOutput,
+    pub last_message: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RunOutput {
+    Human,
+    Json,
+    Jsonl,
+}
+
+fn jsonl_event(event: &str, data: Value) -> Value {
+    json!({
+        "schemaVersion": 1,
+        "event": event,
+        "atUnixMs": unix_ms(),
+        "data": data
+    })
+}
+
+fn emit_jsonl(output: RunOutput, event: &str, data: Value) {
+    if output != RunOutput::Jsonl {
+        return;
+    }
+    println!("{}", jsonl_event(event, data));
+    let _ = io::stdout().flush();
 }
 
 #[derive(Debug, Deserialize)]
@@ -87,6 +114,19 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     validate_declared_verification(&options.verify)?;
 
     let tools = Toolbelt::new(options.workspace)?;
+    let last_message = options
+        .last_message
+        .as_deref()
+        .map(|requested| {
+            if options.authority == Authority::ReadOnly {
+                return Err("--last-message requires workspace write authority".into());
+            }
+            if options.dry_run {
+                return Err("--last-message cannot be used with --dry-run".into());
+            }
+            resolve_last_message_path(tools.workspace(), requested)
+        })
+        .transpose()?;
     let git_before = tools.git_snapshot();
     let ollama = Ollama::new(AppPaths::ollama_url());
     let models = ollama.models()?;
@@ -110,6 +150,17 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             "dry_run": options.dry_run
         }),
     )?;
+    emit_jsonl(
+        options.output,
+        "run.started",
+        json!({
+            "runId": &store.id,
+            "goal": redact_text(&options.goal),
+            "workspace": tools.workspace(),
+            "model": &model,
+            "authority": options.authority.label()
+        }),
+    );
 
     let contract = Contract::infer(&options.goal, options.authority)
         .with_done_when(options.done_when.as_deref());
@@ -128,13 +179,13 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             "declared_verification": options.verify,
         }),
     )?;
-    if options.authority == Authority::Yolo {
+    if options.output == RunOutput::Human && options.authority == Authority::Yolo {
         println!(
             "⚡ YOLO — autonomous, no approval prompts. Authority: {}. Workspace/secret guards still apply; a full receipt is written.",
             tools.workspace().display()
         );
     }
-    if options.verbose {
+    if options.output == RunOutput::Human && options.verbose {
         println!("HII run {}", store.id);
         println!("{}\n", contract.banner());
     }
@@ -174,15 +225,25 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             break;
         }
         steps += 1;
-        let raw = stream_model_json(&ollama, &model, &messages, steps)?.content;
+        let raw = stream_model_json(&ollama, &model, &messages, steps, options.output)?.content;
         store.event(
             "model.response",
             json!({ "step": steps, "content": redact_text(&raw) }),
         )?;
+        emit_jsonl(
+            options.output,
+            "model.response",
+            json!({ "step": steps, "content": redact_text(&raw) }),
+        );
         let action = match parse_action(&raw) {
             Ok(action) => action,
             Err(error) => {
-                if options.verbose {
+                emit_jsonl(
+                    options.output,
+                    "protocol.retry",
+                    json!({ "step": steps, "error": &error }),
+                );
+                if options.output == RunOutput::Human && options.verbose {
                     println!("[step {steps}] protocol retry: {error}");
                 }
                 messages.push(Message::assistant(raw));
@@ -208,7 +269,12 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 limit,
             } => {
                 let label = reason.as_deref().unwrap_or("using workspace tool");
-                if io::stdout().is_terminal() {
+                emit_jsonl(
+                    options.output,
+                    "tool.started",
+                    json!({ "step": steps, "tool": &tool, "target": label }),
+                );
+                if options.output == RunOutput::Human && io::stdout().is_terminal() {
                     crate::tui::tool_start(steps, &tool, label);
                 }
                 let is_hii = crate::hii_tools::is_hii_tool(&tool);
@@ -300,7 +366,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                         observations.insert(key);
                     }
                 }
-                if io::stdout().is_terminal() {
+                if options.output == RunOutput::Human && io::stdout().is_terminal() {
                     crate::tui::tool_result(result.ok, result.verification);
                     if !result.ok {
                         crate::tui::tool_failure_detail(&safe_output);
@@ -325,12 +391,23 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     "tool.result",
                     json!({
                         "step": steps,
+                        "tool": &tool,
+                        "ok": result.ok,
+                        "verification": result.verification,
+                        "output": &safe_output
+                    }),
+                )?;
+                emit_jsonl(
+                    options.output,
+                    "tool.result",
+                    json!({
+                        "step": steps,
                         "tool": tool,
                         "ok": result.ok,
                         "verification": result.verification,
                         "output": safe_output
                     }),
-                )?;
+                );
                 messages.push(Message::assistant(raw));
                 let proof_hint = if result.ok && mutates && !options.dry_run {
                     format!(
@@ -361,7 +438,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                         "No passing HII verification exists for the latest workspace mutation (model claim: {}). Read/list/search are observation only. Run one actual check with verify or http before finalizing.",
                         if claimed.is_empty() { "none" } else { "present" }
                     )));
-                    if options.verbose {
+                    if options.output == RunOutput::Human && options.verbose {
                         println!("[step {steps}] proof required before completion");
                     }
                     continue;
@@ -417,10 +494,41 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     if !declared_checks_passed {
         summary.push_str(" Declared acceptance verification failed.");
     }
+    if let Some(path) = last_message.as_deref() {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "cannot create --last-message directory {}: {error}",
+                    parent.display()
+                )
+            })?;
+        }
+        fs::write(path, format!("{summary}\n")).map_err(|error| {
+            format!(
+                "cannot write --last-message output {}: {error}",
+                path.display()
+            )
+        })?;
+        let relative = path
+            .strip_prefix(tools.workspace())
+            .expect("validated last-message path must remain inside workspace")
+            .display()
+            .to_string();
+        touched_artifacts.insert(relative.clone());
+        store.event(
+            "output.written",
+            json!({ "kind": "last_message", "path": &relative }),
+        )?;
+        emit_jsonl(
+            options.output,
+            "output.written",
+            json!({ "kind": "last_message", "path": relative }),
+        );
+    }
     let git_status = tools.git_snapshot();
     let review = match review_model.as_deref() {
         Some(reviewer) => {
-            if options.verbose {
+            if options.output == RunOutput::Human && options.verbose {
                 println!("review     {reviewer}");
             }
             let prompt = format!(
@@ -493,15 +601,29 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         json!({ "status": receipt.status, "summary": receipt.summary }),
     )?;
     let path = store.finish(&paths.runtime, &receipt)?;
-    if options.verbose {
-        print_receipt(&receipt, &path);
-    } else {
-        if io::stdout().is_terminal() {
-            print!("\x1b[2K\r");
-        }
-        println!("{}", receipt.summary);
-        if let Some(review) = receipt.review.as_deref() {
-            println!("\nReview: {review}");
+    match options.output {
+        RunOutput::Json => println!(
+            "{}",
+            json!({
+                "schemaVersion": 1,
+                "receipt": &receipt,
+                "proof": path
+            })
+        ),
+        RunOutput::Jsonl => emit_jsonl(
+            options.output,
+            "run.finished",
+            json!({ "receipt": &receipt, "proof": path }),
+        ),
+        RunOutput::Human if options.verbose => print_receipt(&receipt, &path),
+        RunOutput::Human => {
+            if io::stdout().is_terminal() {
+                print!("\x1b[2K\r");
+            }
+            println!("{}", receipt.summary);
+            if let Some(review) = receipt.review.as_deref() {
+                println!("\nReview: {review}");
+            }
         }
     }
     Ok(receipt)
@@ -576,6 +698,7 @@ fn stream_model_json(
     model: &str,
     messages: &[Message],
     step: usize,
+    output: RunOutput,
 ) -> Result<ChatResult, String> {
     let ollama = ollama.clone();
     let model_for_thread = model.to_string();
@@ -585,7 +708,7 @@ fn stream_model_json(
         ollama.chat_with_stream(&model_for_thread, &messages, true, true, sender);
     });
 
-    let interactive = io::stdout().is_terminal();
+    let interactive = output == RunOutput::Human && io::stdout().is_terminal();
     let mut thinking_started = false;
     let mut content_started = false;
     loop {
@@ -642,6 +765,70 @@ fn validate_declared_verification(commands: &[String]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn resolve_last_message_path(workspace: &Path, requested: &Path) -> Result<PathBuf, String> {
+    let relative = if requested.is_absolute() {
+        requested.strip_prefix(workspace).map_err(|_| {
+            format!(
+                "--last-message must stay inside the workspace: {}",
+                requested.display()
+            )
+        })?
+    } else {
+        requested
+    };
+    let mut normalized = PathBuf::new();
+    for component in relative.components() {
+        match component {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(format!(
+                    "--last-message must stay inside the workspace: {}",
+                    requested.display()
+                ))
+            }
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        return Err("--last-message requires a file path inside the workspace".into());
+    }
+
+    let target = workspace.join(normalized);
+    if target.exists() {
+        let metadata = fs::symlink_metadata(&target).map_err(|error| error.to_string())?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "--last-message cannot write through a symlink: {}",
+                target.display()
+            ));
+        }
+        let canonical = target.canonicalize().map_err(|error| error.to_string())?;
+        if !canonical.starts_with(workspace) {
+            return Err(format!(
+                "--last-message must stay inside the workspace: {}",
+                requested.display()
+            ));
+        }
+    } else {
+        let mut ancestor = target
+            .parent()
+            .ok_or_else(|| "--last-message requires a parent directory".to_string())?;
+        while !ancestor.exists() {
+            ancestor = ancestor
+                .parent()
+                .ok_or_else(|| "--last-message could not resolve a workspace parent".to_string())?;
+        }
+        let canonical = ancestor.canonicalize().map_err(|error| error.to_string())?;
+        if !canonical.starts_with(workspace) {
+            return Err(format!(
+                "--last-message must stay inside the workspace: {}",
+                requested.display()
+            ));
+        }
+    }
+    Ok(target)
 }
 
 fn shell_command_changes_workspace(command: &str) -> bool {
@@ -988,6 +1175,20 @@ fn print_receipt(receipt: &Receipt, path: &std::path::Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        process,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn temp_workspace() -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after the Unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("hii-run-output-{}-{nonce}", process::id()));
+        fs::create_dir_all(&path).expect("create temporary workspace");
+        path.canonicalize().expect("canonicalize workspace")
+    }
 
     #[test]
     fn parses_json_action() {
@@ -1150,5 +1351,43 @@ mod tests {
         let before = " M existing.rs\n?? old.txt";
         let after = " M existing.rs\n?? old.txt\n?? new.txt";
         assert_eq!(artifact_inventory(before, after), vec!["new.txt"]);
+    }
+
+    #[test]
+    fn jsonl_events_have_a_stable_envelope() {
+        let event = jsonl_event("tool.started", json!({ "tool": "read" }));
+        assert_eq!(event["schemaVersion"], 1);
+        assert_eq!(event["event"], "tool.started");
+        assert_eq!(event["data"]["tool"], "read");
+        assert!(event["atUnixMs"].as_u64().is_some());
+    }
+
+    #[test]
+    fn last_message_paths_are_bounded_to_the_workspace() {
+        let workspace = temp_workspace();
+        let nested = resolve_last_message_path(&workspace, Path::new("output/final.txt"))
+            .expect("relative path should resolve");
+        assert_eq!(nested, workspace.join("output/final.txt"));
+        assert!(resolve_last_message_path(&workspace, Path::new("../escape.txt")).is_err());
+        assert!(resolve_last_message_path(&workspace, Path::new("/tmp/escape.txt")).is_err());
+        assert_eq!(
+            resolve_last_message_path(&workspace, &workspace.join("inside.txt"))
+                .expect("absolute in-workspace path should resolve"),
+            workspace.join("inside.txt")
+        );
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn last_message_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = temp_workspace();
+        let outside = temp_workspace();
+        symlink(&outside, workspace.join("outside")).expect("create escape symlink");
+        assert!(resolve_last_message_path(&workspace, Path::new("outside/final.txt")).is_err());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+        fs::remove_dir_all(outside).expect("remove outside directory");
     }
 }

@@ -20,7 +20,7 @@ mod system_monitor;
 mod tools;
 mod tui;
 
-use agent::RunOptions;
+use agent::{RunOptions, RunOutput};
 use clap::{Parser, Subcommand, ValueEnum};
 use config::{AppPaths, DEFAULT_MAX_STEPS, DEFAULT_MODEL, DEFAULT_REVIEW_MODEL};
 use conversation::Conversation;
@@ -90,7 +90,7 @@ enum SessionProfile {
 enum Commands {
     #[command(alias = "agent", about = "Complete a goal inside a bounded workspace")]
     Run {
-        #[arg(required = true, trailing_var_arg = true)]
+        #[arg(required = true, num_args = 1..)]
         goal: Vec<String>,
         #[arg(
             long,
@@ -134,6 +134,24 @@ enum Commands {
             help = "Do not preload workspace instructions, Git state, or prior HII receipts"
         )]
         no_context: bool,
+        #[arg(
+            long,
+            conflicts_with_all = ["jsonl", "verbose"],
+            help = "Print one machine-readable final result"
+        )]
+        json: bool,
+        #[arg(
+            long,
+            conflicts_with_all = ["json", "verbose"],
+            help = "Stream machine-readable run events, one JSON object per line"
+        )]
+        jsonl: bool,
+        #[arg(
+            long,
+            value_name = "PATH",
+            help = "Write the final model message to a file inside the workspace"
+        )]
+        last_message: Option<PathBuf>,
     },
     #[command(about = "Show the local workspace-agent state")]
     Status {
@@ -294,11 +312,21 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             done_when,
             verify,
             no_context,
+            json,
+            jsonl,
+            last_message,
         }) => {
             let workspace = cli
                 .cwd
                 .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
             let authority = resolve_authority(yolo, authority.as_deref())?;
+            let output = if jsonl {
+                RunOutput::Jsonl
+            } else if json {
+                RunOutput::Json
+            } else {
+                RunOutput::Human
+            };
             let receipt = agent::run(
                 &paths,
                 RunOptions {
@@ -314,6 +342,8 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     done_when,
                     verify,
                     use_context: !no_context,
+                    output,
+                    last_message,
                 },
             )?;
             Ok(if receipt.status == "completed" {
@@ -1272,6 +1302,37 @@ mod tests {
         let cli = Cli::try_parse_from(["hii"]).expect("parse default CLI");
         assert_eq!(cli.max_steps, 0);
         assert_eq!(cli.session_profile, SessionProfile::Local);
+    }
+
+    #[test]
+    fn run_parses_structured_output_and_last_message_after_goal() {
+        let cli = Cli::try_parse_from([
+            "hii",
+            "run",
+            "build",
+            "the",
+            "site",
+            "--jsonl",
+            "--last-message",
+            "output/final.txt",
+        ])
+        .expect("parse structured run");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Run {
+                goal,
+                json: false,
+                jsonl: true,
+                last_message: Some(path),
+                ..
+            }) if goal == ["build", "the", "site"] && path == Path::new("output/final.txt")
+        ));
+    }
+
+    #[test]
+    fn run_structured_output_modes_conflict() {
+        assert!(Cli::try_parse_from(["hii", "run", "--json", "--jsonl", "inspect"]).is_err());
+        assert!(Cli::try_parse_from(["hii", "run", "--json", "--verbose", "inspect"]).is_err());
     }
 
     #[test]
