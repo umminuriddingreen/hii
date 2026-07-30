@@ -18,7 +18,7 @@ await cp(output,path.join(server,'build'),{recursive:true,force:true,verbatimSym
 await cp(path.join(root,'server.mjs'),path.join(server,'server.mjs'),{force:true});
 await cp(path.join(root,'server'),path.join(server,'server'),{recursive:true,force:true});
 await mkdir(path.join(server,'node_modules'),{recursive:true});
-for(const dependency of ['ws','node-pty']) await cp(path.join(root,'node_modules',dependency),path.join(server,'node_modules',dependency),{recursive:true,force:true,verbatimSymlinks:true});
+for(const dependency of ['ws','node-pty','yaml']) await cp(path.join(root,'node_modules',dependency),path.join(server,'node_modules',dependency),{recursive:true,force:true,verbatimSymlinks:true});
 await mkdir(path.join(server,'aii','capabilities'),{recursive:true});
 await cp(path.join(root,'aii','capabilities','registry.json'),path.join(server,'aii','capabilities','registry.json'),{force:true});
 await writeFile(path.join(server,'package.json'),'{"type":"module"}\n','utf8');

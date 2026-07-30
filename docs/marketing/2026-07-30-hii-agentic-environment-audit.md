@@ -413,7 +413,10 @@ cloud sync, credits, or a general “AI operating system.”
 3. Artifact adapters for the first audience: Markdown, image/reference board,
    code/site preview, and a native-file handoff.
 4. Capability draft, review, replay, and diff against the previous run.
-5. Clean-machine packaged-app test and upgrade/recovery test.
+5. Genuine downloaded/quarantined second-Mac test. The same-Mac isolated-user
+   packaged-app gate now proves embedded runtime startup, receipt persistence
+   across reinstall/restart, corrupt-workspace recovery, and strict ad-hoc
+   signature integrity.
 6. A first paid design-partner cohort whose work, feedback, and attribution are
    visible in product decisions.
 

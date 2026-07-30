@@ -352,9 +352,16 @@ npm run hii:windows:check
 npm run hii:workspace:check
 npm run build
 npm run build:tauri
+npm run ci:release-candidate
 hii health --text
 hii caps show
 ```
+
+`ci:release-candidate` is the slower macOS-only local release gate. It runs the
+full product and CLI checks, rebuilds `HII.app`, copies the app outside the
+repository, and verifies clean-user startup, receipt persistence across a
+reinstall-shaped restart, corrupt-workspace recovery, and strict code-sign
+integrity. It does not publish, notarize, or upload the app.
 
 Report exact failures and unverified behavior. Do not treat a successful exit
 code as sufficient when behavior can be exercised directly.

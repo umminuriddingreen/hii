@@ -1,6 +1,6 @@
 # Mac release readiness
 
-Audit date: 2026-07-29 (America/Los_Angeles)
+Audit date: 2026-07-30 (America/Los_Angeles)
 
 Repo: `/Users/ummi/hii`
 
@@ -18,6 +18,14 @@ release described by the launch plan because this Mac has no valid code-signing
 identity, neither release environment variable is configured, and no Apple
 notarization run has been performed.
 
+The app now has a repeatable packaged-app proof. It copies `HII.app` outside
+the repository, starts the embedded Node/Svelte runtime with empty isolated
+user data, writes a receipt workspace, replaces the app copy, verifies the
+receipt after restart, and proves corrupt-workspace recovery. The first run of
+that proof found that `yaml` was missing from the portable runtime; the build
+now bundles it and the complete proof passes. This is not a substitute for a
+downloaded, quarantined test on a second Mac.
+
 The implemented public artifact is a ZIP containing `HII.app`,
 `hii-bootstrap.sh`, and `INSTALL.md`. There is no `.dmg` build or release path.
 If a DMG is a release requirement, that is code work, not an account-only
@@ -34,7 +42,7 @@ blocker.
 | Staple the notarization ticket to the app, validate the ticket, and have Gatekeeper accept the app. | Implemented with `stapler staple`, `stapler validate`, and `spctl`; not exercised. | `scripts/hii-macos-release.mjs` |
 | Package the deliverable without losing the signed/stapled app. | Implemented for a final ZIP containing `HII.app`, `hii-bootstrap.sh`, and `INSTALL.md`. Not implemented for DMG. | `scripts/hii-macos-release.mjs`, `src-tauri/tauri.conf.json` |
 | Record release identity and integrity metadata. | Implemented for the ZIP: version, platform, architecture, minimum macOS version, filename, bytes, SHA-256, signing/notarization claims, and creation time are written to `dist/releases/latest.json` after all preceding commands succeed. | `scripts/hii-macos-release.mjs` |
-| Test the downloaded/quarantined artifact on a clean supported Apple Silicon Mac: Gatekeeper, launch, bundled runtime, bootstrap, first receipt, restart, and uninstall/data deletion. | Required by the release plan and not verified by this audit. | `docs/LAUNCH_AND_MONETIZATION.md`, `docs/INSTALL.md` |
+| Test the downloaded/quarantined artifact on a clean supported Apple Silicon Mac: Gatekeeper, launch, bundled runtime, bootstrap, first receipt, restart, and uninstall/data deletion. | A copied-app, isolated-user simulation now verifies bundled runtime startup, first receipt, reinstall/restart persistence, recovery, and strict ad-hoc signature integrity. A genuinely downloaded/quarantined second-Mac test, bootstrap, and uninstall/data deletion remain unverified. | `scripts/hii-packaged-app-smoke.mjs`, `docs/LAUNCH_AND_MONETIZATION.md`, `docs/INSTALL.md` |
 | Put the verified artifact behind the public download action. | Required by “Build now”; not performed and outside this local code audit. | `docs/LAUNCH_AND_MONETIZATION.md` |
 
 ## Local trust and artifact state
@@ -94,6 +102,26 @@ The script will not create a public archive from an ad-hoc signed app.
   behavior, notarization, stapling, Gatekeeper acceptance, or launch on another
   Mac.
 
+### `npm run hii:packaged-app:check`
+
+- Result: PASS, exit 0.
+- Copied the built 196 MB `HII.app` into a temporary Applications directory
+  outside `/Users/ummi/hii`.
+- Started only the app's embedded Node and SvelteKit resources against a new
+  isolated `HII_RUNTIME_DIR`.
+- Created and persisted a version 1 workspace receipt, replaced the copied app,
+  restarted the packaged runtime, and verified the same receipt and revision.
+- Injected a malformed workspace, received the expected recovery response, and
+  verified that HII preserved the unreadable source at the reported recovery
+  path.
+- Verified the copied app with
+  `codesign --verify --deep --strict --verbose=2`.
+- The initial run failed because `yaml` was not packaged. Adding `yaml` to the
+  portable dependency copy fixed the clean-runtime failure.
+- This remains a same-Mac simulation. It does not prove Developer ID,
+  notarization, quarantine, Gatekeeper, another CPU architecture, or another
+  physical Mac.
+
 ## Blocked on Ummi (human/account actions)
 
 - [ ] Enroll in or confirm active Apple Developer Program membership, accept
@@ -152,10 +180,11 @@ The script will not create a public archive from an ad-hoc signed app.
   - Owner: `scripts/hii-macos-release.mjs`,
     `src-tauri/tauri.conf.json`
 
-- [ ] Add the documented local release gates to the release preflight, or add a
-  single documented command that runs them before Apple submission:
-  `npm run check`, targeted tests, `npm run build`, and bootstrap validation.
-  `release:mac` currently invokes only `build:tauri` before signing.
+- [x] Add a single local release-candidate command that runs the full product
+  and CLI gates, builds `HII.app`, and exercises the isolated packaged-app
+  proof. `npm run ci:release-candidate` now provides that gate, with a manual
+  macOS GitHub workflow that does not upload or publish the artifact.
+  `release:mac` itself still invokes only `build:tauri` before signing.
   - Owner: `package.json`, `scripts/hii-macos-release.mjs`,
     `docs/LAUNCH_AND_MONETIZATION.md`
 
@@ -166,11 +195,14 @@ The script will not create a public archive from an ad-hoc signed app.
   - Owner: `package.json`, `src-tauri/tauri.conf.json`,
     `scripts/hii-macos-release.mjs`
 
-- [ ] Add a repeatable release smoke checklist or script that records the exact
-  artifact filename/hash, signature authority/team, notarization and staple
-  validation, Gatekeeper result, archive contents, and application health
-  checks. The final clean-Mac execution still remains a human release gate.
+- [ ] Extend the repeatable packaged-app smoke with the final distribution
+  evidence: exact archive filename/hash, Developer ID authority/team,
+  notarization and staple validation, Gatekeeper result, archive contents,
+  bootstrap, and uninstall/data deletion. The local runtime, receipt,
+  reinstall/restart, recovery, and ad-hoc signature checks are now automated;
+  the final downloaded clean-Mac execution remains a human release gate.
   - Owner: `scripts/hii-macos-release.mjs`,
+    `scripts/hii-packaged-app-smoke.mjs`,
     `docs/LAUNCH_AND_MONETIZATION.md`
 
 ## Top three blockers to a downloadable build
@@ -179,6 +211,8 @@ The script will not create a public archive from an ad-hoc signed app.
    identity is installed, and neither required release variable is configured.
 2. **There is no DMG pipeline:** current code produces only an ad-hoc local
    `.app`, and the gated public release path would produce a ZIP.
-3. **There is no signed/notarized clean-Mac proof:** Apple submission was not
-   authorized, `dist/releases` does not exist, and Gatekeeper/first-run behavior
-   has not been tested from a downloaded artifact on another Mac.
+3. **There is no signed/notarized second-Mac proof:** local isolated-user,
+   receipt, reinstall/restart, recovery, and ad-hoc signature behavior now pass,
+   but Apple submission was not authorized, `dist/releases` does not exist, and
+   Gatekeeper/first-run behavior has not been tested from a downloaded artifact
+   on another Mac.

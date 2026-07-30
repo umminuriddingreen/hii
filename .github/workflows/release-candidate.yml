@@ -1,0 +1,25 @@
+name: packaged app proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packaged-app-proof-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  packaged-app:
+    name: Clean macOS packaged-app proof
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run ci:release-candidate
