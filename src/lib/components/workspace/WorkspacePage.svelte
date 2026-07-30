@@ -23,8 +23,7 @@
     { id:'knowledge', title:'Knowledge', path:'/knowledge', capabilityId:'hii.knowledge.workspace', detail:'canonical notes · systems · proof' },
     { id:'activate', title:'Activation', path:'/activate', capabilityId:'hii.agent.workspace_run', detail:'choose agent · approve context · run' },
     { id:'boards', title:'Boards', path:'/boards', capabilityId:'hii.board.task_kanban', detail:'bounded work · owners · blockers' },
-    { id:'console', title:'Console', path:'/console', capabilityId:'hii.terminal.observe', detail:'agents · logs · receipts' },
-    { id:'dashboard', title:'System', path:'/dashboard', capabilityId:'hii.og.operational_graph', detail:'live status · capabilities · next actions' }
+    { id:'console', title:'Console', path:'/console', capabilityId:'hii.terminal.observe', detail:'agents · logs · receipts' }
   ];
   let doc:WorkspaceDoc={version:1,revision:0,updatedAt:new Date().toISOString(),viewport:{x:0,y:0,zoom:1},nextZ:1,nodes:[]};
   let ready=false; let loadState:'loading'|'ready'|'recovery'='loading'; let loadError=''; let recoveryPath=''; let saveError='';

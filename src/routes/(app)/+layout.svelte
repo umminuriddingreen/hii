@@ -6,15 +6,7 @@
     '/activate': { title: 'Activation', id: 'activate', flush: true },
     '/boards': { title: 'Boards', id: 'boards' },
     '/console': { title: 'Console', id: 'console', flush: true },
-    '/credits': { title: 'Credits', id: 'credits' },
-    '/dashboard': { title: 'Dashboard', id: 'dashboard' },
-    '/feed': { title: 'Feed', id: 'feed' },
-    '/login': { title: 'Sign in', id: 'login' },
-    '/pilot': { title: 'Founder pilot', id: 'pilot', flush: true },
-    '/terminal': { title: 'Terminal', id: 'console', flush: true },
-    '/termite': { title: 'Termite', id: 'termite' },
-    '/trader': { title: 'Trader', id: 'trader', flush: true },
-    '/upload': { title: 'Exchange', id: 'upload' }
+    '/pilot': { title: 'Founder pilot', id: 'pilot', flush: true }
   };
 
   $: embedded = $page.url.searchParams.get('desk') === '1';
