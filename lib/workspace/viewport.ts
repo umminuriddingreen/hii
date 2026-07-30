@@ -5,6 +5,25 @@ export const WORKSPACE_ZOOM_MAX = 2.5;
 
 type WorkspaceRect = Pick<WorkspaceNode, 'x' | 'y' | 'w' | 'h'>;
 
+export function countWorkspaceNodesInViewport(
+  nodes: WorkspaceRect[],
+  viewport: WorkspaceViewport,
+  size: { width: number; height: number }
+) {
+  if (!nodes.length || size.width <= 0 || size.height <= 0 || viewport.zoom <= 0) return 0;
+  const left = -viewport.x / viewport.zoom;
+  const top = -viewport.y / viewport.zoom;
+  const right = (size.width - viewport.x) / viewport.zoom;
+  const bottom = (size.height - viewport.y) / viewport.zoom;
+
+  return nodes.filter((node) => (
+    node.x + node.w >= left
+    && node.x <= right
+    && node.y + node.h >= top
+    && node.y <= bottom
+  )).length;
+}
+
 export function fitWorkspaceViewport(
   nodes: WorkspaceRect[],
   size: { width: number; height: number },

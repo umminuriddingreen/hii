@@ -13,8 +13,8 @@
   import HiiLogo from '$lib/components/HiiLogo.svelte';
   import type { WorkspaceDoc, WorkspaceNode, WorkspaceNodeType } from '@/lib/workspace/types';
   import { makeNode, seedFor, seedFromFile, seedFromString, seedsFromDataTransfer, type NodeSeed } from '@/lib/workspace/ingest';
-  import { fitWorkspaceViewport, panWorkspaceViewport, zoomWorkspaceViewportAt } from '@/lib/workspace/viewport';
-  import { searchWorkspaceNodes } from '@/lib/workspace/search';
+  import { countWorkspaceNodesInViewport, fitWorkspaceViewport, panWorkspaceViewport, zoomWorkspaceViewportAt } from '@/lib/workspace/viewport';
+  import { searchWorkspaceNodes, workspaceNodeTitle } from '@/lib/workspace/search';
   import { assignNodesToFrame, moveNodeAndFrameContents, removeFrame } from '@/lib/workspace/frames';
   import { emptyWorkspaceHistory, recordWorkspaceChange, redoWorkspace, undoWorkspace } from '@/lib/workspace/history';
 
@@ -28,7 +28,7 @@
   let doc:WorkspaceDoc={version:1,revision:0,updatedAt:new Date().toISOString(),viewport:{x:0,y:0,zoom:1},nextZ:1,nodes:[]};
   let ready=false; let loadState:'loading'|'ready'|'recovery'='loading'; let loadError=''; let recoveryPath=''; let saveError='';
   let workspaceId='default'; let workspaces:Array<{id:string;selected:boolean;status:'ready'|'recovery';revision?:number}>=[]; let workspaceMenu=false;
-  let selected:string|null=null; let omnibar=false; let query=''; let saveTimer:ReturnType<typeof setTimeout>|undefined; let saveInFlight=false; let savePending=false;
+  let selected:string|null=null; let omnibar=false; let query=''; let mapMenu=false; let canvasWidth=0; let canvasHeight=0; let saveTimer:ReturnType<typeof setTimeout>|undefined; let saveInFlight=false; let savePending=false;
   let context:any=null; let board:any[]=[]; let daemon:any=null; let canvas:HTMLElement; let mouse={x:400,y:300};
   let commandInput:HTMLInputElement; let fileInput:HTMLInputElement;
   let composerOpen=false; let composerText=''; let composerInput:HTMLTextAreaElement; let composerAt={x:400,y:280}; let lastSummon=0;
@@ -52,6 +52,11 @@
   ].filter(item=>`${item[1]} ${item[2]}`.toLowerCase().includes(query.toLowerCase()));
   $: nodeResults=searchWorkspaceNodes(doc.nodes,query);
   $: collapsedFrameIds=new Set(doc.nodes.filter(node=>node.type==='frame'&&node.payload.collapsed===true).map(node=>node.id));
+  $: frames=doc.nodes.filter(node=>node.type==='frame');
+  $: mapAnchors=doc.nodes.filter(node=>!['frame','image','media','ink','canvas-text','text'].includes(node.type)).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).slice(0,8);
+  $: mapKinds=Object.entries(doc.nodes.reduce<Record<string,number>>((counts,node)=>({...counts,[node.type]:(counts[node.type]||0)+1}),{})).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  $: visibleNodeCount=countWorkspaceNodesInViewport(doc.nodes,doc.viewport,{width:canvasWidth,height:canvasHeight});
+  $: contentOutsideView=loadState==='ready'&&doc.nodes.length>0&&canvasWidth>0&&canvasHeight>0&&visibleNodeCount===0;
 
   function ensureModelPane(){if(ModelPaneComponent||modelPanePromise)return;modelPanePromise=import('$lib/components/workspace/ModelPane.svelte').then(module=>{ModelPaneComponent=module.default;modelPaneError=''}).catch(error=>{modelPanePromise=null;modelPaneError=error instanceof Error?error.message:'3D viewer unavailable'})}
   async function refreshWorkspaces(){try{const response=await fetch('/api/workspace?list=1');const result=await response.json();if(response.ok)workspaces=result.workspaces||[]}catch{}}
@@ -121,9 +126,10 @@
   function submitIntent(){const intent=composerText.trim();if(!intent)return;const width=seedFor('intent').w;createSpatialRun(intent,{x:composerAt.x-width/2,y:composerAt.y-72});composerText='';composerOpen=false;}
   async function openCommands(){omnibar=true;query='';await tick();commandInput?.focus();}
   function fitNodes(nodes:WorkspaceNode[],maxZoom=1){const rect=canvas?.getBoundingClientRect();if(!rect)return;const viewport=fitWorkspaceViewport(nodes,{width:rect.width,height:rect.height},{maxZoom});if(!viewport)return;doc={...doc,viewport};persist();}
-  function fitAll(){fitNodes(doc.nodes);selected=null;}
+  function fitAll(){fitNodes(doc.nodes);selected=null;mapMenu=false;}
   function focusNode(node:WorkspaceNode){selected=node.id;fitNodes([node],1.25);omnibar=false;query='';}
   function fitFrame(node:WorkspaceNode){const contents=doc.nodes.filter(candidate=>candidate.frameId===node.id);fitNodes(contents.length?[node,...contents]:[node],1.25);selected=node.id;}
+  function openFrame(node:WorkspaceNode){fitFrame(node);mapMenu=false;}
   function regroupFrame(id:string){const before=doc;doc=assignNodesToFrame(doc,id);remember(before);persist();}
   function runCommand(command:string[]){if(command[0]==='fit'){fitAll();omnibar=false;query=''}else if(command[0]==='surface')spawn('surface',{title:command[1].replace('Open ',''),path:command[3],capabilityId:command[4]});else if(command[0]==='intent')void summonComposer();else if(command[0]==='upload'){omnibar=false;fileInput?.click()}else spawn(command[0]);}
   function followUp(node:WorkspaceNode,text:string){createSpatialRun(text,{x:node.x+node.w+48,y:node.y},node.id)}
@@ -169,7 +175,7 @@
 </script>
 
 {#if !data.enabled}<div class="hii-page flex min-h-[60vh] flex-col items-center justify-center gap-3"><p class="hii-kicker">surface off</p><h1 class="hii-page-title">HII is turned off</h1></div>
-{:else}<main bind:this={canvas} class="absolute inset-0 touch-none overflow-hidden" on:pointerdown={pan} on:dblclick={openExplorer} on:wheel={trackpad} on:dragover|preventDefault on:drop={drop} style="background:#fff radial-gradient(circle,rgba(23,23,23,.08) 1px,transparent 1px);background-size:32px 32px">
+{:else}<main bind:this={canvas} bind:clientWidth={canvasWidth} bind:clientHeight={canvasHeight} class="absolute inset-0 touch-none overflow-hidden" on:pointerdown={pan} on:dblclick={openExplorer} on:wheel={trackpad} on:dragover|preventDefault on:drop={drop} style="background:#fff radial-gradient(circle,rgba(23,23,23,.08) 1px,transparent 1px);background-size:32px 32px">
   {#if loadState==='recovery'}
     <section data-workspace-ui class="absolute inset-0 z-[10000] grid place-items-center bg-[#f4f5f7]/95 p-6" aria-labelledby="workspace-recovery-title">
       <div class="w-[min(620px,92vw)] rounded-[28px] border border-amber-950/15 bg-white p-8 shadow-2xl sm:p-10">
@@ -186,6 +192,16 @@
       <p class="text-[13px] text-red-800"><strong>Workspace not saved.</strong> {saveError}</p>
       <button class="shrink-0 font-mono text-[9px] uppercase underline" on:click={()=>void saveNow()}>Try again</button>
     </div>
+  {/if}
+  {#if contentOutsideView&&!saveError}
+    <section data-workspace-ui role="status" aria-live="polite" class="absolute left-1/2 top-4 z-40 flex w-[min(560px,calc(100vw-240px))] -translate-x-1/2 items-center gap-3 rounded-2xl border border-neutral-900/10 bg-white/95 p-2.5 pl-3 shadow-xl backdrop-blur-xl">
+      <span class="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[var(--hii-acid-green)] text-base text-neutral-950">↗</span>
+      <div class="min-w-0 flex-1">
+        <strong class="block truncate text-[13px] text-neutral-950">Your workspace is outside this view.</strong>
+        <span class="block truncate font-mono text-[9px] uppercase tracking-[.08em] text-neutral-400">{doc.nodes.length} objects are safe · camera position preserved</span>
+      </div>
+      <button class="shrink-0 rounded-full bg-neutral-950 px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-white" on:click={fitAll}>Show my work</button>
+    </section>
   {/if}
   <div class="absolute left-0 top-0 origin-top-left will-change-transform" style={`transform:translate(${doc.viewport.x}px,${doc.viewport.y}px) scale(${doc.viewport.zoom})`}>
     {#each doc.nodes as node (node.id)}<section role="group" aria-label={`${node.type} workspace node`} class="group absolute left-0 top-0 flex flex-col overflow-hidden" class:hidden={Boolean(node.frameId&&collapsedFrameIds.has(node.frameId))} class:pointer-events-none={node.type==='frame'} class:ring-2={selected===node.id} class:ring-blue-500={selected===node.id} on:pointerdown={(event)=>drag(event,node)} style={`transform:translate(${node.x}px,${node.y}px);width:${node.w}px;height:${node.h}px;z-index:${Math.round(node.z)}`}>
@@ -261,7 +277,28 @@
       <button class="mt-1 w-full rounded-xl border border-dashed border-neutral-300 px-3 py-2 text-left text-[12px] text-neutral-600 hover:border-neutral-500" on:click={()=>void createNamedWorkspace()} role="menuitem">+ New workspace</button>
     </div>{/if}
   </div>
-  {#if doc.nodes.length}<button data-workspace-ui class="absolute bottom-5 left-5 rounded-full border border-neutral-900/10 bg-white/95 px-4 py-2 font-mono text-[10px] uppercase tracking-[.08em] text-neutral-700 shadow-lg backdrop-blur hover:border-neutral-900/25" on:click={fitAll} aria-label="Fit all workspace content">Fit all <kbd class="ml-2 text-neutral-400">⇧1</kbd></button>{/if}
+  {#if doc.nodes.length}<div data-workspace-ui class="absolute bottom-5 left-5 z-40 flex gap-2">
+    <button class="rounded-full border border-neutral-900/10 bg-white/95 px-4 py-2 font-mono text-[10px] uppercase tracking-[.08em] text-neutral-700 shadow-lg backdrop-blur hover:border-neutral-900/25" on:click={fitAll} aria-label="Fit all workspace content">Fit all <kbd class="ml-2 text-neutral-400">⇧1</kbd></button>
+    <div class="relative">
+      <button class="rounded-full border border-neutral-900/10 bg-white/95 px-4 py-2 font-mono text-[10px] uppercase tracking-[.08em] text-neutral-700 shadow-lg backdrop-blur hover:border-neutral-900/25" on:click={()=>mapMenu=!mapMenu} aria-label="Open workspace map" aria-expanded={mapMenu}>Map <kbd class="ml-2 text-neutral-400">{frames.length}</kbd></button>
+      {#if mapMenu}<section class="absolute bottom-12 left-0 w-[min(320px,calc(100vw-40px))] overflow-hidden rounded-2xl border border-neutral-900/10 bg-white p-2 shadow-2xl" aria-label="Workspace map">
+        <div class="flex items-center justify-between px-3 py-2">
+          <div><p class="font-mono text-[9px] uppercase tracking-[.12em] text-neutral-400">Workspace map</p><p class="mt-1 text-[12px] text-neutral-600">{doc.nodes.length} objects · {frames.length} frames</p></div>
+          <button class="rounded-full bg-neutral-100 px-2 py-1 font-mono text-[9px] uppercase text-neutral-500" on:click={()=>mapMenu=false}>Close</button>
+        </div>
+        <div class="flex flex-wrap gap-1 px-3 py-2">{#each mapKinds as kind}<span class="rounded-full bg-neutral-100 px-2 py-1 font-mono text-[8px] uppercase text-neutral-500">{kind[0]} {kind[1]}</span>{/each}</div>
+        {#if frames.length}<div class="max-h-64 overflow-auto py-1"><p class="px-3 pb-1 pt-2 font-mono text-[8px] uppercase tracking-[.12em] text-neutral-400">Frames</p>{#each frames as frame}<button class="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left hover:bg-blue-50" on:click={()=>openFrame(frame)}>
+          <span class="min-w-0"><strong class="block truncate text-[13px]">{String(frame.payload.title||'Untitled frame')}</strong><small class="font-mono text-[9px] uppercase text-neutral-400">{doc.nodes.filter(node=>node.frameId===frame.id).length} objects</small></span>
+          <span class="text-blue-600">↗</span>
+        </button>{/each}</div>
+        {:else}<div class="mx-1 rounded-xl bg-neutral-50 p-3"><p class="text-[12px] leading-5 text-neutral-500">Frames turn a large workspace into places you can return to.</p><button class="mt-3 font-mono text-[9px] uppercase text-blue-600 underline" on:click={()=>{mapMenu=false;spawn('frame')}}>Create a frame</button></div>{/if}
+        {#if mapAnchors.length}<div class="mt-1 max-h-64 overflow-auto border-t py-1"><p class="px-3 pb-1 pt-2 font-mono text-[8px] uppercase tracking-[.12em] text-neutral-400">Key places</p>{#each mapAnchors as node}<button class="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left hover:bg-blue-50" on:click={()=>{focusNode(node);mapMenu=false}}>
+          <span class="min-w-0"><strong class="block truncate text-[12px]">{workspaceNodeTitle(node)}</strong><small class="font-mono text-[8px] uppercase text-neutral-400">{node.type}</small></span>
+          <span class="text-blue-600">⌖</span>
+        </button>{/each}</div>{/if}
+      </section>{/if}
+    </div>
+  </div>{/if}
   <button class="absolute right-5 top-4 rounded-full bg-[var(--hii-electric-blue)] px-4 py-2 font-mono text-[11px] text-white shadow-lg" on:click={refreshDaemon}><i class="mr-2 inline-block h-2 w-2 rounded-full bg-[var(--hii-acid-green)]"></i>hiid {daemon?.instances?.length||context?.capabilities?.length||'…'}</button>
   {#if omnibar}<div class="absolute inset-0 z-50 bg-white/80 backdrop-blur-sm"><button type="button" class="absolute inset-0 cursor-default" aria-label="Close command palette" on:click={()=>omnibar=false}></button><div class="absolute left-1/2 top-1/2 w-[min(620px,90vw)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog" aria-modal="true" aria-label="Create workspace object"><div class="flex items-center gap-3 border-b p-4"><span>⌘K</span><input bind:this={commandInput} bind:value={query} class="w-full outline-none" placeholder="Find anything, open a tool, or create…" /></div><div class="max-h-[420px] overflow-auto p-2">{#if nodeResults.length}<p class="px-3 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[.12em] text-neutral-400">On this canvas</p>{#each nodeResults as result}<button class="flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-blue-50" on:click={()=>focusNode(result.node)}><span class="grid h-8 w-8 place-items-center rounded-lg bg-blue-50 text-sm text-blue-600">⌖</span><span class="min-w-0 flex-1"><strong class="block truncate">{result.title}</strong><small class="text-neutral-400">{result.node.type} · focus on canvas</small></span><kbd class="font-mono text-[10px] text-neutral-400">find</kbd></button>{/each}<div class="my-2 border-t"></div>{/if}{#each commands as command}<button class="flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-neutral-50" on:click={()=>runCommand(command)}><span class="text-xl">{command[0]==='fit'?'⌖':command[0]==='surface'?'↗':'+'}</span><span class="flex-1"><strong class="block">{command[1]}</strong><small class="text-neutral-400">{command[2]}</small></span><kbd class="font-mono text-[10px] text-neutral-400">{command[0]==='fit'?'view':command[0]==='surface'?'open':command[0]==='upload'?'choose':'create'}</kbd></button>{/each}</div></div></div>{/if}
 </main>{/if}

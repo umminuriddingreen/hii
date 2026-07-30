@@ -50,6 +50,15 @@ describe('agentic workspace interaction contract', () => {
     expect(workspace).toContain('zoomWorkspaceViewportAt');
   });
 
+  it('keeps large spatial workspaces recoverable and navigable', () => {
+    expect(workspace).toContain('countWorkspaceNodesInViewport');
+    expect(workspace).toContain('Your workspace is outside this view.');
+    expect(workspace).toContain('Show my work');
+    expect(workspace).toContain('Workspace map');
+    expect(workspace).toContain('Key places');
+    expect(workspace).toContain('openFrame(frame)');
+  });
+
   it('bridges an explicit browser request into its paired terminal', () => {
     expect(explorer).toContain('curl -I -L --max-time 20 --');
     expect(explorer).toContain("new CustomEvent('hii:terminal-command'");
