@@ -184,7 +184,7 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
         'content-type': contentType(file),
         'content-length': body.length,
         'cache-control': 'no-store',
-        'content-security-policy': "default-src 'self'; connect-src 'self' ws: wss:; frame-src http: https:; style-src 'self'; script-src 'self'",
+        'content-security-policy': "default-src 'self'; connect-src 'self' ws: wss:; frame-src http: https:; style-src 'self' 'unsafe-inline'; script-src 'self'",
         'x-content-type-options': 'nosniff',
         'referrer-policy': 'no-referrer'
       });

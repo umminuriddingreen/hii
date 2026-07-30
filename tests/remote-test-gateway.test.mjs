@@ -89,6 +89,7 @@ test('public-test sandbox retains host PATH but removes secrets and denies delet
   const hostEnv = {
     PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin',
     LANG: 'en_US.UTF-8',
+    NO_COLOR: '1',
     OPENAI_API_KEY: 'do-not-copy',
     RANDOM_TOKEN: 'do-not-copy'
   };
@@ -96,6 +97,9 @@ test('public-test sandbox retains host PATH but removes secrets and denies delet
   assert.equal(env.PATH, hostEnv.PATH);
   assert.equal(env.OPENAI_API_KEY, undefined);
   assert.equal(env.RANDOM_TOKEN, undefined);
+  assert.equal(env.NO_COLOR, undefined);
+  assert.equal(env.COLORTERM, 'truecolor');
+  assert.equal(env.TERM, 'xterm-256color');
   assert.equal(env.HOME.startsWith(layout.sessionDir), true);
   assert.equal(env.HII_RUNTIME_DIR, layout.runtime);
   const sandbox = await createSandbox({ layout, hiiBinary: '/bin/sh', hostEnv });
@@ -209,6 +213,8 @@ test('public screen is exactly two equal panes in both orientations', async () =
   assert.match(main, /id="artifact"/);
   assert.doesNotMatch(main, /<(?:header|nav|button|aside|footer)\b/);
   assert.doesNotMatch(html, /passcode|claim/i);
+  assert.match(css, /#terminal \.xterm-rows/);
+  assert.match(css, /color:\s*#eee/);
   assert.match(css, /grid-template-columns:\s*1fr 1fr/);
   assert.match(css, /grid-template-rows:\s*1fr 1fr/);
   assert.match(css, /@media \(orientation: portrait\), \(max-aspect-ratio: 1\/1\)/);

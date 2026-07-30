@@ -20,6 +20,8 @@ export function sanitizedHostEnv({ layout, hostEnv = process.env }) {
   env.HII_ROOT = layout.workspace;
   env.HII_SESSION_PROFILE = 'public-test';
   env.TERM = 'xterm-256color';
+  env.COLORTERM = 'truecolor';
+  delete env.NO_COLOR;
   return env;
 }
 
