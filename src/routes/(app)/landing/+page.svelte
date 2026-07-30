@@ -219,7 +219,10 @@
   <footer class="hii-launch-footer">
     <HiiLogo />
     <p>Human intent → bounded work → visible proof</p>
-    <a href="mailto:hello@humaninformationinterface.com">hello@humaninformationinterface.com</a>
+    <div>
+      <a href="/privacy">Privacy</a>
+      <a href="mailto:hello@humaninformationinterface.com">hello@humaninformationinterface.com</a>
+    </div>
   </footer>
 </div>
 
@@ -329,7 +332,8 @@
   .hii-launch-footer { display:grid; min-height:120px; grid-template-columns:1fr auto 1fr; align-items:center; gap:22px; padding:28px clamp(24px,4vw,64px); background:#151515; color:white; font-size:8px; }
   .hii-launch-footer :global(.hii-wordmark) { font-size:34px; }
   .hii-launch-footer p { color:#8f9491; }
-  .hii-launch-footer a { justify-self:end; color:white; text-decoration:none; }
+  .hii-launch-footer > div { display:flex; justify-self:end; gap:18px; }
+  .hii-launch-footer a { color:white; text-decoration:none; }
   @media (max-width:900px) {
     .hii-launch-nav { grid-template-columns:1fr auto; }
     .hii-launch-nav nav { display:none; }

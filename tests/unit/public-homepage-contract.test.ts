@@ -6,6 +6,7 @@ const root = path.resolve(import.meta.dirname, '../..');
 const hooks = readFileSync(path.join(root, 'src/hooks.ts'), 'utf8');
 const vite = readFileSync(path.join(root, 'vite.config.ts'), 'utf8');
 const homepage = readFileSync(path.join(root, 'src/routes/(app)/landing/+page.svelte'), 'utf8');
+const privacy = readFileSync(path.join(root, 'src/routes/privacy/+page.svelte'), 'utf8');
 
 describe('public HII homepage', () => {
   it('serves the homepage at the canonical domain without replacing the local workspace root', () => {
@@ -42,5 +43,13 @@ describe('public HII homepage', () => {
     expect(homepage).toContain('$500 <small>one time</small>');
     expect(homepage).toContain('Developer ID signing and Apple notarization pass');
     expect(homepage).toContain('We will never ask you to bypass Gatekeeper');
+  });
+
+  it('links to a plain-language privacy boundary before public recruitment', () => {
+    expect(homepage).toContain('href="/privacy"');
+    expect(privacy).toContain('They do not run an agent, inspect your Mac, read your files');
+    expect(privacy).toContain('Choosing a local Ollama model keeps model inference on your Mac');
+    expect(privacy).toContain('Cloudflare serves this site');
+    expect(privacy).toContain('HII does not sell applicant information');
   });
 });

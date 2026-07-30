@@ -1,7 +1,14 @@
 import type { Handle } from '@sveltejs/kit';
 import { requestContext } from '$lib/request-context';
 
-const cloudflareLaunchRoutes = new Set(['/', '/landing', '/learn', '/activate', '/pilot']);
+const cloudflareLaunchRoutes = new Set([
+  '/',
+  '/landing',
+  '/learn',
+  '/activate',
+  '/pilot',
+  '/privacy'
+]);
 
 export const handle: Handle = async ({ event, resolve }) => {
   if (
