@@ -135,7 +135,15 @@ async function verifyWithChrome(chrome, url, screenshot) {
           bodyText: document.body.innerText.trim().slice(0, 2000),
           childCount: document.body.children.length,
           visible,
-          canvases: canvases.map((c) => ({ width: c.width, height: c.height }))
+          canvases: canvases.map((c) => ({ width: c.width, height: c.height })),
+          backgroundColor: (() => {
+            const transparent = new Set(['transparent', 'rgba(0, 0, 0, 0)']);
+            const body = getComputedStyle(document.body).backgroundColor;
+            const root = getComputedStyle(document.documentElement).backgroundColor;
+            if (!transparent.has(body)) return body;
+            if (!transparent.has(root)) return root;
+            return 'rgb(255, 255, 255)';
+          })()
         };
       })()`,
       returnByValue: true,

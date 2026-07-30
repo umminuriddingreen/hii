@@ -62,15 +62,20 @@ async function close(server) {
   await new Promise((resolve) => server.close(resolve));
 }
 
-async function walkArtifacts(root, relative = '') {
+async function walkPublicFiles(root, relative = '') {
   const items = [];
   for (const entry of await fsp.readdir(path.join(root, relative), { withFileTypes: true })) {
     if (entry.name.startsWith('.') || entry.isSymbolicLink()) continue;
     const child = path.join(relative, entry.name);
-    if (entry.isDirectory()) items.push(...await walkArtifacts(root, child));
-    else if (entry.isFile() && SUPPORTED_ARTIFACT.test(entry.name)) {
+    if (entry.isDirectory()) items.push(...await walkPublicFiles(root, child));
+    else if (entry.isFile()) {
       const stat = await fsp.stat(path.join(root, child));
-      items.push({ relativePath: child.split(path.sep).join('/'), mtimeMs: stat.mtimeMs, bytes: stat.size });
+      items.push({
+        relativePath: child.split(path.sep).join('/'),
+        mtimeMs: stat.mtimeMs,
+        bytes: stat.size,
+        previewable: SUPPORTED_ARTIFACT.test(entry.name)
+      });
     }
   }
   return items;
@@ -138,14 +143,17 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
   async function scanArtifacts() {
     let candidates;
     try {
-      candidates = await walkArtifacts(layout.publicDir);
+      candidates = await walkPublicFiles(layout.publicDir);
     } catch (error) {
       appendEvent(layout, { type: 'artifact-scan-failed', error: error.message });
       return;
     }
-    candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
-    for (const candidate of candidates) {
-      const revision = `${candidate.mtimeMs}:${candidate.bytes}`;
+    candidates.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+    const publicRevision = candidates
+      .map((candidate) => `${candidate.relativePath}:${candidate.mtimeMs}:${candidate.bytes}`)
+      .join('|');
+    for (const candidate of candidates.filter((item) => item.previewable).sort((a, b) => a.mtimeMs - b.mtimeMs)) {
+      const revision = `${candidate.mtimeMs}:${candidate.bytes}:${publicRevision}`;
       if (verifiedRevisions.get(candidate.relativePath) === revision) continue;
       verifiedRevisions.set(candidate.relativePath, revision);
       try {
@@ -165,7 +173,10 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
         };
         manifest.artifacts.push(record);
         if (verification.ok) {
-          latestArtifact = record;
+          latestArtifact = {
+            ...record,
+            previewBackground: verification.dom?.backgroundColor ?? null
+          };
           broadcast({ type: 'artifact', id: record.id });
         }
         await saveManifest();
@@ -215,6 +226,7 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
       const artifactOrigin = config.artifactOrigin ?? `http://127.0.0.1:${artifactPort}`;
       return json(res, 200, {
         id: latestArtifact.id,
+        background: latestArtifact.previewBackground,
         url: `${artifactOrigin}${basePath}/claim/${ticket}`
       });
     }
@@ -292,7 +304,15 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
       pty.onExit(({ exitCode, signal }) => {
         appendEvent(layout, { type: 'hii-exit', exitCode, signal });
         pty = null;
-        void shutdown('hii-exit');
+        if (!shuttingDown && subscribers.size > 0) {
+          appendEvent(layout, { type: 'hii-respawn', reason: 'shared-session-active' });
+          setTimeout(() => void spawnHii().catch((error) => {
+            appendEvent(layout, { type: 'hii-spawn-failed', error: error.message });
+            void shutdown('hii-respawn-failed');
+          }), 350).unref?.();
+        } else {
+          void shutdown('hii-exit');
+        }
       });
     })().finally(() => {
       ptyStartPromise = null;

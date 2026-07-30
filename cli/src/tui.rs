@@ -106,13 +106,17 @@ fn workspace_state(git: &str) -> String {
     }
 }
 
-pub fn welcome(workspace: &Path, model: &str, max_steps: usize, git: &str) {
+pub fn welcome(workspace: &Path, model: &str, max_steps: usize, git: &str, public_test: bool) {
     let width = terminal_width();
     let rule = "━".repeat(width.saturating_sub(4));
-    let workspace = short_path(workspace);
+    let workspace = if public_test {
+        "shared workspace".to_string()
+    } else {
+        short_path(workspace)
+    };
     let model = model.strip_suffix("-mlx").unwrap_or(model);
     let git = workspace_state(git);
-    let workspace = if git == "clean" || git == "not a Git workspace" {
+    let workspace = if public_test || git == "clean" || git == "not a Git workspace" {
         workspace
     } else {
         format!("{workspace} · {git}")

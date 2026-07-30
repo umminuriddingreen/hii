@@ -2,13 +2,21 @@
   box-sizing: border-box;
 }
 
+:root {
+  color-scheme: dark;
+  --terminal: #0b0d10;
+  --terminal-text: #f3f4f1;
+  --preview: #12151b;
+  --divider: rgba(255, 255, 255, 0.12);
+}
+
 html,
 body {
   width: 100%;
   height: 100%;
   margin: 0;
   overflow: hidden;
-  background: #000;
+  background: var(--terminal);
 }
 
 #session {
@@ -33,14 +41,15 @@ body {
 
 #terminal {
   overflow: hidden;
-  padding: 0.35rem;
-  background: #050505;
-  color: #eee;
+  padding: 0.75rem 0.9rem;
+  background: var(--terminal);
+  color: var(--terminal-text);
+  touch-action: manipulation;
 }
 
 #terminal.fallback {
   overflow: auto;
-  color: #eee;
+  color: var(--terminal-text);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font: 14px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -53,18 +62,39 @@ body {
 }
 
 #terminal .xterm,
-#terminal .xterm-rows,
-#terminal .xterm-rows span {
-  color: #eee;
+#terminal .xterm-rows {
+  color: var(--terminal-text);
 }
 
 #artifact {
-  background: #111;
+  display: block;
+  background: var(--preview);
+  box-shadow: inset 1px 0 0 var(--divider);
 }
 
 @media (orientation: portrait), (max-aspect-ratio: 1/1) {
   #session {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr 1fr;
+  }
+
+  #artifact {
+    grid-row: 1;
+    box-shadow: inset 0 -1px 0 var(--divider);
+  }
+
+  #terminal {
+    grid-row: 2;
+    padding: 0.55rem 0.65rem;
+  }
+}
+
+@media (max-width: 480px) {
+  #session {
+    grid-template-rows: minmax(54%, 1.18fr) minmax(46%, 1fr);
+  }
+
+  #terminal {
+    padding: 0.4rem 0.45rem;
   }
 }

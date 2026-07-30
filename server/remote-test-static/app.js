@@ -15,12 +15,40 @@ function sendInput(data) {
 function ensureTerminal() {
   if (terminal) return;
   if (typeof window.Terminal === 'function') {
+    const compact = window.matchMedia('(max-width: 480px)').matches;
     terminal = new window.Terminal({
       cursorBlink: true,
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-      fontSize: 14,
+      cursorStyle: 'bar',
+      fontFamily: '"SFMono-Regular", "SF Mono", Menlo, Consolas, monospace',
+      fontSize: compact ? 13 : 14,
+      fontWeight: '400',
+      fontWeightBold: '600',
+      letterSpacing: 0.15,
+      lineHeight: 1.18,
       scrollback: 5000,
-      theme: { background: '#050505', foreground: '#eeeeee' }
+      theme: {
+        background: '#0b0d10',
+        foreground: '#f3f4f1',
+        cursor: '#67e8f9',
+        cursorAccent: '#0b0d10',
+        selectionBackground: '#21404a',
+        black: '#88919d',
+        brightBlack: '#a7b0bc',
+        blue: '#7dd3fc',
+        brightBlue: '#bae6fd',
+        cyan: '#67e8f9',
+        brightCyan: '#a5f3fc',
+        green: '#86efac',
+        brightGreen: '#bbf7d0',
+        yellow: '#fde68a',
+        brightYellow: '#fef3c7',
+        red: '#fda4af',
+        brightRed: '#fecdd3',
+        magenta: '#c4b5fd',
+        brightMagenta: '#ddd6fe',
+        white: '#f3f4f1',
+        brightWhite: '#ffffff'
+      }
     });
     terminal.open(terminalPane);
     terminal.onData(sendInput);
@@ -68,8 +96,10 @@ function connect() {
 
 function fitTerminal() {
   if (!terminal) return;
-  const columns = Math.max(20, Math.floor(terminalPane.clientWidth / 8.4));
-  const rows = Math.max(5, Math.floor(terminalPane.clientHeight / 18.9));
+  const fontSize = window.matchMedia('(max-width: 480px)').matches ? 13 : 14;
+  if (terminal.options) terminal.options.fontSize = fontSize;
+  const columns = Math.max(20, Math.floor(terminalPane.clientWidth / (fontSize * 0.61)));
+  const rows = Math.max(5, Math.floor(terminalPane.clientHeight / (fontSize * 1.3)));
   terminal.resize(columns, rows);
   if (socket?.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({ type: 'resize', columns, rows }));
@@ -85,6 +115,9 @@ async function refreshArtifact() {
   const latest = await response.json();
   if (latest.id !== latestArtifactId) {
     latestArtifactId = latest.id;
+    if (typeof latest.background === 'string') {
+      artifact.style.background = latest.background;
+    }
     artifact.src = latest.url;
   }
 }

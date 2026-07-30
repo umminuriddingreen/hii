@@ -201,6 +201,7 @@ test('Three.js import-map fixture renders a canvas and captures a screenshot in 
   assert.deepEqual(result.failures, []);
   assert.equal(result.ok, true);
   assert.equal(result.dom.canvases.length, 1);
+  assert.equal(result.dom.backgroundColor, 'rgb(16, 19, 26)');
   assert.ok((await fs.stat(result.screenshot)).size > 1000);
 });
 
@@ -214,8 +215,12 @@ test('public screen is exactly two equal panes in both orientations', async () =
   assert.doesNotMatch(main, /<(?:header|nav|button|aside|footer)\b/);
   assert.doesNotMatch(html, /passcode|claim/i);
   assert.match(css, /#terminal \.xterm-rows/);
-  assert.match(css, /color:\s*#eee/);
+  assert.match(css, /--terminal-text:\s*#f3f4f1/);
+  assert.match(css, /@media \(max-width: 480px\)/);
+  assert.match(await fs.readFile(path.join(repository, 'server', 'remote-test-static', 'app.js'), 'utf8'), /artifact\.style\.background/);
   assert.match(css, /grid-template-columns:\s*1fr 1fr/);
   assert.match(css, /grid-template-rows:\s*1fr 1fr/);
+  assert.match(css, /#artifact\s*\{\s*grid-row:\s*1/);
+  assert.match(css, /#terminal\s*\{\s*grid-row:\s*2/);
   assert.match(css, /@media \(orientation: portrait\), \(max-aspect-ratio: 1\/1\)/);
 });

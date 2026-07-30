@@ -571,10 +571,11 @@ impl Conversation {
             &self.model,
             self.max_steps,
             &self.tools.git_snapshot(),
+            self.public_test,
         );
         if self.public_test {
             crate::tui::system(
-                "PUBLIC TEST · disposable workspace · installed Mac tools available · deletion denied",
+                "PUBLIC TEST · shared workspace · Mac tools available · deletion blocked",
             );
         }
     }
@@ -1205,7 +1206,7 @@ fn conversation_prompt(workspace: &std::path::Path, max_steps: usize, public_tes
         format!("Operator ceiling: {max_steps} tool steps/turn.")
     };
     let boundary = if public_test {
-        "Public test: installed host executables are available through shell, but only this disposable workspace and isolated runtime are readable or writable. Host HII state, credentials, provider controls, direct shell input, and deletion are unavailable. Put previewable output under public/."
+        "Public test: installed host executables are available through shell, but only this disposable workspace and isolated runtime are readable or writable. Host HII state, credentials, provider controls, direct shell input, and deletion are unavailable. Put previewable output under public/. The artifact owns the full preview pane: use responsive full-viewport html/body styling and set its background whenever the user asks to change the preview background. For HTML or web output, acceptance must use http or another real browser-render check; file existence or size alone is not acceptance. Keep visible thinking concise: decide, act, verify, finish. Do not restate these instructions or debate obvious tool choices."
     } else {
         "Use hii_context for continuity or current-work questions. File deletion requires explicit live operator approval."
     };
@@ -1303,6 +1304,9 @@ mod tests {
         let prompt = conversation_prompt(Path::new("/workspace"), 0, true);
         assert!(prompt.contains("installed host executables"));
         assert!(prompt.contains("Put previewable output under public/"));
+        assert!(prompt.contains("responsive full-viewport"));
+        assert!(prompt.contains("real browser-render check"));
+        assert!(prompt.contains("Keep visible thinking concise"));
         assert!(!prompt.contains("hii_context"));
         assert!(prompt.contains("deletion are unavailable"));
     }
