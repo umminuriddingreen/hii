@@ -1,0 +1,2 @@
+-- Remote baseline migration recorded before this repository began tracking
+-- Supabase migrations locally. The live schema remains canonical for this version.
