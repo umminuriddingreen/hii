@@ -30,6 +30,34 @@ The internal maturity test:
 “Infinite” should mean that the workspace can grow without the person losing
 orientation, authorship, or trust. It should not mean an unbounded agent loop.
 
+## Verified implementation checkpoint
+
+The first governed spatial-run loop is now real rather than a roadmap claim.
+Live HII Space completed this exact sequence:
+
+1. Select a canvas object as context.
+2. State an intent and prepare, but do not start, a run.
+3. Review the selected context, capability, eight-step budget, workspace write
+   boundary, and external-action boundary.
+4. Explicitly approve the AII `workspace.run`.
+5. Run one flat HII verification action and preserve its real output.
+6. Return a structured receipt and materialize connected artifact and receipt
+   objects on the canvas.
+7. Convert the verified trace into a proof-backed capability draft that still
+   requires operator review.
+
+The live proof is
+`/Users/ummi/.hii/runs/cli/19fb352a74f-e7d9/receipt.json`; the implementation
+commit is `53a70ca`. Full local CI passed: 105 web tests, 85 Rust tests, clippy,
+all product smoke suites including the new spatial-run gate, and the production
+build.
+
+This closes “one legible governed run” and the first capability-draft path. It
+does not close the entire maturity matrix. The highest remaining product gates
+are a real editable creative artifact adapter, governed cancellation/retry,
+installed-model discovery, clean-machine onboarding, restart recovery, and
+media organization at scale.
+
 ## Evidence reviewed
 
 ### Live HII
