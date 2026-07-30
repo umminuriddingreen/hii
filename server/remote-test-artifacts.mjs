@@ -12,6 +12,52 @@ const CHROME_CANDIDATES = [
   '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser'
 ];
 
+function cleanDiagnostic(value) {
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 1000);
+}
+
+function locationSuffix(details = {}) {
+  const url = cleanDiagnostic(details.url);
+  const line = Number.isInteger(details.lineNumber) ? details.lineNumber + 1 : null;
+  const column = Number.isInteger(details.columnNumber) ? details.columnNumber + 1 : null;
+  if (!url) return '';
+  return ` (${url}${line ? `:${line}` : ''}${column ? `:${column}` : ''})`;
+}
+
+export function chromeFailure(message) {
+  if (message.method === 'Runtime.exceptionThrown') {
+    const details = message.params?.exceptionDetails ?? {};
+    const exception = details.exception ?? {};
+    const description = cleanDiagnostic(
+      exception.description ?? exception.value ?? details.text ?? 'JavaScript exception'
+    );
+    return `js: ${description}${locationSuffix(details)}`;
+  }
+  if (message.method === 'Runtime.consoleAPICalled' && message.params?.type === 'error') {
+    const values = (message.params.args ?? [])
+      .map((argument) => cleanDiagnostic(argument.value ?? argument.description))
+      .filter(Boolean);
+    return `console: ${values.join(' ') || 'console.error'}`;
+  }
+  if (message.method === 'Log.entryAdded' && message.params?.entry?.level === 'error') {
+    return `console: ${cleanDiagnostic(message.params.entry.text)}`;
+  }
+  if (message.method === 'Network.loadingFailed' && !message.params?.canceled) {
+    return `network: ${cleanDiagnostic(message.params?.errorText ?? 'request failed')}`;
+  }
+  if (
+    message.method === 'Network.responseReceived' &&
+    Number(message.params?.response?.status) >= 400
+  ) {
+    const response = message.params.response;
+    return `asset: HTTP ${response.status} ${cleanDiagnostic(response.url)}`;
+  }
+  return null;
+}
+
 async function installedChrome() {
   for (const candidate of CHROME_CANDIDATES) {
     try {
@@ -83,7 +129,7 @@ async function verifyWithChrome(chrome, url, screenshot) {
     });
     let nextId = 1;
     const pending = new Map();
-    const failures = [];
+    const failures = new Set();
     let sessionId;
     browserWs.on('message', (raw) => {
       const message = JSON.parse(raw.toString());
@@ -91,11 +137,8 @@ async function verifyWithChrome(chrome, url, screenshot) {
         pending.get(message.id)(message);
         pending.delete(message.id);
       }
-      if (message.method === 'Runtime.exceptionThrown') failures.push(`js: ${message.params?.exceptionDetails?.text ?? 'exception'}`);
-      if (message.method === 'Log.entryAdded' && ['error', 'warning'].includes(message.params?.entry?.level)) {
-        failures.push(`console: ${message.params.entry.text}`);
-      }
-      if (message.method === 'Network.loadingFailed') failures.push(`network: ${message.params?.errorText ?? 'request failed'}`);
+      const failure = chromeFailure(message);
+      if (failure) failures.add(failure);
     });
     const call = (method, params = {}, sid = sessionId) => new Promise((resolve, reject) => {
       const id = nextId++;
@@ -120,7 +163,7 @@ async function verifyWithChrome(chrome, url, screenshot) {
       call('Log.enable')
     ]);
     const navigation = await call('Page.navigate', { url });
-    if (navigation.errorText) failures.push(`navigation: ${navigation.errorText}`);
+    if (navigation.errorText) failures.add(`navigation: ${navigation.errorText}`);
     await new Promise((resolve) => setTimeout(resolve, 1500));
     const evaluated = await call('Runtime.evaluate', {
       expression: `(() => {
@@ -154,10 +197,10 @@ async function verifyWithChrome(chrome, url, screenshot) {
     await fs.writeFile(screenshot, Buffer.from(capture.data, 'base64'), { mode: 0o600 });
     browserWs.close();
     return {
-      ok: failures.length === 0 && dom.childCount > 0 && dom.visible > 0,
+      ok: failures.size === 0 && dom.childCount > 0 && dom.visible > 0,
       engine: 'chrome-cdp',
       httpStatus: 200,
-      failures,
+      failures: [...failures],
       dom,
       screenshot
     };

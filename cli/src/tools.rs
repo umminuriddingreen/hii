@@ -247,10 +247,18 @@ impl Toolbelt {
             return tool_result(Err("web search query cannot be empty".into()), false);
         }
         let result = (|| {
-            let url = format!(
-                "https://html.duckduckgo.com/html/?q={}",
-                percent_encode(query)
-            );
+            let url = std::env::var("HII_WEB_SEARCH_URL")
+                .ok()
+                .filter(|value| {
+                    value.starts_with("http://127.0.0.1:") || value.starts_with("http://localhost:")
+                })
+                .map(|value| format!("{value}?q={}", percent_encode(query)))
+                .unwrap_or_else(|| {
+                    format!(
+                        "https://html.duckduckgo.com/html/?q={}",
+                        percent_encode(query)
+                    )
+                });
             let response = self
                 .ollama_http
                 .get(&url)

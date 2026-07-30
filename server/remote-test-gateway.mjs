@@ -411,6 +411,7 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
       sandbox.env.HII_VERIFIED_LESSONS_FILE = improvement.sessionLessons;
       sandbox.env.HII_MODEL_URL = `http://127.0.0.1:${modelPort}`;
       sandbox.env.HII_MODEL_PROVIDER = 'lmstudio';
+      sandbox.env.HII_WEB_SEARCH_URL = `http://127.0.0.1:${modelPort}/v1/hii/web-search`;
       const args = [
         ...sandbox.args,
         '--cwd', layout.workspace,

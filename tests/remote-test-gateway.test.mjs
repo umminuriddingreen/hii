@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import http from 'node:http';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   ARTIFACT_HTTPS_PORT,
@@ -17,15 +18,33 @@ import {
   resolvePublicArtifact,
   routeOwnedBy
 } from '../server/remote-test-core.mjs';
-import { verifyArtifact } from '../server/remote-test-artifacts.mjs';
+import { chromeFailure, verifyArtifact } from '../server/remote-test-artifacts.mjs';
 import { createSandbox, sanitizedHostEnv } from '../server/remote-test-sandbox.mjs';
 import { replayTranscript, startRemoteTestGateway } from '../server/remote-test-gateway.mjs';
 import { createImprovementRecorder } from '../server/remote-test-learning.mjs';
+import { startModelBridge } from '../server/remote-test-model-bridge.mjs';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 async function temporary() {
   return await fs.mkdtemp(path.join(os.tmpdir(), 'hii-remote-test-'));
+}
+
+async function childResult(binary, args, options) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(binary, args, options);
+    const stdout = [];
+    const stderr = [];
+    child.stdout?.on('data', (chunk) => stdout.push(chunk));
+    child.stderr?.on('data', (chunk) => stderr.push(chunk));
+    child.once('error', reject);
+    child.once('close', (code, signal) => resolve({
+      code,
+      signal,
+      stdout: Buffer.concat(stdout).toString('utf8'),
+      stderr: Buffer.concat(stderr).toString('utf8')
+    }));
+  });
 }
 
 test('artifact boundary rejects traversal, dotfiles, and symlinks', async (context) => {
@@ -102,16 +121,23 @@ test('public-test sandbox retains host PATH but removes secrets and denies delet
   context.after(() => fs.rm(root, { recursive: true, force: true }));
   const layout = await ensureSessionLayout(root, '20260730120000-abcdefabcdefabcdefabcdef');
   const hostEnv = {
-    PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin',
+    PATH: `/opt/homebrew/bin:${path.join(os.homedir(), '.local', 'bin')}:/usr/local/bin:/usr/bin:/bin`,
     LANG: 'en_US.UTF-8',
     NO_COLOR: '1',
     OPENAI_API_KEY: 'do-not-copy',
-    RANDOM_TOKEN: 'do-not-copy'
+    RANDOM_TOKEN: 'do-not-copy',
+    AWS_PROFILE: 'private-profile',
+    SSH_AUTH_SOCK: '/private/tmp/private-agent.sock',
+    NODE_OPTIONS: '--require=/private/tmp/inject.js'
   };
   const env = sanitizedHostEnv({ layout, hostEnv });
-  assert.equal(env.PATH, hostEnv.PATH);
+  assert.equal(env.PATH.includes(os.homedir()), false);
+  assert.equal(env.PATH.includes('/opt/homebrew/bin'), true);
   assert.equal(env.OPENAI_API_KEY, undefined);
   assert.equal(env.RANDOM_TOKEN, undefined);
+  assert.equal(env.AWS_PROFILE, undefined);
+  assert.equal(env.SSH_AUTH_SOCK, undefined);
+  assert.equal(env.NODE_OPTIONS, undefined);
   assert.equal(env.NO_COLOR, undefined);
   assert.equal(env.COLORTERM, 'truecolor');
   assert.equal(env.TERM, 'xterm-256color');
@@ -119,12 +145,14 @@ test('public-test sandbox retains host PATH but removes secrets and denies delet
   assert.equal(env.HII_RUNTIME_DIR, layout.runtime);
   const sandbox = await createSandbox({ layout, hiiBinary: '/bin/sh', hostEnv });
   const profile = await fs.readFile(sandbox.profilePath, 'utf8');
-  assert.match(profile, /\(allow network\*\)/);
+  assert.match(profile, /\(allow network-outbound \(remote ip "localhost:\*"\)\)/);
+  assert.doesNotMatch(profile, /\(allow network\*\)/);
   assert.match(profile, /\(allow pseudo-tty\)/);
   assert.match(profile, /\(allow file-ioctl\)/);
   assert.match(profile, /\(deny file-write-unlink/);
   const escapedHome = os.homedir().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   assert.match(profile, new RegExp(`\\(deny file-read\\* \\(subpath "${escapedHome}"\\)\\)`));
+  assert.match(profile, /\(deny file-read\* \(subpath "\/Volumes"\)\)/);
   assert.doesNotMatch(profile, new RegExp(`\\(allow file-read\\* \\(subpath "${escapedHome}"\\)\\)`));
   assert.deepEqual(sandbox.args.slice(-1), ['/bin/sh']);
   if (process.platform === 'darwin') {
@@ -142,7 +170,73 @@ printf '{"hostRead":%s,"deleteDenied":%s,"wrote":"%s"}' "$host_read" "$delete_de
     ], { encoding: 'utf8', env });
     assert.equal(probe.status, 0, JSON.stringify({ error: probe.error?.message, signal: probe.signal, stderr: probe.stderr }));
     assert.deepEqual(JSON.parse(probe.stdout), { hostRead: false, deleteDenied: true, wrote: 'ok' }, profile);
+
+    const loopback = net.createServer((socket) => socket.end('ok'));
+    await new Promise((resolve, reject) => {
+      loopback.once('error', reject);
+      loopback.listen(0, '127.0.0.1', resolve);
+    });
+    const port = loopback.address().port;
+    const localNetwork = await childResult(sandbox.launcher, [
+      ...sandbox.args,
+      '-c',
+      `/opt/homebrew/bin/python3 -c 'import socket; print(socket.create_connection(("127.0.0.1", ${port}), 2).recv(2).decode())'`
+    ], { cwd: layout.workspace, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    await new Promise((resolve) => loopback.close(resolve));
+    assert.equal(localNetwork.code, 0, localNetwork.stderr);
+    assert.equal(localNetwork.stdout.trim(), 'ok');
+
+    const externalNetwork = await childResult(sandbox.launcher, [
+      ...sandbox.args,
+      '-c',
+      "/opt/homebrew/bin/python3 -c 'import socket; socket.create_connection((\"1.1.1.1\", 80), 1)'"
+    ], { cwd: layout.workspace, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    assert.notEqual(externalNetwork.code, 0, 'public-test sandbox unexpectedly reached the public network');
   }
+});
+
+test('local model bridge owns external web search for the loopback-only HII process', async (context) => {
+  const server = await startModelBridge({
+    port: 0,
+    workspace: repository,
+    fetchImpl: async (url, options) => {
+      assert.match(String(url), /duckduckgo\.com\/html\/\?q=three\.js/);
+      assert.equal(options.signal instanceof AbortSignal, true);
+      return {
+        ok: true,
+        status: 200,
+        text: async () => '<html><body>local proxy result</body></html>'
+      };
+    }
+  });
+  context.after(() => new Promise((resolve) => server.close(resolve)));
+  const address = server.address();
+  const response = await fetch(`http://127.0.0.1:${address.port}/v1/hii/web-search?q=three.js`);
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), '<html><body>local proxy result</body></html>');
+});
+
+test('Chrome diagnostics retain actionable exception, console, and asset details', () => {
+  assert.match(chromeFailure({
+    method: 'Runtime.exceptionThrown',
+    params: {
+      exceptionDetails: {
+        text: 'Uncaught',
+        url: 'http://127.0.0.1:1234/index.html',
+        lineNumber: 8,
+        columnNumber: 4,
+        exception: { description: 'ReferenceError: missingThing is not defined\n    at index.html:9:5' }
+      }
+    }
+  }), /ReferenceError: missingThing is not defined.*index\.html:9:5/);
+  assert.equal(chromeFailure({
+    method: 'Runtime.consoleAPICalled',
+    params: { type: 'error', args: [{ value: 'shader failed' }, { value: 17 }] }
+  }), 'console: shader failed 17');
+  assert.equal(chromeFailure({
+    method: 'Network.responseReceived',
+    params: { response: { status: 404, url: 'http://127.0.0.1:1234/missing.js' } }
+  }), 'asset: HTTP 404 http://127.0.0.1:1234/missing.js');
 });
 
 test('a reconnect receives the preserved terminal transcript', async (context) => {
@@ -192,6 +286,23 @@ test('Three.js addon imports without an import map are rejected', async (context
   assert.equal(result.engine, 'chrome-cdp');
   assert.equal(result.ok, false);
   assert.ok(result.failures.length > 0);
+});
+
+test('browser verifier reports the actual JavaScript exception instead of generic Uncaught', async (context) => {
+  const root = await temporary();
+  context.after(() => fs.rm(root, { recursive: true, force: true }));
+  const layout = await ensureSessionLayout(root, '20260730120000-050505050505050505050505');
+  await fs.writeFile(
+    path.join(layout.publicDir, 'index.html'),
+    '<!doctype html><html><body><main>Broken</main><script>missingThing()</script></body></html>'
+  );
+  const result = await verifyArtifact({
+    publicDir: layout.publicDir,
+    relativePath: 'index.html',
+    artifactsDir: layout.artifacts
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.failures.some((failure) => failure.includes('ReferenceError: missingThing is not defined')));
 });
 
 test('Three.js import-map fixture renders a canvas and captures a screenshot in Chrome', async (context) => {

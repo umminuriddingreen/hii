@@ -300,6 +300,9 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 }
                 if io::stdout().is_terminal() {
                     crate::tui::tool_result(result.ok, result.verification);
+                    if !result.ok {
+                        crate::tui::tool_failure_detail(&safe_output);
+                    }
                 }
                 if result.ok && matches!(tool.as_str(), "write" | "edit") {
                     if let Some(path) = path.as_deref() {

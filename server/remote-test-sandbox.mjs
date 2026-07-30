@@ -2,7 +2,14 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const SECRET_ENV = /(SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|PRIVATE|API_KEY|ACCESS_KEY|SERVICE_ROLE|COOKIE|SESSION|AUTH)/i;
+const SAFE_HOST_ENV = new Set([
+  'DEVELOPER_DIR',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'SDKROOT',
+  'SYSTEM_VERSION_COMPAT'
+]);
 
 function quoteSandbox(value) {
   return `"${String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
@@ -11,9 +18,17 @@ function quoteSandbox(value) {
 export function sanitizedHostEnv({ layout, hostEnv = process.env }) {
   const env = {};
   for (const [name, value] of Object.entries(hostEnv)) {
-    if (value == null || SECRET_ENV.test(name)) continue;
+    if (value == null || (!SAFE_HOST_ENV.has(name) && !name.startsWith('LC_'))) continue;
     env[name] = value;
   }
+  const hostHome = os.homedir();
+  env.PATH = (hostEnv.PATH ?? '/usr/bin:/bin:/usr/sbin:/sbin')
+    .split(path.delimiter)
+    .filter(Boolean)
+    .map((entry) => path.resolve(entry))
+    .filter((entry) => entry !== hostHome && !entry.startsWith(`${hostHome}${path.sep}`))
+    .filter((entry, index, values) => values.indexOf(entry) === index)
+    .join(path.delimiter);
   env.HOME = path.join(layout.sessionDir, 'home');
   env.TMPDIR = path.join(layout.sessionDir, 'tmp');
   env.HII_RUNTIME_DIR = layout.runtime;
@@ -38,7 +53,8 @@ export async function createSandbox({ layout, hiiBinary, hostEnv = process.env }
   const pathDirectories = (hostEnv.PATH ?? '')
     .split(path.delimiter)
     .filter(Boolean)
-    .map((entry) => path.resolve(entry));
+    .map((entry) => path.resolve(entry))
+    .filter((entry) => entry !== hostHome && !entry.startsWith(`${hostHome}${path.sep}`));
   const toolRoots = pathDirectories.map((entry) => {
     const leaf = path.basename(entry);
     const parent = path.dirname(entry);
@@ -50,12 +66,17 @@ export async function createSandbox({ layout, hiiBinary, hostEnv = process.env }
   });
   const readRoots = [
     '/System',
-    '/Library/Apple',
+    '/Applications',
+    '/Library',
     '/usr',
     '/bin',
     '/sbin',
     '/opt/homebrew',
     '/usr/local',
+    '/private/etc',
+    '/private/var',
+    '/private/var/select',
+    '/dev',
     ...pathDirectories,
     ...toolRoots,
     path.dirname(path.resolve(hiiBinary))
@@ -67,12 +88,15 @@ export async function createSandbox({ layout, hiiBinary, hostEnv = process.env }
     '(allow signal (target self))',
     '(allow sysctl-read)',
     '(allow mach-lookup)',
-    '(allow network*)',
+    '(allow network-outbound (remote ip "localhost:*"))',
     '(allow pseudo-tty)',
     '(allow file-ioctl)',
     '(allow file-read-metadata)',
     '(allow file-read*)',
     `(deny file-read* (subpath ${quoteSandbox(hostHome)}))`,
+    '(deny file-read* (subpath "/Volumes"))',
+    '(deny file-read* (subpath "/Network"))',
+    '(deny file-read* (subpath "/private/var/root"))',
     ...[...new Set(readRoots)].map((root) => `(allow file-read* (subpath ${quoteSandbox(root)}))`),
     `(allow file-read* file-write* (subpath ${quoteSandbox(canonicalSessionDir)}))`,
     `(deny file-write-unlink (subpath ${quoteSandbox(canonicalSessionDir)}))`,

@@ -3,7 +3,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 function signature(failures = []) {
-  return failures
+  return [...new Set(failures)]
     .slice(0, 3)
     .join(' | ')
     .replace(/\b(?:\/Users|\/private|\/var)\/[^\s"'<>]+/g, '<local-path>')
@@ -49,6 +49,7 @@ export function createImprovementRecorder({ root, layout }) {
     const issue = signature(verification?.failures);
     if (!issue) return;
     const history = failures.get(relativePath) ?? [];
+    if (history.at(-1)?.issue === issue) return;
     history.push({ issue, at: new Date().toISOString() });
     failures.set(relativePath, history);
   }

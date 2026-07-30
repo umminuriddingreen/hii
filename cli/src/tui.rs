@@ -336,6 +336,37 @@ pub fn tool_result(ok: bool, verification: bool) {
     );
 }
 
+pub fn tool_failure_detail(output: &str) {
+    let mut shown = Vec::new();
+    for line in output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        let line = truncate(line, terminal_width().saturating_sub(10));
+        if !shown.contains(&line) {
+            shown.push(line);
+        }
+        if shown.len() == 3 {
+            break;
+        }
+    }
+    for line in shown {
+        println!("  {} {}", paint("│", &[DIM, RED]), paint(&line, &[RED]));
+    }
+}
+
+pub fn recovery(message: &str) {
+    println!(
+        "  {}  {}",
+        paint("REPAIR STALLED", &[BOLD, AMBER]),
+        paint(
+            &truncate(message, terminal_width().saturating_sub(20)),
+            &[AMBER]
+        )
+    );
+}
+
 pub fn reply(message: &str, activity: Option<&str>) {
     println!();
     println!("  {}", paint("DONE", &[BOLD, GREEN]));

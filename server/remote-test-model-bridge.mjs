@@ -22,6 +22,29 @@ async function readJson(req, limit = 2 * 1024 * 1024) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
+async function webSearch(res, requestUrl, fetchImpl) {
+  const query = requestUrl.searchParams.get('q')?.trim();
+  if (!query) return sendJson(res, 400, { error: { message: 'missing search query' } });
+  const response = await fetchImpl(
+    `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+    {
+      headers: { 'user-agent': 'HII/0.1 (+local agent web search)' },
+      signal: AbortSignal.timeout(10_000)
+    }
+  );
+  if (!response.ok) {
+    return sendJson(res, 502, { error: { message: `web search HTTP ${response.status}` } });
+  }
+  const body = (await response.text()).slice(0, 2 * 1024 * 1024);
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'content-length': Buffer.byteLength(body),
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff'
+  });
+  res.end(body);
+}
+
 async function localCompletion({ ollamaUrl, body }) {
   const response = await fetch(`${ollamaUrl}/api/chat`, {
     method: 'POST',
@@ -104,10 +127,15 @@ export async function startModelBridge({
   workspace,
   codexBinary = 'codex',
   ollamaUrl = 'http://127.0.0.1:11434',
-  localModel = 'qwen3.6:35b-mlx'
+  localModel = 'qwen3.6:35b-mlx',
+  fetchImpl = fetch
 }) {
   const server = http.createServer(async (req, res) => {
     try {
+      const requestUrl = new URL(req.url, 'http://127.0.0.1');
+      if (req.method === 'GET' && requestUrl.pathname === '/v1/hii/web-search') {
+        return await webSearch(res, requestUrl, fetchImpl);
+      }
       if (req.method === 'GET' && req.url === '/v1/models') {
         return sendJson(res, 200, {
           data: [
