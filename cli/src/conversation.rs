@@ -864,7 +864,7 @@ impl Conversation {
                     (id != self.store.id).then_some((modified, id))
                 })
                 .collect::<Vec<_>>();
-            sessions.sort_by(|left, right| right.0.cmp(&left.0));
+            sessions.sort_by_key(|entry| std::cmp::Reverse(entry.0));
             if sessions.is_empty() {
                 return Ok("No prior HII sessions found.".into());
             }
