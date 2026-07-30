@@ -481,13 +481,22 @@ Do not claim:
 
 ## CI/CD decision
 
-The repository now has four explicit local CI stages:
+The repository now has five explicit local CI stages:
 
 1. Web type and unit tests.
 2. Rust formatting, tests, and clippy.
-3. HII product-proof gates for SDK, skills, knowledge, knowledge runs, Context
+3. An optimized Rust release build, so green source cannot leave the installed
+   HII command on an older binary.
+4. HII product-proof gates for SDK, skills, knowledge, knowledge runs, Context
    Dock, activation, window state, workspace durability, and bootstrap syntax.
-4. Production build.
+5. Production web build.
+
+The global launcher now has one versioned source, one atomic installer, and a
+behavioral gate. It rebuilds the release CLI when the binary is missing or its
+committed Rust inputs changed, reuses a fresh binary without invoking Cargo,
+and preserves the last successful release while multi-agent Rust work is
+uncommitted. This closes the stale-local-command failure observed after the
+Space repair without making HII unavailable during partial edits.
 
 This is CI, not external delivery. HII remains local-first and this audit does
 not authorize deployment, upload, or release. The next CD layer should package

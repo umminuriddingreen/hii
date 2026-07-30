@@ -142,6 +142,7 @@ capability runner with stronger isolation rather than adding a `--force` mode.
 ```sh
 npm run cli:check
 npm run cli:build
+npm run hii:launcher:check
 npm run cli:eval:local
 hii doctor
 hii --cwd /path/to/workspace "make the change and verify it"
@@ -154,8 +155,15 @@ path, then probes Gemma's bounded text-utility behavior. The suite uses isolated
 temporary workspaces and an isolated HII runtime; it does not add a public CLI
 command or write evaluation receipts into the user's normal `~/.hii` runtime.
 
-The global launcher at `/Users/ummi/bin/hii` executes
-`/Users/ummi/hii/target/release/hii` and builds it on first use when absent.
+The canonical global launcher is `scripts/hii-launcher.sh`. Install or refresh
+`/Users/ummi/bin/hii` with `npm run cli:install`. It executes
+`/Users/ummi/hii/target/release/hii`, builds it on first use when absent, and
+rebuilds when the clean, committed workspace manifest, lockfile, or CLI Rust
+source tree changed after the release binary was built. While those paths have
+uncommitted work, the launcher preserves the last successful release instead
+of compiling a partial multi-agent edit. `npm run ci:full` also builds the
+release workspace, so a green full CI run and the installed command exercise
+the same compiled source.
 
 ## Migration rule
 

@@ -173,6 +173,7 @@ AII → publishes governed state → ~/.hii ← HII reads and presents state
 Repository:       /Users/ummi/hii
 Runtime:          /Users/ummi/.hii
 Launcher:         /Users/ummi/bin/hii
+Launcher source:  /Users/ummi/hii/scripts/hii-launcher.sh
 Context database: /Users/ummi/.hii/hii.db
 Knowledge store:  /Users/ummi/.hii/hii.db + /Users/ummi/.hii/knowledge
 AII source:       /Users/ummi/hii/aii
