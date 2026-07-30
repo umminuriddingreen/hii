@@ -380,7 +380,9 @@ test('public screen stays one work stream and one result with minimal preview co
   assert.match(css, /@media \(max-width: 480px\)/);
   assert.match(app, /artifact\.style\.background/);
   assert.match(app, /trackActivity\(message\.data\)/);
-  assert.match(app, /artifact\.src = 'about:blank'/);
+  assert.match(app, /const EMPTY_PREVIEW_DOCUMENT/);
+  assert.match(app, /artifact\.srcdoc = EMPTY_PREVIEW_DOCUMENT/);
+  assert.match(app, /artifact\.removeAttribute\('srcdoc'\)/);
   assert.match(css, /grid-template-columns:\s*1fr 1fr/);
   assert.match(css, /grid-template-rows:\s*1fr 1fr/);
   assert.match(css, /#preview\s*\{\s*grid-row:\s*1/);

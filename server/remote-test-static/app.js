@@ -1,4 +1,36 @@
 const base = new URL('.', location.href).pathname.replace(/\/$/, '');
+const EMPTY_PREVIEW_DOCUMENT = `<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  * { box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+  body {
+    background:
+      radial-gradient(circle at 72% 24%, rgba(69, 214, 232, .12), transparent 24%),
+      radial-gradient(circle at 28% 74%, rgba(217, 154, 82, .1), transparent 28%),
+      repeating-linear-gradient(135deg, transparent 0 38px, rgba(243, 239, 229, .025) 39px 40px),
+      #11152a;
+  }
+  body::before, body::after {
+    content: "";
+    position: absolute;
+    width: 64vmax;
+    height: 64vmax;
+    border: 1px solid rgba(69, 214, 232, .18);
+    border-radius: 42% 58% 61% 39%;
+    transform: rotate(24deg);
+  }
+  body::before { top: -48vmax; right: -22vmax; }
+  body::after {
+    bottom: -52vmax;
+    left: -28vmax;
+    border-color: rgba(217, 154, 82, .16);
+    transform: rotate(-18deg);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { scroll-behavior: auto !important; }
+  }
+</style>`;
 const session = document.querySelector('#session');
 const terminalPane = document.querySelector('#terminal');
 const preview = document.querySelector('#preview');
@@ -16,6 +48,11 @@ let activityTail = '';
 
 function setSignal(state = 'idle') {
   session.dataset.signal = state;
+}
+
+function showEmptyPreview() {
+  artifact.removeAttribute('src');
+  artifact.srcdoc = EMPTY_PREVIEW_DOCUMENT;
 }
 
 function trackActivity(data) {
@@ -186,7 +223,7 @@ async function refreshArtifact(force = false) {
   const response = await fetch(`${base}/latest-ticket`, { method: 'POST' });
   if (response.status === 204) {
     latestArtifactId = undefined;
-    artifact.src = 'about:blank';
+    showEmptyPreview();
     preview.style.background = '';
     artifact.style.background = '';
     setPreviewStatus('empty', 'Ready for your idea');
@@ -201,6 +238,7 @@ async function refreshArtifact(force = false) {
       preview.style.background = latest.background;
       artifact.style.background = latest.background;
     }
+    artifact.removeAttribute('srcdoc');
     artifact.src = latest.url;
   }
   setPreviewStatus('ready', '✓ Preview verified');
