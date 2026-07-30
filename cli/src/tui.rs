@@ -303,7 +303,7 @@ pub fn model_text(message: &str) {
 pub fn tool_start(step: usize, tool: &str, target: &str) {
     let stage = if matches!(tool, "verify" | "http") {
         "VERIFYING"
-    } else if tool == "web_search" {
+    } else if matches!(tool, "web_search" | "web_fetch") {
         "RESEARCHING"
     } else if matches!(tool, "write" | "edit" | "shell") {
         "BUILDING"

@@ -182,6 +182,7 @@ fn input_schema(name: &str) -> Value {
         "list" => object(json!({ "path": string }), json!([])),
         "search" => object(json!({ "query": string, "path": string }), json!(["query"])),
         "web_search" => object(json!({ "query": string }), json!(["query"])),
+        "web_fetch" => object(json!({ "url": string }), json!(["url"])),
         "write" => object(
             json!({ "path": string, "content": string }),
             json!(["path", "content"]),

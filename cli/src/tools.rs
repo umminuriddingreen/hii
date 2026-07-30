@@ -2,11 +2,13 @@ use serde::Serialize;
 use std::{
     fs,
     io::Read,
+    net::{IpAddr, ToSocketAddrs},
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
     thread,
     time::{Duration, Instant},
 };
+use url::Url;
 
 const MAX_OUTPUT_BYTES: usize = 96 * 1024;
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
@@ -21,6 +23,7 @@ pub struct ToolResult {
 pub struct Toolbelt {
     workspace: PathBuf,
     ollama_http: ureq::Agent,
+    web_http: ureq::Agent,
 }
 
 impl Toolbelt {
@@ -38,6 +41,10 @@ impl Toolbelt {
             workspace,
             ollama_http: ureq::AgentBuilder::new()
                 .timeout(Duration::from_secs(30))
+                .build(),
+            web_http: ureq::AgentBuilder::new()
+                .timeout(Duration::from_secs(20))
+                .redirects(0)
                 .build(),
         })
     }
@@ -284,6 +291,77 @@ impl Toolbelt {
                 })
                 .collect::<Vec<_>>()
                 .join("\n\n"))
+        })();
+        tool_result(result, false)
+    }
+
+    /// Fetch one public page selected from research results. This is a bounded
+    /// GET-only reader, not a general network client: credentials, non-standard
+    /// ports, loopback/private destinations, redirect escapes, and binary
+    /// responses are rejected before content reaches the model.
+    pub fn web_fetch(&self, raw_url: &str) -> ToolResult {
+        let result = (|| {
+            let mut current = validate_public_web_url(raw_url)?;
+            for _ in 0..=5 {
+                let response = match self
+                    .web_http
+                    .get(current.as_str())
+                    .set("User-Agent", "HII/0.1 (+local agent web fetch)")
+                    .call()
+                {
+                    Ok(response) => response,
+                    Err(ureq::Error::Status(status, response)) => {
+                        if (300..400).contains(&status) {
+                            response
+                        } else {
+                            return Err(format!("web fetch returned HTTP {status}"));
+                        }
+                    }
+                    Err(error) => return Err(format!("web fetch failed: {error}")),
+                };
+                let status = response.status();
+                if (300..400).contains(&status) {
+                    let location = response
+                        .header("Location")
+                        .ok_or_else(|| format!("web fetch redirect {status} had no Location"))?;
+                    let redirected = current
+                        .join(location)
+                        .map_err(|error| format!("invalid redirect URL: {error}"))?;
+                    current = validate_public_web_url(redirected.as_str())?;
+                    continue;
+                }
+                if !(200..300).contains(&status) {
+                    return Err(format!("web fetch returned HTTP {status}"));
+                }
+                let content_type = response
+                    .header("Content-Type")
+                    .unwrap_or("text/plain")
+                    .to_ascii_lowercase();
+                if !readable_web_content_type(&content_type) {
+                    return Err(format!(
+                        "web fetch only reads HTML, text, JSON, or XML; received {content_type}"
+                    ));
+                }
+                let mut bytes = Vec::new();
+                response
+                    .into_reader()
+                    .take(MAX_OUTPUT_BYTES as u64)
+                    .read_to_end(&mut bytes)
+                    .map_err(|error| error.to_string())?;
+                let body = String::from_utf8(bytes)
+                    .map_err(|_| "web fetch response was not UTF-8 text".to_string())?;
+                let text = if content_type.contains("html") {
+                    readable_html(&body)
+                } else {
+                    body.trim().to_string()
+                };
+                if text.is_empty() {
+                    return Err("web fetch returned no readable text".into());
+                }
+                let text = text.chars().take(48_000).collect::<String>();
+                return Ok(format!("SOURCE {}\n\n{text}", current));
+            }
+            Err("web fetch exceeded 5 redirects".into())
         })();
         tool_result(result, false)
     }
@@ -569,6 +647,117 @@ fn clean_html(value: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn readable_html(value: &str) -> String {
+    let primary = regex::Regex::new(r"(?is)<(?:main|article)\b[^>]*>(.*?)</(?:main|article)>")
+        .expect("valid primary-content regex");
+    let value = primary
+        .captures(value)
+        .and_then(|capture| capture.get(1))
+        .map_or(value, |content| content.as_str());
+    let hidden = regex::Regex::new(
+        r"(?is)<(?:script|style|noscript|svg|template)[^>]*>.*?</(?:script|style|noscript|svg|template)>",
+    )
+    .expect("valid hidden-content regex");
+    let blocks = regex::Regex::new(
+        r"(?i)</?(?:article|aside|blockquote|br|div|footer|h[1-6]|header|li|main|nav|ol|p|pre|section|table|td|th|tr|ul)[^>]*>",
+    )
+    .expect("valid block tag regex");
+    let tags = regex::Regex::new(r"(?s)<[^>]+>").expect("valid tag regex");
+    let without_hidden = hidden.replace_all(value, " ");
+    let with_lines = blocks.replace_all(&without_hidden, "\n");
+    let decoded = decode_entities(&tags.replace_all(&with_lines, " "));
+    let text = tags.replace_all(&decoded, " ");
+    text.lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn readable_web_content_type(value: &str) -> bool {
+    [
+        "text/",
+        "application/json",
+        "application/xml",
+        "+json",
+        "+xml",
+    ]
+    .iter()
+    .any(|kind| value.contains(kind))
+}
+
+fn validate_public_web_url(raw: &str) -> Result<Url, String> {
+    let url = Url::parse(raw.trim()).map_err(|error| format!("invalid web URL: {error}"))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("web fetch URL must use http or https".into());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("web fetch URL may not contain credentials".into());
+    }
+    let host = url
+        .host_str()
+        .ok_or_else(|| "web fetch URL must contain a host".to_string())?;
+    let lowered = host.trim_end_matches('.').to_ascii_lowercase();
+    if lowered == "localhost"
+        || lowered.ends_with(".localhost")
+        || lowered.ends_with(".local")
+        || lowered.ends_with(".internal")
+    {
+        return Err("web fetch cannot access local or private hosts".into());
+    }
+    let port = url
+        .port_or_known_default()
+        .ok_or_else(|| "web fetch URL has no usable port".to_string())?;
+    if !matches!((url.scheme(), port), ("http", 80) | ("https", 443)) {
+        return Err("web fetch only allows standard HTTP and HTTPS ports".into());
+    }
+    let addresses = (host, port)
+        .to_socket_addrs()
+        .map_err(|error| format!("cannot resolve web host: {error}"))?
+        .collect::<Vec<_>>();
+    if addresses.is_empty() {
+        return Err("web host resolved to no addresses".into());
+    }
+    if addresses.iter().any(|address| !public_ip(address.ip())) {
+        return Err(
+            "web fetch cannot access loopback, private, link-local, or reserved networks".into(),
+        );
+    }
+    Ok(url)
+}
+
+fn public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            let [a, b, c, _] = ip.octets();
+            !(a == 0
+                || a == 10
+                || a == 127
+                || (a == 100 && (64..=127).contains(&b))
+                || (a == 169 && b == 254)
+                || (a == 172 && (16..=31).contains(&b))
+                || (a == 192 && b == 168)
+                || (a == 192 && b == 0 && c == 0)
+                || (a == 192 && b == 0 && c == 2)
+                || (a == 198 && (b == 18 || b == 19))
+                || (a == 198 && b == 51 && c == 100)
+                || (a == 203 && b == 0 && c == 113)
+                || a >= 224)
+        }
+        IpAddr::V6(ip) => {
+            if let Some(mapped) = ip.to_ipv4_mapped() {
+                return public_ip(IpAddr::V4(mapped));
+            }
+            let segments = ip.segments();
+            !(ip.is_unspecified()
+                || ip.is_loopback()
+                || (segments[0] & 0xfe00) == 0xfc00
+                || (segments[0] & 0xffc0) == 0xfe80
+                || (segments[0] & 0xff00) == 0xff00)
+        }
+    }
 }
 
 fn decode_entities(value: &str) -> String {
@@ -859,6 +1048,45 @@ mod tests {
         assert_eq!(results[0].0, "A & B Guide");
         assert_eq!(results[0].1, "https://example.com/guide");
         assert_eq!(results[0].2, "A concise verified answer.");
+    }
+
+    #[test]
+    fn web_fetch_rejects_private_destinations_and_credentials() {
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        for url in [
+            "http://127.0.0.1/",
+            "http://localhost/",
+            "http://10.0.0.1/",
+            "https://user:secret@example.com/",
+            "https://example.com:8443/",
+        ] {
+            assert!(!tools.web_fetch(url).ok, "{url} should be blocked");
+        }
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn web_fetch_html_reader_removes_executable_noise() {
+        let html = r#"
+          <html><head><style>body { color: red }</style></head>
+          <body><main><h1>Verified guide</h1><script>alert("no")</script>
+          <p>Use an import map &amp; HTTP.</p></main></body></html>
+        "#;
+        let text = readable_html(html);
+        assert!(text.contains("Verified guide"));
+        assert!(text.contains("Use an import map & HTTP."));
+        assert!(!text.contains("alert"));
+        assert!(!text.contains("color: red"));
+    }
+
+    #[test]
+    fn public_ip_filter_blocks_local_and_mapped_local_addresses() {
+        assert!(!public_ip("127.0.0.1".parse().unwrap()));
+        assert!(!public_ip("10.1.2.3".parse().unwrap()));
+        assert!(!public_ip("::ffff:127.0.0.1".parse().unwrap()));
+        assert!(public_ip("1.1.1.1".parse().unwrap()));
+        assert!(public_ip("2606:4700:4700::1111".parse().unwrap()));
     }
 
     #[test]

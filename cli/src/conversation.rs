@@ -326,14 +326,16 @@ impl Conversation {
                     if io::stdout().is_terminal() {
                         crate::tui::tool_start(step, &tool, &target);
                     }
-                    let observation =
-                        matches!(tool.as_str(), "read" | "list" | "search" | "web_search");
+                    let observation = matches!(
+                        tool.as_str(),
+                        "read" | "list" | "search" | "web_search" | "web_fetch"
+                    );
                     let observation_key = observation.then(|| {
                         observation_signature(
                             mutation_epoch,
                             &tool,
                             path.as_deref(),
-                            query.as_deref(),
+                            query.as_deref().or(url.as_deref()),
                             offset,
                             limit,
                         )
@@ -375,7 +377,7 @@ impl Conversation {
                         )?;
                         self.messages.push(Message::assistant(raw));
                         self.messages.push(Message::user(
-                            "PLAN MODE: do not write, edit, verify, or run mutating tools. Continue with read/list/search/web_search/http or read-only shell evidence, then return a concrete plan. The operator can use /plan off before implementation.",
+                            "PLAN MODE: do not write, edit, verify, or run mutating tools. Continue with read/list/search/web_search/web_fetch/http or read-only shell evidence, then return a concrete plan. The operator can use /plan off before implementation.",
                         ));
                         continue;
                     }
@@ -897,7 +899,7 @@ impl Conversation {
         self.messages.insert(
             1.min(self.messages.len()),
             Message::system(
-                "PLAN MODE: inspect and reason only. Use read, list, search, web_search, http, or read-only shell evidence. Do not write, edit, verify, or mutate anything. Return a concrete implementation plan when enough evidence is available.",
+                "PLAN MODE: inspect and reason only. Use read, list, search, web_search, web_fetch, http, or read-only shell evidence. Do not write, edit, verify, or mutate anything. Return a concrete implementation plan when enough evidence is available.",
             ),
         );
     }
@@ -1623,6 +1625,7 @@ fn tool_target(
     match tool {
         "shell" | "verify" => command.unwrap_or("workspace command"),
         "http" => url.unwrap_or("local endpoint"),
+        "web_fetch" => url.unwrap_or("public page"),
         "search" => query.or(path).unwrap_or("workspace search"),
         _ => path.or(query).unwrap_or("workspace"),
     }
@@ -1738,8 +1741,10 @@ fn shell_command_is_preview(command: &str) -> bool {
 }
 
 fn plan_tool_allowed(tool: &str, shell_evidence: bool) -> bool {
-    matches!(tool, "read" | "list" | "search" | "web_search" | "http")
-        || (tool == "shell" && shell_evidence)
+    matches!(
+        tool,
+        "read" | "list" | "search" | "web_search" | "web_fetch" | "http"
+    ) || (tool == "shell" && shell_evidence)
 }
 
 fn render_permissions(authority: Authority) -> String {
@@ -2070,9 +2075,9 @@ fn conversation_prompt(workspace: &std::path::Path, max_steps: usize, public_tes
         "Use hii_context for continuity or current-work questions. File deletion requires explicit live operator approval.".into()
     };
     let tools = if public_test {
-        "read|list|search|web_search|write|edit|shell|verify|http"
+        "read|list|search|web_search|web_fetch|write|edit|shell|verify|http"
     } else {
-        "read|list|search|web_search|write|edit|shell|verify|http|hii_context"
+        "read|list|search|web_search|web_fetch|write|edit|shell|verify|http|hii_context"
     };
     let lessons = std::env::var("HII_VERIFIED_LESSONS_FILE")
         .ok()
@@ -2181,6 +2186,7 @@ mod tests {
         assert!(prompt.contains("Keep reasoning short"));
         assert!(prompt.contains("Do not ask for feedback yet"));
         assert!(prompt.contains("web_search"));
+        assert!(prompt.contains("web_fetch"));
         assert!(!prompt.contains("hii_context"));
         assert!(prompt.contains("Deletion, messages/email"));
     }
@@ -2258,6 +2264,7 @@ mod tests {
     fn plan_mode_only_allows_observation_tools() {
         assert!(plan_tool_allowed("read", false));
         assert!(plan_tool_allowed("web_search", false));
+        assert!(plan_tool_allowed("web_fetch", false));
         assert!(plan_tool_allowed("http", false));
         assert!(plan_tool_allowed("shell", true));
         assert!(!plan_tool_allowed("shell", false));

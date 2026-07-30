@@ -450,7 +450,7 @@ fn action_schema() -> Value {
         "properties": {
             "type": {
                 "enum": [
-                    "read", "list", "search", "web_search", "write", "edit", "shell", "verify", "http",
+                    "read", "list", "search", "web_search", "web_fetch", "write", "edit", "shell", "verify", "http",
                     "hii_context", "og_next", "caps_check", "board_read", "board_write",
                     "skill_search", "bridge_send", "bridge_read", "final", "message"
                 ]

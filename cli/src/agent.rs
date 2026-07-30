@@ -212,14 +212,16 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     crate::tui::tool_start(steps, &tool, label);
                 }
                 let is_hii = crate::hii_tools::is_hii_tool(&tool);
-                let observation =
-                    matches!(tool.as_str(), "read" | "list" | "search" | "web_search");
+                let observation = matches!(
+                    tool.as_str(),
+                    "read" | "list" | "search" | "web_search" | "web_fetch"
+                );
                 let observation_key = observation.then(|| {
                     observation_signature(
                         mutation_epoch,
                         &tool,
                         path.as_deref(),
-                        query.as_deref(),
+                        query.as_deref().or(url.as_deref()),
                         offset,
                         limit,
                     )
@@ -557,10 +559,10 @@ Workspace: {workspace}
 Done when: {done_when}
 Acceptance checks: {declared_verification}
 
-Loop: inspect -> act -> verify change -> adjust -> final.
+Loop: inspect -> act -> verify -> final.
 Proof MUST be one flat {{"type":"verify","command":"npm test"}} action (or `http`); shell/read/list/search and nested checks never count
-Return one JSON action/turn. `type` is:
-read,list,search,write,edit,shell,verify,http,hii_context,og_next,caps_check,board_read,board_write,skill_search,bridge_send,bridge_read.
+One JSON action/turn. Types:
+read,list,search,web_search,web_fetch,write,edit,shell,verify,http,hii_context,og_next,caps_check,board_read,board_write,skill_search,bridge_send,bridge_read.
 Fields: path,query,command,content,old,new,replace_all,offset,limit,url.
 Finish: {{"type":"final","summary":"result","verification":["checks run"],"next":null}}
 
@@ -732,6 +734,7 @@ pub(crate) fn parse_action(raw: &str) -> Result<Action, String> {
             | "list"
             | "search"
             | "web_search"
+            | "web_fetch"
             | "write"
             | "edit"
             | "shell"
@@ -839,6 +842,8 @@ pub(crate) fn execute_tool(tools: &Toolbelt, call: ToolCall, dry_run: bool) -> T
         "list" => tools.list(call.path),
         "search" => tools.search(call.query.unwrap_or(""), call.path),
         "web_search" => tools.web_search(call.query.unwrap_or("")),
+        "web_fetch" if call.url.is_none_or(|url| url.trim().is_empty()) => malformed("url"),
+        "web_fetch" => tools.web_fetch(call.url.unwrap_or("")),
         "write" if dry_run => blocked("write"),
         "write" => tools.write(call.path.unwrap_or(""), call.content.unwrap_or("")),
         "edit" if dry_run => blocked("edit"),

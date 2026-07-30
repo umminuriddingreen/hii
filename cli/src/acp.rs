@@ -24,6 +24,12 @@ const TOOLS: &[(&str, &str, bool, &str)] = &[
         false,
         "search the public web and return compact cited results",
     ),
+    (
+        "web_fetch",
+        "network",
+        false,
+        "read one public web page with private-network protection",
+    ),
     ("write", "fs", true, "create or overwrite a file"),
     (
         "edit",
