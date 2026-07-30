@@ -354,11 +354,20 @@ impl Toolbelt {
                     "http tool is local-only; URL must use 127.0.0.1 or localhost".to_string(),
                 );
             }
-            let response = self
-                .ollama_http
-                .get(url)
-                .call()
-                .map_err(|error| error.to_string())?;
+            let response = match self.ollama_http.get(url).call() {
+                Ok(response) => response,
+                Err(ureq::Error::Status(status, response)) => {
+                    let mut bytes = Vec::new();
+                    response
+                        .into_reader()
+                        .take(MAX_OUTPUT_BYTES as u64)
+                        .read_to_end(&mut bytes)
+                        .map_err(|error| error.to_string())?;
+                    let body = String::from_utf8_lossy(&bytes);
+                    return Err(format!("HTTP {status}\n{body}"));
+                }
+                Err(error) => return Err(error.to_string()),
+            };
             let status = response.status();
             let mut bytes = Vec::new();
             response
@@ -750,7 +759,11 @@ fn tool_result(result: Result<String, String>, verification: bool) -> ToolResult
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::{
+        io::Write,
+        net::TcpListener,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
 
     static NEXT_WORKSPACE: AtomicUsize = AtomicUsize::new(0);
 
@@ -846,6 +859,34 @@ mod tests {
         assert_eq!(results[0].0, "A & B Guide");
         assert_eq!(results[0].1, "https://example.com/guide");
         assert_eq!(results[0].2, "A concise verified answer.");
+    }
+
+    #[test]
+    fn http_failure_preserves_browser_diagnostics() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            let body = r#"{"ok":false,"failures":["js: SyntaxError: Missing }"]}"#;
+            write!(
+                stream,
+                "HTTP/1.1 422 Unprocessable Entity\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .unwrap();
+        });
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        let result = tools.http(&format!("http://{address}/__verify/index.html"));
+        assert!(!result.ok);
+        assert!(result.verification);
+        assert!(result.output.contains("HTTP 422"));
+        assert!(result.output.contains("SyntaxError: Missing }"));
+        server.join().unwrap();
+        let _ = fs::remove_dir_all(path);
     }
 
     #[test]
