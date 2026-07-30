@@ -114,6 +114,19 @@ export function transcriptHasContent(layout) {
   }
 }
 
+export function trimTrailingIdlePrompt(layout) {
+  try {
+    const transcript = fs.readFileSync(layout.transcript, 'utf8');
+    const match = transcript.match(/\r\u001b\[2K[^\r\n]*◇[^\r\n]*$/u);
+    if (!match || match.index === undefined) return false;
+    fs.writeFileSync(layout.transcript, transcript.slice(0, match.index), { mode: 0o600 });
+    return true;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 export function disconnectTimeoutEnabled(disconnectGraceMs) {
   return Number.isFinite(disconnectGraceMs) && disconnectGraceMs > 0;
 }
@@ -127,6 +140,7 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
   const sessionModel = config.model ?? DEFAULT_SESSION_MODEL;
   const disconnectGraceMs = config.disconnectGraceMs ?? DISCONNECT_GRACE_MS;
   const layout = await ensureSessionLayout(config.root, config.sessionId);
+  trimTrailingIdlePrompt(layout);
   const improvement = createImprovementRecorder({ root: config.root, layout });
   await improvement.refreshContext();
   const sessionPath = config.sessionPath;

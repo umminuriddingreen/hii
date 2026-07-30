@@ -25,7 +25,8 @@ import {
   disconnectTimeoutEnabled,
   replayTranscript,
   startRemoteTestGateway,
-  transcriptHasContent
+  transcriptHasContent,
+  trimTrailingIdlePrompt
 } from '../server/remote-test-gateway.mjs';
 import { createImprovementRecorder } from '../server/remote-test-learning.mjs';
 import { analyzeRemoteTests, formatHarnessInsights } from '../server/remote-test-insights.mjs';
@@ -393,6 +394,20 @@ test('a restarted PTY suppresses a duplicate welcome when transcript history exi
   assert.equal(transcriptHasContent(layout), false);
   await fs.writeFile(layout.transcript, '\u001b[1mWhat do you want to create?\u001b[0m\r\n');
   assert.equal(transcriptHasContent(layout), true);
+});
+
+test('gateway restart trims only a trailing idle composer from preserved history', async (context) => {
+  const root = await temporary();
+  context.after(() => fs.rm(root, { recursive: true, force: true }));
+  const layout = await ensureSessionLayout(root, '20260730120000-060606060606060606060606');
+  const history = '\u001b[1mBuilt and verified the page.\u001b[0m\r\n';
+  await fs.writeFile(
+    layout.transcript,
+    `${history}\r\u001b[2K  \u001b[38;5;220m◇\u001b[0m draft text`
+  );
+  assert.equal(trimTrailingIdlePrompt(layout), true);
+  assert.equal(await fs.readFile(layout.transcript, 'utf8'), history);
+  assert.equal(trimTrailingIdlePrompt(layout), false);
 });
 
 test('public shared sessions stay alive while evaluations can retain a timeout', () => {
