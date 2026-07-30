@@ -434,6 +434,7 @@ dependencies = [
  "ignore",
  "libc",
  "regex",
+ "ring",
  "serde",
  "serde_json",
  "ureq",

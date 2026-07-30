@@ -14,6 +14,7 @@ mod keyboard;
 mod keymap;
 mod legacy;
 mod mcp;
+mod mcp_client;
 mod ollama;
 mod receipt;
 #[cfg(feature = "preview")]
@@ -601,6 +602,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Some(SlashCommand::Resume(id)) => conversation.resume(id.as_deref()),
             Some(SlashCommand::Skills) => conversation.skills(),
             Some(SlashCommand::Hooks) => Ok(conversation.hooks()),
+            Some(SlashCommand::Mcp(requested)) => conversation.mcp_command(&requested),
             Some(SlashCommand::Background(goal)) => conversation.background(&goal),
             Some(SlashCommand::Jobs) => conversation.jobs(),
             Some(SlashCommand::Job { id, action }) => conversation.job(&id, &action),
@@ -705,6 +707,7 @@ enum SlashCommand {
     Resume(Option<String>),
     Skills,
     Hooks,
+    Mcp(String),
     Background(String),
     Jobs,
     Job {
@@ -788,6 +791,7 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         "/resume" => SlashCommand::Resume(argument),
         "/skills" if rest.is_empty() => SlashCommand::Skills,
         "/hooks" if rest.is_empty() => SlashCommand::Hooks,
+        "/mcp" => SlashCommand::Mcp(rest.to_string()),
         "/background" | "/bg" => SlashCommand::Background(rest.to_string()),
         "/jobs" | "/tasks" if rest.is_empty() => SlashCommand::Jobs,
         "/job" => {
@@ -867,7 +871,7 @@ fn slash_help() -> String {
     };
     help.replace(
         "/skills                       show automatically learned skill drafts\n",
-        "/skills                       show automatically learned skill drafts\n/hooks                        inspect approved lifecycle policy\n/background <task>            start one supervised local HII job\n/jobs                         list background jobs\n/job <id> status|logs|proof|cancel\n                               inspect or stop one background job\n",
+        "/skills                       show automatically learned skill drafts\n/hooks                        inspect approved lifecycle policy\n/mcp                          show governed MCP clients\n/mcp add|refresh|show|trust   configure and discover MCP tools\n/background <task>            start one supervised local HII job\n/jobs                         list background jobs\n/job <id> status|logs|proof|cancel\n                               inspect or stop one background job\n",
     )
     .replace(
         "/status                       show session, workspace, model, and usage\n",
@@ -1567,6 +1571,10 @@ mod tests {
         );
         assert_eq!(parse_slash_command("/ps"), Some(SlashCommand::Agents));
         assert_eq!(parse_slash_command("/hooks"), Some(SlashCommand::Hooks));
+        assert_eq!(
+            parse_slash_command("/mcp refresh local"),
+            Some(SlashCommand::Mcp("refresh local".into()))
+        );
         assert_eq!(
             parse_slash_command("/background inspect the failing tests"),
             Some(SlashCommand::Background("inspect the failing tests".into()))

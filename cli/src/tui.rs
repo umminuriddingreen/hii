@@ -87,6 +87,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/stop", "stop one worker"),
     ("/skills", "learned workflows"),
     ("/hooks", "lifecycle policy"),
+    ("/mcp", "governed tool servers"),
     ("/background", "supervised local task"),
     ("/jobs", "background work"),
     ("/job", "inspect or cancel job"),
@@ -615,6 +616,7 @@ mod tests {
         assert!(!matches.iter().any(|(command, _)| *command == "/rename"));
         assert!(!matches.iter().any(|(command, _)| *command == "/background"));
         assert!(!matches.iter().any(|(command, _)| *command == "/jobs"));
+        assert!(!matches.iter().any(|(command, _)| *command == "/mcp"));
     }
 
     #[test]

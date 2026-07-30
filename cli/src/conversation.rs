@@ -9,6 +9,7 @@ use crate::{
     contract::{deletion_shell, sensitive_shell, Authority, Decision},
     hooks::{HookBatch, HookEvent, HookRunner},
     keymap::Keymap,
+    mcp_client::McpClients,
     ollama::{ChatResult, ChatStreamEvent, ChatUsage, Message, Ollama},
     receipt::{
         find_receipt, redact_text, unix_ms, ConversationStore, HookRecord, Receipt, RunStore,
@@ -33,6 +34,7 @@ const COMPACTION_TRANSCRIPT_CHARS: usize = 56 * 1024;
 const GOAL_CONTEXT_PREFIX: &str = "ACTIVE SESSION GOAL:";
 const PLAN_CONTEXT_PREFIX: &str = "PLAN MODE:";
 const AUTHORITY_CONTEXT_PREFIX: &str = "ACTIVE AUTHORITY:";
+const MCP_CONTEXT_PREFIX: &str = "MCP TOOL CATALOG";
 
 struct CompactionStats {
     before_messages: usize,
@@ -162,6 +164,7 @@ pub struct Conversation {
     background_jobs: BackgroundJobs,
     pending_backgrounds: VecDeque<String>,
     keymap: Keymap,
+    mcp_clients: McpClients,
 }
 
 impl Conversation {
@@ -186,6 +189,11 @@ impl Conversation {
         let attachments = AttachmentQueue::new(tools.workspace(), public_test);
         let background_jobs = BackgroundJobs::new(&paths.runtime, tools.workspace())?;
         let keymap = Keymap::load(&paths.runtime)?;
+        let mcp_clients = if public_test {
+            McpClients::disabled(&paths.runtime, tools.workspace())
+        } else {
+            McpClients::load(&paths.runtime, tools.workspace())?
+        };
         let capsule = if public_test {
             crate::context::ContextCapsule::default()
         } else {
@@ -225,8 +233,10 @@ impl Conversation {
             background_jobs,
             pending_backgrounds: VecDeque::new(),
             keymap,
+            mcp_clients,
         };
         conversation.sync_authority_context();
+        conversation.sync_mcp_context();
         let session_hooks = conversation.hooks.fire(
             HookEvent::SessionStart,
             None,
@@ -451,6 +461,221 @@ impl Conversation {
                     self.store
                         .event("assistant.message", json!({ "content": message }))?;
                     return Ok(message);
+                }
+                Action::McpCall {
+                    server,
+                    tool,
+                    arguments,
+                    reason,
+                } => {
+                    used_tools = true;
+                    let label = format!("mcp:{server}:{tool}");
+                    if self.public_test {
+                        self.store.event(
+                            "authority.block",
+                            json!({ "step": step, "tool": label, "reason": "public test MCP boundary" }),
+                        )?;
+                        self.messages.push(Message::assistant(raw));
+                        self.messages.push(Message::user(
+                            "BLOCKED: host MCP clients are unavailable in this isolated public test.",
+                        ));
+                        rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
+                        continue;
+                    }
+                    let plan = match self.mcp_clients.plan(
+                        &server,
+                        &tool,
+                        arguments,
+                        self.authority,
+                    ) {
+                        Ok(plan) => plan,
+                        Err(error) => {
+                            self.messages.push(Message::assistant(raw));
+                            self.messages.push(Message::user(format!(
+                                "MCP CALL BLOCKED: {error}. Use the cached catalog or ask the operator to run /mcp refresh."
+                            )));
+                            rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
+                            continue;
+                        }
+                    };
+                    if self.plan_mode && (plan.mutates || plan.sensitive) {
+                        self.messages.push(Message::assistant(raw));
+                        self.messages.push(Message::user(
+                            "PLAN MODE: only read-only, closed-world MCP tools are available. Continue inspecting or return a plan.",
+                        ));
+                        rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
+                        continue;
+                    }
+                    let target = reason
+                        .as_deref()
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or(&label);
+                    let approved = match plan.decision {
+                        Decision::Allow => true,
+                        Decision::Prompt if plan.destructive => {
+                            crate::agent::request_deletion_approval(target)
+                        }
+                        Decision::Prompt => request_sensitive_approval(&label, target),
+                        Decision::Deny => false,
+                    };
+                    if !approved {
+                        let message = match plan.decision {
+                            Decision::Deny => format!(
+                                "MCP CALL BLOCKED: {} session authority or {} server trust refuses {}.{}. Inspect /permissions and /mcp show {}.",
+                                self.authority.label(),
+                                plan.trust.label(),
+                                server,
+                                tool,
+                                server
+                            ),
+                            Decision::Prompt if plan.destructive => {
+                                "MCP destructive action was not approved.".into()
+                            }
+                            Decision::Prompt => {
+                                "MCP external or mutating action was not approved.".into()
+                            }
+                            Decision::Allow => unreachable!(),
+                        };
+                        self.store.event(
+                            "authority.block",
+                            json!({
+                                "step": step,
+                                "tool": label,
+                                "decision": format!("{:?}", plan.decision),
+                                "serverTrust": plan.trust.label()
+                            }),
+                        )?;
+                        self.messages.push(Message::assistant(raw));
+                        self.messages.push(Message::user(message));
+                        rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
+                        continue;
+                    }
+                    if run.is_none() {
+                        let created = RunStore::create(&self.paths.runtime)?;
+                        created.event(
+                            "run.started",
+                            json!({
+                                "goal": redact_text(input),
+                                "workspace": self.tools.workspace(),
+                                "model": self.model,
+                                "conversation": self.store.id
+                            }),
+                        )?;
+                        run = Some(created);
+                    }
+                    if io::stdout().is_terminal() {
+                        crate::tui::tool_start(step, &label, target);
+                    }
+                    let pre_hooks = self.hooks.fire(
+                        HookEvent::PreTool,
+                        Some(&label),
+                        &self.store.id,
+                        json!({
+                            "step": step,
+                            "server": server,
+                            "tool": tool,
+                            "argumentKeys": plan.arguments.as_object().map(|arguments| arguments.keys().collect::<Vec<_>>()),
+                            "mutatesWorkspace": plan.mutates,
+                            "sensitive": plan.sensitive
+                        }),
+                    );
+                    self.record_hook_batch(&pre_hooks, run.as_ref())?;
+                    let hook_block = pre_hooks.block_reason.clone();
+                    hook_records.extend(pre_hooks.records);
+                    if let Some(blocked) = hook_block {
+                        self.messages.push(Message::assistant(raw));
+                        self.messages.push(Message::user(format!(
+                            "HOOK_BLOCKED: {blocked}. Choose a compliant alternative."
+                        )));
+                        rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
+                        continue;
+                    }
+                    rejected_actions.reset();
+                    let result = self.mcp_clients.call(&plan);
+                    let (ok, safe_output) = match result {
+                        Ok(result) => (result.ok, redact_text(&result.output)),
+                        Err(error) => (false, redact_text(&error)),
+                    };
+                    if ok && plan.mutates {
+                        mutation_epoch += 1;
+                        verified_epoch = None;
+                        verification.clear();
+                        observations.clear();
+                    }
+                    if io::stdout().is_terminal() {
+                        crate::tui::tool_result(ok, false);
+                        if !ok {
+                            crate::tui::tool_failure_detail(&safe_output);
+                        }
+                    }
+                    let post_hooks = self.hooks.fire(
+                        HookEvent::PostTool,
+                        Some(&label),
+                        &self.store.id,
+                        json!({
+                            "step": step,
+                            "server": server,
+                            "tool": tool,
+                            "ok": ok,
+                            "output": safe_output
+                        }),
+                    );
+                    self.record_hook_batch(&post_hooks, run.as_ref())?;
+                    let hook_feedback = post_hooks.model_feedback();
+                    if post_hooks.mutated_workspace() {
+                        mutation_epoch += 1;
+                        verified_epoch = None;
+                        verification.clear();
+                        observations.clear();
+                    }
+                    hook_records.extend(post_hooks.records);
+                    self.store.event(
+                        "mcp.call",
+                        json!({
+                            "step": step,
+                            "server": server,
+                            "tool": tool,
+                            "ok": ok,
+                            "mutates": plan.mutates,
+                            "sensitive": plan.sensitive,
+                            "output": safe_output
+                        }),
+                    )?;
+                    if let Some(run) = &run {
+                        run.event(
+                            "tool.result",
+                            json!({
+                                "step": step,
+                                "tool": label,
+                                "ok": ok,
+                                "verification": false,
+                                "output": safe_output
+                            }),
+                        )?;
+                    }
+                    self.messages.push(Message::assistant(raw));
+                    let proof_hint = if ok && plan.mutates {
+                        format!(
+                            "\n\nMUTATION EPOCH {mutation_epoch} RECORDED. {}",
+                            verification_required_message(false)
+                        )
+                    } else {
+                        String::new()
+                    };
+                    let hook_feedback = if hook_feedback.is_empty() {
+                        String::new()
+                    } else {
+                        format!("\n\n{hook_feedback}")
+                    };
+                    self.messages.push(Message::user(format!(
+                        "MCP TOOL RESULT [{}] {}.{}:\n{}{}{}",
+                        if ok { "ok" } else { "error" },
+                        server,
+                        tool,
+                        safe_output,
+                        proof_hint,
+                        hook_feedback
+                    )));
                 }
                 Action::Tool {
                     tool,
@@ -870,6 +1095,7 @@ impl Conversation {
         self.sync_goal_context();
         self.sync_plan_context();
         self.sync_authority_context();
+        self.sync_mcp_context();
         self.store.event(
             "conversation.cleared",
             json!({ "removed_messages": removed }),
@@ -996,7 +1222,7 @@ impl Conversation {
         };
         let mode = if self.plan_mode { "plan" } else { "workspace" };
         format!(
-            "{} messages · {} characters\n{}\n{}\n{}\nAttachments: {} pending · {}\nMode: {}\nAuthority: {}\nTheme: {}\nKeymap: {}\nGoal: {}\nLearning draft: {}",
+            "{} messages · {} characters\n{}\n{}\n{}\nAttachments: {} pending · {}\nMCP: {} cached tool(s)\nMode: {}\nAuthority: {}\nTheme: {}\nKeymap: {}\nGoal: {}\nLearning draft: {}",
             self.messages.len().saturating_sub(1),
             self.context_chars(),
             self.model,
@@ -1004,6 +1230,7 @@ impl Conversation {
             self.usage.summary(),
             self.attachments.count(),
             format_attachment_bytes(self.attachments.total_bytes()),
+            self.mcp_clients.tool_count(),
             mode,
             self.authority.label(),
             crate::tui::theme_name(),
@@ -1084,6 +1311,22 @@ impl Conversation {
         self.store.event(
             "conversation.keymap",
             json!({ "profile": self.keymap.profile_name() }),
+        )?;
+        Ok(result)
+    }
+
+    pub fn mcp_command(&mut self, requested: &str) -> Result<String, String> {
+        if self.public_test {
+            return Err("Host MCP clients are unavailable in the isolated public test.".into());
+        }
+        let result = self.mcp_clients.command(requested)?;
+        self.sync_mcp_context();
+        self.store.event(
+            "conversation.mcp_config",
+            json!({
+                "command": redact_text(requested),
+                "tools": self.mcp_clients.tool_count()
+            }),
         )?;
         Ok(result)
     }
@@ -1233,6 +1476,20 @@ impl Conversation {
         };
         self.messages
             .insert(1.min(self.messages.len()), Message::system(instruction));
+    }
+
+    fn sync_mcp_context(&mut self) {
+        self.messages.retain(|message| {
+            message.role != "system" || !message.content.starts_with(MCP_CONTEXT_PREFIX)
+        });
+        if self.public_test {
+            return;
+        }
+        let context = self.mcp_clients.catalog_context();
+        if !context.is_empty() {
+            self.messages
+                .insert(1.min(self.messages.len()), Message::system(context));
+        }
     }
 
     pub fn rename(&self, requested: &str) -> Result<String, String> {
@@ -1470,6 +1727,7 @@ impl Conversation {
             )?;
             self.authority = next;
             self.sync_authority_context();
+            self.sync_mcp_context();
         }
         Ok(render_permissions(self.authority))
     }
@@ -1540,6 +1798,7 @@ impl Conversation {
         self.sync_goal_context();
         self.sync_plan_context();
         self.sync_authority_context();
+        self.sync_mcp_context();
         self.store.event(
             "conversation.resumed",
             json!({ "source": id, "messages": count }),
@@ -1622,6 +1881,7 @@ impl Conversation {
         self.sync_goal_context();
         self.sync_plan_context();
         self.sync_authority_context();
+        self.sync_mcp_context();
         self.store.event(
             "conversation.compacted",
             json!({

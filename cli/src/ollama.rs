@@ -516,7 +516,7 @@ fn action_schema() -> Value {
         "properties": {
             "type": {
                 "enum": [
-                    "read", "list", "search", "web_search", "web_fetch", "write", "edit", "shell", "verify", "http",
+                    "read", "list", "search", "web_search", "web_fetch", "write", "edit", "shell", "verify", "http", "mcp_call",
                     "hii_context", "og_next", "caps_check", "board_read", "board_write",
                     "skill_search", "bridge_send", "bridge_read", "final", "message"
                 ]
@@ -534,6 +534,9 @@ fn action_schema() -> Value {
             "reason": { "type": "string" },
             "summary": { "type": "string" },
             "message": { "type": "string" },
+            "server": { "type": "string" },
+            "tool": { "type": "string" },
+            "arguments": { "type": "object" },
             "verification": { "type": "array", "items": { "type": "string" } },
             "next": { "type": ["string", "null"] }
         }

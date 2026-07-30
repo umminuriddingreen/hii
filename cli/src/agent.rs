@@ -2,6 +2,7 @@ use crate::{
     config::{AppPaths, DEFAULT_MODEL, DEFAULT_REVIEW_MODEL},
     contract::{deletion_shell, sensitive_shell, Authority, Contract, Decision},
     hooks::{HookBatch, HookEvent, HookRunner},
+    mcp_client::McpClients,
     ollama::{ChatResult, ChatStreamEvent, Message, Ollama},
     receipt::{redact_text, unix_ms, HookRecord, Receipt, RunStore, VerificationRecord},
     tools::{ToolResult, Toolbelt},
@@ -107,6 +108,13 @@ pub(crate) enum Action {
     Message {
         message: String,
     },
+    McpCall {
+        server: String,
+        tool: String,
+        #[serde(default)]
+        arguments: Value,
+        reason: Option<String>,
+    },
 }
 
 pub(crate) const MODEL_LOOP_DETECTED_MESSAGE: &str =
@@ -166,6 +174,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     validate_declared_verification(&options.verify)?;
 
     let tools = Toolbelt::new(options.workspace)?;
+    let mcp_clients = McpClients::load(&paths.runtime, tools.workspace())?;
     let hooks = HookRunner::load(&paths.runtime, tools.workspace(), options.hooks)?;
     let last_message = options
         .last_message
@@ -283,6 +292,10 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let mut messages = vec![Message::system(system)];
     if !capsule.text.is_empty() {
         messages.push(Message::system(capsule.text.clone()));
+    }
+    let mcp_context = mcp_clients.catalog_context();
+    if !mcp_context.is_empty() {
+        messages.push(Message::system(mcp_context));
     }
     messages.push(Message::user(options.goal.clone()));
     let mut verification = Vec::new();
@@ -593,6 +606,195 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                         break;
                     }
                 }
+            }
+            Action::McpCall {
+                server,
+                tool,
+                arguments,
+                reason,
+            } => {
+                let label = reason
+                    .as_deref()
+                    .unwrap_or("using an operator-configured MCP tool");
+                let qualified = format!("{server}.{tool}");
+                let plan = match mcp_clients.plan(&server, &tool, arguments, options.authority) {
+                    Ok(plan) => plan,
+                    Err(error) => {
+                        store.event(
+                            "mcp.block",
+                            json!({
+                                "step": steps,
+                                "server": server,
+                                "tool": tool,
+                                "reason": redact_text(&error)
+                            }),
+                        )?;
+                        messages.push(Message::assistant(raw));
+                        messages.push(Message::user(format!(
+                            "MCP_BLOCKED: {}. Refresh the server catalog or choose a configured tool.",
+                            redact_text(&error)
+                        )));
+                        rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
+                        continue;
+                    }
+                };
+                if options.dry_run && (plan.mutates || plan.sensitive) {
+                    store.event(
+                        "mcp.block",
+                        json!({
+                            "step": steps,
+                            "server": server,
+                            "tool": tool,
+                            "reason": "dry run forbids mutating or open-world MCP calls"
+                        }),
+                    )?;
+                    messages.push(Message::assistant(raw));
+                    messages.push(Message::user(format!(
+                        "MCP_BLOCKED: {qualified} may mutate state or reach an open-world system, so it cannot run in dry-run mode."
+                    )));
+                    rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
+                    continue;
+                }
+                if let Some(blocked) = enforce_authority(
+                    plan.decision,
+                    &format!("mcp:{qualified}"),
+                    label,
+                    Some(&qualified),
+                    &mut approvals,
+                ) {
+                    store.event(
+                        "authority.block",
+                        json!({
+                            "step": steps,
+                            "tool": format!("mcp:{qualified}"),
+                            "serverTrust": plan.trust.label(),
+                            "decision": format!("{:?}", plan.decision),
+                            "destructive": plan.destructive
+                        }),
+                    )?;
+                    messages.push(Message::assistant(raw));
+                    messages.push(Message::user(blocked));
+                    rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
+                    continue;
+                }
+                emit_jsonl(
+                    options.output,
+                    "tool.started",
+                    json!({
+                        "step": steps,
+                        "tool": format!("mcp:{qualified}"),
+                        "target": label
+                    }),
+                );
+                if options.output == RunOutput::Human && io::stdout().is_terminal() {
+                    crate::tui::tool_start(steps, &format!("mcp:{qualified}"), label);
+                }
+                let pre_hooks = hooks.fire(
+                    HookEvent::PreTool,
+                    Some("mcp_call"),
+                    &store.id,
+                    json!({
+                        "step": steps,
+                        "server": server,
+                        "tool": tool,
+                        "mutatesWorkspace": plan.mutates,
+                        "sensitive": plan.sensitive,
+                        "destructive": plan.destructive
+                    }),
+                );
+                persist_hook_batch(&store, options.output, &pre_hooks)?;
+                let hook_block = pre_hooks.block_reason.clone();
+                hook_records.extend(pre_hooks.records);
+                if let Some(blocked) = hook_block {
+                    messages.push(Message::assistant(raw));
+                    messages.push(Message::user(format!(
+                        "HOOK_BLOCKED: {blocked}. Choose a compliant alternative."
+                    )));
+                    rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
+                    continue;
+                }
+                rejected_actions.reset();
+                let result = mcp_clients.call(&plan);
+                let (ok, output) = match result {
+                    Ok(result) => (result.ok, redact_text(&result.output)),
+                    Err(error) => (false, redact_text(&error)),
+                };
+                if ok && plan.mutates && !options.dry_run {
+                    mutation_epoch += 1;
+                    verified_epoch = None;
+                    verification.clear();
+                    observations.clear();
+                    pending_final = None;
+                }
+                if options.output == RunOutput::Human && io::stdout().is_terminal() {
+                    crate::tui::tool_result(ok, false);
+                    if !ok {
+                        crate::tui::tool_failure_detail(&output);
+                    }
+                }
+                let post_hooks = hooks.fire(
+                    HookEvent::PostTool,
+                    Some("mcp_call"),
+                    &store.id,
+                    json!({
+                        "step": steps,
+                        "server": server,
+                        "tool": tool,
+                        "ok": ok,
+                        "output": &output
+                    }),
+                );
+                persist_hook_batch(&store, options.output, &post_hooks)?;
+                let hook_feedback = post_hooks.model_feedback();
+                if post_hooks.mutated_workspace() {
+                    mutation_epoch += 1;
+                    verified_epoch = None;
+                    verification.clear();
+                    observations.clear();
+                    pending_final = None;
+                }
+                hook_records.extend(post_hooks.records);
+                store.event(
+                    "mcp.result",
+                    json!({
+                        "step": steps,
+                        "server": server,
+                        "tool": tool,
+                        "ok": ok,
+                        "mutatesWorkspace": plan.mutates,
+                        "output": &output
+                    }),
+                )?;
+                emit_jsonl(
+                    options.output,
+                    "tool.result",
+                    json!({
+                        "step": steps,
+                        "tool": format!("mcp:{qualified}"),
+                        "ok": ok,
+                        "verification": false,
+                        "output": &output
+                    }),
+                );
+                messages.push(Message::assistant(raw));
+                let proof_hint = if ok && plan.mutates && !options.dry_run {
+                    format!(
+                        "\n\nMUTATION EPOCH {mutation_epoch} RECORDED. Run one actual verify or http acceptance check next."
+                    )
+                } else {
+                    String::new()
+                };
+                messages.push(Message::user(format!(
+                    "MCP TOOL RESULT [{}] from {qualified}:\n{}{}{}",
+                    if ok { "ok" } else { "error" },
+                    output,
+                    proof_hint,
+                    if hook_feedback.is_empty() {
+                        String::new()
+                    } else {
+                        format!("\n\n{hook_feedback}")
+                    }
+                )));
             }
             Action::Final {
                 summary,
@@ -1429,6 +1631,25 @@ mod tests {
         let action =
             parse_action(r#"{"type":"write","path":"hello.txt","content":"hello\n"}"#).unwrap();
         assert!(matches!(action, Action::Tool { tool, .. } if tool == "write"));
+    }
+
+    #[test]
+    fn parses_governed_mcp_action() {
+        let action = parse_action(
+            r#"{"type":"mcp_call","server":"local","tool":"inspect","arguments":{"path":"Cargo.toml"}}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            action,
+            Action::McpCall {
+                server,
+                tool,
+                arguments,
+                ..
+            } if server == "local"
+                && tool == "inspect"
+                && arguments["path"] == "Cargo.toml"
+        ));
     }
 
     #[test]
