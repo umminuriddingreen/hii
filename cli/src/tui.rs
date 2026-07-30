@@ -5,20 +5,59 @@
 //! consistent visual hierarchy.
 
 use std::{
-    env,
+    env, fs,
     io::{self, IsTerminal},
-    path::Path,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU8, Ordering},
 };
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
 const DIM: &str = "\x1b[2m";
-const CYAN: &str = "\x1b[38;5;44m";
-const BLUE: &str = "\x1b[38;5;75m";
-const GREEN: &str = "\x1b[38;5;78m";
-const AMBER: &str = "\x1b[38;5;215m";
-const RED: &str = "\x1b[38;5;203m";
-const SLATE: &str = "\x1b[38;5;245m";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum Theme {
+    Heritage = 0,
+    Midnight = 1,
+    Mono = 2,
+}
+
+struct Palette {
+    primary: &'static str,
+    secondary: &'static str,
+    success: &'static str,
+    warning: &'static str,
+    error: &'static str,
+    muted: &'static str,
+}
+
+const HERITAGE: Palette = Palette {
+    primary: "\x1b[38;5;220m",
+    secondary: "\x1b[38;5;141m",
+    success: "\x1b[38;5;78m",
+    warning: "\x1b[38;5;215m",
+    error: "\x1b[38;5;203m",
+    muted: "\x1b[38;5;250m",
+};
+const MIDNIGHT: Palette = Palette {
+    primary: "\x1b[38;5;44m",
+    secondary: "\x1b[38;5;75m",
+    success: "\x1b[38;5;78m",
+    warning: "\x1b[38;5;215m",
+    error: "\x1b[38;5;203m",
+    muted: "\x1b[38;5;245m",
+};
+const MONO: Palette = Palette {
+    primary: "\x1b[38;5;255m",
+    secondary: "\x1b[38;5;252m",
+    success: "\x1b[38;5;255m",
+    warning: "\x1b[38;5;250m",
+    error: "\x1b[38;5;255m",
+    muted: "\x1b[38;5;245m",
+};
+
+static ACTIVE_THEME: AtomicU8 = AtomicU8::new(Theme::Heritage as u8);
 
 const COMMANDS: &[(&str, &str)] = &[
     ("/help", "all controls"),
@@ -26,6 +65,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/goal", "persistent objective"),
     ("/plan", "inspect before acting"),
     ("/side", "ask without derailing"),
+    ("/theme", "visual signature"),
     ("/usage", "tokens and speed"),
     ("/thinking", "thought stream"),
     ("/raw", "raw model stream"),
@@ -67,6 +107,86 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/sync", "sync calendar"),
     ("/exit", "leave HII"),
 ];
+
+impl Theme {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "heritage" | "default" => Ok(Theme::Heritage),
+            "midnight" => Ok(Theme::Midnight),
+            "mono" | "monochrome" => Ok(Theme::Mono),
+            other => Err(format!(
+                "unknown theme '{other}'; use heritage | midnight | mono"
+            )),
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Theme::Heritage => "heritage",
+            Theme::Midnight => "midnight",
+            Theme::Mono => "mono",
+        }
+    }
+}
+
+fn active_theme() -> Theme {
+    match ACTIVE_THEME.load(Ordering::Relaxed) {
+        1 => Theme::Midnight,
+        2 => Theme::Mono,
+        _ => Theme::Heritage,
+    }
+}
+
+pub fn theme_name() -> &'static str {
+    active_theme().name()
+}
+
+fn palette() -> &'static Palette {
+    match active_theme() {
+        Theme::Heritage => &HERITAGE,
+        Theme::Midnight => &MIDNIGHT,
+        Theme::Mono => &MONO,
+    }
+}
+
+fn theme_file(runtime: &Path) -> PathBuf {
+    runtime.join("config").join("tui-theme")
+}
+
+pub fn load_theme(runtime: &Path) {
+    let requested = env::var("HII_THEME")
+        .ok()
+        .or_else(|| fs::read_to_string(theme_file(runtime)).ok());
+    if let Some(theme) = requested
+        .as_deref()
+        .and_then(|value| Theme::parse(value).ok())
+    {
+        ACTIVE_THEME.store(theme as u8, Ordering::Relaxed);
+    }
+}
+
+pub fn set_theme(runtime: &Path, requested: Option<&str>) -> Result<String, String> {
+    if let Some(requested) = requested {
+        let theme = Theme::parse(requested)?;
+        let file = theme_file(runtime);
+        if let Some(parent) = file.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        fs::write(&file, format!("{}\n", theme.name())).map_err(|error| error.to_string())?;
+        ACTIVE_THEME.store(theme as u8, Ordering::Relaxed);
+    }
+    let theme = active_theme();
+    let description = match theme {
+        Theme::Heritage => "HII signature · warm gold, violet, and signal green.",
+        Theme::Midnight => "Cool cyan and blue for low-light terminals.",
+        Theme::Mono => "High-clarity monochrome for constrained terminals.",
+    };
+    Ok(format!(
+        "THEME  {}\n{}\nSwitch: /theme heritage | midnight | mono",
+        theme.name(),
+        description
+    ))
+}
 
 fn color_enabled() -> bool {
     io::stdout().is_terminal()
@@ -146,14 +266,14 @@ pub fn welcome(workspace: &Path, model: &str, max_steps: usize, git: &str, publi
     println!();
     println!(
         "  {} {}  {}",
-        paint("◈", &[BOLD, CYAN]),
+        paint("◈", &[BOLD, palette().primary]),
         paint("hii", &[BOLD]),
-        paint(&workspace, &[DIM, SLATE])
+        paint(&workspace, &[DIM, palette().muted])
     );
-    println!("  {}", paint(&rule, &[DIM, BLUE]));
+    println!("  {}", paint(&rule, &[DIM, palette().secondary]));
     println!(
         "  {}  {}",
-        paint("ready", &[GREEN]),
+        paint("ready", &[palette().success]),
         paint(
             &format!(
                 "{model} · workspace · {} · live model stream · receipts",
@@ -163,21 +283,21 @@ pub fn welcome(workspace: &Path, model: &str, max_steps: usize, git: &str, publi
                     format!("{max_steps} steps")
                 }
             ),
-            &[DIM, SLATE]
+            &[DIM, palette().muted]
         )
     );
     println!(
         "  {}",
         paint(
             "state the outcome  ·  Enter steer  Tab queue  Esc stop  ·  / commands",
-            &[DIM, SLATE]
+            &[DIM, palette().muted]
         )
     );
     println!();
 }
 
 pub fn prompt_frame(_frame: usize) -> String {
-    format!("  {} ", paint("◇", &[BOLD, CYAN]))
+    format!("  {} ", paint("◇", &[BOLD, palette().primary]))
 }
 
 fn public_command(command: &str) -> bool {
@@ -190,6 +310,7 @@ fn public_command(command: &str) -> bool {
             | "/usage"
             | "/thinking"
             | "/raw"
+            | "/theme"
             | "/model"
             | "/models"
             | "/proof"
@@ -236,15 +357,15 @@ pub fn command_menu(input: &str, selected: usize, public_test: bool) -> Vec<Stri
             let active = index == selected;
             let marker = if active { "›" } else { " " };
             let command = if active {
-                paint(command, &[BOLD, CYAN])
+                paint(command, &[BOLD, palette().primary])
             } else {
-                paint(command, &[SLATE])
+                paint(command, &[palette().muted])
             };
             format!(
                 "    {} {:<12} {}",
-                paint(marker, &[CYAN]),
+                paint(marker, &[palette().primary]),
                 command,
-                paint(description, &[DIM, SLATE])
+                paint(description, &[DIM, palette().muted])
             )
         })
         .collect::<Vec<_>>();
@@ -257,7 +378,7 @@ pub fn command_menu(input: &str, selected: usize, public_test: bool) -> Vec<Stri
                     selected + 1,
                     total
                 ),
-                &[DIM, SLATE]
+                &[DIM, palette().muted]
             )
         ));
     }
@@ -267,40 +388,44 @@ pub fn command_menu(input: &str, selected: usize, public_test: bool) -> Vec<Stri
 pub fn queued() {
     println!(
         "  {} {}",
-        paint("◇ QUEUED", &[AMBER]),
-        paint("carried into the next intent", &[DIM, SLATE])
+        paint("◇ QUEUED", &[palette().warning]),
+        paint("carried into the next intent", &[DIM, palette().muted])
     );
 }
 
 pub fn steered() {
     println!(
         "\n  {} {}",
-        paint("↳ STEER", &[CYAN]),
-        paint("applies before the next action", &[DIM, SLATE])
+        paint("↳ STEER", &[palette().primary]),
+        paint("applies before the next action", &[DIM, palette().muted])
     );
 }
 
 pub fn idle_background() {
     println!(
         "  {} {}",
-        paint("○ IDLE", &[SLATE]),
-        paint("nothing is running to background", &[DIM, SLATE])
+        paint("○ IDLE", &[palette().muted]),
+        paint("nothing is running to background", &[DIM, palette().muted])
     );
 }
 
 pub fn stage(label: &str, message: &str) {
     println!(
         "  {}  {}",
-        paint(label, &[BOLD, CYAN]),
+        paint(label, &[BOLD, palette().primary]),
         paint(
             &truncate(message, terminal_width().saturating_sub(label.len() + 6)),
-            &[SLATE]
+            &[palette().muted]
         )
     );
 }
 
 pub fn model_text(message: &str) {
-    println!("  {} {}", paint("│", &[BLUE]), paint(message, &[SLATE]));
+    println!(
+        "  {} {}",
+        paint("│", &[palette().secondary]),
+        paint(message, &[palette().muted])
+    );
 }
 
 pub fn tool_start(step: usize, tool: &str, target: &str) {
@@ -315,23 +440,23 @@ pub fn tool_start(step: usize, tool: &str, target: &str) {
     };
     println!(
         "  {}  {:02} {}  {}",
-        paint(stage, &[BOLD, BLUE]),
-        paint(&format!("{step:02}"), &[DIM, SLATE]),
-        paint(&tool.to_ascii_uppercase(), &[BOLD, BLUE]),
+        paint(stage, &[BOLD, palette().secondary]),
+        paint(&format!("{step:02}"), &[DIM, palette().muted]),
+        paint(&tool.to_ascii_uppercase(), &[BOLD, palette().secondary]),
         paint(
             &truncate(target, terminal_width().saturating_sub(20)),
-            &[DIM, SLATE]
+            &[DIM, palette().muted]
         )
     );
 }
 
 pub fn tool_result(ok: bool, verification: bool) {
     let (mark, color, label) = if !ok {
-        ("╰─", RED, "failed")
+        ("╰─", palette().error, "failed")
     } else if verification {
-        ("╰─", GREEN, "verified")
+        ("╰─", palette().success, "verified")
     } else {
-        ("╰─", GREEN, "complete")
+        ("╰─", palette().success, "complete")
     };
     println!(
         "  {} {}",
@@ -356,36 +481,40 @@ pub fn tool_failure_detail(output: &str) {
         }
     }
     for line in shown {
-        println!("  {} {}", paint("│", &[DIM, RED]), paint(&line, &[RED]));
+        println!(
+            "  {} {}",
+            paint("│", &[DIM, palette().error]),
+            paint(&line, &[palette().error])
+        );
     }
 }
 
 pub fn recovery(message: &str) {
     println!(
         "  {}  {}",
-        paint("REPAIR STALLED", &[BOLD, AMBER]),
+        paint("REPAIR STALLED", &[BOLD, palette().warning]),
         paint(
             &truncate(message, terminal_width().saturating_sub(20)),
-            &[AMBER]
+            &[palette().warning]
         )
     );
 }
 
 pub fn reply(message: &str, activity: Option<&str>) {
     println!();
-    println!("  {}", paint("DONE", &[BOLD, GREEN]));
+    println!("  {}", paint("DONE", &[BOLD, palette().success]));
     for line in message.lines() {
         println!("  {line}");
     }
     if let Some(activity) = activity {
-        println!("  {}", paint(activity, &[DIM, SLATE]));
+        println!("  {}", paint(activity, &[DIM, palette().muted]));
     }
     println!();
 }
 
 pub fn system(message: &str) {
     println!();
-    println!("  {}", paint("SYSTEM", &[BOLD, BLUE]));
+    println!("  {}", paint("SYSTEM", &[BOLD, palette().secondary]));
     for line in message.lines() {
         println!("  {line}");
     }
@@ -404,14 +533,14 @@ pub fn error(message: &str) {
     } else {
         "! LOCAL PROBLEM"
     };
-    println!("  {}  {}", paint(label, &[BOLD, RED]), message);
+    println!("  {}  {}", paint(label, &[BOLD, palette().error]), message);
     println!();
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        command_matches, command_menu, prompt_frame, short_path, truncate, workspace_state,
+        command_matches, command_menu, prompt_frame, short_path, truncate, workspace_state, Theme,
     };
     use std::path::Path;
 
@@ -463,8 +592,17 @@ mod tests {
         assert!(matches.iter().any(|(command, _)| *command == "/model"));
         assert!(matches.iter().any(|(command, _)| *command == "/new"));
         assert!(matches.iter().any(|(command, _)| *command == "/raw"));
+        assert!(matches.iter().any(|(command, _)| *command == "/theme"));
         assert!(!matches.iter().any(|(command, _)| *command == "/providers"));
         assert!(!matches.iter().any(|(command, _)| *command == "/copy"));
         assert!(!matches.iter().any(|(command, _)| *command == "/rename"));
+    }
+
+    #[test]
+    fn theme_names_are_stable_and_reject_unknown_values() {
+        assert_eq!(Theme::parse("default").unwrap(), Theme::Heritage);
+        assert_eq!(Theme::parse("midnight").unwrap().name(), "midnight");
+        assert_eq!(Theme::parse("monochrome").unwrap(), Theme::Mono);
+        assert!(Theme::parse("neon-chaos").is_err());
     }
 }

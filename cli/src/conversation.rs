@@ -136,6 +136,7 @@ impl Conversation {
         max_steps: usize,
         public_test: bool,
     ) -> Result<Self, String> {
+        crate::tui::load_theme(&paths.runtime);
         let tools = Toolbelt::new(workspace)?;
         let ollama = Ollama::new(AppPaths::ollama_url());
         let model = choose_model(requested_model.as_deref(), &ollama.models()?)?;
@@ -787,7 +788,7 @@ impl Conversation {
         };
         let mode = if self.plan_mode { "plan" } else { "workspace" };
         format!(
-            "{} messages · {} characters\n{}\n{}\n{}\nMode: {}\nAuthority: {}\nGoal: {}\nLearning draft: {}",
+            "{} messages · {} characters\n{}\n{}\n{}\nMode: {}\nAuthority: {}\nTheme: {}\nGoal: {}\nLearning draft: {}",
             self.messages.len().saturating_sub(1),
             self.context_chars(),
             self.model,
@@ -795,6 +796,7 @@ impl Conversation {
             self.usage.summary(),
             mode,
             self.authority.label(),
+            crate::tui::theme_name(),
             goal,
             learning
         )
@@ -1058,6 +1060,10 @@ impl Conversation {
         self.store
             .event("conversation.thinking_mode", json!({"mode": requested}))?;
         Ok(format!("Thinking activity set to {requested}."))
+    }
+
+    pub fn theme(&self, requested: Option<&str>) -> Result<String, String> {
+        crate::tui::set_theme(&self.paths.runtime, requested)
     }
 
     pub fn model(&mut self, requested: Option<&str>) -> Result<String, String> {
