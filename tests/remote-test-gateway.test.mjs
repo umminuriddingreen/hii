@@ -24,7 +24,8 @@ import { createSandbox, sanitizedHostEnv } from '../server/remote-test-sandbox.m
 import {
   disconnectTimeoutEnabled,
   replayTranscript,
-  startRemoteTestGateway
+  startRemoteTestGateway,
+  transcriptHasContent
 } from '../server/remote-test-gateway.mjs';
 import { createImprovementRecorder } from '../server/remote-test-learning.mjs';
 import { analyzeRemoteTests, formatHarnessInsights } from '../server/remote-test-insights.mjs';
@@ -383,6 +384,15 @@ test('a reconnect receives the preserved terminal transcript', async (context) =
     type: 'data',
     data: '\u001b[32mHII ready\u001b[0m\r\n◈ '
   }]);
+});
+
+test('a restarted PTY suppresses a duplicate welcome when transcript history exists', async (context) => {
+  const root = await temporary();
+  context.after(() => fs.rm(root, { recursive: true, force: true }));
+  const layout = await ensureSessionLayout(root, '20260730120000-050505050505050505050505');
+  assert.equal(transcriptHasContent(layout), false);
+  await fs.writeFile(layout.transcript, '\u001b[1mWhat do you want to create?\u001b[0m\r\n');
+  assert.equal(transcriptHasContent(layout), true);
 });
 
 test('public shared sessions stay alive while evaluations can retain a timeout', () => {

@@ -440,7 +440,10 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         cli.max_steps,
         cli.session_profile == SessionProfile::PublicTest,
     )?;
-    conversation.welcome();
+    let suppress_welcome = env::var("HII_SUPPRESS_WELCOME").ok();
+    if !truthy_flag(suppress_welcome.as_deref()) {
+        conversation.welcome();
+    }
     // A line queued with Tab is carried forward and prepended to the next Submit.
     let mut queued: Option<String> = None;
     let mut input_history: Vec<String> = Vec::new();
@@ -1201,6 +1204,15 @@ fn normalize_goal_args(mut args: Vec<String>) -> Vec<String> {
     args
 }
 
+fn truthy_flag(value: Option<&str>) -> bool {
+    value.is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
 fn command_text(program: &str, args: &[&str], cwd: &std::path::Path) -> Option<String> {
     let output = Command::new(program)
         .args(args)
@@ -1302,6 +1314,14 @@ mod tests {
         let cli = Cli::try_parse_from(["hii"]).expect("parse default CLI");
         assert_eq!(cli.max_steps, 0);
         assert_eq!(cli.session_profile, SessionProfile::Local);
+    }
+
+    #[test]
+    fn welcome_suppression_uses_an_explicit_truthy_flag() {
+        assert!(truthy_flag(Some("1")));
+        assert!(truthy_flag(Some("TRUE")));
+        assert!(!truthy_flag(Some("0")));
+        assert!(!truthy_flag(None));
     }
 
     #[test]

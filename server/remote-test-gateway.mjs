@@ -105,6 +105,15 @@ export function replayTranscript(layout, socket) {
   }
 }
 
+export function transcriptHasContent(layout) {
+  try {
+    return fs.statSync(layout.transcript).size > 0;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 export function disconnectTimeoutEnabled(disconnectGraceMs) {
   return Number.isFinite(disconnectGraceMs) && disconnectGraceMs > 0;
 }
@@ -416,6 +425,7 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
       sandbox.env.HII_MODEL_URL = `http://127.0.0.1:${modelPort}`;
       sandbox.env.HII_MODEL_PROVIDER = 'lmstudio';
       sandbox.env.HII_WEB_SEARCH_URL = `http://127.0.0.1:${modelPort}/v1/hii/web-search`;
+      if (transcriptHasContent(layout)) sandbox.env.HII_SUPPRESS_WELCOME = '1';
       const args = [
         ...sandbox.args,
         '--cwd', layout.workspace,
