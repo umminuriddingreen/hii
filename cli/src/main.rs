@@ -413,6 +413,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
     conversation.welcome();
     // A line queued with Tab is carried forward and prepended to the next Submit.
     let mut queued: Option<String> = None;
+    let mut input_history: Vec<String> = Vec::new();
     let interactive = keyboard::is_interactive();
     loop {
         let active_queue = conversation.take_queued();
@@ -423,12 +424,23 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             // Raw-mode keyboard model: Enter=submit, Tab=queue, Esc/Ctrl+B/Ctrl+T
             // are surfaced as events (interrupt/background/task-view meaning applies
             // during a run; at the idle prompt they are informational).
-            match keyboard::read_event().map_err(|error| error.to_string())? {
-                keyboard::InputEvent::Submit(line) => match queued.take() {
-                    Some(pending) if line.trim().is_empty() => pending,
-                    Some(pending) => format!("{pending}\n{line}"),
-                    None => line,
-                },
+            match keyboard::read_event(conversation.is_public_test(), &input_history)
+                .map_err(|error| error.to_string())?
+            {
+                keyboard::InputEvent::Submit(line) => {
+                    if !line.trim().is_empty()
+                        && input_history
+                            .last()
+                            .is_none_or(|previous| previous != &line)
+                    {
+                        input_history.push(line.clone());
+                    }
+                    match queued.take() {
+                        Some(pending) if line.trim().is_empty() => pending,
+                        Some(pending) => format!("{pending}\n{line}"),
+                        None => line,
+                    }
+                }
                 keyboard::InputEvent::Queue(line) => {
                     if !line.trim().is_empty() {
                         queued = Some(line);

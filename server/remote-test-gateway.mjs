@@ -134,6 +134,7 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
   const routesStarted = [];
   const subscribers = new Set();
 
+  const previousManifest = await readJson(layout.manifest);
   const manifest = {
     schemaVersion: 1,
     id: config.sessionId,
@@ -146,7 +147,9 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
     binary: config.hiiBinary,
     exposure: expose ? { terminal: TERMINAL_HTTPS_PORT, artifacts: ARTIFACT_HTTPS_PORT } : null,
     artifacts: [],
-    savedArtifacts: [],
+    savedArtifacts: Array.isArray(previousManifest?.savedArtifacts)
+      ? previousManifest.savedArtifacts
+      : [],
     outcome: 'starting'
   };
   await writeJsonAtomic(layout.manifest, manifest);

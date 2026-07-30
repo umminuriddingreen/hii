@@ -25,7 +25,8 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/status", "session state"),
     ("/usage", "tokens and speed"),
     ("/thinking", "thought stream"),
-    ("/model", "choose local model"),
+    ("/model", "choose available model"),
+    ("/models", "list available models"),
     ("/providers", "accounts and plans"),
     ("/login", "connect an account"),
     ("/proof", "latest receipt"),
@@ -38,6 +39,19 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/teach", "save as skill"),
     ("/codex", "start Codex task"),
     ("/claude", "start Claude task"),
+    ("/agent", "manage one worker"),
+    #[cfg(feature = "preview")]
+    ("/resources", "machine resources"),
+    #[cfg(feature = "preview")]
+    ("/top", "resource monitor"),
+    #[cfg(feature = "preview")]
+    ("/schedule", "create recurring task"),
+    #[cfg(feature = "preview")]
+    ("/schedules", "recurring tasks"),
+    #[cfg(feature = "preview")]
+    ("/calendar", "calendar view"),
+    #[cfg(feature = "preview")]
+    ("/sync", "sync calendar"),
     ("/exit", "leave HII"),
 ];
 
@@ -165,7 +179,24 @@ pub fn prompt_frame(frame: usize) -> String {
     format!("  {} ", paint(glyph, &[BOLD, CYAN]))
 }
 
-pub fn command_matches(input: &str) -> Vec<(&'static str, &'static str)> {
+fn public_command(command: &str) -> bool {
+    matches!(
+        command,
+        "/help"
+            | "/compact"
+            | "/clear"
+            | "/status"
+            | "/usage"
+            | "/thinking"
+            | "/model"
+            | "/models"
+            | "/proof"
+            | "/undo"
+            | "/exit"
+    )
+}
+
+pub fn command_matches(input: &str, public_test: bool) -> Vec<(&'static str, &'static str)> {
     if !input.starts_with('/') || input.chars().any(char::is_whitespace) {
         return Vec::new();
     }
@@ -173,17 +204,30 @@ pub fn command_matches(input: &str) -> Vec<(&'static str, &'static str)> {
     let mut matches = COMMANDS
         .iter()
         .copied()
+        .filter(|(command, _)| !public_test || public_command(command))
         .filter(|(command, _)| command[1..].contains(&query))
         .collect::<Vec<_>>();
     matches.sort_by_key(|(command, _)| !command[1..].starts_with(&query));
-    matches.truncate(6);
     matches
 }
 
-pub fn command_menu(input: &str, selected: usize) -> Vec<String> {
-    command_matches(input)
+pub fn command_menu(input: &str, selected: usize, public_test: bool) -> Vec<String> {
+    const VISIBLE_ROWS: usize = 6;
+    let matches = command_matches(input, public_test);
+    let selected = selected.min(matches.len().saturating_sub(1));
+    let start = if matches.len() <= VISIBLE_ROWS {
+        0
+    } else {
+        selected
+            .saturating_sub(VISIBLE_ROWS - 1)
+            .min(matches.len() - VISIBLE_ROWS)
+    };
+    let total = matches.len();
+    let mut rows = matches
         .into_iter()
         .enumerate()
+        .skip(start)
+        .take(VISIBLE_ROWS)
         .map(|(index, (command, description))| {
             let active = index == selected;
             let marker = if active { "›" } else { " " };
@@ -199,7 +243,21 @@ pub fn command_menu(input: &str, selected: usize) -> Vec<String> {
                 paint(description, &[DIM, SLATE])
             )
         })
-        .collect()
+        .collect::<Vec<_>>();
+    if total > 0 {
+        rows.push(format!(
+            "    {}",
+            paint(
+                &format!(
+                    "↑↓ navigate  Enter select  Esc close  ·  {}/{}",
+                    selected + 1,
+                    total
+                ),
+                &[DIM, SLATE]
+            )
+        ));
+    }
+    rows
 }
 
 pub fn queued() {
@@ -237,12 +295,8 @@ pub fn stage(label: &str, message: &str) {
     );
 }
 
-pub fn reasoning(message: &str) {
-    println!(
-        "  {}  {}",
-        paint("REASONING", &[BOLD, BLUE]),
-        paint(message, &[SLATE])
-    );
+pub fn model_text(message: &str) {
+    println!("  {} {}", paint("│", &[BLUE]), paint(message, &[SLATE]));
 }
 
 pub fn tool_start(step: usize, tool: &str, target: &str) {
@@ -321,7 +375,9 @@ pub fn error(message: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{command_matches, prompt_frame, short_path, truncate, workspace_state};
+    use super::{
+        command_matches, command_menu, prompt_frame, short_path, truncate, workspace_state,
+    };
     use std::path::Path;
 
     #[test]
@@ -348,9 +404,27 @@ mod tests {
 
     #[test]
     fn slash_palette_filters_commands() {
-        let matches = command_matches("/sta");
+        let matches = command_matches("/sta", false);
         assert_eq!(matches.first().map(|item| item.0), Some("/status"));
-        assert!(command_matches("status").is_empty());
-        assert!(command_matches("/model qwen").is_empty());
+        assert!(command_matches("status", false).is_empty());
+        assert!(command_matches("/model qwen", false).is_empty());
+    }
+
+    #[test]
+    fn slash_palette_keeps_every_command_navigable_in_a_scrolling_window() {
+        let matches = command_matches("/", false);
+        assert!(matches.len() > 6);
+        let last = matches.len() - 1;
+        let menu = command_menu("/", last, false);
+        assert_eq!(menu.len(), 7);
+        assert!(menu.iter().any(|line| line.contains(matches[last].0)));
+        assert!(menu.last().unwrap().contains("Enter select"));
+    }
+
+    #[test]
+    fn public_palette_only_lists_controls_that_can_run() {
+        let matches = command_matches("/", true);
+        assert!(matches.iter().any(|(command, _)| *command == "/model"));
+        assert!(!matches.iter().any(|(command, _)| *command == "/providers"));
     }
 }

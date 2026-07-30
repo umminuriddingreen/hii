@@ -123,8 +123,26 @@ fn apply_key(key: KeyEvent, buf: &mut String) -> KeyOutcome {
         KeyCode::Enter => KeyOutcome::Emit(InputEvent::Submit(std::mem::take(buf))),
         KeyCode::Tab => KeyOutcome::Emit(InputEvent::Queue(std::mem::take(buf))),
         KeyCode::Esc => KeyOutcome::Emit(InputEvent::Interrupt),
+        KeyCode::Char('c') if ctrl => KeyOutcome::Emit(InputEvent::Interrupt),
         KeyCode::Char('b') if ctrl => KeyOutcome::Emit(InputEvent::Background),
         KeyCode::Char('t') if ctrl => KeyOutcome::Emit(InputEvent::TaskView),
+        KeyCode::Char('u') if ctrl => {
+            buf.clear();
+            KeyOutcome::Continue
+        }
+        KeyCode::Char('w') if ctrl => {
+            while buf.ends_with(char::is_whitespace) {
+                buf.pop();
+            }
+            while buf
+                .chars()
+                .last()
+                .is_some_and(|character| !character.is_whitespace())
+            {
+                buf.pop();
+            }
+            KeyOutcome::Continue
+        }
         KeyCode::Backspace => {
             buf.pop();
             KeyOutcome::Continue
@@ -150,11 +168,17 @@ fn clear_menu(out: &mut impl Write, rows: usize) {
     let _ = write!(out, "\x1b[u");
 }
 
-fn redraw(prompt: &str, buf: &str, selected: usize, previous_rows: &mut usize) -> Result<()> {
+fn redraw(
+    prompt: &str,
+    buf: &str,
+    selected: usize,
+    previous_rows: &mut usize,
+    public_test: bool,
+) -> Result<()> {
     let mut out = io::stdout();
     clear_menu(&mut out, *previous_rows);
     write!(out, "\r\x1b[2K{prompt}{buf}").map_err(|e| format!("failed to write prompt: {e}"))?;
-    let menu = crate::tui::command_menu(buf, selected);
+    let menu = crate::tui::command_menu(buf, selected, public_test);
     if !menu.is_empty() {
         write!(out, "\x1b[s").map_err(|e| format!("failed to save cursor: {e}"))?;
         for line in &menu {
@@ -173,17 +197,46 @@ fn redraw(prompt: &str, buf: &str, selected: usize, previous_rows: &mut usize) -
 ///
 /// `prompt` is redrawn as the user edits. Raw mode is entered for the duration
 /// and restored on return (or panic) via [`RawModeGuard`].
-pub fn read_event() -> Result<InputEvent> {
+fn move_selection(selected: usize, length: usize, direction: i8) -> usize {
+    if length == 0 {
+        return 0;
+    }
+    if direction < 0 {
+        selected
+            .checked_sub(1)
+            .unwrap_or_else(|| length.saturating_sub(1))
+    } else {
+        (selected + 1) % length
+    }
+}
+
+fn selected_command(
+    buf: &str,
+    matches: &[(&'static str, &'static str)],
+    selected: usize,
+) -> String {
+    matches
+        .iter()
+        .find(|(command, _)| *command == buf)
+        .or_else(|| matches.get(selected))
+        .map(|(command, _)| (*command).to_string())
+        .unwrap_or_else(|| buf.to_string())
+}
+
+pub fn read_event(public_test: bool, history: &[String]) -> Result<InputEvent> {
     let _guard = RawModeGuard::enter()?;
     let mut buf = String::new();
     let mut frame = 0usize;
     let mut selected = 0usize;
     let mut menu_rows = 0usize;
+    let mut history_index = history.len();
+    let mut draft = String::new();
     redraw(
         &crate::tui::prompt_frame(frame),
         &buf,
         selected,
         &mut menu_rows,
+        public_test,
     )?;
     loop {
         if !event::poll(Duration::from_millis(140))
@@ -196,6 +249,7 @@ pub fn read_event() -> Result<InputEvent> {
                     &buf,
                     selected,
                     &mut menu_rows,
+                    public_test,
                 )?;
             }
             continue;
@@ -206,42 +260,82 @@ pub fn read_event() -> Result<InputEvent> {
             if key.kind != event::KeyEventKind::Press {
                 continue;
             }
-            let matches = crate::tui::command_matches(&buf);
+            let matches = crate::tui::command_matches(&buf, public_test);
             match key.code {
                 KeyCode::Up if !matches.is_empty() => {
-                    selected = selected
-                        .checked_sub(1)
-                        .unwrap_or_else(|| matches.len().saturating_sub(1));
+                    selected = move_selection(selected, matches.len(), -1);
                     redraw(
                         &crate::tui::prompt_frame(frame),
                         &buf,
                         selected,
                         &mut menu_rows,
+                        public_test,
                     )?;
                     continue;
                 }
                 KeyCode::Down if !matches.is_empty() => {
-                    selected = (selected + 1) % matches.len();
+                    selected = move_selection(selected, matches.len(), 1);
                     redraw(
                         &crate::tui::prompt_frame(frame),
                         &buf,
                         selected,
                         &mut menu_rows,
+                        public_test,
                     )?;
                     continue;
                 }
                 KeyCode::Enter if !matches.is_empty() => {
-                    let choice = matches
-                        .iter()
-                        .find(|(command, _)| *command == buf)
-                        .or_else(|| matches.get(selected))
-                        .map(|(command, _)| (*command).to_string())
-                        .unwrap_or_else(|| std::mem::take(&mut buf));
+                    let choice = selected_command(&buf, &matches, selected);
                     let mut out = io::stdout();
                     clear_menu(&mut out, menu_rows);
                     let _ = write!(out, "\r\n");
                     let _ = out.flush();
                     return Ok(InputEvent::Submit(choice));
+                }
+                KeyCode::Esc if !matches.is_empty() => {
+                    buf.clear();
+                    selected = 0;
+                    redraw(
+                        &crate::tui::prompt_frame(frame),
+                        &buf,
+                        selected,
+                        &mut menu_rows,
+                        public_test,
+                    )?;
+                    continue;
+                }
+                KeyCode::Up if matches.is_empty() && !history.is_empty() => {
+                    if history_index == history.len() {
+                        draft = buf.clone();
+                    }
+                    history_index = history_index.saturating_sub(1);
+                    buf.clone_from(&history[history_index]);
+                    selected = 0;
+                    redraw(
+                        &crate::tui::prompt_frame(frame),
+                        &buf,
+                        selected,
+                        &mut menu_rows,
+                        public_test,
+                    )?;
+                    continue;
+                }
+                KeyCode::Down if matches.is_empty() && history_index < history.len() => {
+                    history_index += 1;
+                    if history_index == history.len() {
+                        buf.clone_from(&draft);
+                    } else {
+                        buf.clone_from(&history[history_index]);
+                    }
+                    selected = 0;
+                    redraw(
+                        &crate::tui::prompt_frame(frame),
+                        &buf,
+                        selected,
+                        &mut menu_rows,
+                        public_test,
+                    )?;
+                    continue;
                 }
                 _ => {}
             }
@@ -261,6 +355,7 @@ pub fn read_event() -> Result<InputEvent> {
                         &buf,
                         selected,
                         &mut menu_rows,
+                        public_test,
                     )?;
                 }
             }
@@ -333,6 +428,10 @@ mod tests {
             Some(InputEvent::Interrupt)
         );
         assert_eq!(
+            emit(ctrl(KeyCode::Char('c')), &mut buf),
+            Some(InputEvent::Interrupt)
+        );
+        assert_eq!(
             emit(ctrl(KeyCode::Char('b')), &mut buf),
             Some(InputEvent::Background)
         );
@@ -350,5 +449,22 @@ mod tests {
         // A ctrl chord that is not a mapped control must not type a character.
         assert!(emit(ctrl(KeyCode::Char('x')), &mut buf).is_none());
         assert_eq!(buf, "a");
+        buf.push_str(" two words");
+        assert!(emit(ctrl(KeyCode::Char('w')), &mut buf).is_none());
+        assert_eq!(buf, "a two ");
+        assert!(emit(ctrl(KeyCode::Char('u')), &mut buf).is_none());
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn arrow_selection_wraps_and_enter_resolves_the_highlighted_command() {
+        let matches = crate::tui::command_matches("/", false);
+        assert!(matches.len() > 6);
+        assert_eq!(move_selection(0, matches.len(), -1), matches.len() - 1);
+        assert_eq!(move_selection(matches.len() - 1, matches.len(), 1), 0);
+        assert_eq!(
+            selected_command("/", &matches, matches.len() - 1),
+            matches.last().unwrap().0
+        );
     }
 }

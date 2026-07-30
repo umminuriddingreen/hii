@@ -49,8 +49,6 @@ enum ThinkingMode {
 #[derive(Default)]
 struct VisibleReasoning {
     buffer: String,
-    seen: HashSet<String>,
-    emitted: usize,
 }
 
 impl VisibleReasoning {
@@ -73,48 +71,8 @@ impl VisibleReasoning {
     }
 
     fn clean(&mut self, value: &str) -> Option<String> {
-        if self.emitted >= 8 {
-            return None;
-        }
-        let line = value.split_whitespace().collect::<Vec<_>>().join(" ");
-        if line.len() < 12 {
-            return None;
-        }
-        let lower = line.to_ascii_lowercase();
-        const BOILERPLATE: &[&str] = &[
-            "system prompt",
-            "the instructions",
-            "json tool",
-            "tool action",
-            "mutation epoch",
-            "acceptance action",
-            "protocol",
-            "my response",
-            "final answer",
-            "previous turn",
-            "i should output",
-            "i will use the",
-            "let's execute",
-            "double-check",
-            "wait,",
-            "actually,",
-        ];
-        if BOILERPLATE.iter().any(|needle| lower.contains(needle)) {
-            return None;
-        }
-        let key = lower
-            .chars()
-            .filter(|character| character.is_alphanumeric() || character.is_whitespace())
-            .collect::<String>();
-        if !self.seen.insert(key) {
-            return None;
-        }
-        self.emitted += 1;
-        Some(if line.chars().count() > 220 {
-            format!("{}…", line.chars().take(219).collect::<String>())
-        } else {
-            line
-        })
+        let line = value.trim_end();
+        (!line.trim().is_empty()).then(|| redact_text(line))
     }
 }
 
@@ -906,7 +864,10 @@ impl Conversation {
             ollama.chat_with_stream(&model_for_thread, &messages, json, raw_thinking, sender);
         });
 
-        self.receive_activity(phase, model, receiver, !json)
+        // The operator asked for the provider's real token stream, including
+        // structured tool actions. Tool status remains visible afterward, but
+        // never substitutes for what the model actually emitted.
+        self.receive_activity(phase, model, receiver, true)
     }
 
     fn receive_activity(
@@ -960,7 +921,7 @@ impl Conversation {
                 Ok(ChatStreamEvent::Thinking(delta)) => {
                     if interactive && matches!(self.thinking_mode, ThinkingMode::Raw) {
                         for line in reasoning.push(&delta) {
-                            crate::tui::reasoning(&line);
+                            crate::tui::model_text(&line);
                             reasoning_started = true;
                         }
                     }
@@ -979,7 +940,7 @@ impl Conversation {
                     if interactive {
                         if matches!(self.thinking_mode, ThinkingMode::Raw) {
                             if let Some(line) = reasoning.finish() {
-                                crate::tui::reasoning(&line);
+                                crate::tui::model_text(&line);
                                 reasoning_started = true;
                             }
                         }
