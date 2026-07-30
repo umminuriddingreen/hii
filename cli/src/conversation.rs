@@ -23,11 +23,18 @@ use std::{
 
 const AUTO_COMPACT_CHARS: usize = 64 * 1024;
 const COMPACTION_TRANSCRIPT_CHARS: usize = 56 * 1024;
+const GOAL_CONTEXT_PREFIX: &str = "ACTIVE SESSION GOAL:";
 
 struct CompactionStats {
     before_messages: usize,
     before_chars: usize,
     after_chars: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SessionGoal {
+    objective: String,
+    paused: bool,
 }
 
 #[derive(Default)]
@@ -114,6 +121,7 @@ pub struct Conversation {
     steering: Option<String>,
     queued_inputs: VecDeque<String>,
     public_test: bool,
+    goal: Option<SessionGoal>,
 }
 
 impl Conversation {
@@ -159,6 +167,7 @@ impl Conversation {
             steering: None,
             queued_inputs: VecDeque::new(),
             public_test,
+            goal: None,
         })
     }
 
@@ -560,13 +569,21 @@ impl Conversation {
     }
 
     pub fn clear(&mut self) -> Result<String, String> {
-        let removed = self.messages.len().saturating_sub(1);
+        let removed = self
+            .messages
+            .iter()
+            .filter(|message| {
+                message.role != "system" || !message.content.starts_with(GOAL_CONTEXT_PREFIX)
+            })
+            .count()
+            .saturating_sub(1);
         let system = self
             .messages
             .first()
             .cloned()
             .ok_or_else(|| "conversation system context is missing".to_string())?;
         self.messages = vec![system];
+        self.sync_goal_context();
         self.store.event(
             "conversation.cleared",
             json!({ "removed_messages": removed }),
@@ -672,15 +689,96 @@ impl Conversation {
             .last_skill_draft
             .as_deref()
             .unwrap_or("none this session");
+        let goal = match &self.goal {
+            Some(goal) if goal.paused => format!("{} (paused)", goal.objective),
+            Some(goal) => goal.objective.clone(),
+            None => "none".into(),
+        };
         format!(
-            "{} messages · {} characters\n{}\n{}\n{}\nLearning draft: {}",
+            "{} messages · {} characters\n{}\n{}\n{}\nGoal: {}\nLearning draft: {}",
             self.messages.len().saturating_sub(1),
             self.context_chars(),
             self.model,
             self.tools.workspace().display(),
             self.usage.summary(),
+            goal,
             learning
         )
+    }
+
+    pub fn goal(&mut self, requested: Option<&str>) -> Result<String, String> {
+        let Some(requested) = requested.map(str::trim).filter(|value| !value.is_empty()) else {
+            return Ok(match &self.goal {
+                Some(goal) if goal.paused => format!("Goal paused: {}", goal.objective),
+                Some(goal) => format!("Goal active: {}", goal.objective),
+                None => "No active session goal. Use /goal <objective> to set one.".into(),
+            });
+        };
+        match requested {
+            "clear" => {
+                self.goal = None;
+                self.sync_goal_context();
+                self.store.event("conversation.goal_cleared", json!({}))?;
+                return Ok("Session goal cleared.".into());
+            }
+            "pause" => {
+                let goal = self
+                    .goal
+                    .as_mut()
+                    .ok_or_else(|| "No active session goal to pause.".to_string())?;
+                goal.paused = true;
+            }
+            "resume" => {
+                let goal = self
+                    .goal
+                    .as_mut()
+                    .ok_or_else(|| "No paused session goal to resume.".to_string())?;
+                goal.paused = false;
+            }
+            _ => {
+                let objective = requested.strip_prefix("edit ").unwrap_or(requested).trim();
+                if objective.is_empty() {
+                    return Err("usage: /goal edit <objective>".into());
+                }
+                if objective.chars().count() > 500 {
+                    return Err("session goal must be 500 characters or fewer".into());
+                }
+                self.goal = Some(SessionGoal {
+                    objective: objective.into(),
+                    paused: false,
+                });
+            }
+        }
+        self.sync_goal_context();
+        if let Some(goal) = &self.goal {
+            self.store.event(
+                "conversation.goal",
+                json!({ "objective": goal.objective, "paused": goal.paused }),
+            )?;
+            Ok(if goal.paused {
+                format!("Goal paused: {}", goal.objective)
+            } else {
+                format!("Goal active: {}", goal.objective)
+            })
+        } else {
+            Ok("Session goal cleared.".into())
+        }
+    }
+
+    fn sync_goal_context(&mut self) {
+        self.messages.retain(|message| {
+            message.role != "system" || !message.content.starts_with(GOAL_CONTEXT_PREFIX)
+        });
+        let Some(goal) = self.goal.as_ref().filter(|goal| !goal.paused) else {
+            return;
+        };
+        self.messages.insert(
+            1.min(self.messages.len()),
+            Message::system(format!(
+                "{GOAL_CONTEXT_PREFIX} {}\nTreat the current request as progress toward this objective. Do not claim the goal itself is complete unless the evidence proves it.",
+                goal.objective
+            )),
+        );
     }
 
     pub fn rename(&self, requested: &str) -> Result<String, String> {
@@ -933,6 +1031,8 @@ impl Conversation {
             .ok_or_else(|| "conversation system context is missing".to_string())?;
         let count = restored.len();
         self.messages = std::iter::once(system).chain(restored).collect();
+        self.goal = session_goal(&raw);
+        self.sync_goal_context();
         self.store.event(
             "conversation.resumed",
             json!({ "source": id, "messages": count }),
@@ -1561,6 +1661,37 @@ fn session_title(raw: &str) -> Option<String> {
         .next_back()
 }
 
+fn session_goal(raw: &str) -> Option<SessionGoal> {
+    let mut goal = None;
+    for event in raw
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+    {
+        match event.get("kind").and_then(|value| value.as_str()) {
+            Some("conversation.goal") => {
+                let Some(objective) = event
+                    .get("data")
+                    .and_then(|data| data.get("objective"))
+                    .and_then(|value| value.as_str())
+                else {
+                    continue;
+                };
+                goal = Some(SessionGoal {
+                    objective: objective.into(),
+                    paused: event
+                        .get("data")
+                        .and_then(|data| data.get("paused"))
+                        .and_then(|value| value.as_bool())
+                        .unwrap_or(false),
+                });
+            }
+            Some("conversation.goal_cleared") => goal = None,
+            _ => {}
+        }
+    }
+    goal
+}
+
 fn copy_to_clipboard(value: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let candidates = vec![("pbcopy", Vec::<&str>::new())];
@@ -1663,8 +1794,8 @@ Paths are literal, never Markdown links. Avoid generic greetings. Use one tool a
 mod tests {
     use super::{
         conversation_prompt, needs_verification, observation_signature, plain_message,
-        public_test_sensitive_shell, resumable_messages, session_title, shell_command_is_preview,
-        shell_command_is_read_only, verification_required_message,
+        public_test_sensitive_shell, resumable_messages, session_goal, session_title,
+        shell_command_is_preview, shell_command_is_read_only, verification_required_message,
     };
     use std::path::Path;
 
@@ -1796,5 +1927,22 @@ mod tests {
             "{\"kind\":\"conversation.renamed\",\"data\":{\"title\":\"Release prep\"}}\n",
         );
         assert_eq!(session_title(raw).as_deref(), Some("Release prep"));
+    }
+
+    #[test]
+    fn session_goal_restores_pause_and_clear_state() {
+        let active = concat!(
+            "{\"kind\":\"conversation.goal\",\"data\":{\"objective\":\"Ship HII\",\"paused\":false}}\n",
+            "{\"kind\":\"conversation.goal\",\"data\":{\"objective\":\"Ship HII\",\"paused\":true}}\n",
+        );
+        assert_eq!(
+            session_goal(active),
+            Some(super::SessionGoal {
+                objective: "Ship HII".into(),
+                paused: true,
+            })
+        );
+        let cleared = format!("{active}{{\"kind\":\"conversation.goal_cleared\",\"data\":{{}}}}\n");
+        assert_eq!(session_goal(&cleared), None);
     }
 }

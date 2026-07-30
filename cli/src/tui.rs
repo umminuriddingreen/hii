@@ -23,6 +23,7 @@ const SLATE: &str = "\x1b[38;5;245m";
 const COMMANDS: &[(&str, &str)] = &[
     ("/help", "all controls"),
     ("/status", "session state"),
+    ("/goal", "persistent objective"),
     ("/usage", "tokens and speed"),
     ("/thinking", "thought stream"),
     ("/raw", "raw model stream"),
