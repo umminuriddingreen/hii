@@ -42,6 +42,54 @@ Useful field evidence:
 - [The App Pile submission guidance](https://www.reddit.com/r/macapps/comments/1ttp8mu/megathread_the_app_pile_june_2026/)
 - [A broad AI-workspace claim receiving “why not Markdown?” pushback](https://www.reddit.com/r/BDDevs/comments/1v02mu6/i_built_an_ai_workspace_that_gives_agents_domain/)
 
+## The Clicky launch loop
+
+Clicky did not begin by explaining a platform. Its observable loop was:
+
+1. **One visual sentence.** “An AI teacher that lives next to your cursor” was
+   visible before the architecture needed explanation.
+2. **One founder use case.** The first founder post showed learning DaVinci
+   Resolve—a familiar stuck moment with an immediate payoff.
+3. **Comment-to-access.** “Reply below and I’ll send you the link” converted
+   public curiosity into both distribution and direct founder conversations.
+4. **Ship before certainty.** The founder publicly called it an okay starting
+   point rather than a perfect company idea and kept iterating from response.
+5. **Remixable proof.** Open-source availability, a visually distinctive
+   interaction, and a simple story made it easy for reviewers and users to
+   recreate the demonstration in QGIS, Unity, Fusion, and other tools.
+6. **Expansion after the wedge.** The later agents launch used four concrete
+   jobs—desktop cleanup, a Reminder, an influencer CSV, and a generated Mac
+   app—rather than leading with an abstract agent runtime.
+
+That expansion also produced the clearest warning for HII: a commenter on the
+agents launch said the original teaching pitch felt more purposeful. Clicky’s
+virality validated the interface and the stuck-user problem; it did not
+automatically validate every adjacent agent job.
+
+What HII should copy:
+
+- founder narration;
+- one visually legible transformation;
+- comment-to-access rather than a cold download;
+- manual onboarding while the wedge is still being discovered;
+- use-case remixes by real practitioners;
+- public iteration without pretending the thesis is settled.
+
+What HII should not copy:
+
+- a mascot or cursor follower for its own sake;
+- claims that every agent job is equally valuable;
+- “privacy-first” as a slogan without exact local/cloud boundaries;
+- feature breadth before repeat use;
+- treating views, comments, or clones as paid-product validation.
+
+Primary evidence:
+
+- [The original founder post and iteration note](https://www.linkedin.com/posts/farza-majeed-76685612a_update-on-this-im-gonna-keep-working-on-activity-7449206758692028416-kHcZ)
+- [The later Clicky Agents launch and audience response](https://www.linkedin.com/posts/farza-majeed-76685612a_introducing-clicky-agents-this-is-the-simplest-activity-7454552863227285504-vQrQ)
+- [A practitioner recreating the Clicky story in QGIS](https://www.linkedin.com/posts/spatialthoughts_using-the-open-source-ai-teacher-clicky-activity-7448332971390091265-ekj5)
+- [Mac-user privacy and product-friction discussion](https://www.reddit.com/r/macapps/comments/1srzk5a/has_anyone_tried_clicky/)
+
 ## Four Steps to the Epiphany lens
 
 HII has product vision ahead of customer proof. The correct phase is Customer
@@ -89,24 +137,27 @@ Revenue. More platform surface will not validate them.
 
 ## First public post
 
-Post from `@ummigreen` with `public/marketing/hii-first-win-demo.mp4`:
+Post from `@ummigreen` with `public/marketing/hii-first-win-demo.mp4`.
+Keep the link out of the primary post so the invitation stays conversational:
 
 > I gave HII one real job on my Mac.
 >
-> It kept the approved context, workspace, finished artifact, and proof together
-> instead of losing the work in another chat.
+> It kept the approved context, finished artifact, and proof together instead of
+> losing the work in another chat.
 >
 > 27-second demo ↓
 >
-> What is one thing on your Mac you want help finishing?
->
-> humaninformationinterface.com/learn
+> I’m opening 5 founder-led tests. Reply “HII” + one thing on your Mac you want
+> help finishing.
 
-The first reply should disclose:
+The first founder reply should provide the link and disclose:
 
 > I am building HII. The browser demo uses sample data and has no access to your
 > Mac. The founder pilot starts with one bounded job and an explicit context
-> boundary: humaninformationinterface.com/privacy
+> boundary:
+>
+> humaninformationinterface.com/learn
+> humaninformationinterface.com/privacy
 
 ## Reddit versions
 
