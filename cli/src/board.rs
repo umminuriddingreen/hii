@@ -251,7 +251,7 @@ impl Board {
     pub fn update(&self, id_prefix: &str, patch: EditPatch) -> Result<Task, String> {
         let task = self.find_one(id_prefix)?;
         let now = iso_now();
-        let mut event = serde_json::json!({ "updatedAt": now });
+        let mut event = serde_json::json!({});
         let approval_requested = patch.review_state.as_deref() == Some("approved");
         if let Some(lane) = &patch.lane {
             let lane = normalize(Some(lane.as_str()), LANES, "backlog");
@@ -261,38 +261,63 @@ impl Board {
             {
                 return Err("Approve this proposal before moving it into active work.".to_string());
             }
-            event["lane"] = Value::String(lane.clone());
-            if lane == "done" {
-                event["completedAt"] = Value::String(now.clone());
+            if lane == "done"
+                && task.run_id.is_some()
+                && (task.run_status.as_deref() != Some("completed") || task.receipt_ref.is_none())
+            {
+                return Err(
+                    "A run-linked task needs completed status and a receipt before entering done."
+                        .to_string(),
+                );
+            }
+            if lane != task.lane {
+                event["lane"] = Value::String(lane.clone());
+                if lane == "done" {
+                    event["completedAt"] = Value::String(now.clone());
+                }
             }
         }
         if let Some(priority) = &patch.priority {
-            event["priority"] =
-                Value::String(normalize(Some(priority.as_str()), PRIORITIES, "normal"));
+            let priority = normalize(Some(priority.as_str()), PRIORITIES, "normal");
+            if priority != task.priority {
+                event["priority"] = Value::String(priority);
+            }
         }
         if let Some(owner) = &patch.owner {
             let clean = truncate_chars(redact_text(owner).trim(), 80);
-            event["owner"] = Value::String(if clean.is_empty() {
+            let owner = if clean.is_empty() {
                 task.owner.clone()
             } else {
                 clean
-            });
+            };
+            if owner != task.owner {
+                event["owner"] = Value::String(owner);
+            }
         }
         if let Some(coordinate) = &patch.coordinate {
             let clean = truncate_chars(redact_text(coordinate).trim(), 240);
-            event["coordinate"] = Value::String(if clean.is_empty() {
+            let coordinate = if clean.is_empty() {
                 task.coordinate.clone()
             } else {
                 clean
-            });
+            };
+            if coordinate != task.coordinate {
+                event["coordinate"] = Value::String(coordinate);
+            }
         }
         if let Some(notes) = &patch.notes {
-            event["notes"] = Value::String(truncate_chars(redact_text(notes).trim(), 2000));
+            let notes = truncate_chars(redact_text(notes).trim(), 2000);
+            if notes != task.notes {
+                event["notes"] = Value::String(notes);
+            }
         }
         if let Some(tags) = &patch.tags {
-            event["tags"] = serde_json::to_value(parse_csv_tags(tags)).unwrap();
+            let tags = parse_csv_tags(tags);
+            if tags != task.tags {
+                event["tags"] = serde_json::to_value(tags).unwrap();
+            }
         }
-        if approval_requested {
+        if approval_requested && task.review_state.as_deref() != Some("approved") {
             event["reviewState"] = Value::String("approved".to_string());
             event["approvedAt"] = Value::String(now.clone());
             event["approvedBy"] = Value::String(truncate_chars(
@@ -300,6 +325,14 @@ impl Board {
                 80,
             ));
         }
+        if event
+            .as_object()
+            .map(|value| value.is_empty())
+            .unwrap_or(true)
+        {
+            return Ok(task);
+        }
+        event["updatedAt"] = Value::String(now.clone());
         self.append(serde_json::json!({
             "type": "updated",
             "id": task.id,
@@ -674,6 +707,103 @@ mod tests {
             .unwrap();
         assert_eq!(moved.lane, "done");
         assert!(moved.completed_at.is_some());
+    }
+
+    #[test]
+    fn repeated_move_is_an_idempotent_ledger_noop() {
+        let runtime = TempRuntime::new();
+        let board = Board::open(&runtime.0);
+        let task = board
+            .add(
+                Path::new("/tmp/root"),
+                AddOptions {
+                    title: "keep one board event".into(),
+                    lane: None,
+                    priority: None,
+                    owner: None,
+                    coordinate: None,
+                    notes: None,
+                    tags: None,
+                },
+            )
+            .unwrap();
+        let unchanged = board
+            .update(
+                &task.id,
+                EditPatch {
+                    lane: Some("backlog".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(unchanged.updated_at, task.updated_at);
+        assert_eq!(board.events().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn run_linked_task_requires_completed_receipt_before_done() {
+        let runtime = TempRuntime::new();
+        let board = Board::open(&runtime.0);
+        let task = board
+            .add(
+                Path::new("/tmp/root"),
+                AddOptions {
+                    title: "verify before done".into(),
+                    lane: Some("doing".into()),
+                    priority: None,
+                    owner: None,
+                    coordinate: None,
+                    notes: None,
+                    tags: None,
+                },
+            )
+            .unwrap();
+        board
+            .append(serde_json::json!({
+                "type": "updated",
+                "id": task.id,
+                "patch": {
+                    "runId": "run-one",
+                    "runStatus": "running",
+                    "updatedAt": iso_now()
+                },
+                "ts": iso_now()
+            }))
+            .unwrap();
+
+        let error = board
+            .update(
+                &task.id,
+                EditPatch {
+                    lane: Some("done".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        assert!(error.contains("completed status and a receipt"));
+
+        board
+            .append(serde_json::json!({
+                "type": "updated",
+                "id": task.id,
+                "patch": {
+                    "runStatus": "completed",
+                    "receiptRef": "/tmp/receipt.json",
+                    "updatedAt": iso_now()
+                },
+                "ts": iso_now()
+            }))
+            .unwrap();
+        let completed = board
+            .update(
+                &task.id,
+                EditPatch {
+                    lane: Some("done".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(completed.lane, "done");
     }
 
     #[test]

@@ -545,7 +545,7 @@ function updateBoardTask(idOrPrefix, patch) {
   }
   const task = matches[0];
   const now = new Date().toISOString();
-  const cleanPatch = { updatedAt: now };
+  const cleanPatch = {};
   const approvalRequested = patch.reviewState === "approved";
   if (patch.lane !== undefined) {
     const requestedLane = normalizeBoardLane(patch.lane);
@@ -553,19 +553,46 @@ function updateBoardTask(idOrPrefix, patch) {
       console.error("Approve this proposal before moving it into active work.");
       process.exit(1);
     }
-    cleanPatch.lane = requestedLane;
-    cleanPatch.completedAt = cleanPatch.lane === "done" ? now : undefined;
+    if (
+      requestedLane === "done"
+      && task.runId
+      && (task.runStatus !== "completed" || !task.receiptRef)
+    ) {
+      console.error("A run-linked task needs completed status and a receipt before entering done.");
+      process.exit(1);
+    }
+    if (requestedLane !== task.lane) {
+      cleanPatch.lane = requestedLane;
+      if (cleanPatch.lane === "done") cleanPatch.completedAt = now;
+    }
   }
-  if (approvalRequested) {
+  if (approvalRequested && task.reviewState !== "approved") {
     cleanPatch.reviewState = "approved";
     cleanPatch.approvedAt = now;
     cleanPatch.approvedBy = redactText(patch.approvedBy || "local operator").trim().slice(0, 80);
   }
-  if (patch.priority !== undefined) cleanPatch.priority = normalizeBoardPriority(patch.priority);
-  if (patch.owner !== undefined) cleanPatch.owner = redactText(patch.owner).trim().slice(0, 80) || task.owner;
-  if (patch.coordinate !== undefined) cleanPatch.coordinate = redactText(patch.coordinate).trim().slice(0, 240) || task.coordinate;
-  if (patch.notes !== undefined) cleanPatch.notes = redactText(patch.notes).trim().slice(0, 2000);
-  if (patch.tags !== undefined) cleanPatch.tags = parseCsvTags(patch.tags);
+  if (patch.priority !== undefined) {
+    const priority = normalizeBoardPriority(patch.priority);
+    if (priority !== task.priority) cleanPatch.priority = priority;
+  }
+  if (patch.owner !== undefined) {
+    const owner = redactText(patch.owner).trim().slice(0, 80) || task.owner;
+    if (owner !== task.owner) cleanPatch.owner = owner;
+  }
+  if (patch.coordinate !== undefined) {
+    const coordinate = redactText(patch.coordinate).trim().slice(0, 240) || task.coordinate;
+    if (coordinate !== task.coordinate) cleanPatch.coordinate = coordinate;
+  }
+  if (patch.notes !== undefined) {
+    const notes = redactText(patch.notes).trim().slice(0, 2000);
+    if (notes !== task.notes) cleanPatch.notes = notes;
+  }
+  if (patch.tags !== undefined) {
+    const tags = parseCsvTags(patch.tags);
+    if (JSON.stringify(tags) !== JSON.stringify(task.tags || [])) cleanPatch.tags = tags;
+  }
+  if (Object.keys(cleanPatch).length === 0) return task;
+  cleanPatch.updatedAt = now;
   appendBoardEvent({ type: "updated", id: task.id, patch: cleanPatch, ts: now });
   return { ...task, ...cleanPatch };
 }

@@ -27,7 +27,7 @@
   import { normalizeWorkspaceContextAnchor } from '@/lib/workspace/context-anchor';
   import { rebindPendingWorkspaceContext } from '@/lib/workspace/pending-context';
   import { organizeWorkspaceSelection } from '@/lib/workspace/organize';
-  import { boardRunSyncKey } from '@/lib/workspace/board-run';
+  import { boardPatchForRunState, boardRunSyncKey } from '@/lib/workspace/board-run';
 
   export let data: { enabled: boolean };
   const surfaceCatalog = [
@@ -178,11 +178,16 @@
     return result.task;
   }
   function createBoardRun(task:any,boardNode:WorkspaceNode){
-    if(task.reviewState==='proposed'||!['next','doing'].includes(task.lane)){
+    const retryable=task.lane==='blocked'&&['failed','cancelled'].includes(String(task.runStatus||''));
+    if(task.reviewState==='proposed'||(!['next','doing'].includes(task.lane)&&!retryable)){
       saveError='Approve this task into next or doing before preparing execution.';
       return;
     }
-    const existing=doc.nodes.find(node=>node.type==='run'&&String(node.payload.boardTaskId||'')===String(task.id||''));
+    const existing=doc.nodes.find(node=>
+      node.type==='run'
+      && String(node.payload.boardTaskId||'')===String(task.id||'')
+      && !['failed','cancelled'].includes(String(node.payload.status||node.object?.status||''))
+    );
     if(existing){focusNode(existing);return}
     if(task.runId&&!['failed','cancelled'].includes(String(task.runStatus||''))){
       saveError=`This task is already linked to run ${String(task.runId).slice(0,12)}. Open the workspace that owns that run instead of duplicating it.`;
@@ -251,10 +256,14 @@
     fitNodes([intentNode,runNode],1);
     const syncKey=boardRunSyncKey({status:'waiting_approval',runId:runNode.id});
     boardRunSync.set(String(task.id||''),syncKey);
-    void updateBoardTask(String(task.id||''),{
-      runId:runNode.id,
-      runStatus:'waiting_approval'
-    }).catch(error=>{saveError=error instanceof Error?error.message:'The run was prepared, but its board link was not recorded.'});
+    void updateBoardTask(
+      String(task.id||''),
+      boardPatchForRunState({
+        status:'waiting_approval',
+        runId:runNode.id,
+        currentLane:task.lane
+      })
+    ).catch(error=>{saveError=error instanceof Error?error.message:'The run was prepared, but its board link was not recorded.'});
   }
   function patchRunNode(node:WorkspaceNode,next:Partial<WorkspaceNode>){
     patch(node.id,next);
@@ -267,12 +276,19 @@
     const syncKey=boardRunSyncKey({status:runStatus,runId,receiptRef});
     if(boardRunSync.get(boardTaskId)===syncKey)return;
     boardRunSync.set(boardTaskId,syncKey);
-    const boardPatch:Record<string,unknown>={runId,runStatus};
-    if(['queued','running'].includes(runStatus))boardPatch.lane='doing';
-    if(['failed','cancelled'].includes(runStatus))boardPatch.lane='blocked';
-    if(runStatus==='completed'&&receiptRef){
-      boardPatch.lane='done';
-      boardPatch.receiptRef=receiptRef;
+    const boardTask=board.find(task=>String(task.id||'')===boardTaskId);
+    let boardPatch:Record<string,unknown>;
+    try{
+      boardPatch=boardPatchForRunState({
+        status:runStatus,
+        runId,
+        receiptRef,
+        currentLane:boardTask?.lane
+      });
+    }catch(error){
+      boardRunSync.delete(boardTaskId);
+      saveError=error instanceof Error?error.message:'The run state could not be linked to the board.';
+      return;
     }
     void updateBoardTask(boardTaskId,boardPatch).catch(error=>{
       boardRunSync.delete(boardTaskId);
@@ -496,13 +512,20 @@
                     {:else if task.runId}
                       <span class="mt-1 block truncate font-mono text-[8px] text-neutral-400">run {String(task.runId).slice(0,12)}</span>
                     {/if}
-                    {#if task.reviewState!=='proposed'&&['next','doing'].includes(task.lane)}
+                    {#if task.reviewState!=='proposed'&&(
+                      ['next','doing'].includes(task.lane)
+                      || (task.lane==='blocked'&&['failed','cancelled'].includes(String(task.runStatus||'')))
+                    )}
                       <button
                         class="mt-2 rounded-full bg-[var(--hii-electric-blue)] px-3 py-1.5 font-mono text-[8px] uppercase tracking-[.06em] text-white disabled:opacity-35"
                         disabled={Boolean(task.runId&&!['failed','cancelled'].includes(String(task.runStatus||'')))}
                         on:click={()=>createBoardRun(task,node)}
                       >
-                        {task.runId?'Run already prepared':'Prepare bounded run'}
+                        {['failed','cancelled'].includes(String(task.runStatus||''))
+                          ? 'Prepare fresh retry'
+                          : task.runId
+                            ? 'Run already prepared'
+                            : 'Prepare bounded run'}
                       </button>
                     {/if}
                   </div>

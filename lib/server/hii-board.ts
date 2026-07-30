@@ -58,7 +58,12 @@ const boardDir = path.join(process.env.HII_RUNTIME_DIR || path.join(process.env.
 const taskEventsPath = path.join(boardDir, 'tasks.jsonl');
 
 export class BoardTaskError extends Error {
-  code: 'BOARD_TASK_APPROVAL_REQUIRED' | 'BOARD_TASK_DUPLICATE' | 'BOARD_TASK_LOW_QUALITY';
+  code:
+    | 'BOARD_TASK_APPROVAL_REQUIRED'
+    | 'BOARD_TASK_DUPLICATE'
+    | 'BOARD_TASK_LOW_QUALITY'
+    | 'BOARD_TASK_RUN_TRANSITION'
+    | 'BOARD_TASK_RECEIPT_REQUIRED';
   existingTask?: BoardTask;
 
   constructor(
@@ -89,6 +94,30 @@ function normalizeRunStatus(value: unknown): BoardTaskRunStatus | undefined {
   return boardTaskRunStatuses.includes(value as BoardTaskRunStatus)
     ? value as BoardTaskRunStatus
     : undefined;
+}
+
+function runTransitionAllowed(
+  current: BoardTaskRunStatus | undefined,
+  next: BoardTaskRunStatus
+) {
+  if (current === next) return true;
+  if (!current) return next === 'waiting_approval';
+  const allowed: Record<BoardTaskRunStatus, BoardTaskRunStatus[]> = {
+    waiting_approval: ['queued', 'failed', 'cancelled'],
+    queued: ['running', 'completed', 'failed', 'cancelled'],
+    running: ['completed', 'failed', 'cancelled'],
+    completed: [],
+    failed: ['waiting_approval'],
+    cancelled: ['waiting_approval']
+  };
+  return allowed[current].includes(next);
+}
+
+function patchChangesTask(task: BoardTask, patch: Partial<BoardTask>) {
+  return Object.entries(patch).some(([key, value]) =>
+    value !== undefined
+    && JSON.stringify(task[key as keyof BoardTask]) !== JSON.stringify(value)
+  );
 }
 
 function boardTaskKey(input: Pick<BoardTask, 'title' | 'coordinate'>) {
@@ -261,7 +290,7 @@ export async function updateBoardTask(
   if (!task) throw new Error(`Task not found: ${id}`);
 
   const now = new Date().toISOString();
-  const patch: Partial<BoardTask> = { updatedAt: now };
+  const patch: Partial<BoardTask> = {};
   const approvalRequested = input.reviewState === 'approved';
   if (input.lane !== undefined) {
     const requestedLane = normalizeLane(input.lane);
@@ -276,7 +305,11 @@ export async function updateBoardTask(
       );
     }
     patch.lane = requestedLane;
-    patch.completedAt = patch.lane === 'done' ? now : undefined;
+    patch.completedAt = patch.lane === 'done'
+      ? task.lane === 'done' && task.completedAt
+        ? task.completedAt
+        : now
+      : undefined;
   }
   if (approvalRequested) {
     patch.reviewState = 'approved';
@@ -296,26 +329,74 @@ export async function updateBoardTask(
         'Approve this proposal before preparing or recording a run.'
       );
     }
-    if (input.runId !== undefined) {
-      const runId = sanitizeText(input.runId, 120);
-      if (!runId) throw new Error('A board run link requires a run id.');
-      patch.runId = runId;
+    const runId = input.runId === undefined ? task.runId : sanitizeText(input.runId, 120);
+    const runStatus = input.runStatus === undefined ? task.runStatus : normalizeRunStatus(input.runStatus);
+    const receiptRef = input.receiptRef === undefined
+      ? task.receiptRef
+      : sanitizeText(input.receiptRef, 1000);
+    if (!runId) throw new Error('A board run link requires a run id.');
+    if (!runStatus) throw new Error('Board run status is not recognized.');
+    if (!runTransitionAllowed(task.runStatus, runStatus)) {
+      throw new BoardTaskError(
+        'BOARD_TASK_RUN_TRANSITION',
+        `Board run cannot move from ${task.runStatus ?? 'unlinked'} to ${runStatus}.`
+      );
     }
-    if (input.runStatus !== undefined) {
-      const runStatus = normalizeRunStatus(input.runStatus);
-      if (!runStatus) throw new Error('Board run status is not recognized.');
-      patch.runStatus = runStatus;
-    }
-    if (input.receiptRef !== undefined) {
-      const receiptRef = sanitizeText(input.receiptRef, 1000);
-      if (!receiptRef) throw new Error('A completed board run requires a receipt reference.');
-      if (input.runStatus !== 'completed' && task.runStatus !== 'completed') {
-        throw new Error('A receipt can only be linked to a completed board run.');
+    if (task.runId && runId !== task.runId) {
+      if (!['failed', 'cancelled'].includes(task.runStatus ?? '') || runStatus !== 'waiting_approval') {
+        throw new BoardTaskError(
+          'BOARD_TASK_RUN_TRANSITION',
+          'An active or completed board run cannot be replaced.'
+        );
       }
-      patch.receiptRef = receiptRef;
+    }
+    if (
+      task.runId
+      && runId === task.runId
+      && ['failed', 'cancelled'].includes(task.runStatus ?? '')
+      && runStatus === 'waiting_approval'
+    ) {
+      throw new BoardTaskError(
+        'BOARD_TASK_RUN_TRANSITION',
+        'Retrying blocked work requires a fresh run id.'
+      );
+    }
+    if (task.receiptRef && receiptRef !== task.receiptRef) {
+      throw new BoardTaskError(
+        'BOARD_TASK_RUN_TRANSITION',
+        'A linked board receipt is immutable.'
+      );
+    }
+    if (receiptRef && runStatus !== 'completed') {
+      throw new BoardTaskError(
+        'BOARD_TASK_RUN_TRANSITION',
+        'A receipt can only be linked to a completed board run.'
+      );
+    }
+    if (runStatus === 'completed' && !receiptRef) {
+      throw new BoardTaskError(
+        'BOARD_TASK_RECEIPT_REQUIRED',
+        'A completed board run requires a receipt reference.'
+      );
+    }
+    patch.runId = runId;
+    patch.runStatus = runStatus;
+    if (receiptRef) patch.receiptRef = receiptRef;
+  }
+  const linkedRunId = patch.runId ?? task.runId;
+  if (patch.lane === 'done' && linkedRunId) {
+    const linkedStatus = patch.runStatus ?? task.runStatus;
+    const linkedReceipt = patch.receiptRef ?? task.receiptRef;
+    if (linkedStatus !== 'completed' || !linkedReceipt) {
+      throw new BoardTaskError(
+        'BOARD_TASK_RECEIPT_REQUIRED',
+        'A run-linked task needs completed status and a receipt before entering done.'
+      );
     }
   }
 
+  if (!patchChangesTask(task, patch)) return task;
+  patch.updatedAt = now;
   await appendEvent({ type: 'updated', id, patch, ts: now });
   return { ...task, ...patch };
 }

@@ -42,6 +42,7 @@ const workspaceNavigator = readFileSync(resolve(root, 'src/lib/components/worksp
 const workspaceOutline = readFileSync(resolve(root, 'lib/workspace/outline.ts'), 'utf8');
 const workspaceOrganize = readFileSync(resolve(root, 'lib/workspace/organize.ts'), 'utf8');
 const chatOutput = readFileSync(resolve(root, 'lib/workspace/chat-output.ts'), 'utf8');
+const boardRun = readFileSync(resolve(root, 'lib/workspace/board-run.ts'), 'utf8');
 
 describe('agentic workspace interaction contract', () => {
   it('summons direct workspace intent from Option+Space', () => {
@@ -232,10 +233,14 @@ describe('agentic workspace interaction contract', () => {
     expect(workspace).toContain("source:'HII approved board task'");
     expect(workspace).toContain('boardTaskId');
     expect(workspace).toContain('boardRunSyncKey');
-    expect(workspace).toContain("boardPatch.lane='doing'");
-    expect(workspace).toContain("boardPatch.lane='done'");
-    expect(workspace).toContain('boardPatch.receiptRef=receiptRef');
+    expect(workspace).toContain('boardPatchForRunState');
+    expect(boardRun).toContain("patch.lane = 'doing'");
+    expect(boardRun).toContain("patch.lane = 'done'");
+    expect(boardRun).toContain('patch.receiptRef = receiptRef');
     expect(workspace).toContain('Run already prepared');
+    expect(workspace).toContain('Prepare fresh retry');
+    expect(workspace).toContain("!['failed','cancelled'].includes(String(node.payload.status");
+    expect(packageJson).toContain('hii:board-run:check');
   });
 
   it('returns receipt-listed artifacts as editable, provenance-preserving HII objects', () => {

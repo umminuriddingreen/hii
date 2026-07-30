@@ -302,7 +302,8 @@
       "/api/board/tasks",
       "~/.hii/board/tasks.jsonl",
       "tests/unit/board-quality-boundary.test.ts",
-      "tests/unit/board-run.test.ts"
+      "tests/unit/board-run.test.ts",
+      "tests/unit/board-run-lifecycle.test.ts"
     ],
     "status": "ready",
     "trustLevel": "first-party"

@@ -151,6 +151,16 @@ describe('HII board quality boundary', () => {
       updateBoardTask(proposal.id, { receiptRef: '/tmp/receipt.json' })
     ).rejects.toThrow('A receipt can only be linked to a completed board run.');
 
+    await updateBoardTask(proposal.id, {
+      lane: 'doing',
+      runId: 'run-approved',
+      runStatus: 'queued'
+    });
+    await updateBoardTask(proposal.id, {
+      lane: 'doing',
+      runId: 'run-approved',
+      runStatus: 'running'
+    });
     const completed = await updateBoardTask(proposal.id, {
       lane: 'done',
       runId: 'run-approved',
