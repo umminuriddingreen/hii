@@ -13,6 +13,8 @@
     extension: string;
     size: number;
     editable: boolean;
+    mediaType: string | null;
+    previewable: boolean;
     content: string | null;
     revision: string;
     sourceReceipt?: string | null;
@@ -29,6 +31,9 @@
   $: dirty = Boolean(artifact?.editable) && content !== savedContent;
   $: artifactPath = String(node.payload.artifactPath || node.payload.path || '');
   $: runId = String(node.payload.runId || node.object?.runId || '');
+  $: previewUrl = artifact?.previewable
+    ? `/api/workspace/artifacts?mode=preview&runId=${encodeURIComponent(runId)}&artifact=${encodeURIComponent(artifactPath)}`
+    : '';
 
   async function apiJson(url: string, init?: RequestInit) {
     const response = await fetch(url, init);
@@ -134,6 +139,10 @@
 
   {#if loading}
     <div class="grid min-h-0 flex-1 place-items-center font-mono text-[9px] uppercase text-neutral-400">Opening verified artifact…</div>
+  {:else if artifact?.previewable}
+    <div class="relative grid min-h-0 flex-1 place-items-center overflow-hidden bg-[#f3f1ec] p-3">
+      <img src={previewUrl} alt={artifact.name} class="max-h-full max-w-full object-contain shadow-sm" />
+    </div>
   {:else if artifact?.editable}
     <textarea bind:value={content} class="min-h-0 flex-1 resize-none bg-[#fffef8] p-4 font-mono text-[11px] leading-5 text-neutral-800 outline-none" aria-label={`Edit ${artifact.name}`}></textarea>
   {:else if artifact}

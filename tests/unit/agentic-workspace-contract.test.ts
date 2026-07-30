@@ -258,6 +258,14 @@ describe('agentic workspace interaction contract', () => {
     expect(runArtifactPane).toContain("method: 'PATCH'");
   });
 
+  it('previews receipt-linked image artifacts inside the governed result object', () => {
+    expect(workspaceArtifacts).toContain('readWorkspaceRunArtifactPreview');
+    expect(workspaceArtifacts).toContain('Receipt image previews are limited to 25 MB.');
+    expect(workspaceArtifactRoute).toContain("params.get('mode') === 'preview'");
+    expect(runArtifactPane).toContain('artifact?.previewable');
+    expect(runArtifactPane).toContain('mode=preview');
+  });
+
   it('opens the combined browser and terminal explorer on workspace double-click', () => {
     expect(workspace).toContain('on:dblclick={openExplorer}');
     expect(workspace).toContain("seedFor('explorer')");

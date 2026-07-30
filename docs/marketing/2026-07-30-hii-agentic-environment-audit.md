@@ -280,8 +280,15 @@ The boundary remains proof-backed:
 The isolated spatial-run proof covers read, edit, stale-write conflict,
 unlisted-path rejection, symlink-boundary rejection, and durable human-edit
 provenance. Markdown, text, code, structured data, SVG, and other bounded UTF-8
-formats are supported up to 2 MB. Image, drawing, model, and richer native-file
-adapters remain the next artifact layer.
+formats are supported up to 2 MB.
+
+Receipt-named PNG, JPEG, GIF, WebP, AVIF, and SVG outputs now remain visible
+inside the governed Artifact object rather than collapsing to a generic native
+file handoff. Preview reads repeat the completed-run receipt and approved-root
+checks, refuse unsupported types, cap bytes at 25 MB, and return private
+no-store content. The original file and immutable run receipt remain the
+authority; HII does not copy or silently rewrite the image. Drawing, model, and
+richer native-file adapters remain the next artifact layer.
 
 ### Verified runtime-health checkpoint
 

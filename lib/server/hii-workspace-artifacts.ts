@@ -10,6 +10,11 @@ const editableExtensions = new Set([
   'css', 'scss', 'html', 'svg', 'xml', 'yaml', 'yml', 'toml', 'csv', 'py', 'rs', 'go', 'sh',
   'zsh', 'fish', 'sql', 'log'
 ]);
+const imageTypes: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml'
+};
+const maxPreviewBytes = 25 * 1024 * 1024;
 
 function runtimeRoot() {
   return process.env.HII_RUNTIME_DIR || path.join(os.homedir(), '.hii');
@@ -85,6 +90,8 @@ export async function readWorkspaceRunArtifact(input: { runId?: unknown; artifac
     path: resolved.target,
     name: path.basename(resolved.target),
     extension,
+    mediaType: imageTypes[extension] || null,
+    previewable: Boolean(imageTypes[extension]) && info.size <= maxPreviewBytes,
     size: info.size,
     editable,
     content,
@@ -92,6 +99,18 @@ export async function readWorkspaceRunArtifact(input: { runId?: unknown; artifac
     sourceReceipt: resolved.run.path,
     workspaceRoot: resolved.root
   };
+}
+
+export async function readWorkspaceRunArtifactPreview(input: { runId?: unknown; artifact?: unknown }) {
+  const resolved = await resolveArtifact(input.runId, input.artifact);
+  const info = await stat(resolved.target);
+  if (!info.isFile()) throw new Error('The receipt artifact is not a regular file.');
+  const extension = path.extname(resolved.target).slice(1).toLowerCase();
+  const mediaType = imageTypes[extension];
+  if (!mediaType) throw new Error('Only supported receipt-linked images can be previewed.');
+  if (info.size > maxPreviewBytes) throw new Error('Receipt image previews are limited to 25 MB.');
+  const body = await readFile(resolved.target);
+  return { body, mediaType, revision: hash(body) };
 }
 
 export async function saveWorkspaceRunArtifact(input: {

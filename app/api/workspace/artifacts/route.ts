@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { localTerminalAllowed } from '@/lib/server/hii-terminal';
 import {
   readWorkspaceRunArtifact,
+  readWorkspaceRunArtifactPreview,
   saveWorkspaceRunArtifact
 } from '@/lib/server/hii-workspace-artifacts';
 
@@ -19,6 +20,20 @@ export async function GET(request: Request) {
   if (denied) return denied;
   const params = new URL(request.url).searchParams;
   try {
+    if (params.get('mode') === 'preview') {
+      const preview = await readWorkspaceRunArtifactPreview({
+        runId: params.get('runId'),
+        artifact: params.get('artifact')
+      });
+      return new Response(preview.body, {
+        headers: {
+          'content-type': preview.mediaType,
+          'x-content-type-options': 'nosniff',
+          'cache-control': 'private, no-store',
+          etag: `"${preview.revision}"`
+        }
+      });
+    }
     return NextResponse.json(await readWorkspaceRunArtifact({
       runId: params.get('runId'),
       artifact: params.get('artifact')
