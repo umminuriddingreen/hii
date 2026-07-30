@@ -1,5 +1,14 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import HiiLogo from '$lib/components/HiiLogo.svelte';
+
+  let launchVideo: HTMLVideoElement;
+
+  onMount(() => {
+    launchVideo?.play().catch(() => {
+      // Keep the poster and native controls available when autoplay is blocked.
+    });
+  });
 
   const useSteps = [
     {
@@ -95,9 +104,21 @@
       </div>
 
       <figure class="hii-palette-proof">
-        <div class="hii-window-meta"><span>HII / THE ACTUAL PRODUCT</span><span>⌘ K</span></div>
-        <img src="/marketing/hii-command-palette-live.png" alt="The real HII workspace with its command palette open over a local project canvas" width="1280" height="720" />
-        <figcaption>Actual interface · local project · no concept render</figcaption>
+        <div class="hii-window-meta"><span>HII / ONE REAL JOB</span><span>00:27</span></div>
+        <video
+          bind:this={launchVideo}
+          autoplay
+          muted
+          loop
+          playsinline
+          controls
+          preload="metadata"
+          poster="/marketing/hii-command-palette-live.png"
+          aria-label="A 27-second silent demonstration of HII keeping a real job, approved context, workspace, and proof together"
+        >
+          <source src="/marketing/hii-first-win-demo.mp4" type="video/mp4" />
+        </video>
+        <figcaption>Actual interface · silent-first demo · captions included</figcaption>
       </figure>
     </section>
 
@@ -260,7 +281,7 @@
   .hii-palette-proof, .hii-workspace-proof { position:relative; margin:82px auto 0; overflow:hidden; border-radius:24px; background:white; box-shadow:0 40px 90px rgba(35,38,37,.16); }
   .hii-palette-proof { max-width:1280px; transform:rotate(-.35deg); }
   .hii-window-meta { display:flex; height:42px; align-items:center; justify-content:space-between; padding:0 17px; color:#929694; font-size:8px; }
-  .hii-palette-proof img, .hii-workspace-proof img { display:block; width:100%; height:auto; }
+  .hii-palette-proof video, .hii-workspace-proof img { display:block; width:100%; height:auto; }
   .hii-palette-proof figcaption { padding:12px 17px 14px; color:#929694; font-size:7px; }
   .hii-first-win-section { padding:130px clamp(24px,7vw,108px); background:var(--acid); }
   .hii-first-win-section > header { display:grid; grid-template-columns:.55fr 1.1fr .8fr; gap:50px; align-items:start; }

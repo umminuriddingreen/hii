@@ -24,7 +24,8 @@ describe('public HII homepage', () => {
     expect(homepage).toContain('Signed Mac installer · preparing');
     expect(homepage).toContain('/marketing/hii-workspace-live.png');
     expect(homepage).toContain('/marketing/hii-command-palette-live.png');
-    expect(homepage).toContain('Actual interface · local project · no concept render');
+    expect(homepage).toContain('/marketing/hii-first-win-demo.mp4');
+    expect(homepage).toContain('Actual interface · silent-first demo · captions included');
   });
 
   it('targets people who make and learn with concrete, truthful first wins', () => {
