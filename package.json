@@ -43,7 +43,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "ci:fast": "npm run check && npm run test && npm run cli:check",
-    "ci:full": "npm run ci:fast && npm run hii:sdk:check && npm run hii:skills:check && npm run hii:knowledge:check && npm run hii:knowledge-runs:check && npm run hii:windows:check && npm run hii:workspace:check && npm run build",
+    "ci:product": "npm run hii:sdk:check && npm run hii:skills:check && npm run hii:knowledge:check && npm run hii:knowledge-runs:check && npm run hii:contextdock:check && npm run hii:activation:check && npm run hii:windows:check && npm run hii:workspace:check && npm run hii:bootstrap:check",
+    "ci:full": "npm run ci:fast && npm run ci:product && npm run build",
     "check": "svelte-kit sync && svelte-check --workspace src --config ../svelte.config.js --tsconfig ../tsconfig.json --fail-on-warnings",
     "lint": "svelte-check --workspace src --config ../svelte.config.js --tsconfig ../tsconfig.json --fail-on-warnings"
   },
