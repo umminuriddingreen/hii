@@ -522,7 +522,9 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Some(SlashCommand::Proof(id)) => conversation.proof(id.as_deref()),
             Some(SlashCommand::Diff) => conversation.diff(),
             Some(SlashCommand::Review) => conversation.review(),
-            Some(SlashCommand::Permissions) => Ok(conversation.permissions()),
+            Some(SlashCommand::Permissions(authority)) => {
+                conversation.permissions(authority.as_deref())
+            }
             Some(SlashCommand::Resume(id)) => conversation.resume(id.as_deref()),
             Some(SlashCommand::Skills) => conversation.skills(),
             Some(SlashCommand::Agents) => agents::AgentManager::new(conversation.paths()).list(),
@@ -616,7 +618,7 @@ enum SlashCommand {
     Proof(Option<String>),
     Diff,
     Review,
-    Permissions,
+    Permissions(Option<String>),
     Resume(Option<String>),
     Skills,
     Agents,
@@ -686,7 +688,7 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         "/proof" => SlashCommand::Proof(argument),
         "/diff" if argument.is_none() => SlashCommand::Diff,
         "/review" if argument.is_none() => SlashCommand::Review,
-        "/permissions" if argument.is_none() => SlashCommand::Permissions,
+        "/permissions" => SlashCommand::Permissions(argument),
         "/resume" => SlashCommand::Resume(argument),
         "/skills" if rest.is_empty() => SlashCommand::Skills,
         "/agents" if rest.is_empty() => SlashCommand::Agents,
@@ -741,9 +743,9 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
 
 fn slash_help() -> &'static str {
     if cfg!(feature = "preview") {
-        "/help                         show commands\n/providers                    show local, Codex, and Claude access\n/login codex|claude           connect an existing provider plan\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/rename <name>                name this saved session\n/copy                         copy the latest response\n/status                       show session, workspace, model, and usage\n/goal [edit|pause|resume|clear] [objective]\n                               track a persistent session objective\n/plan [off|prompt]            inspect and research without changes\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n/model [name]                 list or switch available models\n/proof [run-id]               inspect execution proof\n/diff                         inspect scoped workspace changes\n/review                       review current diff for defects\n/permissions                  show the active authority boundary\n/resume [session-id]          list or restore a prior session\n/skills                       show automatically learned skill drafts\n/agents                       show HII-managed and observed agents\n/codex <task>                 use authenticated Codex CLI\n/claude <task>                use authenticated Claude CLI\n/agent <id> status|logs|stop  manage an agent by id\n/resources                    quick CPU, memory, storage, and Ollama view\n/top                          open the embedded btop resource monitor\n/schedule <cron> :: <task>    create a local recurring HII task\n/schedules                    list HII schedules\n/calendar                     show the next 7 days\n/calendar add DATE [TIME] :: TITLE\n/sync calendar                sync next HII runs to Apple Calendar\n/exit                         leave HII\n\nWhile running: type + Enter steers · type + Tab queues · Esc stops"
+        "/help                         show commands\n/providers                    show local, Codex, and Claude access\n/login codex|claude           connect an existing provider plan\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/rename <name>                name this saved session\n/copy                         copy the latest response\n/status                       show session, workspace, model, and usage\n/goal [edit|pause|resume|clear] [objective]\n                               track a persistent session objective\n/plan [off|prompt]            inspect and research without changes\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n/model [name]                 list or switch available models\n/proof [run-id]               inspect execution proof\n/diff                         inspect scoped workspace changes\n/review                       review current diff for defects\n/permissions [level]          show or switch the live authority boundary\n/resume [session-id]          list or restore a prior session\n/skills                       show automatically learned skill drafts\n/agents                       show HII-managed and observed agents\n/codex <task>                 use authenticated Codex CLI\n/claude <task>                use authenticated Claude CLI\n/agent <id> status|logs|stop  manage an agent by id\n/resources                    quick CPU, memory, storage, and Ollama view\n/top                          open the embedded btop resource monitor\n/schedule <cron> :: <task>    create a local recurring HII task\n/schedules                    list HII schedules\n/calendar                     show the next 7 days\n/calendar add DATE [TIME] :: TITLE\n/sync calendar                sync next HII runs to Apple Calendar\n/exit                         leave HII\n\nWhile running: type + Enter steers · type + Tab queues · Esc stops"
     } else {
-        "/help                         show commands\n/providers                    show local, Codex, and Claude access\n/login codex|claude           connect an existing provider plan\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/rename <name>                name this saved session\n/copy                         copy the latest response\n/status                       show session, workspace, model, and usage\n/goal [edit|pause|resume|clear] [objective]\n                               track a persistent session objective\n/plan [off|prompt]            inspect and research without changes\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n/model [name]                 list or switch available models\n/proof [run-id]               inspect execution proof\n/diff                         inspect scoped workspace changes\n/review                       review current diff for defects\n/permissions                  show the active authority boundary\n/resume [session-id]          list or restore a prior session\n/skills                       show automatically learned skill drafts\n/agents                       show HII-managed and observed agents\n/codex <task>                 use authenticated Codex CLI\n/claude <task>                use authenticated Claude CLI\n/agent <id> status|logs|stop  manage an agent by id\n/undo                         drop the last exchange to steer away\n/fork                         snapshot this session to a resumable fork\n/teach <name>                 graduate this session into a reusable skill\n!<command>                    run a shell command directly\n/exit                         leave HII\n\nWhile running: type + Enter steers · type + Tab queues · Esc stops"
+        "/help                         show commands\n/providers                    show local, Codex, and Claude access\n/login codex|claude           connect an existing provider plan\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/rename <name>                name this saved session\n/copy                         copy the latest response\n/status                       show session, workspace, model, and usage\n/goal [edit|pause|resume|clear] [objective]\n                               track a persistent session objective\n/plan [off|prompt]            inspect and research without changes\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n/model [name]                 list or switch available models\n/proof [run-id]               inspect execution proof\n/diff                         inspect scoped workspace changes\n/review                       review current diff for defects\n/permissions [level]          show or switch the live authority boundary\n/resume [session-id]          list or restore a prior session\n/skills                       show automatically learned skill drafts\n/agents                       show HII-managed and observed agents\n/codex <task>                 use authenticated Codex CLI\n/claude <task>                use authenticated Claude CLI\n/agent <id> status|logs|stop  manage an agent by id\n/undo                         drop the last exchange to steer away\n/fork                         snapshot this session to a resumable fork\n/teach <name>                 graduate this session into a reusable skill\n!<command>                    run a shell command directly\n/exit                         leave HII\n\nWhile running: type + Enter steers · type + Tab queues · Esc stops"
     }
 }
 
@@ -1110,7 +1112,7 @@ fn public_test_slash_allowed(command: &SlashCommand) -> bool {
             | SlashCommand::Thinking(_)
             | SlashCommand::Model(_)
             | SlashCommand::Proof(_)
-            | SlashCommand::Permissions
+            | SlashCommand::Permissions(None)
             | SlashCommand::Undo
             | SlashCommand::Unknown(_)
     )
@@ -1178,16 +1180,12 @@ fn resolve_authority(yolo: bool, level: Option<&str>) -> Result<contract::Author
     {
         return Ok(Authority::Yolo);
     }
-    match level.map(|value| value.trim().to_ascii_lowercase()).as_deref() {
+    match level
+        .map(|value| value.trim().to_ascii_lowercase())
+        .as_deref()
+    {
         None => Ok(Authority::Workspace),
-        Some("read-only") | Some("readonly") => Ok(Authority::ReadOnly),
-        Some("workspace") => Ok(Authority::Workspace),
-        Some("external-preview") | Some("preview") => Ok(Authority::ExternalPreview),
-        Some("external-commit") | Some("commit") => Ok(Authority::ExternalCommit),
-        Some("yolo") => Ok(Authority::Yolo),
-        Some(other) => Err(format!(
-            "unknown authority '{other}'; use read-only | workspace | external-preview | external-commit | yolo"
-        )),
+        Some(value) => Authority::parse(value),
     }
 }
 
@@ -1300,7 +1298,11 @@ mod tests {
         assert_eq!(parse_slash_command("/review"), Some(SlashCommand::Review));
         assert_eq!(
             parse_slash_command("/permissions"),
-            Some(SlashCommand::Permissions)
+            Some(SlashCommand::Permissions(None))
+        );
+        assert_eq!(
+            parse_slash_command("/permissions read-only"),
+            Some(SlashCommand::Permissions(Some("read-only".into())))
         );
         assert_eq!(
             parse_slash_command("/resume abc-123"),

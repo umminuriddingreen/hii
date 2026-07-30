@@ -1,7 +1,7 @@
 use crate::{
     agent::{choose_model, execute_tool, parse_action, Action},
     config::AppPaths,
-    contract::deletion_shell,
+    contract::{deletion_shell, sensitive_shell, Authority, Decision},
     ollama::{ChatResult, ChatStreamEvent, ChatUsage, Message, Ollama},
     receipt::{
         find_receipt, redact_text, unix_ms, ConversationStore, Receipt, RunStore,
@@ -25,6 +25,7 @@ const AUTO_COMPACT_CHARS: usize = 64 * 1024;
 const COMPACTION_TRANSCRIPT_CHARS: usize = 56 * 1024;
 const GOAL_CONTEXT_PREFIX: &str = "ACTIVE SESSION GOAL:";
 const PLAN_CONTEXT_PREFIX: &str = "PLAN MODE:";
+const AUTHORITY_CONTEXT_PREFIX: &str = "ACTIVE AUTHORITY:";
 
 struct CompactionStats {
     before_messages: usize,
@@ -124,6 +125,7 @@ pub struct Conversation {
     public_test: bool,
     goal: Option<SessionGoal>,
     plan_mode: bool,
+    authority: Authority,
 }
 
 impl Conversation {
@@ -151,7 +153,7 @@ impl Conversation {
         if !capsule.text.is_empty() {
             messages.push(Message::system(capsule.text));
         }
-        Ok(Self {
+        let mut conversation = Self {
             paths,
             ollama,
             model,
@@ -171,7 +173,10 @@ impl Conversation {
             public_test,
             goal: None,
             plan_mode: false,
-        })
+            authority: Authority::Workspace,
+        };
+        conversation.sync_authority_context();
+        Ok(conversation)
     }
 
     pub fn reply(&mut self, input: &str) -> Result<String, String> {
@@ -352,6 +357,10 @@ impl Conversation {
                     }
                     let shell_evidence = tool == "shell"
                         && command.as_deref().is_some_and(shell_command_is_read_only);
+                    let shell_observation = tool == "shell"
+                        && command
+                            .as_deref()
+                            .is_some_and(shell_command_is_observation_only);
                     let mutation = tool == "write"
                         || tool == "edit"
                         || (tool == "shell"
@@ -359,7 +368,7 @@ impl Conversation {
                             && !command.as_deref().is_some_and(shell_command_is_preview))
                         || (crate::hii_tools::is_hii_tool(&tool)
                             && crate::hii_tools::is_mutating(&tool));
-                    if self.plan_mode && !plan_tool_allowed(&tool, shell_evidence) {
+                    if self.plan_mode && !plan_tool_allowed(&tool, shell_observation) {
                         self.store.event(
                             "authority.block",
                             json!({ "step": step, "tool": tool, "reason": "plan mode" }),
@@ -374,30 +383,77 @@ impl Conversation {
                         mutation && path.as_deref().is_some_and(previewable_web_path);
                     let deletion = (tool == "shell" || tool == "verify")
                         && command.as_deref().is_some_and(deletion_shell);
-                    let deletion_approved = if deletion {
-                        if self.public_test {
-                            false
-                        } else {
-                            let command = command.as_deref().unwrap_or(&tool);
-                            crate::agent::request_deletion_approval(command)
-                        }
-                    } else {
-                        false
-                    };
-                    if deletion && !deletion_approved {
-                        let blocked = if self.public_test {
-                            "Deletion is unavailable in the public test. Choose a non-destructive action."
-                        } else {
-                            "Deletion was not approved. Choose a non-destructive action."
-                        }
-                        .to_string();
+                    let sensitive = (tool == "shell" || tool == "verify")
+                        && command.as_deref().is_some_and(sensitive_shell);
+                    let mut deletion_approved = false;
+                    if self.public_test && deletion {
                         self.store.event(
                             "authority.block",
                             json!({ "step": step, "tool": tool, "reason": "deletion not approved" }),
                         )?;
                         self.messages.push(Message::assistant(raw));
-                        self.messages.push(Message::user(blocked));
+                        self.messages.push(Message::user(
+                            "Deletion is unavailable in the public test. Choose a non-destructive action.",
+                        ));
                         continue;
+                    }
+                    if !self.public_test {
+                        let decision = authority_decision(
+                            self.authority,
+                            mutation || tool == "verify",
+                            sensitive,
+                            deletion,
+                        );
+                        let target = command.as_deref().unwrap_or(&target);
+                        let approved = match decision {
+                            Decision::Allow => true,
+                            Decision::Prompt if deletion => {
+                                crate::agent::request_deletion_approval(target)
+                            }
+                            Decision::Prompt => request_sensitive_approval(&tool, target),
+                            Decision::Deny => false,
+                        };
+                        if decision != Decision::Allow && !approved {
+                            let reason = match decision {
+                                Decision::Deny => format!(
+                                    "BLOCKED by {} authority. Use /permissions to inspect or change the live boundary.",
+                                    self.authority.label()
+                                ),
+                                Decision::Prompt if deletion => {
+                                    "Deletion was not approved. Choose a non-destructive action."
+                                        .into()
+                                }
+                                Decision::Prompt => format!(
+                                    "The external action was not approved. Stay inside {} authority or ask the operator to change it.",
+                                    self.authority.label()
+                                ),
+                                Decision::Allow => unreachable!(),
+                            };
+                            self.store.event(
+                                "authority.block",
+                                json!({
+                                    "step": step,
+                                    "tool": tool,
+                                    "decision": format!("{decision:?}"),
+                                    "authority": self.authority.label()
+                                }),
+                            )?;
+                            self.messages.push(Message::assistant(raw));
+                            self.messages.push(Message::user(reason));
+                            continue;
+                        }
+                        if decision == Decision::Prompt {
+                            self.store.event(
+                                "authority.approval",
+                                json!({
+                                    "step": step,
+                                    "tool": tool,
+                                    "target": target,
+                                    "authority": self.authority.label()
+                                }),
+                            )?;
+                        }
+                        deletion_approved = deletion && approved;
                     }
                     if self.public_test
                         && matches!(tool.as_str(), "shell" | "verify")
@@ -589,7 +645,8 @@ impl Conversation {
             .filter(|message| {
                 message.role != "system"
                     || (!message.content.starts_with(GOAL_CONTEXT_PREFIX)
-                        && !message.content.starts_with(PLAN_CONTEXT_PREFIX))
+                        && !message.content.starts_with(PLAN_CONTEXT_PREFIX)
+                        && !message.content.starts_with(AUTHORITY_CONTEXT_PREFIX))
             })
             .count()
             .saturating_sub(1);
@@ -601,6 +658,7 @@ impl Conversation {
         self.messages = vec![system];
         self.sync_goal_context();
         self.sync_plan_context();
+        self.sync_authority_context();
         self.store.event(
             "conversation.cleared",
             json!({ "removed_messages": removed }),
@@ -657,6 +715,10 @@ impl Conversation {
         fork.event(
             "conversation.plan_mode",
             json!({ "enabled": self.plan_mode }),
+        )?;
+        fork.event(
+            "conversation.authority",
+            json!({ "authority": self.authority.label() }),
         )?;
         Ok(format!(
             "Forked this conversation to {}. The live session is unchanged.",
@@ -723,13 +785,14 @@ impl Conversation {
         };
         let mode = if self.plan_mode { "plan" } else { "workspace" };
         format!(
-            "{} messages · {} characters\n{}\n{}\n{}\nMode: {}\nGoal: {}\nLearning draft: {}",
+            "{} messages · {} characters\n{}\n{}\n{}\nMode: {}\nAuthority: {}\nGoal: {}\nLearning draft: {}",
             self.messages.len().saturating_sub(1),
             self.context_chars(),
             self.model,
             self.tools.workspace().display(),
             self.usage.summary(),
             mode,
+            self.authority.label(),
             goal,
             learning
         )
@@ -839,6 +902,34 @@ impl Conversation {
         );
     }
 
+    fn sync_authority_context(&mut self) {
+        self.messages.retain(|message| {
+            message.role != "system" || !message.content.starts_with(AUTHORITY_CONTEXT_PREFIX)
+        });
+        if self.public_test {
+            return;
+        }
+        let instruction = match self.authority {
+            Authority::ReadOnly => {
+                "ACTIVE AUTHORITY: read-only. Observe, research, and reason. Do not write, edit, or run mutating commands."
+            }
+            Authority::Workspace => {
+                "ACTIVE AUTHORITY: workspace. Workspace-local changes are allowed. External actions are blocked. Deletion always needs live approval."
+            }
+            Authority::ExternalPreview => {
+                "ACTIVE AUTHORITY: external-preview. Workspace changes are allowed. External actions require live approval. Deletion always needs separate live approval."
+            }
+            Authority::ExternalCommit => {
+                "ACTIVE AUTHORITY: external-commit. Authorized external actions are allowed. Deletion still needs separate live approval."
+            }
+            Authority::Yolo => {
+                "ACTIVE AUTHORITY: YOLO. Actions are autonomous inside hard workspace and secret floors. Deletion still needs separate live approval."
+            }
+        };
+        self.messages
+            .insert(1.min(self.messages.len()), Message::system(instruction));
+    }
+
     pub fn rename(&self, requested: &str) -> Result<String, String> {
         let title = requested.split_whitespace().collect::<Vec<_>>().join(" ");
         if title.is_empty() {
@@ -893,11 +984,27 @@ impl Conversation {
         if command.is_empty() {
             return "usage: !<command>".into();
         }
-        if self.plan_mode && !shell_command_is_read_only(command) {
+        if self.plan_mode && !shell_command_is_observation_only(command) {
             return "Plan mode blocks workspace changes. Use a read-only command or /plan off."
                 .into();
         }
         let deletion = deletion_shell(command);
+        let mutates =
+            !shell_command_is_observation_only(command) && !shell_command_is_preview(command);
+        let sensitive = sensitive_shell(command);
+        let decision = authority_decision(self.authority, mutates, sensitive, deletion);
+        if decision == Decision::Deny {
+            return format!(
+                "Blocked by {} authority. Use /permissions to inspect or change the live boundary.",
+                self.authority.label()
+            );
+        }
+        if decision == Decision::Prompt
+            && !deletion
+            && !request_sensitive_approval("shell", command)
+        {
+            return "The external action was not approved.".into();
+        }
         if deletion && !crate::agent::request_deletion_approval(command) {
             return "Deletion was not approved.".into();
         }
@@ -1011,26 +1118,33 @@ impl Conversation {
         Ok(review)
     }
 
-    pub fn permissions(&self) -> String {
+    pub fn permissions(&mut self, requested: Option<&str>) -> Result<String, String> {
         if self.public_test {
-            [
+            return Ok([
                 "PUBLIC TEST",
                 "Allowed: read, search, create, edit, local verification, installed creative tools.",
                 "Network: HII web search and loopback model services only.",
                 "Blocked: deletion, host-home reads, secrets, messages/email, purchases, account changes, installs, private uploads, host HII control.",
                 "Scope: disposable session workspace only.",
             ]
-            .join("\n")
-        } else {
-            [
-                "LOCAL OPERATOR SESSION",
-                "Allowed: workspace reads and edits, local tools, verification, HII context.",
-                "Approval required: deletion and destructive shell actions.",
-                "Never implicit: publishing, pushing, spending, messaging, account changes, or secret access.",
-                "Scope: current workspace unless you explicitly authorize more.",
-            ]
-            .join("\n")
+            .join("\n"));
         }
+        if let Some(requested) = requested {
+            let next = Authority::parse(requested)?;
+            if next == Authority::Yolo {
+                return Err(
+                    "YOLO is unavailable in conversational sessions. Use external-commit for the broadest live boundary."
+                        .into(),
+                );
+            }
+            self.store.event(
+                "conversation.authority",
+                json!({ "authority": next.label() }),
+            )?;
+            self.authority = next;
+            self.sync_authority_context();
+        }
+        Ok(render_permissions(self.authority))
     }
 
     pub fn resume(&mut self, requested: Option<&str>) -> Result<String, String> {
@@ -1095,8 +1209,10 @@ impl Conversation {
         self.messages = std::iter::once(system).chain(restored).collect();
         self.goal = session_goal(&raw);
         self.plan_mode = session_plan_mode(&raw);
+        self.authority = session_authority(&raw).unwrap_or(Authority::Workspace);
         self.sync_goal_context();
         self.sync_plan_context();
+        self.sync_authority_context();
         self.store.event(
             "conversation.resumed",
             json!({ "source": id, "messages": count }),
@@ -1178,6 +1294,7 @@ impl Conversation {
         self.messages = vec![system, Message::system(checkpoint)];
         self.sync_goal_context();
         self.sync_plan_context();
+        self.sync_authority_context();
         self.store.event(
             "conversation.compacted",
             json!({
@@ -1400,7 +1517,7 @@ impl Conversation {
             authority: Some(if self.public_test {
                 "public-test".into()
             } else {
-                "workspace".into()
+                self.authority.label().into()
             }),
             done_when: None,
             approvals: Vec::new(),
@@ -1577,6 +1694,42 @@ fn shell_command_is_read_only(command: &str) -> bool {
     read_only.iter().any(|prefix| lowered.starts_with(prefix))
 }
 
+fn shell_command_is_observation_only(command: &str) -> bool {
+    let lowered = command.trim().to_ascii_lowercase();
+    if [
+        ">", "tee ", "sed -i", "perl -i", ";", "&&", "||", "$(", "`", "\n", " -exec", " -ok",
+    ]
+    .iter()
+    .any(|marker| lowered.contains(marker))
+    {
+        return false;
+    }
+    [
+        "rg ",
+        "rg\t",
+        "ls ",
+        "ls\t",
+        "cat ",
+        "head ",
+        "tail ",
+        "sed -n",
+        "find ",
+        "pwd",
+        "wc ",
+        "stat ",
+        "file ",
+        "git status",
+        "git diff",
+        "git log",
+        "git show",
+        "git branch",
+        "python3 -m json.tool",
+        "node --check",
+    ]
+    .iter()
+    .any(|prefix| lowered.starts_with(prefix))
+}
+
 fn shell_command_is_preview(command: &str) -> bool {
     let lowered = command.trim().to_ascii_lowercase();
     ["open ", "xdg-open ", "start "]
@@ -1587,6 +1740,55 @@ fn shell_command_is_preview(command: &str) -> bool {
 fn plan_tool_allowed(tool: &str, shell_evidence: bool) -> bool {
     matches!(tool, "read" | "list" | "search" | "web_search" | "http")
         || (tool == "shell" && shell_evidence)
+}
+
+fn render_permissions(authority: Authority) -> String {
+    let boundary = match authority {
+        Authority::ReadOnly => "Observe and research only; workspace changes are blocked.",
+        Authority::Workspace => "Workspace-local work is allowed; external actions are blocked.",
+        Authority::ExternalPreview => {
+            "Workspace-local work is allowed; external actions ask before running."
+        }
+        Authority::ExternalCommit => {
+            "Workspace-local and explicitly requested external actions are allowed."
+        }
+        Authority::Yolo => "Autonomous inside HII's hard workspace and secret floors.",
+    };
+    format!(
+        "AUTHORITY  {}\n{}\nDeletion always needs separate live approval.\nSwitch: /permissions read-only | workspace | external-preview | external-commit",
+        authority.label(),
+        boundary
+    )
+}
+
+fn authority_decision(
+    authority: Authority,
+    mutates: bool,
+    sensitive: bool,
+    deletion: bool,
+) -> Decision {
+    if deletion {
+        if authority == Authority::ReadOnly {
+            Decision::Deny
+        } else {
+            Decision::Prompt
+        }
+    } else {
+        authority.decide(mutates, sensitive)
+    }
+}
+
+fn request_sensitive_approval(tool: &str, target: &str) -> bool {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return false;
+    }
+    println!(
+        "\nEXTERNAL ACTION APPROVAL\n  ACTION  {tool}\n  DETAIL  {target}\n  EFFECT  crosses the local workspace boundary"
+    );
+    print!("  Allow this action? [y/N] ");
+    let _ = io::stdout().flush();
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer).is_ok() && matches!(answer.trim(), "y" | "Y" | "yes")
 }
 
 fn needs_verification(mutation_epoch: usize, verified_epoch: Option<usize>) -> bool {
@@ -1779,6 +1981,22 @@ fn session_plan_mode(raw: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn session_authority(raw: &str) -> Option<Authority> {
+    raw.lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|event| {
+            event.get("kind").and_then(|value| value.as_str()) == Some("conversation.authority")
+        })
+        .filter_map(|event| {
+            event
+                .get("data")
+                .and_then(|data| data.get("authority"))
+                .and_then(|value| value.as_str())
+                .and_then(|value| Authority::parse(value).ok())
+        })
+        .next_back()
+}
+
 fn copy_to_clipboard(value: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let candidates = vec![("pbcopy", Vec::<&str>::new())];
@@ -1880,11 +2098,13 @@ Paths are literal, never Markdown links. Avoid generic greetings. Use one tool a
 #[cfg(test)]
 mod tests {
     use super::{
-        conversation_prompt, needs_verification, observation_signature, plain_message,
-        plan_tool_allowed, public_test_sensitive_shell, resumable_messages, session_goal,
-        session_plan_mode, session_title, shell_command_is_preview, shell_command_is_read_only,
+        authority_decision, conversation_prompt, needs_verification, observation_signature,
+        plain_message, plan_tool_allowed, public_test_sensitive_shell, render_permissions,
+        resumable_messages, session_authority, session_goal, session_plan_mode, session_title,
+        shell_command_is_observation_only, shell_command_is_preview, shell_command_is_read_only,
         verification_required_message,
     };
+    use crate::contract::{Authority, Decision};
     use std::path::Path;
 
     #[test]
@@ -2043,6 +2263,11 @@ mod tests {
         assert!(!plan_tool_allowed("shell", false));
         assert!(!plan_tool_allowed("write", false));
         assert!(!plan_tool_allowed("verify", false));
+        assert!(shell_command_is_observation_only("git diff --stat"));
+        assert!(!shell_command_is_observation_only("cargo test"));
+        assert!(!shell_command_is_observation_only(
+            "git status; touch escaped"
+        ));
     }
 
     #[test]
@@ -2053,5 +2278,35 @@ mod tests {
             "{\"kind\":\"conversation.plan_mode\",\"data\":{\"enabled\":true}}\n",
         );
         assert!(session_plan_mode(raw));
+    }
+
+    #[test]
+    fn session_authority_restores_the_latest_valid_boundary() {
+        let raw = concat!(
+            "{\"kind\":\"conversation.authority\",\"data\":{\"authority\":\"read-only\"}}\n",
+            "{\"kind\":\"conversation.authority\",\"data\":{\"authority\":\"workspace\"}}\n",
+        );
+        assert_eq!(session_authority(raw), Some(Authority::Workspace));
+        assert!(render_permissions(Authority::ReadOnly).contains("Observe and research only"));
+    }
+
+    #[test]
+    fn live_authority_keeps_deletion_on_a_separate_approval_floor() {
+        assert_eq!(
+            authority_decision(Authority::ReadOnly, true, false, false),
+            Decision::Deny
+        );
+        assert_eq!(
+            authority_decision(Authority::Workspace, true, true, false),
+            Decision::Deny
+        );
+        assert_eq!(
+            authority_decision(Authority::ExternalPreview, true, true, false),
+            Decision::Prompt
+        );
+        assert_eq!(
+            authority_decision(Authority::ExternalCommit, true, true, true),
+            Decision::Prompt
+        );
     }
 }

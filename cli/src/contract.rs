@@ -32,6 +32,19 @@ pub enum Decision {
 }
 
 impl Authority {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "read-only" | "readonly" => Ok(Authority::ReadOnly),
+            "workspace" => Ok(Authority::Workspace),
+            "external-preview" | "preview" => Ok(Authority::ExternalPreview),
+            "external-commit" | "commit" => Ok(Authority::ExternalCommit),
+            "yolo" => Ok(Authority::Yolo),
+            other => Err(format!(
+                "unknown authority '{other}'; use read-only | workspace | external-preview | external-commit | yolo"
+            )),
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Authority::ReadOnly => "read-only",
@@ -191,6 +204,16 @@ mod tests {
             Authority::ExternalPreview.decide(true, true),
             Decision::Prompt
         );
+    }
+
+    #[test]
+    fn parses_operator_facing_authority_aliases() {
+        assert_eq!(Authority::parse("read-only").unwrap(), Authority::ReadOnly);
+        assert_eq!(
+            Authority::parse("preview").unwrap(),
+            Authority::ExternalPreview
+        );
+        assert!(Authority::parse("root").is_err());
     }
 
     #[test]
