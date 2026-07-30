@@ -56,17 +56,23 @@ async function hidden(prompt) {
       process.stdin.off('data', onData);
       process.stdout.write('\n');
     };
-    const onData = (character) => {
-      if (character === '\u0003') {
-        cleanup();
-        reject(new Error('cancelled'));
-      } else if (character === '\r' || character === '\n') {
-        cleanup();
-        resolve(value);
-      } else if (character === '\u007f' || character === '\b') {
-        value = value.slice(0, -1);
-      } else if (character >= ' ') {
-        value += character;
+    const onData = (chunk) => {
+      for (const character of chunk) {
+        if (character === '\u0003') {
+          cleanup();
+          reject(new Error('cancelled'));
+          return;
+        }
+        if (character === '\r' || character === '\n') {
+          cleanup();
+          resolve(value);
+          return;
+        }
+        if (character === '\u007f' || character === '\b') {
+          value = value.slice(0, -1);
+        } else if (character >= ' ') {
+          value += character;
+        }
       }
     };
     process.stdin.on('data', onData);
