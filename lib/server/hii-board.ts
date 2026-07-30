@@ -7,6 +7,13 @@ export type BoardLane = 'backlog' | 'next' | 'doing' | 'blocked' | 'done';
 export type BoardPriority = 'low' | 'normal' | 'high' | 'urgent';
 export type BoardTaskOrigin = 'human' | 'agent' | 'system';
 export type BoardTaskReviewState = 'proposed' | 'approved';
+export type BoardTaskRunStatus =
+  | 'waiting_approval'
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
 
 export type BoardTask = {
   id: string;
@@ -23,6 +30,9 @@ export type BoardTask = {
   requestedLane?: BoardLane;
   approvedAt?: string;
   approvedBy?: string;
+  runId?: string;
+  runStatus?: BoardTaskRunStatus;
+  receiptRef?: string;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
@@ -35,6 +45,14 @@ type BoardTaskEvent =
 export const boardLanes: BoardLane[] = ['backlog', 'next', 'doing', 'blocked', 'done'];
 export const boardPriorities: BoardPriority[] = ['low', 'normal', 'high', 'urgent'];
 export const boardTaskOrigins: BoardTaskOrigin[] = ['human', 'agent', 'system'];
+export const boardTaskRunStatuses: BoardTaskRunStatus[] = [
+  'waiting_approval',
+  'queued',
+  'running',
+  'completed',
+  'failed',
+  'cancelled'
+];
 
 const boardDir = path.join(process.env.HII_RUNTIME_DIR || path.join(process.env.HOME || '.', '.hii'), 'board');
 const taskEventsPath = path.join(boardDir, 'tasks.jsonl');
@@ -65,6 +83,12 @@ function normalizePriority(value: unknown): BoardPriority {
 
 function normalizeOrigin(value: unknown): BoardTaskOrigin {
   return boardTaskOrigins.includes(value as BoardTaskOrigin) ? (value as BoardTaskOrigin) : 'system';
+}
+
+function normalizeRunStatus(value: unknown): BoardTaskRunStatus | undefined {
+  return boardTaskRunStatuses.includes(value as BoardTaskRunStatus)
+    ? value as BoardTaskRunStatus
+    : undefined;
 }
 
 function boardTaskKey(input: Pick<BoardTask, 'title' | 'coordinate'>) {
@@ -228,6 +252,9 @@ export async function updateBoardTask(
     title?: unknown;
     reviewState?: unknown;
     approvedBy?: unknown;
+    runId?: unknown;
+    runStatus?: unknown;
+    receiptRef?: unknown;
   }
 ) {
   const task = (await listBoardTasks({ includeDone: true })).find((candidate) => candidate.id === id);
@@ -262,6 +289,32 @@ export async function updateBoardTask(
   if (typeof input.notes === 'string') patch.notes = sanitizeText(input.notes, 2000);
   if (input.tags !== undefined) patch.tags = parseTags(input.tags);
   if (typeof input.title === 'string' && sanitizeText(input.title, 240)) patch.title = sanitizeText(input.title, 240);
+  if (input.runId !== undefined || input.runStatus !== undefined || input.receiptRef !== undefined) {
+    if (effectiveReviewState(task) === 'proposed' && !approvalRequested) {
+      throw new BoardTaskError(
+        'BOARD_TASK_APPROVAL_REQUIRED',
+        'Approve this proposal before preparing or recording a run.'
+      );
+    }
+    if (input.runId !== undefined) {
+      const runId = sanitizeText(input.runId, 120);
+      if (!runId) throw new Error('A board run link requires a run id.');
+      patch.runId = runId;
+    }
+    if (input.runStatus !== undefined) {
+      const runStatus = normalizeRunStatus(input.runStatus);
+      if (!runStatus) throw new Error('Board run status is not recognized.');
+      patch.runStatus = runStatus;
+    }
+    if (input.receiptRef !== undefined) {
+      const receiptRef = sanitizeText(input.receiptRef, 1000);
+      if (!receiptRef) throw new Error('A completed board run requires a receipt reference.');
+      if (input.runStatus !== 'completed' && task.runStatus !== 'completed') {
+        throw new Error('A receipt can only be linked to a completed board run.');
+      }
+      patch.receiptRef = receiptRef;
+    }
+  }
 
   await appendEvent({ type: 'updated', id, patch, ts: now });
   return { ...task, ...patch };

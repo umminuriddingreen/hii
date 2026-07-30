@@ -454,7 +454,10 @@ compatibility boundary part of the permanent product CI gate.
   still intentionally raw. The board now records human, agent, and system
   origin; holds generated active requests as proposals; rejects exact open
   duplicates before append; and requires explicit approval before a proposal
-  enters `next` or `doing`.
+  enters `next` or `doing`. An approved active card can now prepare the existing
+  bounded HII Space run with a content fingerprint and a second execution
+  approval; queued, running, blocked, completed, and receipt-linked state then
+  return to the same append-only board ledger.
 - Runtime state is hard to interpret: the surface showed roughly 90 `hiid`
   instances without explaining whether that was healthy or actionable.
 - During the initial audit, `hii space health`, `hii space snapshot`, and

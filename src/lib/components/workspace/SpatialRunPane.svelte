@@ -207,10 +207,14 @@
     while (active) {
       try {
         const run = (await apiJson(`/api/workspace/runs?id=${encodeURIComponent(id)}`)) as RunResponse;
+        const previousStatus = status;
         job = run.job;
         status = run.job.status;
         if (run.receipt) receipt = run.receipt;
         if (run.path) receiptPath = run.path;
+        if (run.job.status !== previousStatus && ['queued', 'running'].includes(run.job.status)) {
+          patchRun(run.job.status, { job: run.job });
+        }
         if (terminalStatuses.has(run.job.status)) {
           const failureError = run.job.status === 'completed'
             ? ''

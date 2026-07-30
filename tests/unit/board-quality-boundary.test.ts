@@ -118,4 +118,50 @@ describe('HII board quality boundary', () => {
       code: 'BOARD_TASK_LOW_QUALITY'
     });
   });
+
+  it('links only approved work to a governed run and completed receipt', async () => {
+    const { createBoardTask, updateBoardTask } = await board();
+    const proposal = await createBoardTask({
+      title: 'Verify the client handoff',
+      lane: 'next',
+      origin: 'agent'
+    });
+
+    await expect(
+      updateBoardTask(proposal.id, {
+        runId: 'run-proposed',
+        runStatus: 'waiting_approval'
+      })
+    ).rejects.toMatchObject({ code: 'BOARD_TASK_APPROVAL_REQUIRED' });
+
+    const approved = await updateBoardTask(proposal.id, {
+      lane: 'next',
+      reviewState: 'approved',
+      approvedBy: 'local operator',
+      runId: 'run-approved',
+      runStatus: 'waiting_approval'
+    });
+    expect(approved).toMatchObject({
+      lane: 'next',
+      runId: 'run-approved',
+      runStatus: 'waiting_approval'
+    });
+
+    await expect(
+      updateBoardTask(proposal.id, { receiptRef: '/tmp/receipt.json' })
+    ).rejects.toThrow('A receipt can only be linked to a completed board run.');
+
+    const completed = await updateBoardTask(proposal.id, {
+      lane: 'done',
+      runId: 'run-approved',
+      runStatus: 'completed',
+      receiptRef: '/tmp/receipt.json'
+    });
+    expect(completed).toMatchObject({
+      lane: 'done',
+      runStatus: 'completed',
+      receiptRef: '/tmp/receipt.json'
+    });
+    expect(completed.completedAt).toEqual(expect.any(String));
+  });
 });

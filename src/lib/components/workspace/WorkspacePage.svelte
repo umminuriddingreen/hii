@@ -27,6 +27,7 @@
   import { normalizeWorkspaceContextAnchor } from '@/lib/workspace/context-anchor';
   import { rebindPendingWorkspaceContext } from '@/lib/workspace/pending-context';
   import { organizeWorkspaceSelection } from '@/lib/workspace/organize';
+  import { boardRunSyncKey } from '@/lib/workspace/board-run';
 
   export let data: { enabled: boolean };
   const surfaceCatalog = [
@@ -40,6 +41,7 @@
   let workspaceId='default'; let workspaces:Array<{id:string;selected:boolean;status:'ready'|'recovery';revision?:number}>=[]; let workspaceMenu=false;
   let selected:string|null=null; let contextSelection:string[]=[]; let omnibar=false; let query=''; let mapMenu=false; let currentSceneId:string|null=null; let organizationNotice=''; let canvasWidth=0; let canvasHeight=0; let saveTimer:ReturnType<typeof setTimeout>|undefined; let saveInFlight=false; let savePending=false;
   let context:any=null; let board:any[]=[]; let daemon:any=null; let healthOpen=false; let daemonActionBusy=false; let canvas:HTMLElement; let mouse={x:400,y:300};
+  const boardRunSync = new Map<string,string>();
   let commandInput:HTMLInputElement; let fileInput:HTMLInputElement;
   let composerOpen=false; let composerText=''; let composerInput:HTMLTextAreaElement; let composerAt={x:400,y:280}; let lastSummon=0;
   let ModelPaneComponent:any=null; let modelPanePromise:Promise<void>|null=null; let modelPaneError='';
@@ -168,6 +170,115 @@
     }
   }
   function createSpatialRun(intent:string,at:{x:number;y:number},parentId?:string,contextNodes:WorkspaceNode[]=[]){const before=doc;const title=intent.length>44?`${intent.slice(0,44)}…`:intent;const approvedContext=contextNodes.map(contextItem);let z=doc.nextZ;const intentSeed=seedFor('intent',{title:'your intent',text:intent,parentId,context:approvedContext}),intentNode=makeNode(intentSeed,at.x,at.y,++z),runSeed=seedFor('run',{title,prompt:intent,parentId:intentNode.id,autoStart:false,status:'waiting_approval',context:approvedContext,workspaceRoot:String(context?.identity?.repo||'/Users/ummi/hii'),model:'',maxSteps:8}),runNode=makeNode(runSeed,at.x,at.y+intentSeed.h+20,++z);doc={...doc,nextZ:z,nodes:[...doc.nodes,intentNode,runNode]};selected=runNode.id;contextSelection=[];remember(before);persist();}
+  async function updateBoardTask(id:string,patch:Record<string,unknown>){
+    const response=await fetch('/api/board/tasks',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({id,...patch})});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(result.error||'HII could not update the governed board.');
+    board=board.map(task=>task.id===id?result.task:task);
+    return result.task;
+  }
+  function createBoardRun(task:any,boardNode:WorkspaceNode){
+    if(task.reviewState==='proposed'||!['next','doing'].includes(task.lane)){
+      saveError='Approve this task into next or doing before preparing execution.';
+      return;
+    }
+    const existing=doc.nodes.find(node=>node.type==='run'&&String(node.payload.boardTaskId||'')===String(task.id||''));
+    if(existing){focusNode(existing);return}
+    if(task.runId&&!['failed','cancelled'].includes(String(task.runStatus||''))){
+      saveError=`This task is already linked to run ${String(task.runId).slice(0,12)}. Open the workspace that owns that run instead of duplicating it.`;
+      return;
+    }
+    const before=doc;
+    const intentSeed=seedFor('intent');
+    const runSeed=seedFor('run');
+    const at=findOpenWorkspacePosition(
+      doc.nodes,
+      {x:boardNode.x+boardNode.w+48,y:boardNode.y},
+      {w:Math.max(intentSeed.w,runSeed.w),h:intentSeed.h+20+runSeed.h}
+    );
+    const approvedContext=[{
+      id:`board:${String(task.id||'')}`,
+      title:String(task.title||'Approved board task'),
+      type:'board-task',
+      source:'HII append-only task ledger',
+      excerpt:String(task.notes||'').slice(0,2400),
+      objectKind:'task',
+      owner:String(task.owner||'main agent'),
+      authority:'hii-runtime',
+      proofRefs:[`board-task:${String(task.id||'')}`]
+    }];
+    let z=doc.nextZ;
+    const boardIntentSeed=seedFor('intent',{
+      title:'approved board intent',
+      text:String(task.title||''),
+      parentId:boardNode.id,
+      boardTaskId:String(task.id||''),
+      context:approvedContext
+    });
+    boardIntentSeed.object={
+      ...boardIntentSeed.object,
+      kind:'intent',
+      owner:'human',
+      status:'approved',
+      source:'HII approved board task',
+      parentId:boardNode.id,
+      proofRefs:[`board-task:${String(task.id||'')}`],
+      audit:[...(boardIntentSeed.object?.audit||[]),{
+        ts:new Date().toISOString(),
+        actor:'human',
+        action:'prepared approved board task for bounded execution'
+      }]
+    };
+    const intentNode=makeNode(boardIntentSeed,at.x,at.y,++z);
+    const boardRunSeed=seedFor('run',{
+      title:String(task.title||'Approved board task').slice(0,44),
+      prompt:String(task.title||''),
+      parentId:intentNode.id,
+      boardTaskId:String(task.id||''),
+      autoStart:false,
+      status:'waiting_approval',
+      context:approvedContext,
+      workspaceRoot:String(task.coordinate||context?.identity?.repo||'/Users/ummi/hii'),
+      model:'',
+      maxSteps:8
+    });
+    const runNode=makeNode(boardRunSeed,at.x,at.y+boardIntentSeed.h+20,++z);
+    doc={...doc,nextZ:z,nodes:[...doc.nodes,intentNode,runNode]};
+    selected=runNode.id;
+    contextSelection=[intentNode.id];
+    remember(before);
+    persist();
+    fitNodes([intentNode,runNode],1);
+    const syncKey=boardRunSyncKey({status:'waiting_approval',runId:runNode.id});
+    boardRunSync.set(String(task.id||''),syncKey);
+    void updateBoardTask(String(task.id||''),{
+      runId:runNode.id,
+      runStatus:'waiting_approval'
+    }).catch(error=>{saveError=error instanceof Error?error.message:'The run was prepared, but its board link was not recorded.'});
+  }
+  function patchRunNode(node:WorkspaceNode,next:Partial<WorkspaceNode>){
+    patch(node.id,next);
+    const nextPayload={...node.payload,...(next.payload||{})};
+    const boardTaskId=String(nextPayload.boardTaskId||'');
+    const runStatus=String(nextPayload.status||'');
+    if(!boardTaskId||!['waiting_approval','queued','running','completed','failed','cancelled'].includes(runStatus))return;
+    const runId=String(nextPayload.runId||next.object?.runId||node.id);
+    const receiptRef=String(nextPayload.receiptPath||'');
+    const syncKey=boardRunSyncKey({status:runStatus,runId,receiptRef});
+    if(boardRunSync.get(boardTaskId)===syncKey)return;
+    boardRunSync.set(boardTaskId,syncKey);
+    const boardPatch:Record<string,unknown>={runId,runStatus};
+    if(['queued','running'].includes(runStatus))boardPatch.lane='doing';
+    if(['failed','cancelled'].includes(runStatus))boardPatch.lane='blocked';
+    if(runStatus==='completed'&&receiptRef){
+      boardPatch.lane='done';
+      boardPatch.receiptRef=receiptRef;
+    }
+    void updateBoardTask(boardTaskId,boardPatch).catch(error=>{
+      boardRunSync.delete(boardTaskId);
+      saveError=error instanceof Error?error.message:'The run changed, but its board state was not recorded.';
+    });
+  }
   function submitIntent(){const intent=composerText.trim();if(!intent)return;const width=seedFor('intent').w;createSpatialRun(intent,{x:composerAt.x-width/2,y:composerAt.y-72},undefined,selectedContextNodes);composerText='';composerOpen=false;}
   async function openCommands(){omnibar=true;query='';await tick();commandInput?.focus();}
   function fitNodes(nodes:WorkspaceNode[],maxZoom=1){const rect=canvas?.getBoundingClientRect();if(!rect)return;const viewport=fitWorkspaceViewport(nodes,{width:rect.width,height:rect.height},{maxZoom});if(!viewport)return;doc={...doc,viewport};persist();}
@@ -356,7 +467,7 @@
         {:else if ['artifact','receipt'].includes(node.object?.kind||'')}<GovernedResultPane {node} />
         {:else if ['note','text','canvas-text','ink','link','file','image','media','html','font'].includes(node.type)}<StaticNode {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} onSize={(size)=>patch(node.id,size)} />
         {:else if node.type==='intent'}<IntentPane {node} />
-        {:else if node.type==='run'}<SpatialRunPane {node} onPatch={(next)=>patch(node.id,next)} onFollowUp={(text)=>followUp(node,text)} onComplete={(result)=>completedRunNodes(node,result)} onCapabilityDraft={(result)=>materializeCapabilityDraft(node,result)} />
+        {:else if node.type==='run'}<SpatialRunPane {node} onPatch={(next)=>patchRunNode(node,next)} onFollowUp={(text)=>followUp(node,text)} onComplete={(result)=>completedRunNodes(node,result)} onCapabilityDraft={(result)=>materializeCapabilityDraft(node,result)} />
         {:else if node.type==='document'}<DocumentPane {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} />
         {:else if node.type==='cad'}<CadPane {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} />
         {:else if node.type==='model'}{#if ModelPaneComponent}<svelte:component this={ModelPaneComponent} {node} onPayload={(payload:Record<string,unknown>)=>patch(node.id,{payload:{...node.payload,...payload}})} />{:else}<div class="grid h-full place-items-center bg-[#f3f1ec] p-5 text-center font-mono text-[10px] uppercase tracking-[0.12em] text-neutral-400">{modelPaneError||'loading 3D viewer…'}</div>{/if}
@@ -364,7 +475,41 @@
         {:else if node.type==='browser'}<BrowserPane {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} />
         {:else if node.type==='explorer'}<ExplorerPane {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} />
         {:else if node.type==='context'}<div class="scroll h-full overflow-auto p-3.5"><div class="flex justify-between font-mono text-[10px] uppercase text-neutral-400"><span>system context</span><button on:click={refreshContext}>refresh</button></div><div class="mt-3 rounded-md border p-3"><strong class="font-mono text-[11px]">{context?.git?.branch||'reading…'}</strong><p class="font-mono text-[10px] text-neutral-500">{context?.git?.status?.length||0} dirty paths</p></div><h3 class="mt-3 font-mono text-[10px] uppercase text-neutral-400">next</h3>{#each context?.nextActions?.slice(0,4)||[] as action}<p class="mt-1 text-[12px]"><span class="text-[var(--hii-electric-blue)]">{action.track}</span> {action.next}</p>{/each}</div>
-        {:else if node.type==='board'}<div class="scroll h-full overflow-auto p-3.5"><div class="flex justify-between font-mono text-[10px] uppercase text-neutral-400"><span>governed board</span><a href="/boards">review ↗</a></div>{#each ['doing','next','blocked','backlog'] as lane}{#if board.some(task=>task.lane===lane)}<h3 class="mt-3 font-mono text-[10px] uppercase text-neutral-400">{lane}</h3>{#each board.filter(task=>task.lane===lane).slice(0,6) as task}<div class={`mt-1.5 rounded-md border p-2 text-[12px] ${task.reviewState==='proposed'?'border-[var(--hii-electric-blue)]':''}`}><div class="mb-1 flex justify-between font-mono text-[9px] uppercase text-neutral-400"><span>{task.reviewState==='proposed'?'proposal':task.priority}</span><span>{task.origin||'legacy'}</span></div>{task.title}</div>{/each}{/if}{/each}</div>
+        {:else if node.type==='board'}
+          <div class="scroll h-full overflow-auto p-3.5">
+            <div class="flex justify-between font-mono text-[10px] uppercase text-neutral-400">
+              <span>governed board</span>
+              <a href="/boards">review ↗</a>
+            </div>
+            {#each ['doing','next','blocked','backlog'] as lane}
+              {#if board.some(task=>task.lane===lane)}
+                <h3 class="mt-3 font-mono text-[10px] uppercase text-neutral-400">{lane}</h3>
+                {#each board.filter(task=>task.lane===lane).slice(0,6) as task}
+                  <div class={`mt-1.5 rounded-md border p-2 text-[12px] ${task.reviewState==='proposed'?'border-[var(--hii-electric-blue)]':''}`}>
+                    <div class="mb-1 flex justify-between font-mono text-[9px] uppercase text-neutral-400">
+                      <span>{task.reviewState==='proposed'?'proposal':task.runStatus||task.priority}</span>
+                      <span>{task.origin||'legacy'}</span>
+                    </div>
+                    <strong class="block font-medium leading-4">{task.title}</strong>
+                    {#if task.receiptRef}
+                      <span class="mt-1 block truncate font-mono text-[8px] uppercase text-emerald-700">receipt linked</span>
+                    {:else if task.runId}
+                      <span class="mt-1 block truncate font-mono text-[8px] text-neutral-400">run {String(task.runId).slice(0,12)}</span>
+                    {/if}
+                    {#if task.reviewState!=='proposed'&&['next','doing'].includes(task.lane)}
+                      <button
+                        class="mt-2 rounded-full bg-[var(--hii-electric-blue)] px-3 py-1.5 font-mono text-[8px] uppercase tracking-[.06em] text-white disabled:opacity-35"
+                        disabled={Boolean(task.runId&&!['failed','cancelled'].includes(String(task.runStatus||'')))}
+                        on:click={()=>createBoardRun(task,node)}
+                      >
+                        {task.runId?'Run already prepared':'Prepare bounded run'}
+                      </button>
+                    {/if}
+                  </div>
+                {/each}
+              {/if}
+            {/each}
+          </div>
         {:else if node.type==='surface'}<SurfacePane path={String(node.payload.path||'/')} title={String(node.payload.title||'HII surface')} />
         {:else if node.type==='chat'}<ChatPane {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} />
         {:else if node.type==='sound-field'}<div class="relative h-full overflow-hidden bg-[#07131c] text-white"><div class="absolute inset-0 opacity-70" style="background:radial-gradient(circle at 65% 55%,#ffce3a 0,transparent 7%),radial-gradient(circle at 45% 40%,#ff6b35 0,transparent 14%),radial-gradient(circle at 50% 50%,#176bff 0,transparent 55%)"></div><div class="relative p-5"><p class="font-mono text-xs text-white/60">MODELED / WEEKDAY / 18:00</p><h2 class="mt-2 text-3xl">South Berkeley Sound Field</h2><p class="mt-3 max-w-sm text-sm text-white/70">A provenance-aware spatial scene. Replace modeled values with calibrated measurements before analysis.</p></div></div>

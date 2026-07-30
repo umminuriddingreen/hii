@@ -144,6 +144,13 @@
                 <strong>{task.title}</strong>
                 <p>{task.owner} · {task.origin ?? 'legacy'} · {task.source}</p>
                 {#if task.coordinate}<code class="coordinate">{task.coordinate}</code>{/if}
+                {#if task.runStatus}
+                  <div class="run-state">
+                    <span>run {task.runStatus.replace('_', ' ')}</span>
+                    {#if task.runId}<code>{task.runId.slice(0, 12)}</code>{/if}
+                    {#if task.receiptRef}<strong>receipt linked</strong>{/if}
+                  </div>
+                {/if}
                 {#if reviewState(task) === 'proposed' && task.lane !== 'done'}
                   <div class="proposal-actions">
                     <span>Requested {task.requestedLane ?? 'review'}</span>
@@ -211,6 +218,7 @@
   .lane header,
   .task-state,
   .proposal-actions,
+  .run-state,
   .coordinate {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
@@ -359,6 +367,19 @@
     gap: 7px;
     border-top: 1px solid rgba(20, 20, 20, 0.1);
     padding-top: 9px;
+  }
+  .run-state {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    color: #737373;
+    font-size: 9px;
+    text-transform: uppercase;
+  }
+  .run-state strong {
+    color: #047857;
+    font-weight: 650;
   }
   .proposal-actions span {
     color: #777c83;

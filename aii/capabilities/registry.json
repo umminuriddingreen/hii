@@ -267,7 +267,7 @@
     "name": "Task Kanban Board",
     "owner": "hii",
     "runtime": "local-cli",
-    "summary": "Track human intent and generated work in one append-only local board, hold agent and system tasks as reviewable proposals, reject exact open duplicates, and require explicit approval before proposals enter active work.",
+    "summary": "Track human intent and generated work in one append-only local board, govern proposals before active work, and carry approved cards through bounded HII Space runs to receipt-linked completion.",
     "inputs": [
       "task title",
       "lane",
@@ -277,13 +277,15 @@
       "notes",
       "tags",
       "origin",
-      "review state"
+      "review state",
+      "governed run state"
     ],
     "outputs": [
       "task event log",
       "kanban board",
       "agent context task summary",
-      "approval provenance"
+      "approval provenance",
+      "run and receipt lineage"
     ],
     "permissions": [
       "local-only",
@@ -299,7 +301,8 @@
       "/boards",
       "/api/board/tasks",
       "~/.hii/board/tasks.jsonl",
-      "tests/unit/board-quality-boundary.test.ts"
+      "tests/unit/board-quality-boundary.test.ts",
+      "tests/unit/board-run.test.ts"
     ],
     "status": "ready",
     "trustLevel": "first-party"

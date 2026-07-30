@@ -32,6 +32,12 @@ pub struct Task {
     pub approved_at: Option<String>,
     #[serde(rename = "approvedBy")]
     pub approved_by: Option<String>,
+    #[serde(rename = "runId")]
+    pub run_id: Option<String>,
+    #[serde(rename = "runStatus")]
+    pub run_status: Option<String>,
+    #[serde(rename = "receiptRef")]
+    pub receipt_ref: Option<String>,
     #[serde(rename = "createdAt")]
     pub created_at: String,
     #[serde(rename = "updatedAt")]
@@ -208,6 +214,9 @@ impl Board {
             requested_lane: None,
             approved_at: Some(now.clone()),
             approved_by: Some("local operator".to_string()),
+            run_id: None,
+            run_status: None,
+            receipt_ref: None,
             created_at: now.clone(),
             updated_at: now.clone(),
             completed_at: None,
@@ -399,6 +408,15 @@ fn apply_patch(task: &mut Task, patch: &serde_json::Map<String, Value>) {
     if let Some(approved_by) = patch.get("approvedBy").and_then(Value::as_str) {
         task.approved_by = Some(approved_by.to_string());
     }
+    if let Some(run_id) = patch.get("runId").and_then(Value::as_str) {
+        task.run_id = Some(run_id.to_string());
+    }
+    if let Some(run_status) = patch.get("runStatus").and_then(Value::as_str) {
+        task.run_status = Some(run_status.to_string());
+    }
+    if let Some(receipt_ref) = patch.get("receiptRef").and_then(Value::as_str) {
+        task.receipt_ref = Some(receipt_ref.to_string());
+    }
     if let Some(updated_at) = patch.get("updatedAt").and_then(Value::as_str) {
         task.updated_at = updated_at.to_string();
     }
@@ -526,6 +544,18 @@ pub fn print_board(store: &Path, tasks: &[Task], include_done: bool) {
                 println!(
                     "      approval: required  requested: {}",
                     task.requested_lane.as_deref().unwrap_or("review")
+                );
+            }
+            if let Some(run_status) = &task.run_status {
+                println!(
+                    "      run: {}  id: {}  receipt: {}",
+                    run_status,
+                    task.run_id.as_deref().unwrap_or("pending"),
+                    if task.receipt_ref.is_some() {
+                        "linked"
+                    } else {
+                        "pending"
+                    }
                 );
             }
             if !task.notes.is_empty() {
@@ -758,6 +788,9 @@ mod tests {
             requested_lane: Some("doing".into()),
             approved_at: None,
             approved_by: None,
+            run_id: None,
+            run_status: None,
+            receipt_ref: None,
             created_at: iso_now(),
             updated_at: iso_now(),
             completed_at: None,

@@ -1142,6 +1142,9 @@ function printBoard(tasks, { includeDone = false } = {}) {
       if (task.reviewState === "proposed") {
         console.log(`      approval: required  requested: ${task.requestedLane || "review"}`);
       }
+      if (task.runStatus) {
+        console.log(`      run: ${task.runStatus}  id: ${task.runId || "pending"}  receipt: ${task.receiptRef ? "linked" : "pending"}`);
+      }
       if (task.notes) console.log(`      notes: ${task.notes.slice(0, 180)}`);
     }
     console.log("");

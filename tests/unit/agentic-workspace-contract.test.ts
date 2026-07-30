@@ -164,6 +164,7 @@ describe('agentic workspace interaction contract', () => {
     expect(spatialRun).toContain('Raw execution log');
     expect(spatialRun).toContain('{#if rawEvidenceOpen}');
     expect(spatialRun).toContain('on:pointerdown|stopPropagation');
+    expect(spatialRun).toContain("patchRun(run.job.status, { job: run.job })");
     expect(spatialRun).toContain('terminalRunMessage(status)');
     expect(runProgress).toContain("'approval' | 'queue' | 'work' | 'proof' | 'receipt'");
     expect(runProgress).toContain('No verified receipt was returned.');
@@ -223,6 +224,18 @@ describe('agentic workspace interaction contract', () => {
     expect(workspaceRuns).toContain('createWorkspaceRunCapabilityDraft');
     expect(workspaceRuns).toContain("'--repeatable'");
     expect(workspaceRuns).not.toContain('skill register');
+  });
+
+  it('carries approved board work through bounded execution and back to its receipt', () => {
+    expect(workspace).toContain('Prepare bounded run');
+    expect(workspace).toContain('createBoardRun(task,node)');
+    expect(workspace).toContain("source:'HII approved board task'");
+    expect(workspace).toContain('boardTaskId');
+    expect(workspace).toContain('boardRunSyncKey');
+    expect(workspace).toContain("boardPatch.lane='doing'");
+    expect(workspace).toContain("boardPatch.lane='done'");
+    expect(workspace).toContain('boardPatch.receiptRef=receiptRef');
+    expect(workspace).toContain('Run already prepared');
   });
 
   it('returns receipt-listed artifacts as editable, provenance-preserving HII objects', () => {
