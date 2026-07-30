@@ -9,7 +9,7 @@
   aria-label={title}
   aria-hidden={title ? undefined : 'true'}
 >
-  hii
+  HII
 </span>
 
 <style>
