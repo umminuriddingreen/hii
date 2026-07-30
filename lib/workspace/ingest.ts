@@ -395,11 +395,26 @@ export async function seedFromFile(file: File): Promise<NodeSeed> {
   if (t.startsWith('video/') || VIDEO_FILE.test(name) || t.startsWith('audio/') || AUDIO_FILE.test(name)) {
     const stored = await storeWorkspaceAsset(file);
     const asset = stored
-      ? { url: stored.url, path: stored.path, name: stored.name, mime: stored.mime, size: stored.size }
+      ? { url: stored.url, path: stored.path, name: stored.name, mime: stored.mime, size: stored.size, sha256: stored.sha256 }
       : { url: URL.createObjectURL(file), name, mime: t, size: file.size, ephemeral: true };
     const kind = t.startsWith('audio/') || AUDIO_FILE.test(name) ? 'audio' : 'video';
     const size = kind === 'audio' ? { w: 420, h: 132 } : { w: 480, h: 320 };
     return { ...seedFor('media', { ...asset, kind, extension }), ...size };
+  }
+  if (DESIGN.test(name)) {
+    const stored = await storeWorkspaceAsset(file);
+    return {
+      type: 'file',
+      w: 420,
+      h: 260,
+      object: governedAsset(file, stored, 'asset', 'added design source to workspace'),
+      payload: {
+        ...persistedAssetPayload(file, stored, extension),
+        ...fileSummary(name, t),
+        title: name,
+        anchorAdapter: 'design-selection'
+      }
+    };
   }
   if (FONT.test(name)) {
     const fam = 'f' + Math.random().toString(36).slice(2);

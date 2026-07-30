@@ -23,6 +23,7 @@
   import { emptyWorkspaceHistory, recordWorkspaceChange, redoWorkspace, undoWorkspace } from '@/lib/workspace/history';
   import { workspaceConnections } from '@/lib/workspace/connections';
   import { findOpenWorkspacePosition } from '@/lib/workspace/layout';
+  import { normalizeWorkspaceContextAnchor } from '@/lib/workspace/context-anchor';
 
   export let data: { enabled: boolean };
   const surfaceCatalog = [
@@ -142,6 +143,7 @@
       type:node.type,
       source:String(node.payload.path||node.payload.url||node.object?.source||'').slice(0,1000),
       expectedSha256:String(node.payload.sha256||'').slice(0,64),
+      anchor:normalizeWorkspaceContextAnchor(node.payload.contextAnchor),
       excerpt:contextExcerpt(node),
       objectKind:String(node.object?.kind||''),
       owner:String(node.object?.owner||''),
@@ -316,9 +318,9 @@
         {:else if ['note','text','canvas-text','ink','link','file','image','media','html','font'].includes(node.type)}<StaticNode {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} onSize={(size)=>patch(node.id,size)} />
         {:else if node.type==='intent'}<IntentPane {node} />
         {:else if node.type==='run'}<SpatialRunPane {node} onPatch={(next)=>patch(node.id,next)} onFollowUp={(text)=>followUp(node,text)} onComplete={(result)=>completedRunNodes(node,result)} onCapabilityDraft={(result)=>materializeCapabilityDraft(node,result)} />
-        {:else if node.type==='document'}<DocumentPane {node} />
-        {:else if node.type==='cad'}<CadPane {node} />
-        {:else if node.type==='model'}{#if ModelPaneComponent}<svelte:component this={ModelPaneComponent} {node} />{:else}<div class="grid h-full place-items-center bg-[#f3f1ec] p-5 text-center font-mono text-[10px] uppercase tracking-[0.12em] text-neutral-400">{modelPaneError||'loading 3D viewer…'}</div>{/if}
+        {:else if node.type==='document'}<DocumentPane {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} />
+        {:else if node.type==='cad'}<CadPane {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} />
+        {:else if node.type==='model'}{#if ModelPaneComponent}<svelte:component this={ModelPaneComponent} {node} onPayload={(payload:Record<string,unknown>)=>patch(node.id,{payload:{...node.payload,...payload}})} />{:else}<div class="grid h-full place-items-center bg-[#f3f1ec] p-5 text-center font-mono text-[10px] uppercase tracking-[0.12em] text-neutral-400">{modelPaneError||'loading 3D viewer…'}</div>{/if}
         {:else if node.type==='terminal'}<TerminalPane sessionId={String(node.payload.sessionId)} cwd={String(node.payload.cwd||'')} />
         {:else if node.type==='browser'}<BrowserPane {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} />
         {:else if node.type==='explorer'}<ExplorerPane {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} />

@@ -3,6 +3,10 @@
   import type { SpatialObjectStatus, WorkspaceNode } from '@/lib/workspace/types';
   import { workspaceRunBoundaryManifest } from '@/lib/workspace/run-boundary';
   import { terminalRunMessage, workspaceRunEvidence, workspaceRunProgress, type RunProgressStep } from '@/lib/workspace/run-progress';
+  import {
+    workspaceContextAnchorLabel,
+    type WorkspaceContextAnchor
+  } from '@/lib/workspace/context-anchor';
 
   export let node: WorkspaceNode;
   export let onPatch: (patch: Partial<WorkspaceNode>) => void;
@@ -12,7 +16,8 @@
 
   type ContextItem = {
     id: string; title: string; type: string; source?: string; excerpt?: string;
-    expectedSha256?: string; objectKind?: string; owner?: string; authority?: string;
+    expectedSha256?: string; anchor?: WorkspaceContextAnchor; objectKind?: string;
+    owner?: string; authority?: string;
     proofRefs?: string[];
   };
   type ContextPreviewItem = ContextItem & {
@@ -444,6 +449,7 @@
                   {#if item.relativePath}<span class="mt-1 block break-all font-mono text-[8px] text-blue-600">{item.relativePath}</span>{/if}
                   {#if item.stagedRelativePath}<span class="mt-1 block break-all font-mono text-[8px] text-violet-700">run copy · {item.stagedRelativePath}</span>{/if}
                   {#if item.sha256}<span class="mt-1 block truncate font-mono text-[7px] text-neutral-400">sha256 {item.sha256}</span>{/if}
+                  {#if item.anchor}<span class="mt-1.5 inline-flex rounded-full bg-blue-50 px-2 py-1 font-mono text-[7px] uppercase tracking-[.05em] text-blue-700">human focus · {workspaceContextAnchorLabel(item.anchor)}</span>{/if}
                   {#if item.source && item.access === 'remote-reference'}<span class="mt-1 block break-all font-mono text-[8px] text-blue-600">{item.source}</span>{/if}
                   {#if item.excerpt}<p class="mt-1.5 line-clamp-3 text-[9px] leading-4 text-neutral-600">{item.excerpt}</p>{/if}
                   {#if item.blockedReason}<p class="mt-1.5 text-[9px] leading-4 text-red-800">{item.blockedReason}</p>{/if}

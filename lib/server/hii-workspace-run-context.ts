@@ -4,6 +4,11 @@ import { realpath, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { sensitiveWorkspaceContextSource } from '../workspace/run-boundary.ts';
+import {
+  normalizeWorkspaceContextAnchor,
+  workspaceContextAnchorInstruction,
+  type WorkspaceContextAnchor
+} from '../workspace/context-anchor.ts';
 
 export type WorkspaceRunContextItem = {
   id: string;
@@ -11,6 +16,7 @@ export type WorkspaceRunContextItem = {
   type: string;
   source?: string;
   expectedSha256?: string;
+  anchor?: WorkspaceContextAnchor;
   excerpt?: string;
   objectKind?: string;
   owner?: string;
@@ -99,6 +105,7 @@ export function normalizeWorkspaceRunContext(value: unknown): WorkspaceRunContex
       if (!id || !title || !type) return null;
       const source = clean(item.source, 1000);
       const expectedSha256 = cleanSha256(item.expectedSha256);
+      const anchor = normalizeWorkspaceContextAnchor(item.anchor);
       const excerpt = clean(item.excerpt, 2400);
       const objectKind = clean(item.objectKind, 80);
       const owner = clean(item.owner, 80);
@@ -110,6 +117,7 @@ export function normalizeWorkspaceRunContext(value: unknown): WorkspaceRunContex
         type,
         ...(source ? { source } : {}),
         ...(expectedSha256 ? { expectedSha256 } : {}),
+        ...(anchor ? { anchor } : {}),
         ...(excerpt ? { excerpt } : {}),
         ...(objectKind ? { objectKind } : {}),
         ...(owner ? { owner } : {}),
@@ -187,6 +195,7 @@ function stablePreviewShape(
       type: item.type,
       source: item.source || '',
       expectedSha256: item.expectedSha256 || '',
+      anchor: item.anchor || null,
       excerpt: item.excerpt || '',
       objectKind: item.objectKind || '',
       owner: item.owner || '',
@@ -433,6 +442,7 @@ export function workspaceRunExecutionGoal(
       item.relativePath ? `  Workspace source: ${item.relativePath}` : '',
       item.stagedRelativePath ? `  Read-only staged source: ${item.stagedRelativePath}` : '',
       item.sha256 ? `  SHA-256: ${item.sha256}` : '',
+      item.anchor ? `  Context anchor: ${workspaceContextAnchorInstruction(item.anchor)}` : '',
       item.source && item.access === 'remote-reference' ? `  Remote source: ${item.source}` : '',
       item.excerpt ? `  Approved snapshot: ${item.excerpt}` : '',
       item.proofRefs?.length ? `  Proof references: ${item.proofRefs.join(', ')}` : ''

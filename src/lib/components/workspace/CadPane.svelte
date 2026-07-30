@@ -2,8 +2,13 @@
   import { onMount } from 'svelte';
   import { parseDxf, type DxfDrawing, type DxfPrimitive } from '@/lib/workspace/dxf';
   import type { WorkspaceNode } from '@/lib/workspace/types';
+  import {
+    normalizeWorkspaceContextAnchor,
+    workspaceContextAnchorLabel
+  } from '@/lib/workspace/context-anchor';
 
   export let node: WorkspaceNode;
+  export let onPayload: (patch: Record<string, unknown>) => void = () => {};
 
   const palette = ['#69a7ff', '#70d6a3', '#ffd166', '#ef7f9b', '#c59cff', '#78d7e8', '#ff9f68', '#d8e27a'];
   let svg: SVGSVGElement;
@@ -20,6 +25,7 @@
   $: checksum = String(node.payload.sha256 || '');
   $: source = String(node.object?.source || node.payload.path || name);
   $: visiblePrimitives = drawing?.primitives.filter((primitive) => !hiddenLayers.has(primitive.layer)) || [];
+  $: anchor = normalizeWorkspaceContextAnchor(node.payload.contextAnchor);
 
   function layerColor(layer: string) {
     let hash = 0;
@@ -105,6 +111,22 @@
     hiddenLayers = next;
   }
 
+  function useDrawingView() {
+    if (!drawing) return;
+    onPayload({
+      contextAnchor: {
+        kind: 'drawing-view',
+        bounds: {
+          minX: view.x,
+          minY: -(view.y + view.h),
+          maxX: view.x + view.w,
+          maxY: -view.y
+        },
+        layers: drawing.layers.filter((layer) => !hiddenLayers.has(layer))
+      }
+    });
+  }
+
   onMount(() => {
     const controller = new AbortController();
     if (!url) {
@@ -176,8 +198,10 @@
     {#if drawing}<span class="text-white/35">{drawing.primitives.length} entities · {drawing.layers.length} layers · {drawing.units}</span>{/if}
   </div>
 
-  <div class="absolute right-3 top-3 flex gap-1 rounded-full border border-white/10 bg-[#151a23]/90 p-1 shadow-lg backdrop-blur">
+  <div role="group" aria-label="Drawing view controls" class="absolute right-3 top-3 flex gap-1 rounded-full border border-white/10 bg-[#151a23]/90 p-1 shadow-lg backdrop-blur" on:pointerdown|stopPropagation>
     <button class="rounded-full px-2.5 py-1 font-mono text-[9px] text-white/70 hover:bg-white/10" on:click={frameDrawing} disabled={status !== 'ready'}>frame</button>
+    <button class="rounded-full px-2.5 py-1 font-mono text-[9px] text-white/70 hover:bg-white/10" class:bg-blue-500={anchor?.kind === 'drawing-view'} class:text-white={anchor?.kind === 'drawing-view'} on:click={useDrawingView} disabled={status !== 'ready'}>{anchor?.kind === 'drawing-view' ? 'view saved' : 'use view'}</button>
+    {#if anchor?.kind === 'drawing-view'}<button class="rounded-full px-2.5 py-1 font-mono text-[9px] text-white/45 hover:bg-white/10" on:click={()=>onPayload({contextAnchor:null})}>clear</button>{/if}
     <a href={url} download={name} class="rounded-full px-2.5 py-1 font-mono text-[9px] text-white/70 hover:bg-white/10">save ↓</a>
   </div>
 
@@ -200,6 +224,7 @@
 
   <footer class="pointer-events-none absolute bottom-3 left-3 right-3 flex items-center justify-between gap-3 rounded-full border border-white/10 bg-[#151a23]/90 px-3 py-1.5 font-mono text-[9px] text-white/40 shadow-lg backdrop-blur">
     <span class="min-w-0 truncate" title={source}>local source · {source}</span>
+    {#if anchor}<span class="shrink-0 rounded-full bg-blue-500/20 px-2 py-0.5 text-blue-200">human focus · {workspaceContextAnchorLabel(anchor)}</span>{/if}
     <span class="hidden shrink-0 md:inline">drag to pan · scroll to zoom · frame to reset</span>
     <span class="shrink-0">{checksum ? `sha256 ${checksum.slice(0, 10)}…` : node.payload.ephemeral ? 'session only' : 'stored locally'}</span>
   </footer>

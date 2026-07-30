@@ -31,6 +31,12 @@ const desktopBuild = readFileSync(resolve(root, 'scripts/hii-tauri-build.mjs'), 
 const desktopInstall = readFileSync(resolve(root, 'scripts/hii-tauri-install.mjs'), 'utf8');
 const desktopRelease = readFileSync(resolve(root, 'scripts/hii-macos-release.mjs'), 'utf8');
 const cursorBar = readFileSync(resolve(root, 'src/routes/palette/+page.svelte'), 'utf8');
+const staticNode = readFileSync(resolve(root, 'src/lib/components/workspace/StaticNode.svelte'), 'utf8');
+const documentPane = readFileSync(resolve(root, 'src/lib/components/workspace/DocumentPane.svelte'), 'utf8');
+const cadPane = readFileSync(resolve(root, 'src/lib/components/workspace/CadPane.svelte'), 'utf8');
+const modelPane = readFileSync(resolve(root, 'src/lib/components/workspace/ModelPane.svelte'), 'utf8');
+const contextAnchor = readFileSync(resolve(root, 'lib/workspace/context-anchor.ts'), 'utf8');
+const workspaceIngest = readFileSync(resolve(root, 'lib/workspace/ingest.ts'), 'utf8');
 
 describe('agentic workspace interaction contract', () => {
   it('summons direct workspace intent from Option+Space', () => {
@@ -97,6 +103,27 @@ describe('agentic workspace interaction contract', () => {
     expect(workspaceRunStaging).toContain('cleanupStatus: "skipped-unowned"');
     expect(hiid).toContain('stageWorkspaceRunContext');
     expect(hiid).toContain('cleanupWorkspaceRunContext');
+  });
+
+  it('binds the human selected part of an asset to the same governed run manifest', () => {
+    expect(workspace).toContain('normalizeWorkspaceContextAnchor(node.payload.contextAnchor)');
+    expect(spatialRun).toContain('human focus · {workspaceContextAnchorLabel(item.anchor)}');
+    expect(workspaceRunContext).toContain('anchor: item.anchor || null');
+    expect(workspaceRunContext).toContain('Context anchor:');
+    expect(workspaceRunStaging).toContain('anchor: item.anchor || null');
+    expect(contextAnchor).toContain("'document-range'");
+    expect(contextAnchor).toContain("'image-region'");
+    expect(contextAnchor).toContain("'design-selection'");
+    expect(contextAnchor).toContain("'drawing-view'");
+    expect(contextAnchor).toContain("'media-range'");
+    expect(contextAnchor).toContain("'model-view'");
+    expect(documentPane).toContain('use pages');
+    expect(staticNode).toContain('focus region');
+    expect(staticNode).toContain('use selection');
+    expect(staticNode).toContain("markMedia('in')");
+    expect(cadPane).toContain('useDrawingView');
+    expect(modelPane).toContain('useModelView');
+    expect(workspaceIngest).toContain("anchorAdapter: 'design-selection'");
   });
 
   it('keeps governed progress concise and raw execution output behind inspection', () => {

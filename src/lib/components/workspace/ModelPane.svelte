@@ -7,8 +7,13 @@
   import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
   import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
   import type { WorkspaceNode } from '@/lib/workspace/types';
+  import {
+    normalizeWorkspaceContextAnchor,
+    workspaceContextAnchorLabel
+  } from '@/lib/workspace/context-anchor';
 
   export let node: WorkspaceNode;
+  export let onPayload: (patch: Record<string, unknown>) => void = () => {};
 
   let host: HTMLDivElement;
   let status: 'loading' | 'ready' | 'failed' = 'loading';
@@ -28,6 +33,7 @@
   $: name = String(node.payload.name || '3D model');
   $: extension = String(node.payload.extension || '').toLowerCase();
   $: checksum = String(node.payload.sha256 || '');
+  $: anchor = normalizeWorkspaceContextAnchor(node.payload.contextAnchor);
 
   function readableError(reason: unknown) {
     if (reason instanceof Error && reason.message) return reason.message;
@@ -57,6 +63,17 @@
   function toggleGrid() {
     gridVisible = !gridVisible;
     if (grid) grid.visible = gridVisible;
+  }
+
+  function useModelView() {
+    if (!camera || !controls) return;
+    onPayload({
+      contextAnchor: {
+        kind: 'model-view',
+        camera: camera.position.toArray().slice(0, 3),
+        target: controls.target.toArray().slice(0, 3)
+      }
+    });
   }
 
   onMount(() => {
@@ -239,8 +256,10 @@
     {#if status === 'ready'}<span class="text-neutral-400">{meshes} mesh · {triangles.toLocaleString()} tri</span>{/if}
   </div>
 
-  <div class="absolute right-3 top-3 flex gap-1 rounded-full border border-black/10 bg-white/90 p-1 shadow-sm backdrop-blur">
+  <div role="group" aria-label="3D view controls" class="absolute right-3 top-3 flex gap-1 rounded-full border border-black/10 bg-white/90 p-1 shadow-sm backdrop-blur" on:pointerdown|stopPropagation>
     <button class="rounded-full px-2.5 py-1 font-mono text-[9px] hover:bg-neutral-100" on:click={() => frameModel?.()} disabled={status !== 'ready'}>frame</button>
+    <button class="rounded-full px-2.5 py-1 font-mono text-[9px] hover:bg-neutral-100" class:bg-blue-500={anchor?.kind === 'model-view'} class:text-white={anchor?.kind === 'model-view'} on:click={useModelView} disabled={status !== 'ready'}>{anchor?.kind === 'model-view' ? 'view saved' : 'use view'}</button>
+    {#if anchor?.kind === 'model-view'}<button class="rounded-full px-2 py-1 font-mono text-[9px] text-neutral-400 hover:bg-neutral-100" on:click={() => onPayload({ contextAnchor: null })}>clear</button>{/if}
     <button class="rounded-full px-2.5 py-1 font-mono text-[9px] hover:bg-neutral-100" class:bg-neutral-950={wireframe} class:text-white={wireframe} on:click={toggleWireframe} disabled={status !== 'ready'}>wire</button>
     <button class="rounded-full px-2.5 py-1 font-mono text-[9px] hover:bg-neutral-100" class:bg-neutral-950={!gridVisible} class:text-white={!gridVisible} on:click={toggleGrid}>grid</button>
   </div>
@@ -257,6 +276,7 @@
 
   <footer class="pointer-events-none absolute bottom-3 left-3 right-3 flex items-center justify-between gap-3 rounded-full border border-black/10 bg-white/90 px-3 py-1.5 font-mono text-[9px] text-neutral-500 shadow-sm backdrop-blur">
     <span class="truncate">local source · {name}</span>
+    {#if anchor}<span class="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-blue-700">human focus · {workspaceContextAnchorLabel(anchor)}</span>{/if}
     <span class="hidden shrink-0 text-neutral-400 md:inline">drag to orbit · right drag to pan · scroll to zoom</span>
     <span class="shrink-0">{checksum ? `sha256 ${checksum.slice(0, 10)}…` : node.payload.ephemeral ? 'session only' : 'stored locally'}</span>
   </footer>

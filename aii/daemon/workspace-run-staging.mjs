@@ -150,7 +150,8 @@ export function stageWorkspaceRunContext(input) {
         relativePath,
         sha256: expectedSha256,
         byteSize: details.size,
-        provenance: item.provenance
+        provenance: item.provenance,
+        anchor: item.anchor || null
       });
     }
   } catch (error) {

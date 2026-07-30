@@ -148,4 +148,37 @@ describe('HII execution context manifest', () => {
     expect(mismatched.blocked).toBe(true);
     expect(mismatched.items[0].blockedReason).toContain('integrity proof');
   });
+
+  it('binds sub-asset human focus into the approval fingerprint and execution goal', async () => {
+    const { workspaceRoot } = fixtureRoot();
+    const base = {
+      id: 'brief',
+      title: 'Launch brief',
+      type: 'document',
+      excerpt: 'A reviewed launch brief.',
+      anchor: { kind: 'document-range' as const, pageStart: 2, pageEnd: 4 }
+    };
+    const pagesTwoToFour = await previewWorkspaceRunContext({
+      runId: 'focus-run',
+      workspaceRoot,
+      context: [base]
+    });
+    const pageFive = await previewWorkspaceRunContext({
+      runId: 'focus-run',
+      workspaceRoot,
+      context: [{
+        ...base,
+        anchor: { kind: 'document-range' as const, pageStart: 5, pageEnd: 5 }
+      }]
+    });
+
+    expect(pagesTwoToFour.items[0].anchor).toEqual({
+      kind: 'document-range',
+      pageStart: 2,
+      pageEnd: 4
+    });
+    expect(pageFive.fingerprint).not.toBe(pagesTwoToFour.fingerprint);
+    expect(workspaceRunExecutionGoal('Use the selected pages.', pagesTwoToFour))
+      .toContain('Human-reviewed PDF focus: pages 2–4');
+  });
 });

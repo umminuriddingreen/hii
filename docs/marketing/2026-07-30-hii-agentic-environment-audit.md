@@ -231,6 +231,33 @@ visible before the untouched `Approve bounded run` control. No run was started,
 and the operator's prior `governed-run-demo` workspace selection was restored
 after the visual proof.
 
+### Verified sub-asset context checkpoint
+
+Whole-file integrity is no longer the smallest unit of human intent. Native HII
+viewers now let a person preserve a PDF page or range, normalized image region,
+design frame and layers, DXF view bounds and visible layers, media in/out range,
+or 3D camera and target as the selected focus of that object.
+
+The focus stays attached to the governed workspace object and enters the same
+approval manifest as its source identity. Changing only the page, crop, layer,
+time range, or view changes the approval fingerprint. AII carries the normalized
+anchor into the read-only staged-file manifest and receives a plain-language
+instruction naming the exact reviewed region; the byte boundary and external
+action policy are unchanged.
+
+The dedicated sub-asset gate proves all six anchor types, strict normalization,
+fingerprint invalidation when focus changes, execution-goal instructions,
+read-only staging, anchor preservation, guarded cleanup, and immutable source
+preservation. Design sources and media imports are now content-addressed with
+SHA-256 like the other creative assets rather than becoming metadata-only or
+losing their runner integrity proof.
+
+This follows the useful pattern in Figma selection links, Miro frames/layers,
+Apple Freeform saved views, and screen-context agents without turning HII into a
+generic whiteboard or hiding provenance. HII's distinct contract is that human
+focus, source identity, permission boundary, verification, and receipt remain
+one governed loop.
+
 ### Verified artifact checkpoint
 
 HII now returns each text or code file named in a completed run receipt as its
@@ -457,7 +484,7 @@ cloud sync, credits, or a general “AI operating system.”
 | 0 | Orientation at scale | Map, named ordered Scenes, search, off-screen rescue, and deterministic Scene navigation are implemented. The remaining scale gate is proving this flow with hundreds of organized—not flat—media objects. |
 | 0 | One legible governed run | Selected context, intent, permission boundary, progress, artifact, proof, and receipt are visible as one connected flow without reading raw logs. |
 | 0 | Artifact-first closure | The output opens beside its inputs, is editable or launches its native editor, and reports exactly what changed. |
-| 0 | Trustworthy context selection | Before approval, the user can see the exact files/nodes/sources included, exclusions, provenance, and likely network boundary. |
+| 0 | Trustworthy context selection | Before approval, the user can see the exact files/nodes/sources and sub-asset regions included, exclusions, provenance, content identity, and likely network boundary. |
 | 0 | Human-readable runtime health | One instance model, one clear status, failures with cause and recovery action, no unexplained process counts. |
 | 1 | Media organization | New multi-image imports become bounded proof-linked contact sheets and exact duplicates are visibly counted. Explicit organization of existing nodes, batch labels, and reviewed perceptual dedupe remain open. |
 | 1 | Run focus and log hygiene | Default progress is a short step list; raw stdout/stderr stays one level deeper. Duplicate tasks and transcript debris are prevented. |
@@ -491,11 +518,11 @@ cloud sync, credits, or a general “AI operating system.”
 
 1. Extend the verified contact-sheet import with stacking, batch labels,
    reviewed perceptual dedupe, and an explicit “organize this selection” action.
-2. Add sub-asset context anchors—PDF page/range, image crop or annotation,
-   design frame/layer, drawing view/layer, and media time range—so selecting a
-   large creative asset communicates the exact human-relevant region instead
-   of only its byte identity. Governed per-run transport for whole imported
-   assets is implemented.
+2. Extend sub-asset focus into contact sheets: promote one or more sheet items
+   into reviewed image-region context without expanding the run to every image,
+   and preserve optional human annotation labels beside each selected region.
+   PDF ranges, single-image regions, design frame/layer, drawing view/layer,
+   media ranges, and 3D views are implemented and fingerprint-bound.
 3. Artifact adapters for the first audience: Markdown, image/reference board,
    code/site preview, and a native-file handoff.
 4. Run one real operator-approved registered-capability replay, then preserve
