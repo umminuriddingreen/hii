@@ -68,6 +68,29 @@ export async function readJson(file) {
   }
 }
 
+export async function archiveSessionForReset(sessionDir) {
+  const resolvedSession = path.resolve(sessionDir);
+  const historyRoot = path.join(
+    resolvedSession,
+    'history',
+    `reset-${new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')}-${crypto.randomBytes(4).toString('hex')}`
+  );
+  await fsp.mkdir(historyRoot, { recursive: true, mode: 0o700 });
+  const moved = [];
+  for (const name of ['workspace', 'runtime', 'home', 'tmp', 'transcript.log']) {
+    const source = path.join(resolvedSession, name);
+    try {
+      await fsp.lstat(source);
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue;
+      throw error;
+    }
+    await fsp.rename(source, path.join(historyRoot, name));
+    moved.push(name);
+  }
+  return { historyRoot, moved };
+}
+
 export function appendEvent(layout, event) {
   fs.appendFileSync(
     layout.events,

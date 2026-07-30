@@ -93,6 +93,21 @@ async function serveForVerification(publicDir) {
   return server;
 }
 
+async function stopChrome(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  child.kill('SIGTERM');
+  await Promise.race([
+    new Promise((resolve) => child.once('exit', resolve)),
+    new Promise((resolve) => setTimeout(resolve, 1500))
+  ]);
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  child.kill('SIGKILL');
+  await Promise.race([
+    new Promise((resolve) => child.once('exit', resolve)),
+    new Promise((resolve) => setTimeout(resolve, 500))
+  ]);
+}
+
 async function verifyWithChrome(chrome, url, screenshot) {
   const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hii-remote-chrome-'));
   const child = spawn(chrome, [
@@ -205,8 +220,8 @@ async function verifyWithChrome(chrome, url, screenshot) {
       screenshot
     };
   } finally {
-    child.kill('SIGTERM');
-    await fs.rm(userDataDir, { recursive: true, force: true });
+    await stopChrome(child);
+    await fs.rm(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 }
 

@@ -197,6 +197,10 @@ body {
   color: var(--signal-error);
 }
 
+#preview-status[data-state="empty"] {
+  color: var(--signal-cyan);
+}
+
 #preview-controls {
   right: 0.7rem;
   display: flex;

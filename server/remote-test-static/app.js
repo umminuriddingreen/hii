@@ -138,6 +138,8 @@ function connect() {
     setConnection();
     setSignal('idle');
     fitTerminal();
+    void refreshArtifact();
+    void refreshSaved();
   });
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data);
@@ -182,7 +184,15 @@ window.addEventListener('resize', fitTerminal);
 
 async function refreshArtifact(force = false) {
   const response = await fetch(`${base}/latest-ticket`, { method: 'POST' });
-  if (response.status === 204) return;
+  if (response.status === 204) {
+    latestArtifactId = undefined;
+    artifact.src = 'about:blank';
+    preview.style.background = '';
+    artifact.style.background = '';
+    setPreviewStatus('empty', 'Ready for your idea');
+    updateSaveButton();
+    return;
+  }
   if (!response.ok) return;
   const latest = await response.json();
   if (force || latest.id !== latestArtifactId) {

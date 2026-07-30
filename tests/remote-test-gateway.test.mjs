@@ -11,6 +11,7 @@ import {
   ARTIFACT_HTTPS_PORT,
   MODEL,
   TERMINAL_HTTPS_PORT,
+  archiveSessionForReset,
   ensureSessionLayout,
   funnelStartArgs,
   funnelStopArgs,
@@ -59,6 +60,32 @@ test('artifact boundary rejects traversal, dotfiles, and symlinks', async (conte
   await assert.rejects(() => resolvePublicArtifact(layout.publicDir, '%2e%2e/runtime/secret'));
   await assert.rejects(() => resolvePublicArtifact(layout.publicDir, '.secret'));
   await assert.rejects(() => resolvePublicArtifact(layout.publicDir, 'link.txt'));
+});
+
+test('session reset archives active state without deleting saved evidence or changing identity', async (context) => {
+  const root = await temporary();
+  context.after(() => fs.rm(root, { recursive: true, force: true }));
+  const layout = await ensureSessionLayout(root, '20260730123456-aaaaaaaaaaaaaaaaaaaaaaaa');
+  await fs.writeFile(path.join(layout.publicDir, 'index.html'), '<h1>Old preview</h1>');
+  await fs.writeFile(layout.transcript, 'old transcript');
+  await fs.mkdir(path.join(layout.sessionDir, 'home'), { recursive: true });
+  await fs.mkdir(path.join(layout.sessionDir, 'tmp'), { recursive: true });
+  await fs.writeFile(layout.manifest, JSON.stringify({ id: layout.id, savedArtifacts: [{ id: 'saved-1' }] }));
+
+  const archived = await archiveSessionForReset(layout.sessionDir);
+
+  assert.deepEqual(
+    archived.moved.sort(),
+    ['home', 'runtime', 'tmp', 'transcript.log', 'workspace'].sort()
+  );
+  assert.equal(await fs.readFile(path.join(archived.historyRoot, 'transcript.log'), 'utf8'), 'old transcript');
+  assert.equal(
+    await fs.readFile(path.join(archived.historyRoot, 'workspace', 'public', 'index.html'), 'utf8'),
+    '<h1>Old preview</h1>'
+  );
+  assert.deepEqual(JSON.parse(await fs.readFile(layout.manifest, 'utf8')).savedArtifacts, [{ id: 'saved-1' }]);
+  await assert.rejects(fs.access(layout.workspace));
+  await assert.rejects(fs.access(layout.transcript));
 });
 
 test('a failed browser check followed by proof becomes a reusable lesson, not an installed patch', async (context) => {
@@ -353,6 +380,7 @@ test('public screen stays one work stream and one result with minimal preview co
   assert.match(css, /@media \(max-width: 480px\)/);
   assert.match(app, /artifact\.style\.background/);
   assert.match(app, /trackActivity\(message\.data\)/);
+  assert.match(app, /artifact\.src = 'about:blank'/);
   assert.match(css, /grid-template-columns:\s*1fr 1fr/);
   assert.match(css, /grid-template-rows:\s*1fr 1fr/);
   assert.match(css, /#preview\s*\{\s*grid-row:\s*1/);

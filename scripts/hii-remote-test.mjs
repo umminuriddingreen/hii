@@ -10,6 +10,7 @@ import {
   MODEL,
   TERMINAL_HTTPS_PORT,
   TERMINAL_PORT,
+  archiveSessionForReset,
   funnelStopArgs,
   inspectPreflight,
   newSecret,
@@ -222,6 +223,22 @@ async function switchModel() {
   return await restart(model);
 }
 
+async function reset(model = requestedModel()) {
+  const state = await readJson(stateFile);
+  if (!state) throw new Error('no active session to reset; use start');
+  const manifest = await readJson(path.join(state.sessionDir, 'manifest.json'));
+  const reuse = reusableSession(state, manifest);
+  await stop({ quiet: true });
+  const archive = await archiveSessionForReset(state.sessionDir);
+  print({
+    status: 'resetting',
+    sessionId: state.sessionId,
+    preserved: archive.historyRoot,
+    moved: archive.moved
+  });
+  return await launch({ reuse, model: model || reuse.model });
+}
+
 async function main() {
   await fs.mkdir(root, { recursive: true, mode: 0o700 });
   const command = process.argv[2] ?? 'status';
@@ -229,6 +246,7 @@ async function main() {
   if (command === 'status') return print(await status());
   if (command === 'stop') return await stop();
   if (command === 'restart') return await restart();
+  if (command === 'reset') return await reset();
   if (command === 'model') return await switchModel();
   if (command === 'preflight') {
     const report = await preflight();
@@ -237,7 +255,7 @@ async function main() {
     return;
   }
   if (command === '--help' || command === 'help') {
-    print('Usage: node scripts/hii-remote-test.mjs start [--model MODEL] | restart [--model MODEL] | model [MODEL] | status | stop | preflight');
+    print('Usage: node scripts/hii-remote-test.mjs start [--model MODEL] | restart [--model MODEL] | reset [--model MODEL] | model [MODEL] | status | stop | preflight');
     return;
   }
   throw new Error(`unknown command: ${command}`);
