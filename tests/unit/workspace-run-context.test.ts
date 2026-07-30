@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -8,6 +9,7 @@ import {
 } from '../../lib/server/hii-workspace-run-context';
 
 const temporaryRoots: string[] = [];
+const originalRuntimeDir = process.env.HII_RUNTIME_DIR;
 
 function fixtureRoot() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hii-context-preview-'));
@@ -18,6 +20,8 @@ function fixtureRoot() {
 }
 
 afterEach(() => {
+  if (originalRuntimeDir === undefined) delete process.env.HII_RUNTIME_DIR;
+  else process.env.HII_RUNTIME_DIR = originalRuntimeDir;
   for (const directory of temporaryRoots.splice(0)) {
     fs.rmSync(directory, { recursive: true, force: true });
   }
@@ -91,5 +95,57 @@ describe('HII execution context manifest', () => {
     expect(blocked.items[0].blockedReason).toContain('outside the approved workspace root');
     expect(remote.network).toMatchObject({ required: true });
     expect(remote.network.scope).toContain('outbound read-only web retrieval');
+  });
+
+  it('plans a reviewed read-only copy for a content-addressed HII-managed asset', async () => {
+    const { directory, workspaceRoot } = fixtureRoot();
+    const runtimeRoot = path.join(directory, 'runtime');
+    const assetRoot = path.join(runtimeRoot, 'workspace', 'assets');
+    fs.mkdirSync(assetRoot, { recursive: true });
+    process.env.HII_RUNTIME_DIR = runtimeRoot;
+    const body = Buffer.from('visual reference\n');
+    const sha256 = createHash('sha256').update(body).digest('hex');
+    const source = path.join(assetRoot, `${sha256}.png`);
+    fs.writeFileSync(source, body);
+
+    const preview = await previewWorkspaceRunContext({
+      runId: 'creative-run',
+      workspaceRoot,
+      context: [{
+        id: 'reference',
+        title: 'Visual reference',
+        type: 'image',
+        source,
+        expectedSha256: sha256
+      }]
+    });
+
+    expect(preview).toMatchObject({
+      runId: 'creative-run',
+      blocked: false,
+      warnings: [],
+      summary: { stagedLocalAssets: 1 }
+    });
+    expect(preview.items[0]).toMatchObject({
+      access: 'staged-local-asset',
+      sha256,
+      stagedRelativePath: path.join('.hii-run-context', 'creative-run', `${sha256}.png`)
+    });
+    expect(workspaceRunExecutionGoal('Use the visual reference.', preview))
+      .toContain('Read-only staged source: .hii-run-context');
+
+    const mismatched = await previewWorkspaceRunContext({
+      runId: 'creative-run',
+      workspaceRoot,
+      context: [{
+        id: 'reference',
+        title: 'Visual reference',
+        type: 'image',
+        source,
+        expectedSha256: '0'.repeat(64)
+      }]
+    });
+    expect(mismatched.blocked).toBe(true);
+    expect(mismatched.items[0].blockedReason).toContain('integrity proof');
   });
 });

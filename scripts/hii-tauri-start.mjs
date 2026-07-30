@@ -25,6 +25,8 @@ const child = spawn(nodeRuntime, ["server.mjs"], {
     ...process.env,
     PORT: port,
     HOST: "127.0.0.1",
+    ORIGIN: `http://127.0.0.1:${port}`,
+    BODY_SIZE_LIMIT: "251M",
     HII_TAURI: "1",
     NODE_ENV: "production"
   }

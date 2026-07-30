@@ -81,6 +81,7 @@ export async function approveKnowledgeRun(input: {
   const goal = clean(input.goal, 4000);
   if (goal.length < 8) throw new Error('Describe the bounded goal in at least 8 characters.');
   const contextPreview = await previewWorkspaceRunContext({
+    runId: run.id,
     workspaceRoot: input.workspaceRoot,
     context: []
   });

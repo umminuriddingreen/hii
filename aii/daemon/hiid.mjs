@@ -6,6 +6,10 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import {
+  cleanupWorkspaceRunContext,
+  stageWorkspaceRunContext
+} from "./workspace-run-staging.mjs";
 
 const ROOT = path.join(os.homedir(), "hii");
 const RUNTIME = process.env.HII_RUNTIME_DIR || path.join(os.homedir(), ".hii");
@@ -304,6 +308,8 @@ function reportWorkspaceJob(intent, { status, output, startedAt, receiptMatch = 
     metadata: {
       ...(previous?.metadata || {}), knowledgeRunId: intent.id, projectId: intent.projectId,
       workspaceRoot: intent.workspaceRoot, goal: intent.goal, context: intent.context || [],
+      contextPreview: intent.contextPreview || previous?.metadata?.contextPreview || null,
+      contextStaging: intent.contextStaging || previous?.metadata?.contextStaging || null,
       requestedBy: intent.requestedBy, model: intent.model, maxSteps: intent.maxSteps,
       pid: status === "running" ? pid : null,
       startedAt: previous?.metadata?.startedAt || startedAt,
@@ -417,8 +423,25 @@ function executeWorkspaceIntent(intent) {
     });
     return;
   }
+  let contextStaging;
+  try {
+    contextStaging = stageWorkspaceRunContext({
+      runtimeRoot: RUNTIME,
+      workspaceRoot,
+      intentId: intent.id,
+      contextPreview: intent.contextPreview
+    });
+  } catch (error) {
+    const output = error instanceof Error ? error.message : String(error);
+    reportWorkspaceJob({ ...intent, workspaceRoot }, { status: "failed", output, startedAt });
+    event("workspace.run.failed", {
+      actor: "aii.hiid", target: intent.id, status: "failed",
+      text: "AII rejected local asset staging before bounded execution."
+    });
+    return;
+  }
   const args = ["--cwd", workspaceRoot, "--model", model, "--max-steps", String(maxSteps), "run", String(intent.goal).slice(0, 16000)];
-  const normalizedIntent = { ...intent, workspaceRoot, model, maxSteps };
+  const normalizedIntent = { ...intent, workspaceRoot, model, maxSteps, contextStaging };
   const child = execFile(HII_BIN, args, {
     cwd: workspaceRoot,
     timeout: 30 * 60 * 1000,
@@ -426,16 +449,43 @@ function executeWorkspaceIntent(intent) {
   }, (error, stdout, stderr) => {
     activeWorkspaceRuns.delete(intent.id);
     const terminal = latestCapabilityJob(intent.id);
-    if (terminal?.status === "cancelled") return;
+    let cleanedStaging;
+    try {
+      cleanedStaging = cleanupWorkspaceRunContext({
+        workspaceRoot,
+        intentId: intent.id,
+        staging: normalizedIntent.contextStaging
+      });
+    } catch (cleanupError) {
+      cleanedStaging = {
+        ...normalizedIntent.contextStaging,
+        cleanupStatus: "failed",
+        cleanupError: cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+      };
+    }
+    const terminalIntent = { ...normalizedIntent, contextStaging: cleanedStaging };
+    if (terminal?.status === "cancelled") {
+      reportWorkspaceJob(terminalIntent, {
+        status: "cancelled",
+        output: cleanedStaging.cleanupStatus === "removed" || cleanedStaging.cleanupStatus === "not-required"
+          ? "AII stopped the bounded run and removed its disposable context copy."
+          : `AII stopped the bounded run, but context cleanup needs attention: ${cleanedStaging.cleanupError || cleanedStaging.cleanupStatus}`,
+        startedAt
+      });
+      return;
+    }
     const output = redact(`${stdout ?? ""}${stderr ?? ""}`.trim());
-    const receiptMatch = findWorkspaceReceipt(normalizedIntent, startedAt);
+    const receiptMatch = findWorkspaceReceipt(terminalIntent, startedAt);
     const receiptStatus = receiptMatch?.receipt?.status;
     const hasVerifiedProof = Array.isArray(receiptMatch?.receipt?.verification)
       && receiptMatch.receipt.verification.some((check) => check?.ok === true);
-    const status = error || receiptStatus !== "completed" || !hasVerifiedProof ? "failed" : "completed";
-    reportWorkspaceJob(normalizedIntent, {
+    const cleanupPassed = ["removed", "not-required"].includes(cleanedStaging.cleanupStatus);
+    const status = error || receiptStatus !== "completed" || !hasVerifiedProof || !cleanupPassed ? "failed" : "completed";
+    reportWorkspaceJob(terminalIntent, {
       status,
-      output: output || receiptMatch?.receipt?.summary || (error ? String(error.message) : "Bounded workspace run finished."),
+      output: !cleanupPassed
+        ? `Context cleanup needs attention: ${cleanedStaging.cleanupError || cleanedStaging.cleanupStatus}`
+        : output || receiptMatch?.receipt?.summary || (error ? String(error.message) : "Bounded workspace run finished."),
       startedAt,
       receiptMatch
     });
@@ -470,7 +520,9 @@ function workspaceIntentFromJob(job) {
     requestedAt: job.createdAt,
     requestedBy: String(metadata.requestedBy || "hii.workspace"),
     projectId: String(metadata.projectId || "hii-spatial-workspace"),
-    context: Array.isArray(metadata.context) ? metadata.context : []
+    context: Array.isArray(metadata.context) ? metadata.context : [],
+    contextPreview: metadata.contextPreview || null,
+    contextStaging: metadata.contextStaging || null
   };
 }
 
@@ -526,6 +578,36 @@ function reconcileWorkspaceRuns() {
     if (job?.capabilityId === "hii.agent.workspace_run") latest.set(job.id, job);
   }
   for (const job of latest.values()) {
+    if (
+      ["completed", "failed", "cancelled"].includes(job.status)
+      && !activeWorkspaceRuns.has(job.id)
+      && job.metadata?.contextStaging?.preparedAt
+      && !job.metadata.contextStaging.cleanupStatus
+    ) {
+      const terminalIntent = workspaceIntentFromJob(job);
+      let cleanedStaging;
+      try {
+        cleanedStaging = cleanupWorkspaceRunContext({
+          workspaceRoot: terminalIntent.workspaceRoot,
+          intentId: terminalIntent.id,
+          staging: terminalIntent.contextStaging
+        });
+      } catch (cleanupError) {
+        cleanedStaging = {
+          ...terminalIntent.contextStaging,
+          cleanupStatus: "failed",
+          cleanupError: cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+        };
+      }
+      reportWorkspaceJob({ ...terminalIntent, contextStaging: cleanedStaging }, {
+        status: job.status,
+        output: ["removed", "not-required"].includes(cleanedStaging.cleanupStatus)
+          ? "AII reconciled and removed the terminal run's disposable context copy."
+          : `Terminal run context cleanup needs attention: ${cleanedStaging.cleanupError || cleanedStaging.cleanupStatus}`,
+        startedAt: String(job.metadata?.startedAt || job.createdAt || now())
+      });
+      continue;
+    }
     if (job.status !== "running" || activeWorkspaceRuns.has(job.id)) continue;
     const intent = workspaceIntentFromJob(job);
     const pid = Number(job.metadata?.pid);
@@ -535,13 +617,30 @@ function reconcileWorkspaceRuns() {
     const verified = receiptMatch?.receipt?.status === "completed"
       && Array.isArray(receiptMatch.receipt.verification)
       && receiptMatch.receipt.verification.some((check) => check?.ok === true);
-    const status = job.metadata?.cancelRequestedAt ? "cancelled" : verified ? "completed" : "failed";
-    reportWorkspaceJob(intent, {
+    let cleanedStaging;
+    try {
+      cleanedStaging = cleanupWorkspaceRunContext({
+        workspaceRoot: intent.workspaceRoot,
+        intentId: intent.id,
+        staging: intent.contextStaging
+      });
+    } catch (cleanupError) {
+      cleanedStaging = {
+        ...(intent.contextStaging || {}),
+        cleanupStatus: "failed",
+        cleanupError: cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+      };
+    }
+    const cleanupPassed = ["removed", "not-required"].includes(cleanedStaging.cleanupStatus);
+    const status = job.metadata?.cancelRequestedAt ? "cancelled" : verified && cleanupPassed ? "completed" : "failed";
+    reportWorkspaceJob({ ...intent, contextStaging: cleanedStaging }, {
       status,
-      output: verified
+      output: verified && cleanupPassed
         ? "AII recovered a verified receipt after an interrupted daemon lifecycle."
         : status === "cancelled"
           ? "AII reconciled the interrupted run as cancelled."
+          : !cleanupPassed
+            ? `AII could not safely remove the interrupted run context: ${cleanedStaging.cleanupError || cleanedStaging.cleanupStatus}`
           : "AII found no owned process or verified receipt after daemon interruption.",
       startedAt,
       receiptMatch
@@ -1248,9 +1347,25 @@ process.on("SIGTERM", () => {
   try {
     for (const [id, execution] of activeWorkspaceRuns) {
       execution.child.kill("SIGTERM");
-      reportWorkspaceJob(execution.intent, {
+      let cleanedStaging;
+      try {
+        cleanedStaging = cleanupWorkspaceRunContext({
+          workspaceRoot: execution.intent.workspaceRoot,
+          intentId: id,
+          staging: execution.intent.contextStaging
+        });
+      } catch (cleanupError) {
+        cleanedStaging = {
+          ...(execution.intent.contextStaging || {}),
+          cleanupStatus: "failed",
+          cleanupError: cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+        };
+      }
+      reportWorkspaceJob({ ...execution.intent, contextStaging: cleanedStaging }, {
         status: "cancelled",
-        output: "AII stopped the bounded workspace run during daemon shutdown.",
+        output: ["removed", "not-required"].includes(cleanedStaging.cleanupStatus)
+          ? "AII stopped the bounded workspace run and removed its disposable context copy during daemon shutdown."
+          : `AII stopped the bounded run, but context cleanup needs attention: ${cleanedStaging.cleanupError || cleanedStaging.cleanupStatus}`,
         startedAt: execution.startedAt
       });
       event("workspace.run.cancelled", {

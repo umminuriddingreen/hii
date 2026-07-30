@@ -78,6 +78,8 @@ async function startPackagedServer() {
       HII_RUNTIME_DIR: runtimeDir,
       HOST: '127.0.0.1',
       PORT: String(port),
+      ORIGIN: `http://127.0.0.1:${port}`,
+      BODY_SIZE_LIMIT: '251M',
       HII_TAURI: '1',
       NODE_ENV: 'production'
     }
@@ -179,6 +181,34 @@ try {
   assert.equal(firstLoad.body.status, 'missing');
   assert.equal(firstLoad.body.workspace.version, 1);
 
+  const assetBytes = Buffer.alloc(600 * 1024, 0x68);
+  const firstAssetForm = new FormData();
+  firstAssetForm.set('file', new File([assetBytes], 'reference.png', { type: 'image/png' }));
+  const firstAssetResponse = await fetch(`${server.baseUrl}/api/workspace/assets`, {
+    method: 'POST',
+    headers: { origin: server.baseUrl },
+    body: firstAssetForm
+  });
+  assert.equal(firstAssetResponse.status, 200);
+  const firstAsset = await firstAssetResponse.json();
+  assert.equal(firstAsset.storage, 'hii-content-addressed');
+  assert.equal(firstAsset.deduplicated, false);
+  assert.match(firstAsset.sha256, /^[a-f0-9]{64}$/);
+  assert.equal(path.basename(firstAsset.path), `${firstAsset.sha256}.png`);
+
+  const repeatedAssetForm = new FormData();
+  repeatedAssetForm.set('file', new File([assetBytes], 'renamed.png', { type: 'image/png' }));
+  const repeatedAssetResponse = await fetch(`${server.baseUrl}/api/workspace/assets`, {
+    method: 'POST',
+    headers: { origin: server.baseUrl },
+    body: repeatedAssetForm
+  });
+  assert.equal(repeatedAssetResponse.status, 200);
+  const repeatedAsset = await repeatedAssetResponse.json();
+  assert.equal(repeatedAsset.deduplicated, true);
+  assert.equal(repeatedAsset.path, firstAsset.path);
+  assert.equal(repeatedAsset.url, firstAsset.url);
+
   const created = await requestJson(server.baseUrl, '/api/workspace', {
     method: 'POST',
     body: JSON.stringify({ action: 'create', workspaceId: 'packaged-proof', select: true })
@@ -218,6 +248,9 @@ try {
   assert.equal(afterReinstall.body.workspace.version, 1);
   assert.equal(afterReinstall.body.workspace.nodes[0].id, 'packaged-receipt');
   assert.equal(afterReinstall.body.workspace.nodes[0].object.kind, 'receipt');
+  const persistedAsset = await fetch(`${server.baseUrl}${firstAsset.url}`);
+  assert.equal(persistedAsset.status, 200);
+  assert.deepEqual(Buffer.from(await persistedAsset.arrayBuffer()), assetBytes);
 
   const brokenPath = path.join(runtimeDir, 'workspace', 'workspaces', 'broken.json');
   await writeFile(brokenPath, '{"version":1,"nodes":', 'utf8');
@@ -242,6 +275,7 @@ try {
   console.log('isolation:    copied HII.app ran outside the source repository');
   console.log('clean user:   empty isolated runtime initialized');
   console.log('persistence:  receipt workspace survived packaged reinstall + restart');
+  console.log('assets:       content-addressed upload deduplicated and survived reinstall');
   console.log('recovery:     corrupt workspace preserved with an inspectable recovery path');
   console.log('signature:    copied app passed strict deep code-sign verification');
 } finally {

@@ -46,6 +46,9 @@ describe('workspace asset viewer contract', () => {
     expect(document).toContain('sha256');
     expect(document).toContain('Document viewer');
     expect(assets).toContain("createHash('sha256')");
+    expect(assets).toContain("storage: 'hii-content-addressed'");
+    expect(assets).toContain("flag: 'wx'");
+    expect(assets).toContain('deduplicated');
     expect(asset).toContain("glb: 'model/gltf-binary'");
     expect(asset).toContain("obj: 'model/obj'");
   });

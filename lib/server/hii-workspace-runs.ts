@@ -149,6 +149,7 @@ export async function queueApprovedWorkspaceRun(input: {
 
   const context = normalizeWorkspaceRunContext(input.context);
   const contextPreview = await previewWorkspaceRunContext({
+    runId: id,
     workspaceRoot: resolvedRoot,
     context
   });
@@ -184,7 +185,13 @@ export async function queueApprovedWorkspaceRun(input: {
     requestedBy,
     projectId,
     context,
-    contextPreview
+    contextPreview,
+    contextStaging: {
+      required: contextPreview.summary.stagedLocalAssets > 0,
+      policy: contextPreview.summary.stagedLocalAssets
+        ? 'AII reverifies each selected managed asset, makes a read-only per-run copy inside the approved root, and removes only that disposable copy after terminal state.'
+        : 'No per-run local asset staging is required.'
+    }
   };
   const daemonDir = path.join(runtimeRoot(), 'daemon');
   const intentsPath = path.join(daemonDir, 'intents.jsonl');
@@ -221,6 +228,7 @@ export async function queueApprovedWorkspaceRun(input: {
       maxSteps,
       context,
       contextPreview,
+      contextStaging: intent.contextStaging,
       requestedBy,
       approvedAt: now,
       boundary: {

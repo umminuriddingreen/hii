@@ -10,6 +10,7 @@ export type WorkspaceRunContextItem = {
   title: string;
   type: string;
   source?: string;
+  expectedSha256?: string;
   excerpt?: string;
   objectKind?: string;
   owner?: string;
@@ -21,6 +22,7 @@ export type WorkspaceRunContextPreviewItem = WorkspaceRunContextItem & {
   access:
     | 'workspace-file'
     | 'workspace-directory'
+    | 'staged-local-asset'
     | 'inline-snapshot'
     | 'remote-reference'
     | 'opaque-reference'
@@ -29,15 +31,18 @@ export type WorkspaceRunContextPreviewItem = WorkspaceRunContextItem & {
   provenance: string;
   network: 'none' | 'read-only-web';
   relativePath?: string;
+  stagedRelativePath?: string;
   sha256?: string;
   byteSize?: number;
   modifiedAt?: string;
+  notice?: string;
   warning?: string;
   blockedReason?: string;
 };
 
 export type WorkspaceRunContextPreview = {
   generatedAt: string;
+  runId: string;
   workspaceRoot: string;
   fingerprint: string;
   blocked: boolean;
@@ -48,6 +53,7 @@ export type WorkspaceRunContextPreview = {
     selected: number;
     executable: number;
     workspaceFiles: number;
+    stagedLocalAssets: number;
     inlineSnapshots: number;
     remoteReferences: number;
     labelOnly: number;
@@ -71,6 +77,11 @@ function cleanId(value: unknown) {
   return clean(value, 120).replace(/[^a-zA-Z0-9_-]/g, '');
 }
 
+function cleanSha256(value: unknown) {
+  const sha256 = clean(value, 64).toLowerCase();
+  return /^[a-f0-9]{64}$/.test(sha256) ? sha256 : '';
+}
+
 function cleanList(value: unknown, maxItems: number, maxLength: number) {
   if (!Array.isArray(value)) return [];
   return value.map((item) => clean(item, maxLength)).filter(Boolean).slice(0, maxItems);
@@ -87,6 +98,7 @@ export function normalizeWorkspaceRunContext(value: unknown): WorkspaceRunContex
       const type = clean(item.type, 80);
       if (!id || !title || !type) return null;
       const source = clean(item.source, 1000);
+      const expectedSha256 = cleanSha256(item.expectedSha256);
       const excerpt = clean(item.excerpt, 2400);
       const objectKind = clean(item.objectKind, 80);
       const owner = clean(item.owner, 80);
@@ -97,6 +109,7 @@ export function normalizeWorkspaceRunContext(value: unknown): WorkspaceRunContex
         title,
         type,
         ...(source ? { source } : {}),
+        ...(expectedSha256 ? { expectedSha256 } : {}),
         ...(excerpt ? { excerpt } : {}),
         ...(objectKind ? { objectKind } : {}),
         ...(owner ? { owner } : {}),
@@ -121,6 +134,16 @@ export async function resolveWorkspaceRunRoot(value: unknown) {
 function insideRoot(root: string, candidate: string) {
   const relative = path.relative(root, candidate);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+async function managedAssetRoot() {
+  const runtimeRoot = process.env.HII_RUNTIME_DIR || path.join(os.homedir(), '.hii');
+  return realpath(path.join(runtimeRoot, 'workspace', 'assets')).catch(() => '');
+}
+
+function stagedAssetRelativePath(runId: string, sha256: string, source: string) {
+  const extension = path.extname(source).toLowerCase().replace(/[^a-z0-9.]/g, '').slice(0, 16);
+  return path.join('.hii-run-context', runId, `${sha256}${extension}`);
 }
 
 function localSourcePath(source: string, root: string) {
@@ -151,16 +174,19 @@ async function fileSha256(file: string) {
 }
 
 function stablePreviewShape(
+  runId: string,
   workspaceRoot: string,
   items: WorkspaceRunContextPreviewItem[]
 ) {
   return {
+    runId,
     workspaceRoot,
     items: items.map((item) => ({
       id: item.id,
       title: item.title,
       type: item.type,
       source: item.source || '',
+      expectedSha256: item.expectedSha256 || '',
       excerpt: item.excerpt || '',
       objectKind: item.objectKind || '',
       owner: item.owner || '',
@@ -170,9 +196,11 @@ function stablePreviewShape(
       provenance: item.provenance,
       network: item.network,
       relativePath: item.relativePath || '',
+      stagedRelativePath: item.stagedRelativePath || '',
       sha256: item.sha256 || '',
       byteSize: item.byteSize ?? null,
       modifiedAt: item.modifiedAt || '',
+      notice: item.notice || '',
       warning: item.warning || '',
       blockedReason: item.blockedReason || ''
     }))
@@ -180,10 +208,13 @@ function stablePreviewShape(
 }
 
 export async function previewWorkspaceRunContext(input: {
+  runId?: unknown;
   workspaceRoot?: unknown;
   context?: unknown;
 }): Promise<WorkspaceRunContextPreview> {
+  const runId = cleanId(input.runId) || 'context-preview';
   const workspaceRoot = await resolveWorkspaceRunRoot(input.workspaceRoot);
+  const assetRoot = await managedAssetRoot();
   const context = normalizeWorkspaceRunContext(input.context);
   const items: WorkspaceRunContextPreviewItem[] = [];
 
@@ -221,6 +252,53 @@ export async function previewWorkspaceRunContext(input: {
           provenance: 'unresolved local source',
           network: 'none',
           blockedReason: 'The selected local source no longer exists.'
+        });
+        continue;
+      }
+      if (assetRoot && insideRoot(assetRoot, resolved)) {
+        const details = await stat(resolved);
+        if (!details.isFile()) {
+          items.push({
+            ...item,
+            access: 'blocked',
+            provenance: 'unsupported HII-managed source',
+            network: 'none',
+            blockedReason: 'The selected HII-managed source is not a regular file.'
+          });
+          continue;
+        }
+        if (details.size > 250 * 1024 * 1024) {
+          items.push({
+            ...item,
+            access: 'blocked',
+            provenance: 'oversized HII-managed source',
+            network: 'none',
+            blockedReason: 'The selected local asset exceeds the 250 MB governed staging limit.'
+          });
+          continue;
+        }
+        const sha256 = await fileSha256(resolved);
+        if (item.expectedSha256 && item.expectedSha256 !== sha256) {
+          items.push({
+            ...item,
+            access: 'blocked',
+            provenance: 'HII-managed source integrity mismatch',
+            network: 'none',
+            sha256,
+            blockedReason: 'The selected local asset no longer matches the integrity proof recorded on its canvas object.'
+          });
+          continue;
+        }
+        items.push({
+          ...item,
+          access: 'staged-local-asset',
+          provenance: 'content-addressed HII asset selected for a read-only per-run copy',
+          network: 'none',
+          sha256,
+          byteSize: details.size,
+          modifiedAt: details.mtime.toISOString(),
+          stagedRelativePath: stagedAssetRelativePath(runId, sha256, resolved),
+          notice: 'AII will reverify this asset, copy it inside the approved workspace only for this run, and remove that disposable copy after the run reaches a terminal state.'
         });
         continue;
       }
@@ -310,11 +388,12 @@ export async function previewWorkspaceRunContext(input: {
     .filter((warning): warning is string => Boolean(warning));
   const remoteReferences = items.filter((item) => item.network === 'read-only-web').length;
   const fingerprint = createHash('sha256')
-    .update(JSON.stringify(stablePreviewShape(workspaceRoot, items)))
+    .update(JSON.stringify(stablePreviewShape(runId, workspaceRoot, items)))
     .digest('hex');
 
   return {
     generatedAt: new Date().toISOString(),
+    runId,
     workspaceRoot,
     fingerprint,
     blocked: blockers.length > 0,
@@ -327,6 +406,7 @@ export async function previewWorkspaceRunContext(input: {
       workspaceFiles: items.filter((item) =>
         item.access === 'workspace-file' || item.access === 'workspace-directory'
       ).length,
+      stagedLocalAssets: items.filter((item) => item.access === 'staged-local-asset').length,
       inlineSnapshots: items.filter((item) => item.access === 'inline-snapshot').length,
       remoteReferences,
       labelOnly: items.filter((item) =>
@@ -351,6 +431,7 @@ export function workspaceRunExecutionGoal(
     const identity = `- ${item.title} (${item.type}; ${item.access})`;
     const details = [
       item.relativePath ? `  Workspace source: ${item.relativePath}` : '',
+      item.stagedRelativePath ? `  Read-only staged source: ${item.stagedRelativePath}` : '',
       item.sha256 ? `  SHA-256: ${item.sha256}` : '',
       item.source && item.access === 'remote-reference' ? `  Remote source: ${item.source}` : '',
       item.excerpt ? `  Approved snapshot: ${item.excerpt}` : '',

@@ -10,7 +10,10 @@ const runProgress = readFileSync(resolve(root, 'lib/workspace/run-progress.ts'),
 const runBoundary = readFileSync(resolve(root, 'lib/workspace/run-boundary.ts'), 'utf8');
 const workspaceRuns = readFileSync(resolve(root, 'lib/server/hii-workspace-runs.ts'), 'utf8');
 const workspaceRunContext = readFileSync(resolve(root, 'lib/server/hii-workspace-run-context.ts'), 'utf8');
+const workspaceRunStaging = readFileSync(resolve(root, 'aii/daemon/workspace-run-staging.mjs'), 'utf8');
 const workspaceRunRoute = readFileSync(resolve(root, 'app/api/workspace/runs/route.ts'), 'utf8');
+const workspaceAssetsRoute = readFileSync(resolve(root, 'app/api/workspace/assets/route.ts'), 'utf8');
+const terminalServer = readFileSync(resolve(root, 'lib/server/hii-terminal.ts'), 'utf8');
 const workspaceArtifacts = readFileSync(resolve(root, 'lib/server/hii-workspace-artifacts.ts'), 'utf8');
 const workspaceArtifactRoute = readFileSync(resolve(root, 'app/api/workspace/artifacts/route.ts'), 'utf8');
 const apiBridge = readFileSync(resolve(root, 'src/routes/api/[...path]/+server.ts'), 'utf8');
@@ -78,6 +81,24 @@ describe('agentic workspace interaction contract', () => {
     expect(hiid).toContain('String(intent.goal).slice(0, 16000)');
   });
 
+  it('stages explicitly selected local creative assets without widening runner authority', () => {
+    expect(workspace).toContain("expectedSha256:String(node.payload.sha256||'')");
+    expect(spatialRun).toContain("runId: node.id");
+    expect(spatialRun).toContain('run copy · {item.stagedRelativePath}');
+    expect(workspaceAssetsRoute).toContain("storage: 'hii-content-addressed'");
+    expect(workspaceAssetsRoute).toContain("flag: 'wx'");
+    expect(terminalServer).toContain("process.env.HII_TAURI === '1'");
+    expect(desktop).toContain('.env("ORIGIN", format!("http://127.0.0.1:{port}"))');
+    expect(desktop).toContain('.env("BODY_SIZE_LIMIT", "251M")');
+    expect(workspaceRunContext).toContain("'staged-local-asset'");
+    expect(workspaceRunContext).toContain("path.join('.hii-run-context', runId");
+    expect(workspaceRunStaging).toContain('A selected local asset changed after context approval.');
+    expect(workspaceRunStaging).toContain('fs.constants.COPYFILE_EXCL');
+    expect(workspaceRunStaging).toContain('cleanupStatus: "skipped-unowned"');
+    expect(hiid).toContain('stageWorkspaceRunContext');
+    expect(hiid).toContain('cleanupWorkspaceRunContext');
+  });
+
   it('keeps governed progress concise and raw execution output behind inspection', () => {
     expect(spatialRun).toContain('workspaceRunProgress');
     expect(spatialRun).toContain('Inspect evidence');
@@ -114,7 +135,8 @@ describe('agentic workspace interaction contract', () => {
     expect(hiid).toContain('activeWorkspaceRuns');
     expect(hiid).toContain('cancelWorkspaceIntent');
     expect(hiid).toContain('reconcileWorkspaceRuns');
-    expect(hiid).toContain('if (terminal?.status === "cancelled") return');
+    expect(hiid).toContain('if (terminal?.status === "cancelled") {');
+    expect(hiid).toContain('reportWorkspaceJob(terminalIntent');
   });
 
   it('shows operator-meaningful runtime health instead of unexplained process counts', () => {

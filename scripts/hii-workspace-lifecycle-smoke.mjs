@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,6 +13,12 @@ const runner = path.join(directory, 'bounded-runner.mjs');
 const daemon = path.resolve('aii/daemon/hiid.mjs');
 fs.mkdirSync(workspaceRoot, { recursive: true });
 fs.mkdirSync(runtime, { recursive: true });
+const assetRoot = path.join(runtime, 'workspace', 'assets');
+fs.mkdirSync(assetRoot, { recursive: true });
+const assetBody = Buffer.from('lifecycle visual reference\n');
+const assetSha256 = createHash('sha256').update(assetBody).digest('hex');
+const assetSource = path.join(assetRoot, `${assetSha256}.png`);
+fs.writeFileSync(assetSource, assetBody);
 fs.writeFileSync(runner, `#!/usr/bin/env node
 process.on('SIGTERM', () => process.exit(143));
 setInterval(() => {}, 1000);
@@ -26,6 +33,7 @@ process.env.HII_DISABLE_BACKGROUND_TICKS = '1';
 
 const runs = await import('../lib/server/hii-workspace-runs.ts');
 const jobs = await import('../lib/capabilities/local-store.ts');
+const staging = await import('../aii/daemon/workspace-run-staging.mjs');
 
 function latestJob(id) {
   try {
@@ -66,9 +74,18 @@ const daemonProcess = spawn(process.execPath, [daemon, 'run'], {
 });
 
 try {
+  const context = [{
+    id: 'lifecycle-reference',
+    title: 'Lifecycle visual reference',
+    type: 'image',
+    source: assetSource,
+    expectedSha256: assetSha256,
+    proofRefs: [`sha256:${assetSha256}`]
+  }];
   const contextPreview = await runs.previewWorkspaceRunContext({
+    runId: 'lifecycle-cancel-demo',
     workspaceRoot,
-    context: []
+    context
   });
   const queued = await runs.queueApprovedWorkspaceRun({
     id: 'lifecycle-cancel-demo',
@@ -77,6 +94,7 @@ try {
     workspaceRoot,
     model: 'qwen3.6:35b-mlx',
     maxSteps: 3,
+    context,
     contextFingerprint: contextPreview.fingerprint,
     approved: true
   });
@@ -91,6 +109,9 @@ try {
   );
   const runnerPid = Number(running.metadata.pid);
   assert.equal(alive(runnerPid), true);
+  const stagedPath = path.join(workspaceRoot, contextPreview.items[0].stagedRelativePath);
+  assert.equal(fs.readFileSync(stagedPath, 'utf8'), assetBody.toString('utf8'));
+  assert.equal(fs.statSync(stagedPath).mode & 0o777, 0o400);
 
   const cancellation = await runs.requestWorkspaceRunCancellation({ id: queued.job.id });
   assert.equal(cancellation.queued, true);
@@ -103,11 +124,34 @@ try {
       : null,
     'AII did not record the workspace cancellation.'
   );
-  assert.match(cancelled.logs.at(-1), /stopped|cancelled/i);
+  assert.equal(cancelled.logs.some((entry) => /stopped|cancelled/i.test(entry)), true);
   await waitFor(() => !alive(runnerPid), 'The owned bounded runner process remained alive.');
-  await new Promise((resolve) => setTimeout(resolve, 400));
-  assert.equal(latestJob('lifecycle-cancel-demo').status, 'cancelled');
+  const cleaned = await waitFor(
+    () => latestJob('lifecycle-cancel-demo')?.metadata?.contextStaging?.cleanupStatus === 'removed'
+      ? latestJob('lifecycle-cancel-demo')
+      : null,
+    'AII did not remove the cancelled run context copy.'
+  );
+  assert.equal(cleaned.status, 'cancelled');
+  assert.equal(fs.existsSync(stagedPath), false);
+  assert.equal(fs.readFileSync(assetSource, 'utf8'), assetBody.toString('utf8'));
 
+  const interruptedPreview = await runs.previewWorkspaceRunContext({
+    runId: 'lifecycle-interrupted-demo',
+    workspaceRoot,
+    context
+  });
+  const interruptedStaging = staging.stageWorkspaceRunContext({
+    runtimeRoot: runtime,
+    workspaceRoot,
+    intentId: 'lifecycle-interrupted-demo',
+    contextPreview: interruptedPreview
+  });
+  const interruptedStagedPath = path.join(
+    workspaceRoot,
+    interruptedStaging.files[0].relativePath
+  );
+  assert.equal(fs.existsSync(interruptedStagedPath), true);
   const staleAt = new Date().toISOString();
   await jobs.appendCapabilityJob({
     id: 'lifecycle-interrupted-demo',
@@ -129,7 +173,10 @@ try {
       model: 'qwen3.6:35b-mlx',
       maxSteps: 3,
       pid: 999999,
-      startedAt: staleAt
+      startedAt: staleAt,
+      context,
+      contextPreview: interruptedPreview,
+      contextStaging: interruptedStaging
     }
   });
   const reconciled = await waitFor(
@@ -139,6 +186,8 @@ try {
     'AII did not reconcile the interrupted workspace run.'
   );
   assert.match(reconciled.logs.at(-1), /no owned process or verified receipt/i);
+  assert.equal(reconciled.metadata.contextStaging.cleanupStatus, 'removed');
+  assert.equal(fs.existsSync(interruptedStagedPath), false);
 
   const intents = fs.readFileSync(path.join(runtime, 'daemon', 'intents.jsonl'), 'utf8')
     .split('\n')
@@ -151,7 +200,8 @@ try {
   console.log('ownership:    AII persisted and stopped the owned runner PID');
   console.log('cancellation: append-only request -> terminal cancelled verified');
   console.log('race:         late runner callback did not overwrite cancellation');
-  console.log('recovery:     interrupted running job reconciled from process + receipt truth');
+  console.log('staging:      selected local asset copied read-only then cleaned on cancellation');
+  console.log('recovery:     interrupted run reconciled and its marked context copy removed');
 } finally {
   if (daemonProcess.exitCode === null) daemonProcess.kill('SIGTERM');
   await new Promise((resolve) => {

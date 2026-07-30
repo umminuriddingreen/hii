@@ -263,6 +263,8 @@ fn spawn_hii_server(app: &tauri::App, port: u16) -> Result<Child, String> {
         .current_dir(server_dir)
         .env("PORT", port.to_string())
         .env("HOST", "127.0.0.1")
+        .env("ORIGIN", format!("http://127.0.0.1:{port}"))
+        .env("BODY_SIZE_LIMIT", "251M")
         .env("NODE_ENV", "production")
         .env("HII_TAURI", "1")
         .env("HII_RUNTIME_DIR", runtime)

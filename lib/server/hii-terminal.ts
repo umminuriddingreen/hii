@@ -64,10 +64,22 @@ function truncateProcessText(value: string, maxLength = 720) {
 }
 
 export function localTerminalAllowed(request: Request) {
-  if (process.env.HII_LOCAL_TERMINAL_ENABLED === '1') return true;
+  if (process.env.HII_LOCAL_TERMINAL_ENABLED === '1' || process.env.HII_TAURI === '1') return true;
   const host = request.headers.get('host') ?? '';
+  let requestHostname = '';
+  try {
+    requestHostname = new URL(request.url).hostname;
+  } catch {
+    // A malformed URL must not expand local authority.
+  }
   const hostOk =
-    host.startsWith('localhost:') || host.startsWith('127.0.0.1:') || host.startsWith('[::1]:');
+    host === 'localhost' ||
+    host.startsWith('localhost:') ||
+    host === '127.0.0.1' ||
+    host.startsWith('127.0.0.1:') ||
+    host === '[::1]' ||
+    host.startsWith('[::1]:') ||
+    (!host && ['localhost', '127.0.0.1', '[::1]'].includes(requestHostname));
   // Host alone is forgeable-by-default in a browser (any site can fetch
   // http://localhost:3000 and the browser sets Host for it). Origin is what
   // distinguishes our own pages from a cross-site request.

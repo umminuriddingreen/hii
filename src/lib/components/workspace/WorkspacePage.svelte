@@ -141,6 +141,7 @@
       title:workspaceNodeTitle(node),
       type:node.type,
       source:String(node.payload.path||node.payload.url||node.object?.source||'').slice(0,1000),
+      expectedSha256:String(node.payload.sha256||'').slice(0,64),
       excerpt:contextExcerpt(node),
       objectKind:String(node.object?.kind||''),
       owner:String(node.object?.owner||''),

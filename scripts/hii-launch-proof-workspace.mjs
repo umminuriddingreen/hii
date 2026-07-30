@@ -58,14 +58,15 @@ export async function createLaunchProofWorkspace(options = {}) {
     { id: sourceIds[1], title: 'Launch brief', type: 'note', source: path.join(workspaceRoot, 'docs/launch/hii-x-launch-kit-opus5.md') },
     { id: sourceIds[2], title: 'Claim boundary', type: 'note', source: path.join(workspaceRoot, 'docs/marketing/2026-07-30-hii-agentic-environment-audit.md') }
   ];
+  const runId = randomUUID();
   const contextPreview = await previewWorkspaceRunContext({
+    runId,
     workspaceRoot,
     context
   });
   if (contextPreview.blocked) {
     throw new Error(`The launch context manifest is blocked: ${contextPreview.blockers.join(' ')}`);
   }
-  const runId = randomUUID();
   await queueApprovedWorkspaceRun({
     id: runId,
     projectId: 'hii-launch-proof',

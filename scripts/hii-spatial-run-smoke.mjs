@@ -30,6 +30,7 @@ try {
     authority: 'hii-runtime'
   }];
   const contextPreview = await runs.previewWorkspaceRunContext({
+    runId: 'spatial-demo',
     workspaceRoot,
     context: selectedContext
   });
@@ -49,7 +50,11 @@ try {
     /Explicit approval/
   );
 
-  const emptyPreview = await runs.previewWorkspaceRunContext({ workspaceRoot, context: [] });
+  const emptyPreview = await runs.previewWorkspaceRunContext({
+    runId: 'missing-model-demo',
+    workspaceRoot,
+    context: []
+  });
   await assert.rejects(
     () => runs.queueApprovedWorkspaceRun({
       id: 'missing-model-demo',
@@ -78,6 +83,7 @@ try {
   const outsidePath = path.join(directory, 'outside-context.txt');
   fs.writeFileSync(outsidePath, 'outside context\n');
   const outsidePreview = await runs.previewWorkspaceRunContext({
+    runId: 'outside-context-demo',
     workspaceRoot,
     context: [{ id: 'outside-1', title: 'Outside source', type: 'file', source: outsidePath }]
   });
@@ -85,6 +91,7 @@ try {
   assert.match(outsidePreview.blockers[0], /outside the approved workspace root/);
 
   const remotePreview = await runs.previewWorkspaceRunContext({
+    runId: 'remote-context-demo',
     workspaceRoot,
     context: [{ id: 'remote-1', title: 'Remote brief', type: 'link', source: 'https://example.com/brief' }]
   });
@@ -92,6 +99,7 @@ try {
   assert.match(remotePreview.network.scope, /outbound read-only web retrieval/);
 
   const inlinePreview = await runs.previewWorkspaceRunContext({
+    runId: 'inline-context-demo',
     workspaceRoot,
     context: [{ id: 'note-1', title: 'Human note', type: 'note', excerpt: 'Keep the interface calm and inspectable.' }]
   });
@@ -100,7 +108,11 @@ try {
   const mutablePath = path.join(workspaceRoot, 'mutable.txt');
   fs.writeFileSync(mutablePath, 'before review\n');
   const mutableContext = [{ id: 'mutable-1', title: 'Mutable source', type: 'file', source: mutablePath }];
-  const mutablePreview = await runs.previewWorkspaceRunContext({ workspaceRoot, context: mutableContext });
+  const mutablePreview = await runs.previewWorkspaceRunContext({
+    runId: 'stale-context-demo',
+    workspaceRoot,
+    context: mutableContext
+  });
   fs.writeFileSync(mutablePath, 'changed after review\n');
   await assert.rejects(
     () => runs.queueApprovedWorkspaceRun({

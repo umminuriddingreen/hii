@@ -12,21 +12,23 @@
 
   type ContextItem = {
     id: string; title: string; type: string; source?: string; excerpt?: string;
-    objectKind?: string; owner?: string; authority?: string; proofRefs?: string[];
+    expectedSha256?: string; objectKind?: string; owner?: string; authority?: string;
+    proofRefs?: string[];
   };
   type ContextPreviewItem = ContextItem & {
-    access: 'workspace-file' | 'workspace-directory' | 'inline-snapshot' |
-      'remote-reference' | 'opaque-reference' | 'label-only' | 'blocked';
+    access: 'workspace-file' | 'workspace-directory' | 'staged-local-asset' |
+      'inline-snapshot' | 'remote-reference' | 'opaque-reference' | 'label-only' | 'blocked';
     provenance: string; network: 'none' | 'read-only-web'; relativePath?: string;
-    sha256?: string; byteSize?: number; modifiedAt?: string; warning?: string;
-    blockedReason?: string;
+    stagedRelativePath?: string; sha256?: string; byteSize?: number; modifiedAt?: string;
+    notice?: string; warning?: string; blockedReason?: string;
   };
   type ContextPreview = {
-    generatedAt: string; workspaceRoot: string; fingerprint: string; blocked: boolean;
+    generatedAt: string; runId: string; workspaceRoot: string; fingerprint: string; blocked: boolean;
     blockers: string[]; warnings: string[]; items: ContextPreviewItem[];
     summary: {
       selected: number; executable: number; workspaceFiles: number;
-      inlineSnapshots: number; remoteReferences: number; labelOnly: number;
+      stagedLocalAssets: number; inlineSnapshots: number; remoteReferences: number;
+      labelOnly: number;
     };
     network: { required: boolean; scope: string };
   };
@@ -302,6 +304,7 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           action: 'preview-context',
+          runId: node.id,
           workspaceRoot: boundary.workspaceRoot,
           context
         })
@@ -439,10 +442,12 @@
                   </div>
                   <span class="mt-1 block break-all font-mono text-[8px] text-neutral-400">{item.type} · {item.provenance}</span>
                   {#if item.relativePath}<span class="mt-1 block break-all font-mono text-[8px] text-blue-600">{item.relativePath}</span>{/if}
+                  {#if item.stagedRelativePath}<span class="mt-1 block break-all font-mono text-[8px] text-violet-700">run copy · {item.stagedRelativePath}</span>{/if}
                   {#if item.sha256}<span class="mt-1 block truncate font-mono text-[7px] text-neutral-400">sha256 {item.sha256}</span>{/if}
                   {#if item.source && item.access === 'remote-reference'}<span class="mt-1 block break-all font-mono text-[8px] text-blue-600">{item.source}</span>{/if}
                   {#if item.excerpt}<p class="mt-1.5 line-clamp-3 text-[9px] leading-4 text-neutral-600">{item.excerpt}</p>{/if}
                   {#if item.blockedReason}<p class="mt-1.5 text-[9px] leading-4 text-red-800">{item.blockedReason}</p>{/if}
+                  {#if item.notice}<p class="mt-1.5 text-[9px] leading-4 text-violet-800">{item.notice}</p>{/if}
                   {#if item.warning}<p class="mt-1.5 text-[9px] leading-4 text-amber-800">{item.warning}</p>{/if}
                 </div>
               {/each}

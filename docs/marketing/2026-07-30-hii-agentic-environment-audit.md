@@ -198,9 +198,31 @@ silently truncating it at the previous 4,000-character limit.
 The isolated context-manifest unit and spatial-run gates prove relative and
 absolute workspace files, content hashing, inline snapshots, proof lineage,
 outside-root rejection, secret rejection, remote-read disclosure, and stale
-review rejection. External local creative assets are currently blocked rather
-than silently advertised as readable; governed per-run staging remains the
-next context transport adapter.
+review rejection.
+
+Explicitly imported local creative assets now use immutable content-addressed
+storage under the HII runtime. Selecting one for a run does not widen the
+runner to `~/.hii`: the approval manifest names a deterministic disposable path
+inside the already approved project root. AII reverifies the source SHA-256
+immediately before execution, creates a read-only copy only for that run, and
+removes only a copy carrying the matching run/fingerprint ownership marker
+after completion, failure, cancellation, or interrupted-run reconciliation.
+The source asset remains in HII-managed storage. Arbitrary outside-root paths
+still fail closed.
+
+The dedicated context-staging gate proves content identity, reviewed
+destination, pre-execution stale-source rejection, immutable staging, guarded
+cleanup, and source preservation. This closes the transport gap that made a
+selected Figma export, image reference, PDF, drawing, model, audio file, or
+video look usable on the canvas while remaining inaccessible to the bounded
+runner.
+
+The clean-user packaged-app gate now also uploads and deduplicates a 600 KiB
+asset, then proves that the bytes survive app replacement and server restart.
+The desktop server declares its exact loopback origin to SvelteKit and raises
+the adapter body ceiling above HII's own 250 MiB route policy, so packaged
+uploads are governed by HII instead of being rejected by an implicit framework
+default before the route runs.
 
 Live HII Space in `context-manifest-proof` shows one approved human note as an
 inline snapshot, the master context as a content-hashed workspace file, and a
@@ -469,11 +491,11 @@ cloud sync, credits, or a general “AI operating system.”
 
 1. Extend the verified contact-sheet import with stacking, batch labels,
    reviewed perceptual dedupe, and an explicit “organize this selection” action.
-2. Add a governed per-run staging adapter for explicitly selected local assets
-   outside the workspace root. The exact context manifest, secrets gate,
-   network warning, content snapshots, hashes, and stale-review rejection are
-   implemented; external local assets now fail closed instead of appearing
-   readable when they are not.
+2. Add sub-asset context anchors—PDF page/range, image crop or annotation,
+   design frame/layer, drawing view/layer, and media time range—so selecting a
+   large creative asset communicates the exact human-relevant region instead
+   of only its byte identity. Governed per-run transport for whole imported
+   assets is implemented.
 3. Artifact adapters for the first audience: Markdown, image/reference board,
    code/site preview, and a native-file handoff.
 4. Run one real operator-approved registered-capability replay, then preserve
