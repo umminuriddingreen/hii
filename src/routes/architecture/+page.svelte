@@ -48,7 +48,7 @@
   <meta property="og:url" content="https://humaninformationinterface.com/architecture" />
   <meta
     property="og:image"
-    content="https://humaninformationinterface.com/marketing/hii-workspace-live.png"
+    content="https://humaninformationinterface.com/marketing/hii-architecture-hero.png"
   />
 </svelte:head>
 
@@ -184,7 +184,7 @@
       <p>The demonstration uses sample data and cannot inspect your Mac. A real session starts only after the job and context boundary are agreed.</p>
     </header>
     <figure>
-      <div class="video-label"><span>HII / FIRST WIN</span><span>27 SEC · SILENT FIRST</span></div>
+      <div class="video-label"><span>HII / ARCHITECTURE FIRST WIN</span><span>25 SEC · SILENT FIRST</span></div>
       <video
         bind:this={proofVideo}
         autoplay
@@ -193,10 +193,10 @@
         playsinline
         controls
         preload="metadata"
-        poster="/marketing/hii-command-palette-live.png"
-        aria-label="A 27-second demonstration of an actual HII first-win workspace"
+        poster="/marketing/hii-architecture-hero.png"
+        aria-label="A 25-second architecture-cohort demonstration using an actual HII first-win workspace"
       >
-        <source src="/marketing/hii-first-win-demo.mp4" type="video/mp4" />
+        <source src="/marketing/hii-architecture-first-win-demo.mp4" type="video/mp4" />
       </video>
       <figcaption>Actual interface · sample context · captions embedded</figcaption>
     </figure>

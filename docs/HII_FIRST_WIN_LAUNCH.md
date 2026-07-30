@@ -159,24 +159,25 @@ legible. Prepared replacement:
 
 ### LinkedIn
 
-Publish the video natively. Do not put a link in the primary post:
+Publish `public/marketing/hii-architecture-first-win-demo.mp4` natively. Do not
+put a link in the primary post:
 
-> I built HII because useful AI work kept disappearing between chats, folders,
-> tools, and browser tabs.
+> I built HII for a problem I keep seeing in architecture and computational
+> design: the real decision is spread across drawings, reports, models, scripts,
+> notes, and chat threads.
 >
 > I gave it one real job on my Mac.
 >
-> HII kept the context I approved, the work, the finished artifact, and the proof
-> together.
+> HII kept the context I approved, the finished artifact, and the proof together.
 >
-> The video is 27 seconds. It is the actual interface—not a concept render.
+> This video is 25 seconds. It uses the actual interface—not a concept render.
 >
-> I am not opening a general beta yet. I am looking for five makers, designers,
-> researchers, or independent operators with one real thing on their Mac they
-> already want to finish.
+> I am not opening a general beta. I am looking for five architects,
+> computational designers, or built-world founders with one real job they
+> already need finished.
 >
-> Reply “HII” and tell me the job. I will message you personally and stay with
-> it through the first result.
+> Reply “HII” + the job. I will message you personally and stay with it through
+> the first result.
 
 First founder comment:
 
@@ -189,18 +190,19 @@ First founder comment:
 
 ### X
 
-Post from `@ummigreen` with `public/marketing/hii-first-win-demo.mp4`.
+Post from `@ummigreen` with
+`public/marketing/hii-architecture-first-win-demo.mp4`.
 Keep the link out of the primary post so the invitation stays conversational:
 
-> I gave HII one real job on my Mac.
+> Architecture work is split across drawings, reports, models, scripts, notes,
+> and chats.
 >
-> It kept the approved context, finished artifact, and proof together instead of
-> losing the work in another chat.
+> I gave HII one job. It kept the approved context, artifact, and proof together.
 >
-> 27-second demo ↓
+> 25-second demo ↓
 >
-> I’m opening 5 founder-led tests. Reply “HII” + one thing on your Mac you want
-> help finishing.
+> I’m opening 5 founder-led sessions. Reply “HII” + the built-world job you need
+> finished.
 
 The first founder reply should provide the link and disclose:
 

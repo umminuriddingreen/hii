@@ -65,7 +65,8 @@ describe('public HII homepage', () => {
     expect(architecture).toContain('Prepare a design review');
     expect(architecture).toContain('Debug a computational workflow');
     expect(architecture).toContain('A model is not<br />a project boundary.');
-    expect(architecture).toContain('/marketing/hii-first-win-demo.mp4');
+    expect(architecture).toContain('/marketing/hii-architecture-hero.png');
+    expect(architecture).toContain('/marketing/hii-architecture-first-win-demo.mp4');
     expect(architecture).toContain('The demonstration uses sample data and cannot inspect your Mac');
     expect(architecture).toContain('Apply for founder activation · $500');
     expect(architecture).toContain('href="/privacy"');
