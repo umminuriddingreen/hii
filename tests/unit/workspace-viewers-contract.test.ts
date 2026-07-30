@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const root = process.cwd();
-const workspace = readFileSync(resolve(root, 'src/routes/+page.svelte'), 'utf8');
+const workspace = readFileSync(resolve(root, 'src/lib/components/workspace/WorkspacePage.svelte'), 'utf8');
 const model = readFileSync(resolve(root, 'src/lib/components/workspace/ModelPane.svelte'), 'utf8');
 const document = readFileSync(resolve(root, 'src/lib/components/workspace/DocumentPane.svelte'), 'utf8');
 const cad = readFileSync(resolve(root, 'src/lib/components/workspace/CadPane.svelte'), 'utf8');

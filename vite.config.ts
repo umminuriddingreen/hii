@@ -5,6 +5,7 @@ import { WebSocketServer } from 'ws';
 import { attachPtyGateway, isLocalRequest } from './server/pty-gateway.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
+const hiiTarget = process.env.HII_TARGET === 'desktop' ? 'desktop' : 'web';
 
 function hiiPtyGateway(): Plugin {
   return {
@@ -32,6 +33,9 @@ function hiiPtyGateway(): Plugin {
 }
 
 export default defineConfig({
+  define: {
+    __HII_TARGET__: JSON.stringify(hiiTarget)
+  },
   envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
   plugins: [sveltekit(), hiiPtyGateway()],
   resolve: {
