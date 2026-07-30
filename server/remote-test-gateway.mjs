@@ -9,7 +9,6 @@ import {
   ARTIFACT_HTTPS_PORT,
   ARTIFACT_PORT,
   DISCONNECT_GRACE_MS,
-  MAX_AUTH_FAILURES,
   MAX_MESSAGE_BYTES,
   MAX_MESSAGES_PER_MINUTE,
   MODEL,
@@ -22,9 +21,7 @@ import {
   ensureSessionLayout,
   funnelStartArgs,
   funnelStopArgs,
-  hashPasscode,
   newSecret,
-  passcodeMatches,
   readJson,
   resolvePublicArtifact,
   routeOwnedBy,
@@ -108,23 +105,20 @@ export function replayTranscript(layout, socket) {
   }
 }
 
-export async function startRemoteTestGateway(config, passcode, dependencies = {}) {
+export async function startRemoteTestGateway(config, dependencies = {}) {
   const run = dependencies.run ?? runCommand;
   const expose = dependencies.expose ?? config.expose ?? true;
   const terminalPort = config.terminalPort ?? TERMINAL_PORT;
   const artifactPort = config.artifactPort ?? ARTIFACT_PORT;
   const disconnectGraceMs = config.disconnectGraceMs ?? DISCONNECT_GRACE_MS;
   const layout = await ensureSessionLayout(config.root, config.sessionId);
-  const passcodeRecord = hashPasscode(passcode);
   const sessionPath = config.sessionPath;
   const basePath = `/s/${sessionPath}`;
   const bearer = newSecret();
   const artifactCookie = newSecret();
   const tickets = new Map();
-  const authLimiter = new SlidingWindowLimiter(10);
+  const claimLimiter = new SlidingWindowLimiter(10);
   const messageLimiter = new SlidingWindowLimiter(MAX_MESSAGES_PER_MINUTE);
-  let failedAttempts = 0;
-  let locked = false;
   let claimed = false;
   let activeSocket = null;
   let pty = null;
@@ -234,25 +228,12 @@ export async function startRemoteTestGateway(config, passcode, dependencies = {}
     if (url.pathname === `${basePath}/app.js`) return await serveStatic('app.js', res);
     if (url.pathname === `${basePath}/xterm.js`) return await serveStatic('xterm.js', res);
     if (url.pathname === `${basePath}/xterm.css`) return await serveStatic('xterm.css', res);
-    if (url.pathname === `${basePath}/auth` && req.method === 'POST') {
-      if (locked) return json(res, 423, { error: 'session locked' });
+    if (url.pathname === `${basePath}/claim` && req.method === 'POST') {
       if (claimed) return json(res, 409, { error: 'session already claimed' });
-      if (!authLimiter.allow(remoteKey(req))) return json(res, 429, { error: 'rate limited' });
-      try {
-        const body = await requestJson(req);
-        if (typeof body.passcode !== 'string' || !passcodeMatches(body.passcode, passcodeRecord)) {
-          failedAttempts += 1;
-          appendEvent(layout, { type: 'auth-failed', attempt: failedAttempts });
-          if (failedAttempts >= MAX_AUTH_FAILURES) locked = true;
-          return json(res, locked ? 423 : 401, { error: locked ? 'session locked' : 'invalid passcode' });
-        }
-        failedAttempts = 0;
-        claimed = true;
-        appendEvent(layout, { type: 'auth-succeeded' });
-        return json(res, 200, { token: bearer });
-      } catch {
-        return json(res, 400, { error: 'invalid request' });
-      }
+      if (!claimLimiter.allow(remoteKey(req))) return json(res, 429, { error: 'rate limited' });
+      claimed = true;
+      appendEvent(layout, { type: 'session-claimed' });
+      return json(res, 200, { token: bearer });
     }
     if (url.pathname === `${basePath}/latest-ticket` && req.method === 'POST') {
       if (bearerToken(req) !== bearer) return json(res, 401, { error: 'unauthorized' });
@@ -489,9 +470,9 @@ async function childMain() {
   if (!encoded) return;
   const config = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
   process.once('message', async (message) => {
-    if (message?.type !== 'passcode' || typeof message.passcode !== 'string') process.exit(2);
+    if (message?.type !== 'start') process.exit(2);
     try {
-      const gateway = await startRemoteTestGateway(config, message.passcode);
+      const gateway = await startRemoteTestGateway(config);
       process.send?.({ type: 'ready', pid: process.pid, basePath: gateway.basePath });
       process.disconnect?.();
       process.once('SIGTERM', () => void gateway.shutdown('operator-stop').finally(() => process.exit(0)));

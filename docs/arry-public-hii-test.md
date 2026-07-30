@@ -1,7 +1,7 @@
 # Arry public HII test
 
 This is a disposable, one-tester HII session served from the M3 Max through
-Tailscale Funnel. After the passcode screen, the browser contains exactly two
+Tailscale Funnel. The unguessable URL opens directly into exactly two
 equal panes:
 
 - a live bare HII terminal
@@ -29,9 +29,8 @@ The start command checks that:
 - `qwen3.6:35b-mlx` is available from loopback Ollama
 - a local Chrome-family browser is available for artifact verification
 
-It then asks for the shared passcode without echoing it or placing it in shell
-history. It prints the unguessable public URL only after both Funnel routes and
-the gateway are ready.
+It prints the unguessable public URL only after both Funnel routes and the
+gateway are ready.
 
 ## Session boundary
 
@@ -48,9 +47,9 @@ Credential-like environment variables and the rest of the host home directory
 are unavailable. The disposable workspace and isolated HII runtime are the
 only writable session locations. Deletion is denied.
 
-Only the first correct passcode can claim the session. Five failed attempts
-lock it until restart. Browser messages have size and rate limits, and a second
-live WebSocket client is refused.
+Only the first browser to open the unguessable URL can claim the session.
+Browser messages have size and rate limits, and a second live WebSocket client
+is refused.
 
 ## Artifacts
 

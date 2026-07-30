@@ -1,10 +1,9 @@
 const base = new URL('.', location.href).pathname.replace(/\/$/, '');
-const gate = document.querySelector('#gate');
-const passcode = document.querySelector('#passcode');
+const bearerKey = `hii-remote-bearer:${base}`;
 const session = document.querySelector('#session');
 const terminalPane = document.querySelector('#terminal');
 const artifact = document.querySelector('#artifact');
-let bearer = sessionStorage.getItem('hii-remote-bearer');
+let bearer = sessionStorage.getItem(bearerKey);
 let socket;
 let latestArtifactId;
 let terminal;
@@ -47,7 +46,6 @@ function ensureTerminal() {
 }
 
 function showSession() {
-  gate.hidden = true;
   session.hidden = false;
   ensureTerminal();
   fitTerminal();
@@ -56,32 +54,13 @@ function showSession() {
   refreshArtifact();
 }
 
-async function authenticate(value) {
-  const response = await fetch(`${base}/auth`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ passcode: value })
-  });
-  if (!response.ok) {
-    passcode.value = '';
-    passcode.focus();
-    return;
-  }
+async function claimSession() {
+  const response = await fetch(`${base}/claim`, { method: 'POST' });
+  if (!response.ok) return;
   bearer = (await response.json()).token;
-  sessionStorage.setItem('hii-remote-bearer', bearer);
+  sessionStorage.setItem(bearerKey, bearer);
   showSession();
 }
-
-gate.addEventListener('submit', (event) => {
-  event.preventDefault();
-  authenticate(passcode.value);
-});
-
-passcode.addEventListener('keydown', (event) => {
-  if (event.key !== 'Enter') return;
-  event.preventDefault();
-  authenticate(passcode.value);
-});
 
 function connect() {
   if (!bearer || socket?.readyState === WebSocket.OPEN) return;
@@ -116,7 +95,7 @@ async function refreshArtifact() {
     headers: { authorization: `Bearer ${bearer}` }
   });
   if (response.status === 401) {
-    sessionStorage.removeItem('hii-remote-bearer');
+    sessionStorage.removeItem(bearerKey);
     bearer = null;
     location.reload();
     return;
@@ -131,3 +110,4 @@ async function refreshArtifact() {
 }
 
 if (bearer) showSession();
+else claimSession();

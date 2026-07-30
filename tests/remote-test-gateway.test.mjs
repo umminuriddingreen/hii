@@ -126,43 +126,7 @@ printf '{"hostRead":%s,"deleteDenied":%s,"wrote":"%s"}' "$host_read" "$delete_de
   }
 });
 
-test('passcode gate locks after five failures without starting HII or Funnel', async (context) => {
-  const root = await temporary();
-  context.after(() => fs.rm(root, { recursive: true, force: true }));
-  const stateFile = path.join(root, 'active.json');
-  const gateway = await startRemoteTestGateway({
-    root,
-    stateFile,
-    sessionId: '20260730120000-fedcbafedcbafedcbafedcba',
-    sessionPath: 'unguessable-session-path-123456789',
-    hiiBinary: process.execPath,
-    terminalPort: 0,
-    artifactPort: 0,
-    expose: false,
-    disconnectGraceMs: 50,
-    chromePath: false
-  }, 'correct horse battery staple', { expose: false });
-  context.after(() => gateway.shutdown('test'));
-  const address = gateway.servers.terminal.address();
-  const endpoint = `http://127.0.0.1:${address.port}${gateway.basePath}/auth`;
-  for (let attempt = 1; attempt <= 5; attempt += 1) {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ passcode: 'wrong' })
-    });
-    assert.equal(response.status, attempt === 5 ? 423 : 401);
-  }
-  const locked = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ passcode: 'correct horse battery staple' })
-  });
-  assert.equal(locked.status, 423);
-  assert.equal(gateway.manifest.artifacts.length, 0);
-});
-
-test('only the first correct passcode can claim the tester session', async (context) => {
+test('only the first browser can claim the unguessable session URL', async (context) => {
   const root = await temporary();
   context.after(() => fs.rm(root, { recursive: true, force: true }));
   const gateway = await startRemoteTestGateway({
@@ -176,16 +140,12 @@ test('only the first correct passcode can claim the tester session', async (cont
     expose: false,
     disconnectGraceMs: 50,
     chromePath: false
-  }, 'correct horse battery staple', { expose: false });
+  }, { expose: false });
   context.after(() => gateway.shutdown('test'));
-  const endpoint = `http://127.0.0.1:${gateway.servers.terminal.address().port}${gateway.basePath}/auth`;
-  const authenticate = () => fetch(endpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ passcode: 'correct horse battery staple' })
-  });
-  assert.equal((await authenticate()).status, 200);
-  assert.equal((await authenticate()).status, 409);
+  const endpoint = `http://127.0.0.1:${gateway.servers.terminal.address().port}${gateway.basePath}/claim`;
+  const claim = () => fetch(endpoint, { method: 'POST' });
+  assert.equal((await claim()).status, 200);
+  assert.equal((await claim()).status, 409);
 });
 
 test('a reconnect receives the preserved terminal transcript', async (context) => {

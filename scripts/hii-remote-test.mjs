@@ -40,45 +40,6 @@ function print(value) {
   process.stdout.write(`${typeof value === 'string' ? value : JSON.stringify(value, null, 2)}\n`);
 }
 
-async function hidden(prompt) {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    throw new Error('start requires an interactive terminal for the hidden passcode prompt');
-  }
-  process.stdout.write(prompt);
-  process.stdin.setRawMode(true);
-  process.stdin.resume();
-  process.stdin.setEncoding('utf8');
-  return await new Promise((resolve, reject) => {
-    let value = '';
-    const cleanup = () => {
-      process.stdin.setRawMode(false);
-      process.stdin.pause();
-      process.stdin.off('data', onData);
-      process.stdout.write('\n');
-    };
-    const onData = (chunk) => {
-      for (const character of chunk) {
-        if (character === '\u0003') {
-          cleanup();
-          reject(new Error('cancelled'));
-          return;
-        }
-        if (character === '\r' || character === '\n') {
-          cleanup();
-          resolve(value);
-          return;
-        }
-        if (character === '\u007f' || character === '\b') {
-          value = value.slice(0, -1);
-        } else if (character >= ' ') {
-          value += character;
-        }
-      }
-    };
-    process.stdin.on('data', onData);
-  });
-}
-
 async function preflight() {
   return await inspectPreflight({
     hiiBinary: process.env.HII_REMOTE_TEST_BINARY || defaultBinary,
@@ -114,11 +75,6 @@ async function start() {
       `preflight failed; no server, PTY, or Funnel route was changed${recovery.length ? `. Recovery: ${recovery.join(' ; ')}` : ''}`
     );
   }
-  const passcode = await hidden('Session passcode: ');
-  if (passcode.length < 10) throw new Error('passcode must be at least 10 characters');
-  const confirmation = await hidden('Confirm passcode: ');
-  if (passcode !== confirmation) throw new Error('passcodes do not match');
-
   const id = newSessionId();
   const sessionPath = newSecret(24);
   const terminalPort = Number(process.env.HII_REMOTE_TEST_TERMINAL_PORT) || TERMINAL_PORT;
@@ -161,7 +117,7 @@ async function start() {
         reject(new Error(message.message));
       }
     });
-    child.send({ type: 'passcode', passcode });
+    child.send({ type: 'start' });
   });
   if (child.connected) child.disconnect();
   child.unref();

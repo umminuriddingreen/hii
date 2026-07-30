@@ -11,22 +11,6 @@ body {
   background: #000;
 }
 
-#gate {
-  width: 100%;
-  height: 100%;
-  display: grid;
-  place-items: center;
-}
-
-#gate input {
-  width: min(24rem, 75vw);
-  padding: 0.75rem;
-  color: #fff;
-  background: #000;
-  border: 1px solid #444;
-  font: 1rem ui-monospace, monospace;
-}
-
 #session {
   width: 100%;
   height: 100%;
@@ -34,8 +18,7 @@ body {
   grid-template-columns: 1fr 1fr;
 }
 
-#session[hidden],
-#gate[hidden] {
+#session[hidden] {
   display: none;
 }
 
