@@ -256,15 +256,28 @@ impl Toolbelt {
     }
 
     pub fn shell(&self, command: &str, verification: bool) -> ToolResult {
-        if let Err(error) = validate_shell(command, &self.workspace) {
+        self.shell_with_delete_approval(command, verification, false)
+    }
+
+    pub fn shell_with_delete_approval(
+        &self,
+        command: &str,
+        verification: bool,
+        deletion_approved: bool,
+    ) -> ToolResult {
+        if let Err(error) = validate_shell(command, &self.workspace, deletion_approved) {
             return tool_result(Err(error), verification);
         }
         let process = platform_shell(command);
         self.run_command(process, verification, DEFAULT_TIMEOUT_SECS)
     }
 
-    pub fn shell_interactive(&self, command: &str) -> ToolResult {
-        if let Err(error) = validate_shell(command, &self.workspace) {
+    pub fn shell_interactive_with_delete_approval(
+        &self,
+        command: &str,
+        deletion_approved: bool,
+    ) -> ToolResult {
+        if let Err(error) = validate_shell(command, &self.workspace, deletion_approved) {
             return tool_result(Err(error), false);
         }
         let result = platform_shell(command)
@@ -515,13 +528,14 @@ fn platform_shell(command: &str) -> Command {
     }
 }
 
-fn validate_shell(command: &str, workspace: &Path) -> Result<(), String> {
+fn validate_shell(command: &str, workspace: &Path, deletion_approved: bool) -> Result<(), String> {
     let normalized = command.to_ascii_lowercase();
+    if crate::contract::deletion_shell(command) && !deletion_approved {
+        return Err("file deletion requires explicit operator approval".into());
+    }
     let blocked = [
         // POSIX
         "sudo ",
-        "rm ",
-        "rm\t",
         "git reset",
         "git clean",
         "git checkout --",
@@ -536,12 +550,7 @@ fn validate_shell(command: &str, workspace: &Path) -> Result<(), String> {
         "dd if=",
         "chmod -r",
         // Windows equivalents
-        "del ",
-        "erase ",
-        "rmdir ",
-        "rd ",
         "format ",
-        "remove-item ",
         "diskpart",
     ];
     if let Some(pattern) = blocked
@@ -630,8 +639,9 @@ mod tests {
     #[test]
     fn destructive_shell_is_blocked() {
         let path = workspace();
-        assert!(validate_shell("rm -rf build", &path).is_err());
-        assert!(validate_shell("git status --short", &path).is_ok());
+        assert!(validate_shell("rm -rf build", &path, false).is_err());
+        assert!(validate_shell("rm -rf build", &path, true).is_ok());
+        assert!(validate_shell("git status --short", &path, false).is_ok());
         let _ = fs::remove_dir_all(path);
     }
 
@@ -698,9 +708,9 @@ mod tests {
     #[test]
     fn windows_destructive_patterns_are_blocked() {
         let path = workspace();
-        assert!(validate_shell("del important.txt", &path).is_err());
-        assert!(validate_shell("Remove-Item x", &path).is_err());
-        assert!(validate_shell("cargo test", &path).is_ok());
+        assert!(validate_shell("del important.txt", &path, false).is_err());
+        assert!(validate_shell("Remove-Item x", &path, false).is_err());
+        assert!(validate_shell("cargo test", &path, false).is_ok());
         let _ = fs::remove_dir_all(path);
     }
 }

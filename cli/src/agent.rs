@@ -1,7 +1,7 @@
 use crate::{
     config::{AppPaths, DEFAULT_MODEL, DEFAULT_REVIEW_MODEL},
-    contract::{sensitive_shell, Authority, Contract, Decision},
-    ollama::{Message, Ollama},
+    contract::{deletion_shell, sensitive_shell, Authority, Contract, Decision},
+    ollama::{ChatResult, ChatStreamEvent, Message, Ollama},
     receipt::{redact_text, unix_ms, Receipt, RunStore, VerificationRecord},
     tools::{ToolResult, Toolbelt},
 };
@@ -12,7 +12,10 @@ use std::{
     io::{self, IsTerminal, Write},
     path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
+    sync::mpsc,
     sync::OnceLock,
+    thread,
+    time::Duration,
 };
 
 /// Set by the Ctrl-C handler so an in-flight run can stop at the next step and
@@ -81,9 +84,6 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     if options.goal.trim().is_empty() {
         return Err("goal cannot be empty".into());
     }
-    if options.max_steps == 0 || options.max_steps > 64 {
-        return Err("max steps must be between 1 and 64".into());
-    }
     validate_declared_verification(&options.verify)?;
 
     let tools = Toolbelt::new(options.workspace)?;
@@ -137,9 +137,6 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     if options.verbose {
         println!("HII run {}", store.id);
         println!("{}\n", contract.banner());
-    } else if io::stdout().is_terminal() {
-        print!("HII is working…\r");
-        let _ = io::stdout().flush();
     }
     let mut approvals: Vec<String> = Vec::new();
     arm_interrupt();
@@ -160,25 +157,21 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     messages.push(Message::user(options.goal.clone()));
     let mut verification = Vec::new();
     let mut touched_artifacts = BTreeSet::new();
-    let mut parse_failures = 0usize;
     let mut final_summary = None;
     let mut final_next = None;
     let mut steps = 0usize;
 
-    while steps < options.max_steps {
+    loop {
+        if options.max_steps > 0 && steps >= options.max_steps {
+            break;
+        }
         if INTERRUPTED.load(Ordering::SeqCst) {
             interrupted = true;
             store.event("run.interrupted", json!({ "step": steps }))?;
             break;
         }
         steps += 1;
-        if options.verbose {
-            print!("[{steps}/{}] thinking…\r", options.max_steps);
-        }
-        let raw = ollama.chat_json(&model, &messages)?;
-        if options.verbose {
-            print!("\x1b[2K\r");
-        }
+        let raw = stream_model_json(&ollama, &model, &messages, steps)?.content;
         store.event(
             "model.response",
             json!({ "step": steps, "content": redact_text(&raw) }),
@@ -186,21 +179,16 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         let action = match parse_action(&raw) {
             Ok(action) => action,
             Err(error) => {
-                parse_failures += 1;
                 if options.verbose {
-                    println!("[{steps}/{}] protocol retry: {error}", options.max_steps);
+                    println!("[step {steps}] protocol retry: {error}");
                 }
                 messages.push(Message::assistant(raw));
                 messages.push(Message::user(format!(
                     "Protocol error: {error}. Return one JSON object matching the required action schema."
                 )));
-                if parse_failures >= 3 {
-                    return Err("model failed the HII action protocol three times".into());
-                }
                 continue;
             }
         };
-        parse_failures = 0;
         match action {
             Action::Tool {
                 tool,
@@ -217,8 +205,8 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 limit,
             } => {
                 let label = reason.as_deref().unwrap_or("using workspace tool");
-                if options.verbose {
-                    println!("[{steps}/{}] ◆ {tool}: {label}", options.max_steps);
+                if io::stdout().is_terminal() {
+                    crate::tui::tool_start(steps, &tool, label);
                 }
                 let is_hii = crate::hii_tools::is_hii_tool(&tool);
                 let mutates = matches!(tool.as_str(), "write" | "edit")
@@ -226,7 +214,14 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     || (is_hii && crate::hii_tools::is_mutating(&tool));
                 let sensitive = (tool == "shell" || tool == "verify")
                     && command.as_deref().is_some_and(sensitive_shell);
-                let decision = options.authority.decide(mutates, sensitive);
+                let deletion = !options.dry_run
+                    && (tool == "shell" || tool == "verify")
+                    && command.as_deref().is_some_and(deletion_shell);
+                let decision = if deletion {
+                    Decision::Prompt
+                } else {
+                    options.authority.decide(mutates, sensitive)
+                };
                 if let Some(blocked) =
                     enforce_authority(decision, &tool, label, command.as_deref(), &mut approvals)
                 {
@@ -255,11 +250,15 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                             replace_all,
                             offset,
                             limit,
+                            allow_delete: deletion,
                         },
                         options.dry_run,
                     )
                 };
                 let safe_output = redact_text(&result.output);
+                if io::stdout().is_terminal() {
+                    crate::tui::tool_result(result.ok, result.verification);
+                }
                 if result.ok && matches!(tool.as_str(), "write" | "edit") {
                     if let Some(path) = path.as_deref() {
                         touched_artifacts.insert(path.to_string());
@@ -301,10 +300,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                         if claimed.is_empty() { "none" } else { "present" }
                     )));
                     if options.verbose {
-                        println!(
-                            "[{steps}/{}] proof required before completion",
-                            options.max_steps
-                        );
+                        println!("[step {steps}] proof required before completion");
                     }
                     continue;
                 }
@@ -348,10 +344,12 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         if interrupted {
             format!("Interrupted by operator after {steps} step(s); partial work preserved.")
         } else {
-            format!(
-                "Step limit reached before the model returned a final result ({} steps).",
-                options.max_steps
-            )
+            match options.max_steps {
+                0 => format!("Run ended before the model returned a final result ({steps} steps)."),
+                limit => {
+                    format!("Operator step ceiling reached before completion ({limit} steps).")
+                }
+            }
         }
     }));
     if !declared_checks_passed {
@@ -477,22 +475,86 @@ fn system_prompt(
     } else {
         declared_verification.join(" ; ")
     };
+    let limit = if max_steps == 0 {
+        "No tool-step ceiling; continue until finished or interrupted.".to_string()
+    } else {
+        format!("Operator ceiling: {max_steps} tool steps.")
+    };
     format!(
-        r#"You are HII's local workspace agent. Finish the goal with proof.
+        r#"You are HII. Finish the local goal with proof.
 Workspace: {workspace}
-Limit: {max_steps} steps. Dry run: {dry_run}.
+{limit} Dry run: {dry_run}.
 Done when: {done_when}
 Acceptance checks: {declared_verification}
 
 Loop: inspect -> act -> verify change -> adjust -> final.
-Return one JSON object/turn. The action `type` is the tool:
+Return one JSON action/turn. `type` is:
 read,list,search,write,edit,shell,verify,http,hii_context,og_next,caps_check,board_read,board_write,skill_search,bridge_send,bridge_read.
-Use only needed fields: path,query,command,content,old,new,replace_all,offset,limit,url.
+Fields: path,query,command,content,old,new,replace_all,offset,limit,url.
 Finish: {{"type":"final","summary":"result","verification":["checks run"],"next":null}}
 
-Read AGENTS.md before editing. Use minimal context; read large files in slices. Preserve unclear work. Prefer edit for small changes and verify for checks. HII tools expose context, graph, capabilities, board, skills, and bridge. Stay inside the workspace; never publish, push, spend, message, delete, or read secrets. Never claim unrun proof."#,
+Read AGENTS.md. Use minimal, sliced context. Preserve unclear work. Verify changes. Stay inside the workspace; never publish, push, spend, message, or read secrets. Deletion needs live approval; never hide it in a script. Never claim unrun proof."#,
         workspace = workspace.display()
     )
+}
+
+fn stream_model_json(
+    ollama: &Ollama,
+    model: &str,
+    messages: &[Message],
+    step: usize,
+) -> Result<ChatResult, String> {
+    let ollama = ollama.clone();
+    let model_for_thread = model.to_string();
+    let messages = messages.to_vec();
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        ollama.chat_with_stream(&model_for_thread, &messages, true, true, sender);
+    });
+
+    let interactive = io::stdout().is_terminal();
+    let mut thinking_started = false;
+    let mut content_started = false;
+    loop {
+        match receiver.recv_timeout(Duration::from_millis(120)) {
+            Ok(ChatStreamEvent::Thinking(delta)) => {
+                if interactive {
+                    if !thinking_started {
+                        println!("\n  THINKING · step {step}");
+                        print!("  ");
+                        thinking_started = true;
+                    }
+                    print!("{}", delta.replace('\n', "\n  "));
+                    let _ = io::stdout().flush();
+                }
+            }
+            Ok(ChatStreamEvent::Content(delta)) => {
+                if interactive {
+                    if !content_started {
+                        if thinking_started {
+                            println!();
+                        }
+                        println!("\n  MODEL · step {step}");
+                        print!("  ");
+                        content_started = true;
+                    }
+                    print!("{}", delta.replace('\n', "\n  "));
+                    let _ = io::stdout().flush();
+                }
+            }
+            Ok(ChatStreamEvent::Done(result)) => {
+                if interactive && (thinking_started || content_started) {
+                    println!("\n");
+                    let _ = io::stdout().flush();
+                }
+                return result;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("the local model stream stopped unexpectedly".into())
+            }
+        }
+    }
 }
 
 fn validate_declared_verification(commands: &[String]) -> Result<(), String> {
@@ -577,6 +639,7 @@ pub(crate) struct ToolCall<'a> {
     pub replace_all: bool,
     pub offset: Option<usize>,
     pub limit: Option<usize>,
+    pub allow_delete: bool,
 }
 
 pub(crate) fn execute_tool(tools: &Toolbelt, call: ToolCall, dry_run: bool) -> ToolResult {
@@ -599,8 +662,12 @@ pub(crate) fn execute_tool(tools: &Toolbelt, call: ToolCall, dry_run: bool) -> T
             call.replace_all,
         ),
         "shell" if dry_run => blocked("shell"),
-        "shell" => tools.shell(call.command.unwrap_or(""), false),
-        "verify" => tools.shell(call.command.unwrap_or(""), true),
+        "shell" => {
+            tools.shell_with_delete_approval(call.command.unwrap_or(""), false, call.allow_delete)
+        }
+        "verify" => {
+            tools.shell_with_delete_approval(call.command.unwrap_or(""), true, call.allow_delete)
+        }
         "http" => tools.http(call.url.unwrap_or("")),
         other => ToolResult {
             ok: false,
@@ -671,6 +738,19 @@ fn enforce_authority(
             }
         }
     }
+}
+
+pub(crate) fn request_deletion_approval(command: &str) -> bool {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return false;
+    }
+    println!(
+        "\nDELETE APPROVAL NEEDED\n  COMMAND  {command}\n  SCOPE    current workspace only\n  EFFECT   removes files or directories"
+    );
+    print!("  Allow this deletion? [y/N] ");
+    let _ = io::stdout().flush();
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer).is_ok() && matches!(answer.trim(), "y" | "Y" | "yes")
 }
 
 fn print_receipt(receipt: &Receipt, path: &std::path::Path) {
@@ -749,6 +829,19 @@ mod tests {
             "agent prompt grew to {} bytes",
             prompt.len()
         );
+    }
+
+    #[test]
+    fn zero_steps_means_no_agent_ceiling() {
+        let prompt = system_prompt(
+            std::path::Path::new("/workspace"),
+            0,
+            false,
+            "verified",
+            &[],
+        );
+        assert!(prompt.contains("No tool-step ceiling"));
+        assert!(!prompt.contains("Operator ceiling:"));
     }
 
     #[test]

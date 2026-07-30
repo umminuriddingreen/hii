@@ -15,7 +15,7 @@
 
 use crate::agent::{execute_tool, ToolCall};
 use crate::config::AppPaths;
-use crate::contract::{sensitive_shell, Authority, Decision};
+use crate::contract::{deletion_shell, sensitive_shell, Authority, Decision};
 use crate::tools::{ToolResult, Toolbelt};
 use crate::{acp, hii_tools};
 use serde::{Deserialize, Serialize};
@@ -222,7 +222,13 @@ fn tools_call(
         || (name == "shell" && command.is_some())
         || (is_hii && hii_tools::is_mutating(name));
     let sensitive = matches!(name, "shell" | "verify") && command.is_some_and(sensitive_shell);
-    match authority.decide(mutates, sensitive) {
+    let deletion = matches!(name, "shell" | "verify") && command.is_some_and(deletion_shell);
+    let decision = if deletion {
+        Decision::Prompt
+    } else {
+        authority.decide(mutates, sensitive)
+    };
+    match decision {
         Decision::Allow => {}
         Decision::Deny => {
             return Err((
@@ -259,6 +265,7 @@ fn tools_call(
                 replace_all: args["replace_all"].as_bool().unwrap_or(false),
                 offset: args["offset"].as_u64().map(|value| value as usize),
                 limit: args["limit"].as_u64().map(|value| value as usize),
+                allow_delete: false,
             },
             false,
         )
@@ -327,6 +334,17 @@ mod tests {
         let params = json!({ "name": "read", "arguments": { "path": "f.txt" } });
         let result = tools_call(&params, &tools, &path, Authority::ReadOnly).unwrap();
         assert_eq!(result["isError"], json!(false));
+        let _ = std::fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn deletion_is_refused_without_an_interactive_approval_channel() {
+        let (tools, path) = tempbelt("delete");
+        std::fs::write(path.join("f.txt"), "keep").unwrap();
+        let params = json!({ "name": "shell", "arguments": { "command": "rm f.txt" } });
+        let error = tools_call(&params, &tools, &path, Authority::Yolo).unwrap_err();
+        assert_eq!(error.0, AUTHORITY_DENIED);
+        assert!(path.join("f.txt").exists());
         let _ = std::fs::remove_dir_all(path);
     }
 }

@@ -130,7 +130,14 @@ pub fn welcome(workspace: &Path, model: &str, max_steps: usize, git: &str) {
         "  {}  {}",
         paint("ready", &[GREEN]),
         paint(
-            &format!("{model} · workspace · {max_steps} steps · receipts"),
+            &format!(
+                "{model} · workspace · {} · live model stream · receipts",
+                if max_steps == 0 {
+                    "unlimited".to_string()
+                } else {
+                    format!("{max_steps} steps")
+                }
+            ),
             &[DIM, SLATE]
         )
     );
@@ -251,6 +258,11 @@ pub fn reply(message: &str, activity: Option<&str>) {
     if let Some(activity) = activity {
         println!("  {}", paint(activity, &[DIM, SLATE]));
     }
+    println!();
+}
+
+pub fn activity(message: &str) {
+    println!("  {}", paint(message, &[DIM, SLATE]));
     println!();
 }
 

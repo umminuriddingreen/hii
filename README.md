@@ -197,9 +197,10 @@ summaries.
 ## Terminal Control Plane
 
 The `hii` command is a fast Rust workspace agent for the same governed HII/AII
-loop. Bare `hii` opens a clean, ongoing conversation with session memory and
-quiet access to workspace tools. A quoted intent or `hii run` starts explicit
-non-interactive work.
+loop. Bare `hii` opens an ongoing conversation with session memory and a live
+stream of the local model's provider-supplied thinking, response text, tool
+actions, and results. A quoted intent or `hii run` uses the same visible stream
+for explicit work.
 
 ```sh
 hii
@@ -217,17 +218,17 @@ hii task "Add source provenance to the import receipt" --coordinate /Users/ummi/
 hii work
 ```
 
-The default workhorse is local `qwen3.6:27b-mlx`. `--review` asks
-`qwen3.6:35b-mlx` for a stronger final proof review. Each run is bounded by an
-explicit workspace and step limit, uses typed read/search/write/shell/verify
-tools, and persists events plus a receipt under `~/.hii/runs/cli/`.
+The default workhorse is local `qwen3.6:35b-mlx`. There is no model/tool-step
+ceiling by default: HII continues until the model finishes or the operator
+interrupts with Esc/Ctrl-C. `--max-steps N` adds a ceiling only when explicitly
+requested. Typed read/search/write/shell/verify tools remain inside the
+workspace, and events plus receipts persist under `~/.hii/runs/cli/`.
 
-Conversational turns show only HII's natural response. Model selection, tool
-steps, run IDs, and receipt bookkeeping remain backend state. Conversation
-events are stored under `~/.hii/conversations/cli/`; when a turn uses workspace
-tools, its proof remains available through `hii proof` without cluttering chat.
-Explicit runs are quiet by default too; `hii run --verbose` exposes diagnostic
-plumbing when it is genuinely useful.
+Conversation events are stored under `~/.hii/conversations/cli/`; when a turn
+uses workspace tools, its proof remains available through `hii proof`.
+Recognizable file deletion always pauses for live yes/no approval—even under
+YOLO authority—and is refused on non-interactive MCP channels. `hii run
+--verbose` adds the full contract and receipt coordinates to the live stream.
 
 The native surface is intentionally small: `run`, `status`, `doctor`, `models`,
 and `proof`. Existing command families are delegated to the current Node

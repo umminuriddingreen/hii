@@ -58,7 +58,12 @@ struct Cli {
     )]
     model: Option<String>,
 
-    #[arg(long, global = true, default_value_t = DEFAULT_MAX_STEPS, help = "Maximum autonomous tool steps")]
+    #[arg(
+        long,
+        global = true,
+        default_value_t = DEFAULT_MAX_STEPS,
+        help = "Optional tool-step ceiling; 0 means unlimited"
+    )]
     max_steps: usize,
 
     #[command(subcommand)]
@@ -509,7 +514,13 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 let activity = show_activity
                     .then(|| conversation.activity_footer())
                     .flatten();
-                tui::reply(&reply, activity.as_deref());
+                if show_activity && io::stdout().is_terminal() {
+                    if let Some(activity) = activity.as_deref() {
+                        tui::activity(activity);
+                    }
+                } else {
+                    tui::reply(&reply, activity.as_deref());
+                }
             }
             Err(error) => tui::error(&error),
         }
@@ -700,8 +711,13 @@ fn status(paths: &AppPaths, cwd: Option<PathBuf>, json: bool) -> Result<(), Stri
             models.len()
         );
         println!(
-            "agent      {}  ·  {} steps",
-            DEFAULT_MODEL, DEFAULT_MAX_STEPS
+            "agent      {}  ·  {}",
+            DEFAULT_MODEL,
+            if DEFAULT_MAX_STEPS == 0 {
+                "unlimited"
+            } else {
+                "operator step ceiling"
+            }
         );
         if !latest.trim().is_empty() {
             println!("proof      hii proof {}", latest.trim());
@@ -1116,6 +1132,12 @@ mod tests {
     fn native_command_is_preserved() {
         let args = vec!["hii".into(), "status".into()];
         assert_eq!(normalize_goal_args(args.clone()), args);
+    }
+
+    #[test]
+    fn cli_has_no_step_ceiling_by_default() {
+        let cli = Cli::try_parse_from(["hii"]).expect("parse default CLI");
+        assert_eq!(cli.max_steps, 0);
     }
 
     #[test]

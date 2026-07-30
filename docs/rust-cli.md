@@ -37,25 +37,32 @@ production board (`~/.hii/board/tasks.jsonl`, 23 tasks including duplicate
 archival) with `diff <(hii board list --all) <(node scripts/hii-cli.mjs board
 list --all)` producing zero diff, plus unit tests in `cli/src/board.rs`.
 
-Interactive conversation preserves context across turns and renders only the
-assistant's useful response. Internal model actions and tool observations are
-persisted silently; they are not terminal UI.
+Interactive conversation preserves context across turns and streams the local
+model's provider-supplied thinking and response text as it arrives. Tool
+actions and results remain visible in sequence, so bare `hii` shows what the
+model is considering and doing instead of replacing activity with a generic
+working indicator.
 
 Type `/help` inside bare `hii` for the conversational control surface. It
 includes model switching, automatic/manual compaction, token and throughput
 activity, managed Codex and Claude sessions, local schedules, Apple Calendar,
 system resources, proof inspection, and automatically learned skill drafts.
 Schedule, Calendar, and system-resource controls require a `preview` build.
-`/thinking off|compact|detailed` changes only the activity rail; raw hidden
-reasoning is never printed.
+`/thinking off|compact|raw` controls provider-supplied thinking display. Model
+response text continues streaming in every mode; `raw` is the default.
+
+There is no tool-step ceiling by default. HII continues until the model
+finishes or the operator interrupts with Esc/Ctrl-C. `--max-steps N` remains
+available only when the operator deliberately wants a finite ceiling; `0`
+means unlimited.
 
 Verified conversational workflows are conservatively analyzed after the turn.
 When HII finds a genuinely repeatable procedure it creates or updates a draft
 under `~/.hii/skills/proposed/`. Drafting is automatic; registration and skill
 execution remain proof-backed operator decisions.
 
-Explicit `hii run` uses the same quiet presentation. Add `--verbose` only when
-debugging the model/tool protocol or locating a specific backend receipt.
+Explicit `hii run` uses the same live model stream. Add `--verbose` for the
+full contract and backend receipt details.
 
 Native runs preload a bounded, source-labelled context capsule containing the
 workspace's `AGENTS.md`, current Git state, and up to three prior HII receipts
@@ -86,13 +93,13 @@ goal
 → inspect approved workspace
 → choose one typed tool
 → act
-→ observe bounded output
+→ stream model and tool output
 → adjust
 → run an explicit verification tool
 → write receipt
 ```
 
-`qwen3.6:27b-mlx` is the default work model. `--review` sends the final result
+`qwen3.6:35b-mlx` is the default work model. `--review` sends the final result
 and proof record to `qwen3.6:35b-mlx` for a stricter second pass. Ollama remains
 a replaceable local model provider; workspace policy, tools, events, and proof
 belong to HII/AII.
@@ -117,11 +124,14 @@ verification results, Git status, risk, and next action.
 - Every filesystem path is resolved beneath one canonical workspace root.
 - Direct reads and writes under `.git` and common secret-bearing files are
   rejected.
-- Shell commands have a timeout, output cap, path checks, and destructive
-  pattern guard.
+- Shell commands have a timeout, output cap, workspace path checks, and
+  destructive-system guards.
 - Local HTTP verification only accepts `127.0.0.1` or `localhost` URLs.
-- Publishing, pushing, spending, messaging, deletion, and external access are
-  never inferred from a goal.
+- File deletion is never silent: recognizable deletion commands require an
+  explicit live yes/no approval, including under YOLO authority. Stdio/MCP
+  execution refuses deletion because it has no approval channel.
+- Publishing, pushing, spending, messaging, and external access are never
+  inferred from a goal.
 
 The shell guard is not an operating-system sandbox. It is a fast policy layer
 for ordinary local work. Higher-risk execution should move behind an AII

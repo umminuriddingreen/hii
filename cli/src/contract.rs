@@ -86,6 +86,35 @@ pub fn sensitive_shell(command: &str) -> bool {
     MARKERS.iter().any(|marker| c.contains(marker))
 }
 
+/// Recognizable file-removal commands always require a live operator approval,
+/// even under YOLO authority. This is intentionally broader than `rm`: models
+/// commonly reach deletion through Git, PowerShell, Python, Node, or `find`.
+pub fn deletion_shell(command: &str) -> bool {
+    let c = command.to_ascii_lowercase();
+    const MARKERS: &[&str] = &[
+        "rm ",
+        "rm\t",
+        "rmdir ",
+        "unlink ",
+        "git rm ",
+        "find ",
+        " -delete",
+        "del ",
+        "erase ",
+        "remove-item ",
+        "os.remove(",
+        "os.unlink(",
+        "shutil.rmtree(",
+        "fs.unlink(",
+        "fs.rm(",
+        "remove_file(",
+        "remove_dir(",
+        "remove_dir_all(",
+    ];
+    MARKERS.iter().any(|marker| c.contains(marker))
+        && !(c.contains("find ") && !c.contains(" -delete"))
+}
+
 /// The editable work contract serialized into the receipt.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Contract {
@@ -106,9 +135,11 @@ impl Contract {
             authority,
             done_when: "the goal is verified by an actual check".to_string(),
             pause_if: match authority {
-                Authority::Yolo => "never (autonomous)".to_string(),
-                _ => "an action would push, publish, deploy, spend, or leave the workspace"
-                    .to_string(),
+                Authority::Yolo => "a command would delete files".to_string(),
+                _ => {
+                    "a command would delete files; external effects remain outside local authority"
+                        .to_string()
+                }
             },
         }
     }
@@ -167,6 +198,16 @@ mod tests {
         assert!(sensitive_shell("git push origin main"));
         assert!(sensitive_shell("curl https://example.com"));
         assert!(!sensitive_shell("cargo test"));
+    }
+
+    #[test]
+    fn detects_deletion_across_common_shells() {
+        assert!(deletion_shell("rm -rf build"));
+        assert!(deletion_shell("git rm old.rs"));
+        assert!(deletion_shell("python -c 'import os; os.remove(\"x\")'"));
+        assert!(deletion_shell("find . -name '*.tmp' -delete"));
+        assert!(!deletion_shell("find . -name '*.rs' -print"));
+        assert!(!deletion_shell("cargo test"));
     }
 
     #[test]

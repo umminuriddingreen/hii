@@ -88,6 +88,7 @@ pub struct ChatResult {
 #[derive(Debug)]
 pub enum ChatStreamEvent {
     Thinking(String),
+    Content(String),
     Done(Result<ChatResult, String>),
 }
 
@@ -163,10 +164,6 @@ impl Ollama {
                 Ok(response.data.into_iter().map(|model| model.id).collect())
             }
         }
-    }
-
-    pub fn chat_json(&self, model: &str, messages: &[Message]) -> Result<String, String> {
-        Ok(self.chat_json_with_usage(model, messages)?.content)
     }
 
     pub fn chat_json_with_usage(
@@ -304,6 +301,14 @@ impl Ollama {
             } else {
                 self.chat_text_with_usage(model, messages)
             };
+            if let Ok(chat) = &result {
+                if !chat.thinking.is_empty() {
+                    let _ = sender.send(ChatStreamEvent::Thinking(chat.thinking.clone()));
+                }
+                if !chat.content.is_empty() {
+                    let _ = sender.send(ChatStreamEvent::Content(chat.content.clone()));
+                }
+            }
             let _ = sender.send(ChatStreamEvent::Done(result));
             return;
         }
@@ -357,6 +362,9 @@ impl Ollama {
             if !chunk.message.thinking.is_empty() {
                 thinking.push_str(&chunk.message.thinking);
                 let _ = sender.send(ChatStreamEvent::Thinking(chunk.message.thinking));
+            }
+            if !chunk.message.content.is_empty() {
+                let _ = sender.send(ChatStreamEvent::Content(chunk.message.content.clone()));
             }
             content.push_str(&chunk.message.content);
             usage = ChatUsage {

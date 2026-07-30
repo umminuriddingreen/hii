@@ -1,6 +1,7 @@
 use crate::{
     agent::{choose_model, execute_tool, parse_action, Action},
     config::AppPaths,
+    contract::deletion_shell,
     ollama::{ChatResult, ChatStreamEvent, ChatUsage, Message, Ollama},
     receipt::{
         find_receipt, redact_text, unix_ms, ConversationStore, Receipt, RunStore,
@@ -113,9 +114,9 @@ impl Conversation {
             usage: SessionUsage::default(),
             last_skill_draft: None,
             thinking_mode: match std::env::var("HII_THINKING").as_deref() {
+                Ok("off") => ThinkingMode::Off,
                 Ok("compact") => ThinkingMode::Compact,
-                Ok("raw") | Ok("live") => ThinkingMode::Raw,
-                _ => ThinkingMode::Off,
+                _ => ThinkingMode::Raw,
             },
             steering: None,
             queued_inputs: VecDeque::new(),
@@ -134,9 +135,14 @@ impl Conversation {
         let mut verification = Vec::new();
         let mut used_tools = false;
         let mut mutating_work = false;
-        let mut parse_failures = 0usize;
+        let mut steps = 0usize;
 
-        for step in 1..=self.max_steps {
+        loop {
+            if self.max_steps > 0 && steps >= self.max_steps {
+                break;
+            }
+            steps += 1;
+            let step = steps;
             let raw = self
                 .call_activity("thinking", self.messages.clone(), true)?
                 .content;
@@ -173,18 +179,13 @@ impl Conversation {
                     return Ok(message);
                 }
                 Err(error) => {
-                    parse_failures += 1;
                     self.messages.push(Message::assistant(raw));
                     self.messages.push(Message::user(format!(
                         "Protocol error: {error}. Return exactly one valid JSON action."
                     )));
-                    if parse_failures >= 3 {
-                        return Err("the local model lost the conversation protocol".into());
-                    }
                     continue;
                 }
             };
-            parse_failures = 0;
             match action {
                 Action::Message { message } => {
                     if mutating_work && verification.is_empty() {
@@ -249,6 +250,25 @@ impl Conversation {
                         && command.as_deref().is_some_and(shell_command_is_read_only);
                     mutating_work |=
                         tool == "write" || tool == "edit" || (tool == "shell" && !shell_evidence);
+                    let deletion = (tool == "shell" || tool == "verify")
+                        && command.as_deref().is_some_and(deletion_shell);
+                    let deletion_approved = if deletion {
+                        let command = command.as_deref().unwrap_or(&tool);
+                        crate::agent::request_deletion_approval(command)
+                    } else {
+                        false
+                    };
+                    if deletion && !deletion_approved {
+                        let blocked = "Deletion was not approved. Choose a non-destructive action."
+                            .to_string();
+                        self.store.event(
+                            "authority.block",
+                            json!({ "step": step, "tool": tool, "reason": "deletion not approved" }),
+                        )?;
+                        self.messages.push(Message::assistant(raw));
+                        self.messages.push(Message::user(blocked));
+                        continue;
+                    }
                     if run.is_none() {
                         let created = RunStore::create(&self.paths.runtime)?;
                         created.event(
@@ -279,6 +299,7 @@ impl Conversation {
                                 replace_all,
                                 offset,
                                 limit,
+                                allow_delete: deletion_approved,
                             },
                             false,
                         )
@@ -323,12 +344,12 @@ impl Conversation {
             self.finish_backend_run(
                 run,
                 input,
-                self.max_steps,
-                "I reached the workspace step limit before I could finish cleanly.",
+                steps,
+                "The operator step ceiling was reached before I could finish cleanly.",
                 verification,
             )?;
         }
-        Ok("I lost the thread there. Try saying that once more, a little more directly.".into())
+        Ok("The operator step ceiling was reached before I could finish cleanly.".into())
     }
 
     pub fn compact(&mut self) -> Result<String, String> {
@@ -482,7 +503,13 @@ impl Conversation {
         if command.is_empty() {
             return "usage: !<command>".into();
         }
-        self.tools.shell_interactive(command).output
+        let deletion = deletion_shell(command);
+        if deletion && !crate::agent::request_deletion_approval(command) {
+            return "Deletion was not approved.".into();
+        }
+        self.tools
+            .shell_interactive_with_delete_approval(command, deletion)
+            .output
     }
 
     #[cfg(feature = "preview")]
@@ -680,8 +707,8 @@ impl Conversation {
         let mut frame = 0usize;
         let mut raw_started = false;
         let mut live_input = crate::keyboard::LiveInput::enter()?;
-        let interactive =
-            io::stdout().is_terminal() && !matches!(self.thinking_mode, ThinkingMode::Off);
+        let interactive = io::stdout().is_terminal();
+        let mut content_started = false;
         loop {
             if let Some(input) = live_input.as_mut() {
                 if let Some(event) = input.poll()? {
@@ -718,7 +745,7 @@ impl Conversation {
             }
             match receiver.recv_timeout(Duration::from_millis(120)) {
                 Ok(ChatStreamEvent::Thinking(delta)) => {
-                    if matches!(self.thinking_mode, ThinkingMode::Raw) {
+                    if interactive && matches!(self.thinking_mode, ThinkingMode::Raw) {
                         if !raw_started {
                             print!("\x1b[2K\r  THINKING\n  ");
                             raw_started = true;
@@ -727,9 +754,22 @@ impl Conversation {
                         let _ = io::stdout().flush();
                     }
                 }
+                Ok(ChatStreamEvent::Content(delta)) => {
+                    if interactive {
+                        if !content_started {
+                            if raw_started {
+                                println!();
+                            }
+                            print!("\n  MODEL\n  ");
+                            content_started = true;
+                        }
+                        print!("{}", delta.replace('\n', "\n  "));
+                        let _ = io::stdout().flush();
+                    }
+                }
                 Ok(ChatStreamEvent::Done(result)) => {
                     if interactive {
-                        if raw_started {
+                        if raw_started || content_started {
                             println!();
                         } else {
                             print!("\x1b[2K\r");
@@ -767,20 +807,20 @@ impl Conversation {
                     if interactive {
                         let estimated_context = self.context_chars() / 4;
                         match self.thinking_mode {
-                            ThinkingMode::Compact => print!(
+                            ThinkingMode::Compact if !content_started => print!(
                                 "\r{} {} · {:.1}s",
                                 frames[frame % frames.len()],
                                 phase,
                                 started.elapsed().as_secs_f64()
                             ),
-                            ThinkingMode::Raw if !raw_started => print!(
+                            ThinkingMode::Raw if !raw_started && !content_started => print!(
                                 "\r{} waiting for thought · {:.1}s · {} · ~{} ctx",
                                 frames[frame % frames.len()],
                                 started.elapsed().as_secs_f64(),
                                 compact_model_name(&model),
                                 format_count(estimated_context as u64)
                             ),
-                            ThinkingMode::Raw => {}
+                            ThinkingMode::Compact | ThinkingMode::Raw => {}
                             ThinkingMode::Off => {}
                         }
                         let _ = io::stdout().flush();
@@ -1024,15 +1064,20 @@ fn plain_message(raw: &str) -> Option<&str> {
 }
 
 fn conversation_prompt(workspace: &std::path::Path, max_steps: usize) -> String {
+    let limit = if max_steps == 0 {
+        "No tool-step ceiling; continue until finished or interrupted.".to_string()
+    } else {
+        format!("Operator ceiling: {max_steps} tool steps/turn.")
+    };
     format!(
         r#"You are HII, Ummi's concise local workspace partner.
 Workspace: {workspace}
-Limit: {max_steps} tool steps/turn.
+{limit}
 
 Reply naturally in plain text. For work, return one JSON tool action:
 {{"type":"read|list|search|write|edit|shell|verify|http|hii_context", ...needed fields}}
 
-Use hii_context for continuity or current-work questions. Paths are literal, never Markdown links. Avoid generic greetings. Use one tool at a time only for requested work. After a mutation, verify before replying. Preserve unclear work. Stay inside the workspace; never publish, push, spend, message, delete, or read secrets. Final replies omit internal protocol and bookkeeping."#,
+Use hii_context for continuity or current-work questions. Paths are literal, never Markdown links. Avoid generic greetings. Use one tool at a time only for requested work. After a mutation, verify before replying. Preserve unclear work. Stay inside the workspace; never publish, push, spend, message, or read secrets. File deletion requires explicit live operator approval. Never hide deletion inside an opaque script. Final replies omit internal protocol and bookkeeping."#,
         workspace = workspace.display()
     )
 }
@@ -1069,6 +1114,13 @@ mod tests {
             "conversation prompt grew to {} bytes",
             prompt.len()
         );
+    }
+
+    #[test]
+    fn conversation_is_unlimited_when_step_ceiling_is_zero() {
+        let prompt = conversation_prompt(Path::new("/workspace"), 0);
+        assert!(prompt.contains("No tool-step ceiling"));
+        assert!(!prompt.contains("Operator ceiling:"));
     }
 
     #[test]
