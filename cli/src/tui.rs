@@ -25,6 +25,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/status", "session state"),
     ("/usage", "tokens and speed"),
     ("/thinking", "thought stream"),
+    ("/raw", "raw model stream"),
     ("/model", "choose available model"),
     ("/models", "list available models"),
     ("/providers", "accounts and plans"),
@@ -38,6 +39,9 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/skills", "learned workflows"),
     ("/compact", "shrink context"),
     ("/clear", "fresh conversation"),
+    ("/new", "fresh conversation"),
+    ("/rename", "name this session"),
+    ("/copy", "copy latest response"),
     ("/undo", "drop last exchange"),
     ("/fork", "snapshot session"),
     ("/teach", "save as skill"),
@@ -180,11 +184,13 @@ fn public_command(command: &str) -> bool {
             | "/status"
             | "/usage"
             | "/thinking"
+            | "/raw"
             | "/model"
             | "/models"
             | "/proof"
             | "/permissions"
             | "/undo"
+            | "/new"
             | "/exit"
     )
 }
@@ -450,6 +456,10 @@ mod tests {
     fn public_palette_only_lists_controls_that_can_run() {
         let matches = command_matches("/", true);
         assert!(matches.iter().any(|(command, _)| *command == "/model"));
+        assert!(matches.iter().any(|(command, _)| *command == "/new"));
+        assert!(matches.iter().any(|(command, _)| *command == "/raw"));
         assert!(!matches.iter().any(|(command, _)| *command == "/providers"));
+        assert!(!matches.iter().any(|(command, _)| *command == "/copy"));
+        assert!(!matches.iter().any(|(command, _)| *command == "/rename"));
     }
 }

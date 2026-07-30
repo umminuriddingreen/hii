@@ -15,6 +15,7 @@ use std::{
     collections::{HashSet, VecDeque},
     io::{self, IsTerminal, Write},
     path::PathBuf,
+    process::{Command, Stdio},
     sync::mpsc,
     thread,
     time::{Duration, Instant},
@@ -682,6 +683,32 @@ impl Conversation {
         )
     }
 
+    pub fn rename(&self, requested: &str) -> Result<String, String> {
+        let title = requested.split_whitespace().collect::<Vec<_>>().join(" ");
+        if title.is_empty() {
+            return Err("usage: /rename <session name>".into());
+        }
+        if title.chars().count() > 80 {
+            return Err("session name must be 80 characters or fewer".into());
+        }
+        self.store
+            .event("conversation.renamed", json!({ "title": title }))?;
+        Ok(format!("Session renamed to {title}."))
+    }
+
+    pub fn copy_latest(&self) -> Result<String, String> {
+        let message = self
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.role == "assistant")
+            .map(|message| message.content.trim())
+            .filter(|message| !message.is_empty())
+            .ok_or_else(|| "No completed response to copy yet.".to_string())?;
+        copy_to_clipboard(message)?;
+        Ok("Copied the latest response.".into())
+    }
+
     pub fn welcome(&self) {
         if self.public_test {
             crate::tui::cue("What do you want to create?");
@@ -861,7 +888,10 @@ impl Conversation {
                 .filter_map(|entry| {
                     let modified = entry.metadata().ok()?.modified().ok()?;
                     let id = entry.path().file_stem()?.to_str()?.to_string();
-                    (id != self.store.id).then_some((modified, id))
+                    let title = std::fs::read_to_string(entry.path())
+                        .ok()
+                        .and_then(|raw| session_title(&raw));
+                    (id != self.store.id).then_some((modified, id, title))
                 })
                 .collect::<Vec<_>>();
             sessions.sort_by_key(|entry| std::cmp::Reverse(entry.0));
@@ -873,7 +903,10 @@ impl Conversation {
                 sessions
                     .into_iter()
                     .take(10)
-                    .map(|(_, id)| format!("  {id}"))
+                    .map(|(_, id, title)| match title {
+                        Some(title) => format!("  {id}  {title}"),
+                        None => format!("  {id}"),
+                    })
                     .collect::<Vec<_>>()
                     .join("\n")
             ));
@@ -1512,6 +1545,66 @@ fn resumable_messages(raw: &str) -> Vec<Message> {
         .collect()
 }
 
+fn session_title(raw: &str) -> Option<String> {
+    raw.lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|event| {
+            event.get("kind").and_then(|value| value.as_str()) == Some("conversation.renamed")
+        })
+        .filter_map(|event| {
+            event
+                .get("data")
+                .and_then(|data| data.get("title"))
+                .and_then(|title| title.as_str())
+                .map(str::to_string)
+        })
+        .next_back()
+}
+
+fn copy_to_clipboard(value: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let candidates = vec![("pbcopy", Vec::<&str>::new())];
+    #[cfg(target_os = "windows")]
+    let candidates = vec![("cmd", vec!["/C", "clip"])];
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    let candidates = vec![
+        ("wl-copy", Vec::<&str>::new()),
+        ("xclip", vec!["-selection", "clipboard"]),
+        ("xsel", vec!["--clipboard", "--input"]),
+    ];
+
+    let mut last_error = None;
+    for (program, arguments) in candidates {
+        let mut child = match Command::new(program)
+            .args(arguments)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(error) => {
+                last_error = Some(error.to_string());
+                continue;
+            }
+        };
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(value.as_bytes())
+                .map_err(|error| error.to_string())?;
+        }
+        let status = child.wait().map_err(|error| error.to_string())?;
+        if status.success() {
+            return Ok(());
+        }
+        last_error = Some(format!("{program} exited with {status}"));
+    }
+    Err(format!(
+        "clipboard is unavailable{}",
+        last_error.map_or_else(String::new, |error| format!(": {error}"))
+    ))
+}
+
 fn plain_message(raw: &str) -> Option<&str> {
     let value = raw.trim();
     let lowered = value.to_ascii_lowercase();
@@ -1570,7 +1663,7 @@ Paths are literal, never Markdown links. Avoid generic greetings. Use one tool a
 mod tests {
     use super::{
         conversation_prompt, needs_verification, observation_signature, plain_message,
-        public_test_sensitive_shell, resumable_messages, shell_command_is_preview,
+        public_test_sensitive_shell, resumable_messages, session_title, shell_command_is_preview,
         shell_command_is_read_only, verification_required_message,
     };
     use std::path::Path;
@@ -1693,5 +1786,15 @@ mod tests {
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].role, "user");
         assert_eq!(messages[1].content, "done");
+    }
+
+    #[test]
+    fn session_title_uses_the_latest_rename_event() {
+        let raw = concat!(
+            "{\"kind\":\"conversation.renamed\",\"data\":{\"title\":\"First\"}}\n",
+            "{\"kind\":\"user.message\",\"data\":{\"content\":\"hello\"}}\n",
+            "{\"kind\":\"conversation.renamed\",\"data\":{\"title\":\"Release prep\"}}\n",
+        );
+        assert_eq!(session_title(raw).as_deref(), Some("Release prep"));
     }
 }
