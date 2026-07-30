@@ -115,6 +115,40 @@ proof, but it is not launch-grade choreography. The viral demo should use a
 small isolated workspace or named Scene with no overlapping drafts. Duplicate
 task prevention and automatic demo-layout cleanup remain open.
 
+### Verified launch-proof checkpoint
+
+HII now has one real, isolated launch workspace instead of a polished mock.
+The approved AII run `9fa34c8a-1f4c-4228-9160-78a78c668937` used three named
+context objects and the installed `qwen3.6:35b-mlx` model to write and verify
+`docs/launch/launch-storyboard.md`. The run completed in 41.916 seconds and its
+receipt is
+`/Users/ummi/.hii/runs/cli/19fb3cfa8dd-e595/receipt.json`.
+
+The persisted `launch-proof` workspace contains exactly seven semantic objects:
+three sources, one intent, one completed run, one receipt-linked editable
+artifact, and one receipt. All run-derived objects point to the real AII job.
+Creating it did not steal the operator's current workspace selection;
+`governed-run-demo` remained selected.
+
+The generator is deliberately fail closed. Preview is the default, approval is
+explicit, an existing named workspace is never replaced, and no workspace is
+created without a completed receipt containing both the storyboard artifact
+and a passing check. Three failed acceptance attempts therefore remained
+visible in the job ledger without becoming showcase state.
+
+Those failures exposed two real convergence defects. HII's stream guard counted
+private action rehearsal together with visible JSON, and a successful verify
+could be followed by repeated verification or looping final narration. The
+first correction is on the current branch; the two follow-up convergence
+commits are preserved on local branch `codex/hii-convergence` until concurrent
+MCP work in the same Rust files lands. Together they keep private and visible
+repetition histories separate, preserve a final summary that arrives just
+before proof, treat an identical already passing check as completion rather
+than running it again, and recover a model-summary loop only when the latest
+mutation epoch already has fresh passing proof. The successful launch receipt
+predates the duplicate-check guard and therefore honestly contains the same
+passing check twice.
+
 ### Verified artifact checkpoint
 
 HII now returns each text or code file named in a completed run receipt as its
@@ -366,8 +400,9 @@ cloud sync, credits, or a general “AI operating system.”
    deliberately secondary log view.
 4. Keep runtime and desktop-space health operator-readable; live-verify the
    repaired Space snapshot when AeroSpace is intentionally started.
-5. Build one real demo workspace with fewer than eight visible semantic nodes
-   and real latency. No mock output.
+5. Keep the verified seven-object `launch-proof` workspace as the launch
+   baseline. Re-record it when the hero artifact changes; never replace it with
+   mock output.
 6. Treat the new CI product-proof job as the minimum merge gate.
 
 ### Build next
@@ -393,7 +428,9 @@ cloud sync, credits, or a general “AI operating system.”
 
 ## The first hero demo
 
-One continuous 45-second recording. No cuts, speedups, or mock state.
+One 45-second recording built from a real approved run. No mock state. If local
+model latency exceeds the cut, use one visible, labeled elapsed-time jump rather
+than implying the work was instant.
 
 | Time | On screen | Caption |
 | --- | --- | --- |

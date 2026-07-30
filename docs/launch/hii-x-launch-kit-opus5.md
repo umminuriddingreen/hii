@@ -28,8 +28,10 @@ Record a complete source take and retain it. The published cut may use one
 clearly labeled time jump while the local model runs; never imply the run took
 less time than it did.
 
-Use a small isolated workspace or named Scene. Do not use the current
-`governed-run-demo` layout as-is: its later proposals overlap the completed run.
+Use the persisted `launch-proof` workspace. It contains exactly seven semantic
+objects tied to real AII run `9fa34c8a-1f4c-4228-9160-78a78c668937` and remains
+unselected until the operator opens it for recording. Do not use
+`governed-run-demo` as-is: its later proposals overlap the completed run.
 
 Real task:
 
@@ -46,13 +48,28 @@ Real task:
 | 13–21s | Hold on capability, step budget, workspace boundary, external boundary, and installed model | `You see the boundary first.` |
 | 21–24s | Press `Approve bounded run` | `Nothing runs before approval.` |
 | 24–31s | Show the five-step lifecycle and the live stop control | `Bounded work. Visible state.` |
-| 31–33s | Labeled time jump using the real elapsed duration | `[actual duration] later` |
+| 31–33s | Labeled time jump using the real elapsed duration | `42 seconds later` |
 | 33–39s | The Markdown artifact arrives; open and edit one word in place | `The result is yours to edit.` |
 | 39–45s | Hold artifact and receipt together; open evidence but not raw logs | `And you can inspect the receipt.` |
 
 End card:
 
 > HII first cohort — paid. `[one application link]`
+
+Proof for this take:
+
+- Real local-model duration: 41.916 seconds.
+- Receipt:
+  `/Users/ummi/.hii/runs/cli/19fb3cfa8dd-e595/receipt.json`.
+- Artifact: `docs/launch/launch-storyboard.md`, 641 bytes, exactly four
+  numbered beat headings.
+- Workspace graph: three sources → intent → completed run → editable artifact
+  + receipt.
+- The recorded receipt contains the same passing check twice because the model
+  repeated verification once. The subsequent convergence guard is committed on
+  local branch `codex/hii-convergence` and prevents that duplicate from
+  executing after integration; do not crop the historical evidence to imply
+  otherwise.
 
 Keep out of frame:
 
