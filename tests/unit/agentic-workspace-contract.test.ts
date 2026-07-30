@@ -147,7 +147,9 @@ describe('agentic workspace interaction contract', () => {
     expect(workspace).toContain('seedsFromDataTransfer(event.dataTransfer)');
     expect(readFileSync(resolve(root, 'lib/workspace/ingest.ts'), 'utf8')).toContain("adapter: 'contact-sheet'");
     expect(readFileSync(resolve(root, 'lib/workspace/ingest.ts'), 'utf8')).toContain("crypto.subtle.digest('SHA-256'");
-    expect(readFileSync(resolve(root, 'src/lib/components/workspace/StaticNode.svelte'), 'utf8')).toContain('exact duplicate');
+    const staticNode = readFileSync(resolve(root, 'src/lib/components/workspace/StaticNode.svelte'), 'utf8');
+    expect(staticNode).toContain('exact duplicate');
+    expect(staticNode).toContain('aspect-video w-full bg-neutral-100 object-contain');
   });
 
   it('bridges an explicit browser request into its paired terminal', () => {

@@ -30,7 +30,7 @@
       <div class="grid gap-2" style={`grid-template-columns:repeat(${Number(node.payload.columns)||4},minmax(0,1fr))`}>
         {#each (node.payload.items as Array<Record<string,unknown>>||[]) as item}
           <a href={String(item.url||'')} target="_blank" rel="noreferrer" class="group/item overflow-hidden rounded-xl border border-neutral-900/10 bg-neutral-50 hover:border-blue-400" title={String(item.path||item.name||'Reference image')}>
-            <img src={String(item.url||'')} alt={String(item.name||'Reference image')} loading="lazy" class="aspect-square w-full object-cover"/>
+            <img src={String(item.url||'')} alt={String(item.name||'Reference image')} loading="lazy" class="aspect-video w-full bg-neutral-100 object-contain"/>
             <span class="block truncate px-2 py-1.5 font-mono text-[8px] text-neutral-500 group-hover/item:text-blue-700">{String(item.name||'image')}</span>
           </a>
         {/each}

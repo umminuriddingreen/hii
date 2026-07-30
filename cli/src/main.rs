@@ -1262,7 +1262,7 @@ mod tests {
 
     const FROZEN_LEGACY_FAMILIES: &[&str] = &[
         "ship", "bridge", "og", "caps", "context", "health", "task", "work", "skill", "codex",
-        "daemon", "loop", "feed", "probe", "check",
+        "daemon", "loop", "feed", "space", "probe", "check",
     ];
 
     struct TempRepo(PathBuf);

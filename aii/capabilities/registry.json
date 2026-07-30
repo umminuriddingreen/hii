@@ -226,6 +226,43 @@
     "trustLevel": "first-party"
   },
   {
+    "id": "hii.space.desktop_control",
+    "name": "Inspect and Control HII Desktop Space",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Inspect AeroSpace health, monitors, workspaces, windows, and apps through HII, then forward only explicit deterministic desktop actions with bounded subprocess timeouts.",
+    "inputs": [
+      "explicit HII Space subcommand",
+      "optional window, workspace, or monitor target"
+    ],
+    "outputs": [
+      "human-readable or JSON health",
+      "bounded desktop snapshot",
+      "explicit action result"
+    ],
+    "permissions": [
+      "local macOS workstation only",
+      "read-only for health, snapshot, and apps",
+      "window or workspace mutation only from an explicit action subcommand",
+      "no implicit app launch",
+      "three-second AeroSpace command timeout"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii space health",
+      "hii space snapshot",
+      "hii space apps",
+      "scripts/hii-space.mjs",
+      "scripts/hii-space-smoke.mjs",
+      "cli/src/legacy.rs"
+    ],
+    "status": "partial",
+    "trustLevel": "first-party"
+  },
+  {
     "id": "hii.board.task_kanban",
     "name": "Task Kanban Board",
     "owner": "hii",

@@ -2387,6 +2387,10 @@ switch (cmd) {
   case "daemon": cmdDaemon(rest); break;
   case "instances": cmdInstances(rest); break;
   case "feed": cmdFeed(rest); break;
+  case "space": {
+    const { cmdSpace } = await import("./hii-space.mjs");
+    process.exit(cmdSpace(rest));
+  }
   case "board": cmdBoard(rest); break;
   case "money": cmdMoney(rest); break;
   case "links": cmdLinks(rest); break;
@@ -2456,6 +2460,9 @@ usage: hii <command>
   daemon feed         show recent daemon actions
   instances list      list daemon instances and observed processes
   feed [n]            show the HII live action feed
+  space health        inspect the deterministic macOS workspace layer
+  space snapshot      show monitors, workspaces, and windows
+  space apps          list visible desktop applications
   board               show local kanban/todo board
   board add <title>   create a task with lane/priority/owner/coordinate
   board move <id> <lane>

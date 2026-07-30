@@ -131,6 +131,14 @@ queued run counts, heartbeat age, and explains that observed Mac processes are
 inspectable context rather than active HII agents. Historical failed runs do
 not degrade current runtime health.
 
+The separate desktop-space inspection path is now deterministic too.
+`hii space health` is routed through the compatibility CLI rather than being
+misclassified as an agent goal. AeroSpace subprocesses have a three-second
+timeout, and the current Mac returns its truthful installed-but-offline state
+in about 60 ms with `open -a AeroSpace` as the explicit next command. HII does
+not launch AeroSpace or move windows implicitly. Snapshot and app inspection
+stop at the same health boundary when the server is unavailable.
+
 ### Verified Scenes checkpoint
 
 HII now turns its existing spatial frames into named, ordered Scenes without
@@ -169,6 +177,21 @@ source proof, and mixed-batch behavior. The unit gate additionally proves that
 the 164-image case observed in the live workspace becomes three sheets of
 80, 80, and 4 without dropping a unique source.
 
+The live `maturity-proof` workspace adds a visual checkpoint. One persisted
+Scene named `Launch proof` contains one contact sheet with five real HII launch
+references, five distinct local asset routes, and five source names. Reload
+preserves the Scene and media, `Map 1` reports `2 objects · 1 scene`, and its
+Scene entry navigates back to the framed work while AII remains ready. This
+review also caught a real presentation defect: wide references were square
+cropped. Contact sheets now use a contained 16:9 treatment so each composition
+and its copy remain legible.
+
+Chrome's extension could not grant the native file chooser access during this
+audit because “Allow access to file URLs” was disabled. The five files were
+therefore persisted through HII's same local workspace and asset APIs, while
+the isolated import gate—not this browser step—proves chooser-to-contact-sheet
+batch behavior. That distinction keeps the visual and import claims separate.
+
 This is intentionally non-destructive. Existing flat image fields are not
 silently rewritten, and near-duplicate visual matching is not claimed. A
 future explicit “organize this selection” action, batch labels, and
@@ -190,9 +213,11 @@ perceptual-deduplication review remain open.
   also showed duplicate or low-quality generated tasks.
 - Runtime state is hard to interpret: the surface showed roughly 90 `hiid`
   instances without explaining whether that was healthy or actionable.
-- `hii space health`, `hii space snapshot`, and `hii space apps` hung without
-  useful output during the audit. The compatibility-safe `hii health --text`
-  and `hii caps show` entrypoints worked.
+- During the initial audit, `hii space health`, `hii space snapshot`, and
+  `hii space apps` were misrouted into an agent loop and hung. The repaired
+  deterministic command family now reports that AeroSpace is installed but
+  its server is offline; ready-state snapshots remain product-smoke verified
+  but cannot be live-verified until the operator starts AeroSpace.
 - This audit added a spatial Map with object inventory and direct navigation,
   plus an off-screen rescue action when the workspace is outside the viewport.
 
@@ -288,11 +313,13 @@ cloud sync, credits, or a general “AI operating system.”
    context selection → intent → approval → compact progress → visible artifact →
    receipt → save as draft capability.
 2. Keep the Map and named Scenes as permanent product infrastructure; prove
-   them against the first contact-sheet import.
+   them against the first contact-sheet import. The five-reference visual
+   checkpoint is complete; the remaining proof is orientation under
+   hundreds-of-object load.
 3. Replace raw chat/run noise with an inspectable progress summary and a
    deliberately secondary log view.
-4. Make runtime health describe one operator-meaningful state and recovery
-   action. Fix the hanging `hii space` commands.
+4. Keep runtime and desktop-space health operator-readable; live-verify the
+   repaired Space snapshot when AeroSpace is intentionally started.
 5. Build one real demo workspace with fewer than eight visible semantic nodes
    and real latency. No mock output.
 6. Treat the new CI product-proof job as the minimum merge gate.
