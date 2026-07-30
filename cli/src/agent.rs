@@ -285,7 +285,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         messages.push(Message::system(capsule.text.clone()));
     }
     messages.push(Message::user(options.goal.clone()));
-    let mut verification = Vec::new();
+    let mut verification: Vec<VerificationRecord> = Vec::new();
     let mut touched_artifacts = BTreeSet::new();
     let mut final_summary = None;
     let mut final_next = None;
@@ -307,7 +307,28 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             break;
         }
         steps += 1;
-        let raw = stream_model_json(&ollama, &model, &messages, steps, options.output)?.content;
+        let raw = match stream_model_json(&ollama, &model, &messages, steps, options.output) {
+            Ok(result) => result.content,
+            Err(error)
+                if error.contains("MODEL LOOP DETECTED")
+                    && mutation_epoch > 0
+                    && verified_epoch == Some(mutation_epoch)
+                    && verification.iter().any(|check| check.ok) =>
+            {
+                store.event(
+                    "convergence.verified_loop_recovered",
+                    json!({
+                        "step": steps,
+                        "mutation_epoch": mutation_epoch,
+                        "reason": "model repeated while preparing the final response"
+                    }),
+                )?;
+                final_summary = Some(verified_completion_summary(&touched_artifacts));
+                final_next = None;
+                break;
+            }
+            Err(error) => return Err(error),
+        };
         store.event(
             "model.response",
             json!({ "step": steps, "content": redact_text(&raw) }),
@@ -1114,6 +1135,16 @@ fn take_verified_pending_final(
     ready.then(|| pending.take()).flatten()
 }
 
+fn verified_completion_summary(artifacts: &BTreeSet<String>) -> String {
+    if artifacts.is_empty() {
+        return "Completed and verified the bounded workspace run. HII closed the run after the model repeated while preparing the final summary.".into();
+    }
+    format!(
+        "Completed and verified the bounded workspace run. Artifacts: {}. HII closed the run after the model repeated while preparing the final summary.",
+        artifacts.iter().cloned().collect::<Vec<_>>().join(", ")
+    )
+}
+
 pub(crate) fn parse_action(raw: &str) -> Result<Action, String> {
     let trimmed = raw.trim();
     let candidate = if trimmed.starts_with("```") {
@@ -1602,6 +1633,19 @@ mod tests {
             })
         );
         assert!(pending.is_none());
+    }
+
+    #[test]
+    fn verified_loop_recovery_summary_names_receipt_artifacts() {
+        let artifacts = BTreeSet::from([
+            "docs/launch/launch-storyboard.md".to_string(),
+            "docs/launch/other.md".to_string(),
+        ]);
+        let summary = verified_completion_summary(&artifacts);
+
+        assert!(summary.contains("Completed and verified"));
+        assert!(summary.contains("docs/launch/launch-storyboard.md"));
+        assert!(summary.contains("model repeated while preparing the final summary"));
     }
 
     #[test]
