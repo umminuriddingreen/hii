@@ -50,26 +50,6 @@ function json(res, status, value) {
   res.end(body);
 }
 
-function bearerToken(req) {
-  const match = String(req.headers.authorization ?? '').match(/^Bearer ([A-Za-z0-9_-]{32,})$/);
-  return match?.[1] ?? null;
-}
-
-function remoteKey(req) {
-  return req.socket.remoteAddress ?? 'unknown';
-}
-
-async function requestJson(req, maximum = 4096) {
-  const chunks = [];
-  let bytes = 0;
-  for await (const chunk of req) {
-    bytes += chunk.length;
-    if (bytes > maximum) throw new Error('request too large');
-    chunks.push(chunk);
-  }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
-}
-
 async function listen(server, port) {
   await new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -114,14 +94,11 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
   const layout = await ensureSessionLayout(config.root, config.sessionId);
   const sessionPath = config.sessionPath;
   const basePath = `/s/${sessionPath}`;
-  const bearer = newSecret();
   const artifactCookie = newSecret();
   const tickets = new Map();
-  const claimLimiter = new SlidingWindowLimiter(10);
   const messageLimiter = new SlidingWindowLimiter(MAX_MESSAGES_PER_MINUTE);
-  let claimed = false;
-  let activeSocket = null;
   let pty = null;
+  let ptyStartPromise = null;
   let disconnectTimer = null;
   let artifactTimer = null;
   let shuttingDown = false;
@@ -228,15 +205,7 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
     if (url.pathname === `${basePath}/app.js`) return await serveStatic('app.js', res);
     if (url.pathname === `${basePath}/xterm.js`) return await serveStatic('xterm.js', res);
     if (url.pathname === `${basePath}/xterm.css`) return await serveStatic('xterm.css', res);
-    if (url.pathname === `${basePath}/claim` && req.method === 'POST') {
-      if (claimed) return json(res, 409, { error: 'session already claimed' });
-      if (!claimLimiter.allow(remoteKey(req))) return json(res, 429, { error: 'rate limited' });
-      claimed = true;
-      appendEvent(layout, { type: 'session-claimed' });
-      return json(res, 200, { token: bearer });
-    }
     if (url.pathname === `${basePath}/latest-ticket` && req.method === 'POST') {
-      if (bearerToken(req) !== bearer) return json(res, 401, { error: 'unauthorized' });
       if (!latestArtifact) {
         res.writeHead(204, { 'cache-control': 'no-store' }).end();
         return;
@@ -299,40 +268,41 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
 
   async function spawnHii() {
     if (pty) return;
-    const sandbox = await createSandbox({ layout, hiiBinary: config.hiiBinary });
-    const args = [
-      ...sandbox.args,
-      '--cwd', layout.workspace,
-      '--model', MODEL,
-      '--session-profile', SESSION_PROFILE
-    ];
-    appendEvent(layout, { type: 'hii-spawn', binary: config.hiiBinary, args: args.slice(sandbox.args.length) });
-    pty = spawnPty(sandbox.launcher, args, {
-      name: 'xterm-256color',
-      cwd: layout.workspace,
-      cols: 80,
-      rows: 24,
-      env: sandbox.env
+    if (ptyStartPromise) return await ptyStartPromise;
+    ptyStartPromise = (async () => {
+      const sandbox = await createSandbox({ layout, hiiBinary: config.hiiBinary });
+      const args = [
+        ...sandbox.args,
+        '--cwd', layout.workspace,
+        '--model', MODEL,
+        '--session-profile', SESSION_PROFILE
+      ];
+      appendEvent(layout, { type: 'hii-spawn', binary: config.hiiBinary, args: args.slice(sandbox.args.length) });
+      pty = spawnPty(sandbox.launcher, args, {
+        name: 'xterm-256color',
+        cwd: layout.workspace,
+        cols: 80,
+        rows: 24,
+        env: sandbox.env
+      });
+      pty.onData((data) => {
+        fs.appendFileSync(layout.transcript, data, { mode: 0o600 });
+        broadcast({ type: 'data', data });
+      });
+      pty.onExit(({ exitCode, signal }) => {
+        appendEvent(layout, { type: 'hii-exit', exitCode, signal });
+        pty = null;
+        void shutdown('hii-exit');
+      });
+    })().finally(() => {
+      ptyStartPromise = null;
     });
-    pty.onData((data) => {
-      fs.appendFileSync(layout.transcript, data, { mode: 0o600 });
-      broadcast({ type: 'data', data });
-    });
-    pty.onExit(({ exitCode, signal }) => {
-      appendEvent(layout, { type: 'hii-exit', exitCode, signal });
-      pty = null;
-      void shutdown('hii-exit');
-    });
+    return await ptyStartPromise;
   }
 
   terminalServer.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://loopback');
-    const protocols = String(req.headers['sec-websocket-protocol'] ?? '').split(',').map((item) => item.trim());
-    if (
-      url.pathname !== `${basePath}/ws` ||
-      !protocols.includes(`hii-token.${bearer}`) ||
-      (activeSocket && activeSocket.readyState === activeSocket.OPEN)
-    ) {
+    if (url.pathname !== `${basePath}/ws`) {
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
       socket.destroy();
       return;
@@ -341,7 +311,7 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
   });
 
   wss.on('connection', async (ws) => {
-    activeSocket = ws;
+    const clientId = newSecret(8);
     subscribers.add(ws);
     if (disconnectTimer) clearTimeout(disconnectTimer);
     disconnectTimer = null;
@@ -354,7 +324,7 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
       return;
     }
     ws.on('message', (raw) => {
-      if (raw.length > MAX_MESSAGE_BYTES || !messageLimiter.allow('authenticated-client')) {
+      if (raw.length > MAX_MESSAGE_BYTES || !messageLimiter.allow(clientId)) {
         ws.close(1008, 'message limit');
         return;
       }
@@ -374,10 +344,11 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
     });
     ws.on('close', () => {
       subscribers.delete(ws);
-      if (activeSocket === ws) activeSocket = null;
-      appendEvent(layout, { type: 'ws-disconnected', graceMs: disconnectGraceMs });
-      disconnectTimer = setTimeout(() => void shutdown('disconnect-timeout'), disconnectGraceMs);
-      disconnectTimer.unref?.();
+      appendEvent(layout, { type: 'ws-disconnected', clientsRemaining: subscribers.size });
+      if (subscribers.size === 0) {
+        disconnectTimer = setTimeout(() => void shutdown('disconnect-timeout'), disconnectGraceMs);
+        disconnectTimer.unref?.();
+      }
     });
   });
 
@@ -457,7 +428,6 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
     basePath,
     terminalPort,
     artifactPort,
-    bearer,
     shutdown,
     scanArtifacts,
     manifest,

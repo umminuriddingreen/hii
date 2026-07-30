@@ -1,9 +1,7 @@
 const base = new URL('.', location.href).pathname.replace(/\/$/, '');
-const bearerKey = `hii-remote-bearer:${base}`;
 const session = document.querySelector('#session');
 const terminalPane = document.querySelector('#terminal');
 const artifact = document.querySelector('#artifact');
-let bearer = sessionStorage.getItem(bearerKey);
 let socket;
 let latestArtifactId;
 let terminal;
@@ -54,18 +52,10 @@ function showSession() {
   refreshArtifact();
 }
 
-async function claimSession() {
-  const response = await fetch(`${base}/claim`, { method: 'POST' });
-  if (!response.ok) return;
-  bearer = (await response.json()).token;
-  sessionStorage.setItem(bearerKey, bearer);
-  showSession();
-}
-
 function connect() {
-  if (!bearer || socket?.readyState === WebSocket.OPEN) return;
+  if (socket?.readyState === WebSocket.OPEN) return;
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  socket = new WebSocket(`${scheme}//${location.host}${base}/ws`, [`hii-token.${bearer}`]);
+  socket = new WebSocket(`${scheme}//${location.host}${base}/ws`);
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data);
     if (message.type === 'data') {
@@ -89,17 +79,7 @@ function fitTerminal() {
 window.addEventListener('resize', fitTerminal);
 
 async function refreshArtifact() {
-  if (!bearer) return;
-  const response = await fetch(`${base}/latest-ticket`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${bearer}` }
-  });
-  if (response.status === 401) {
-    sessionStorage.removeItem(bearerKey);
-    bearer = null;
-    location.reload();
-    return;
-  }
+  const response = await fetch(`${base}/latest-ticket`, { method: 'POST' });
   if (response.status === 204) return;
   if (!response.ok) return;
   const latest = await response.json();
@@ -109,5 +89,4 @@ async function refreshArtifact() {
   }
 }
 
-if (bearer) showSession();
-else claimSession();
+showSession();

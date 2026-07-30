@@ -1,8 +1,8 @@
 # Arry public HII test
 
-This is a disposable, one-tester HII session served from the M3 Max through
-Tailscale Funnel. The unguessable URL opens directly into exactly two
-equal panes:
+This is a disposable shared HII session served from the M3 Max through
+Tailscale Funnel. The unguessable URL opens directly into exactly two equal
+panes:
 
 - a live bare HII terminal
 - the latest locally verified artifact
@@ -47,9 +47,9 @@ Credential-like environment variables and the rest of the host home directory
 are unavailable. The disposable workspace and isolated HII runtime are the
 only writable session locations. Deletion is denied.
 
-Only the first browser to open the unguessable URL can claim the session.
-Browser messages have size and rate limits, and a second live WebSocket client
-is refused.
+Every browser that opens the unguessable URL joins the same live terminal and
+artifact stream. Browser messages have per-client size and rate limits. The
+90-second shutdown window begins only after the last viewer disconnects.
 
 ## Artifacts
 
@@ -62,8 +62,8 @@ HII publishes candidate output under:
 The gateway rejects traversal, dotfiles, and symlinks. HTML is served to local
 headless Chrome over HTTP and is published only after it returns HTTP 200,
 loads required assets without browser errors, renders visible DOM or canvas,
-and produces a screenshot. Artifact pages use a separate Funnel origin and do
-not receive the terminal bearer token.
+and produces a screenshot. Artifact pages use a separate Funnel origin, so
+generated JavaScript cannot access the terminal connection.
 
 ## Stop and recover
 

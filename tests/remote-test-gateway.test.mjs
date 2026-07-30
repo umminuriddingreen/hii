@@ -126,28 +126,6 @@ printf '{"hostRead":%s,"deleteDenied":%s,"wrote":"%s"}' "$host_read" "$delete_de
   }
 });
 
-test('only the first browser can claim the unguessable session URL', async (context) => {
-  const root = await temporary();
-  context.after(() => fs.rm(root, { recursive: true, force: true }));
-  const gateway = await startRemoteTestGateway({
-    root,
-    stateFile: path.join(root, 'active.json'),
-    sessionId: '20260730120000-010101010101010101010101',
-    sessionPath: 'single-tester-session-path-123456789',
-    hiiBinary: process.execPath,
-    terminalPort: 0,
-    artifactPort: 0,
-    expose: false,
-    disconnectGraceMs: 50,
-    chromePath: false
-  }, { expose: false });
-  context.after(() => gateway.shutdown('test'));
-  const endpoint = `http://127.0.0.1:${gateway.servers.terminal.address().port}${gateway.basePath}/claim`;
-  const claim = () => fetch(endpoint, { method: 'POST' });
-  assert.equal((await claim()).status, 200);
-  assert.equal((await claim()).status, 409);
-});
-
 test('a reconnect receives the preserved terminal transcript', async (context) => {
   const root = await temporary();
   context.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -222,7 +200,7 @@ test('Three.js import-map fixture renders a canvas and captures a screenshot in 
   assert.ok((await fs.stat(result.screenshot)).size > 1000);
 });
 
-test('authenticated screen is exactly two equal panes in both orientations', async () => {
+test('public screen is exactly two equal panes in both orientations', async () => {
   const html = await fs.readFile(path.join(repository, 'server', 'remote-test-static', 'index.html'), 'utf8');
   const css = await fs.readFile(path.join(repository, 'server', 'remote-test-static', 'style.css'), 'utf8');
   const main = html.match(/<main id="session" hidden>([\s\S]*?)<\/main>/)?.[1] ?? '';
@@ -230,6 +208,7 @@ test('authenticated screen is exactly two equal panes in both orientations', asy
   assert.match(main, /id="terminal"/);
   assert.match(main, /id="artifact"/);
   assert.doesNotMatch(main, /<(?:header|nav|button|aside|footer)\b/);
+  assert.doesNotMatch(html, /passcode|claim/i);
   assert.match(css, /grid-template-columns:\s*1fr 1fr/);
   assert.match(css, /grid-template-rows:\s*1fr 1fr/);
   assert.match(css, /@media \(orientation: portrait\), \(max-aspect-ratio: 1\/1\)/);

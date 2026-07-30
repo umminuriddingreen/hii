@@ -15,7 +15,6 @@ export const ARTIFACT_HTTPS_PORT = 8443;
 export const DISCONNECT_GRACE_MS = 90_000;
 export const MAX_MESSAGE_BYTES = 16 * 1024;
 export const MAX_MESSAGES_PER_MINUTE = 120;
-export const MAX_AUTH_FAILURES = 5;
 
 export function remoteTestsRoot(home = os.homedir()) {
   return path.join(home, '.hii', 'remote-tests');
@@ -74,18 +73,6 @@ export function appendEvent(layout, event) {
     `${JSON.stringify({ at: new Date().toISOString(), ...event })}\n`,
     { mode: 0o600 }
   );
-}
-
-export function hashPasscode(passcode, salt = crypto.randomBytes(16)) {
-  return {
-    salt,
-    digest: crypto.scryptSync(passcode, salt, 32)
-  };
-}
-
-export function passcodeMatches(passcode, record) {
-  const candidate = crypto.scryptSync(passcode, record.salt, record.digest.length);
-  return crypto.timingSafeEqual(candidate, record.digest);
 }
 
 export function contentType(file) {
