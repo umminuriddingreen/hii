@@ -12,19 +12,19 @@
 
   const useSteps = [
     {
-      label: 'Bring in context',
-      title: 'Start with the work you already have.',
-      copy: 'Drop in project folders, notes, links, images, and files. HII keeps the source and the boundary visible.'
+      label: 'Put it on the workspace',
+      title: 'Bring the material into view.',
+      copy: 'Arrange notes, files, images, websites, models, chats, and tools on one open workspace. HII keeps their sources and boundaries visible.'
     },
     {
-      label: 'Work in place',
-      title: 'Give the workspace an outcome.',
-      copy: 'Open chat, terminal, browser, board, or live context as objects on the same canvas. Approve what agents can use.'
+      label: 'Work with HII',
+      title: 'Point at the work and say what you want.',
+      copy: 'Explore, explain, edit, organize, or make something new. Approve what HII and its agents may use before work begins.'
     },
     {
-      label: 'Keep the proof',
-      title: 'Finished work comes back inspectable.',
-      copy: 'Review the changed files, checks, artifacts, and receipt. Reuse a proven workflow only after it earns trust.'
+      label: 'Keep what gets made',
+      title: 'Results return to the workspace.',
+      copy: 'The artifact, changed files, checks, and receipt stay connected to the work so you can inspect, refine, and reuse them.'
     }
   ];
 
@@ -43,29 +43,29 @@
 
   const firstWins = [
     {
-      label: 'Learn a hard tool',
-      example: 'Help me understand this project and show me what to do next.',
-      result: 'A source-linked explanation and one clear next move.'
+      label: 'Think visually',
+      example: 'Arrange these references and help me find the direction.',
+      result: 'A connected workspace you can move, edit, and keep developing.'
     },
     {
-      label: 'Finish something',
-      example: 'Turn these rough files and notes into one portfolio-ready artifact.',
-      result: 'A finished artifact, the changes, and the checks that passed.'
+      label: 'Make something',
+      example: 'Turn this rough idea and these files into something I can use.',
+      result: 'A real artifact beside the context and tools that shaped it.'
     },
     {
-      label: 'Improve my work',
-      example: 'Find the highest-value improvement I can complete today.',
-      result: 'A before-and-after result with an inspectable receipt.'
+      label: 'Move work forward',
+      example: 'Open this project, understand where I am, and help with the next move.',
+      result: 'A visible next step, completed work, and proof you can inspect.'
     }
   ];
 </script>
 
 <svelte:head>
-  <title>HII — Turn what is on your Mac into finished work</title>
-  <meta name="description" content="HII helps makers, learners, creators, and independent operators give AI one real job, choose what it can use, and get a finished result with proof." />
+  <title>HII — A visual workspace that works with you</title>
+  <meta name="description" content="HII is a visual workspace for thinking, making, and working with AI. Bring your notes, files, tools, and ideas together, then make something real." />
   <link rel="canonical" href="https://humaninformationinterface.com/" />
-  <meta property="og:title" content="HII — One idea in. Finished work and proof out." />
-  <meta property="og:description" content="A local-first Mac workspace for people who make and learn with AI." />
+  <meta property="og:title" content="HII — Think it. Make it. Keep it together." />
+  <meta property="og:description" content="A visual, local-first Mac workspace for people and AI to think and make together." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://humaninformationinterface.com/" />
   <meta property="og:image" content="https://humaninformationinterface.com/marketing/hii-workspace-live.png" />
@@ -79,12 +79,12 @@
       <span>Human Information Interface</span>
     </a>
     <nav>
-      <a href="#first-win">First wins</a>
+      <a href="#first-win">What you can do</a>
       <a href="#product">See HII</a>
       <a href="#trust">Trust</a>
       <a href="#pricing">Pricing</a>
     </nav>
-    <a class="hii-account-link" href="/learn">Try one win <span aria-hidden="true">↗</span></a>
+    <a class="hii-account-link" href="/learn">Try HII <span aria-hidden="true">↗</span></a>
   </header>
 
   <main id="top">
@@ -93,14 +93,14 @@
       <div class="hii-live-pill"><i></i> local workspace</div>
 
       <div class="hii-launch-copy">
-        <p class="hii-launch-eyebrow"><span></span> For people making and learning on a Mac</p>
-        <h1 id="hero-title">Turn what is<br />on your Mac into<br /><em>finished work.</em></h1>
-        <p class="hii-launch-deck">Give HII one real job. Choose the files and information it may use. Watch the work happen, then open the result and the proof.</p>
+        <p class="hii-launch-eyebrow"><span></span> A visual workspace that works with you</p>
+        <h1 id="hero-title">Think it.<br />Make it.<br /><em>Keep it together.</em></h1>
+        <p class="hii-launch-deck">Put notes, files, websites, images, models, chats, and tools on one open workspace. Tell HII what you want to explore or make, and work with AI without losing the context.</p>
         <div class="hii-launch-actions">
-          <a class="hii-launch-primary" href="/learn">Try one win in your browser <span aria-hidden="true">↗</span></a>
+          <a class="hii-launch-primary" href="/learn">Try HII in your browser <span aria-hidden="true">↗</span></a>
           <a class="hii-launch-secondary" href="#download">Join the Mac beta <span aria-hidden="true">↓</span></a>
         </div>
-        <p class="hii-launch-note">For makers · creators · designers · researchers · independent operators</p>
+        <p class="hii-launch-note">For ideas · projects · research · design · code · anything you are trying to make real</p>
       </div>
 
       <figure class="hii-palette-proof">
@@ -124,9 +124,9 @@
 
     <section class="hii-first-win-section" id="first-win" aria-labelledby="first-win-title">
       <header>
-        <p class="hii-launch-eyebrow"><span></span> Start with something you care about</p>
-        <h2 id="first-win-title">One useful win.<br />Then do it again.</h2>
-        <p>You do not need to learn agent infrastructure. Start with a real outcome in plain language and keep control of the information behind it.</p>
+        <p class="hii-launch-eyebrow"><span></span> Start anywhere</p>
+        <h2 id="first-win-title">A blank space<br />that can help.</h2>
+        <p>Like a visual canvas, HII gives your work room to take shape. Unlike a passive canvas, it can understand the material you choose and help move it forward.</p>
       </header>
       <div class="hii-first-wins">
         {#each firstWins as win}
@@ -140,8 +140,8 @@
       <div class="hii-demo-callout">
         <div>
           <span>NO INSTALL NEEDED</span>
-          <h3>Shape your first task before HII touches a file.</h3>
-          <p>The guided demo turns a rough intention into a plan, visible boundaries, and a proof target. No agent runs on the demo page.</p>
+          <h3>See how HII turns an intention into a working space.</h3>
+          <p>The guided demo turns a rough idea into a plan, visible boundaries, and a proof target. No agent runs and no files are touched on the demo page.</p>
         </div>
         <a class="hii-launch-primary" href="/learn">Open the guided demo <span aria-hidden="true">↗</span></a>
       </div>
@@ -150,8 +150,8 @@
     <section class="hii-product-proof" id="product" aria-labelledby="product-title">
       <div class="hii-product-intro">
         <p class="hii-launch-eyebrow"><span></span> The actual HII workspace</p>
-        <h2 id="product-title">See the work,<br />not just the answer.</h2>
-        <p>Your intention, source material, agent work, finished artifacts, and proof stay together as things you can inspect and return to.</p>
+        <h2 id="product-title">Everything in view.<br />Nothing lost in chat.</h2>
+        <p>Your ideas, source material, tools, conversations, finished artifacts, and proof stay together as objects you can inspect, arrange, and return to.</p>
       </div>
 
       <div class="hii-lineage" aria-label="HII verified work loop">
@@ -173,7 +173,7 @@
     <section class="hii-use-section" id="how" aria-labelledby="use-title">
       <header>
         <p class="hii-launch-eyebrow"><span></span> Using HII</p>
-        <h2 id="use-title">From “I want to…”<br />to “it is done.”</h2>
+        <h2 id="use-title">A place to think.<br />A way to act.</h2>
       </header>
       <div class="hii-use-steps">
         {#each useSteps as step, index}
@@ -239,9 +239,9 @@
 
   <footer class="hii-launch-footer">
     <HiiLogo />
-    <p>Human intent → bounded work → visible proof</p>
+    <p>Think · make · inspect · keep</p>
     <div>
-      <a href="/architecture">Architecture cohort</a>
+      <a href="/architecture">Architecture example</a>
       <a href="/privacy">Privacy</a>
       <a href="mailto:hello@humaninformationinterface.com">hello@humaninformationinterface.com</a>
     </div>

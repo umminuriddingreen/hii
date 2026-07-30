@@ -1,11 +1,11 @@
-I built HII for a problem I keep seeing in architecture and computational design: the real decision is spread across drawings, reports, models, scripts, notes, and chat threads.
+I have been building HII because I do not want my work trapped in a stack of disconnected files, tools, and AI chats.
 
-I gave it one real job on my Mac.
+HII is a visual workspace where notes, files, websites, images, models, chats, and tools can live together.
 
-HII kept the context I approved, the finished artifact, and the proof together.
+You can arrange the work like Miro or Figma, then ask HII to help you understand it, change it, or make something new. The context you approve, the result, and the proof stay connected on the workspace.
 
-This video is 25 seconds. It uses the actual interface—not a concept render.
+This video uses the actual interface—not a concept render.
 
-I am not opening a general beta. I am looking for five architects, computational designers, or built-world founders with one real job they already need finished.
+I am looking for five people who make things on a Mac and have one real project they want to move forward.
 
-Reply “HII” + the job. I will message you personally and stay with it through the first result.
+Reply “HII” + what you are trying to make. I will message you personally and stay with it through the first useful result.

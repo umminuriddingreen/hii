@@ -1,7 +1,7 @@
-Architecture work is split across drawings, reports, models, scripts, notes, and chats.
+I don’t want my work trapped in disconnected files, tools, and AI chats.
 
-I gave HII one job. It kept the approved context, artifact, and proof together.
+HII is a visual workspace where you arrange the work, ask AI to help, and keep the context, result, and proof together.
 
-25-second demo ↓
+Actual interface ↓
 
-I’m opening 5 founder-led sessions. Reply “HII” + the built-world job you need finished.
+5 founder sessions. Reply “HII” + what you’re making.

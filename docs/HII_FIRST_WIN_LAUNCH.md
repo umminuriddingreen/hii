@@ -2,9 +2,9 @@
 
 ## The decision
 
-HII is not launching as “the operating system for every agent.” It is launching
-as the fastest trustworthy way for a Mac-based maker to turn scattered local
-context into one finished result with proof.
+HII is not launching as an architecture tool or “the operating system for every
+agent.” It is launching as a visual, local-first workspace for thinking, making,
+and working with AI.
 
 The audience is:
 
@@ -13,9 +13,14 @@ The audience is:
 - tired of repeatedly pasting context and losing the work between chats;
 - willing to try a founder-led workflow before adopting a broad new platform.
 
-The first promise is:
+The product promise is:
 
-> Give HII one real job. Choose what it may use. Open the result and the proof.
+> Think it. Make it. Keep it together.
+
+The first-use behavior remains:
+
+> Bring one real project. Choose what HII may use. Make one useful move and keep
+> the result connected to the work.
 
 ## What the market evidence says
 
@@ -142,9 +147,9 @@ Revenue. More platform surface will not validate them.
 The current founder-account evidence changes the channel order:
 
 1. **LinkedIn first.** The authenticated founder profile has 500+ connections
-   and overlaps architecture, design, construction, and technical education.
-2. **Direct invitations second.** Five individually relevant people or
-   discussions can produce stronger discovery evidence than broad reach.
+   across design, technology, architecture, education, and independent making.
+2. **Direct invitations second.** Five individually relevant people who make
+   things can produce stronger discovery evidence than broad reach.
 3. **X third.** `@ummigreen` currently has four followers. Use it as a public
    build log and a place for reply-based participation, not the sole acquisition
    engine.
@@ -154,30 +159,31 @@ The current founder-account evidence changes the channel order:
 Before publishing, the LinkedIn headline should at least make the founder role
 legible. Prepared replacement:
 
-> Founder, HII — a local-first Mac workspace for finished AI work with visible
-> context and proof | Architecture + computation
+> Founder, HII — a visual, local-first workspace for thinking, making, and
+> working with AI
 
 ### LinkedIn
 
-Publish `public/marketing/hii-architecture-first-win-demo.mp4` natively. Do not
-put a link in the primary post:
+Publish the current generic HII workspace demonstration natively. Do not put a
+link in the primary post:
 
-> I built HII for a problem I keep seeing in architecture and computational
-> design: the real decision is spread across drawings, reports, models, scripts,
-> notes, and chat threads.
+> I have been building HII because I do not want my work trapped in a stack of
+> disconnected files, tools, and AI chats.
 >
-> I gave it one real job on my Mac.
+> HII is a visual workspace where notes, files, websites, images, models, chats,
+> and tools can live together.
 >
-> HII kept the context I approved, the finished artifact, and the proof together.
+> You can arrange the work like Miro or Figma, then ask HII to help you
+> understand it, change it, or make something new. The context you approve, the
+> result, and the proof stay connected on the workspace.
 >
-> This video is 25 seconds. It uses the actual interface—not a concept render.
+> This video uses the actual interface—not a concept render.
 >
-> I am not opening a general beta. I am looking for five architects,
-> computational designers, or built-world founders with one real job they
-> already need finished.
+> I am looking for five people who make things on a Mac and have one real project
+> they want to move forward.
 >
-> Reply “HII” + the job. I will message you personally and stay with it through
-> the first result.
+> Reply “HII” + what you are trying to make. I will message you personally and
+> stay with it through the first useful result.
 
 First founder comment:
 
@@ -185,24 +191,22 @@ First founder comment:
 > Mac. A founder test begins only after we agree on the job and exactly what HII
 > may use.
 >
-> humaninformationinterface.com/architecture
+> humaninformationinterface.com
 > humaninformationinterface.com/privacy
 
 ### X
 
-Post from `@ummigreen` with
-`public/marketing/hii-architecture-first-win-demo.mp4`.
-Keep the link out of the primary post so the invitation stays conversational:
+Post from `@ummigreen` with the generic HII workspace demonstration. Keep the
+link out of the primary post so the invitation stays conversational:
 
-> Architecture work is split across drawings, reports, models, scripts, notes,
-> and chats.
+> I do not want my work trapped in disconnected files, tools, and AI chats.
 >
-> I gave HII one job. It kept the approved context, artifact, and proof together.
+> HII is a visual workspace where you can arrange the work, ask AI to help, and
+> keep the context, result, and proof together.
 >
-> 25-second demo ↓
+> Actual interface ↓
 >
-> I’m opening 5 founder-led sessions. Reply “HII” + the built-world job you need
-> finished.
+> I’m opening 5 founder-led sessions. Reply “HII” + what you are trying to make.
 
 The first founder reply should provide the link and disclose:
 

@@ -33,13 +33,13 @@
 </script>
 
 <svelte:head>
-  <title>HII for Architecture — Context in. Defensible work out.</title>
+  <title>Architecture in HII — A visual workspace example</title>
   <meta
     name="description"
-    content="A founder-led HII workflow for architects and computational designers: bring one real job, bound the context, and keep the result and proof together."
+    content="See how architects and computational designers can use the broader HII visual workspace to keep project context, work, results, and proof together."
   />
   <link rel="canonical" href="https://humaninformationinterface.com/architecture" />
-  <meta property="og:title" content="HII for Architecture — Context in. Defensible work out." />
+  <meta property="og:title" content="Architecture in HII — A visual workspace example" />
   <meta
     property="og:description"
     content="Bring one source-heavy architecture or computational-design job. Keep its context, result, and proof together."
@@ -53,10 +53,10 @@
 </svelte:head>
 
 <main class="arch-page">
-  <nav aria-label="HII architecture navigation">
+  <nav aria-label="HII architecture example navigation">
     <a class="brand" href="/landing" aria-label="HII home">
       <HiiLogo />
-      <span>architecture / founder cohort</span>
+      <span>architecture / example workspace</span>
     </a>
     <div class="nav-index" aria-hidden="true">
       <span>drawing set</span>
@@ -84,7 +84,7 @@
         <a class="primary" href="#first-job">Choose a first job <span aria-hidden="true">↓</span></a>
         <a class="secondary" href="/privacy">Read the context boundary</a>
       </div>
-      <p class="availability">Five founder-led discovery sessions · Mac workflows · no general beta tour</p>
+      <p class="availability">One example inside the broader HII workspace · not a separate architecture product</p>
     </div>
 
     <div class="section-drawing" aria-label="A section drawing showing context becoming a verified result">
@@ -205,7 +205,7 @@
   <section class="cohort-section" aria-labelledby="cohort-title">
     <div class="cohort-number" aria-hidden="true">05</div>
     <div>
-      <p class="eyebrow"><i></i> Founder cohort / five seats</p>
+      <p class="eyebrow"><i></i> Try HII with your own work</p>
       <h2 id="cohort-title">Bring the job<br />you already need done.</h2>
       <p>
         The discovery session defines the job and boundary. If a hands-on activation is the right

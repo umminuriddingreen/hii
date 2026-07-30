@@ -2,7 +2,7 @@
 
 Status: founder-beta acquisition plan  
 Audience: people who make and learn on a Mac  
-Primary event: one person completes and inspects one useful HII result  
+Primary event: one person creates a useful HII workspace and completes one meaningful move inside it
 Commercial event: a qualified person applies for a $500 founder activation
 
 ## What Clicky proves
@@ -59,15 +59,19 @@ They qualify for founder activation when:
 - they care which information the agent uses and what it changes;
 - they will inspect the result and run the workflow again.
 
-## HII's one-sentence launch
+## HII's product sentence
 
-> Give HII one real job on your Mac, choose what it may use, and get finished
-> work with proof.
+> HII is a visual workspace for thinking, making, and working with AI.
 
 Supporting sentence:
 
-> HII keeps your intention, source material, agent work, finished artifact, and
-> receipt together in one local workspace.
+> Put notes, files, websites, images, models, chats, and tools in one place.
+> Arrange the work like a visual canvas, ask HII to help, and keep the context,
+> result, and proof connected.
+
+The discovery wedge is still one real job. That is the first behavior to test,
+not the permanent product category. Architecture, code, research, media, and
+business are example workspaces inside HII—not separate product identities.
 
 Do not lead with:
 

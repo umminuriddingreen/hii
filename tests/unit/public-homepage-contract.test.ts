@@ -20,8 +20,8 @@ describe('public HII homepage', () => {
 
   it('states the product truth and carries canonical metadata', () => {
     expect(homepage).toContain('https://humaninformationinterface.com/');
-    expect(homepage).toContain('Turn what is<br />on your Mac into<br /><em>finished work.</em>');
-    expect(homepage).toContain('Try one win in your browser');
+    expect(homepage).toContain('Think it.<br />Make it.<br /><em>Keep it together.</em>');
+    expect(homepage).toContain('Try HII in your browser');
     expect(homepage).toContain('Join the Mac beta');
     expect(homepage).toContain('Signed Mac installer · preparing');
     expect(homepage).toContain('/marketing/hii-workspace-live.png');
@@ -30,13 +30,13 @@ describe('public HII homepage', () => {
     expect(homepage).toContain('Actual interface · silent-first demo · captions included');
   });
 
-  it('targets people who make and learn with concrete, truthful first wins', () => {
-    expect(homepage).toContain('For people making and learning on a Mac');
-    expect(homepage).toContain('For makers · creators · designers · researchers · independent operators');
-    expect(homepage).toContain('Learn a hard tool');
-    expect(homepage).toContain('Finish something');
-    expect(homepage).toContain('Improve my work');
-    expect(homepage).toContain('No agent runs on the demo page');
+  it('presents HII as a broad visual workspace with concrete, truthful uses', () => {
+    expect(homepage).toContain('A visual workspace that works with you');
+    expect(homepage).toContain('For ideas · projects · research · design · code');
+    expect(homepage).toContain('Think visually');
+    expect(homepage).toContain('Make something');
+    expect(homepage).toContain('Move work forward');
+    expect(homepage).toContain('No agent runs and no files are touched on the demo page');
     expect(homepage).toContain('href="/learn"');
   });
 
@@ -50,7 +50,7 @@ describe('public HII homepage', () => {
 
   it('links to a plain-language privacy boundary before public recruitment', () => {
     expect(homepage).toContain('href="/privacy"');
-    expect(homepage).toContain('href="/architecture"');
+    expect(homepage).toContain('Architecture example');
     expect(privacy).toContain('They do not run an agent, inspect your Mac, read your files');
     expect(privacy).toContain('Choosing a local Ollama model keeps model inference on your Mac');
     expect(privacy).toContain('Cloudflare serves this site');
@@ -61,6 +61,8 @@ describe('public HII homepage', () => {
     expect(serverHooks).toContain("'/architecture'");
     expect(architecture).toContain('https://humaninformationinterface.com/architecture');
     expect(architecture).toContain('HII for architecture + computational design');
+    expect(architecture).toContain('architecture / example workspace');
+    expect(architecture).toContain('not a separate architecture product');
     expect(architecture).toContain('Trace a site decision');
     expect(architecture).toContain('Prepare a design review');
     expect(architecture).toContain('Debug a computational workflow');
