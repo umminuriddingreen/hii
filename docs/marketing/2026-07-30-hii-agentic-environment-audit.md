@@ -805,10 +805,17 @@ uncommitted. This closes the stale-local-command failure observed after the
 Space repair without making HII unavailable during partial edits.
 
 This is CI, not external delivery. HII remains local-first and this audit does
-not authorize deployment, upload, or release. The next CD layer should package
-an immutable Mac build, test it in a clean temporary user environment, verify
-upgrade/recovery and receipt compatibility, then produce a signed local release
-candidate for explicit operator approval. Publishing remains a separate action.
+not authorize deployment, upload, or release. The local release-candidate gate
+now packages `HII.app`, copies it outside the repository, starts an empty
+isolated user runtime, verifies asset and receipt persistence across reinstall
+and restart, preserves a corrupt workspace for recovery, and checks the app's
+strict ad-hoc signature. The public release path also requires package,
+lockfile, and desktop bundle versions to agree; refuses a dirty Git worktree;
+and records the exact clean commit in the final archive manifest.
+
+External delivery remains separately gated on a Developer ID identity, Apple
+notarization, explicit operator approval, and a genuinely downloaded,
+quarantined second-Mac test. Publishing remains a separate action.
 
 ## Sources
 

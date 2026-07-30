@@ -4,8 +4,11 @@ import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '../..');
 const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
+const packageLock = JSON.parse(readFileSync(resolve(root, 'package-lock.json'), 'utf8'));
+const tauriConfig = JSON.parse(readFileSync(resolve(root, 'src-tauri/tauri.conf.json'), 'utf8'));
 const smoke = readFileSync(resolve(root, 'scripts/hii-packaged-app-smoke.mjs'), 'utf8');
 const portableBuild = readFileSync(resolve(root, 'scripts/hii-svelte-tauri-build.mjs'), 'utf8');
+const release = readFileSync(resolve(root, 'scripts/hii-macos-release.mjs'), 'utf8');
 const workflow = readFileSync(resolve(root, '.github/workflows/release-candidate.yml'), 'utf8');
 
 describe('packaged app release candidate contract', () => {
@@ -35,5 +38,17 @@ describe('packaged app release candidate contract', () => {
     expect(workflow).not.toContain('upload-artifact');
     expect(workflow).not.toContain('action-gh-release');
     expect(workflow).not.toContain('gh release');
+  });
+
+  it('binds a public Mac archive to one clean committed release identity', () => {
+    expect(packageJson.version).toBe('0.1.0');
+    expect(packageLock.version).toBe(packageJson.version);
+    expect(packageLock.packages[''].version).toBe(packageJson.version);
+    expect(tauriConfig.version).toBe(packageJson.version);
+    expect(release).toContain("capture('git', ['rev-parse', '--verify', 'HEAD'])");
+    expect(release).toContain("capture('git', ['status', '--porcelain', '--untracked-files=all'])");
+    expect(release.match(/requireSourceIdentity\(gitCommit\)/g)).toHaveLength(2);
+    expect(release).toContain("gitTree: 'clean'");
+    expect(release).toContain('gitCommit');
   });
 });

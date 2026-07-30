@@ -23,6 +23,8 @@ if (process.platform !== 'darwin') {
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const config = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'));
+const packageConfig = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
+const packageLock = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
 const version = config.version;
 const arch = process.arch === 'arm64' ? 'arm64' : process.arch;
 const app = path.join(root, 'src-tauri', 'target', 'release', 'bundle', 'macos', 'HII.app');
@@ -39,6 +41,38 @@ function run(command, args, options = {}) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
+function capture(command, args) {
+  const result = spawnSync(command, args, { cwd: root, encoding: 'utf8' });
+  if (result.status !== 0) {
+    process.stderr.write(result.stderr || `${command} failed.\n`);
+    process.exit(result.status ?? 1);
+  }
+  return result.stdout.trim();
+}
+
+function requireSourceIdentity(expectedCommit) {
+  const currentCommit = capture('git', ['rev-parse', '--verify', 'HEAD']);
+  const gitStatus = capture('git', ['status', '--porcelain', '--untracked-files=all']);
+  if (currentCommit !== expectedCommit || gitStatus) {
+    console.error([
+      'hii:release:mac requires one unchanged clean Git commit.',
+      'Commit or explicitly remove every tracked and untracked change before producing a signed release.'
+    ].join('\n'));
+    process.exit(2);
+  }
+}
+
+if (
+  packageConfig.version !== version
+  || packageLock.version !== version
+  || packageLock.packages?.['']?.version !== version
+) {
+  console.error(
+    `hii:release:mac requires one release version; package, lockfile, and Tauri must all equal ${version}.`
+  );
+  process.exit(2);
+}
+
 if (!identity || !notaryProfile) {
   console.error([
     'hii:release:mac is intentionally closed until distribution trust is configured.',
@@ -49,8 +83,12 @@ if (!identity || !notaryProfile) {
   process.exit(2);
 }
 
+const gitCommit = capture('git', ['rev-parse', '--verify', 'HEAD']);
+requireSourceIdentity(gitCommit);
+
 run('security', ['find-identity', '-v', '-p', 'codesigning']);
 run('npm', ['run', 'build:tauri']);
+requireSourceIdentity(gitCommit);
 
 if (!existsSync(app) || !existsSync(bootstrap) || !existsSync(installGuide)) {
   console.error('hii:release:mac could not find the app, bootstrap, or install guide.');
@@ -104,6 +142,8 @@ try {
     filename: path.basename(archive),
     bytes,
     sha256,
+    gitCommit,
+    gitTree: 'clean',
     signed: true,
     notarized: true,
     createdAt: new Date().toISOString()

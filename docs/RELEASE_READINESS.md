@@ -41,7 +41,7 @@ blocker.
 | Submit a supported container to Apple notarization and wait for acceptance. | Implemented for a temporary ZIP made with `ditto`; blocked because no configured notary profile was supplied and Apple services were intentionally not called in this audit. | `scripts/hii-macos-release.mjs` |
 | Staple the notarization ticket to the app, validate the ticket, and have Gatekeeper accept the app. | Implemented with `stapler staple`, `stapler validate`, and `spctl`; not exercised. | `scripts/hii-macos-release.mjs` |
 | Package the deliverable without losing the signed/stapled app. | Implemented for a final ZIP containing `HII.app`, `hii-bootstrap.sh`, and `INSTALL.md`. Not implemented for DMG. | `scripts/hii-macos-release.mjs`, `src-tauri/tauri.conf.json` |
-| Record release identity and integrity metadata. | Implemented for the ZIP: version, platform, architecture, minimum macOS version, filename, bytes, SHA-256, signing/notarization claims, and creation time are written to `dist/releases/latest.json` after all preceding commands succeed. | `scripts/hii-macos-release.mjs` |
+| Record release identity and integrity metadata. | Implemented for the ZIP: one package/Tauri version, clean source commit, platform, architecture, minimum macOS version, filename, bytes, SHA-256, signing/notarization claims, and creation time are written to `dist/releases/latest.json` after all preceding commands succeed. The public release command refuses a dirty Git worktree. | `scripts/hii-macos-release.mjs` |
 | Test the downloaded/quarantined artifact on a clean supported Apple Silicon Mac: Gatekeeper, launch, bundled runtime, bootstrap, first receipt, restart, and uninstall/data deletion. | A copied-app, isolated-user simulation now verifies bundled runtime startup, first receipt, reinstall/restart persistence, recovery, and strict ad-hoc signature integrity. A genuinely downloaded/quarantined second-Mac test, bootstrap, and uninstall/data deletion remain unverified. | `scripts/hii-packaged-app-smoke.mjs`, `docs/LAUNCH_AND_MONETIZATION.md`, `docs/INSTALL.md` |
 | Put the verified artifact behind the public download action. | Required by “Build now”; not performed and outside this local code audit. | `docs/LAUNCH_AND_MONETIZATION.md` |
 
@@ -188,10 +188,11 @@ The script will not create a public archive from an ad-hoc signed app.
   - Owner: `package.json`, `scripts/hii-macos-release.mjs`,
     `docs/LAUNCH_AND_MONETIZATION.md`
 
-- [ ] Resolve or explicitly document the version source mismatch:
-  `package.json` is `0.0.1`, while `src-tauri/tauri.conf.json` and the release
-  filename use `0.1.0`. A public build should have one intentional release
-  version.
+- [x] Resolve the version source mismatch and bind public archives to committed
+  source. `package.json`, `package-lock.json`, and
+  `src-tauri/tauri.conf.json` now agree on `0.1.0`; the release contract tests
+  that equality. `release:mac` refuses tracked or untracked Git changes and
+  records the exact clean commit in `latest.json`.
   - Owner: `package.json`, `src-tauri/tauri.conf.json`,
     `scripts/hii-macos-release.mjs`
 
