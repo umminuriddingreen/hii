@@ -138,7 +138,8 @@ async function launch(options = {}) {
     chromePath: report.chromePath,
     artifactOrigin: `https://${dnsName}:${ARTIFACT_HTTPS_PORT}`,
     model,
-    expose: true
+    expose: true,
+    disconnectGraceMs: 0
   };
   const child = fork(gatewayFile, [], {
     detached: true,

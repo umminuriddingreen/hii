@@ -21,7 +21,11 @@ import {
 } from '../server/remote-test-core.mjs';
 import { chromeFailure, verifyArtifact } from '../server/remote-test-artifacts.mjs';
 import { createSandbox, sanitizedHostEnv } from '../server/remote-test-sandbox.mjs';
-import { replayTranscript, startRemoteTestGateway } from '../server/remote-test-gateway.mjs';
+import {
+  disconnectTimeoutEnabled,
+  replayTranscript,
+  startRemoteTestGateway
+} from '../server/remote-test-gateway.mjs';
 import { createImprovementRecorder } from '../server/remote-test-learning.mjs';
 import { analyzeRemoteTests, formatHarnessInsights } from '../server/remote-test-insights.mjs';
 import { runRemoteEvaluation } from '../server/remote-test-eval.mjs';
@@ -379,6 +383,12 @@ test('a reconnect receives the preserved terminal transcript', async (context) =
     type: 'data',
     data: '\u001b[32mHII ready\u001b[0m\r\n◈ '
   }]);
+});
+
+test('public shared sessions stay alive while evaluations can retain a timeout', () => {
+  assert.equal(disconnectTimeoutEnabled(0), false);
+  assert.equal(disconnectTimeoutEnabled(90_000), true);
+  assert.equal(disconnectTimeoutEnabled(Number.POSITIVE_INFINITY), false);
 });
 
 test('HTML publication requires Chrome instead of accepting a static false positive', async (context) => {

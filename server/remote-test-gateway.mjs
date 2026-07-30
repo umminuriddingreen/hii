@@ -105,6 +105,10 @@ export function replayTranscript(layout, socket) {
   }
 }
 
+export function disconnectTimeoutEnabled(disconnectGraceMs) {
+  return Number.isFinite(disconnectGraceMs) && disconnectGraceMs > 0;
+}
+
 export async function startRemoteTestGateway(config, dependencies = {}) {
   const run = dependencies.run ?? runCommand;
   const expose = dependencies.expose ?? config.expose ?? true;
@@ -509,9 +513,11 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
         writerUntil = 0;
       }
       appendEvent(layout, { type: 'ws-disconnected', clientsRemaining: subscribers.size });
-      if (subscribers.size === 0) {
+      if (subscribers.size === 0 && disconnectTimeoutEnabled(disconnectGraceMs)) {
         disconnectTimer = setTimeout(() => void shutdown('disconnect-timeout'), disconnectGraceMs);
         disconnectTimer.unref?.();
+      } else if (subscribers.size === 0) {
+        appendEvent(layout, { type: 'gateway-idle', policy: 'operator-stop-only' });
       }
     });
   });
