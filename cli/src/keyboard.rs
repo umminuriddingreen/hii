@@ -32,8 +32,8 @@ pub enum InputEvent {
     Queue(String),
     /// Esc — interrupt the current run.
     Interrupt,
-    /// Ctrl+B — background the current run.
-    Background,
+    /// Ctrl+B — start the current composer text as a supervised background task.
+    Background(String),
     /// Ctrl+T — show the task/status view.
     TaskView,
 }
@@ -149,7 +149,10 @@ fn apply_key(key: KeyEvent, buf: &mut String, cursor: &mut usize) -> KeyOutcome 
         }
         KeyCode::Esc => KeyOutcome::Emit(InputEvent::Interrupt),
         KeyCode::Char('c') if ctrl => KeyOutcome::Emit(InputEvent::Interrupt),
-        KeyCode::Char('b') if ctrl => KeyOutcome::Emit(InputEvent::Background),
+        KeyCode::Char('b') if ctrl => {
+            *cursor = 0;
+            KeyOutcome::Emit(InputEvent::Background(std::mem::take(buf)))
+        }
         KeyCode::Char('t') if ctrl => KeyOutcome::Emit(InputEvent::TaskView),
         KeyCode::Char('a') if ctrl => {
             *cursor = 0;
@@ -590,10 +593,13 @@ mod tests {
             emit(ctrl(KeyCode::Char('c')), &mut buf, &mut cursor),
             Some(InputEvent::Interrupt)
         );
+        buf = "task".into();
+        cursor = buf.len();
         assert_eq!(
             emit(ctrl(KeyCode::Char('b')), &mut buf, &mut cursor),
-            Some(InputEvent::Background)
+            Some(InputEvent::Background("task".into()))
         );
+        assert!(buf.is_empty());
         assert_eq!(
             emit(ctrl(KeyCode::Char('t')), &mut buf, &mut cursor),
             Some(InputEvent::TaskView)

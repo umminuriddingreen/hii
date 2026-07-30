@@ -4,6 +4,7 @@ use crate::{
         MODEL_LOOP_DETECTED_MESSAGE,
     },
     attachments::AttachmentQueue,
+    background::BackgroundJobs,
     config::AppPaths,
     contract::{deletion_shell, sensitive_shell, Authority, Decision},
     hooks::{HookBatch, HookEvent, HookRunner},
@@ -157,6 +158,8 @@ pub struct Conversation {
     authority: Authority,
     hooks: HookRunner,
     attachments: AttachmentQueue,
+    background_jobs: BackgroundJobs,
+    pending_backgrounds: VecDeque<String>,
 }
 
 impl Conversation {
@@ -179,6 +182,7 @@ impl Conversation {
             hooks_enabled && !public_test,
         )?;
         let attachments = AttachmentQueue::new(tools.workspace(), public_test);
+        let background_jobs = BackgroundJobs::new(&paths.runtime, tools.workspace())?;
         let capsule = if public_test {
             crate::context::ContextCapsule::default()
         } else {
@@ -215,6 +219,8 @@ impl Conversation {
             authority: Authority::Workspace,
             hooks,
             attachments,
+            background_jobs,
+            pending_backgrounds: VecDeque::new(),
         };
         conversation.sync_authority_context();
         let session_hooks = conversation.hooks.fire(
@@ -1030,6 +1036,55 @@ impl Conversation {
         Ok(result)
     }
 
+    pub fn background(&mut self, goal: &str) -> Result<String, String> {
+        if self.public_test {
+            return Err(
+                "Background child processes are unavailable in the public test. Queue steering with Tab instead."
+                    .into(),
+            );
+        }
+        let result = self.background_jobs.start(goal, &self.model)?;
+        self.store.event(
+            "background.started",
+            json!({ "goal": redact_text(goal), "model": self.model }),
+        )?;
+        Ok(result)
+    }
+
+    pub fn jobs(&mut self) -> Result<String, String> {
+        self.background_jobs.list()
+    }
+
+    pub fn job(&mut self, id: &str, action: &str) -> Result<String, String> {
+        let result = self.background_jobs.operate(id, action)?;
+        self.store
+            .event("background.operated", json!({ "id": id, "action": action }))?;
+        Ok(result)
+    }
+
+    pub fn task_view(&mut self) -> String {
+        let jobs = self
+            .background_jobs
+            .list()
+            .unwrap_or_else(|error| format!("Background jobs unavailable: {error}"));
+        format!("{}\n\nBACKGROUND JOBS\n{jobs}", self.status())
+    }
+
+    pub fn poll_background_updates(&mut self) -> Result<Vec<String>, String> {
+        self.background_jobs.refresh()
+    }
+
+    pub fn start_pending_backgrounds(&mut self) -> Vec<String> {
+        let mut results = Vec::new();
+        while let Some(goal) = self.pending_backgrounds.pop_front() {
+            match self.background(&goal) {
+                Ok(result) => results.push(result),
+                Err(error) => results.push(format!("Background task not started: {error}")),
+            }
+        }
+        results
+    }
+
     pub fn plan(&mut self, enabled: bool) -> Result<String, String> {
         self.plan_mode = enabled;
         self.sync_plan_context();
@@ -1646,16 +1701,27 @@ impl Conversation {
                             return Err("operator interrupted model activity".into());
                         }
                         crate::keyboard::InputEvent::TaskView => {
-                            crate::tui::system(&self.status());
+                            crate::tui::system(&self.task_view());
                         }
-                        crate::keyboard::InputEvent::Background => {
-                            self.store.event(
-                                "conversation.background_requested",
-                                json!({ "phase": phase }),
-                            )?;
-                            crate::tui::system(
-                                "This local call will finish here; the next queued intent will continue afterward.",
-                            );
+                        crate::keyboard::InputEvent::Background(value) => {
+                            if value.trim().is_empty() {
+                                crate::tui::system(
+                                    "Type a task, then press Ctrl+B to run it after this turn.",
+                                );
+                            } else if self.public_test {
+                                crate::tui::system(
+                                    "Background child processes are unavailable in the public test. Press Tab to queue steering.",
+                                );
+                            } else {
+                                self.pending_backgrounds.push_back(value.clone());
+                                self.store.event(
+                                    "conversation.background_requested",
+                                    json!({ "phase": phase, "goal": redact_text(&value) }),
+                                )?;
+                                crate::tui::system(
+                                    "Background task queued; it starts when this turn returns control.",
+                                );
+                            }
                         }
                         _ => {}
                     }

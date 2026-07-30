@@ -2,6 +2,7 @@ mod acp;
 mod agent;
 mod agents;
 mod attachments;
+mod background;
 mod board;
 mod config;
 mod context;
@@ -460,6 +461,12 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
     let mut input_history: Vec<String> = Vec::new();
     let interactive = keyboard::is_interactive();
     loop {
+        for update in conversation.poll_background_updates()? {
+            tui::system(&update);
+        }
+        for update in conversation.start_pending_backgrounds() {
+            tui::system(&update);
+        }
         let active_queue = conversation.take_queued();
         let goal = if let Some(pending) = active_queue {
             tui::system("Running queued follow-up.");
@@ -493,12 +500,19 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     continue;
                 }
                 keyboard::InputEvent::TaskView => {
-                    tui::system(&conversation.status());
+                    tui::system(&conversation.task_view());
                     continue;
                 }
                 keyboard::InputEvent::Interrupt => break,
-                keyboard::InputEvent::Background => {
-                    tui::idle_background();
+                keyboard::InputEvent::Background(goal) => {
+                    if goal.trim().is_empty() {
+                        tui::idle_background();
+                    } else {
+                        match conversation.background(&goal) {
+                            Ok(result) => tui::system(&result),
+                            Err(error) => tui::error(&error),
+                        }
+                    }
                     continue;
                 }
             }
@@ -579,6 +593,9 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Some(SlashCommand::Resume(id)) => conversation.resume(id.as_deref()),
             Some(SlashCommand::Skills) => conversation.skills(),
             Some(SlashCommand::Hooks) => Ok(conversation.hooks()),
+            Some(SlashCommand::Background(goal)) => conversation.background(&goal),
+            Some(SlashCommand::Jobs) => conversation.jobs(),
+            Some(SlashCommand::Job { id, action }) => conversation.job(&id, &action),
             Some(SlashCommand::Agents) => agents::AgentManager::new(conversation.paths()).list(),
             Some(SlashCommand::Providers) => {
                 agents::AgentManager::new(conversation.paths()).providers()
@@ -679,6 +696,12 @@ enum SlashCommand {
     Resume(Option<String>),
     Skills,
     Hooks,
+    Background(String),
+    Jobs,
+    Job {
+        id: String,
+        action: String,
+    },
     Agents,
     Providers,
     Login(String),
@@ -755,6 +778,22 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         "/resume" => SlashCommand::Resume(argument),
         "/skills" if rest.is_empty() => SlashCommand::Skills,
         "/hooks" if rest.is_empty() => SlashCommand::Hooks,
+        "/background" | "/bg" => SlashCommand::Background(rest.to_string()),
+        "/jobs" | "/tasks" if rest.is_empty() => SlashCommand::Jobs,
+        "/job" => {
+            let parts = rest.split_whitespace().collect::<Vec<_>>();
+            match parts.as_slice() {
+                [id] => SlashCommand::Job {
+                    id: (*id).into(),
+                    action: "status".into(),
+                },
+                [id, action] => SlashCommand::Job {
+                    id: (*id).into(),
+                    action: (*action).into(),
+                },
+                _ => SlashCommand::Unknown(input.into()),
+            }
+        }
         "/agents" if rest.is_empty() => SlashCommand::Agents,
         "/ps" if rest.is_empty() => SlashCommand::Agents,
         "/providers" if rest.is_empty() => SlashCommand::Providers,
@@ -818,7 +857,7 @@ fn slash_help() -> String {
     };
     help.replace(
         "/skills                       show automatically learned skill drafts\n",
-        "/skills                       show automatically learned skill drafts\n/hooks                        inspect approved lifecycle policy\n",
+        "/skills                       show automatically learned skill drafts\n/hooks                        inspect approved lifecycle policy\n/background <task>            start one supervised local HII job\n/jobs                         list background jobs\n/job <id> status|logs|proof|cancel\n                               inspect or stop one background job\n",
     )
     .replace(
         "/status                       show session, workspace, model, and usage\n",
@@ -1505,6 +1544,18 @@ mod tests {
         );
         assert_eq!(parse_slash_command("/ps"), Some(SlashCommand::Agents));
         assert_eq!(parse_slash_command("/hooks"), Some(SlashCommand::Hooks));
+        assert_eq!(
+            parse_slash_command("/background inspect the failing tests"),
+            Some(SlashCommand::Background("inspect the failing tests".into()))
+        );
+        assert_eq!(parse_slash_command("/jobs"), Some(SlashCommand::Jobs));
+        assert_eq!(
+            parse_slash_command("/job deadbeef logs"),
+            Some(SlashCommand::Job {
+                id: "deadbeef".into(),
+                action: "logs".into()
+            })
+        );
         assert_eq!(
             parse_slash_command("/stop worker-7"),
             Some(SlashCommand::Agent {

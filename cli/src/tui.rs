@@ -86,6 +86,9 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/stop", "stop one worker"),
     ("/skills", "learned workflows"),
     ("/hooks", "lifecycle policy"),
+    ("/background", "supervised local task"),
+    ("/jobs", "background work"),
+    ("/job", "inspect or cancel job"),
     ("/compact", "shrink context"),
     ("/clear", "fresh conversation"),
     ("/new", "fresh conversation"),
@@ -411,8 +414,8 @@ pub fn steered() {
 pub fn idle_background() {
     println!(
         "  {} {}",
-        paint("○ IDLE", &[palette().muted]),
-        paint("nothing is running to background", &[DIM, palette().muted])
+        paint("◇ BACKGROUND", &[palette().primary]),
+        paint("type a task, then press Ctrl+B", &[DIM, palette().muted])
     );
 }
 
@@ -607,6 +610,8 @@ mod tests {
         assert!(!matches.iter().any(|(command, _)| *command == "/providers"));
         assert!(!matches.iter().any(|(command, _)| *command == "/copy"));
         assert!(!matches.iter().any(|(command, _)| *command == "/rename"));
+        assert!(!matches.iter().any(|(command, _)| *command == "/background"));
+        assert!(!matches.iter().any(|(command, _)| *command == "/jobs"));
     }
 
     #[test]
