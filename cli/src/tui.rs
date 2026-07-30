@@ -26,6 +26,8 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/usage", "tokens and speed"),
     ("/thinking", "thought stream"),
     ("/model", "choose local model"),
+    ("/providers", "accounts and plans"),
+    ("/login", "connect an account"),
     ("/proof", "latest receipt"),
     ("/agents", "managed workers"),
     ("/skills", "learned workflows"),

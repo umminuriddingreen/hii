@@ -1,5 +1,6 @@
 use crate::config::AppPaths;
-use std::process::Command;
+use serde_json::Value;
+use std::process::{Command, Stdio};
 
 pub struct AgentManager {
     hiid: std::path::PathBuf,
@@ -46,6 +47,40 @@ impl AgentManager {
         self.run(&["claude", "run", task])
     }
 
+    /// Show only safe, user-facing provider state. Authentication files and
+    /// account identifiers are intentionally never read by HII.
+    pub fn providers(&self) -> Result<String, String> {
+        let codex = provider_status("codex")?;
+        let claude = provider_status("claude")?;
+        Ok(format!(
+            "local   ready · Ollama / LM Studio\ncodex   {codex}\nclaude  {claude}\n\n/login codex  ·  /login claude"
+        ))
+    }
+
+    /// Hand the terminal directly to the provider's official login flow. HII
+    /// never accepts, proxies, logs, or stores the resulting credential.
+    pub fn login(&self, provider: &str) -> Result<String, String> {
+        let (program, args, label): (&str, &[&str], &str) = match provider.trim() {
+            "codex" | "openai" => ("codex", &["login"], "Codex"),
+            "claude" | "anthropic" => ("claude", &["auth", "login"], "Claude"),
+            _ => return Err("login provider must be codex or claude".into()),
+        };
+        let status = Command::new(program)
+            .args(args)
+            .current_dir(&self.repo)
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .map_err(|error| format!("could not open {label} login: {error}"))?;
+        if !status.success() {
+            return Err(format!("{label} login did not complete."));
+        }
+        Ok(format!(
+            "{label} login complete. HII will use the authenticated CLI session."
+        ))
+    }
+
     pub fn operate(&self, id: &str, action: &str) -> Result<String, String> {
         if id.starts_with("codex-") || id.starts_with("codex:") {
             let id = id.strip_prefix("codex:").unwrap_or(id);
@@ -86,5 +121,50 @@ impl AgentManager {
         } else {
             Err(if stderr.is_empty() { stdout } else { stderr })
         }
+    }
+}
+
+fn provider_status(provider: &str) -> Result<String, String> {
+    match provider {
+        "codex" => {
+            let output = match Command::new("codex").args(["login", "status"]).output() {
+                Ok(output) => output,
+                Err(_) => return Ok("not installed".into()),
+            };
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            if !output.status.success() {
+                return Ok("signed out · /login codex".into());
+            }
+            let method = if text.to_ascii_lowercase().contains("chatgpt") {
+                "ChatGPT plan"
+            } else {
+                "authenticated"
+            };
+            Ok(format!("ready · {method}"))
+        }
+        "claude" => {
+            let output = match Command::new("claude").args(["auth", "status"]).output() {
+                Ok(output) => output,
+                Err(_) => return Ok("not installed".into()),
+            };
+            if !output.status.success() {
+                return Ok("signed out · /login claude".into());
+            }
+            let value: Value = serde_json::from_slice(&output.stdout).unwrap_or(Value::Null);
+            if !value["loggedIn"].as_bool().unwrap_or(false) {
+                return Ok("signed out · /login claude".into());
+            }
+            let plan = value["subscriptionType"]
+                .as_str()
+                .filter(|value| !value.is_empty())
+                .map(|value| format!("{value} plan"))
+                .unwrap_or_else(|| "authenticated".into());
+            Ok(format!("ready · {plan}"))
+        }
+        _ => Err("unknown provider".into()),
     }
 }

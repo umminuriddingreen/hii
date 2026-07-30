@@ -105,6 +105,13 @@ enum Commands {
     Doctor,
     #[command(about = "List locally installed Ollama models")]
     Models,
+    #[command(about = "Show local, Codex, and Claude account access")]
+    Providers,
+    #[command(about = "Connect an existing Codex or Claude plan")]
+    Login {
+        #[arg(value_name = "PROVIDER", help = "codex | claude")]
+        provider: String,
+    },
     #[command(
         alias = "receipt",
         about = "Inspect the latest or selected run receipt"
@@ -290,6 +297,14 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             }
             Ok(ExitCode::SUCCESS)
         }
+        Some(Commands::Providers) => {
+            println!("{}", agents::AgentManager::new(&paths).providers()?);
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Login { provider }) => {
+            println!("{}", agents::AgentManager::new(&paths).login(&provider)?);
+            Ok(ExitCode::SUCCESS)
+        }
         Some(Commands::Proof { id, json }) => {
             proof(&paths, id.as_deref(), json)?;
             Ok(ExitCode::SUCCESS)
@@ -409,6 +424,12 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Some(SlashCommand::Proof(id)) => conversation.proof(id.as_deref()),
             Some(SlashCommand::Skills) => conversation.skills(),
             Some(SlashCommand::Agents) => agents::AgentManager::new(conversation.paths()).list(),
+            Some(SlashCommand::Providers) => {
+                agents::AgentManager::new(conversation.paths()).providers()
+            }
+            Some(SlashCommand::Login(provider)) => {
+                agents::AgentManager::new(conversation.paths()).login(&provider)
+            }
             Some(SlashCommand::Codex(task)) => {
                 agents::AgentManager::new(conversation.paths()).codex(&task)
             }
@@ -484,6 +505,8 @@ enum SlashCommand {
     Proof(Option<String>),
     Skills,
     Agents,
+    Providers,
+    Login(String),
     Codex(String),
     Claude(String),
     Undo,
@@ -539,6 +562,8 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         "/proof" => SlashCommand::Proof(argument),
         "/skills" if rest.is_empty() => SlashCommand::Skills,
         "/agents" if rest.is_empty() => SlashCommand::Agents,
+        "/providers" if rest.is_empty() => SlashCommand::Providers,
+        "/login" => SlashCommand::Login(rest.to_ascii_lowercase()),
         "/codex" => SlashCommand::Codex(rest.to_string()),
         "/claude" => SlashCommand::Claude(rest.to_string()),
         "/undo" if argument.is_none() => SlashCommand::Undo,
@@ -585,9 +610,9 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
 
 fn slash_help() -> &'static str {
     if cfg!(feature = "preview") {
-        "/help                         show commands\n/compact                      summarize and shrink this conversation\n/clear                        start with fresh context\n/status                       show session, workspace, model, and usage\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/model [name]                 list or switch local models\n/proof [run-id]               inspect execution proof\n/skills                       show automatically learned skill drafts\n/agents                       show HII-managed and observed agents\n/codex <task>                 start a managed Codex run\n/claude <task>                start a managed Claude session\n/agent <id> status|logs|stop  manage an agent by id\n/resources                    quick CPU, memory, storage, and Ollama view\n/top                          open the embedded btop resource monitor\n/schedule <cron> :: <task>    create a local recurring HII task\n/schedules                    list HII schedules\n/calendar                     show the next 7 days\n/calendar add DATE [TIME] :: TITLE\n/sync calendar                sync next HII runs to Apple Calendar\n/exit                         leave HII\n\nWhile running: type + Enter steers · type + Tab queues · Esc stops"
+        "/help                         show commands\n/providers                    show local, Codex, and Claude access\n/login codex|claude           connect an existing provider plan\n/compact                      summarize and shrink this conversation\n/clear                        start with fresh context\n/status                       show session, workspace, model, and usage\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/model [name]                 list or switch local models\n/proof [run-id]               inspect execution proof\n/skills                       show automatically learned skill drafts\n/agents                       show HII-managed and observed agents\n/codex <task>                 use authenticated Codex CLI\n/claude <task>                use authenticated Claude CLI\n/agent <id> status|logs|stop  manage an agent by id\n/resources                    quick CPU, memory, storage, and Ollama view\n/top                          open the embedded btop resource monitor\n/schedule <cron> :: <task>    create a local recurring HII task\n/schedules                    list HII schedules\n/calendar                     show the next 7 days\n/calendar add DATE [TIME] :: TITLE\n/sync calendar                sync next HII runs to Apple Calendar\n/exit                         leave HII\n\nWhile running: type + Enter steers · type + Tab queues · Esc stops"
     } else {
-        "/help                         show commands\n/compact                      summarize and shrink this conversation\n/clear                        start with fresh context\n/status                       show session, workspace, model, and usage\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/model [name]                 list or switch local models\n/proof [run-id]               inspect execution proof\n/skills                       show automatically learned skill drafts\n/agents                       show HII-managed and observed agents\n/codex <task>                 start a managed Codex run\n/claude <task>                start a managed Claude session\n/agent <id> status|logs|stop  manage an agent by id\n/undo                         drop the last exchange to steer away\n/fork                         snapshot this session to a resumable fork\n/teach <name>                 graduate this session into a reusable skill\n!<command>                    run a shell command directly\n/exit                         leave HII\n\nWhile running: type + Enter steers · type + Tab queues · Esc stops"
+        "/help                         show commands\n/providers                    show local, Codex, and Claude access\n/login codex|claude           connect an existing provider plan\n/compact                      summarize and shrink this conversation\n/clear                        start with fresh context\n/status                       show session, workspace, model, and usage\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/model [name]                 list or switch local models\n/proof [run-id]               inspect execution proof\n/skills                       show automatically learned skill drafts\n/agents                       show HII-managed and observed agents\n/codex <task>                 use authenticated Codex CLI\n/claude <task>                use authenticated Claude CLI\n/agent <id> status|logs|stop  manage an agent by id\n/undo                         drop the last exchange to steer away\n/fork                         snapshot this session to a resumable fork\n/teach <name>                 graduate this session into a reusable skill\n!<command>                    run a shell command directly\n/exit                         leave HII\n\nWhile running: type + Enter steers · type + Tab queues · Esc stops"
     }
 }
 
@@ -933,6 +958,8 @@ fn is_native_command(command: &str) -> bool {
             | "status"
             | "doctor"
             | "models"
+            | "providers"
+            | "login"
             | "proof"
             | "receipt"
             | "board"
@@ -1061,6 +1088,14 @@ mod tests {
         assert_eq!(
             parse_slash_command("/model qwen3.6:35b-mlx"),
             Some(SlashCommand::Model(Some("qwen3.6:35b-mlx".into())))
+        );
+        assert_eq!(
+            parse_slash_command("/login codex"),
+            Some(SlashCommand::Login("codex".into()))
+        );
+        assert_eq!(
+            parse_slash_command("/providers"),
+            Some(SlashCommand::Providers)
         );
     }
 
