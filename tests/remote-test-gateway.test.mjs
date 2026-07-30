@@ -19,7 +19,7 @@ import {
 } from '../server/remote-test-core.mjs';
 import { verifyArtifact } from '../server/remote-test-artifacts.mjs';
 import { createSandbox, sanitizedHostEnv } from '../server/remote-test-sandbox.mjs';
-import { startRemoteTestGateway } from '../server/remote-test-gateway.mjs';
+import { replayTranscript, startRemoteTestGateway } from '../server/remote-test-gateway.mjs';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -186,6 +186,19 @@ test('only the first correct passcode can claim the tester session', async (cont
   });
   assert.equal((await authenticate()).status, 200);
   assert.equal((await authenticate()).status, 409);
+});
+
+test('a reconnect receives the preserved terminal transcript', async (context) => {
+  const root = await temporary();
+  context.after(() => fs.rm(root, { recursive: true, force: true }));
+  const layout = await ensureSessionLayout(root, '20260730120000-040404040404040404040404');
+  await fs.writeFile(layout.transcript, '\u001b[32mHII ready\u001b[0m\r\n◈ ');
+  const messages = [];
+  replayTranscript(layout, { send: (message) => messages.push(JSON.parse(message)) });
+  assert.deepEqual(messages, [{
+    type: 'data',
+    data: '\u001b[32mHII ready\u001b[0m\r\n◈ '
+  }]);
 });
 
 test('HTML publication requires Chrome instead of accepting a static false positive', async (context) => {

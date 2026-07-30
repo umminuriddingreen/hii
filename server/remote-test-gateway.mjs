@@ -99,6 +99,15 @@ async function walkArtifacts(root, relative = '') {
   return items;
 }
 
+export function replayTranscript(layout, socket) {
+  try {
+    const transcript = fs.readFileSync(layout.transcript, 'utf8');
+    if (transcript) socket.send(JSON.stringify({ type: 'data', data: transcript }));
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+}
+
 export async function startRemoteTestGateway(config, passcode, dependencies = {}) {
   const run = dependencies.run ?? runCommand;
   const expose = dependencies.expose ?? config.expose ?? true;
@@ -356,6 +365,7 @@ export async function startRemoteTestGateway(config, passcode, dependencies = {}
     if (disconnectTimer) clearTimeout(disconnectTimer);
     disconnectTimer = null;
     try {
+      replayTranscript(layout, ws);
       await spawnHii();
     } catch (error) {
       appendEvent(layout, { type: 'hii-spawn-failed', error: error.message });
