@@ -26,6 +26,7 @@
   import { findOpenWorkspacePosition } from '@/lib/workspace/layout';
   import { normalizeWorkspaceContextAnchor } from '@/lib/workspace/context-anchor';
   import { rebindPendingWorkspaceContext } from '@/lib/workspace/pending-context';
+  import { organizeWorkspaceSelection } from '@/lib/workspace/organize';
 
   export let data: { enabled: boolean };
   const surfaceCatalog = [
@@ -37,7 +38,7 @@
   let doc:WorkspaceDoc={version:1,revision:0,updatedAt:new Date().toISOString(),viewport:{x:0,y:0,zoom:1},nextZ:1,nodes:[]};
   let ready=false; let loadState:'loading'|'ready'|'recovery'='loading'; let loadError=''; let recoveryPath=''; let saveError='';
   let workspaceId='default'; let workspaces:Array<{id:string;selected:boolean;status:'ready'|'recovery';revision?:number}>=[]; let workspaceMenu=false;
-  let selected:string|null=null; let contextSelection:string[]=[]; let omnibar=false; let query=''; let mapMenu=false; let currentSceneId:string|null=null; let canvasWidth=0; let canvasHeight=0; let saveTimer:ReturnType<typeof setTimeout>|undefined; let saveInFlight=false; let savePending=false;
+  let selected:string|null=null; let contextSelection:string[]=[]; let omnibar=false; let query=''; let mapMenu=false; let currentSceneId:string|null=null; let organizationNotice=''; let canvasWidth=0; let canvasHeight=0; let saveTimer:ReturnType<typeof setTimeout>|undefined; let saveInFlight=false; let savePending=false;
   let context:any=null; let board:any[]=[]; let daemon:any=null; let healthOpen=false; let daemonActionBusy=false; let canvas:HTMLElement; let mouse={x:400,y:300};
   let commandInput:HTMLInputElement; let fileInput:HTMLInputElement;
   let composerOpen=false; let composerText=''; let composerInput:HTMLTextAreaElement; let composerAt={x:400,y:280}; let lastSummon=0;
@@ -57,12 +58,14 @@
     ['context','Pin live system context','git · capabilities · next actions'],
     ['board','Open board object','~/.hii board lanes'],
     ['frame','New scene','name, capture, focus, and move related objects together'],
+    ...(organizableSelection.length>1?[['organize','Make Scene from selection','exact membership · reversible']]:[]),
     ['sound-field','Open South Berkeley sound field','modeled dBA']
   ].filter(item=>`${item[1]} ${item[2]}`.toLowerCase().includes(query.toLowerCase()));
   $: nodeResults=searchWorkspaceNodes(doc.nodes,query);
   $: collapsedFrameIds=new Set(doc.nodes.filter(node=>node.type==='frame'&&node.payload.collapsed===true).map(node=>node.id));
   $: scenes=workspaceScenes(doc.nodes);
   $: selectedContextNodes=contextSelection.map(id=>doc.nodes.find(node=>node.id===id)).filter((node):node is WorkspaceNode=>Boolean(node));
+  $: organizableSelection=selectedContextNodes.filter(node=>node.type!=='frame');
   $: connections=workspaceConnections(doc.nodes);
   $: visibleNodeCount=countWorkspaceNodesInViewport(doc.nodes,doc.viewport,{width:canvasWidth,height:canvasHeight});
   $: contentOutsideView=loadState==='ready'&&doc.nodes.length>0&&canvasWidth>0&&canvasHeight>0&&visibleNodeCount===0;
@@ -170,12 +173,27 @@
   function fitNodes(nodes:WorkspaceNode[],maxZoom=1){const rect=canvas?.getBoundingClientRect();if(!rect)return;const viewport=fitWorkspaceViewport(nodes,{width:rect.width,height:rect.height},{maxZoom});if(!viewport)return;doc={...doc,viewport};persist();}
   function fitAll(){fitNodes(doc.nodes);selected=null;contextSelection=[];currentSceneId=null;mapMenu=false;}
   function focusNode(node:WorkspaceNode){select(node);currentSceneId=node.frameId||null;fitNodes([node],1.25);omnibar=false;query='';}
+  function selectShownNodes(nodes:WorkspaceNode[]){const ids=[...new Set(nodes.filter(node=>node.type!=='frame').map(node=>node.id))];if(!ids.length)return;organizationNotice='';contextSelection=ids;selected=ids.at(-1)||null;}
   function sceneMembers(id:string){return workspaceSceneMembers(doc.nodes,id)}
   function fitScene(node:WorkspaceNode){const contents=sceneMembers(node.id);fitNodes(contents.length?[node,...contents]:[node],1.25);selected=node.id;contextSelection=[];currentSceneId=node.id;}
   function openScene(node:WorkspaceNode){fitScene(node);mapMenu=false;}
   function openAdjacentScene(direction:-1|1){const scene=adjacentWorkspaceScene(scenes,currentSceneId,direction);if(scene)openScene(scene)}
   function captureScene(id:string){const before=doc;const captured=assignNodesToFrame(doc,id);const now=new Date().toISOString();doc={...captured,nodes:captured.nodes.map(node=>node.id===id?{...node,updatedAt:now,object:{...node.object,kind:'scene',owner:'human',status:'ready',source:'HII spatial workspace',audit:[...(node.object?.audit||[]),{ts:now,actor:'human' as const,action:'captured workspace scene membership'}].slice(-20)}}:node)};currentSceneId=id;remember(before);persist();}
-  function runCommand(command:string[]){if(command[0]==='fit'){fitAll();omnibar=false;query=''}else if(command[0]==='surface')spawn('surface',{title:command[1].replace('Open ',''),path:command[3],capabilityId:command[4]});else if(command[0]==='intent')void summonComposer();else if(command[0]==='upload'){omnibar=false;fileInput?.click()}else spawn(command[0]);}
+  function organizeSelection(){
+    const before=doc;
+    const organized=organizeWorkspaceSelection(doc,contextSelection);
+    if(!organized)return;
+    doc=organized.doc;
+    selected=organized.scene.id;
+    contextSelection=[];
+    currentSceneId=organized.scene.id;
+    organizationNotice=`${workspaceNodeTitle(organized.scene)} now holds ${organized.organizedIds.length} selected objects.`;
+    remember(before);
+    persist();
+    mapMenu=false;omnibar=false;query='';
+    fitNodes([organized.scene,...doc.nodes.filter(node=>organized.organizedIds.includes(node.id))],1);
+  }
+  function runCommand(command:string[]){if(command[0]==='fit'){fitAll();omnibar=false;query=''}else if(command[0]==='organize')organizeSelection();else if(command[0]==='surface')spawn('surface',{title:command[1].replace('Open ',''),path:command[3],capabilityId:command[4]});else if(command[0]==='intent')void summonComposer();else if(command[0]==='upload'){omnibar=false;fileInput?.click()}else spawn(command[0]);}
   function followUp(node:WorkspaceNode,text:string){
     const intentSeed=seedFor('intent'),runSeed=seedFor('run');
     const at=findOpenWorkspacePosition(
@@ -226,7 +244,7 @@
   function openExplorer(event:MouseEvent){if(event.target!==canvas)return;const at=workspacePoint(event.clientX,event.clientY),seed=seedFor('explorer'),topLeft=workspacePoint(24,52),bottomRight=workspacePoint(innerWidth-24,innerHeight-72),x=Math.max(topLeft.x,Math.min(at.x-seed.w/2,bottomRight.x-seed.w)),y=Math.max(topLeft.y,Math.min(at.y-seed.h/2,bottomRight.y-seed.h));addSeeds([seed],{x,y});}
   function openSurface(id:string){const item=surfaceCatalog.find(candidate=>candidate.id===id);if(item)spawn('surface',{surface:item.id,title:item.title,path:item.path,capabilityId:item.capabilityId});}
   function close(id:string){const before=doc;const node=doc.nodes.find(candidate=>candidate.id===id);doc=node?.type==='frame'?removeFrame(doc,id):{...doc,nodes:doc.nodes.filter(n=>n.id!==id)};selected=null;contextSelection=contextSelection.filter(item=>item!==id);if(currentSceneId===id)currentSceneId=null;remember(before);persist();}
-  function select(node:WorkspaceNode,additive=false){if(additive){const removing=contextSelection.includes(node.id);contextSelection=removing?contextSelection.filter(id=>id!==node.id):[...contextSelection,node.id];selected=removing?contextSelection.at(-1)||null:node.id}else{selected=node.id;contextSelection=[node.id]}if(node.z<doc.nextZ)doc={...doc,nextZ:doc.nextZ+1,nodes:doc.nodes.map(candidate=>candidate.id===node.id?{...candidate,z:doc.nextZ+1}:candidate)}}
+  function select(node:WorkspaceNode,additive=false){organizationNotice='';if(additive){const removing=contextSelection.includes(node.id);contextSelection=removing?contextSelection.filter(id=>id!==node.id):[...contextSelection,node.id];selected=removing?contextSelection.at(-1)||null:node.id}else{selected=node.id;contextSelection=[node.id]}if(node.z<doc.nextZ)doc={...doc,nextZ:doc.nextZ+1,nodes:doc.nodes.map(candidate=>candidate.id===node.id?{...candidate,z:doc.nextZ+1}:candidate)}}
   function drag(event:PointerEvent,node:WorkspaceNode){if((event.target as HTMLElement).closest('button,input,textarea,iframe,a,.scroll,.xterm'))return;event.preventDefault();if(event.shiftKey){select(node,true);return}const before=doc;select(node);const sx=event.clientX,sy=event.clientY,ox=node.x,oy=node.y;let changed=false;const move=(e:PointerEvent)=>{changed=true;doc=moveNodeAndFrameContents(doc,node.id,ox+(e.clientX-sx)/doc.viewport.zoom,oy+(e.clientY-sy)/doc.viewport.zoom)};const up=()=>{removeEventListener('pointermove',move);removeEventListener('pointerup',up);if(changed){remember(before);persist()}};addEventListener('pointermove',move);addEventListener('pointerup',up);}
   function resize(event:PointerEvent,node:WorkspaceNode){event.preventDefault();event.stopPropagation();const before=doc,sx=event.clientX,sy=event.clientY,ow=node.w,oh=node.h;let changed=false;const move=(e:PointerEvent)=>{changed=true;doc={...doc,nodes:doc.nodes.map(candidate=>candidate.id===node.id?{...candidate,w:Math.max(140,ow+(e.clientX-sx)/doc.viewport.zoom),h:Math.max(80,oh+(e.clientY-sy)/doc.viewport.zoom)}:candidate)}};const up=()=>{removeEventListener('pointermove',move);removeEventListener('pointerup',up);if(changed){if(node.type==='frame')doc=assignNodesToFrame(doc,node.id);remember(before);persist()}};addEventListener('pointermove',move);addEventListener('pointerup',up);}
   function pan(event:PointerEvent){if(event.target!==canvas)return;const sx=event.clientX,sy=event.clientY,ox=doc.viewport.x,oy=doc.viewport.y;const move=(e:PointerEvent)=>doc={...doc,viewport:{...doc.viewport,x:ox+e.clientX-sx,y:oy+e.clientY-sy}};const up=()=>{removeEventListener('pointermove',move);removeEventListener('pointerup',up);persist()};addEventListener('pointermove',move);addEventListener('pointerup',up);}
@@ -258,7 +276,7 @@
   async function refreshBoard(){try{board=(await (await fetch('/api/board/tasks')).json()).tasks||[]}catch{}}
   async function refreshDaemon(){try{const response=await fetch('/api/daemon');const result=await response.json();if(response.ok)daemon=result}catch{}}
   async function controlDaemon(action:string){if(daemonActionBusy)return;daemonActionBusy=true;try{const response=await fetch('/api/daemon',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action})});const result=await response.json();if(!response.ok)throw new Error(result.error||'AII control failed.');daemon=result.snapshot;setTimeout(()=>void refreshDaemon(),800)}catch(error){saveError=error instanceof Error?error.message:'AII control failed.'}finally{daemonActionBusy=false}}
-  function changeHistory(direction:'undo'|'redo'){const result=direction==='undo'?undoWorkspace(workspaceHistory,doc):redoWorkspace(workspaceHistory,doc);if(!result)return;doc=result.doc;workspaceHistory=result.history;selected=null;persist();}
+  function changeHistory(direction:'undo'|'redo'){const result=direction==='undo'?undoWorkspace(workspaceHistory,doc):redoWorkspace(workspaceHistory,doc);if(!result)return;doc=result.doc;workspaceHistory=result.history;selected=null;contextSelection=[];currentSceneId=null;organizationNotice='';persist();}
   function keydown(event:KeyboardEvent){const editable=(event.target as Element)?.closest?.('input,textarea,[contenteditable]');const command=event.metaKey||event.ctrlKey;if(!editable&&command&&event.key.toLowerCase()==='z'){event.preventDefault();changeHistory(event.shiftKey?'redo':'undo');return}if(!editable&&command&&event.key.toLowerCase()==='y'){event.preventDefault();changeHistory('redo');return}if(!editable&&event.shiftKey&&event.key==='1'){event.preventDefault();fitAll();return}if(event.altKey&&event.code==='Space'&&!event.repeat){event.preventDefault();void summonComposer();return}if(command&&event.key.toLowerCase()==='k'){event.preventDefault();if(omnibar)omnibar=false;else void openCommands();}if(event.key==='Escape'){omnibar=false;composerOpen=false;}}
   async function drop(event:DragEvent){event.preventDefault();if(!event.dataTransfer)return;const at={x:(event.clientX-doc.viewport.x)/doc.viewport.zoom,y:(event.clientY-doc.viewport.y)/doc.viewport.zoom};addSeeds(await seedsFromDataTransfer(event.dataTransfer),at)}
   async function addFiles(files:File[]){const seeds=await seedsFromFiles(files);const center={x:(-doc.viewport.x+innerWidth/2)/doc.viewport.zoom,y:(-doc.viewport.y+innerHeight/2)/doc.viewport.zoom};addSeeds(seeds,{x:center.x-190,y:center.y-150})}
@@ -294,9 +312,17 @@
       <button class="shrink-0 rounded-full bg-neutral-950 px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-white" on:click={fitAll}>Show my work</button>
     </section>
   {/if}
+  {#if organizationNotice&&!contextSelection.length}
+    <section data-workspace-ui role="status" aria-live="polite" class="absolute left-1/2 top-4 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-emerald-900/10 bg-white/95 p-1.5 pl-4 shadow-xl backdrop-blur-xl">
+      <span class="font-mono text-[9px] uppercase tracking-[.08em] text-emerald-800">{organizationNotice}</span>
+      <button class="rounded-full bg-neutral-950 px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-white" on:click={()=>changeHistory('undo')}>Undo <kbd class="ml-1 text-white/50">⌘Z</kbd></button>
+      <button class="rounded-full px-2 py-2 font-mono text-[9px] uppercase text-neutral-400 hover:text-neutral-900" aria-label="Dismiss organization notice" on:click={()=>organizationNotice=''}>×</button>
+    </section>
+  {/if}
   {#if contextSelection.length&&!composerOpen}
     <section data-workspace-ui role="status" class="absolute left-1/2 top-4 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-blue-900/10 bg-white/95 p-1.5 pl-4 shadow-xl backdrop-blur-xl">
       <span class="font-mono text-[9px] uppercase tracking-[.1em] text-blue-700">{contextSelection.length} context object{contextSelection.length===1?'':'s'} selected</span>
+      {#if organizableSelection.length>1}<button class="rounded-full border border-blue-200 bg-blue-50 px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-blue-700 hover:border-blue-400" aria-label="Organize selection into scene" on:click={organizeSelection}>Make Scene</button>{/if}
       <button class="rounded-full bg-[var(--hii-electric-blue)] px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-white" on:click={()=>void summonComposer()}>Give intent <kbd class="ml-1 text-white/60">⌥Space</kbd></button>
       <button class="rounded-full px-2 py-2 font-mono text-[9px] uppercase text-neutral-400 hover:text-neutral-900" aria-label="Clear context selection" on:click={()=>{contextSelection=[];selected=null}}>×</button>
     </section>
@@ -402,6 +428,7 @@
         onCreateScene={()=>{mapMenu=false;spawn('frame')}}
         onOpenScene={openScene}
         onFocusNode={(node)=>{focusNode(node);mapMenu=false}}
+        onSelectNodes={selectShownNodes}
         onAdjacentScene={openAdjacentScene}
       />{/if}
     </div>

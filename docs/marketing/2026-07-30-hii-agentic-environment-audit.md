@@ -330,10 +330,11 @@ the real canvas.
 - Scene creation and membership capture add human-authored audit entries.
 
 The isolated `hii:scenes:check` product gate proves ordering, wrapping
-navigation, explicit membership, type summaries, deterministic viewport
-framing, and persistence after reload. This closes the named Scenes portion of
-orientation at scale. Existing-media organization, stacking, and reviewed
-near-duplicate handling remain open.
+navigation, explicit membership, exact-selection organization at 240 objects,
+type summaries, deterministic viewport framing, and persistence after reload.
+This closes the named Scenes and explicit existing-object organization portions
+of orientation at scale. Stacking, batch labels, and reviewed near-duplicate
+handling remain open.
 
 ### Verified governed-outline and first-win checkpoint
 
@@ -398,8 +399,26 @@ batch behavior. That distinction keeps the visual and import claims separate.
 
 This is intentionally non-destructive. Existing flat image fields are not
 silently rewritten, and near-duplicate visual matching is not claimed. A
-future explicit “organize this selection” action, batch labels, and
-perceptual-deduplication review remain open.
+future stacking action, batch labels, and perceptual-deduplication review
+remain open.
+
+### Verified exact-selection organization checkpoint
+
+Map search now acts as a human-reviewed organization boundary. A person can
+filter the complete governed outline, select every shown result, and choose
+`Make Scene`. HII creates one human-owned Scene with the exact selected
+membership; it does not move, merge, delete, or flatten the source objects.
+The result is immediately reversible through the visible Undo action or
+`⌘Z`.
+
+The live `orientation-scale-proof` workspace was cloned from the default
+workspace so the source stayed untouched. Searching for `asset` returned all
+164 real image objects, `Select 164` made that bounded result set explicit,
+and `Make Scene` produced one 164-member Scene. Map reported `183 objects · 1
+scenes`; the Scene summary reported `164 image` and `164 ready`. Undo restored
+the 182-object, zero-Scene state, and redo restored the Scene. The proof
+workspace persisted at revision 4, and the previously selected
+`governed-run-demo` workspace was restored afterward.
 
 ## Evidence reviewed
 
@@ -525,12 +544,12 @@ cloud sync, credits, or a general “AI operating system.”
 
 | Priority | Gap | Evidence of done |
 | --- | --- | --- |
-| 0 | Orientation at scale | The searchable governed outline, named ordered Scenes, arbitrary-depth lineage, status summaries, off-screen rescue, and deterministic Scene navigation are implemented. The remaining scale gate is proving this flow with hundreds of organized—not flat—media objects. |
+| 0 | Orientation at scale | The searchable governed outline, named ordered Scenes, arbitrary-depth lineage, status summaries, off-screen rescue, deterministic Scene navigation, and exact filter → selection → Scene flow are implemented. The 240-object product gate and live 164-image proof demonstrate organization under hundreds-of-object load; the next scale proof is useful multi-Scene classification rather than one large Scene. |
 | 0 | One legible governed run | Selected context, intent, permission boundary, progress, artifact, proof, and receipt are visible as one connected flow without reading raw logs. |
 | 0 | Artifact-first closure | The output opens beside its inputs, is editable or launches its native editor, and reports exactly what changed. |
 | 0 | Trustworthy context selection | Before approval, the user can see the exact files/nodes/sources and sub-asset regions included, exclusions, provenance, content identity, and likely network boundary. |
 | 0 | Human-readable runtime health | One instance model, one clear status, failures with cause and recovery action, no unexplained process counts. |
-| 1 | Media organization | New multi-image imports become bounded proof-linked contact sheets and exact duplicates are visibly counted. Explicit organization of existing nodes, batch labels, and reviewed perceptual dedupe remain open. |
+| 1 | Media organization | New multi-image imports become bounded proof-linked contact sheets, exact duplicates are visibly counted, and filtered existing nodes become an exact reversible Scene. Stacking, batch labels, and reviewed perceptual dedupe remain open. |
 | 1 | Run focus and log hygiene | Default progress is a short step list; raw stdout/stderr stays one level deeper. Duplicate tasks and transcript debris are prevented. |
 | 1 | Capability reuse | A successful approved trace can become a draft capability, show required inputs and permissions, and be re-run on new context. |
 | 1 | Onboarding | The first-session journey and privacy-safe local funnel are implemented. A clean Mac install must still reach the first verified artifact in under ten minutes with no repository knowledge. |
@@ -545,10 +564,10 @@ cloud sync, credits, or a general “AI operating system.”
 1. Finish the hero loop as a single product path:
    context selection → intent → approval → compact progress → visible artifact →
    receipt → save as draft capability.
-2. Keep the Map and named Scenes as permanent product infrastructure; prove
-   the searchable governed outline against hundreds of organized objects. The
-   five-reference visual checkpoint and real intent → run → receipt search are
-   complete; the remaining proof is orientation under hundreds-of-object load.
+2. Keep the Map and named Scenes as permanent product infrastructure. The
+   searchable outline, 240-object product gate, and live 164-image reversible
+   Scene proof are complete; next prove a useful human classification into
+   several named Scenes without losing provenance.
 3. Replace raw chat/run noise with an inspectable progress summary and a
    deliberately secondary log view.
 4. Keep runtime and desktop-space health operator-readable; live-verify the
@@ -563,8 +582,8 @@ cloud sync, credits, or a general “AI operating system.”
 
 ### Build next
 
-1. Extend the verified contact-sheet import with stacking, batch labels,
-   reviewed perceptual dedupe, and an explicit “organize this selection” action.
+1. Extend the verified contact-sheet and exact-selection organization flow
+   with stacking, batch labels, and reviewed perceptual dedupe.
 2. Extend sub-asset focus into contact sheets: promote one or more sheet items
    into reviewed image-region context without expanding the run to every image,
    and preserve optional human annotation labels beside each selected region.

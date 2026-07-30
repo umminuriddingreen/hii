@@ -40,6 +40,7 @@ const workspaceIngest = readFileSync(resolve(root, 'lib/workspace/ingest.ts'), '
 const pendingContext = readFileSync(resolve(root, 'lib/workspace/pending-context.ts'), 'utf8');
 const workspaceNavigator = readFileSync(resolve(root, 'src/lib/components/workspace/WorkspaceNavigator.svelte'), 'utf8');
 const workspaceOutline = readFileSync(resolve(root, 'lib/workspace/outline.ts'), 'utf8');
+const workspaceOrganize = readFileSync(resolve(root, 'lib/workspace/organize.ts'), 'utf8');
 
 describe('agentic workspace interaction contract', () => {
   it('summons direct workspace intent from Option+Space', () => {
@@ -61,6 +62,19 @@ describe('agentic workspace interaction contract', () => {
     expect(workspaceNavigator).toContain('workspaceFlattenOutlineEntries');
     expect(workspaceOutline).toContain('[node.object?.parentId, node.payload.parentId]');
     expect(workspaceOutline).toContain('statusCounts');
+  });
+
+  it('turns exact human selection into reversible Scene structure', () => {
+    expect(workspace).toContain('organizeWorkspaceSelection(doc,contextSelection)');
+    expect(workspace).toContain('aria-label="Organize selection into scene"');
+    expect(workspace).toContain('Make Scene');
+    expect(workspace).toContain("changeHistory('undo')");
+    expect(workspace).toContain('onSelectNodes={selectShownNodes}');
+    expect(workspaceNavigator).toContain('Select {visibleNodes.length}');
+    expect(workspaceNavigator).toContain('onSelectNodes(visibleNodes)');
+    expect(workspaceOrganize).toContain("membership: 'explicit-selection'");
+    expect(workspaceOrganize).toContain("action: 'organized explicit workspace selection into scene'");
+    expect(workspaceOrganize).toContain("node.type !== 'frame'");
   });
 
   it('hands selected context to the real AII workspace runner and branches from its receipt', () => {

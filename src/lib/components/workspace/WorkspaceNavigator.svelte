@@ -10,6 +10,7 @@
   export let onCreateScene: () => void;
   export let onOpenScene: (node: WorkspaceNode) => void;
   export let onFocusNode: (node: WorkspaceNode) => void;
+  export let onSelectNodes: (nodes: WorkspaceNode[]) => void;
   export let onAdjacentScene: (direction: -1 | 1) => void;
 
   let query = '';
@@ -18,6 +19,7 @@
   $: scenes = groups.filter((group) => group.scene);
   $: totalSceneCount = nodes.filter((node) => node.type === 'frame').length;
   $: visibleObjects = groups.reduce((count, group) => count + workspaceOutlineEntryCount(group.entries), 0);
+  $: visibleNodes = groups.flatMap((group) => workspaceFlattenOutlineEntries(group.entries).map((entry) => entry.node));
 
   function toggle(id: string) {
     const next = new Set(expanded);
@@ -52,10 +54,19 @@
     <button class="rounded-full bg-neutral-100 px-2 py-1 font-mono text-[9px] uppercase text-neutral-500" on:click={onClose}>Close</button>
   </div>
 
-  <label class="mx-3 mb-2 block">
-    <span class="sr-only">Search workspace outline</span>
-    <input bind:value={query} type="search" aria-label="Search workspace outline" placeholder="Find an intent, run, receipt, or object…" class="w-full rounded-xl border border-neutral-900/10 bg-neutral-50 px-3 py-2 text-[12px] outline-none focus:border-blue-400 focus:bg-white" />
-  </label>
+  <div class="mx-3 mb-2 flex items-center gap-2">
+    <label class="min-w-0 flex-1">
+      <span class="sr-only">Search workspace outline</span>
+      <input bind:value={query} type="search" aria-label="Search workspace outline" placeholder="Find an intent, run, receipt, or object…" class="w-full rounded-xl border border-neutral-900/10 bg-neutral-50 px-3 py-2 text-[12px] outline-none focus:border-blue-400 focus:bg-white" />
+    </label>
+    {#if visibleNodes.length > 1}
+      <button
+        class="shrink-0 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 font-mono text-[8px] uppercase tracking-[.08em] text-blue-700 hover:border-blue-400"
+        aria-label={`Select ${visibleNodes.length} shown workspace objects`}
+        on:click={() => onSelectNodes(visibleNodes)}
+      >Select {visibleNodes.length}</button>
+    {/if}
+  </div>
 
   {#if scenes.length}
     <div class="flex items-center justify-between border-b px-3 pb-2">

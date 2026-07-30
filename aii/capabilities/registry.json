@@ -918,7 +918,7 @@
     "name": "Create in the HII Spatial Workspace",
     "owner": "hii",
     "runtime": "next-route",
-    "summary": "Create with editable text and durable media, navigate large canvases through a searchable governed Scene and object outline, inspect source-linked PDF documents, local DXF drawings, and 3D models, bind human-selected pages, regions, layers, time ranges, and views into governed agent runs, branch verified work, and edit receipt-linked text artifacts beside their source context.",
+    "summary": "Create with editable text and durable media, organize exact human selections into reversible Scenes, navigate large canvases through a searchable governed Scene and object outline, inspect source-linked PDF documents, local DXF drawings, and 3D models, bind human-selected pages, regions, layers, time ranges, and views into governed agent runs, branch verified work, and edit receipt-linked text artifacts beside their source context.",
     "inputs": [
       "typed canvas text",
       "local clipboard or dropped media",
@@ -930,6 +930,7 @@
       "explicit spatial agent intent",
       "follow-up intent branched from a completed run",
       "receipt-listed local workspace artifact",
+      "two or more explicitly selected workspace objects",
       "named scene with explicitly captured object membership",
       "batch of local reference images"
     ],
@@ -947,6 +948,7 @@
       "durable run id and full local proof log",
       "editable receipt-linked text or code artifact",
       "append-only human artifact-edit receipt",
+      "reversible human-owned scene with exact selected membership",
       "ordered scene navigation with compact membership summaries",
       "bounded contact sheets with exact-duplicate counts and source hashes"
     ],
@@ -973,6 +975,7 @@
       "src/lib/components/workspace/SpatialRunPane.svelte",
       "src/lib/components/workspace/RunArtifactPane.svelte",
       "lib/workspace/ingest.ts",
+      "lib/workspace/organize.ts",
       "lib/workspace/scenes.ts",
       "lib/workspace/dxf.ts",
       "lib/workspace/run-output.ts",
@@ -980,6 +983,7 @@
       "app/api/workspace/artifacts",
       "app/api/daemon/runs",
       "tests/unit/workspace-viewers-contract.test.ts",
+      "tests/unit/workspace-organize.test.ts",
       "tests/unit/dxf.test.ts",
       "scripts/hii-spatial-run-smoke.mjs",
       "scripts/hii-workspace-scenes-smoke.mjs",
