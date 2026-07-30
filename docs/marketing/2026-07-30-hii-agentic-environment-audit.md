@@ -131,6 +131,28 @@ queued run counts, heartbeat age, and explains that observed Mac processes are
 inspectable context rather than active HII agents. Historical failed runs do
 not degrade current runtime health.
 
+### Verified Scenes checkpoint
+
+HII now turns its existing spatial frames into named, ordered Scenes without
+introducing a parallel presentation system. A Scene is a persisted HII spatial
+object owned by the human. Its captured membership remains an explicit
+`frameId` relationship in the workspace document, while its Map entry shows a
+compact type summary rather than a screenshot thumbnail that can drift from
+the real canvas.
+
+- New Scenes receive a stable sequence number and human-editable name.
+- Capture records which fully contained objects belong to the Scene.
+- Go deterministically fits the Scene and its current members.
+- Previous and next navigation wraps through the ordered Scene sequence.
+- Existing frames remain readable and are treated as legacy Scenes rather than
+  requiring a destructive workspace migration.
+- Scene creation and membership capture add human-authored audit entries.
+
+The isolated `hii:scenes:check` product gate proves ordering, wrapping
+navigation, explicit membership, type summaries, deterministic viewport
+framing, and persistence after reload. This closes the named Scenes portion of
+orientation at scale. Media stacking, contact sheets, and dedupe remain open.
+
 ## Evidence reviewed
 
 ### Live HII
@@ -224,7 +246,7 @@ cloud sync, credits, or a general “AI operating system.”
 
 | Priority | Gap | Evidence of done |
 | --- | --- | --- |
-| 0 | Orientation at scale | A user can always answer where they are, what exists, and how to return. Map, frames/Scenes, search, and off-screen rescue work with hundreds of objects. |
+| 0 | Orientation at scale | Map, named ordered Scenes, search, off-screen rescue, and deterministic Scene navigation are implemented. The remaining scale gate is proving this flow with hundreds of organized—not flat—media objects. |
 | 0 | One legible governed run | Selected context, intent, permission boundary, progress, artifact, proof, and receipt are visible as one connected flow without reading raw logs. |
 | 0 | Artifact-first closure | The output opens beside its inputs, is editable or launches its native editor, and reports exactly what changed. |
 | 0 | Trustworthy context selection | Before approval, the user can see the exact files/nodes/sources included, exclusions, provenance, and likely network boundary. |
@@ -244,7 +266,8 @@ cloud sync, credits, or a general “AI operating system.”
 1. Finish the hero loop as a single product path:
    context selection → intent → approval → compact progress → visible artifact →
    receipt → save as draft capability.
-2. Make the Map permanent product infrastructure and add named frames/Scenes.
+2. Keep the Map and named Scenes as permanent product infrastructure; prove
+   them against the first contact-sheet import.
 3. Replace raw chat/run noise with an inspectable progress summary and a
    deliberately secondary log view.
 4. Make runtime health describe one operator-meaningful state and recovery

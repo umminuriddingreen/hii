@@ -135,7 +135,11 @@ describe('agentic workspace interaction contract', () => {
     expect(workspace).toContain('Show my work');
     expect(workspace).toContain('Workspace map');
     expect(workspace).toContain('Key places');
-    expect(workspace).toContain('openFrame(frame)');
+    expect(workspace).toContain('workspaceScenes(doc.nodes)');
+    expect(workspace).toContain('openScene(scene)');
+    expect(workspace).toContain('openAdjacentScene(1)');
+    expect(workspace).toContain('captureScene(node.id)');
+    expect(workspace).toContain('Scene name');
   });
 
   it('bridges an explicit browser request into its paired terminal', () => {

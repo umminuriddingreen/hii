@@ -18,6 +18,7 @@
   import { countWorkspaceNodesInViewport, fitWorkspaceViewport, panWorkspaceViewport, zoomWorkspaceViewportAt } from '@/lib/workspace/viewport';
   import { searchWorkspaceNodes, workspaceNodeTitle } from '@/lib/workspace/search';
   import { assignNodesToFrame, moveNodeAndFrameContents, removeFrame } from '@/lib/workspace/frames';
+  import { adjacentWorkspaceScene, workspaceSceneMembers, workspaceScenes, workspaceSceneTypeSummary } from '@/lib/workspace/scenes';
   import { emptyWorkspaceHistory, recordWorkspaceChange, redoWorkspace, undoWorkspace } from '@/lib/workspace/history';
   import { workspaceConnections } from '@/lib/workspace/connections';
 
@@ -31,7 +32,7 @@
   let doc:WorkspaceDoc={version:1,revision:0,updatedAt:new Date().toISOString(),viewport:{x:0,y:0,zoom:1},nextZ:1,nodes:[]};
   let ready=false; let loadState:'loading'|'ready'|'recovery'='loading'; let loadError=''; let recoveryPath=''; let saveError='';
   let workspaceId='default'; let workspaces:Array<{id:string;selected:boolean;status:'ready'|'recovery';revision?:number}>=[]; let workspaceMenu=false;
-  let selected:string|null=null; let contextSelection:string[]=[]; let omnibar=false; let query=''; let mapMenu=false; let canvasWidth=0; let canvasHeight=0; let saveTimer:ReturnType<typeof setTimeout>|undefined; let saveInFlight=false; let savePending=false;
+  let selected:string|null=null; let contextSelection:string[]=[]; let omnibar=false; let query=''; let mapMenu=false; let currentSceneId:string|null=null; let canvasWidth=0; let canvasHeight=0; let saveTimer:ReturnType<typeof setTimeout>|undefined; let saveInFlight=false; let savePending=false;
   let context:any=null; let board:any[]=[]; let daemon:any=null; let healthOpen=false; let daemonActionBusy=false; let canvas:HTMLElement; let mouse={x:400,y:300};
   let commandInput:HTMLInputElement; let fileInput:HTMLInputElement;
   let composerOpen=false; let composerText=''; let composerInput:HTMLTextAreaElement; let composerAt={x:400,y:280}; let lastSummon=0;
@@ -50,12 +51,12 @@
     ['explorer','Open workspace explorer','browse available workspace tools'],
     ['context','Pin live system context','git · capabilities · next actions'],
     ['board','Open board object','~/.hii board lanes'],
-    ['frame','New frame','group, collapse, focus, and move objects together'],
+    ['frame','New scene','name, capture, focus, and move related objects together'],
     ['sound-field','Open South Berkeley sound field','modeled dBA']
   ].filter(item=>`${item[1]} ${item[2]}`.toLowerCase().includes(query.toLowerCase()));
   $: nodeResults=searchWorkspaceNodes(doc.nodes,query);
   $: collapsedFrameIds=new Set(doc.nodes.filter(node=>node.type==='frame'&&node.payload.collapsed===true).map(node=>node.id));
-  $: frames=doc.nodes.filter(node=>node.type==='frame');
+  $: scenes=workspaceScenes(doc.nodes);
   $: mapAnchors=doc.nodes.filter(node=>!['frame','image','media','ink','canvas-text','text'].includes(node.type)).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).slice(0,8);
   $: mapKinds=Object.entries(doc.nodes.reduce<Record<string,number>>((counts,node)=>({...counts,[node.type]:(counts[node.type]||0)+1}),{})).sort((a,b)=>b[1]-a[1]).slice(0,5);
   $: selectedContextNodes=contextSelection.map(id=>doc.nodes.find(node=>node.id===id)).filter((node):node is WorkspaceNode=>Boolean(node));
@@ -74,7 +75,7 @@
       if(!response.ok||result.status==='recovery'){
         loadState='recovery';loadError=result.error||'HII could not load this workspace.';recoveryPath=result.recoveryPath||'';return;
       }
-      workspaceId=result.workspaceId||requestedWorkspaceId||'default';doc=result.workspace;workspaceHistory=emptyWorkspaceHistory();selected=null;contextSelection=[];loadState='ready';
+      workspaceId=result.workspaceId||requestedWorkspaceId||'default';doc=result.workspace;workspaceHistory=emptyWorkspaceHistory();selected=null;contextSelection=[];currentSceneId=null;loadState='ready';
       void refreshWorkspaces();
       if(doc.nodes.some(node=>node.type==='model'))ensureModelPane();
     }catch(error){
@@ -125,7 +126,7 @@
   }
   function patch(id:string,patch:Partial<WorkspaceNode>){const before=doc;doc={...doc,nodes:doc.nodes.map(n=>n.id===id?{...n,...patch,updatedAt:new Date().toISOString()}:n)};remember(before);persist();}
   function addSeeds(seeds:NodeSeed[],at:{x:number;y:number}){const before=doc;if(seeds.some(seed=>seed.type==='model'))ensureModelPane();for(const [index,seed] of seeds.entries()){const node=makeNode(seed,at.x+index*28,at.y+index*28,++doc.nextZ);doc={...doc,nodes:[...doc.nodes,node]};selected=node.id}remember(before);persist();}
-  function spawn(type:string,payload:Record<string,unknown>={}){const seed=seedFor(type as WorkspaceNodeType,type==='browser'?{url:'https://duckduckgo.com',...payload}:type==='terminal'?{sessionId:crypto.randomUUID(),...payload}:payload);const center={x:(-doc.viewport.x+innerWidth/2)/doc.viewport.zoom,y:(-doc.viewport.y+innerHeight/2)/doc.viewport.zoom};addSeeds([seed],{x:center.x-seed.w/2,y:center.y-seed.h/2});omnibar=false;query='';if(type==='context')void refreshContext();if(type==='board')void refreshBoard();}
+  function spawn(type:string,payload:Record<string,unknown>={}){const typedPayload=type==='frame'?{sceneOrder:scenes.length+1,...payload}:payload;const seed=seedFor(type as WorkspaceNodeType,type==='browser'?{url:'https://duckduckgo.com',...typedPayload}:type==='terminal'?{sessionId:crypto.randomUUID(),...typedPayload}:typedPayload);const center={x:(-doc.viewport.x+innerWidth/2)/doc.viewport.zoom,y:(-doc.viewport.y+innerHeight/2)/doc.viewport.zoom};addSeeds([seed],{x:center.x-seed.w/2,y:center.y-seed.h/2});omnibar=false;query='';if(type==='context')void refreshContext();if(type==='board')void refreshBoard();}
   function workspacePoint(clientX:number,clientY:number){return{x:(clientX-doc.viewport.x)/doc.viewport.zoom,y:(clientY-doc.viewport.y)/doc.viewport.zoom}}
   async function summonComposer(at?:{x:number;y:number}){const now=Date.now();if(now-lastSummon<180)return;lastSummon=now;composerAt=at||workspacePoint(innerWidth/2,innerHeight/2);composerOpen=true;omnibar=false;await tick();composerInput?.focus();}
   function contextItem(node:WorkspaceNode){return{id:node.id,title:workspaceNodeTitle(node),type:node.type,source:String(node.object?.source||node.payload.path||node.payload.url||'').slice(0,1000)}}
@@ -133,11 +134,13 @@
   function submitIntent(){const intent=composerText.trim();if(!intent)return;const width=seedFor('intent').w;createSpatialRun(intent,{x:composerAt.x-width/2,y:composerAt.y-72},undefined,selectedContextNodes);composerText='';composerOpen=false;}
   async function openCommands(){omnibar=true;query='';await tick();commandInput?.focus();}
   function fitNodes(nodes:WorkspaceNode[],maxZoom=1){const rect=canvas?.getBoundingClientRect();if(!rect)return;const viewport=fitWorkspaceViewport(nodes,{width:rect.width,height:rect.height},{maxZoom});if(!viewport)return;doc={...doc,viewport};persist();}
-  function fitAll(){fitNodes(doc.nodes);selected=null;contextSelection=[];mapMenu=false;}
-  function focusNode(node:WorkspaceNode){selected=node.id;contextSelection=[node.id];fitNodes([node],1.25);omnibar=false;query='';}
-  function fitFrame(node:WorkspaceNode){const contents=doc.nodes.filter(candidate=>candidate.frameId===node.id);fitNodes(contents.length?[node,...contents]:[node],1.25);selected=node.id;}
-  function openFrame(node:WorkspaceNode){fitFrame(node);mapMenu=false;}
-  function regroupFrame(id:string){const before=doc;doc=assignNodesToFrame(doc,id);remember(before);persist();}
+  function fitAll(){fitNodes(doc.nodes);selected=null;contextSelection=[];currentSceneId=null;mapMenu=false;}
+  function focusNode(node:WorkspaceNode){selected=node.id;contextSelection=[node.id];currentSceneId=node.frameId||null;fitNodes([node],1.25);omnibar=false;query='';}
+  function sceneMembers(id:string){return workspaceSceneMembers(doc.nodes,id)}
+  function fitScene(node:WorkspaceNode){const contents=sceneMembers(node.id);fitNodes(contents.length?[node,...contents]:[node],1.25);selected=node.id;contextSelection=[];currentSceneId=node.id;}
+  function openScene(node:WorkspaceNode){fitScene(node);mapMenu=false;}
+  function openAdjacentScene(direction:-1|1){const scene=adjacentWorkspaceScene(scenes,currentSceneId,direction);if(scene)openScene(scene)}
+  function captureScene(id:string){const before=doc;const captured=assignNodesToFrame(doc,id);const now=new Date().toISOString();doc={...captured,nodes:captured.nodes.map(node=>node.id===id?{...node,updatedAt:now,object:{...node.object,kind:'scene',owner:'human',status:'ready',source:'HII spatial workspace',audit:[...(node.object?.audit||[]),{ts:now,actor:'human' as const,action:'captured workspace scene membership'}].slice(-20)}}:node)};currentSceneId=id;remember(before);persist();}
   function runCommand(command:string[]){if(command[0]==='fit'){fitAll();omnibar=false;query=''}else if(command[0]==='surface')spawn('surface',{title:command[1].replace('Open ',''),path:command[3],capabilityId:command[4]});else if(command[0]==='intent')void summonComposer();else if(command[0]==='upload'){omnibar=false;fileInput?.click()}else spawn(command[0]);}
   function followUp(node:WorkspaceNode,text:string){createSpatialRun(text,{x:node.x+node.w+48,y:node.y},node.id,[node])}
   function completedRunNodes(runNode:WorkspaceNode,result:Record<string,unknown>){
@@ -173,7 +176,7 @@
   }
   function openExplorer(event:MouseEvent){if(event.target!==canvas)return;const at=workspacePoint(event.clientX,event.clientY),seed=seedFor('explorer'),topLeft=workspacePoint(24,52),bottomRight=workspacePoint(innerWidth-24,innerHeight-72),x=Math.max(topLeft.x,Math.min(at.x-seed.w/2,bottomRight.x-seed.w)),y=Math.max(topLeft.y,Math.min(at.y-seed.h/2,bottomRight.y-seed.h));addSeeds([seed],{x,y});}
   function openSurface(id:string){const item=surfaceCatalog.find(candidate=>candidate.id===id);if(item)spawn('surface',{surface:item.id,title:item.title,path:item.path,capabilityId:item.capabilityId});}
-  function close(id:string){const before=doc;const node=doc.nodes.find(candidate=>candidate.id===id);doc=node?.type==='frame'?removeFrame(doc,id):{...doc,nodes:doc.nodes.filter(n=>n.id!==id)};selected=null;contextSelection=contextSelection.filter(item=>item!==id);remember(before);persist();}
+  function close(id:string){const before=doc;const node=doc.nodes.find(candidate=>candidate.id===id);doc=node?.type==='frame'?removeFrame(doc,id):{...doc,nodes:doc.nodes.filter(n=>n.id!==id)};selected=null;contextSelection=contextSelection.filter(item=>item!==id);if(currentSceneId===id)currentSceneId=null;remember(before);persist();}
   function select(node:WorkspaceNode,additive=false){if(additive){const removing=contextSelection.includes(node.id);contextSelection=removing?contextSelection.filter(id=>id!==node.id):[...contextSelection,node.id];selected=removing?contextSelection.at(-1)||null:node.id}else{selected=node.id;contextSelection=[node.id]}if(node.z<doc.nextZ)doc={...doc,nextZ:doc.nextZ+1,nodes:doc.nodes.map(candidate=>candidate.id===node.id?{...candidate,z:doc.nextZ+1}:candidate)}}
   function drag(event:PointerEvent,node:WorkspaceNode){if((event.target as HTMLElement).closest('button,input,textarea,iframe,a,.scroll,.xterm'))return;event.preventDefault();if(event.shiftKey){select(node,true);return}const before=doc;select(node);const sx=event.clientX,sy=event.clientY,ox=node.x,oy=node.y;let changed=false;const move=(e:PointerEvent)=>{changed=true;doc=moveNodeAndFrameContents(doc,node.id,ox+(e.clientX-sx)/doc.viewport.zoom,oy+(e.clientY-sy)/doc.viewport.zoom)};const up=()=>{removeEventListener('pointermove',move);removeEventListener('pointerup',up);if(changed){remember(before);persist()}};addEventListener('pointermove',move);addEventListener('pointerup',up);}
   function resize(event:PointerEvent,node:WorkspaceNode){event.preventDefault();event.stopPropagation();const before=doc,sx=event.clientX,sy=event.clientY,ow=node.w,oh=node.h;let changed=false;const move=(e:PointerEvent)=>{changed=true;doc={...doc,nodes:doc.nodes.map(candidate=>candidate.id===node.id?{...candidate,w:Math.max(140,ow+(e.clientX-sx)/doc.viewport.zoom),h:Math.max(80,oh+(e.clientY-sy)/doc.viewport.zoom)}:candidate)}};const up=()=>{removeEventListener('pointermove',move);removeEventListener('pointerup',up);if(changed){if(node.type==='frame')doc=assignNodesToFrame(doc,node.id);remember(before);persist()}};addEventListener('pointermove',move);addEventListener('pointerup',up);}
@@ -265,9 +268,11 @@
       <div class="relative min-h-0 flex-1">
         {#if node.type==='frame'}<div class="h-full rounded-2xl border-2 border-dashed border-blue-500/60 bg-blue-50/10">
           <div class="pointer-events-auto flex h-10 cursor-move items-center gap-2 border-b border-blue-500/20 bg-blue-50/90 px-3 text-blue-950">
-            <input aria-label="Frame title" class="min-w-0 flex-1 bg-transparent text-[12px] font-semibold outline-none" value={String(node.payload.title||'Frame')} on:change={(event)=>patch(node.id,{payload:{...node.payload,title:event.currentTarget.value}})} />
-            <button class="rounded-full px-2 py-1 font-mono text-[9px] uppercase hover:bg-white" on:click|stopPropagation={()=>regroupFrame(node.id)}>Capture</button>
-            <button class="rounded-full px-2 py-1 font-mono text-[9px] uppercase hover:bg-white" on:click|stopPropagation={()=>fitFrame(node)}>Fit</button>
+            <span class="shrink-0 rounded-full bg-blue-100 px-2 py-1 font-mono text-[8px] uppercase tracking-[.08em] text-blue-700">Scene {scenes.findIndex(scene=>scene.id===node.id)+1}</span>
+            <input aria-label="Scene name" class="min-w-0 flex-1 bg-transparent text-[12px] font-semibold outline-none" value={String(node.payload.title||'Scene')} on:change={(event)=>patch(node.id,{payload:{...node.payload,title:event.currentTarget.value}})} />
+            <span class="shrink-0 font-mono text-[8px] uppercase text-blue-700/60">{sceneMembers(node.id).length} objects</span>
+            <button class="rounded-full px-2 py-1 font-mono text-[9px] uppercase hover:bg-white" on:click|stopPropagation={()=>captureScene(node.id)}>Capture</button>
+            <button class="rounded-full px-2 py-1 font-mono text-[9px] uppercase hover:bg-white" on:click|stopPropagation={()=>fitScene(node)}>Go</button>
             <button class="rounded-full px-2 py-1 font-mono text-[9px] uppercase hover:bg-white" on:click|stopPropagation={()=>patch(node.id,{payload:{...node.payload,collapsed:node.payload.collapsed!==true}})}>{node.payload.collapsed===true?'Expand':'Collapse'}</button>
           </div>
         </div>
@@ -339,18 +344,19 @@
   {#if doc.nodes.length}<div data-workspace-ui class="absolute bottom-5 left-5 z-40 flex gap-2">
     <button class="rounded-full border border-neutral-900/10 bg-white/95 px-4 py-2 font-mono text-[10px] uppercase tracking-[.08em] text-neutral-700 shadow-lg backdrop-blur hover:border-neutral-900/25" on:click={fitAll} aria-label="Fit all workspace content">Fit all <kbd class="ml-2 text-neutral-400">⇧1</kbd></button>
     <div class="relative">
-      <button class="rounded-full border border-neutral-900/10 bg-white/95 px-4 py-2 font-mono text-[10px] uppercase tracking-[.08em] text-neutral-700 shadow-lg backdrop-blur hover:border-neutral-900/25" on:click={()=>mapMenu=!mapMenu} aria-label="Open workspace map" aria-expanded={mapMenu}>Map <kbd class="ml-2 text-neutral-400">{frames.length}</kbd></button>
+      <button class="rounded-full border border-neutral-900/10 bg-white/95 px-4 py-2 font-mono text-[10px] uppercase tracking-[.08em] text-neutral-700 shadow-lg backdrop-blur hover:border-neutral-900/25" on:click={()=>mapMenu=!mapMenu} aria-label="Open workspace map" aria-expanded={mapMenu}>Map <kbd class="ml-2 text-neutral-400">{scenes.length}</kbd></button>
       {#if mapMenu}<section class="absolute bottom-12 left-0 w-[min(320px,calc(100vw-40px))] overflow-hidden rounded-2xl border border-neutral-900/10 bg-white p-2 shadow-2xl" aria-label="Workspace map">
         <div class="flex items-center justify-between px-3 py-2">
-          <div><p class="font-mono text-[9px] uppercase tracking-[.12em] text-neutral-400">Workspace map</p><p class="mt-1 text-[12px] text-neutral-600">{doc.nodes.length} objects · {frames.length} frames</p></div>
+          <div><p class="font-mono text-[9px] uppercase tracking-[.12em] text-neutral-400">Workspace map</p><p class="mt-1 text-[12px] text-neutral-600">{doc.nodes.length} objects · {scenes.length} scenes</p></div>
           <button class="rounded-full bg-neutral-100 px-2 py-1 font-mono text-[9px] uppercase text-neutral-500" on:click={()=>mapMenu=false}>Close</button>
         </div>
         <div class="flex flex-wrap gap-1 px-3 py-2">{#each mapKinds as kind}<span class="rounded-full bg-neutral-100 px-2 py-1 font-mono text-[8px] uppercase text-neutral-500">{kind[0]} {kind[1]}</span>{/each}</div>
-        {#if frames.length}<div class="max-h-64 overflow-auto py-1"><p class="px-3 pb-1 pt-2 font-mono text-[8px] uppercase tracking-[.12em] text-neutral-400">Frames</p>{#each frames as frame}<button class="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left hover:bg-blue-50" on:click={()=>openFrame(frame)}>
-          <span class="min-w-0"><strong class="block truncate text-[13px]">{String(frame.payload.title||'Untitled frame')}</strong><small class="font-mono text-[9px] uppercase text-neutral-400">{doc.nodes.filter(node=>node.frameId===frame.id).length} objects</small></span>
+        {#if scenes.length}<div class="max-h-64 overflow-auto py-1"><div class="flex items-center justify-between px-3 pb-1 pt-2"><p class="font-mono text-[8px] uppercase tracking-[.12em] text-neutral-400">Scenes</p><div class="flex gap-1"><button class="rounded-full bg-neutral-100 px-2 py-1 text-[10px]" aria-label="Previous scene" on:click={()=>openAdjacentScene(-1)}>←</button><button class="rounded-full bg-neutral-100 px-2 py-1 text-[10px]" aria-label="Next scene" on:click={()=>openAdjacentScene(1)}>→</button></div></div>{#each scenes as scene,index}<button class="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left hover:bg-blue-50" class:bg-blue-50={scene.id===currentSceneId} on:click={()=>openScene(scene)}>
+          <span class="mr-3 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-blue-50 font-mono text-[9px] text-blue-700">{index+1}</span>
+          <span class="min-w-0 flex-1"><strong class="block truncate text-[13px]">{String(scene.payload.title||'Untitled scene')}</strong><small class="block truncate font-mono text-[8px] uppercase text-neutral-400">{workspaceSceneTypeSummary(sceneMembers(scene.id))}</small></span>
           <span class="text-blue-600">↗</span>
         </button>{/each}</div>
-        {:else}<div class="mx-1 rounded-xl bg-neutral-50 p-3"><p class="text-[12px] leading-5 text-neutral-500">Frames turn a large workspace into places you can return to.</p><button class="mt-3 font-mono text-[9px] uppercase text-blue-600 underline" on:click={()=>{mapMenu=false;spawn('frame')}}>Create a frame</button></div>{/if}
+        {:else}<div class="mx-1 rounded-xl bg-neutral-50 p-3"><p class="text-[12px] leading-5 text-neutral-500">Scenes name a group of objects and make a large workspace navigable.</p><button class="mt-3 font-mono text-[9px] uppercase text-blue-600 underline" on:click={()=>{mapMenu=false;spawn('frame')}}>Create a scene</button></div>{/if}
         {#if mapAnchors.length}<div class="mt-1 max-h-64 overflow-auto border-t py-1"><p class="px-3 pb-1 pt-2 font-mono text-[8px] uppercase tracking-[.12em] text-neutral-400">Key places</p>{#each mapAnchors as node}<button class="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left hover:bg-blue-50" on:click={()=>{focusNode(node);mapMenu=false}}>
           <span class="min-w-0"><strong class="block truncate text-[12px]">{workspaceNodeTitle(node)}</strong><small class="font-mono text-[8px] uppercase text-neutral-400">{node.type}</small></span>
           <span class="text-blue-600">⌖</span>

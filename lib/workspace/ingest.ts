@@ -72,8 +72,18 @@ export function seedFor(type: WorkspaceNodeType, payload: Record<string, unknown
     return {
       type,
       ...defaultSize[type],
-      object: { kind: 'component', owner: 'human', status: 'ready' },
-      payload: { title: 'New frame', collapsed: false, ...payload }
+      object: {
+        kind: 'scene',
+        owner: 'human',
+        status: 'ready',
+        source: 'HII spatial workspace',
+        audit: [{
+          ts: new Date().toISOString(),
+          actor: 'human',
+          action: 'created workspace scene'
+        }]
+      },
+      payload: { title: 'New scene', collapsed: false, ...payload }
     };
   }
   if (type === 'intent') {

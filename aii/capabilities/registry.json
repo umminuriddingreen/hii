@@ -881,7 +881,7 @@
     "name": "Create in the HII Spatial Workspace",
     "owner": "hii",
     "runtime": "next-route",
-    "summary": "Create with editable text and durable media, inspect source-linked PDF documents, local DXF drawings, and 3D models, branch governed agent work, and edit receipt-linked text artifacts directly beside their source context.",
+    "summary": "Create with editable text and durable media, organize large canvases into named navigable scenes, inspect source-linked PDF documents, local DXF drawings, and 3D models, branch governed agent work, and edit receipt-linked text artifacts directly beside their source context.",
     "inputs": [
       "typed canvas text",
       "local clipboard or dropped media",
@@ -892,7 +892,8 @@
       "non-destructive crop insets",
       "explicit spatial agent intent",
       "follow-up intent branched from a completed run",
-      "receipt-listed local workspace artifact"
+      "receipt-listed local workspace artifact",
+      "named scene with explicitly captured object membership"
     ],
     "outputs": [
       "persisted movable workspace nodes",
@@ -907,7 +908,8 @@
       "incrementally visible managed agent response",
       "durable run id and full local proof log",
       "editable receipt-linked text or code artifact",
-      "append-only human artifact-edit receipt"
+      "append-only human artifact-edit receipt",
+      "ordered scene navigation with compact membership summaries"
     ],
     "permissions": [
       "local HII origin only",
@@ -932,6 +934,7 @@
       "src/lib/components/workspace/SpatialRunPane.svelte",
       "src/lib/components/workspace/RunArtifactPane.svelte",
       "lib/workspace/ingest.ts",
+      "lib/workspace/scenes.ts",
       "lib/workspace/dxf.ts",
       "lib/workspace/run-output.ts",
       "app/api/workspace/assets",
@@ -940,6 +943,7 @@
       "tests/unit/workspace-viewers-contract.test.ts",
       "tests/unit/dxf.test.ts",
       "scripts/hii-spatial-run-smoke.mjs",
+      "scripts/hii-workspace-scenes-smoke.mjs",
       "~/.hii/workspace/workspace.json",
       "npm run build"
     ],
