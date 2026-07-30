@@ -497,17 +497,38 @@ function createBoardTask({ title, lane, priority, owner, coordinate, notes, tags
     console.error("usage: hii board add <title> [--lane backlog|next|doing|blocked|done] [--priority low|normal|high|urgent]");
     process.exit(1);
   }
+  if (/^--?[\p{L}\p{N}][\p{L}\p{N}_-]*$/u.test(cleanTitle)) {
+    console.error("Use an outcome-focused task title instead of a command flag.");
+    process.exit(1);
+  }
   const now = new Date().toISOString();
+  const cleanCoordinate = redactText(coordinate || ROOT).slice(0, 240);
+  const duplicateKey = [cleanTitle, cleanCoordinate]
+    .map((value) => String(value ?? "").trim().toLowerCase().replace(/\s+/g, " "))
+    .join("\u0000");
+  const duplicate = boardTasks().find((task) =>
+    [task.title, task.coordinate]
+      .map((value) => String(value ?? "").trim().toLowerCase().replace(/\s+/g, " "))
+      .join("\u0000") === duplicateKey
+  );
+  if (duplicate) {
+    console.error(`An open task already covers this outcome: ${duplicate.id.slice(0, 8)} ${duplicate.title}`);
+    process.exit(1);
+  }
   const task = {
     id: randomUUID(),
     title: cleanTitle.slice(0, 240),
     lane: normalizeBoardLane(lane),
     priority: normalizeBoardPriority(priority),
     owner: redactText(owner || "main agent").slice(0, 80),
-    coordinate: redactText(coordinate || ROOT).slice(0, 240),
+    coordinate: cleanCoordinate,
     notes: redactText(notes || "").slice(0, 2000),
     tags: parseCsvTags(tags),
     source,
+    origin: "human",
+    reviewState: "approved",
+    approvedAt: now,
+    approvedBy: "local operator",
     createdAt: now,
     updatedAt: now
   };
@@ -525,9 +546,20 @@ function updateBoardTask(idOrPrefix, patch) {
   const task = matches[0];
   const now = new Date().toISOString();
   const cleanPatch = { updatedAt: now };
+  const approvalRequested = patch.reviewState === "approved";
   if (patch.lane !== undefined) {
-    cleanPatch.lane = normalizeBoardLane(patch.lane);
+    const requestedLane = normalizeBoardLane(patch.lane);
+    if (["next", "doing"].includes(requestedLane) && task.reviewState === "proposed" && !approvalRequested) {
+      console.error("Approve this proposal before moving it into active work.");
+      process.exit(1);
+    }
+    cleanPatch.lane = requestedLane;
     cleanPatch.completedAt = cleanPatch.lane === "done" ? now : undefined;
+  }
+  if (approvalRequested) {
+    cleanPatch.reviewState = "approved";
+    cleanPatch.approvedAt = now;
+    cleanPatch.approvedBy = redactText(patch.approvedBy || "local operator").trim().slice(0, 80);
   }
   if (patch.priority !== undefined) cleanPatch.priority = normalizeBoardPriority(patch.priority);
   if (patch.owner !== undefined) cleanPatch.owner = redactText(patch.owner).trim().slice(0, 80) || task.owner;
@@ -539,7 +571,7 @@ function updateBoardTask(idOrPrefix, patch) {
 }
 
 function boardDedupeKey(task) {
-  return [task.title, task.owner, task.coordinate]
+  return [task.title, task.coordinate]
     .map((value) => String(value ?? "").trim().toLowerCase().replace(/\s+/g, " "))
     .join("\u0000");
 }
@@ -895,6 +927,7 @@ function agentCommandCatalog() {
     { command: "hii board", purpose: "Show the local kanban/todo board grouped by backlog, next, doing, blocked, and done." },
     { command: "hii board add <title>", purpose: "Create a local task with owner, coordinate, priority, tags, and notes." },
     { command: "hii board move <id> <lane>", purpose: "Move a task between kanban lanes." },
+    { command: "hii board approve <id>", purpose: "Approve a generated proposal into its requested active lane." },
     { command: "hii board dedupe", purpose: "Archive duplicate open cards through append-only board events." },
     { command: "hii knowledge", purpose: "Show canonical local HII knowledge and recent immutable source imports." },
     { command: "hii knowledge check", purpose: "Run the isolated notes, links, search, graph, history, lifecycle, and export smoke test." },
@@ -1103,8 +1136,12 @@ function printBoard(tasks, { includeDone = false } = {}) {
     }
     for (const task of laneTasks) {
       const tags = task.tags?.length ? ` #${task.tags.join(" #")}` : "";
-      console.log(`  ${task.id.slice(0, 8)}  [${task.priority}] ${task.title}${tags}`);
-      console.log(`      owner: ${task.owner}  coordinate: ${task.coordinate}`);
+      const review = task.reviewState === "proposed" ? " [proposal]" : "";
+      console.log(`  ${task.id.slice(0, 8)}  [${task.priority}]${review} ${task.title}${tags}`);
+      console.log(`      owner: ${task.owner}  origin: ${task.origin || "legacy"}  coordinate: ${task.coordinate}`);
+      if (task.reviewState === "proposed") {
+        console.log(`      approval: required  requested: ${task.requestedLane || "review"}`);
+      }
       if (task.notes) console.log(`      notes: ${task.notes.slice(0, 180)}`);
     }
     console.log("");
@@ -1147,6 +1184,23 @@ function cmdBoard(args) {
     console.log(task.title);
     return;
   }
+  if (sub === "approve") {
+    const id = args[1];
+    const requestedLane = parseFlagValue(args.slice(2), "--lane", undefined);
+    if (!id) {
+      console.error("usage: hii board approve <task-id-prefix> [--lane next|doing]");
+      process.exit(1);
+    }
+    const proposal = boardTasks({ includeDone: true }).find((task) => task.id.startsWith(id));
+    const task = updateBoardTask(id, {
+      lane: requestedLane || proposal?.requestedLane || "next",
+      reviewState: "approved",
+      approvedBy: "local operator"
+    });
+    console.log(`approved ${task.id.slice(0, 8)} -> ${task.lane}`);
+    console.log(task.title);
+    return;
+  }
   if (sub === "dedupe") {
     const dryRun = args.includes("--dry-run");
     const reconciled = dedupeBoardTasks({ dryRun });
@@ -1186,7 +1240,7 @@ function cmdBoard(args) {
     console.log(`updated ${task.id.slice(0, 8)}  ${task.title}`);
     return;
   }
-  console.error("usage: hii board [list|add|move|done|edit|dedupe]");
+  console.error("usage: hii board [list|add|move|approve|done|edit|dedupe]");
   process.exit(1);
 }
 
@@ -2466,6 +2520,7 @@ usage: hii <command>
   board               show local kanban/todo board
   board add <title>   create a task with lane/priority/owner/coordinate
   board move <id> <lane>
+  board approve <id>   approve a generated proposal into active work
                       move a task to backlog|next|doing|blocked|done
   board dedupe        archive duplicate open cards; add --dry-run to preview
   money idea <idea>   turn a rough idea into a local offer brief

@@ -158,8 +158,8 @@ export const POST: RequestHandler = async ({ request }) => {
       const snapshot = knowledgeSystemSnapshot(String(body?.projectId || '') || undefined);
       const decision = snapshot.objects.find((object) => object.id === String(body?.id || ''));
       if (!decision || decision.kind !== 'decision' || !['accepted', 'active'].includes(decision.status)) return json({ error: 'Only an accepted decision can become a task.' }, { status: 409 });
-      const task = await createBoardTask({ title: decision.title, lane: 'next', priority: 'normal', owner: 'main agent', coordinate: decision.provenance?.path || '/Users/ummi/hii', notes: `${decision.summary}\n\nKnowledge decision: ${decision.id}`, tags: ['knowledge', decision.projectId, 'decision'], source: 'hii.knowledge.system-map' });
-      const object = createKnowledgeObject({ projectId: decision.projectId, kind: 'task', title: task.title, summary: task.notes, status: 'active', owner: task.owner, externalRef: `board:${task.id}`, provenance: decision.provenance });
+      const task = await createBoardTask({ title: decision.title, lane: 'next', priority: 'normal', owner: 'main agent', coordinate: decision.provenance?.path || '/Users/ummi/hii', notes: `${decision.summary}\n\nKnowledge decision: ${decision.id}`, tags: ['knowledge', decision.projectId, 'decision'], source: 'hii.knowledge.system-map', origin: 'system' });
+      const object = createKnowledgeObject({ projectId: decision.projectId, kind: 'task', title: task.title, summary: task.notes, status: task.reviewState === 'proposed' ? 'proposed' : 'active', owner: task.owner, externalRef: `board:${task.id}`, provenance: decision.provenance });
       createKnowledgeRelation({ projectId: decision.projectId, fromId: decision.id, toId: object.id, kind: 'implements', status: 'accepted' });
       ensureSystemMap(decision.projectId);
       return json({ task, object }, { status: 201 });

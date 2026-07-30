@@ -267,7 +267,7 @@
     "name": "Task Kanban Board",
     "owner": "hii",
     "runtime": "local-cli",
-    "summary": "Track HII work as a local kanban/todo board with CLI commands, a dense browser surface, and append-only task events.",
+    "summary": "Track human intent and generated work in one append-only local board, hold agent and system tasks as reviewable proposals, reject exact open duplicates, and require explicit approval before proposals enter active work.",
     "inputs": [
       "task title",
       "lane",
@@ -275,12 +275,15 @@
       "owner",
       "coordinate",
       "notes",
-      "tags"
+      "tags",
+      "origin",
+      "review state"
     ],
     "outputs": [
       "task event log",
       "kanban board",
-      "agent context task summary"
+      "agent context task summary",
+      "approval provenance"
     ],
     "permissions": [
       "local-only",
@@ -295,7 +298,8 @@
       "hii board",
       "/boards",
       "/api/board/tasks",
-      "~/.hii/board/tasks.jsonl"
+      "~/.hii/board/tasks.jsonl",
+      "tests/unit/board-quality-boundary.test.ts"
     ],
     "status": "ready",
     "trustLevel": "first-party"

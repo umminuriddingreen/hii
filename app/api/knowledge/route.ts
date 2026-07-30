@@ -185,14 +185,15 @@ export async function POST(request: Request) {
         coordinate: decision.provenance?.path || '/Users/ummi/hii',
         notes: `${decision.summary}\n\nKnowledge decision: ${decision.id}`,
         tags: ['knowledge', decision.projectId, 'decision'],
-        source: 'hii.knowledge.system-map'
+        source: 'hii.knowledge.system-map',
+        origin: 'system'
       });
       const object = createKnowledgeObject({
         projectId: decision.projectId,
         kind: 'task',
         title: task.title,
         summary: task.notes,
-        status: 'active',
+        status: task.reviewState === 'proposed' ? 'proposed' : 'active',
         owner: task.owner,
         externalRef: `board:${task.id}`,
         provenance: decision.provenance

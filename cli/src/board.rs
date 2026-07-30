@@ -23,6 +23,15 @@ pub struct Task {
     pub notes: String,
     pub tags: Vec<String>,
     pub source: String,
+    pub origin: Option<String>,
+    #[serde(rename = "reviewState")]
+    pub review_state: Option<String>,
+    #[serde(rename = "requestedLane")]
+    pub requested_lane: Option<String>,
+    #[serde(rename = "approvedAt")]
+    pub approved_at: Option<String>,
+    #[serde(rename = "approvedBy")]
+    pub approved_by: Option<String>,
     #[serde(rename = "createdAt")]
     pub created_at: String,
     #[serde(rename = "updatedAt")]
@@ -43,6 +52,8 @@ pub struct EditPatch {
     pub coordinate: Option<String>,
     pub notes: Option<String>,
     pub tags: Option<String>,
+    pub review_state: Option<String>,
+    pub approved_by: Option<String>,
 }
 
 pub struct AddOptions {
@@ -150,7 +161,32 @@ impl Board {
                     .to_string(),
             );
         }
+        if is_command_flag(&title) {
+            return Err("Use an outcome-focused task title instead of a command flag.".to_string());
+        }
         let now = iso_now();
+        let coordinate = truncate_chars(
+            redact_text(
+                options
+                    .coordinate
+                    .as_deref()
+                    .unwrap_or(&root.display().to_string()),
+            )
+            .trim(),
+            240,
+        );
+        let key = task_key(&title, &coordinate);
+        if let Some(existing) = self
+            .tasks(false)?
+            .into_iter()
+            .find(|task| task_key(&task.title, &task.coordinate) == key)
+        {
+            return Err(format!(
+                "An open task already covers this outcome: {} {}",
+                &existing.id[..8.min(existing.id.len())],
+                existing.title
+            ));
+        }
         let task = Task {
             id: Uuid::new_v4().to_string(),
             title: truncate_chars(&title, 240),
@@ -160,22 +196,18 @@ impl Board {
                 redact_text(options.owner.as_deref().unwrap_or("main agent")).trim(),
                 80,
             ),
-            coordinate: truncate_chars(
-                redact_text(
-                    options
-                        .coordinate
-                        .as_deref()
-                        .unwrap_or(&root.display().to_string()),
-                )
-                .trim(),
-                240,
-            ),
+            coordinate,
             notes: truncate_chars(
                 redact_text(options.notes.as_deref().unwrap_or("")).trim(),
                 2000,
             ),
             tags: parse_csv_tags(options.tags.as_deref().unwrap_or("")),
             source: "hii board".to_string(),
+            origin: Some("human".to_string()),
+            review_state: Some("approved".to_string()),
+            requested_lane: None,
+            approved_at: Some(now.clone()),
+            approved_by: Some("local operator".to_string()),
             created_at: now.clone(),
             updated_at: now.clone(),
             completed_at: None,
@@ -211,8 +243,15 @@ impl Board {
         let task = self.find_one(id_prefix)?;
         let now = iso_now();
         let mut event = serde_json::json!({ "updatedAt": now });
+        let approval_requested = patch.review_state.as_deref() == Some("approved");
         if let Some(lane) = &patch.lane {
             let lane = normalize(Some(lane.as_str()), LANES, "backlog");
+            if ["next", "doing"].contains(&lane.as_str())
+                && task.review_state.as_deref() == Some("proposed")
+                && !approval_requested
+            {
+                return Err("Approve this proposal before moving it into active work.".to_string());
+            }
             event["lane"] = Value::String(lane.clone());
             if lane == "done" {
                 event["completedAt"] = Value::String(now.clone());
@@ -244,6 +283,14 @@ impl Board {
         if let Some(tags) = &patch.tags {
             event["tags"] = serde_json::to_value(parse_csv_tags(tags)).unwrap();
         }
+        if approval_requested {
+            event["reviewState"] = Value::String("approved".to_string());
+            event["approvedAt"] = Value::String(now.clone());
+            event["approvedBy"] = Value::String(truncate_chars(
+                redact_text(patch.approved_by.as_deref().unwrap_or("local operator")).trim(),
+                80,
+            ));
+        }
         self.append(serde_json::json!({
             "type": "updated",
             "id": task.id,
@@ -255,6 +302,22 @@ impl Board {
             apply_patch(&mut updated, map);
         }
         Ok(updated)
+    }
+
+    pub fn approve(&self, id_prefix: &str, lane: Option<String>) -> Result<Task, String> {
+        let task = self.find_one(id_prefix)?;
+        let target = lane
+            .or(task.requested_lane.clone())
+            .unwrap_or_else(|| "next".to_string());
+        self.update(
+            &task.id,
+            EditPatch {
+                lane: Some(target),
+                review_state: Some("approved".to_string()),
+                approved_by: Some("local operator".to_string()),
+                ..Default::default()
+            },
+        )
     }
 
     pub fn dedupe(&self, dry_run: bool) -> Result<Vec<(Task, Task)>, String> {
@@ -327,6 +390,15 @@ fn apply_patch(task: &mut Task, patch: &serde_json::Map<String, Value>) {
             .map(str::to_string)
             .collect();
     }
+    if let Some(review_state) = patch.get("reviewState").and_then(Value::as_str) {
+        task.review_state = Some(review_state.to_string());
+    }
+    if let Some(approved_at) = patch.get("approvedAt").and_then(Value::as_str) {
+        task.approved_at = Some(approved_at.to_string());
+    }
+    if let Some(approved_by) = patch.get("approvedBy").and_then(Value::as_str) {
+        task.approved_by = Some(approved_by.to_string());
+    }
     if let Some(updated_at) = patch.get("updatedAt").and_then(Value::as_str) {
         task.updated_at = updated_at.to_string();
     }
@@ -336,7 +408,7 @@ fn apply_patch(task: &mut Task, patch: &serde_json::Map<String, Value>) {
 }
 
 fn dedupe_key(task: &Task) -> String {
-    [&task.title, &task.owner, &task.coordinate]
+    [&task.title, &task.coordinate]
         .iter()
         .map(|value| {
             value
@@ -348,6 +420,31 @@ fn dedupe_key(task: &Task) -> String {
         })
         .collect::<Vec<_>>()
         .join("\u{0}")
+}
+
+fn task_key(title: &str, coordinate: &str) -> String {
+    [title, coordinate]
+        .iter()
+        .map(|value| {
+            value
+                .trim()
+                .to_lowercase()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect::<Vec<_>>()
+        .join("\u{0}")
+}
+
+fn is_command_flag(title: &str) -> bool {
+    let value = title.trim();
+    value.starts_with('-')
+        && !value.contains(char::is_whitespace)
+        && value
+            .trim_start_matches('-')
+            .chars()
+            .all(|character| character.is_alphanumeric() || matches!(character, '_' | '-'))
 }
 
 fn normalize(value: Option<&str>, allowed: &[&str], fallback: &str) -> String {
@@ -406,17 +503,31 @@ pub fn print_board(store: &Path, tasks: &[Task], include_done: bool) {
             } else {
                 format!(" #{}", task.tags.join(" #"))
             };
+            let review = if task.review_state.as_deref() == Some("proposed") {
+                " [proposal]"
+            } else {
+                ""
+            };
             println!(
-                "  {}  [{}] {}{}",
+                "  {}  [{}]{} {}{}",
                 &task.id[..8.min(task.id.len())],
                 task.priority,
+                review,
                 task.title,
                 tags
             );
             println!(
-                "      owner: {}  coordinate: {}",
-                task.owner, task.coordinate
+                "      owner: {}  origin: {}  coordinate: {}",
+                task.owner,
+                task.origin.as_deref().unwrap_or("legacy"),
+                task.coordinate
             );
+            if task.review_state.as_deref() == Some("proposed") {
+                println!(
+                    "      approval: required  requested: {}",
+                    task.requested_lane.as_deref().unwrap_or("review")
+                );
+            }
             if !task.notes.is_empty() {
                 let notes: String = task.notes.chars().take(180).collect();
                 println!("      notes: {notes}");
@@ -570,20 +681,29 @@ mod tests {
     fn dedupe_keeps_first_and_marks_later_duplicates_done() {
         let runtime = TempRuntime::new();
         let board = Board::open(&runtime.0);
-        let options = |title: &str| AddOptions {
-            title: title.into(),
-            lane: None,
-            priority: None,
-            owner: None,
-            coordinate: Some("/tmp/root".into()),
-            notes: None,
-            tags: None,
-        };
         let first = board
-            .add(Path::new("/tmp/root"), options("dedupe me"))
+            .add(
+                Path::new("/tmp/root"),
+                AddOptions {
+                    title: "dedupe me".into(),
+                    lane: None,
+                    priority: None,
+                    owner: None,
+                    coordinate: Some("/tmp/root".into()),
+                    notes: None,
+                    tags: None,
+                },
+            )
             .unwrap();
-        let second = board
-            .add(Path::new("/tmp/root"), options("dedupe me"))
+        let mut second = first.clone();
+        second.id = Uuid::new_v4().to_string();
+        second.updated_at = iso_now();
+        board
+            .append(serde_json::json!({
+                "type": "created",
+                "task": second,
+                "ts": iso_now()
+            }))
             .unwrap();
         let reconciled = board.dedupe(false).unwrap();
         assert_eq!(reconciled.len(), 1);
@@ -594,6 +714,76 @@ mod tests {
         assert!([first.id.clone(), second.id.clone()].contains(&keep.id));
         assert!([first.id, second.id].contains(&duplicate.id));
         assert_eq!(board.tasks(false).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn add_rejects_open_duplicates_before_append() {
+        let runtime = TempRuntime::new();
+        let board = Board::open(&runtime.0);
+        let options = |owner: &str| AddOptions {
+            title: "Verify the launch receipt".into(),
+            lane: None,
+            priority: None,
+            owner: Some(owner.into()),
+            coordinate: Some("/tmp/root".into()),
+            notes: None,
+            tags: None,
+        };
+        board
+            .add(Path::new("/tmp/root"), options("operator"))
+            .unwrap();
+        let error = board
+            .add(Path::new("/tmp/root"), options("another agent"))
+            .unwrap_err();
+        assert!(error.starts_with("An open task already covers this outcome:"));
+        assert_eq!(board.tasks(false).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn proposal_requires_approval_before_active_lane() {
+        let runtime = TempRuntime::new();
+        let board = Board::open(&runtime.0);
+        let task = Task {
+            id: Uuid::new_v4().to_string(),
+            title: "Compare launch clip variants".into(),
+            lane: "backlog".into(),
+            priority: "normal".into(),
+            owner: "Opus".into(),
+            coordinate: "/tmp/root".into(),
+            notes: String::new(),
+            tags: Vec::new(),
+            source: "api.board.tasks".into(),
+            origin: Some("system".into()),
+            review_state: Some("proposed".into()),
+            requested_lane: Some("doing".into()),
+            approved_at: None,
+            approved_by: None,
+            created_at: iso_now(),
+            updated_at: iso_now(),
+            completed_at: None,
+        };
+        board
+            .append(serde_json::json!({ "type": "created", "task": task, "ts": iso_now() }))
+            .unwrap();
+
+        let error = board
+            .update(
+                &task.id,
+                EditPatch {
+                    lane: Some("doing".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            error,
+            "Approve this proposal before moving it into active work."
+        );
+
+        let approved = board.approve(&task.id, None).unwrap();
+        assert_eq!(approved.lane, "doing");
+        assert_eq!(approved.review_state.as_deref(), Some("approved"));
+        assert!(approved.approved_at.is_some());
     }
 
     #[test]

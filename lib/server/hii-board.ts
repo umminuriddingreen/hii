@@ -5,6 +5,8 @@ import { randomUUID } from 'crypto';
 
 export type BoardLane = 'backlog' | 'next' | 'doing' | 'blocked' | 'done';
 export type BoardPriority = 'low' | 'normal' | 'high' | 'urgent';
+export type BoardTaskOrigin = 'human' | 'agent' | 'system';
+export type BoardTaskReviewState = 'proposed' | 'approved';
 
 export type BoardTask = {
   id: string;
@@ -16,6 +18,11 @@ export type BoardTask = {
   notes: string;
   tags: string[];
   source: string;
+  origin?: BoardTaskOrigin;
+  reviewState?: BoardTaskReviewState;
+  requestedLane?: BoardLane;
+  approvedAt?: string;
+  approvedBy?: string;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
@@ -27,9 +34,26 @@ type BoardTaskEvent =
 
 export const boardLanes: BoardLane[] = ['backlog', 'next', 'doing', 'blocked', 'done'];
 export const boardPriorities: BoardPriority[] = ['low', 'normal', 'high', 'urgent'];
+export const boardTaskOrigins: BoardTaskOrigin[] = ['human', 'agent', 'system'];
 
 const boardDir = path.join(process.env.HII_RUNTIME_DIR || path.join(process.env.HOME || '.', '.hii'), 'board');
 const taskEventsPath = path.join(boardDir, 'tasks.jsonl');
+
+export class BoardTaskError extends Error {
+  code: 'BOARD_TASK_APPROVAL_REQUIRED' | 'BOARD_TASK_DUPLICATE' | 'BOARD_TASK_LOW_QUALITY';
+  existingTask?: BoardTask;
+
+  constructor(
+    code: BoardTaskError['code'],
+    message: string,
+    options: { existingTask?: BoardTask } = {}
+  ) {
+    super(message);
+    this.name = 'BoardTaskError';
+    this.code = code;
+    this.existingTask = options.existingTask;
+  }
+}
 
 function normalizeLane(value: unknown): BoardLane {
   return boardLanes.includes(value as BoardLane) ? (value as BoardLane) : 'backlog';
@@ -37,6 +61,20 @@ function normalizeLane(value: unknown): BoardLane {
 
 function normalizePriority(value: unknown): BoardPriority {
   return boardPriorities.includes(value as BoardPriority) ? (value as BoardPriority) : 'normal';
+}
+
+function normalizeOrigin(value: unknown): BoardTaskOrigin {
+  return boardTaskOrigins.includes(value as BoardTaskOrigin) ? (value as BoardTaskOrigin) : 'system';
+}
+
+function boardTaskKey(input: Pick<BoardTask, 'title' | 'coordinate'>) {
+  return [input.title, input.coordinate]
+    .map((value) => value.trim().toLocaleLowerCase().replace(/\s+/g, ' '))
+    .join('\u0000');
+}
+
+function effectiveReviewState(task: BoardTask): BoardTaskReviewState {
+  return task.reviewState ?? 'approved';
 }
 
 function sanitizeText(value: unknown, maxLength: number) {
@@ -121,25 +159,55 @@ export async function createBoardTask(input: {
   notes?: unknown;
   tags?: unknown;
   source?: unknown;
+  origin?: unknown;
+  approvedBy?: unknown;
 }) {
-  const title = sanitizeText(input.title, 240);
+  const title = sanitizeText(input.title, 1000);
   if (title.length < 2) throw new Error('Task title must be at least 2 characters.');
   if (title.length > 240) throw new Error('Task title must be 240 characters or less.');
+  if (/^--?[\p{L}\p{N}][\p{L}\p{N}_-]*$/u.test(title)) {
+    throw new BoardTaskError(
+      'BOARD_TASK_LOW_QUALITY',
+      'Use an outcome-focused task title instead of a command flag.'
+    );
+  }
 
   const now = new Date().toISOString();
+  const source = sanitizeText(input.source, 120) || 'hii board';
+  const origin = normalizeOrigin(input.origin);
+  const requestedLane = normalizeLane(input.lane);
+  const reviewState: BoardTaskReviewState = origin === 'human' ? 'approved' : 'proposed';
+  const lane = reviewState === 'proposed' && ['next', 'doing'].includes(requestedLane)
+    ? 'backlog'
+    : requestedLane;
+  const coordinate = sanitizeText(input.coordinate, 240) || '/Users/ummi/hii';
+  const existingTask = (await listBoardTasks()).find((candidate) =>
+    boardTaskKey(candidate) === boardTaskKey({ title, coordinate })
+  );
+  if (existingTask) {
+    throw new BoardTaskError(
+      'BOARD_TASK_DUPLICATE',
+      `An open task already covers this outcome: ${existingTask.id.slice(0, 8)} ${existingTask.title}`,
+      { existingTask }
+    );
+  }
+  const approvedBy = reviewState === 'approved'
+    ? sanitizeText(input.approvedBy, 80) || 'local operator'
+    : undefined;
   const task: BoardTask = {
     id: randomUUID(),
     title,
-    lane: normalizeLane(input.lane),
+    lane,
     priority: normalizePriority(input.priority),
     owner: sanitizeText(input.owner, 80) || 'main agent',
-    coordinate:
-      sanitizeText(input.coordinate, 240)
-        ? sanitizeText(input.coordinate, 240)
-        : '/Users/ummi/hii',
+    coordinate,
     notes: sanitizeText(input.notes, 2000),
     tags: parseTags(input.tags),
-    source: sanitizeText(input.source, 120) || 'hii board',
+    source,
+    origin,
+    reviewState,
+    ...(lane !== requestedLane ? { requestedLane } : {}),
+    ...(reviewState === 'approved' ? { approvedAt: now, approvedBy } : {}),
     createdAt: now,
     updatedAt: now
   };
@@ -158,6 +226,8 @@ export async function updateBoardTask(
     notes?: unknown;
     tags?: unknown;
     title?: unknown;
+    reviewState?: unknown;
+    approvedBy?: unknown;
   }
 ) {
   const task = (await listBoardTasks({ includeDone: true })).find((candidate) => candidate.id === id);
@@ -165,9 +235,26 @@ export async function updateBoardTask(
 
   const now = new Date().toISOString();
   const patch: Partial<BoardTask> = { updatedAt: now };
+  const approvalRequested = input.reviewState === 'approved';
   if (input.lane !== undefined) {
-    patch.lane = normalizeLane(input.lane);
+    const requestedLane = normalizeLane(input.lane);
+    if (
+      ['next', 'doing'].includes(requestedLane)
+      && effectiveReviewState(task) === 'proposed'
+      && !approvalRequested
+    ) {
+      throw new BoardTaskError(
+        'BOARD_TASK_APPROVAL_REQUIRED',
+        'Approve this proposal before moving it into active work.'
+      );
+    }
+    patch.lane = requestedLane;
     patch.completedAt = patch.lane === 'done' ? now : undefined;
+  }
+  if (approvalRequested) {
+    patch.reviewState = 'approved';
+    patch.approvedAt = now;
+    patch.approvedBy = sanitizeText(input.approvedBy, 80) || 'local operator';
   }
   if (input.priority !== undefined) patch.priority = normalizePriority(input.priority);
   if (typeof input.owner === 'string') patch.owner = sanitizeText(input.owner, 80) || task.owner;

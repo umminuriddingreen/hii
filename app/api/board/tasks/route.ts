@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createBoardTask, listBoardTasks, updateBoardTask } from '@/lib/server/hii-board';
+import { BoardTaskError, createBoardTask, listBoardTasks, updateBoardTask } from '@/lib/server/hii-board';
 import { localTerminalAllowed } from '@/lib/server/hii-terminal';
 
 export const dynamic = 'force-dynamic';
@@ -25,11 +25,18 @@ export async function POST(request: Request) {
       coordinate: body?.coordinate,
       notes: body?.notes,
       tags: body?.tags,
-      source: 'api.board.tasks'
+      source: 'api.board.tasks',
+      origin: body?.origin,
+      approvedBy: body?.approvedBy
     });
     return NextResponse.json({ task }, { status: 201 });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Could not create task.' }, { status: 400 });
+    const conflict = error instanceof BoardTaskError && error.code === 'BOARD_TASK_DUPLICATE';
+    return NextResponse.json({
+      error: error instanceof Error ? error.message : 'Could not create task.',
+      code: error instanceof BoardTaskError ? error.code : undefined,
+      existingTask: error instanceof BoardTaskError ? error.existingTask : undefined
+    }, { status: conflict ? 409 : 400 });
   }
 }
 
@@ -42,6 +49,10 @@ export async function PATCH(request: Request) {
     const task = await updateBoardTask(id, body ?? {});
     return NextResponse.json({ task });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Could not update task.' }, { status: 400 });
+    const conflict = error instanceof BoardTaskError;
+    return NextResponse.json({
+      error: error instanceof Error ? error.message : 'Could not update task.',
+      code: conflict ? error.code : undefined
+    }, { status: conflict ? 409 : 400 });
   }
 }

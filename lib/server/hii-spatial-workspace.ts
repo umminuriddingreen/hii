@@ -229,11 +229,14 @@ export async function getSpatialWorkspaceSnapshot(): Promise<WorkspaceDoc & { so
     object: {
       kind: 'task',
       owner: task.owner,
-      status: statusFromLane[task.lane],
+      status: task.reviewState === 'proposed' ? 'proposed' : statusFromLane[task.lane],
       source: task.source,
       memoryRefs: task.tags,
       audit: [
-        { ts: task.createdAt, actor: 'human', action: 'task.created' },
+        { ts: task.createdAt, actor: task.origin ?? 'system', action: 'task.created' },
+        ...(task.approvedAt
+          ? [{ ts: task.approvedAt, actor: 'human' as const, action: 'task.approved', note: task.approvedBy }]
+          : []),
         { ts: task.updatedAt, actor: 'hii', action: `task.${task.lane}` }
       ]
     },
@@ -243,7 +246,14 @@ export async function getSpatialWorkspaceSnapshot(): Promise<WorkspaceDoc & { so
       priority: task.priority,
       coordinate: task.coordinate,
       notes: task.notes,
-      nextAction: task.lane === 'done' ? 'archive or attach proof' : 'choose model, assign agent, or mark blocked'
+      origin: task.origin ?? 'legacy',
+      reviewState: task.reviewState ?? 'approved',
+      requestedLane: task.requestedLane,
+      nextAction: task.reviewState === 'proposed'
+        ? 'review provenance and approve or archive'
+        : task.lane === 'done'
+          ? 'archive or attach proof'
+          : 'choose model, assign agent, or mark blocked'
     }
   }));
 

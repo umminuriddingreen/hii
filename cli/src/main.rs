@@ -262,6 +262,12 @@ enum BoardCommand {
     },
     #[command(about = "Move a task to a different lane")]
     Move { id: String, lane: String },
+    #[command(about = "Approve a generated proposal into active work")]
+    Approve {
+        id: String,
+        #[arg(long)]
+        lane: Option<String>,
+    },
     #[command(about = "Mark a task done")]
     Done { id: String },
     #[command(about = "Edit a task's fields")]
@@ -1158,6 +1164,16 @@ fn board_command(
             println!("{}", task.title);
             Ok(ExitCode::SUCCESS)
         }
+        BoardCommand::Approve { id, lane } => {
+            let task = store.approve(&id, lane)?;
+            println!(
+                "approved {} -> {}",
+                &task.id[..8.min(task.id.len())],
+                task.lane
+            );
+            println!("{}", task.title);
+            Ok(ExitCode::SUCCESS)
+        }
         BoardCommand::Done { id } => {
             let task = store.update(
                 &id,
@@ -1187,6 +1203,8 @@ fn board_command(
                     coordinate,
                     notes,
                     tags,
+                    review_state: None,
+                    approved_by: None,
                 },
             )?;
             println!(
