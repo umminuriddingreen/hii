@@ -1514,10 +1514,14 @@ fn resumable_messages(raw: &str) -> Vec<Message> {
 
 fn plain_message(raw: &str) -> Option<&str> {
     let value = raw.trim();
+    let lowered = value.to_ascii_lowercase();
     (!value.is_empty()
         && !value.starts_with('{')
         && !value.starts_with("```")
-        && !value.starts_with('['))
+        && !value.starts_with('[')
+        && !value.contains("```")
+        && !lowered.contains("<!doctype html")
+        && !lowered.contains("<html"))
     .then_some(value)
 }
 
@@ -1552,7 +1556,7 @@ fn conversation_prompt(workspace: &std::path::Path, max_steps: usize, public_tes
 Workspace: {workspace}
 {limit}
 
-Reply naturally in plain text. For work, return one JSON tool action:
+For chat, reply naturally. For workspace work, output exactly one JSON tool action with no prose or fence:
 {{"type":"{tools}", ...needed fields}}
 
 {boundary}
@@ -1653,6 +1657,11 @@ mod tests {
         assert_eq!(plain_message("  "), None);
         assert_eq!(plain_message(r#"{"type":"read""#), None);
         assert_eq!(plain_message("```json"), None);
+        assert_eq!(plain_message("I made it:\n```html\n<h1>Hi</h1>\n```"), None);
+        assert_eq!(
+            plain_message("I made it:\n<!doctype html><html></html>"),
+            None
+        );
     }
 
     #[test]
