@@ -383,7 +383,11 @@ impl Ollama {
         let mut content = String::new();
         let mut thinking = String::new();
         let mut usage = ChatUsage::default();
-        let mut repetition = RepetitionGuard::default();
+        // Models commonly rehearse a structured action in private thinking before
+        // emitting the same JSON publicly. Keep the channels independent so that
+        // one valid action is not counted as another thinking-loop repetition.
+        let mut thinking_repetition = RepetitionGuard::default();
+        let mut content_repetition = RepetitionGuard::default();
         for line in BufReader::new(response.into_reader()).lines() {
             let line = match line {
                 Ok(line) => line,
@@ -405,7 +409,7 @@ impl Ollama {
             };
             if !chunk.message.thinking.is_empty() {
                 thinking.push_str(&chunk.message.thinking);
-                if repetition.observe(&chunk.message.thinking) {
+                if thinking_repetition.observe(&chunk.message.thinking) {
                     let _ = sender.send(ChatStreamEvent::Done(Err(
                         "MODEL LOOP DETECTED — the current generation repeated the same substantial block three times. The session is preserved; revise or retry the request."
                             .into(),
@@ -415,7 +419,7 @@ impl Ollama {
                 let _ = sender.send(ChatStreamEvent::Thinking(chunk.message.thinking));
             }
             if !chunk.message.content.is_empty() {
-                if repetition.observe(&chunk.message.content) {
+                if content_repetition.observe(&chunk.message.content) {
                     let _ = sender.send(ChatStreamEvent::Done(Err(
                         "MODEL LOOP DETECTED — the current generation repeated the same substantial block three times. The session is preserved; revise or retry the request."
                             .into(),
@@ -606,6 +610,17 @@ mod tests {
         assert!(!guard.observe("checking the workspace "));
         assert!(!guard.observe("running the test "));
         assert!(!guard.observe("returning the result "));
+    }
+
+    #[test]
+    fn private_rehearsal_does_not_count_against_visible_content() {
+        let block = "I will emit exactly one bounded write action with the supplied local content, then wait for the tool result before running the requested verification action. ";
+        let mut thinking = RepetitionGuard::default();
+        let mut content = RepetitionGuard::default();
+
+        assert!(!thinking.observe(block));
+        assert!(!thinking.observe(block));
+        assert!(!content.observe(block));
     }
 
     use super::action_schema;

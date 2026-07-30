@@ -289,6 +289,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let mut touched_artifacts = BTreeSet::new();
     let mut final_summary = None;
     let mut final_next = None;
+    let mut pending_final = None;
     let mut mutation_epoch = usize::from(session_hook_mutation);
     let mut verified_epoch = None;
     let mut observations = HashSet::new();
@@ -490,6 +491,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                         verified_epoch = None;
                         verification.clear();
                         observations.clear();
+                        pending_final = None;
                     } else if let Some(key) = observation_key {
                         observations.insert(key);
                     }
@@ -576,6 +578,21 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                         format!("\n\n{hook_feedback}")
                     }
                 )));
+                if result.verification && result.ok {
+                    if let Some(pending) = take_verified_pending_final(
+                        &mut pending_final,
+                        mutation_epoch,
+                        verified_epoch,
+                    ) {
+                        store.event(
+                            "convergence.pending_final_completed",
+                            json!({ "step": steps, "mutation_epoch": mutation_epoch }),
+                        )?;
+                        final_summary = Some(pending.summary);
+                        final_next = pending.next;
+                        break;
+                    }
+                }
             }
             Action::Final {
                 summary,
@@ -587,6 +604,11 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 if options.verify.is_empty()
                     && (!verification.iter().any(|check| check.ok) || current_proof_missing)
                 {
+                    pending_final = Some(PendingFinal {
+                        summary,
+                        next,
+                        mutation_epoch,
+                    });
                     messages.push(Message::assistant(raw));
                     messages.push(Message::user(format!(
                         "No passing HII verification exists for the latest workspace mutation (model claim: {}). Read/list/search are observation only. Run one actual check with verify or http before finalizing.",
@@ -595,7 +617,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     if options.output == RunOutput::Human && options.verbose {
                         println!("[step {steps}] proof required before completion");
                     }
-                    rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
+                    rejected_actions.reset();
                     continue;
                 }
                 final_summary = Some(summary);
@@ -1074,6 +1096,24 @@ fn acceptance_passed(commands: &[String], records: &[VerificationRecord]) -> boo
     })
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct PendingFinal {
+    summary: String,
+    next: Option<String>,
+    mutation_epoch: usize,
+}
+
+fn take_verified_pending_final(
+    pending: &mut Option<PendingFinal>,
+    mutation_epoch: usize,
+    verified_epoch: Option<usize>,
+) -> Option<PendingFinal> {
+    let ready = pending.as_ref().is_some_and(|final_action| {
+        final_action.mutation_epoch == mutation_epoch && verified_epoch == Some(mutation_epoch)
+    });
+    ready.then(|| pending.take()).flatten()
+}
+
 pub(crate) fn parse_action(raw: &str) -> Result<Action, String> {
     let trimmed = raw.trim();
     let candidate = if trimmed.starts_with("```") {
@@ -1541,6 +1581,27 @@ mod tests {
             output: "ok".into(),
         }];
         assert!(!acceptance_passed(&commands, &records));
+    }
+
+    #[test]
+    fn pending_final_completes_only_after_same_epoch_proof() {
+        let mut pending = Some(PendingFinal {
+            summary: "artifact ready".into(),
+            next: None,
+            mutation_epoch: 2,
+        });
+
+        assert!(take_verified_pending_final(&mut pending, 2, None).is_none());
+        assert!(take_verified_pending_final(&mut pending, 3, Some(3)).is_none());
+        assert_eq!(
+            take_verified_pending_final(&mut pending, 2, Some(2)),
+            Some(PendingFinal {
+                summary: "artifact ready".into(),
+                next: None,
+                mutation_epoch: 2,
+            })
+        );
+        assert!(pending.is_none());
     }
 
     #[test]
