@@ -228,7 +228,8 @@ test('public screen stays one work stream and one result with minimal preview co
   assert.match(main, /id="artifact"/);
   assert.doesNotMatch(main, /<(?:header|aside|footer)\b/);
   assert.equal((main.match(/<section\b/g) ?? []).length, 2);
-  assert.equal((main.match(/<button\b/g) ?? []).length, 4);
+  assert.equal((main.match(/<button\b/g) ?? []).length, 5);
+  assert.match(main, /data-action="save"/);
   assert.doesNotMatch(html, /passcode|claim/i);
   assert.match(css, /#terminal \.xterm-rows/);
   assert.match(css, /--terminal-text:\s*#f3f4f1/);

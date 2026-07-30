@@ -8,6 +8,8 @@ const previewStatus = document.querySelector('#preview-status');
 const previewControls = document.querySelector('#preview-controls');
 let socket;
 let latestArtifactId;
+let savedSourceArtifactId;
+let savedUrl;
 let terminal;
 let reconnectTimer;
 
@@ -93,6 +95,7 @@ function showSession() {
   terminal.focus();
   connect();
   refreshArtifact();
+  refreshSaved();
 }
 
 function connect() {
@@ -161,6 +164,38 @@ async function refreshArtifact(force = false) {
   setPreviewStatus('ready', '✓ Preview verified');
 }
 
+function updateSaveButton() {
+  const button = previewControls.querySelector('[data-action="save"]');
+  const canOpen = savedUrl && savedSourceArtifactId === latestArtifactId;
+  button.textContent = canOpen ? 'Open' : 'Save';
+  button.title = canOpen ? 'Open saved preview' : 'Save verified preview';
+  button.setAttribute('aria-label', button.title);
+}
+
+async function refreshSaved() {
+  const response = await fetch(`${base}/latest-save`, { method: 'POST' });
+  if (response.status === 204 || !response.ok) return updateSaveButton();
+  const saved = await response.json();
+  savedSourceArtifactId = saved.sourceArtifactId;
+  savedUrl = saved.url;
+  updateSaveButton();
+}
+
+async function saveOrOpen() {
+  if (savedUrl && savedSourceArtifactId === latestArtifactId) {
+    window.open(savedUrl, '_blank', 'noopener,noreferrer');
+    return;
+  }
+  setPreviewStatus('updating', 'Saving verified preview…');
+  const response = await fetch(`${base}/save-latest`, { method: 'POST' });
+  if (!response.ok) {
+    setPreviewStatus('failed', 'Could not save preview');
+    return;
+  }
+  await refreshSaved();
+  setPreviewStatus('ready', '✓ Preview saved');
+}
+
 previewControls.addEventListener('click', async (event) => {
   const button = event.target.closest('button[data-action]');
   if (!button) return;
@@ -175,6 +210,7 @@ previewControls.addEventListener('click', async (event) => {
     button.setAttribute('aria-label', mobile ? 'Use desktop preview' : 'Use mobile preview');
   }
   if (action === 'latest') await refreshArtifact(true);
+  if (action === 'save') await saveOrOpen();
 });
 
 function fitVisualViewport() {

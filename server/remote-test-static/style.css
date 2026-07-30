@@ -147,7 +147,7 @@ body {
 }
 
 #preview-controls button {
-  width: 2rem;
+  min-width: 2rem;
   height: 1.8rem;
   padding: 0;
   border: 0;
@@ -156,6 +156,12 @@ body {
   color: #f3f4f1;
   font: 16px/1 system-ui, sans-serif;
   cursor: pointer;
+}
+
+#preview-controls button[data-action="save"] {
+  width: auto;
+  padding-inline: 0.55rem;
+  font-size: 11px;
 }
 
 #preview-controls button:hover,

@@ -84,6 +84,18 @@ async function walkPublicFiles(root, relative = '') {
   return items;
 }
 
+async function copyPublicSnapshot(source, destination, relative = '') {
+  await fsp.mkdir(path.join(destination, relative), { recursive: true, mode: 0o700 });
+  for (const entry of await fsp.readdir(path.join(source, relative), { withFileTypes: true })) {
+    if (entry.name.startsWith('.') || entry.isSymbolicLink()) continue;
+    const child = path.join(relative, entry.name);
+    if (entry.isDirectory()) await copyPublicSnapshot(source, destination, child);
+    else if (entry.isFile()) {
+      await fsp.copyFile(path.join(source, child), path.join(destination, child));
+    }
+  }
+}
+
 export function replayTranscript(layout, socket) {
   try {
     const transcript = fs.readFileSync(layout.transcript, 'utf8');
@@ -134,6 +146,7 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
     binary: config.hiiBinary,
     exposure: expose ? { terminal: TERMINAL_HTTPS_PORT, artifacts: ARTIFACT_HTTPS_PORT } : null,
     artifacts: [],
+    savedArtifacts: [],
     outcome: 'starting'
   };
   await writeJsonAtomic(layout.manifest, manifest);
@@ -279,6 +292,48 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
         url: `${artifactOrigin}${basePath}/claim/${ticket}`
       });
     }
+    if (url.pathname === `${basePath}/save-latest` && req.method === 'POST') {
+      if (!latestArtifact) {
+        res.writeHead(204, { 'cache-control': 'no-store' }).end();
+        return;
+      }
+      const id = newSecret(12);
+      const snapshotRoot = path.join(layout.artifacts, 'saved', id, 'public');
+      await copyPublicSnapshot(layout.publicDir, snapshotRoot);
+      const saved = {
+        id,
+        sourceArtifactId: latestArtifact.id,
+        path: latestArtifact.path,
+        background: latestArtifact.previewBackground,
+        savedAt: new Date().toISOString(),
+        root: snapshotRoot
+      };
+      manifest.savedArtifacts.push(saved);
+      await saveManifest();
+      appendEvent(layout, { type: 'artifact-saved', id, path: saved.path });
+      return json(res, 200, { id, sourceArtifactId: saved.sourceArtifactId, savedAt: saved.savedAt });
+    }
+    if (url.pathname === `${basePath}/latest-save` && req.method === 'POST') {
+      const saved = manifest.savedArtifacts.at(-1);
+      if (!saved) {
+        res.writeHead(204, { 'cache-control': 'no-store' }).end();
+        return;
+      }
+      const ticket = newSecret(24);
+      tickets.set(ticket, {
+        artifact: { ...saved, verified: true },
+        root: saved.root,
+        savedId: saved.id,
+        expiresAt: Date.now() + 60_000
+      });
+      const artifactOrigin = config.artifactOrigin ?? `http://127.0.0.1:${artifactPort}`;
+      return json(res, 200, {
+        id: saved.id,
+        sourceArtifactId: saved.sourceArtifactId,
+        savedAt: saved.savedAt,
+        url: `${artifactOrigin}${basePath}/claim/${ticket}`
+      });
+    }
     res.writeHead(404, { 'cache-control': 'no-store' }).end();
   });
 
@@ -286,6 +341,7 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
     const url = new URL(req.url, 'http://loopback');
     const claimPrefix = `${basePath}/claim/`;
     const filesPrefix = `${basePath}/files/`;
+    const savedFilesPrefix = `${basePath}/saved/`;
     if (url.pathname.startsWith(claimPrefix)) {
       const ticket = url.pathname.slice(claimPrefix.length);
       const claim = tickets.get(ticket);
@@ -297,19 +353,35 @@ export async function startRemoteTestGateway(config, dependencies = {}) {
       const secure = String(config.artifactOrigin ?? '').startsWith('https:') ? '; Secure' : '';
       res.writeHead(302, {
         'set-cookie': `hii_artifact=${artifactCookie}; HttpOnly; SameSite=Strict; Path=${basePath}${secure}`,
-        location: `${filesPrefix}${claim.artifact.path.split('/').map(encodeURIComponent).join('/')}`,
+        location: claim.root
+          ? `${savedFilesPrefix}${claim.savedId}/${claim.artifact.path.split('/').map(encodeURIComponent).join('/')}`
+          : `${filesPrefix}${claim.artifact.path.split('/').map(encodeURIComponent).join('/')}`,
         'cache-control': 'no-store',
         'referrer-policy': 'no-referrer'
       }).end();
       return;
     }
-    if (!url.pathname.startsWith(filesPrefix) || !String(req.headers.cookie ?? '').split(/;\s*/).includes(`hii_artifact=${artifactCookie}`)) {
+    const hasCookie = String(req.headers.cookie ?? '').split(/;\s*/).includes(`hii_artifact=${artifactCookie}`);
+    if ((!url.pathname.startsWith(filesPrefix) && !url.pathname.startsWith(savedFilesPrefix)) || !hasCookie) {
       res.writeHead(401, { 'cache-control': 'no-store' }).end();
       return;
     }
-    const relative = url.pathname.slice(filesPrefix.length);
+    let root = layout.publicDir;
+    let relative = url.pathname.slice(filesPrefix.length);
+    if (url.pathname.startsWith(savedFilesPrefix)) {
+      const remainder = url.pathname.slice(savedFilesPrefix.length);
+      const slash = remainder.indexOf('/');
+      const id = slash < 0 ? '' : remainder.slice(0, slash);
+      const saved = manifest.savedArtifacts.find((item) => item.id === id);
+      if (!saved) {
+        res.writeHead(404, { 'cache-control': 'no-store' }).end();
+        return;
+      }
+      root = saved.root;
+      relative = remainder.slice(slash + 1);
+    }
     try {
-      const file = await resolvePublicArtifact(layout.publicDir, relative);
+      const file = await resolvePublicArtifact(root, relative);
       const body = await fsp.readFile(file);
       res.writeHead(200, {
         'content-type': contentType(file),
