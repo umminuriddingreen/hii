@@ -1,8 +1,9 @@
 use crate::{
     config::{AppPaths, DEFAULT_MODEL, DEFAULT_REVIEW_MODEL},
     contract::{deletion_shell, sensitive_shell, Authority, Contract, Decision},
+    hooks::{HookBatch, HookEvent, HookRunner},
     ollama::{ChatResult, ChatStreamEvent, Message, Ollama},
-    receipt::{redact_text, unix_ms, Receipt, RunStore, VerificationRecord},
+    receipt::{redact_text, unix_ms, HookRecord, Receipt, RunStore, VerificationRecord},
     tools::{ToolResult, Toolbelt},
 };
 use serde::Deserialize;
@@ -48,6 +49,7 @@ pub struct RunOptions {
     pub use_context: bool,
     pub output: RunOutput,
     pub last_message: Option<PathBuf>,
+    pub hooks: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -114,6 +116,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     validate_declared_verification(&options.verify)?;
 
     let tools = Toolbelt::new(options.workspace)?;
+    let hooks = HookRunner::load(&paths.runtime, tools.workspace(), options.hooks)?;
     let last_message = options
         .last_message
         .as_deref()
@@ -161,6 +164,32 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             "authority": options.authority.label()
         }),
     );
+    let mut hook_records: Vec<HookRecord> = Vec::new();
+    let session_hooks = hooks.fire(
+        HookEvent::SessionStart,
+        None,
+        &store.id,
+        json!({
+            "goal": redact_text(&options.goal),
+            "authority": options.authority.label()
+        }),
+    );
+    persist_hook_batch(&store, options.output, &session_hooks)?;
+    let session_hook_mutation = session_hooks.mutated_workspace();
+    hook_records.extend(session_hooks.records);
+    let prompt_hooks = hooks.fire(
+        HookEvent::UserPrompt,
+        None,
+        &store.id,
+        json!({ "prompt": redact_text(&options.goal) }),
+    );
+    persist_hook_batch(&store, options.output, &prompt_hooks)?;
+    let prompt_block = prompt_hooks.block_reason.clone();
+    hook_records.extend(prompt_hooks.records);
+    if let Some(reason) = prompt_block {
+        store.event("run.blocked", json!({ "reason": redact_text(&reason) }))?;
+        return Err(format!("Prompt blocked by lifecycle policy: {reason}"));
+    }
 
     let contract = Contract::infer(&options.goal, options.authority)
         .with_done_when(options.done_when.as_deref());
@@ -210,7 +239,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let mut touched_artifacts = BTreeSet::new();
     let mut final_summary = None;
     let mut final_next = None;
-    let mut mutation_epoch = 0usize;
+    let mut mutation_epoch = usize::from(session_hook_mutation);
     let mut verified_epoch = None;
     let mut observations = HashSet::new();
     let mut steps = 0usize;
@@ -333,6 +362,31 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     messages.push(Message::user(blocked));
                     continue;
                 }
+                let pre_hooks = hooks.fire(
+                    HookEvent::PreTool,
+                    Some(&tool),
+                    &store.id,
+                    json!({
+                        "step": steps,
+                        "tool": &tool,
+                        "path": path.as_deref(),
+                        "query": query.as_deref(),
+                        "command": command.as_deref().map(redact_text),
+                        "url": url.as_deref(),
+                        "mutatesWorkspace": mutates,
+                        "sensitive": sensitive
+                    }),
+                );
+                persist_hook_batch(&store, options.output, &pre_hooks)?;
+                let hook_block = pre_hooks.block_reason.clone();
+                hook_records.extend(pre_hooks.records);
+                if let Some(blocked) = hook_block {
+                    messages.push(Message::assistant(raw));
+                    messages.push(Message::user(format!(
+                        "HOOK_BLOCKED: {blocked}. Choose a compliant alternative."
+                    )));
+                    continue;
+                }
                 let result = if is_hii {
                     crate::hii_tools::execute(&paths.repo, &tool, query.as_deref())
                 } else {
@@ -387,6 +441,27 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                         verified_epoch = Some(mutation_epoch);
                     }
                 }
+                let post_hooks = hooks.fire(
+                    HookEvent::PostTool,
+                    Some(&tool),
+                    &store.id,
+                    json!({
+                        "step": steps,
+                        "tool": &tool,
+                        "ok": result.ok,
+                        "verification": result.verification,
+                        "output": &safe_output
+                    }),
+                );
+                persist_hook_batch(&store, options.output, &post_hooks)?;
+                let hook_feedback = post_hooks.model_feedback();
+                if post_hooks.mutated_workspace() {
+                    mutation_epoch += 1;
+                    verified_epoch = None;
+                    verification.clear();
+                    observations.clear();
+                }
+                hook_records.extend(post_hooks.records);
                 store.event(
                     "tool.result",
                     json!({
@@ -417,10 +492,15 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     String::new()
                 };
                 messages.push(Message::user(format!(
-                    "TOOL RESULT [{}]:\n{}{}",
+                    "TOOL RESULT [{}]:\n{}{}{}",
                     if result.ok { "ok" } else { "error" },
                     safe_output,
-                    proof_hint
+                    proof_hint,
+                    if hook_feedback.is_empty() {
+                        String::new()
+                    } else {
+                        format!("\n\n{hook_feedback}")
+                    }
                 )));
             }
             Action::Final {
@@ -494,6 +574,18 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     if !declared_checks_passed {
         summary.push_str(" Declared acceptance verification failed.");
     }
+    let stop_hooks = hooks.fire(
+        HookEvent::Stop,
+        None,
+        &store.id,
+        json!({
+            "status": if completed { "completed" } else { "incomplete" },
+            "summary": &summary,
+            "steps": steps
+        }),
+    );
+    persist_hook_batch(&store, options.output, &stop_hooks)?;
+    hook_records.extend(stop_hooks.records);
     if let Some(path) = last_message.as_deref() {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|error| {
@@ -566,7 +658,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let preexisting_changes = artifact_inventory("clean", &git_before);
     let reversible = Some(git_status != "not a git workspace");
     let receipt = Receipt {
-        schema_version: 3,
+        schema_version: 4,
         id: store.id.clone(),
         created_at_unix_ms: store.started_at_unix_ms,
         finished_at_unix_ms: unix_ms(),
@@ -595,6 +687,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         reversible,
         context_sources: capsule.sources,
         preexisting_changes,
+        hooks: hook_records,
     };
     store.event(
         "run.finished",
@@ -627,6 +720,19 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         }
     }
     Ok(receipt)
+}
+
+fn persist_hook_batch(
+    store: &RunStore,
+    output: RunOutput,
+    batch: &HookBatch,
+) -> Result<(), String> {
+    for record in &batch.records {
+        let value = serde_json::to_value(record).map_err(|error| error.to_string())?;
+        store.event("hook.result", value.clone())?;
+        emit_jsonl(output, "hook.result", value);
+    }
+    Ok(())
 }
 
 pub(crate) fn choose_model(
@@ -1177,15 +1283,19 @@ mod tests {
     use super::*;
     use std::{
         process,
+        sync::atomic::{AtomicU64, Ordering},
         time::{SystemTime, UNIX_EPOCH},
     };
 
     fn temp_workspace() -> PathBuf {
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock should be after the Unix epoch")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("hii-run-output-{}-{nonce}", process::id()));
+        let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("hii-run-output-{}-{nonce}-{serial}", process::id()));
         fs::create_dir_all(&path).expect("create temporary workspace");
         path.canonicalize().expect("canonicalize workspace")
     }

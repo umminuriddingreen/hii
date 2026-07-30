@@ -86,6 +86,65 @@ the context source list. Receipts distinguish files touched by the run from
 pre-existing dirty worktree state, so concurrent user or agent work is not
 misattributed as a new artifact.
 
+## Governed lifecycle hooks
+
+HII can run explicitly approved operator-local hooks at `sessionStart`,
+`userPrompt`, `preTool`, `postTool`, and `stop`. Configure them in
+`~/.hii/config/hooks.json`:
+
+```json
+{
+  "schemaVersion": 1,
+  "enabled": true,
+  "hooks": {
+    "preTool": [
+      {
+        "name": "protect-generated-files",
+        "command": "scripts/hii-hooks/protect.sh",
+        "matcher": "write|edit",
+        "approved": true,
+        "timeoutMs": 3000
+      }
+    ],
+    "postTool": [
+      {
+        "name": "format-edits",
+        "command": "scripts/hii-hooks/format.sh",
+        "matcher": "write|edit",
+        "approved": true,
+        "timeoutMs": 10000,
+        "mutatesWorkspace": true
+      }
+    ]
+  }
+}
+```
+
+Hook commands are literal workspace-relative executable paths, with an optional
+literal `args` array; shell command strings, absolute paths, traversal,
+symlinks, and non-executable files are rejected. The operator-local config must
+be a regular file owned by the current user and cannot be group- or
+world-writable. Every hook needs `approved: true` before it can execute.
+
+HII sends bounded redacted event JSON on standard input and clears the process
+environment before restoring only a minimal `PATH`, isolated `HOME`, workspace,
+session, locale, terminal, and temporary-directory context. Hook output is
+capped at 8 KiB, redacted, written to the run event stream, and retained in
+receipt schema 4. Timeouts terminate the hook process group; the default is
+three seconds and the maximum is 30 seconds.
+
+`userPrompt` and `preTool` hooks can deny an action with exit code 2 or
+`{"decision":"deny","reason":"..."}`. A timeout or launch failure also fails
+closed for those policy events. A successful `sessionStart` or `postTool` hook
+that declares `mutatesWorkspace` invalidates earlier proof, so HII must verify
+the resulting state again. Use `/hooks` to inspect effective policy and
+`--no-hooks` for an explicitly hook-free local session. Public-test sessions
+disable hooks categorically.
+
+Approved hooks are trusted host code, not an operating-system sandbox. Protect
+the operator-local config and review executable changes with the same care as
+any other local automation.
+
 ## Agent loop
 
 ```text

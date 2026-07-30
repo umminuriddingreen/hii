@@ -2,9 +2,10 @@ use crate::{
     agent::{choose_model, execute_tool, parse_action, Action},
     config::AppPaths,
     contract::{deletion_shell, sensitive_shell, Authority, Decision},
+    hooks::{HookBatch, HookEvent, HookRunner},
     ollama::{ChatResult, ChatStreamEvent, ChatUsage, Message, Ollama},
     receipt::{
-        find_receipt, redact_text, unix_ms, ConversationStore, Receipt, RunStore,
+        find_receipt, redact_text, unix_ms, ConversationStore, HookRecord, Receipt, RunStore,
         VerificationRecord,
     },
     skills,
@@ -126,6 +127,7 @@ pub struct Conversation {
     goal: Option<SessionGoal>,
     plan_mode: bool,
     authority: Authority,
+    hooks: HookRunner,
 }
 
 impl Conversation {
@@ -135,12 +137,18 @@ impl Conversation {
         requested_model: Option<String>,
         max_steps: usize,
         public_test: bool,
+        hooks_enabled: bool,
     ) -> Result<Self, String> {
         crate::tui::load_theme(&paths.runtime);
         let tools = Toolbelt::new(workspace)?;
         let ollama = Ollama::new(AppPaths::ollama_url());
         let model = choose_model(requested_model.as_deref(), &ollama.models()?)?;
         let store = ConversationStore::create(&paths.runtime)?;
+        let hooks = HookRunner::load(
+            &paths.runtime,
+            tools.workspace(),
+            hooks_enabled && !public_test,
+        )?;
         let capsule = if public_test {
             crate::context::ContextCapsule::default()
         } else {
@@ -175,8 +183,19 @@ impl Conversation {
             goal: None,
             plan_mode: false,
             authority: Authority::Workspace,
+            hooks,
         };
         conversation.sync_authority_context();
+        let session_hooks = conversation.hooks.fire(
+            HookEvent::SessionStart,
+            None,
+            &conversation.store.id,
+            json!({
+                "model": &conversation.model,
+                "publicTest": public_test
+            }),
+        );
+        conversation.record_hook_batch(&session_hooks, None)?;
         Ok(conversation)
     }
 
@@ -184,6 +203,17 @@ impl Conversation {
         if self.context_chars() >= AUTO_COMPACT_CHARS {
             self.compact_internal("automatic")?;
         }
+        let prompt_hooks = self.hooks.fire(
+            HookEvent::UserPrompt,
+            None,
+            &self.store.id,
+            json!({ "prompt": redact_text(input) }),
+        );
+        self.record_hook_batch(&prompt_hooks, None)?;
+        if let Some(reason) = prompt_hooks.block_reason.as_deref() {
+            return Err(format!("Prompt blocked by lifecycle policy: {reason}"));
+        }
+        let mut hook_records = prompt_hooks.records;
         self.store
             .event("user.message", json!({ "content": redact_text(input) }))?;
         self.messages.push(Message::user(input));
@@ -252,7 +282,14 @@ impl Conversation {
                     }
                     let message = redact_text(plain_message(&raw).unwrap_or_default());
                     self.messages.push(Message::assistant(message.clone()));
-                    self.finish_backend_run(run, input, step, &message, verification)?;
+                    self.finish_backend_run(
+                        run,
+                        input,
+                        step,
+                        &message,
+                        verification,
+                        hook_records,
+                    )?;
                     self.store
                         .event("assistant.message", json!({ "content": message }))?;
                     return Ok(message);
@@ -277,7 +314,14 @@ impl Conversation {
                     }
                     let message = redact_text(&message);
                     self.messages.push(Message::assistant(message.clone()));
-                    self.finish_backend_run(run, input, step, &message, verification)?;
+                    self.finish_backend_run(
+                        run,
+                        input,
+                        step,
+                        &message,
+                        verification,
+                        hook_records,
+                    )?;
                     self.store
                         .event("assistant.message", json!({ "content": message }))?;
                     return Ok(message);
@@ -297,7 +341,14 @@ impl Conversation {
                     };
                     let message = redact_text(&message);
                     self.messages.push(Message::assistant(message.clone()));
-                    self.finish_backend_run(run, input, step, &message, verification)?;
+                    self.finish_backend_run(
+                        run,
+                        input,
+                        step,
+                        &message,
+                        verification,
+                        hook_records,
+                    )?;
                     self.store
                         .event("assistant.message", json!({ "content": message }))?;
                     return Ok(message);
@@ -496,6 +547,31 @@ impl Conversation {
                         )?;
                         run = Some(created);
                     }
+                    let pre_hooks = self.hooks.fire(
+                        HookEvent::PreTool,
+                        Some(&tool),
+                        &self.store.id,
+                        json!({
+                            "step": step,
+                            "tool": &tool,
+                            "path": path.as_deref(),
+                            "query": query.as_deref(),
+                            "command": command.as_deref().map(redact_text),
+                            "url": url.as_deref(),
+                            "mutatesWorkspace": mutation,
+                            "sensitive": sensitive
+                        }),
+                    );
+                    self.record_hook_batch(&pre_hooks, run.as_ref())?;
+                    let hook_block = pre_hooks.block_reason.clone();
+                    hook_records.extend(pre_hooks.records);
+                    if let Some(blocked) = hook_block {
+                        self.messages.push(Message::assistant(raw));
+                        self.messages.push(Message::user(format!(
+                            "HOOK_BLOCKED: {blocked}. Choose a compliant alternative."
+                        )));
+                        continue;
+                    }
                     let result = if crate::hii_tools::is_hii_tool(&tool) {
                         crate::hii_tools::execute(&self.paths.repo, &tool, query.as_deref())
                     } else {
@@ -589,6 +665,30 @@ impl Conversation {
                             }
                         }
                     }
+                    let post_hooks = self.hooks.fire(
+                        HookEvent::PostTool,
+                        Some(&tool),
+                        &self.store.id,
+                        json!({
+                            "step": step,
+                            "tool": &tool,
+                            "ok": result.ok,
+                            "verification": result.verification,
+                            "output": &safe_output
+                        }),
+                    );
+                    self.record_hook_batch(&post_hooks, run.as_ref())?;
+                    let hook_feedback = post_hooks.model_feedback();
+                    if post_hooks.mutated_workspace() {
+                        mutation_epoch += 1;
+                        verified_epoch = None;
+                        verification.clear();
+                        observations.clear();
+                    }
+                    hook_records.extend(post_hooks.records);
+                    if !hook_feedback.is_empty() {
+                        repair_hint.push_str(&format!("\n\n{hook_feedback}"));
+                    }
                     if let Some(run) = &run {
                         run.event(
                             "tool.result",
@@ -628,6 +728,7 @@ impl Conversation {
                 steps,
                 "The operator step ceiling was reached before I could finish cleanly.",
                 verification,
+                hook_records,
             )?;
         }
         Ok("The operator step ceiling was reached before I could finish cleanly.".into())
@@ -976,6 +1077,10 @@ impl Conversation {
 
     pub fn paths(&self) -> &AppPaths {
         &self.paths
+    }
+
+    pub fn hooks(&self) -> String {
+        self.hooks.summary()
     }
 
     pub fn is_public_test(&self) -> bool {
@@ -1510,12 +1615,25 @@ impl Conversation {
         steps: usize,
         summary: &str,
         verification: Vec<VerificationRecord>,
+        mut hook_records: Vec<HookRecord>,
     ) -> Result<(), String> {
+        let stop_hooks = self.hooks.fire(
+            HookEvent::Stop,
+            None,
+            &self.store.id,
+            json!({
+                "summary": redact_text(summary),
+                "steps": steps,
+                "verified": verification.iter().any(|check| check.ok)
+            }),
+        );
+        self.record_hook_batch(&stop_hooks, run.as_ref())?;
+        hook_records.extend(stop_hooks.records);
         let Some(run) = run else {
             return Ok(());
         };
         let receipt = Receipt {
-            schema_version: 3,
+            schema_version: 4,
             id: run.id.clone(),
             created_at_unix_ms: run.started_at_unix_ms,
             finished_at_unix_ms: unix_ms(),
@@ -1555,6 +1673,7 @@ impl Conversation {
                 .sources
             },
             preexisting_changes: Vec::new(),
+            hooks: hook_records,
         };
         run.event(
             "run.finished",
@@ -1599,6 +1718,17 @@ impl Conversation {
                         json!({"error": redact_text(&error), "receipt": receipt.id}),
                     )?;
                 }
+            }
+        }
+        Ok(())
+    }
+
+    fn record_hook_batch(&self, batch: &HookBatch, run: Option<&RunStore>) -> Result<(), String> {
+        for record in &batch.records {
+            let value = serde_json::to_value(record).map_err(|error| error.to_string())?;
+            self.store.event("hook.result", value.clone())?;
+            if let Some(run) = run {
+                run.event("hook.result", value)?;
             }
         }
         Ok(())

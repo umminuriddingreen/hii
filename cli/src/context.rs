@@ -239,6 +239,7 @@ mod tests {
             reversible: Some(true),
             context_sources: Vec::new(),
             preexisting_changes: Vec::new(),
+            hooks: Vec::new(),
         };
         let run_dir = runtime.0.join("runs/cli/prior-run");
         fs::create_dir_all(&run_dir).expect("create run");

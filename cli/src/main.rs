@@ -7,6 +7,7 @@ mod context;
 mod contract;
 mod conversation;
 mod hii_tools;
+mod hooks;
 mod keyboard;
 mod legacy;
 mod mcp;
@@ -74,6 +75,13 @@ struct Cli {
         help = "Session boundary: local | public-test"
     )]
     session_profile: SessionProfile,
+
+    #[arg(
+        long,
+        global = true,
+        help = "Disable all operator-local lifecycle hooks for this session"
+    )]
+    no_hooks: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -344,6 +352,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     use_context: !no_context,
                     output,
                     last_message,
+                    hooks: lifecycle_hooks_enabled(cli.no_hooks, cli.session_profile),
                 },
             )?;
             Ok(if receipt.status == "completed" {
@@ -439,6 +448,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         cli.model,
         cli.max_steps,
         cli.session_profile == SessionProfile::PublicTest,
+        lifecycle_hooks_enabled(cli.no_hooks, cli.session_profile),
     )?;
     let suppress_welcome = env::var("HII_SUPPRESS_WELCOME").ok();
     if !truthy_flag(suppress_welcome.as_deref()) {
@@ -532,11 +542,10 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         }
         let result = match slash {
             Some(SlashCommand::Help) => Ok(if conversation.is_public_test() {
-                public_test_slash_help()
+                public_test_slash_help().to_string()
             } else {
                 slash_help()
-            }
-            .to_string()),
+            }),
             Some(SlashCommand::Compact) => conversation.compact(),
             Some(SlashCommand::Clear) => conversation.clear(),
             Some(SlashCommand::Status) => Ok(conversation.status()),
@@ -565,6 +574,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             }
             Some(SlashCommand::Resume(id)) => conversation.resume(id.as_deref()),
             Some(SlashCommand::Skills) => conversation.skills(),
+            Some(SlashCommand::Hooks) => Ok(conversation.hooks()),
             Some(SlashCommand::Agents) => agents::AgentManager::new(conversation.paths()).list(),
             Some(SlashCommand::Providers) => {
                 agents::AgentManager::new(conversation.paths()).providers()
@@ -618,7 +628,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             }
             Some(SlashCommand::Unknown(command)) => {
                 let help = if conversation.is_public_test() {
-                    public_test_slash_help()
+                    public_test_slash_help().to_string()
                 } else {
                     slash_help()
                 };
@@ -661,6 +671,7 @@ enum SlashCommand {
     Permissions(Option<String>),
     Resume(Option<String>),
     Skills,
+    Hooks,
     Agents,
     Providers,
     Login(String),
@@ -733,6 +744,7 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         "/permissions" => SlashCommand::Permissions(argument),
         "/resume" => SlashCommand::Resume(argument),
         "/skills" if rest.is_empty() => SlashCommand::Skills,
+        "/hooks" if rest.is_empty() => SlashCommand::Hooks,
         "/agents" if rest.is_empty() => SlashCommand::Agents,
         "/ps" if rest.is_empty() => SlashCommand::Agents,
         "/providers" if rest.is_empty() => SlashCommand::Providers,
@@ -788,16 +800,24 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
     })
 }
 
-fn slash_help() -> &'static str {
-    if cfg!(feature = "preview") {
+fn slash_help() -> String {
+    let help = if cfg!(feature = "preview") {
         "/help                         show commands\n/providers                    show local, Codex, and Claude access\n/login codex|claude           connect an existing provider plan\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/rename <name>                name this saved session\n/copy                         copy the latest response\n/status                       show session, workspace, model, and usage\n/goal [edit|pause|resume|clear] [objective]\n                               track a persistent session objective\n/plan [off|prompt]            inspect and research without changes\n/side <question>              ask without changing the main conversation\n/theme [name]                 switch the persistent visual signature\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n/model [name]                 list or switch available models\n/proof [run-id]               inspect execution proof\n/diff                         inspect scoped workspace changes\n/review                       review current diff for defects\n/permissions [level]          show or switch the live authority boundary\n/resume [session-id]          list or restore a prior session\n/skills                       show automatically learned skill drafts\n/agents | /ps                 show HII-managed and observed agents\n/codex <task>                 use authenticated Codex CLI\n/claude <task>                use authenticated Claude CLI\n/agent <id> status|logs|stop  manage an agent by id\n/stop <id>                    stop one managed agent\n/resources                    quick CPU, memory, storage, and Ollama view\n/top                          open the embedded btop resource monitor\n/schedule <cron> :: <task>    create a local recurring HII task\n/schedules                    list HII schedules\n/calendar                     show the next 7 days\n/calendar add DATE [TIME] :: TITLE\n/sync calendar                sync next HII runs to Apple Calendar\n/exit                         leave HII\n\nWhile running: type + Enter steers · type + Tab queues · Esc stops"
     } else {
         "/help                         show commands\n/providers                    show local, Codex, and Claude access\n/login codex|claude           connect an existing provider plan\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/rename <name>                name this saved session\n/copy                         copy the latest response\n/status                       show session, workspace, model, and usage\n/goal [edit|pause|resume|clear] [objective]\n                               track a persistent session objective\n/plan [off|prompt]            inspect and research without changes\n/side <question>              ask without changing the main conversation\n/theme [name]                 switch the persistent visual signature\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n/model [name]                 list or switch available models\n/proof [run-id]               inspect execution proof\n/diff                         inspect scoped workspace changes\n/review                       review current diff for defects\n/permissions [level]          show or switch the live authority boundary\n/resume [session-id]          list or restore a prior session\n/skills                       show automatically learned skill drafts\n/agents | /ps                 show HII-managed and observed agents\n/codex <task>                 use authenticated Codex CLI\n/claude <task>                use authenticated Claude CLI\n/agent <id> status|logs|stop  manage an agent by id\n/stop <id>                    stop one managed agent\n/undo                         drop the last exchange to steer away\n/fork                         snapshot this session to a resumable fork\n/teach <name>                 graduate this session into a reusable skill\n!<command>                    run a shell command directly\n/exit                         leave HII\n\nWhile running: type + Enter steers · type + Tab queues · Esc stops"
-    }
+    };
+    help.replace(
+        "/skills                       show automatically learned skill drafts\n",
+        "/skills                       show automatically learned skill drafts\n/hooks                        inspect approved lifecycle policy\n",
+    )
 }
 
 fn public_test_slash_help() -> &'static str {
     "/help                         show commands\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/status                       show isolated session, workspace, model, and usage\n/theme [name]                 switch the terminal theme\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n/model [name]                 list or switch available models\n/proof [run-id]               inspect isolated execution proof\n/permissions                  show the tester-safe authority boundary\n/undo                         drop the last exchange\n/exit                         leave HII\n\nInstalled Mac tools are available to HII inside the disposable workspace. Direct shell input and deletion are unavailable."
+}
+
+fn lifecycle_hooks_enabled(no_hooks: bool, profile: SessionProfile) -> bool {
+    !no_hooks && profile != SessionProfile::PublicTest
 }
 
 #[cfg(feature = "preview")]
@@ -1314,6 +1334,21 @@ mod tests {
         let cli = Cli::try_parse_from(["hii"]).expect("parse default CLI");
         assert_eq!(cli.max_steps, 0);
         assert_eq!(cli.session_profile, SessionProfile::Local);
+        assert!(!cli.no_hooks);
+    }
+
+    #[test]
+    fn no_hooks_is_a_global_session_control() {
+        let cli =
+            Cli::try_parse_from(["hii", "--no-hooks", "run", "inspect"]).expect("parse no-hooks");
+        assert!(cli.no_hooks);
+    }
+
+    #[test]
+    fn lifecycle_hooks_never_cross_the_public_test_boundary() {
+        assert!(lifecycle_hooks_enabled(false, SessionProfile::Local));
+        assert!(!lifecycle_hooks_enabled(true, SessionProfile::Local));
+        assert!(!lifecycle_hooks_enabled(false, SessionProfile::PublicTest));
     }
 
     #[test]
@@ -1440,6 +1475,7 @@ mod tests {
             Some(SlashCommand::Plan(Some("off".into())))
         );
         assert_eq!(parse_slash_command("/ps"), Some(SlashCommand::Agents));
+        assert_eq!(parse_slash_command("/hooks"), Some(SlashCommand::Hooks));
         assert_eq!(
             parse_slash_command("/stop worker-7"),
             Some(SlashCommand::Agent {

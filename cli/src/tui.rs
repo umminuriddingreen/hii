@@ -82,6 +82,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/ps", "managed workers"),
     ("/stop", "stop one worker"),
     ("/skills", "learned workflows"),
+    ("/hooks", "lifecycle policy"),
     ("/compact", "shrink context"),
     ("/clear", "fresh conversation"),
     ("/new", "fresh conversation"),

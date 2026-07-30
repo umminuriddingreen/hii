@@ -15,6 +15,18 @@ pub struct VerificationRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookRecord {
+    pub event: String,
+    pub name: String,
+    pub command: String,
+    pub status: String,
+    pub exit_code: Option<i32>,
+    pub duration_ms: u64,
+    pub output: String,
+    pub mutates_workspace: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Receipt {
     pub schema_version: u8,
     pub id: String,
@@ -47,6 +59,8 @@ pub struct Receipt {
     pub context_sources: Vec<String>,
     #[serde(default)]
     pub preexisting_changes: Vec<String>,
+    #[serde(default)]
+    pub hooks: Vec<HookRecord>,
 }
 
 pub struct RunStore {

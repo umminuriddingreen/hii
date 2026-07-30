@@ -431,6 +431,7 @@ dependencies = [
  "ctrlc",
  "dirs",
  "ignore",
+ "libc",
  "regex",
  "serde",
  "serde_json",
