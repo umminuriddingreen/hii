@@ -6,6 +6,7 @@ import { attachPtyGateway, isLocalRequest } from './server/pty-gateway.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const hiiTarget = process.env.HII_TARGET === 'desktop' ? 'desktop' : 'web';
+const hiiDeployTarget = process.env.HII_DEPLOY_TARGET === 'cloudflare' ? 'cloudflare' : 'local';
 
 function hiiPtyGateway(): Plugin {
   return {
@@ -34,7 +35,8 @@ function hiiPtyGateway(): Plugin {
 
 export default defineConfig({
   define: {
-    __HII_TARGET__: JSON.stringify(hiiTarget)
+    __HII_TARGET__: JSON.stringify(hiiTarget),
+    __HII_DEPLOY_TARGET__: JSON.stringify(hiiDeployTarget)
   },
   envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
   plugins: [sveltekit(), hiiPtyGateway()],

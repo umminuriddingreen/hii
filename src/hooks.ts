@@ -6,5 +6,6 @@ const publicHomepageHosts = new Set([
 ]);
 
 export const reroute: Reroute = ({ url }) => {
+  if (__HII_DEPLOY_TARGET__ === 'cloudflare') return;
   if (url.pathname === '/' && publicHomepageHosts.has(url.hostname)) return '/landing';
 };

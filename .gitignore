@@ -1,6 +1,7 @@
 node_modules
 /.next
 /.svelte-kit
+/.wrangler
 /out
 /output/
 /build
