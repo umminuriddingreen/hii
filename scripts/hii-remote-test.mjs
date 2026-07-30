@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import {
   ARTIFACT_HTTPS_PORT,
   ARTIFACT_PORT,
+  MODEL,
   TERMINAL_HTTPS_PORT,
   TERMINAL_PORT,
   funnelStopArgs,
@@ -55,9 +56,38 @@ async function status() {
   return { ...state, processAlive: alive(state.pid), status: alive(state.pid) ? 'running' : 'stale' };
 }
 
-async function start() {
+function requestedModel(args = process.argv.slice(3)) {
+  const index = args.indexOf('--model');
+  const raw = index >= 0 ? args[index + 1] : args.find((value) => !value.startsWith('-'));
+  if (index >= 0 && !raw) throw new Error('--model requires a model name');
+  if (!raw) return null;
+  const model = raw.trim();
+  if (!model || model.length > 128 || /[\u0000-\u001f]/.test(model)) {
+    throw new Error('invalid model name');
+  }
+  return model;
+}
+
+function reusableSession(state, manifest) {
+  const expectedDir = path.join(root, state.sessionId);
+  if (
+    !/^[a-zA-Z0-9-]{20,80}$/.test(state.sessionId ?? '') ||
+    !/^[a-zA-Z0-9_-]{20,80}$/.test(state.sessionPath ?? '') ||
+    path.resolve(state.sessionDir ?? '') !== expectedDir
+  ) {
+    throw new Error('active session state is not safe to reuse');
+  }
+  return {
+    sessionId: state.sessionId,
+    sessionPath: state.sessionPath,
+    model: manifest?.model || MODEL
+  };
+}
+
+async function launch(options = {}) {
+  const reuse = options.reuse ?? null;
   const current = await status();
-  if (current.status === 'running') {
+  if (!reuse && current.status === 'running') {
     print(current);
     return;
   }
@@ -75,8 +105,9 @@ async function start() {
       `preflight failed; no server, PTY, or Funnel route was changed${recovery.length ? `. Recovery: ${recovery.join(' ; ')}` : ''}`
     );
   }
-  const id = newSessionId();
-  const sessionPath = newSecret(24);
+  const id = reuse?.sessionId ?? newSessionId();
+  const sessionPath = reuse?.sessionPath ?? newSecret(24);
+  const model = options.model || reuse?.model || process.env.HII_REMOTE_TEST_MODEL || MODEL;
   const terminalPort = Number(process.env.HII_REMOTE_TEST_TERMINAL_PORT) || TERMINAL_PORT;
   const artifactPort = Number(process.env.HII_REMOTE_TEST_ARTIFACT_PORT) || ARTIFACT_PORT;
   const dnsName = String(report.tailscaleDnsName ?? '').replace(/\.$/, '');
@@ -92,6 +123,7 @@ async function start() {
     artifactPort,
     chromePath: report.chromePath,
     artifactOrigin: `https://${dnsName}:${ARTIFACT_HTTPS_PORT}`,
+    model,
     expose: true
   };
   const child = fork(gatewayFile, [], {
@@ -127,15 +159,21 @@ async function start() {
     pid: ready.pid,
     terminal: `https://${dnsName}${ready.basePath}/`,
     artifacts: `https://${dnsName}:${ARTIFACT_HTTPS_PORT}${ready.basePath}/`,
+    model,
+    reusedSession: Boolean(reuse),
     note: 'Only artifacts that pass local verification are linked in the artifact pane.'
   });
 }
 
-async function stop() {
+async function start() {
+  return await launch({ model: requestedModel() });
+}
+
+async function stop(options = {}) {
   const state = await readJson(stateFile);
   if (!state) {
-    print({ status: 'stopped' });
-    return;
+    if (!options.quiet) print({ status: 'stopped' });
+    return null;
   }
   if (alive(state.pid)) {
     process.kill(state.pid, 'SIGTERM');
@@ -160,7 +198,28 @@ async function stop() {
     }
     await fs.rm(stateFile, { force: true });
   }
-  print({ status: 'stopped', sessionId: state.sessionId, preserved: state.sessionDir });
+  if (!options.quiet) print({ status: 'stopped', sessionId: state.sessionId, preserved: state.sessionDir });
+  return state;
+}
+
+async function restart(model = requestedModel()) {
+  const state = await readJson(stateFile);
+  if (!state) throw new Error('no active session to restart; use start');
+  const manifest = await readJson(path.join(state.sessionDir, 'manifest.json'));
+  const reuse = reusableSession(state, manifest);
+  await stop({ quiet: true });
+  return await launch({ reuse, model: model || reuse.model });
+}
+
+async function switchModel() {
+  const model = requestedModel(process.argv.slice(3));
+  if (!model) {
+    const state = await readJson(stateFile);
+    const manifest = state ? await readJson(path.join(state.sessionDir, 'manifest.json')) : null;
+    print({ model: manifest?.model ?? null, status: state ? (alive(state.pid) ? 'running' : 'stale') : 'stopped' });
+    return;
+  }
+  return await restart(model);
 }
 
 async function main() {
@@ -169,6 +228,8 @@ async function main() {
   if (command === 'start') return await start();
   if (command === 'status') return print(await status());
   if (command === 'stop') return await stop();
+  if (command === 'restart') return await restart();
+  if (command === 'model') return await switchModel();
   if (command === 'preflight') {
     const report = await preflight();
     print(report);
@@ -176,7 +237,7 @@ async function main() {
     return;
   }
   if (command === '--help' || command === 'help') {
-    print('Usage: node scripts/hii-remote-test.mjs start|status|stop|preflight');
+    print('Usage: node scripts/hii-remote-test.mjs start [--model MODEL] | restart [--model MODEL] | model [MODEL] | status | stop | preflight');
     return;
   }
   throw new Error(`unknown command: ${command}`);
