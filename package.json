@@ -9,6 +9,7 @@
     "dev:web": "HII_TARGET=web vite dev --host 127.0.0.1",
     "dev:web:tauri": "HII_TARGET=desktop vite dev --host 127.0.0.1 --port 3042",
     "dev:tauri": "tauri dev",
+    "demo:launch-proof": "node --experimental-strip-types scripts/hii-launch-proof-workspace.mjs",
     "build": "HII_TARGET=web vite build",
     "build:web": "HII_TARGET=web vite build",
     "build:cloudflare": "HII_TARGET=web HII_DEPLOY_TARGET=cloudflare vite build && node scripts/prepare-cloudflare-public.mjs",
