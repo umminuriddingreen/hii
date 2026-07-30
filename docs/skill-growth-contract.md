@@ -14,6 +14,7 @@ agent action → receipt → repeatable draft → verification → review → re
 ~/.hii/skills/proposed/<id>/              draft SKILL.md and manifest
 ~/.hii/skills/registry.json              active registered-skill index
 ~/.hii/skills/registered/<id>/            reviewed SKILL.md and manifest
+~/.hii/skills/executions.jsonl            append-only replay lifecycle ledger
 ~/.hii/skills/exports/                    local portable packages and export log
 ```
 
@@ -75,6 +76,22 @@ hii skill register verify-hii-workflow --reviewed-by ummi
 Registration fails without a verification command or a verified source
 receipt. Registered skills record their reviewer, proof provenance,
 permissions, and side effects.
+
+## Workspace review and replay
+
+HII Space renders draft capabilities as governed workspace objects. Before
+registration, the operator can inspect the manifest's permissions, side
+effects, required proof, observation count, and source-receipt lineage. The
+registration action requires both an explicit review confirmation and a named
+reviewer.
+
+Registered capabilities can be replayed only through a second explicit
+approval. AII starts a fresh bounded run from the registered manifest and HII
+records the replay lifecycle in `executions.jsonl`. A replay is not shown as
+verified until the matching run returns an exact capability-replay receipt
+with passing checks. When two completed replays exist, HII compares status,
+duration, output count, proof count, and verification count against the
+previous run. The comparison never rewrites either receipt.
 
 ## Discovery and health
 

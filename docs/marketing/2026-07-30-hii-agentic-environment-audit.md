@@ -149,6 +149,30 @@ mutation epoch already has fresh passing proof. The successful launch receipt
 predates the duplicate-check guard and therefore honestly contains the same
 passing check twice.
 
+### Verified governed-capability checkpoint
+
+The capability draft is no longer a dead-end sentence on a completed run. HII
+Space now opens the live AII manifest as a governed canvas object and shows its
+source-receipt lineage, permissions, side effects, and required proof before
+registration. Registration requires a named reviewer and an explicit review
+confirmation; a draft never grants replay authority by itself.
+
+A registered capability exposes a separate explicit replay approval. The new
+append-only execution ledger at `~/.hii/skills/executions.jsonl` joins each
+replay to its fresh AII run and exact action receipt. HII does not label the
+replay verified merely because a daemon job completed: the linked capability
+receipt must contain passing checks. Once two replay receipts exist, the
+workspace compares status, duration, output, proof, and verification counts
+without rewriting either receipt.
+
+The isolated skill-replay product gate proves draft creation from a real agent
+action receipt, guarded registration, source-receipt lineage, exact
+receipt-gated verification, and previous-run comparison. Live HII Space proves
+the manifest review surface and its disabled-until-reviewed registration
+control. A real operator-approved replay was deliberately not started during
+this audit, so end-to-end replay remains a final live acceptance step rather
+than a completed product claim.
+
 ### Verified artifact checkpoint
 
 HII now returns each text or code file named in a completed run receipt as its
@@ -412,7 +436,10 @@ cloud sync, credits, or a general “AI operating system.”
 2. Exact context preview with secrets/network warnings before approval.
 3. Artifact adapters for the first audience: Markdown, image/reference board,
    code/site preview, and a native-file handoff.
-4. Capability draft, review, replay, and diff against the previous run.
+4. Run one real operator-approved registered-capability replay, then preserve
+   its exact receipt and previous-run diff as the launch acceptance proof. The
+   workspace review, guarded registration, replay ledger, and comparison
+   contract are implemented.
 5. Genuine downloaded/quarantined second-Mac test. The same-Mac isolated-user
    packaged-app gate now proves embedded runtime startup, receipt persistence
    across reinstall/restart, corrupt-workspace recovery, and strict ad-hoc
@@ -573,8 +600,9 @@ The repository now has five explicit local CI stages:
 2. Rust formatting, tests, and clippy.
 3. An optimized Rust release build, so green source cannot leave the installed
    HII command on an older binary.
-4. HII product-proof gates for SDK, skills, knowledge, knowledge runs, Context
-   Dock, activation, window state, workspace durability, and bootstrap syntax.
+4. HII product-proof gates for SDK, skills, governed skill replay, knowledge,
+   knowledge runs, Context Dock, activation, window state, workspace
+   durability, and bootstrap syntax.
 5. Production web build.
 
 The global launcher now has one versioned source, one atomic installer, and a

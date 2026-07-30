@@ -10,6 +10,7 @@
   import SpatialRunPane from '$lib/components/workspace/SpatialRunPane.svelte';
   import RunArtifactPane from '$lib/components/workspace/RunArtifactPane.svelte';
   import GovernedResultPane from '$lib/components/workspace/GovernedResultPane.svelte';
+  import GovernedCapabilityPane from '$lib/components/workspace/GovernedCapabilityPane.svelte';
   import SurfacePane from '$lib/components/workspace/SurfacePane.svelte';
   import StaticNode from '$lib/components/workspace/StaticNode.svelte';
   import HiiLogo from '$lib/components/HiiLogo.svelte';
@@ -293,7 +294,8 @@
           </div>
         </div>
         {:else if node.object?.kind==='artifact'&&node.payload.adapter==='run-artifact'}<RunArtifactPane {node} onPatch={(next)=>patch(node.id,next)} />
-        {:else if ['artifact','receipt','capability'].includes(node.object?.kind||'')}<GovernedResultPane {node} />
+        {:else if node.object?.kind==='capability'}<GovernedCapabilityPane {node} onPatch={(next)=>patch(node.id,next)} />
+        {:else if ['artifact','receipt'].includes(node.object?.kind||'')}<GovernedResultPane {node} />
         {:else if ['note','text','canvas-text','ink','link','file','image','media','html','font'].includes(node.type)}<StaticNode {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} onSize={(size)=>patch(node.id,size)} />
         {:else if node.type==='intent'}<IntentPane {node} />
         {:else if node.type==='run'}<SpatialRunPane {node} onPatch={(next)=>patch(node.id,next)} onFollowUp={(text)=>followUp(node,text)} onComplete={(result)=>completedRunNodes(node,result)} onCapabilityDraft={(result)=>materializeCapabilityDraft(node,result)} />

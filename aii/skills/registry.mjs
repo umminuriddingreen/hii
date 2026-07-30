@@ -500,6 +500,11 @@ export function reportAgentAction(input) {
   return { receipt, proposal };
 }
 
+export function registerSkillProposal(id, reviewedBy) {
+  ensureRegistryFile();
+  return registerProposal(id, reviewedBy);
+}
+
 export function runSkillCommand(args) {
   const sub = args[0] || "list";
   if (sub === "report") {
