@@ -38,6 +38,18 @@ try {
     /not installed/
   );
 
+  await assert.rejects(
+    () => runs.queueApprovedWorkspaceRun({
+      id: 'secret-context-demo',
+      goal: 'Prove secret-like context cannot be queued.',
+      workspaceRoot,
+      model: 'qwen3.6:35b-mlx',
+      context: [{ id: 'secret-1', title: 'Environment', type: 'text', source: path.join(workspaceRoot, '.env') }],
+      approved: true
+    }),
+    /Secret-like files/
+  );
+
   const discovered = await runs.discoverWorkspaceRunModels();
   assert.deepEqual(discovered.models, ['qwen3.6:35b-mlx', 'qwen3.6:27b-mlx']);
   assert.equal(discovered.defaultModel, 'qwen3.6:35b-mlx');
@@ -157,6 +169,7 @@ try {
   console.log('artifact:     receipt-listed file -> editable HII object verified');
   console.log('edit proof:   atomic save + optimistic conflict + human receipt verified');
   console.log('boundary:     unlisted and symlink-escaped artifacts rejected');
+  console.log('context:      effective read authority shown + secret-like sources rejected');
   console.log('capability:   verified receipt -> idempotent review draft verified');
 } finally {
   fs.rmSync(directory, { recursive: true, force: true });

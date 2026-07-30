@@ -7,6 +7,7 @@ const workspace = readFileSync(resolve(root, 'src/lib/components/workspace/Works
 const chat = readFileSync(resolve(root, 'src/lib/components/workspace/ChatPane.svelte'), 'utf8');
 const spatialRun = readFileSync(resolve(root, 'src/lib/components/workspace/SpatialRunPane.svelte'), 'utf8');
 const runProgress = readFileSync(resolve(root, 'lib/workspace/run-progress.ts'), 'utf8');
+const runBoundary = readFileSync(resolve(root, 'lib/workspace/run-boundary.ts'), 'utf8');
 const workspaceRuns = readFileSync(resolve(root, 'lib/server/hii-workspace-runs.ts'), 'utf8');
 const workspaceRunRoute = readFileSync(resolve(root, 'app/api/workspace/runs/route.ts'), 'utf8');
 const workspaceArtifacts = readFileSync(resolve(root, 'lib/server/hii-workspace-artifacts.ts'), 'utf8');
@@ -50,6 +51,15 @@ describe('agentic workspace interaction contract', () => {
     expect(spatialRun).toContain('onFollowUp(text)');
     expect(workspace).toContain('parentId:intentNode.id');
     expect(chat).toContain('run.visibleOutput');
+  });
+
+  it('shows the effective read authority and fails closed for secret-like context', () => {
+    expect(spatialRun).toContain('Read boundary');
+    expect(spatialRun).toContain('Secret policy');
+    expect(spatialRun).toContain('boundaryManifest.blocked');
+    expect(runBoundary).toContain('other non-secret files inside');
+    expect(runBoundary).toContain('assertWorkspaceRunContextSafe');
+    expect(workspaceRuns).toContain('assertWorkspaceRunContextSafe(context)');
   });
 
   it('keeps governed progress concise and raw execution output behind inspection', () => {

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { appendCapabilityJob, listCapabilityJobs } from '../capabilities/local-store.ts';
 import type { CapabilityJob } from '../capabilities/types.ts';
+import { assertWorkspaceRunContextSafe } from '../workspace/run-boundary.ts';
 import { createContextProject } from './hii-context-dock.ts';
 
 const execFileAsync = promisify(execFile);
@@ -179,6 +180,7 @@ export async function queueApprovedWorkspaceRun(input: {
   if (project.excluded || !project.approvedRoot) throw new Error('The selected workspace root is not approved.');
 
   const context = normalizeContext(input.context);
+  assertWorkspaceRunContextSafe(context);
   const discovered = await discoverWorkspaceRunModels();
   if (!discovered.available || !discovered.defaultModel) throw new Error(discovered.message);
   const requestedModel = clean(input.model, 160);

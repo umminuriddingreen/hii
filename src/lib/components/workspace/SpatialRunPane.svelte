@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { SpatialObjectStatus, WorkspaceNode } from '@/lib/workspace/types';
+  import { workspaceRunBoundaryManifest } from '@/lib/workspace/run-boundary';
   import { terminalRunMessage, workspaceRunEvidence, workspaceRunProgress, type RunProgressStep } from '@/lib/workspace/run-progress';
 
   export let node: WorkspaceNode;
@@ -67,6 +68,10 @@
     maxSteps: Number(node.payload.maxSteps || 8),
     network: 'No publish, push, message, spend, or secret export'
   };
+  $: boundaryManifest = workspaceRunBoundaryManifest({
+    context,
+    workspaceRoot: boundary.workspaceRoot
+  });
   $: checks = (receipt?.verification || []).filter((check) => check.ok === true);
   $: progressSteps = workspaceRunProgress({
     status,
@@ -369,20 +374,28 @@
               {#each context as item}
                 <div class="rounded-xl border border-neutral-900/10 bg-white px-3 py-2">
                   <strong class="block truncate text-[11px] text-neutral-800">{item.title}</strong>
-                  <span class="font-mono text-[8px] uppercase text-neutral-400">{item.type}{item.source ? ` · ${item.source}` : ''}</span>
+                  <span class="block break-all font-mono text-[8px] uppercase text-neutral-400">{item.type}{item.source ? ` · ${item.source}` : ' · no source reference'}</span>
                 </div>
               {/each}
             </div>
+            {#if boundaryManifest.missingProvenanceCount}
+              <div class="mt-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-[10px] leading-5 text-amber-900">{boundaryManifest.missingProvenanceCount} selected object{boundaryManifest.missingProvenanceCount === 1 ? '' : 's'} {boundaryManifest.missingProvenanceCount === 1 ? 'has' : 'have'} no source reference. The object remains visible, but its provenance is incomplete.</div>
+            {/if}
+            {#if boundaryManifest.blocked}
+              <div class="mt-2 rounded-xl border border-red-300 bg-red-50 p-3 text-[10px] leading-5 text-red-900">Remove secret-like files or credential-bearing URLs before approval. HII will not queue this context.</div>
+            {/if}
           {:else}
-            <div class="mt-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-[10px] leading-5 text-amber-900">No canvas objects were selected. AII will receive only this intent and the approved project boundary.</div>
+            <div class="mt-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-[10px] leading-5 text-amber-900">No canvas objects were selected. The intent still carries workspace-level read and write authority shown below.</div>
           {/if}
         </div>
 
         <dl class="mt-5 grid grid-cols-2 gap-2 text-[9px]">
           <div class="rounded-xl bg-neutral-100 p-3"><dt class="font-mono uppercase text-neutral-400">Capability</dt><dd class="mt-1 break-all text-neutral-700">{boundary.capabilityId}</dd></div>
           <div class="rounded-xl bg-neutral-100 p-3"><dt class="font-mono uppercase text-neutral-400">Budget</dt><dd class="mt-1 text-neutral-700">{boundary.maxSteps} local tool steps</dd></div>
-          <div class="col-span-2 rounded-xl bg-neutral-100 p-3"><dt class="font-mono uppercase text-neutral-400">Write boundary</dt><dd class="mt-1 break-all text-neutral-700">{boundary.workspaceRoot}</dd></div>
-          <div class="col-span-2 rounded-xl bg-neutral-100 p-3"><dt class="font-mono uppercase text-neutral-400">External boundary</dt><dd class="mt-1 text-neutral-700">{boundary.network}</dd></div>
+          <div class="col-span-2 rounded-xl bg-blue-50 p-3"><dt class="font-mono uppercase text-blue-500">Read boundary</dt><dd class="mt-1 leading-4 text-blue-950">{boundaryManifest.readScope}</dd></div>
+          <div class="col-span-2 rounded-xl bg-neutral-100 p-3"><dt class="font-mono uppercase text-neutral-400">Write boundary</dt><dd class="mt-1 break-all text-neutral-700">{boundaryManifest.writeScope}</dd></div>
+          <div class="col-span-2 rounded-xl bg-neutral-100 p-3"><dt class="font-mono uppercase text-neutral-400">External boundary</dt><dd class="mt-1 text-neutral-700">{boundaryManifest.externalScope}</dd></div>
+          <div class="col-span-2 rounded-xl bg-neutral-100 p-3"><dt class="font-mono uppercase text-neutral-400">Secret policy</dt><dd class="mt-1 text-neutral-700">{boundaryManifest.secretPolicy}</dd></div>
         </dl>
 
         <label class="mt-3 block rounded-xl bg-neutral-100 p-3 font-mono text-[8px] uppercase tracking-[.1em] text-neutral-400">
@@ -395,7 +408,7 @@
           <span class="mt-1.5 block normal-case tracking-normal text-neutral-500">{modelMessage}</span>
         </label>
 
-        <button class="mt-5 w-full rounded-full bg-neutral-950 px-4 py-3 font-mono text-[9px] uppercase tracking-[.1em] text-white disabled:opacity-40" disabled={busy || modelsLoading || !selectedModel} on:click={approveAndStart}>
+        <button class="mt-5 w-full rounded-full bg-neutral-950 px-4 py-3 font-mono text-[9px] uppercase tracking-[.1em] text-white disabled:opacity-40" disabled={busy || modelsLoading || !selectedModel || boundaryManifest.blocked} on:click={approveAndStart}>
           {busy ? 'Queueing with AII…' : 'Approve bounded run'}
         </button>
       </section>
