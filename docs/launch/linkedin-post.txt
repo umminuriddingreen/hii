@@ -1,0 +1,11 @@
+I built HII for a problem I keep seeing in architecture and computational design: the real decision is spread across drawings, reports, models, scripts, notes, and chat threads.
+
+I gave it one real job on my Mac.
+
+HII kept the context I approved, the finished artifact, and the proof together.
+
+This video is 25 seconds. It uses the actual interface—not a concept render.
+
+I am not opening a general beta. I am looking for five architects, computational designers, or built-world founders with one real job they already need finished.
+
+Reply “HII” + the job. I will message you personally and stay with it through the first result.
