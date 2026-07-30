@@ -420,6 +420,23 @@ the 182-object, zero-Scene state, and redo restored the Scene. The proof
 workspace persisted at revision 4, and the previously selected
 `governed-run-demo` workspace was restored afterward.
 
+### Verified managed-chat focus checkpoint
+
+The governed Run object already presents approval, queue, bounded work, proof,
+and receipt as a five-step lifecycle, with evidence one level deeper and raw
+execution logs behind a second explicit disclosure. The remaining live defect
+was the older Chat object: two completed messages in the default workspace
+still rendered 1,874- and 55,936-character Codex startup, authentication, and
+tool transcripts as if they were assistant answers.
+
+HII now extracts the readable assistant response for those legacy messages
+without rewriting their stored evidence. Each message shows the human-facing
+AII state and an `Inspect run details` action. The raw transcript is absent
+from the default DOM and appears only while that disclosure is open. Live HII
+proved both old messages readable, the raw marker hidden by default, and the
+preserved transcript available on inspection. `hii:chat:check` makes that
+compatibility boundary part of the permanent product CI gate.
+
 ## Evidence reviewed
 
 ### Live HII
@@ -432,8 +449,10 @@ workspace persisted at revision 4, and the previously selected
 - Intent-to-run links, local persistence, knowledge search, provenance,
   approval semantics, receipts, terminal/browser/model surfaces, and product
   smoke tests exist.
-- Chat and terminal surfaces expose too much raw operational output. The board
-  also showed duplicate or low-quality generated tasks.
+- Managed Run and legacy Chat surfaces now keep readable progress or assistant
+  output primary and raw execution evidence explicitly nested. The terminal is
+  still intentionally raw, and the board showed duplicate or low-quality
+  generated tasks.
 - Runtime state is hard to interpret: the surface showed roughly 90 `hiid`
   instances without explaining whether that was healthy or actionable.
 - During the initial audit, `hii space health`, `hii space snapshot`, and
@@ -550,7 +569,7 @@ cloud sync, credits, or a general “AI operating system.”
 | 0 | Trustworthy context selection | Before approval, the user can see the exact files/nodes/sources and sub-asset regions included, exclusions, provenance, content identity, and likely network boundary. |
 | 0 | Human-readable runtime health | One instance model, one clear status, failures with cause and recovery action, no unexplained process counts. |
 | 1 | Media organization | New multi-image imports become bounded proof-linked contact sheets, exact duplicates are visibly counted, and filtered existing nodes become an exact reversible Scene. Stacking, batch labels, and reviewed perceptual dedupe remain open. |
-| 1 | Run focus and log hygiene | Default progress is a short step list; raw stdout/stderr stays one level deeper. Duplicate tasks and transcript debris are prevented. |
+| 1 | Run focus and log hygiene | Governed Runs use a five-step progress summary, raw logs require two disclosures, and legacy Chat transcripts render only the readable response by default while preserving inspectable evidence. Preventing duplicate or low-quality generated board tasks remains open. |
 | 1 | Capability reuse | A successful approved trace can become a draft capability, show required inputs and permissions, and be re-run on new context. |
 | 1 | Onboarding | The first-session journey and privacy-safe local funnel are implemented. A clean Mac install must still reach the first verified artifact in under ten minutes with no repository knowledge. |
 | 1 | Recovery | Interrupted runs, stale surfaces, conflicting writes, and app restarts recover without duplicate work or lost provenance. |
@@ -568,8 +587,8 @@ cloud sync, credits, or a general “AI operating system.”
    searchable outline, 240-object product gate, and live 164-image reversible
    Scene proof are complete; next prove a useful human classification into
    several named Scenes without losing provenance.
-3. Replace raw chat/run noise with an inspectable progress summary and a
-   deliberately secondary log view.
+3. Preserve the verified Run and Chat focus hierarchy; next prevent duplicate
+   or low-quality generated board tasks from becoming active work.
 4. Keep runtime and desktop-space health operator-readable; live-verify the
    repaired Space snapshot when AeroSpace is intentionally started.
 5. Keep the verified seven-object `launch-proof` workspace as the launch

@@ -41,6 +41,7 @@ const pendingContext = readFileSync(resolve(root, 'lib/workspace/pending-context
 const workspaceNavigator = readFileSync(resolve(root, 'src/lib/components/workspace/WorkspaceNavigator.svelte'), 'utf8');
 const workspaceOutline = readFileSync(resolve(root, 'lib/workspace/outline.ts'), 'utf8');
 const workspaceOrganize = readFileSync(resolve(root, 'lib/workspace/organize.ts'), 'utf8');
+const chatOutput = readFileSync(resolve(root, 'lib/workspace/chat-output.ts'), 'utf8');
 
 describe('agentic workspace interaction contract', () => {
   it('summons direct workspace intent from Option+Space', () => {
@@ -166,6 +167,12 @@ describe('agentic workspace interaction contract', () => {
     expect(spatialRun).toContain('terminalRunMessage(status)');
     expect(runProgress).toContain("'approval' | 'queue' | 'work' | 'proof' | 'receipt'");
     expect(runProgress).toContain('No verified receipt was returned.');
+    expect(chat).toContain('workspaceChatPresentation');
+    expect(chat).toContain('Inspect');
+    expect(chat).toContain('run details');
+    expect(chat).toContain('{#if rawOpen.has(message.id)}');
+    expect(chatOutput).toContain('visibleRunOutput(text)');
+    expect(chatOutput).toContain('legacyTranscript: true');
   });
 
   it('uses the installed HII model default and preserves truthful terminal failures', () => {
