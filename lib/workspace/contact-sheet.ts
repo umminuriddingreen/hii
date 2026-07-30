@@ -2,6 +2,7 @@ import type { NodeSeed } from './ingest';
 export type ContactSheetItem = { url:string; path:string; name:string; mime:string; size:number; sha256:string };
 export type ContactSheetSelection = ContactSheetItem & { label?:string };
 export type ContactSheetLabels = Record<string,string>;
+export type ContactSheetStack = { id:string; title:string; sha256s:string[] };
 const text=(value:unknown,max=1000)=>String(value??'').replace(/[\u0000-\u001F\u007F]/g,' ').trim().slice(0,max);
 
 export function normalizeContactSheetItems(value:unknown):ContactSheetItem[]{
@@ -49,6 +50,75 @@ export function filterContactSheetItems(itemsValue:unknown,labelsValue:unknown,q
     const haystack=`${item.name} ${item.path} ${item.mime} ${labels[item.sha256]||''}`.toLocaleLowerCase();
     return terms.every(term=>haystack.includes(term));
   });
+}
+
+export function normalizeContactSheetStacks(itemsValue:unknown,stacksValue:unknown):ContactSheetStack[]{
+  const known=new Set(normalizeContactSheetItems(itemsValue).map(item=>item.sha256));
+  const used=new Set<string>(),ids=new Set<string>();
+  if(!Array.isArray(stacksValue))return[];
+  const stacks:ContactSheetStack[]=[];
+  for(const raw of stacksValue){
+    const value=raw&&typeof raw==='object'?raw as Record<string,unknown>:{};
+    const id=text(value.id,64),title=text(value.title,160);
+    const sha256s=Array.isArray(value.sha256s)?[...new Set(value.sha256s
+      .map(hash=>text(hash,128).toLowerCase())
+      .filter(hash=>known.has(hash)&&!used.has(hash)))].slice(0,12):[];
+    if(!id||ids.has(id)||!title||sha256s.length<2)continue;
+    ids.add(id);
+    sha256s.forEach(hash=>used.add(hash));
+    stacks.push({id,title,sha256s});
+    if(stacks.length>=24)break;
+  }
+  return stacks;
+}
+
+export function contactSheetStackItems(itemsValue:unknown,stackValue:unknown):ContactSheetItem[]{
+  const stack=normalizeContactSheetStacks(itemsValue,[stackValue])[0];
+  if(!stack)return[];
+  const hashes=new Set(stack.sha256s);
+  return normalizeContactSheetItems(itemsValue).filter(item=>hashes.has(item.sha256));
+}
+
+export function filterContactSheetStacks(input:{items:unknown;labels:unknown;stacks:unknown;query:unknown}):ContactSheetStack[]{
+  const items=normalizeContactSheetItems(input.items),stacks=normalizeContactSheetStacks(items,input.stacks);
+  const query=text(input.query,240);
+  if(!query)return stacks;
+  const terms=query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  return stacks.filter(stack=>{
+    if(terms.every(term=>stack.title.toLocaleLowerCase().includes(term)))return true;
+    const members=contactSheetStackItems(items,stack);
+    return filterContactSheetItems(members,input.labels,query).length>0;
+  });
+}
+
+export function stackContactSheetSelection(input:{
+  items:unknown;labels:unknown;stacks:unknown;selectedItems:unknown;title?:unknown;stackId?:string
+}):{created:boolean;stack:ContactSheetStack;stacks:ContactSheetStack[]}{
+  const items=normalizeContactSheetItems(input.items);
+  const selection=normalizeContactSheetSelection(items,input.selectedItems,input.labels);
+  if(selection.length<2)throw new Error('Select at least two exact references to make a stack.');
+  const hashes=selection.map(item=>item.sha256),signature=[...hashes].sort().join(',');
+  const normalized=normalizeContactSheetStacks(items,input.stacks);
+  const existing=normalized.find(stack=>[...stack.sha256s].sort().join(',')===signature);
+  if(existing){
+    const requestedTitle=text(input.title,160);
+    const stack=requestedTitle&&requestedTitle!==existing.title?{...existing,title:requestedTitle}:existing;
+    return{created:false,stack,stacks:normalized.map(candidate=>candidate.id===existing.id?stack:candidate)};
+  }
+  const selected=new Set(hashes);
+  const remaining=normalized
+    .map(stack=>({...stack,sha256s:stack.sha256s.filter(hash=>!selected.has(hash))}))
+    .filter(stack=>stack.sha256s.length>=2);
+  const labels=normalizeContactSheetLabels(items,input.labels);
+  const sharedLabels=[...new Set(hashes.map(hash=>labels[hash]).filter(Boolean))];
+  const title=text(input.title,160)||(sharedLabels.length===1?sharedLabels[0]:`Stack ${remaining.length+1}`);
+  const stack={id:text(input.stackId,64)||crypto.randomUUID(),title,sha256s:hashes};
+  return{created:true,stack,stacks:[...remaining,stack]};
+}
+
+export function unstackContactSheetItems(itemsValue:unknown,stacksValue:unknown,stackId:unknown):ContactSheetStack[]{
+  const id=text(stackId,64);
+  return normalizeContactSheetStacks(itemsValue,stacksValue).filter(stack=>stack.id!==id);
 }
 
 export function contactSheetContextItems(input:{nodeId:string;items:unknown;selectedItems:unknown;itemLabels?:unknown;proofRefs?:string[]}){

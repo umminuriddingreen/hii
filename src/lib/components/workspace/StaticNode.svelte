@@ -6,11 +6,17 @@
     type WorkspaceContextAnchor
   } from '@/lib/workspace/context-anchor';
   import {
+    contactSheetStackItems,
     filterContactSheetItems,
+    filterContactSheetStacks,
     labelContactSheetItems,
     normalizeContactSheetItems,
     normalizeContactSheetLabels,
-    normalizeContactSheetSelection
+    normalizeContactSheetSelection,
+    normalizeContactSheetStacks,
+    stackContactSheetSelection,
+    unstackContactSheetItems,
+    type ContactSheetStack
   } from '@/lib/workspace/contact-sheet';
 
   export let node:WorkspaceNode;
@@ -33,12 +39,20 @@
   let designLayers=initialAnchor?.kind==='design-selection'?initialAnchor.layers.join(', '):'';
   let contactQuery='';
   let batchContactLabel='';
+  let activeContactStackId='';
   $: anchor=normalizeWorkspaceContextAnchor(node.payload.contextAnchor);
   $: imageRegion=anchor?.kind==='image-region'?anchor:draftRegion;
   $: contactItems=normalizeContactSheetItems(node.payload.items);
   $: contactLabels=normalizeContactSheetLabels(contactItems,node.payload.itemLabels);
   $: selectedContactItems=normalizeContactSheetSelection(contactItems,node.payload.selectedItems,contactLabels);
-  $: shownContactItems=filterContactSheetItems(contactItems,contactLabels,contactQuery);
+  $: contactStacks=normalizeContactSheetStacks(contactItems,node.payload.itemStacks);
+  $: activeContactStack=contactStacks.find(stack=>stack.id===activeContactStackId);
+  $: shownContactStacks=activeContactStack?[]:filterContactSheetStacks({items:contactItems,labels:contactLabels,stacks:contactStacks,query:contactQuery});
+  $: stackedContactHashes=new Set(contactStacks.flatMap(stack=>stack.sha256s));
+  $: shownContactItems=filterContactSheetItems(contactItems,contactLabels,contactQuery).filter(item=>
+    activeContactStack?activeContactStack.sha256s.includes(item.sha256):!stackedContactHashes.has(item.sha256)
+  );
+  $: shownContactSourceCount=shownContactItems.length+shownContactStacks.reduce((count,stack)=>count+contactSheetStackItems(contactItems,stack).length,0);
   function toggleContactItem(item:(typeof contactItems)[number]){
     const selected=selectedContactItems.some(candidate=>candidate.sha256===item.sha256);
     onPayload({selectedItems:selected?selectedContactItems.filter(candidate=>candidate.sha256!==item.sha256):selectedContactItems.length<12?[...selectedContactItems,item]:selectedContactItems});
@@ -55,6 +69,25 @@
     const selected=new Map(selectedContactItems.map(item=>[item.sha256,item]));
     for(const item of shownContactItems){if(selected.size>=12)break;selected.set(item.sha256,item)}
     onPayload({selectedItems:[...selected.values()]});
+  }
+  function makeContactStack(){
+    if(selectedContactItems.length<2)return;
+    const itemLabels=batchContactLabel.trim()
+      ?labelContactSheetItems({items:contactItems,labels:contactLabels,selectedItems:selectedContactItems,label:batchContactLabel})
+      :contactLabels;
+    const result=stackContactSheetSelection({
+      items:contactItems,labels:itemLabels,stacks:contactStacks,selectedItems:selectedContactItems,title:batchContactLabel
+    });
+    onPayload({itemLabels,itemStacks:result.stacks});
+    activeContactStackId=result.stack.id;
+    batchContactLabel='';
+  }
+  function selectContactStack(stack:ContactSheetStack){
+    onPayload({selectedItems:normalizeContactSheetSelection(contactItems,stack.sha256s.map(sha256=>({sha256})),contactLabels)});
+  }
+  function removeContactStack(stack:ContactSheetStack){
+    onPayload({itemStacks:unstackContactSheetItems(contactItems,contactStacks,stack.id)});
+    if(activeContactStackId===stack.id)activeContactStackId='';
   }
 
   function normalizedPoint(event:PointerEvent) {
@@ -138,22 +171,43 @@
   <section class="flex h-full min-h-0 flex-col overflow-hidden bg-white">
     <header class="border-b px-4 py-3">
       <div class="flex items-center justify-between gap-3">
-        <div class="min-w-0"><strong class="block truncate text-[13px]">{text('title')||'Reference contact sheet'}</strong><small class="font-mono text-[8px] uppercase tracking-[.08em] text-neutral-400">{shownContactItems.length} shown · {Number(node.payload.uniqueCount)||0} unique · {selectedContactItems.length} selected for context</small></div>
+        <div class="min-w-0"><strong class="block truncate text-[13px]">{text('title')||'Reference contact sheet'}{activeContactStack?` / ${activeContactStack.title}`:''}</strong><small class="font-mono text-[8px] uppercase tracking-[.08em] text-neutral-400">{shownContactSourceCount} references shown · {contactStacks.length} stack{contactStacks.length===1?'':'s'} · {selectedContactItems.length} selected for context</small></div>
         {#if Number(node.payload.duplicateCount)>0}<span class="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 font-mono text-[8px] uppercase text-amber-700">{Number(node.payload.duplicateCount)} exact duplicate{Number(node.payload.duplicateCount)===1?'':'s'} omitted</span>{/if}
       </div>
-      <div role="group" aria-label="Contact sheet review controls" class="mt-2 flex items-center gap-1.5" on:pointerdown|stopPropagation>
+      <div role="group" aria-label="Contact sheet review controls" class="mt-2 flex flex-wrap items-center gap-1.5" on:pointerdown|stopPropagation>
+        {#if activeContactStack}<button class="shrink-0 rounded-full bg-neutral-950 px-2.5 py-1.5 font-mono text-[8px] uppercase text-white" on:click={()=>activeContactStackId=''}>← Sheet</button>{/if}
         <input aria-label="Filter contact sheet" bind:value={contactQuery} class="min-w-0 flex-1 rounded-full border border-neutral-900/10 bg-neutral-50 px-3 py-1.5 font-mono text-[8px] outline-none focus:border-blue-400" placeholder="filter names, paths, or labels"/>
         <button class="shrink-0 rounded-full bg-neutral-100 px-2.5 py-1.5 font-mono text-[8px] uppercase text-neutral-600 disabled:opacity-35" disabled={!shownContactItems.length||selectedContactItems.length>=12} on:click={selectShownContactItems}>Select shown</button>
         {#if selectedContactItems.length}
           <input aria-label="Batch label selected references" bind:value={batchContactLabel} class="min-w-0 max-w-32 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 font-mono text-[8px] outline-none focus:border-blue-500" placeholder="label selected"/>
           <button class="shrink-0 rounded-full bg-blue-600 px-2.5 py-1.5 font-mono text-[8px] uppercase text-white disabled:opacity-35" disabled={!batchContactLabel.trim()} on:click={labelSelectedContactItems}>Label selected</button>
-          {#if selectedContactItems.length>1}<button class="shrink-0 rounded-full border border-blue-200 bg-white px-2.5 py-1.5 font-mono text-[8px] uppercase text-blue-700 hover:border-blue-500" on:click={onOrganize}>Make Scene ↗</button>{/if}
+          {#if selectedContactItems.length>1}
+            <button class="shrink-0 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1.5 font-mono text-[8px] uppercase text-violet-700 hover:border-violet-500" on:click={makeContactStack}>Stack selected</button>
+            <button class="shrink-0 rounded-full border border-blue-200 bg-white px-2.5 py-1.5 font-mono text-[8px] uppercase text-blue-700 hover:border-blue-500" on:click={onOrganize}>Make Scene ↗</button>
+          {/if}
           <button class="shrink-0 rounded-full px-2 py-1.5 font-mono text-[8px] uppercase text-neutral-400 hover:bg-neutral-100" on:click={()=>onPayload({selectedItems:[]})}>Clear</button>
         {/if}
       </div>
     </header>
     <div class="scroll min-h-0 flex-1 overflow-auto p-3">
       <div class="grid gap-2" style={`grid-template-columns:repeat(${Number(node.payload.columns)||4},minmax(0,1fr))`}>
+        {#each shownContactStacks as stack}
+          <div class="overflow-hidden rounded-xl border border-violet-200 bg-violet-50/40">
+            <button aria-label={`Open ${stack.title} stack`} class="block w-full text-left" on:click={()=>activeContactStackId=stack.id}>
+              <span class="grid aspect-video grid-cols-2 gap-px overflow-hidden bg-violet-100">
+                {#each contactSheetStackItems(contactItems,stack).slice(0,4) as member}
+                  <img src={member.url} alt="" loading="lazy" class="h-full min-h-0 w-full object-cover"/>
+                {/each}
+              </span>
+              <span class="block truncate px-2 pt-2 text-[10px] font-semibold text-violet-950">{stack.title}</span>
+              <span class="block px-2 pb-2 font-mono text-[8px] uppercase text-violet-600">{stack.sha256s.length} exact references · open stack</span>
+            </button>
+            <div role="group" aria-label={`${stack.title} stack controls`} class="flex items-center gap-1 border-t border-violet-100 p-1.5" on:pointerdown|stopPropagation>
+              <button class="rounded-full bg-violet-600 px-2.5 py-1 font-mono text-[8px] uppercase text-white" on:click={()=>selectContactStack(stack)}>Use stack</button>
+              <button class="rounded-full px-2 py-1 font-mono text-[8px] uppercase text-violet-500 hover:bg-white" on:click={()=>removeContactStack(stack)}>Unstack</button>
+            </div>
+          </div>
+        {/each}
         {#each shownContactItems as item}
           <div class={`group/item overflow-hidden rounded-xl border bg-neutral-50 ${selectedContactItems.some(candidate=>candidate.sha256===item.sha256)?'border-blue-500 ring-2 ring-blue-200':'border-neutral-900/10 hover:border-blue-400'}`} title={item.path||item.name}>
             <button aria-label={`Use ${item.name} as run context`} aria-pressed={selectedContactItems.some(candidate=>candidate.sha256===item.sha256)} class="block w-full text-left" on:click={()=>toggleContactItem(item)}>
@@ -168,7 +222,7 @@
           </div>
         {/each}
       </div>
-      {#if !shownContactItems.length}<p class="grid min-h-32 place-items-center font-mono text-[9px] text-neutral-400">No references match this filter.</p>{/if}
+      {#if !shownContactItems.length&&!shownContactStacks.length}<p class="grid min-h-32 place-items-center font-mono text-[9px] text-neutral-400">No references match this filter.</p>{/if}
     </div>
   </section>
 {:else if node.type==='image'}

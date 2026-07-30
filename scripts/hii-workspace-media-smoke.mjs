@@ -6,8 +6,11 @@ const { organizeContactSheetReviewSet } = await import('../lib/workspace/contact
 const {
   contactSheetContextItems,
   contactSheetItemSeed,
+  contactSheetStackItems,
   filterContactSheetItems,
-  labelContactSheetItems
+  labelContactSheetItems,
+  stackContactSheetSelection,
+  unstackContactSheetItems
 } = await import('../lib/workspace/contact-sheet.ts');
 
 const stored = [];
@@ -68,6 +71,17 @@ assert.equal(contextItems[0].title, 'material palette');
 assert.equal(contextItems[0].source, sheet.payload.items[1].path);
 assert.equal(contextItems[0].expectedSha256, sheet.payload.items[1].sha256);
 assert.equal(filterContactSheetItems(sheet.payload.items, itemLabels, 'material').length, 2);
+const stacked = stackContactSheetSelection({
+  items: sheet.payload.items,
+  labels: itemLabels,
+  stacks: sheet.payload.itemStacks,
+  selectedItems,
+  stackId: 'material-stack'
+});
+assert.equal(stacked.created, true);
+assert.equal(stacked.stack.title, 'material palette');
+assert.deepEqual(contactSheetStackItems(sheet.payload.items, stacked.stack), selectedItems);
+assert.deepEqual(unstackContactSheetItems(sheet.payload.items, stacked.stacks, stacked.stack.id), []);
 const promoted = contactSheetItemSeed(sheet.payload.items[1], 'proof-sheet', 'material palette');
 assert.equal(promoted.object.parentId, 'proof-sheet');
 assert.deepEqual(promoted.object.proofRefs, [`sha256:${sheet.payload.items[1].sha256}`]);
@@ -100,6 +114,7 @@ console.log('dedupe:       exact SHA-256 duplicate omitted before storage');
 console.log('proof:        unique source paths + hashes preserved');
 console.log('focus:        exact labeled thumbnails -> separate hashed run context');
 console.log('classification: selected references -> durable filterable batch label');
+console.log('stacking:     exact references -> compact reversible human-owned stack');
 console.log('scenes:       exact classified review set -> reversible named Scene');
 console.log('promotion:    sheet item -> provenance-linked region-focusable image');
 console.log('mixed batch:  non-image artifact remains directly editable');

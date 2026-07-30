@@ -3,10 +3,15 @@ import { seedsFromFiles } from '../../lib/workspace/ingest';
 import {
   contactSheetContextItems,
   contactSheetItemSeed,
+  contactSheetStackItems,
   filterContactSheetItems,
+  filterContactSheetStacks,
   labelContactSheetItems,
   normalizeContactSheetLabels,
-  normalizeContactSheetSelection
+  normalizeContactSheetSelection,
+  normalizeContactSheetStacks,
+  stackContactSheetSelection,
+  unstackContactSheetItems
 } from '../../lib/workspace/contact-sheet';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -148,6 +153,76 @@ describe('workspace contact-sheet import', () => {
       expectedSha256: '3'.padStart(64, '0'),
       excerpt: 'Human annotation: facade rhythm'
     });
+  });
+
+  it('collapses exact human-selected references into reversible duplicate-safe stacks', () => {
+    const items = Array.from({ length: 5 }, (_, index) => ({
+      url: `/asset/${index}.png`, path: `/project/${index}.png`, name: `${index}-reference.png`,
+      mime: 'image/png', size: 10, sha256: (index + 1).toString(16).padStart(64, '0')
+    }));
+    const labels = {
+      [items[0].sha256]: 'material palette',
+      [items[1].sha256]: 'material palette'
+    };
+    const first = stackContactSheetSelection({
+      items,
+      labels,
+      stacks: [],
+      selectedItems: [items[0], items[1]],
+      stackId: 'stack-materials'
+    });
+    expect(first).toEqual({
+      created: true,
+      stack: {
+        id: 'stack-materials',
+        title: 'material palette',
+        sha256s: [items[0].sha256, items[1].sha256]
+      },
+      stacks: [{
+        id: 'stack-materials',
+        title: 'material palette',
+        sha256s: [items[0].sha256, items[1].sha256]
+      }]
+    });
+    expect(contactSheetStackItems(items, first.stack)).toEqual([items[0], items[1]]);
+    expect(filterContactSheetStacks({ items, labels, stacks: first.stacks, query: '1-reference' })).toEqual(first.stacks);
+    expect(stackContactSheetSelection({
+      items,
+      labels,
+      stacks: first.stacks,
+      selectedItems: [items[1], items[0]]
+    })).toMatchObject({ created: false, stack: { id: 'stack-materials' } });
+    expect(stackContactSheetSelection({
+      items,
+      labels,
+      stacks: first.stacks,
+      selectedItems: [items[0], items[1]],
+      title: 'approved palette'
+    })).toMatchObject({
+      created: false,
+      stack: { id: 'stack-materials', title: 'approved palette' },
+      stacks: [{ id: 'stack-materials', title: 'approved palette' }]
+    });
+
+    const moved = stackContactSheetSelection({
+      items,
+      labels,
+      stacks: first.stacks,
+      selectedItems: [items[1], items[2]],
+      title: 'alternate',
+      stackId: 'stack-alternate'
+    });
+    expect(moved.stacks).toEqual([{
+      id: 'stack-alternate',
+      title: 'alternate',
+      sha256s: [items[1].sha256, items[2].sha256]
+    }]);
+    expect(normalizeContactSheetStacks(items, [
+      ...moved.stacks,
+      { id: 'invalid', title: 'invalid overlap', sha256s: [items[2].sha256, items[3].sha256] },
+      { id: 'stack-alternate', title: 'duplicate id', sha256s: [items[3].sha256, items[4].sha256] }
+    ])).toEqual(moved.stacks);
+    expect(unstackContactSheetItems(items, moved.stacks, 'stack-alternate')).toEqual([]);
   });
 
   it('promotes one durable thumbnail into a region-focusable child object', () => {

@@ -346,6 +346,18 @@ describe('agentic workspace interaction contract', () => {
     expect(reviewScene).toContain('reviewSetSignature');
   });
 
+  it('keeps related contact-sheet references compact without losing exact membership', () => {
+    const staticNode = readFileSync(resolve(root, 'src/lib/components/workspace/StaticNode.svelte'), 'utf8');
+    const contactSheet = readFileSync(resolve(root, 'lib/workspace/contact-sheet.ts'), 'utf8');
+    expect(staticNode).toContain('Stack selected');
+    expect(staticNode).toContain('Use stack');
+    expect(staticNode).toContain('Unstack');
+    expect(staticNode).toContain('Open ${stack.title} stack');
+    expect(contactSheet).toContain('stackContactSheetSelection');
+    expect(contactSheet).toContain('normalizeContactSheetStacks');
+    expect(contactSheet).toContain('sha256s.length<2');
+  });
+
   it('bridges an explicit browser request into its paired terminal', () => {
     expect(explorer).toContain('curl -I -L --max-time 20 --');
     expect(explorer).toContain("new CustomEvent('hii:terminal-command'");
