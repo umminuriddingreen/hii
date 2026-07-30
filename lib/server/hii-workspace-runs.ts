@@ -1,25 +1,26 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFile, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { appendCapabilityJob, listCapabilityJobs } from '../capabilities/local-store.ts';
 import type { CapabilityJob } from '../capabilities/types.ts';
-import { assertWorkspaceRunContextSafe } from '../workspace/run-boundary.ts';
 import { createContextProject } from './hii-context-dock.ts';
+import {
+  normalizeWorkspaceRunContext,
+  previewWorkspaceRunContext,
+  resolveWorkspaceRunRoot,
+  workspaceRunExecutionGoal
+} from './hii-workspace-run-context.ts';
+
+export type { WorkspaceRunContextItem } from './hii-workspace-run-context.ts';
+export { previewWorkspaceRunContext } from './hii-workspace-run-context.ts';
 
 const execFileAsync = promisify(execFile);
 const capabilityId = 'hii.agent.workspace_run';
 export const defaultWorkspaceRunModel = 'qwen3.6:35b-mlx';
 const preferredModels = [defaultWorkspaceRunModel, 'qwen3.6:27b-mlx'];
-
-export type WorkspaceRunContextItem = {
-  id: string;
-  title: string;
-  type: string;
-  source?: string;
-};
 
 function runtimeRoot() {
   return process.env.HII_RUNTIME_DIR || path.join(os.homedir(), '.hii');
@@ -44,23 +45,6 @@ function skillId(value: unknown) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 63);
-}
-
-function normalizeContext(value: unknown): WorkspaceRunContextItem[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((entry) => {
-      if (!entry || typeof entry !== 'object') return null;
-      const item = entry as Record<string, unknown>;
-      const id = cleanId(item.id);
-      const title = clean(item.title, 240);
-      const type = clean(item.type, 80);
-      if (!id || !title || !type) return null;
-      const source = clean(item.source, 1000);
-      return { id, title, type, ...(source ? { source } : {}) };
-    })
-    .filter((entry): entry is WorkspaceRunContextItem => Boolean(entry))
-    .slice(0, 24);
 }
 
 export type WorkspaceRunModels = {
@@ -138,18 +122,6 @@ async function initializeIntentCursor(intentsPath: string, cursorPath: string) {
   }
 }
 
-function executionGoal(goal: string, context: WorkspaceRunContextItem[]) {
-  if (!context.length) return goal;
-  return [
-    goal,
-    '',
-    'Approved HII canvas context:',
-    ...context.map((item) => `- ${item.title} (${item.type})${item.source ? ` — ${item.source}` : ''}`),
-    '',
-    'Use only the context above and the approved workspace root. Do not silently expand the context boundary.'
-  ].join('\n');
-}
-
 export async function queueApprovedWorkspaceRun(input: {
   id?: unknown;
   projectId?: unknown;
@@ -158,6 +130,7 @@ export async function queueApprovedWorkspaceRun(input: {
   model?: unknown;
   maxSteps?: unknown;
   context?: unknown;
+  contextFingerprint?: unknown;
   approved?: unknown;
   requestedBy?: unknown;
 }) {
@@ -165,12 +138,7 @@ export async function queueApprovedWorkspaceRun(input: {
   const id = cleanId(input.id) || randomUUID();
   const goal = clean(input.goal, 4000);
   if (goal.length < 8) throw new Error('Describe the bounded goal in at least 8 characters.');
-  const requestedRoot = clean(input.workspaceRoot, 1000);
-  const resolvedRoot = await realpath(requestedRoot).catch(() => '');
-  if (!resolvedRoot) throw new Error('The selected workspace root does not exist.');
-  if ([path.parse(resolvedRoot).root, os.homedir()].includes(resolvedRoot)) {
-    throw new Error('Choose a specific project folder, not a filesystem or home-directory root.');
-  }
+  const resolvedRoot = await resolveWorkspaceRunRoot(input.workspaceRoot);
   const projectId = clean(input.projectId, 120) || 'hii-spatial-workspace';
   const project = createContextProject({
     name: `${projectId} execution`,
@@ -179,8 +147,21 @@ export async function queueApprovedWorkspaceRun(input: {
   });
   if (project.excluded || !project.approvedRoot) throw new Error('The selected workspace root is not approved.');
 
-  const context = normalizeContext(input.context);
-  assertWorkspaceRunContextSafe(context);
+  const context = normalizeWorkspaceRunContext(input.context);
+  const contextPreview = await previewWorkspaceRunContext({
+    workspaceRoot: resolvedRoot,
+    context
+  });
+  if (contextPreview.blocked) {
+    throw new Error(`The selected context is not executable. ${contextPreview.blockers.join(' ')}`);
+  }
+  const approvedFingerprint = clean(input.contextFingerprint, 80);
+  if (!approvedFingerprint) {
+    throw new Error('Refresh and review the execution context manifest before approval.');
+  }
+  if (approvedFingerprint !== contextPreview.fingerprint) {
+    throw new Error('The selected context changed after review. Refresh the execution context manifest before approval.');
+  }
   const discovered = await discoverWorkspaceRunModels();
   if (!discovered.available || !discovered.defaultModel) throw new Error(discovered.message);
   const requestedModel = clean(input.model, 160);
@@ -195,14 +176,15 @@ export async function queueApprovedWorkspaceRun(input: {
     kind: 'workspace.run',
     id,
     capabilityId,
-    goal: executionGoal(goal, context),
+    goal: workspaceRunExecutionGoal(goal, contextPreview),
     workspaceRoot: project.rootPath,
     model,
     maxSteps,
     requestedAt: now,
     requestedBy,
     projectId,
-    context
+    context,
+    contextPreview
   };
   const daemonDir = path.join(runtimeRoot(), 'daemon');
   const intentsPath = path.join(daemonDir, 'intents.jsonl');
@@ -238,12 +220,13 @@ export async function queueApprovedWorkspaceRun(input: {
       model,
       maxSteps,
       context,
+      contextPreview,
       requestedBy,
       approvedAt: now,
       boundary: {
         read: context.length ? 'selected canvas context plus approved workspace root' : 'approved workspace root',
         write: project.rootPath,
-        network: 'publishing, pushing, messaging, spending, and secret export are not authorized'
+        network: contextPreview.network.scope
       }
     }
   };

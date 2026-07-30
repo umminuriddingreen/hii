@@ -93,6 +93,10 @@ with passing checks. When two completed replays exist, HII compares status,
 duration, output count, proof count, and verification count against the
 previous run. The comparison never rewrites either receipt.
 
+Every replay still passes through the same HII execution-context boundary as a
+new run. Canvas context is reviewed as a fingerprinted manifest; registration
+does not freeze or silently widen unrelated workspace context.
+
 ## Discovery and health
 
 ```sh

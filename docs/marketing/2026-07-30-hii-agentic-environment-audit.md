@@ -173,6 +173,42 @@ control. A real operator-approved replay was deliberately not started during
 this audit, so end-to-end replay remains a final live acceptance step rather
 than a completed product claim.
 
+### Verified execution-context checkpoint
+
+Selected canvas objects now become an executable context manifest before a run
+can be approved. HII snapshots bounded human-authored note or text content,
+resolves workspace-local paths, content-hashes regular files with SHA-256,
+names proof references, and distinguishes local, inline, remote, opaque, and
+label-only context. The approval card shows those facts rather than presenting
+node titles as if the agent can necessarily read them.
+
+The manifest fails closed for missing files, secret-like paths,
+credential-bearing URLs, unsupported filesystem objects, symlink escapes, and
+local files outside the approved workspace root. Remote URLs remain visible as
+references and disclose that governed outbound read-only retrieval may occur;
+publishing, upload, messaging, spending, and secret export remain blocked.
+
+Approval is bound to the reviewed manifest fingerprint. AII recomputes the
+manifest immediately before queueing and rejects the run if a selected file or
+snapshot changed after review. The fingerprint, content identities, snapshots,
+network statement, and selected proof lineage enter the AII execution goal and
+job metadata. The daemon now preserves the bounded manifest instead of
+silently truncating it at the previous 4,000-character limit.
+
+The isolated context-manifest unit and spatial-run gates prove relative and
+absolute workspace files, content hashing, inline snapshots, proof lineage,
+outside-root rejection, secret rejection, remote-read disclosure, and stale
+review rejection. External local creative assets are currently blocked rather
+than silently advertised as readable; governed per-run staging remains the
+next context transport adapter.
+
+Live HII Space in `context-manifest-proof` shows one approved human note as an
+inline snapshot, the master context as a content-hashed workspace file, and a
+Figma URL as a remote reference with an outbound-read warning. All three are
+visible before the untouched `Approve bounded run` control. No run was started,
+and the operator's prior `governed-run-demo` workspace selection was restored
+after the visual proof.
+
 ### Verified artifact checkpoint
 
 HII now returns each text or code file named in a completed run receipt as its
@@ -433,7 +469,11 @@ cloud sync, credits, or a general “AI operating system.”
 
 1. Extend the verified contact-sheet import with stacking, batch labels,
    reviewed perceptual dedupe, and an explicit “organize this selection” action.
-2. Exact context preview with secrets/network warnings before approval.
+2. Add a governed per-run staging adapter for explicitly selected local assets
+   outside the workspace root. The exact context manifest, secrets gate,
+   network warning, content snapshots, hashes, and stale-review rejection are
+   implemented; external local assets now fail closed instead of appearing
+   readable when they are not.
 3. Artifact adapters for the first audience: Markdown, image/reference board,
    code/site preview, and a native-file handoff.
 4. Run one real operator-approved registered-capability replay, then preserve

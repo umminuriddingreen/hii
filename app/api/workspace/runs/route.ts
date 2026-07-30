@@ -4,6 +4,7 @@ import {
   createWorkspaceRunCapabilityDraft,
   discoverWorkspaceRunModels,
   getWorkspaceRun,
+  previewWorkspaceRunContext,
   queueApprovedWorkspaceRun,
   requestWorkspaceRunCancellation
 } from '@/lib/server/hii-workspace-runs';
@@ -44,6 +45,15 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   if (!body) return NextResponse.json({ error: 'Workspace run payload required.' }, { status: 400 });
   try {
+    if (body.action === 'preview-context') {
+      return NextResponse.json({
+        ok: true,
+        preview: await previewWorkspaceRunContext({
+          workspaceRoot: body.workspaceRoot,
+          context: body.context
+        })
+      });
+    }
     if (body.action === 'approve') {
       return NextResponse.json({
         ok: true,
@@ -55,6 +65,7 @@ export async function POST(request: Request) {
           model: body.model,
           maxSteps: body.maxSteps,
           context: body.context,
+          contextFingerprint: body.contextFingerprint,
           approved: body.approved,
           requestedBy: 'hii.workspace'
         }))
@@ -73,7 +84,7 @@ export async function POST(request: Request) {
       }, { status: 202 });
     }
     return NextResponse.json(
-      { error: 'Action must be approve, cancel, or draft-capability.' },
+      { error: 'Action must be preview-context, approve, cancel, or draft-capability.' },
       { status: 400 }
     );
   } catch (error) {

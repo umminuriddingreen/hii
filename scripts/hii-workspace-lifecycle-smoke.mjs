@@ -66,6 +66,10 @@ const daemonProcess = spawn(process.execPath, [daemon, 'run'], {
 });
 
 try {
+  const contextPreview = await runs.previewWorkspaceRunContext({
+    workspaceRoot,
+    context: []
+  });
   const queued = await runs.queueApprovedWorkspaceRun({
     id: 'lifecycle-cancel-demo',
     projectId: 'lifecycle-smoke',
@@ -73,6 +77,7 @@ try {
     workspaceRoot,
     model: 'qwen3.6:35b-mlx',
     maxSteps: 3,
+    contextFingerprint: contextPreview.fingerprint,
     approved: true
   });
   assert.equal(queued.job.status, 'queued');

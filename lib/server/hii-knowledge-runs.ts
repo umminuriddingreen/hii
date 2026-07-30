@@ -7,7 +7,11 @@ import {
   knowledgeSystemSnapshot,
   updateKnowledgeObject
 } from './hii-knowledge-systems.ts';
-import { defaultWorkspaceRunModel, queueApprovedWorkspaceRun } from './hii-workspace-runs.ts';
+import {
+  defaultWorkspaceRunModel,
+  previewWorkspaceRunContext,
+  queueApprovedWorkspaceRun
+} from './hii-workspace-runs.ts';
 
 const capabilityId = 'hii.agent.workspace_run';
 
@@ -76,6 +80,10 @@ export async function approveKnowledgeRun(input: {
   if (!run || run.kind !== 'run' || run.status !== 'proposed') throw new Error('Only a proposed run can be approved.');
   const goal = clean(input.goal, 4000);
   if (goal.length < 8) throw new Error('Describe the bounded goal in at least 8 characters.');
+  const contextPreview = await previewWorkspaceRunContext({
+    workspaceRoot: input.workspaceRoot,
+    context: []
+  });
   const { job } = await queueApprovedWorkspaceRun({
     id: run.id,
     projectId: run.projectId,
@@ -83,6 +91,7 @@ export async function approveKnowledgeRun(input: {
     workspaceRoot: input.workspaceRoot,
     model: input.model,
     maxSteps: input.maxSteps,
+    contextFingerprint: contextPreview.fingerprint,
     approved: true,
     requestedBy: 'hii.knowledge'
   });

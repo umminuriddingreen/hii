@@ -417,7 +417,7 @@ function executeWorkspaceIntent(intent) {
     });
     return;
   }
-  const args = ["--cwd", workspaceRoot, "--model", model, "--max-steps", String(maxSteps), "run", String(intent.goal).slice(0, 4000)];
+  const args = ["--cwd", workspaceRoot, "--model", model, "--max-steps", String(maxSteps), "run", String(intent.goal).slice(0, 16000)];
   const normalizedIntent = { ...intent, workspaceRoot, model, maxSteps };
   const child = execFile(HII_BIN, args, {
     cwd: workspaceRoot,

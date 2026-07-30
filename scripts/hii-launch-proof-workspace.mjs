@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { queueApprovedWorkspaceRun, getWorkspaceRun } from '../lib/server/hii-workspace-runs.ts';
+import {
+  getWorkspaceRun,
+  previewWorkspaceRunContext,
+  queueApprovedWorkspaceRun
+} from '../lib/server/hii-workspace-runs.ts';
 import { createWorkspace, listWorkspaces, writeWorkspace } from '../lib/server/workspace-store.ts';
 import {
   buildLaunchProofWorkspace,
@@ -54,6 +58,13 @@ export async function createLaunchProofWorkspace(options = {}) {
     { id: sourceIds[1], title: 'Launch brief', type: 'note', source: path.join(workspaceRoot, 'docs/launch/hii-x-launch-kit-opus5.md') },
     { id: sourceIds[2], title: 'Claim boundary', type: 'note', source: path.join(workspaceRoot, 'docs/marketing/2026-07-30-hii-agentic-environment-audit.md') }
   ];
+  const contextPreview = await previewWorkspaceRunContext({
+    workspaceRoot,
+    context
+  });
+  if (contextPreview.blocked) {
+    throw new Error(`The launch context manifest is blocked: ${contextPreview.blockers.join(' ')}`);
+  }
   const runId = randomUUID();
   await queueApprovedWorkspaceRun({
     id: runId,
@@ -63,6 +74,7 @@ export async function createLaunchProofWorkspace(options = {}) {
     model: 'qwen3.6:35b-mlx',
     maxSteps: 8,
     context,
+    contextFingerprint: contextPreview.fingerprint,
     approved: true,
     requestedBy: 'hii.launch-proof'
   });

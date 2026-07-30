@@ -10,7 +10,26 @@
   export let onComplete: (result: Record<string, unknown>) => void;
   export let onCapabilityDraft: (result: Record<string, unknown>) => void;
 
-  type ContextItem = { id: string; title: string; type: string; source?: string };
+  type ContextItem = {
+    id: string; title: string; type: string; source?: string; excerpt?: string;
+    objectKind?: string; owner?: string; authority?: string; proofRefs?: string[];
+  };
+  type ContextPreviewItem = ContextItem & {
+    access: 'workspace-file' | 'workspace-directory' | 'inline-snapshot' |
+      'remote-reference' | 'opaque-reference' | 'label-only' | 'blocked';
+    provenance: string; network: 'none' | 'read-only-web'; relativePath?: string;
+    sha256?: string; byteSize?: number; modifiedAt?: string; warning?: string;
+    blockedReason?: string;
+  };
+  type ContextPreview = {
+    generatedAt: string; workspaceRoot: string; fingerprint: string; blocked: boolean;
+    blockers: string[]; warnings: string[]; items: ContextPreviewItem[];
+    summary: {
+      selected: number; executable: number; workspaceFiles: number;
+      inlineSnapshots: number; remoteReferences: number; labelOnly: number;
+    };
+    network: { required: boolean; scope: string };
+  };
   type Job = {
     id: string;
     status: string;
@@ -59,6 +78,9 @@
   let evidenceOpen = false;
   let rawEvidenceOpen = false;
   let transientFailure = false;
+  let contextPreview: ContextPreview | null = node.payload.contextPreview as ContextPreview || null;
+  let contextPreviewLoading = false;
+  let contextPreviewError = '';
 
   $: context = (Array.isArray(node.payload.context) ? node.payload.context : []) as ContextItem[];
   $: boundary = {
@@ -83,6 +105,7 @@
   }) as RunProgressStep[];
   $: evidence = workspaceRunEvidence(job, receipt);
   $: evidenceCount = evidence.ledger.length + evidence.proofArtifacts.length + evidence.checks.length + evidence.logs.length;
+  $: approvalBlocked = boundaryManifest.blocked || contextPreview?.blocked || !contextPreview?.fingerprint;
 
   function objectStatus(value: string): SpatialObjectStatus {
     if (value === 'cancelled') return 'archived';
@@ -205,7 +228,7 @@
   }
 
   async function approveAndStart() {
-    if (busy || !selectedModel || !String(node.payload.prompt || '').trim()) return;
+    if (busy || approvalBlocked || !selectedModel || !String(node.payload.prompt || '').trim()) return;
     busy = true;
     transientFailure = false;
     error = '';
@@ -231,6 +254,7 @@
           workspaceRoot: boundary.workspaceRoot,
           model: boundary.model,
           maxSteps: boundary.maxSteps,
+          contextFingerprint: contextPreview?.fingerprint,
           approved: true
         })
       });
@@ -265,6 +289,37 @@
       modelMessage = cause instanceof Error ? cause.message : 'Could not discover installed local models.';
     } finally {
       modelsLoading = false;
+    }
+  }
+
+  async function loadContextPreview() {
+    if (contextPreviewLoading) return;
+    contextPreviewLoading = true;
+    contextPreviewError = '';
+    try {
+      const result = await apiJson('/api/workspace/runs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'preview-context',
+          workspaceRoot: boundary.workspaceRoot,
+          context
+        })
+      }) as { preview: ContextPreview };
+      contextPreview = result.preview;
+      onPatch({
+        payload: {
+          ...node.payload,
+          contextPreview: result.preview
+        }
+      });
+    } catch (cause) {
+      contextPreview = null;
+      contextPreviewError = cause instanceof Error
+        ? cause.message
+        : 'Could not build the execution context manifest.';
+    } finally {
+      contextPreviewLoading = false;
     }
   }
 
@@ -342,7 +397,10 @@
     } else if (runId && terminalStatuses.has(status)) {
       void loadRun(runId);
     }
-    if (['waiting_approval', 'proposed'].includes(status)) void loadModels();
+    if (['waiting_approval', 'proposed'].includes(status)) {
+      void loadModels();
+      void loadContextPreview();
+    }
     return () => {
       active = false;
     };
@@ -366,27 +424,49 @@
 
         <div class="mt-5">
           <div class="flex items-center justify-between">
-            <h3 class="font-mono text-[8px] uppercase tracking-[.12em] text-neutral-400">Approved canvas context</h3>
-            <span class="font-mono text-[8px] text-neutral-400">{context.length} object{context.length === 1 ? '' : 's'}</span>
+            <h3 class="font-mono text-[8px] uppercase tracking-[.12em] text-neutral-400">Execution context manifest</h3>
+            <span class="font-mono text-[8px] text-neutral-400">
+              {contextPreviewLoading ? 'fingerprinting…' : `${contextPreview?.summary.executable ?? 0}/${context.length} executable`}
+            </span>
           </div>
-          {#if context.length}
+          {#if contextPreview?.items.length}
             <div class="mt-2 space-y-1.5">
-              {#each context as item}
-                <div class="rounded-xl border border-neutral-900/10 bg-white px-3 py-2">
-                  <strong class="block truncate text-[11px] text-neutral-800">{item.title}</strong>
-                  <span class="block break-all font-mono text-[8px] uppercase text-neutral-400">{item.type}{item.source ? ` · ${item.source}` : ' · no source reference'}</span>
+              {#each contextPreview.items as item}
+                <div class={`rounded-xl border px-3 py-2 ${item.access === 'blocked' ? 'border-red-300 bg-red-50' : 'border-neutral-900/10 bg-white'}`}>
+                  <div class="flex items-start justify-between gap-2">
+                    <strong class="min-w-0 truncate text-[11px] text-neutral-800">{item.title}</strong>
+                    <span class="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 font-mono text-[7px] uppercase tracking-[.06em] text-neutral-500">{item.access.replaceAll('-', ' ')}</span>
+                  </div>
+                  <span class="mt-1 block break-all font-mono text-[8px] text-neutral-400">{item.type} · {item.provenance}</span>
+                  {#if item.relativePath}<span class="mt-1 block break-all font-mono text-[8px] text-blue-600">{item.relativePath}</span>{/if}
+                  {#if item.sha256}<span class="mt-1 block truncate font-mono text-[7px] text-neutral-400">sha256 {item.sha256}</span>{/if}
+                  {#if item.source && item.access === 'remote-reference'}<span class="mt-1 block break-all font-mono text-[8px] text-blue-600">{item.source}</span>{/if}
+                  {#if item.excerpt}<p class="mt-1.5 line-clamp-3 text-[9px] leading-4 text-neutral-600">{item.excerpt}</p>{/if}
+                  {#if item.blockedReason}<p class="mt-1.5 text-[9px] leading-4 text-red-800">{item.blockedReason}</p>{/if}
+                  {#if item.warning}<p class="mt-1.5 text-[9px] leading-4 text-amber-800">{item.warning}</p>{/if}
                 </div>
               {/each}
             </div>
-            {#if boundaryManifest.missingProvenanceCount}
-              <div class="mt-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-[10px] leading-5 text-amber-900">{boundaryManifest.missingProvenanceCount} selected object{boundaryManifest.missingProvenanceCount === 1 ? '' : 's'} {boundaryManifest.missingProvenanceCount === 1 ? 'has' : 'have'} no source reference. The object remains visible, but its provenance is incomplete.</div>
+            <div class="mt-2 flex items-center justify-between rounded-xl bg-neutral-950 px-3 py-2 font-mono text-[7px] text-neutral-300">
+              <span>context fingerprint</span>
+              <span>{contextPreview.fingerprint}</span>
+            </div>
+            {#if contextPreview.warnings.length}
+              <div class="mt-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-[10px] leading-5 text-amber-900">{contextPreview.warnings.length} context warning{contextPreview.warnings.length === 1 ? '' : 's'} shown above. Review them before approval.</div>
             {/if}
-            {#if boundaryManifest.blocked}
-              <div class="mt-2 rounded-xl border border-red-300 bg-red-50 p-3 text-[10px] leading-5 text-red-900">Remove secret-like files or credential-bearing URLs before approval. HII will not queue this context.</div>
+            {#if contextPreview.blocked}
+              <div class="mt-2 rounded-xl border border-red-300 bg-red-50 p-3 text-[10px] leading-5 text-red-900">This manifest cannot execute. Remove or replace every blocked source, then prepare a fresh run.</div>
             {/if}
+          {:else if contextPreviewLoading}
+            <div class="mt-2 rounded-xl bg-neutral-100 p-3 text-[10px] leading-5 text-neutral-500">Resolving selected sources and computing a stable execution fingerprint…</div>
+          {:else if contextPreviewError}
+            <div class="mt-2 rounded-xl border border-red-300 bg-red-50 p-3 text-[10px] leading-5 text-red-900">{contextPreviewError}</div>
           {:else}
             <div class="mt-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-[10px] leading-5 text-amber-900">No canvas objects were selected. The intent still carries workspace-level read and write authority shown below.</div>
           {/if}
+          <button class="mt-2 rounded-full border border-neutral-900/10 bg-white px-3 py-1.5 font-mono text-[8px] uppercase tracking-[.08em] text-neutral-600 disabled:opacity-40" disabled={contextPreviewLoading} on:click={loadContextPreview}>
+            {contextPreviewLoading ? 'Refreshing manifest…' : 'Refresh context manifest'}
+          </button>
         </div>
 
         <dl class="mt-5 grid grid-cols-2 gap-2 text-[9px]">
@@ -394,6 +474,7 @@
           <div class="rounded-xl bg-neutral-100 p-3"><dt class="font-mono uppercase text-neutral-400">Budget</dt><dd class="mt-1 text-neutral-700">{boundary.maxSteps} local tool steps</dd></div>
           <div class="col-span-2 rounded-xl bg-blue-50 p-3"><dt class="font-mono uppercase text-blue-500">Read boundary</dt><dd class="mt-1 leading-4 text-blue-950">{boundaryManifest.readScope}</dd></div>
           <div class="col-span-2 rounded-xl bg-neutral-100 p-3"><dt class="font-mono uppercase text-neutral-400">Write boundary</dt><dd class="mt-1 break-all text-neutral-700">{boundaryManifest.writeScope}</dd></div>
+          <div class="col-span-2 rounded-xl p-3" class:bg-amber-50={contextPreview?.network.required} class:bg-neutral-100={!contextPreview?.network.required}><dt class="font-mono uppercase" class:text-amber-700={contextPreview?.network.required} class:text-neutral-400={!contextPreview?.network.required}>Network boundary</dt><dd class="mt-1 leading-4 text-neutral-700">{contextPreview?.network.scope || 'Context network boundary is still being resolved.'}</dd></div>
           <div class="col-span-2 rounded-xl bg-neutral-100 p-3"><dt class="font-mono uppercase text-neutral-400">External boundary</dt><dd class="mt-1 text-neutral-700">{boundaryManifest.externalScope}</dd></div>
           <div class="col-span-2 rounded-xl bg-neutral-100 p-3"><dt class="font-mono uppercase text-neutral-400">Secret policy</dt><dd class="mt-1 text-neutral-700">{boundaryManifest.secretPolicy}</dd></div>
         </dl>
@@ -408,7 +489,7 @@
           <span class="mt-1.5 block normal-case tracking-normal text-neutral-500">{modelMessage}</span>
         </label>
 
-        <button class="mt-5 w-full rounded-full bg-neutral-950 px-4 py-3 font-mono text-[9px] uppercase tracking-[.1em] text-white disabled:opacity-40" disabled={busy || modelsLoading || !selectedModel || boundaryManifest.blocked} on:click={approveAndStart}>
+        <button class="mt-5 w-full rounded-full bg-neutral-950 px-4 py-3 font-mono text-[9px] uppercase tracking-[.1em] text-white disabled:opacity-40" disabled={busy || modelsLoading || contextPreviewLoading || !selectedModel || approvalBlocked} on:click={approveAndStart}>
           {busy ? 'Queueing with AII…' : 'Approve bounded run'}
         </button>
       </section>

@@ -131,7 +131,23 @@
   function spawn(type:string,payload:Record<string,unknown>={}){const typedPayload=type==='frame'?{sceneOrder:scenes.length+1,...payload}:payload;const seed=seedFor(type as WorkspaceNodeType,type==='browser'?{url:'https://duckduckgo.com',...typedPayload}:type==='terminal'?{sessionId:crypto.randomUUID(),...typedPayload}:typedPayload);const center={x:(-doc.viewport.x+innerWidth/2)/doc.viewport.zoom,y:(-doc.viewport.y+innerHeight/2)/doc.viewport.zoom};addSeeds([seed],{x:center.x-seed.w/2,y:center.y-seed.h/2});omnibar=false;query='';if(type==='context')void refreshContext();if(type==='board')void refreshBoard();}
   function workspacePoint(clientX:number,clientY:number){return{x:(clientX-doc.viewport.x)/doc.viewport.zoom,y:(clientY-doc.viewport.y)/doc.viewport.zoom}}
   async function summonComposer(at?:{x:number;y:number}){const now=Date.now();if(now-lastSummon<180)return;lastSummon=now;composerAt=at||workspacePoint(innerWidth/2,innerHeight/2);composerOpen=true;omnibar=false;await tick();composerInput?.focus();}
-  function contextItem(node:WorkspaceNode){return{id:node.id,title:workspaceNodeTitle(node),type:node.type,source:String(node.object?.source||node.payload.path||node.payload.url||'').slice(0,1000)}}
+  function contextExcerpt(node:WorkspaceNode){
+    const candidates=[node.payload.content,node.payload.text,node.payload.summary,node.payload.description,node.payload.markdown];
+    return String(candidates.find(value=>typeof value==='string'&&value.trim())||'').replace(/\s+/g,' ').trim().slice(0,2400);
+  }
+  function contextItem(node:WorkspaceNode){
+    return{
+      id:node.id,
+      title:workspaceNodeTitle(node),
+      type:node.type,
+      source:String(node.payload.path||node.payload.url||node.object?.source||'').slice(0,1000),
+      excerpt:contextExcerpt(node),
+      objectKind:String(node.object?.kind||''),
+      owner:String(node.object?.owner||''),
+      authority:String(node.objectRef?.authority||''),
+      proofRefs:(node.object?.proofRefs||[]).slice(0,12)
+    }
+  }
   function createSpatialRun(intent:string,at:{x:number;y:number},parentId?:string,contextNodes:WorkspaceNode[]=[]){const before=doc;const title=intent.length>44?`${intent.slice(0,44)}…`:intent;const approvedContext=contextNodes.map(contextItem);let z=doc.nextZ;const intentSeed=seedFor('intent',{title:'your intent',text:intent,parentId,context:approvedContext}),intentNode=makeNode(intentSeed,at.x,at.y,++z),runSeed=seedFor('run',{title,prompt:intent,parentId:intentNode.id,autoStart:false,status:'waiting_approval',context:approvedContext,workspaceRoot:String(context?.identity?.repo||'/Users/ummi/hii'),model:'',maxSteps:8}),runNode=makeNode(runSeed,at.x,at.y+intentSeed.h+20,++z);doc={...doc,nextZ:z,nodes:[...doc.nodes,intentNode,runNode]};selected=runNode.id;contextSelection=[];remember(before);persist();}
   function submitIntent(){const intent=composerText.trim();if(!intent)return;const width=seedFor('intent').w;createSpatialRun(intent,{x:composerAt.x-width/2,y:composerAt.y-72},undefined,selectedContextNodes);composerText='';composerOpen=false;}
   async function openCommands(){omnibar=true;query='';await tick();commandInput?.focus();}

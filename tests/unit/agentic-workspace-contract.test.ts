@@ -9,6 +9,7 @@ const spatialRun = readFileSync(resolve(root, 'src/lib/components/workspace/Spat
 const runProgress = readFileSync(resolve(root, 'lib/workspace/run-progress.ts'), 'utf8');
 const runBoundary = readFileSync(resolve(root, 'lib/workspace/run-boundary.ts'), 'utf8');
 const workspaceRuns = readFileSync(resolve(root, 'lib/server/hii-workspace-runs.ts'), 'utf8');
+const workspaceRunContext = readFileSync(resolve(root, 'lib/server/hii-workspace-run-context.ts'), 'utf8');
 const workspaceRunRoute = readFileSync(resolve(root, 'app/api/workspace/runs/route.ts'), 'utf8');
 const workspaceArtifacts = readFileSync(resolve(root, 'lib/server/hii-workspace-artifacts.ts'), 'utf8');
 const workspaceArtifactRoute = readFileSync(resolve(root, 'app/api/workspace/artifacts/route.ts'), 'utf8');
@@ -42,7 +43,7 @@ describe('agentic workspace interaction contract', () => {
 
   it('hands selected context to the real AII workspace runner and branches from its receipt', () => {
     expect(workspace).toContain('selectedContextNodes');
-    expect(spatialRun).toContain('Approved canvas context');
+    expect(spatialRun).toContain('Execution context manifest');
     expect(spatialRun).toContain('/api/workspace/runs');
     expect(spatialRun).toContain('setTimeout(resolve, 1000)');
     expect(workspaceRuns).toContain("kind: 'workspace.run'");
@@ -59,7 +60,22 @@ describe('agentic workspace interaction contract', () => {
     expect(spatialRun).toContain('boundaryManifest.blocked');
     expect(runBoundary).toContain('other non-secret files inside');
     expect(runBoundary).toContain('assertWorkspaceRunContextSafe');
-    expect(workspaceRuns).toContain('assertWorkspaceRunContextSafe(context)');
+    expect(workspaceRunContext).toContain('sensitiveWorkspaceContextSource(source)');
+    expect(workspaceRuns).toContain('contextPreview.blocked');
+  });
+
+  it('binds approval to an executable context manifest rather than decorative node labels', () => {
+    expect(workspace).toContain('contextExcerpt(node)');
+    expect(workspace).toContain('proofRefs:(node.object?.proofRefs||[])');
+    expect(spatialRun).toContain('Execution context manifest');
+    expect(spatialRun).toContain("action: 'preview-context'");
+    expect(spatialRun).toContain('contextFingerprint: contextPreview?.fingerprint');
+    expect(spatialRun).toContain('Network boundary');
+    expect(workspaceRuns).toContain('approvedFingerprint !== contextPreview.fingerprint');
+    expect(workspaceRunContext).toContain('content-hashed file inside approved workspace root');
+    expect(workspaceRunContext).toContain('outbound read-only web retrieval');
+    expect(workspaceRunContext).toContain('Approved snapshot:');
+    expect(hiid).toContain('String(intent.goal).slice(0, 16000)');
   });
 
   it('keeps governed progress concise and raw execution output behind inspection', () => {

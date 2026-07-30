@@ -17,22 +17,46 @@ const jobs = await import('../lib/capabilities/local-store.ts');
 const progress = await import('../lib/workspace/run-progress.ts');
 
 try {
+  const referencePath = path.join(workspaceRoot, 'reference.png');
+  fs.writeFileSync(referencePath, 'reference image fixture\n');
+  const selectedContext = [{
+    id: 'source-1',
+    title: 'Reference image',
+    type: 'image',
+    source: referencePath,
+    excerpt: 'Use the selected reference as the visual constraint.',
+    objectKind: 'source',
+    owner: 'human',
+    authority: 'hii-runtime'
+  }];
+  const contextPreview = await runs.previewWorkspaceRunContext({
+    workspaceRoot,
+    context: selectedContext
+  });
+  assert.equal(contextPreview.blocked, false);
+  assert.equal(contextPreview.summary.workspaceFiles, 1);
+  assert.equal(contextPreview.items[0].access, 'workspace-file');
+  assert.match(contextPreview.items[0].sha256, /^[a-f0-9]{64}$/);
+  assert.equal(contextPreview.network.required, false);
+
   await assert.rejects(
     () => runs.queueApprovedWorkspaceRun({
       id: 'spatial-demo',
       goal: 'Create and verify one local artifact.',
       workspaceRoot,
-      context: [{ id: 'source-1', title: 'Reference image', type: 'image', source: '/tmp/reference.png' }]
+      context: selectedContext
     }),
     /Explicit approval/
   );
 
+  const emptyPreview = await runs.previewWorkspaceRunContext({ workspaceRoot, context: [] });
   await assert.rejects(
     () => runs.queueApprovedWorkspaceRun({
       id: 'missing-model-demo',
       goal: 'Prove an unavailable model cannot be queued.',
       workspaceRoot,
       model: 'not-installed:latest',
+      contextFingerprint: emptyPreview.fingerprint,
       approved: true
     }),
     /not installed/
@@ -45,9 +69,50 @@ try {
       workspaceRoot,
       model: 'qwen3.6:35b-mlx',
       context: [{ id: 'secret-1', title: 'Environment', type: 'text', source: path.join(workspaceRoot, '.env') }],
+      contextFingerprint: 'reviewed-secret-context',
       approved: true
     }),
-    /Secret-like files/
+    /not executable/
+  );
+
+  const outsidePath = path.join(directory, 'outside-context.txt');
+  fs.writeFileSync(outsidePath, 'outside context\n');
+  const outsidePreview = await runs.previewWorkspaceRunContext({
+    workspaceRoot,
+    context: [{ id: 'outside-1', title: 'Outside source', type: 'file', source: outsidePath }]
+  });
+  assert.equal(outsidePreview.blocked, true);
+  assert.match(outsidePreview.blockers[0], /outside the approved workspace root/);
+
+  const remotePreview = await runs.previewWorkspaceRunContext({
+    workspaceRoot,
+    context: [{ id: 'remote-1', title: 'Remote brief', type: 'link', source: 'https://example.com/brief' }]
+  });
+  assert.equal(remotePreview.network.required, true);
+  assert.match(remotePreview.network.scope, /outbound read-only web retrieval/);
+
+  const inlinePreview = await runs.previewWorkspaceRunContext({
+    workspaceRoot,
+    context: [{ id: 'note-1', title: 'Human note', type: 'note', excerpt: 'Keep the interface calm and inspectable.' }]
+  });
+  assert.equal(inlinePreview.items[0].access, 'inline-snapshot');
+
+  const mutablePath = path.join(workspaceRoot, 'mutable.txt');
+  fs.writeFileSync(mutablePath, 'before review\n');
+  const mutableContext = [{ id: 'mutable-1', title: 'Mutable source', type: 'file', source: mutablePath }];
+  const mutablePreview = await runs.previewWorkspaceRunContext({ workspaceRoot, context: mutableContext });
+  fs.writeFileSync(mutablePath, 'changed after review\n');
+  await assert.rejects(
+    () => runs.queueApprovedWorkspaceRun({
+      id: 'stale-context-demo',
+      goal: 'Reject context changed after operator review.',
+      workspaceRoot,
+      model: 'qwen3.6:35b-mlx',
+      context: mutableContext,
+      contextFingerprint: mutablePreview.fingerprint,
+      approved: true
+    }),
+    /changed after review/
   );
 
   const discovered = await runs.discoverWorkspaceRunModels();
@@ -61,17 +126,20 @@ try {
     workspaceRoot,
     model: 'qwen3.6:27b-mlx',
     maxSteps: 5,
-    context: [{ id: 'source-1', title: 'Reference image', type: 'image', source: '/tmp/reference.png' }],
+    context: selectedContext,
+    contextFingerprint: contextPreview.fingerprint,
     approved: true
   });
   assert.equal(queued.job.status, 'queued');
   assert.equal(queued.job.metadata.context.length, 1);
-  assert.match(queued.job.metadata.boundary.network, /not authorized/);
+  assert.equal(queued.job.metadata.contextPreview.fingerprint, contextPreview.fingerprint);
+  assert.match(queued.job.metadata.boundary.network, /remain blocked/);
   const intents = fs.readFileSync(path.join(process.env.HII_RUNTIME_DIR, 'daemon', 'intents.jsonl'), 'utf8').trim().split('\n');
   assert.equal(intents.length, 1);
   const intent = JSON.parse(intents[0]);
   assert.equal(intent.kind, 'workspace.run');
-  assert.match(intent.goal, /Approved HII canvas context/);
+  assert.match(intent.goal, /Approved HII execution context manifest/);
+  assert.match(intent.goal, /SHA-256/);
 
   const changedArtifact = path.join(workspaceRoot, 'proof.txt');
   const outsideArtifact = path.join(directory, 'outside.txt');
@@ -169,7 +237,8 @@ try {
   console.log('artifact:     receipt-listed file -> editable HII object verified');
   console.log('edit proof:   atomic save + optimistic conflict + human receipt verified');
   console.log('boundary:     unlisted and symlink-escaped artifacts rejected');
-  console.log('context:      effective read authority shown + secret-like sources rejected');
+  console.log('context:      executable manifest + snapshots + hashes + stale review rejection verified');
+  console.log('network:      remote-read warning + local-only manifest verified');
   console.log('capability:   verified receipt -> idempotent review draft verified');
 } finally {
   fs.rmSync(directory, { recursive: true, force: true });
