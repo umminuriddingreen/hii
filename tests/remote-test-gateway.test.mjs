@@ -23,6 +23,7 @@ import { chromeFailure, verifyArtifact } from '../server/remote-test-artifacts.m
 import { createSandbox, sanitizedHostEnv } from '../server/remote-test-sandbox.mjs';
 import { replayTranscript, startRemoteTestGateway } from '../server/remote-test-gateway.mjs';
 import { createImprovementRecorder } from '../server/remote-test-learning.mjs';
+import { analyzeRemoteTests, formatHarnessInsights } from '../server/remote-test-insights.mjs';
 import { startModelBridge } from '../server/remote-test-model-bridge.mjs';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -86,6 +87,95 @@ test('session reset archives active state without deleting saved evidence or cha
   assert.deepEqual(JSON.parse(await fs.readFile(layout.manifest, 'utf8')).savedArtifacts, [{ id: 'saved-1' }]);
   await assert.rejects(fs.access(layout.workspace));
   await assert.rejects(fs.access(layout.transcript));
+});
+
+test('harness insights report measured traces and name unmeasured evidence honestly', async (context) => {
+  const root = await temporary();
+  context.after(() => fs.rm(root, { recursive: true, force: true }));
+  const first = await ensureSessionLayout(root, '20260730123456-bbbbbbbbbbbbbbbbbbbbbbbb');
+  await ensureSessionLayout(root, '20260730123457-cccccccccccccccccccccccc');
+  await fs.writeFile(first.manifest, JSON.stringify({ model: MODEL, outcome: 'running' }));
+  await fs.writeFile(
+    first.events,
+    [
+      { at: '2026-07-30T12:00:00.000Z', type: 'terminal-input', bytes: 5 },
+      { at: '2026-07-30T12:00:10.000Z', type: 'artifact-verified', path: 'index.html', ok: false },
+      { at: '2026-07-30T12:00:20.000Z', type: 'artifact-verified', path: 'index.html', ok: true }
+    ].map((event) => JSON.stringify(event)).join('\n')
+  );
+  await fs.writeFile(
+    first.transcript,
+    'test -s public/index.html\nREPEATED_ACTION\nMODEL LOOP DETECTED\nResponse interrupted\n'
+  );
+  const conversations = path.join(first.runtime, 'conversations', 'cli');
+  await fs.mkdir(conversations, { recursive: true });
+  const repeatedPhrase = 'measure the same eight word phrase again right now';
+  await fs.writeFile(
+    path.join(conversations, 'conversation-1.jsonl'),
+    [
+      {
+        conversation_id: 'conversation-1',
+        kind: 'user.message',
+        ts_unix_ms: 1_000,
+        data: { content: 'build it' }
+      },
+      {
+        conversation_id: 'conversation-1',
+        kind: 'usage.model_call',
+        ts_unix_ms: 1_900,
+        data: { prompt_tokens: 120 }
+      },
+      {
+        conversation_id: 'conversation-1',
+        kind: 'model.thinking',
+        ts_unix_ms: 1_950,
+        data: { content: `${repeatedPhrase}. ${repeatedPhrase}.` }
+      },
+      {
+        conversation_id: 'conversation-1',
+        kind: 'model.action',
+        ts_unix_ms: 2_000,
+        data: { content: '{"type":"write"}' }
+      },
+      {
+        conversation_id: 'conversation-1',
+        kind: 'assistant.message',
+        ts_unix_ms: 3_000,
+        data: { content: 'Done' }
+      }
+    ].map((event) => JSON.stringify(event)).join('\n')
+  );
+
+  const report = await analyzeRemoteTests(root);
+  const formatted = formatHarnessInsights(report);
+
+  assert.equal(report.metrics.sessions, 2);
+  assert.equal(report.metrics.conversationTasks, 1);
+  assert.equal(report.metrics.completedConversations, 1);
+  assert.equal(report.metrics.conversationCompletionRate, 1);
+  assert.equal(report.metrics.sessionsWithWork, 1);
+  assert.equal(report.metrics.completedArtifactSessions, 1);
+  assert.equal(report.metrics.artifactSessionCompletionRate, 1);
+  assert.equal(report.metrics.verificationChecks, 2);
+  assert.equal(report.metrics.browserVerificationSuccessRate, 0.5);
+  assert.equal(report.metrics.failedBrowserChecks, 1);
+  assert.equal(report.metrics.uniqueArtifacts, 1);
+  assert.equal(report.metrics.repairedArtifacts, 1);
+  assert.equal(report.metrics.testerInputBursts, 1);
+  assert.equal(report.metrics.repeatedActions, 1);
+  assert.equal(report.metrics.modelLoops, 1);
+  assert.equal(report.metrics.interruptions, 1);
+  assert.equal(report.metrics.weakHtmlFileChecks, 1);
+  assert.equal(report.metrics.medianTimeToFirstVerifiedArtifactMs, 20_000);
+  assert.equal(report.metrics.medianTimeToFirstActionMs, 1_000);
+  assert.equal(report.metrics.medianPromptTokensBeforeFirstAction, 120);
+  assert.ok(report.metrics.repetitiveThinkingNgramRate > 0);
+  assert.equal(report.metrics.followUpUserMessages, 0);
+  assert.equal(report.installsChangesAutomatically, false);
+  assert.match(formatted, /HARNESS INSIGHT/);
+  assert.match(formatted, /No harness source change is installed automatically/);
+  assert.match(report.coverageGaps.join(' '), /Tester acceptance/);
+  assert.doesNotMatch(report.coverageGaps.join(' '), /Tokens before first action/);
 });
 
 test('a failed browser check followed by proof becomes a reusable lesson, not an installed patch', async (context) => {

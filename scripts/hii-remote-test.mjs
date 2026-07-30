@@ -20,6 +20,10 @@ import {
   routeOwnedBy,
   runCommand
 } from '../server/remote-test-core.mjs';
+import {
+  analyzeRemoteTests,
+  formatHarnessInsights
+} from '../server/remote-test-insights.mjs';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const gatewayFile = path.join(repository, 'server', 'remote-test-gateway.mjs');
@@ -239,6 +243,11 @@ async function reset(model = requestedModel()) {
   return await launch({ reuse, model: model || reuse.model });
 }
 
+async function insights() {
+  const report = await analyzeRemoteTests(root);
+  print(process.argv.includes('--json') ? report : formatHarnessInsights(report));
+}
+
 async function main() {
   await fs.mkdir(root, { recursive: true, mode: 0o700 });
   const command = process.argv[2] ?? 'status';
@@ -248,6 +257,7 @@ async function main() {
   if (command === 'restart') return await restart();
   if (command === 'reset') return await reset();
   if (command === 'model') return await switchModel();
+  if (command === 'insights') return await insights();
   if (command === 'preflight') {
     const report = await preflight();
     print(report);
@@ -255,7 +265,7 @@ async function main() {
     return;
   }
   if (command === '--help' || command === 'help') {
-    print('Usage: node scripts/hii-remote-test.mjs start [--model MODEL] | restart [--model MODEL] | reset [--model MODEL] | model [MODEL] | status | stop | preflight');
+    print('Usage: node scripts/hii-remote-test.mjs start [--model MODEL] | restart [--model MODEL] | reset [--model MODEL] | model [MODEL] | insights [--json] | status | stop | preflight');
     return;
   }
   throw new Error(`unknown command: ${command}`);
