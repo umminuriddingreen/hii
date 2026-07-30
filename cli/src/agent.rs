@@ -389,6 +389,21 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 offset,
                 limit,
             } => {
+                if repeats_passing_verification(
+                    &tool,
+                    command.as_deref().or(url.as_deref()),
+                    mutation_epoch,
+                    verified_epoch,
+                    &verification,
+                ) {
+                    store.event(
+                        "convergence.repeated_verification_completed",
+                        json!({ "step": steps, "tool": tool, "mutation_epoch": mutation_epoch }),
+                    )?;
+                    final_summary = Some(verified_completion_summary(&touched_artifacts));
+                    final_next = None;
+                    break;
+                }
                 let label = reason.as_deref().unwrap_or("using workspace tool");
                 emit_jsonl(
                     options.output,
@@ -1145,6 +1160,22 @@ fn verified_completion_summary(artifacts: &BTreeSet<String>) -> String {
     )
 }
 
+fn repeats_passing_verification(
+    tool: &str,
+    target: Option<&str>,
+    mutation_epoch: usize,
+    verified_epoch: Option<usize>,
+    records: &[VerificationRecord],
+) -> bool {
+    matches!(tool, "verify" | "http")
+        && verified_epoch == Some(mutation_epoch)
+        && target.is_some_and(|target| {
+            records
+                .iter()
+                .any(|record| record.ok && record.command == target)
+        })
+}
+
 pub(crate) fn parse_action(raw: &str) -> Result<Action, String> {
     let trimmed = raw.trim();
     let candidate = if trimmed.starts_with("```") {
@@ -1646,6 +1677,37 @@ mod tests {
         assert!(summary.contains("Completed and verified"));
         assert!(summary.contains("docs/launch/launch-storyboard.md"));
         assert!(summary.contains("model repeated while preparing the final summary"));
+    }
+
+    #[test]
+    fn repeated_passing_verification_is_a_completion_signal() {
+        let records = vec![VerificationRecord {
+            command: "npm test".into(),
+            ok: true,
+            output: "passed".into(),
+        }];
+
+        assert!(repeats_passing_verification(
+            "verify",
+            Some("npm test"),
+            2,
+            Some(2),
+            &records
+        ));
+        assert!(!repeats_passing_verification(
+            "verify",
+            Some("npm test"),
+            3,
+            Some(2),
+            &records
+        ));
+        assert!(!repeats_passing_verification(
+            "verify",
+            Some("npm run check"),
+            2,
+            Some(2),
+            &records
+        ));
     }
 
     #[test]
