@@ -54,7 +54,10 @@ response text continues streaming in every mode; `raw` is the default.
 There is no tool-step ceiling by default. HII continues until the model
 finishes or the operator interrupts with Esc/Ctrl-C. `--max-steps N` remains
 available only when the operator deliberately wants a finite ceiling; `0`
-means unlimited.
+means unlimited. If the model returns the same rejected action three times
+against unchanged workspace/proof state, HII reports `MODEL LOOP DETECTED` and
+returns control while preserving the session and completed workspace changes.
+This is convergence recovery, not a run-step limit.
 
 Verified conversational workflows are conservatively analyzed after the turn.
 When HII finds a genuinely repeatable procedure it creates or updates a draft

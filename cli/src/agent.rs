@@ -109,6 +109,56 @@ pub(crate) enum Action {
     },
 }
 
+pub(crate) const MODEL_LOOP_DETECTED_MESSAGE: &str =
+    "MODEL LOOP DETECTED — HII stopped the repeated rejected action and preserved the session. Revise or steer the request; completed workspace changes remain in place.";
+
+#[derive(Debug, Default)]
+pub(crate) struct RejectedActionGuard {
+    last_action: String,
+    last_state: Option<(usize, Option<usize>)>,
+    rejected_count: usize,
+}
+
+impl RejectedActionGuard {
+    pub(crate) fn would_loop(
+        &self,
+        raw: &str,
+        mutation_epoch: usize,
+        verified_epoch: Option<usize>,
+    ) -> bool {
+        self.rejected_count >= 2
+            && self.last_state == Some((mutation_epoch, verified_epoch))
+            && self.last_action == normalized_action(raw)
+    }
+
+    pub(crate) fn reject(
+        &mut self,
+        raw: &str,
+        mutation_epoch: usize,
+        verified_epoch: Option<usize>,
+    ) {
+        let action = normalized_action(raw);
+        let state = (mutation_epoch, verified_epoch);
+        if self.last_state == Some(state) && self.last_action == action {
+            self.rejected_count += 1;
+        } else {
+            self.last_action = action;
+            self.last_state = Some(state);
+            self.rejected_count = 1;
+        }
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.last_action.clear();
+        self.last_state = None;
+        self.rejected_count = 0;
+    }
+}
+
+fn normalized_action(raw: &str) -> String {
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     if options.goal.trim().is_empty() {
         return Err("goal cannot be empty".into());
@@ -243,6 +293,8 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let mut verified_epoch = None;
     let mut observations = HashSet::new();
     let mut steps = 0usize;
+    let mut rejected_actions = RejectedActionGuard::default();
+    let mut model_loop_detected = false;
 
     loop {
         if options.max_steps > 0 && steps >= options.max_steps {
@@ -264,6 +316,23 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             "model.response",
             json!({ "step": steps, "content": redact_text(&raw) }),
         );
+        if rejected_actions.would_loop(&raw, mutation_epoch, verified_epoch) {
+            model_loop_detected = true;
+            store.event(
+                "model.loop_detected",
+                json!({ "step": steps, "reason": "identical rejected action repeated three times" }),
+            )?;
+            emit_jsonl(
+                options.output,
+                "model.loop_detected",
+                json!({ "step": steps, "message": MODEL_LOOP_DETECTED_MESSAGE }),
+            );
+            if options.output == RunOutput::Human {
+                crate::tui::recovery(MODEL_LOOP_DETECTED_MESSAGE);
+            }
+            break;
+        }
+        let rejected_raw = raw.clone();
         let action = match parse_action(&raw) {
             Ok(action) => action,
             Err(error) => {
@@ -279,6 +348,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 messages.push(Message::user(format!(
                     "Protocol error: {error}. Return one JSON object matching the required action schema."
                 )));
+                rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                 continue;
             }
         };
@@ -333,6 +403,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     messages.push(Message::user(
                         "REPEATED_ACTION: this exact observation already ran after the latest workspace change. Do not repeat read/list/search. Run one actual verify or http acceptance check next, then return final if it passes.",
                     ));
+                    rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                     continue;
                 }
                 let mutates = matches!(tool.as_str(), "write" | "edit")
@@ -360,6 +431,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     )?;
                     messages.push(Message::assistant(raw));
                     messages.push(Message::user(blocked));
+                    rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                     continue;
                 }
                 let pre_hooks = hooks.fire(
@@ -385,8 +457,10 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     messages.push(Message::user(format!(
                         "HOOK_BLOCKED: {blocked}. Choose a compliant alternative."
                     )));
+                    rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                     continue;
                 }
+                rejected_actions.reset();
                 let result = if is_hii {
                     crate::hii_tools::execute(&paths.repo, &tool, query.as_deref())
                 } else {
@@ -521,6 +595,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     if options.output == RunOutput::Human && options.verbose {
                         println!("[step {steps}] proof required before completion");
                     }
+                    rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                     continue;
                 }
                 final_summary = Some(summary);
@@ -532,6 +607,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 messages.push(Message::user(format!(
                     "This is explicit run mode, not chat. Continue the bounded task, verify it, then return a final action. Your conversational message was: {message}"
                 )));
+                rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
             }
         }
     }
@@ -560,7 +636,9 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         && verification.iter().any(|check| check.ok)
         && declared_checks_passed;
     let mut summary = redact_text(&final_summary.unwrap_or_else(|| {
-        if interrupted {
+        if model_loop_detected {
+            MODEL_LOOP_DETECTED_MESSAGE.into()
+        } else if interrupted {
             format!("Interrupted by operator after {steps} step(s); partial work preserved.")
         } else {
             match options.max_steps {
@@ -1421,6 +1499,31 @@ mod tests {
         );
         assert!(prompt.contains("No tool-step ceiling"));
         assert!(!prompt.contains("Operator ceiling:"));
+    }
+
+    #[test]
+    fn three_identical_rejected_actions_trigger_loop_recovery() {
+        let mut guard = RejectedActionGuard::default();
+        let action = r#"{"type":"final","summary":"done"}"#;
+
+        assert!(!guard.would_loop(action, 1, None));
+        guard.reject(action, 1, None);
+        assert!(!guard.would_loop(action, 1, None));
+        guard.reject(action, 1, None);
+        assert!(guard.would_loop(action, 1, None));
+    }
+
+    #[test]
+    fn rejected_action_guard_resets_when_action_or_state_changes() {
+        let mut guard = RejectedActionGuard::default();
+        guard.reject("same action", 1, None);
+        guard.reject("same   action", 1, None);
+        assert!(guard.would_loop("same action", 1, None));
+        assert!(!guard.would_loop("different action", 1, None));
+        assert!(!guard.would_loop("same action", 2, None));
+
+        guard.reset();
+        assert!(!guard.would_loop("same action", 1, None));
     }
 
     #[test]

@@ -1,5 +1,8 @@
 use crate::{
-    agent::{choose_model, execute_tool, parse_action, Action},
+    agent::{
+        choose_model, execute_tool, parse_action, Action, RejectedActionGuard,
+        MODEL_LOOP_DETECTED_MESSAGE,
+    },
     config::AppPaths,
     contract::{deletion_shell, sensitive_shell, Authority, Decision},
     hooks::{HookBatch, HookEvent, HookRunner},
@@ -107,6 +110,30 @@ impl SessionUsage {
             self.total_duration_ms as f64 / 1_000.0,
             context_percent
         )
+    }
+}
+
+struct BackendOutcome {
+    verification: Vec<VerificationRecord>,
+    hook_records: Vec<HookRecord>,
+    completed: bool,
+}
+
+impl BackendOutcome {
+    fn completed(verification: Vec<VerificationRecord>, hook_records: Vec<HookRecord>) -> Self {
+        Self {
+            verification,
+            hook_records,
+            completed: true,
+        }
+    }
+
+    fn incomplete(verification: Vec<VerificationRecord>, hook_records: Vec<HookRecord>) -> Self {
+        Self {
+            verification,
+            hook_records,
+            completed: false,
+        }
     }
 }
 
@@ -227,6 +254,7 @@ impl Conversation {
         let mut steps = 0usize;
         let mut web_mutation_pending = false;
         let mut repeated_verification_failure: Option<(String, usize)> = None;
+        let mut rejected_actions = RejectedActionGuard::default();
         if io::stdout().is_terminal() {
             crate::tui::stage("UNDERSTOOD", input);
         }
@@ -255,6 +283,7 @@ impl Conversation {
                 Err(error) => return Err(error),
             };
             if let Some(steering) = self.steering.take() {
+                rejected_actions.reset();
                 self.messages.push(Message::assistant(raw));
                 self.messages.push(Message::user(format!(
                     "OPERATOR STEERING (latest instruction): {steering}\nDiscard the prior proposed action and follow this instruction before executing anything."
@@ -269,6 +298,39 @@ impl Conversation {
                 "model.action",
                 json!({ "step": step, "content": redact_text(&raw) }),
             )?;
+            if rejected_actions.would_loop(&raw, mutation_epoch, verified_epoch) {
+                let message = if mutation_epoch > 0 && verified_epoch == Some(mutation_epoch) {
+                    format!("{MODEL_LOOP_DETECTED_MESSAGE} The last verified preview remains live.")
+                } else {
+                    MODEL_LOOP_DETECTED_MESSAGE.to_string()
+                };
+                self.store.event(
+                    "model.loop_detected",
+                    json!({ "step": step, "reason": "identical rejected action repeated three times" }),
+                )?;
+                if let Some(run) = &run {
+                    run.event(
+                        "model.loop_detected",
+                        json!({ "step": step, "message": &message }),
+                    )?;
+                }
+                if io::stdout().is_terminal() {
+                    crate::tui::recovery(&message);
+                }
+                self.messages.push(Message::assistant(raw));
+                self.messages.push(Message::user(message.clone()));
+                self.finish_backend_run(
+                    run,
+                    input,
+                    step,
+                    &message,
+                    BackendOutcome::incomplete(verification, hook_records),
+                )?;
+                self.store
+                    .event("assistant.message", json!({ "content": &message }))?;
+                return Ok(message);
+            }
+            let rejected_raw = raw.clone();
             let action = match parse_action(&raw) {
                 Ok(action) => action,
                 Err(_) if plain_message(&raw).is_some() => {
@@ -278,6 +340,7 @@ impl Conversation {
                             .push(Message::user(verification_required_message(
                                 web_mutation_pending,
                             )));
+                        rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                         continue;
                     }
                     let message = redact_text(plain_message(&raw).unwrap_or_default());
@@ -287,8 +350,7 @@ impl Conversation {
                         input,
                         step,
                         &message,
-                        verification,
-                        hook_records,
+                        BackendOutcome::completed(verification, hook_records),
                     )?;
                     self.store
                         .event("assistant.message", json!({ "content": message }))?;
@@ -299,6 +361,7 @@ impl Conversation {
                     self.messages.push(Message::user(format!(
                         "Protocol error: {error}. Return exactly one valid JSON action."
                     )));
+                    rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                     continue;
                 }
             };
@@ -310,6 +373,7 @@ impl Conversation {
                             .push(Message::user(verification_required_message(
                                 web_mutation_pending,
                             )));
+                        rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                         continue;
                     }
                     let message = redact_text(&message);
@@ -319,8 +383,7 @@ impl Conversation {
                         input,
                         step,
                         &message,
-                        verification,
-                        hook_records,
+                        BackendOutcome::completed(verification, hook_records),
                     )?;
                     self.store
                         .event("assistant.message", json!({ "content": message }))?;
@@ -333,6 +396,7 @@ impl Conversation {
                             .push(Message::user(verification_required_message(
                                 web_mutation_pending,
                             )));
+                        rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                         continue;
                     }
                     let message = match next.filter(|value| !value.trim().is_empty()) {
@@ -346,8 +410,7 @@ impl Conversation {
                         input,
                         step,
                         &message,
-                        verification,
-                        hook_records,
+                        BackendOutcome::completed(verification, hook_records),
                     )?;
                     self.store
                         .event("assistant.message", json!({ "content": message }))?;
@@ -407,6 +470,7 @@ impl Conversation {
                         )?;
                         self.messages.push(Message::assistant(raw));
                         self.messages.push(Message::user(blocked));
+                        rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                         continue;
                     }
                     let shell_evidence = tool == "shell"
@@ -431,6 +495,7 @@ impl Conversation {
                         self.messages.push(Message::user(
                             "PLAN MODE: do not write, edit, verify, or run mutating tools. Continue with read/list/search/web_search/web_fetch/http or read-only shell evidence, then return a concrete plan. The operator can use /plan off before implementation.",
                         ));
+                        rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                         continue;
                     }
                     let web_mutation =
@@ -449,6 +514,7 @@ impl Conversation {
                         self.messages.push(Message::user(
                             "Deletion is unavailable in the public test. Choose a non-destructive action.",
                         ));
+                        rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                         continue;
                     }
                     if !self.public_test {
@@ -494,6 +560,7 @@ impl Conversation {
                             )?;
                             self.messages.push(Message::assistant(raw));
                             self.messages.push(Message::user(reason));
+                            rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                             continue;
                         }
                         if decision == Decision::Prompt {
@@ -521,6 +588,7 @@ impl Conversation {
                         self.messages.push(Message::user(
                             "BLOCKED: this public test cannot send messages, make purchases, change accounts, upload private files, install software, or mutate systems outside the test workspace. Use web_search for research and workspace-local creative tools for the artifact.",
                         ));
+                        rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                         continue;
                     }
                     if self.public_test && crate::hii_tools::is_hii_tool(&tool) {
@@ -532,6 +600,7 @@ impl Conversation {
                         self.messages.push(Message::user(
                             "BLOCKED: host HII context and control-plane tools are unavailable in this isolated test. Use workspace and installed host tools only.",
                         ));
+                        rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                         continue;
                     }
                     if run.is_none() {
@@ -570,8 +639,10 @@ impl Conversation {
                         self.messages.push(Message::user(format!(
                             "HOOK_BLOCKED: {blocked}. Choose a compliant alternative."
                         )));
+                        rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                         continue;
                     }
+                    rejected_actions.reset();
                     let result = if crate::hii_tools::is_hii_tool(&tool) {
                         crate::hii_tools::execute(&self.paths.repo, &tool, query.as_deref())
                     } else {
@@ -727,8 +798,7 @@ impl Conversation {
                 input,
                 steps,
                 "The operator step ceiling was reached before I could finish cleanly.",
-                verification,
-                hook_records,
+                BackendOutcome::incomplete(verification, hook_records),
             )?;
         }
         Ok("The operator step ceiling was reached before I could finish cleanly.".into())
@@ -1614,9 +1684,13 @@ impl Conversation {
         input: &str,
         steps: usize,
         summary: &str,
-        verification: Vec<VerificationRecord>,
-        mut hook_records: Vec<HookRecord>,
+        outcome: BackendOutcome,
     ) -> Result<(), String> {
+        let BackendOutcome {
+            verification,
+            mut hook_records,
+            completed,
+        } = outcome;
         let stop_hooks = self.hooks.fire(
             HookEvent::Stop,
             None,
@@ -1624,7 +1698,8 @@ impl Conversation {
             json!({
                 "summary": redact_text(summary),
                 "steps": steps,
-                "verified": verification.iter().any(|check| check.ok)
+                "verified": verification.iter().any(|check| check.ok),
+                "status": if completed { "completed" } else { "incomplete" }
             }),
         );
         self.record_hook_batch(&stop_hooks, run.as_ref())?;
@@ -1637,7 +1712,12 @@ impl Conversation {
             id: run.id.clone(),
             created_at_unix_ms: run.started_at_unix_ms,
             finished_at_unix_ms: unix_ms(),
-            status: "completed".into(),
+            status: if completed {
+                "completed"
+            } else {
+                "incomplete"
+            }
+            .into(),
             goal: redact_text(input),
             workspace: self.tools.workspace().display().to_string(),
             model: self.model.clone(),
@@ -1680,7 +1760,7 @@ impl Conversation {
             json!({ "status": receipt.status, "summary": receipt.summary }),
         )?;
         let receipt_path = run.finish(&self.paths.runtime, &receipt)?;
-        if !self.public_test && receipt.verification.iter().any(|check| check.ok) {
+        if completed && !self.public_test && receipt.verification.iter().any(|check| check.ok) {
             let checks = receipt
                 .verification
                 .iter()
