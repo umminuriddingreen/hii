@@ -33,6 +33,14 @@ describe('activation wizard contract', () => {
     }
   });
 
+  it('records a privacy-safe first-win journey through the local activation contract', () => {
+    expect(activate).toContain('journeyId = crypto.randomUUID()');
+    expect(activate).toContain('JSON.stringify({ action, journeyId, ...params })');
+    expect(activate).toContain('First win journey');
+    expect(activate).toContain('without external analytics or captured task content');
+    expect(activate).toContain('activationJourney.elapsedSeconds');
+  });
+
   it('uses the HII founder-beta visual tokens', () => {
     for (const token of ['--paper:', '--ink:', '--blue:', '--acid:']) expect(activate).toContain(token);
   });

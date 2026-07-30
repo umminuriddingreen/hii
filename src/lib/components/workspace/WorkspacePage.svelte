@@ -13,13 +13,14 @@
   import GovernedCapabilityPane from '$lib/components/workspace/GovernedCapabilityPane.svelte';
   import SurfacePane from '$lib/components/workspace/SurfacePane.svelte';
   import StaticNode from '$lib/components/workspace/StaticNode.svelte';
+  import WorkspaceNavigator from '$lib/components/workspace/WorkspaceNavigator.svelte';
   import HiiLogo from '$lib/components/HiiLogo.svelte';
   import type { WorkspaceDoc, WorkspaceNode, WorkspaceNodeType } from '@/lib/workspace/types';
   import { makeNode, seedFor, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
   import { countWorkspaceNodesInViewport, fitWorkspaceViewport, panWorkspaceViewport, zoomWorkspaceViewportAt } from '@/lib/workspace/viewport';
   import { searchWorkspaceNodes, workspaceNodeTitle } from '@/lib/workspace/search';
   import { assignNodesToFrame, moveNodeAndFrameContents, removeFrame } from '@/lib/workspace/frames';
-  import { adjacentWorkspaceScene, workspaceSceneMembers, workspaceScenes, workspaceSceneTypeSummary } from '@/lib/workspace/scenes';
+  import { adjacentWorkspaceScene, workspaceSceneMembers, workspaceScenes } from '@/lib/workspace/scenes';
   import { emptyWorkspaceHistory, recordWorkspaceChange, redoWorkspace, undoWorkspace } from '@/lib/workspace/history';
   import { workspaceConnections } from '@/lib/workspace/connections';
   import { findOpenWorkspacePosition } from '@/lib/workspace/layout';
@@ -61,8 +62,6 @@
   $: nodeResults=searchWorkspaceNodes(doc.nodes,query);
   $: collapsedFrameIds=new Set(doc.nodes.filter(node=>node.type==='frame'&&node.payload.collapsed===true).map(node=>node.id));
   $: scenes=workspaceScenes(doc.nodes);
-  $: mapAnchors=doc.nodes.filter(node=>!['frame','image','media','ink','canvas-text','text'].includes(node.type)).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).slice(0,8);
-  $: mapKinds=Object.entries(doc.nodes.reduce<Record<string,number>>((counts,node)=>({...counts,[node.type]:(counts[node.type]||0)+1}),{})).sort((a,b)=>b[1]-a[1]).slice(0,5);
   $: selectedContextNodes=contextSelection.map(id=>doc.nodes.find(node=>node.id===id)).filter((node):node is WorkspaceNode=>Boolean(node));
   $: connections=workspaceConnections(doc.nodes);
   $: visibleNodeCount=countWorkspaceNodesInViewport(doc.nodes,doc.viewport,{width:canvasWidth,height:canvasHeight});
@@ -396,23 +395,15 @@
     <button class="rounded-full border border-neutral-900/10 bg-white/95 px-4 py-2 font-mono text-[10px] uppercase tracking-[.08em] text-neutral-700 shadow-lg backdrop-blur hover:border-neutral-900/25" on:click={fitAll} aria-label="Fit all workspace content">Fit all <kbd class="ml-2 text-neutral-400">⇧1</kbd></button>
     <div class="relative">
       <button class="rounded-full border border-neutral-900/10 bg-white/95 px-4 py-2 font-mono text-[10px] uppercase tracking-[.08em] text-neutral-700 shadow-lg backdrop-blur hover:border-neutral-900/25" on:click={()=>mapMenu=!mapMenu} aria-label="Open workspace map" aria-expanded={mapMenu}>Map <kbd class="ml-2 text-neutral-400">{scenes.length}</kbd></button>
-      {#if mapMenu}<section class="absolute bottom-12 left-0 w-[min(320px,calc(100vw-40px))] overflow-hidden rounded-2xl border border-neutral-900/10 bg-white p-2 shadow-2xl" aria-label="Workspace map">
-        <div class="flex items-center justify-between px-3 py-2">
-          <div><p class="font-mono text-[9px] uppercase tracking-[.12em] text-neutral-400">Workspace map</p><p class="mt-1 text-[12px] text-neutral-600">{doc.nodes.length} objects · {scenes.length} scenes</p></div>
-          <button class="rounded-full bg-neutral-100 px-2 py-1 font-mono text-[9px] uppercase text-neutral-500" on:click={()=>mapMenu=false}>Close</button>
-        </div>
-        <div class="flex flex-wrap gap-1 px-3 py-2">{#each mapKinds as kind}<span class="rounded-full bg-neutral-100 px-2 py-1 font-mono text-[8px] uppercase text-neutral-500">{kind[0]} {kind[1]}</span>{/each}</div>
-        {#if scenes.length}<div class="max-h-64 overflow-auto py-1"><div class="flex items-center justify-between px-3 pb-1 pt-2"><p class="font-mono text-[8px] uppercase tracking-[.12em] text-neutral-400">Scenes</p><div class="flex gap-1"><button class="rounded-full bg-neutral-100 px-2 py-1 text-[10px]" aria-label="Previous scene" on:click={()=>openAdjacentScene(-1)}>←</button><button class="rounded-full bg-neutral-100 px-2 py-1 text-[10px]" aria-label="Next scene" on:click={()=>openAdjacentScene(1)}>→</button></div></div>{#each scenes as scene,index}<button class="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left hover:bg-blue-50" class:bg-blue-50={scene.id===currentSceneId} on:click={()=>openScene(scene)}>
-          <span class="mr-3 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-blue-50 font-mono text-[9px] text-blue-700">{index+1}</span>
-          <span class="min-w-0 flex-1"><strong class="block truncate text-[13px]">{String(scene.payload.title||'Untitled scene')}</strong><small class="block truncate font-mono text-[8px] uppercase text-neutral-400">{workspaceSceneTypeSummary(sceneMembers(scene.id))}</small></span>
-          <span class="text-blue-600">↗</span>
-        </button>{/each}</div>
-        {:else}<div class="mx-1 rounded-xl bg-neutral-50 p-3"><p class="text-[12px] leading-5 text-neutral-500">Scenes name a group of objects and make a large workspace navigable.</p><button class="mt-3 font-mono text-[9px] uppercase text-blue-600 underline" on:click={()=>{mapMenu=false;spawn('frame')}}>Create a scene</button></div>{/if}
-        {#if mapAnchors.length}<div class="mt-1 max-h-64 overflow-auto border-t py-1"><p class="px-3 pb-1 pt-2 font-mono text-[8px] uppercase tracking-[.12em] text-neutral-400">Key places</p>{#each mapAnchors as node}<button class="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left hover:bg-blue-50" on:click={()=>{focusNode(node);mapMenu=false}}>
-          <span class="min-w-0"><strong class="block truncate text-[12px]">{workspaceNodeTitle(node)}</strong><small class="font-mono text-[8px] uppercase text-neutral-400">{node.type}</small></span>
-          <span class="text-blue-600">⌖</span>
-        </button>{/each}</div>{/if}
-      </section>{/if}
+      {#if mapMenu}<WorkspaceNavigator
+        nodes={doc.nodes}
+        {currentSceneId}
+        onClose={()=>mapMenu=false}
+        onCreateScene={()=>{mapMenu=false;spawn('frame')}}
+        onOpenScene={openScene}
+        onFocusNode={(node)=>{focusNode(node);mapMenu=false}}
+        onAdjacentScene={openAdjacentScene}
+      />{/if}
     </div>
   </div>{/if}
   <div data-workspace-ui class="absolute right-5 top-4 z-40">

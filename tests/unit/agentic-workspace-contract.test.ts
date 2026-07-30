@@ -38,6 +38,8 @@ const modelPane = readFileSync(resolve(root, 'src/lib/components/workspace/Model
 const contextAnchor = readFileSync(resolve(root, 'lib/workspace/context-anchor.ts'), 'utf8');
 const workspaceIngest = readFileSync(resolve(root, 'lib/workspace/ingest.ts'), 'utf8');
 const pendingContext = readFileSync(resolve(root, 'lib/workspace/pending-context.ts'), 'utf8');
+const workspaceNavigator = readFileSync(resolve(root, 'src/lib/components/workspace/WorkspaceNavigator.svelte'), 'utf8');
+const workspaceOutline = readFileSync(resolve(root, 'lib/workspace/outline.ts'), 'utf8');
 
 describe('agentic workspace interaction contract', () => {
   it('summons direct workspace intent from Option+Space', () => {
@@ -49,6 +51,16 @@ describe('agentic workspace interaction contract', () => {
     expect(workspace).toContain("seedFor('run'");
     expect(spatialRun).toContain('Approve bounded run');
     expect(spatialRun).toContain("action: 'approve'");
+  });
+
+  it('keeps dense canvases navigable as scenes plus governed object lineage', () => {
+    expect(workspace).toContain('<WorkspaceNavigator');
+    expect(workspaceNavigator).toContain('Workspace outline');
+    expect(workspaceNavigator).toContain('Find an intent, run, receipt, or object');
+    expect(workspaceOutline).toContain("title: 'Loose objects'");
+    expect(workspaceNavigator).toContain('workspaceFlattenOutlineEntries');
+    expect(workspaceOutline).toContain('[node.object?.parentId, node.payload.parentId]');
+    expect(workspaceOutline).toContain('statusCounts');
   });
 
   it('hands selected context to the real AII workspace runner and branches from its receipt', () => {
@@ -225,11 +237,12 @@ describe('agentic workspace interaction contract', () => {
     expect(workspace).toContain('countWorkspaceNodesInViewport');
     expect(workspace).toContain('Your workspace is outside this view.');
     expect(workspace).toContain('Show my work');
-    expect(workspace).toContain('Workspace map');
-    expect(workspace).toContain('Key places');
+    expect(workspace).toContain('<WorkspaceNavigator');
+    expect(workspaceNavigator).toContain('Workspace outline');
+    expect(workspaceNavigator).toContain('Find an intent, run, receipt, or object');
     expect(workspace).toContain('workspaceScenes(doc.nodes)');
-    expect(workspace).toContain('openScene(scene)');
-    expect(workspace).toContain('openAdjacentScene(1)');
+    expect(workspace).toContain('onOpenScene={openScene}');
+    expect(workspaceNavigator).toContain('onAdjacentScene(1)');
     expect(workspace).toContain('captureScene(node.id)');
     expect(workspace).toContain('Scene name');
     expect(workspace).toContain('findOpenWorkspacePosition');

@@ -26,6 +26,7 @@ process.env.HII_OLLAMA_BIN = stubBinary('ollama', '[ "$1" = "list" ] && printf "
 
 const contextDock = await import('../lib/server/hii-context-dock.ts');
 const activation = await import('../lib/server/hii-activation.ts');
+const activationJourney = await import('../lib/server/hii-activation-journey.ts');
 
 try {
   const agents = await activation.detectAgents();
@@ -68,12 +69,50 @@ try {
   assert.equal(status.status, 'completed');
   assert.equal(status.receipt.summary, 'activation smoke verified');
 
+  const journeyId = 'journey-activation-smoke';
+  await activationJourney.recordActivationJourneyMilestone({
+    journeyId,
+    milestone: 'agents_detected',
+    at: codex.startedAt,
+    metadata: { installedAgents: 3 }
+  });
+  await activationJourney.recordActivationJourneyMilestone({
+    journeyId,
+    milestone: 'context_previewed',
+    metadata: { itemCount: state.sources.length }
+  });
+  await activationJourney.recordActivationJourneyMilestone({
+    journeyId,
+    milestone: 'context_approved',
+    metadata: { sourceCount: state.sources.length }
+  });
+  await activationJourney.recordActivationJourneyMilestone({
+    journeyId,
+    activationId: codex.activationId,
+    milestone: 'run_started',
+    metadata: { agent: 'codex', runKind: codex.runKind }
+  });
+  await activationJourney.recordActivationJourneyMilestone({
+    journeyId,
+    activationId: codex.activationId,
+    milestone: 'receipt_verified'
+  });
+  const journey = await activationJourney.readActivationJourney(journeyId);
+  assert.equal(journey.status, 'completed');
+  assert.equal(journey.milestones.length, 5);
+  const funnel = await activationJourney.activationFunnelSummary();
+  assert.equal(funnel.receiptsVerified, 1);
+  assert.equal(funnel.completionRate, 1);
+  const eventsText = fs.readFileSync(path.join(runtimeRoot, 'activations', 'events.jsonl'), 'utf8');
+  assert.doesNotMatch(eventsText, /approved-project|Prove the Codex queue/);
+
   console.log('HII activation smoke');
   console.log('status:       ok');
   console.log('detect:       Codex + Claude + Ollama offline detection verified with stubs');
   console.log('orientation:  project context + task + permission boundary + receipt wording verified');
   console.log('routing:      Codex queue cwd + Claude partner-onboard intent cwd verified');
   console.log('receipt:      fresh latest CLI receipt resolution verified');
+  console.log('journey:      five local milestones + privacy-safe funnel verified');
   console.log('network:      no network used');
 } finally {
   contextDock.resetContextDockDbForTests();

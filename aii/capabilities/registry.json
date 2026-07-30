@@ -918,7 +918,7 @@
     "name": "Create in the HII Spatial Workspace",
     "owner": "hii",
     "runtime": "next-route",
-    "summary": "Create with editable text and durable media, organize large canvases into named navigable scenes, inspect source-linked PDF documents, local DXF drawings, and 3D models, bind human-selected pages, regions, layers, time ranges, and views into governed agent runs, branch verified work, and edit receipt-linked text artifacts beside their source context.",
+    "summary": "Create with editable text and durable media, navigate large canvases through a searchable governed Scene and object outline, inspect source-linked PDF documents, local DXF drawings, and 3D models, bind human-selected pages, regions, layers, time ranges, and views into governed agent runs, branch verified work, and edit receipt-linked text artifacts beside their source context.",
     "inputs": [
       "typed canvas text",
       "local clipboard or dropped media",

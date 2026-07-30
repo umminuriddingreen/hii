@@ -335,6 +335,37 @@ framing, and persistence after reload. This closes the named Scenes portion of
 orientation at scale. Existing-media organization, stacking, and reviewed
 near-duplicate handling remain open.
 
+### Verified governed-outline and first-win checkpoint
+
+Map is now a searchable governed outline rather than a shallow list of recent
+places. It includes every framed and unframed object, preserves arbitrary-depth
+parent lineage, groups work under ordered Scenes or `Loose objects`, summarizes
+terminal and approval states, and keeps matching ancestors visible when a
+person searches for a descendant. Missing or cyclic parent references degrade
+to navigable roots instead of hiding work or breaking the outline.
+
+Live HII Space proved this against the existing `governed-run-demo` workspace:
+the outline indexed 16 unframed objects and a search for `receipt` exposed the
+actual intent → run → receipt lineage, including the completed run and verified
+receipt. This is the useful lesson from Figma layers, Miro frames, and Apple
+Freeform Scenes, adapted to HII's own contract: the hierarchy carries governed
+agent state and proof rather than only visual grouping.
+
+The activation path now preserves an equally inspectable first-session journey:
+local agents detected → project context previewed → context explicitly approved
+→ bounded run started → verified receipt returned (or run failed). Events are
+append-only, duplicate-safe, terminal-state immutable, and restricted to
+opaque ids plus bounded counts, sizes, agent kind, run kind, and timestamps.
+Paths, task text, identities, model output, and file contents are not recorded.
+The aggregate funnel is local-only and exposes no raw event rows.
+
+The live activation mock reached all five milestones and rendered the verified
+receipt journey in 42 seconds. The isolated activation gate proves the real
+append-only event store, privacy boundary, idempotence, terminal immutability,
+completion rate, and median time-to-receipt aggregation. The current local
+funnel correctly reports zero real journeys; HII will not manufacture founder
+cohort evidence from demo state.
+
 ### Verified contact-sheet checkpoint
 
 New multi-image imports no longer become one equal-weight canvas node per file.
@@ -391,8 +422,9 @@ perceptual-deduplication review remain open.
   deterministic command family now reports that AeroSpace is installed but
   its server is offline; ready-state snapshots remain product-smoke verified
   but cannot be live-verified until the operator starts AeroSpace.
-- This audit added a spatial Map with object inventory and direct navigation,
-  plus an off-screen rescue action when the workspace is outside the viewport.
+- This audit added a searchable governed outline with complete object
+  inventory, Scene and lineage navigation, status summaries, and an off-screen
+  rescue action when the workspace is outside the viewport.
 
 ### Arry conversation
 
@@ -493,7 +525,7 @@ cloud sync, credits, or a general “AI operating system.”
 
 | Priority | Gap | Evidence of done |
 | --- | --- | --- |
-| 0 | Orientation at scale | Map, named ordered Scenes, search, off-screen rescue, and deterministic Scene navigation are implemented. The remaining scale gate is proving this flow with hundreds of organized—not flat—media objects. |
+| 0 | Orientation at scale | The searchable governed outline, named ordered Scenes, arbitrary-depth lineage, status summaries, off-screen rescue, and deterministic Scene navigation are implemented. The remaining scale gate is proving this flow with hundreds of organized—not flat—media objects. |
 | 0 | One legible governed run | Selected context, intent, permission boundary, progress, artifact, proof, and receipt are visible as one connected flow without reading raw logs. |
 | 0 | Artifact-first closure | The output opens beside its inputs, is editable or launches its native editor, and reports exactly what changed. |
 | 0 | Trustworthy context selection | Before approval, the user can see the exact files/nodes/sources and sub-asset regions included, exclusions, provenance, content identity, and likely network boundary. |
@@ -501,7 +533,7 @@ cloud sync, credits, or a general “AI operating system.”
 | 1 | Media organization | New multi-image imports become bounded proof-linked contact sheets and exact duplicates are visibly counted. Explicit organization of existing nodes, batch labels, and reviewed perceptual dedupe remain open. |
 | 1 | Run focus and log hygiene | Default progress is a short step list; raw stdout/stderr stays one level deeper. Duplicate tasks and transcript debris are prevented. |
 | 1 | Capability reuse | A successful approved trace can become a draft capability, show required inputs and permissions, and be re-run on new context. |
-| 1 | Onboarding | A clean Mac install reaches the first verified artifact in under ten minutes with no repository knowledge. |
+| 1 | Onboarding | The first-session journey and privacy-safe local funnel are implemented. A clean Mac install must still reach the first verified artifact in under ten minutes with no repository knowledge. |
 | 1 | Recovery | Interrupted runs, stale surfaces, conflicting writes, and app restarts recover without duplicate work or lost provenance. |
 | 2 | Collaboration | Share/export a bounded workspace bundle with redaction, provenance, and receipts before adding live multi-user editing. |
 | 2 | Extensibility | Add governed adapters only after the local knowledge and run loop is reliable; no marketplace before the trust model is proven. |
@@ -514,9 +546,9 @@ cloud sync, credits, or a general “AI operating system.”
    context selection → intent → approval → compact progress → visible artifact →
    receipt → save as draft capability.
 2. Keep the Map and named Scenes as permanent product infrastructure; prove
-   them against the first contact-sheet import. The five-reference visual
-   checkpoint is complete; the remaining proof is orientation under
-   hundreds-of-object load.
+   the searchable governed outline against hundreds of organized objects. The
+   five-reference visual checkpoint and real intent → run → receipt search are
+   complete; the remaining proof is orientation under hundreds-of-object load.
 3. Replace raw chat/run noise with an inspectable progress summary and a
    deliberately secondary log view.
 4. Keep runtime and desktop-space health operator-readable; live-verify the
@@ -525,6 +557,9 @@ cloud sync, credits, or a general “AI operating system.”
    baseline. Re-record it when the hero artifact changes; never replace it with
    mock output.
 6. Treat the new CI product-proof job as the minimum merge gate.
+7. Use the local first-win funnel with the first five founder users. Improve the
+   largest real drop-off without adding external analytics or collecting task
+   content.
 
 ### Build next
 

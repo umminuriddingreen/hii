@@ -4,6 +4,7 @@
   type AgentId = 'codex' | 'claude' | 'ollama';
   type StartAgent = 'codex' | 'claude';
   type ActivationAction = 'detect' | 'inventory' | 'create' | 'start' | 'status';
+  type ActivationMilestone = 'agents_detected' | 'context_previewed' | 'context_approved' | 'run_started' | 'receipt_verified' | 'run_failed';
 
   type AgentDetection = {
     id: AgentId;
@@ -51,7 +52,17 @@
   type DetectionResponse = { agents: AgentDetection[] };
   type CreateResponse = { project: { id?: string; projectId?: string; name?: string }; scan: unknown };
   type StartResponse = { activationId: string; startedAt: string; runKind: 'codex-exec' | 'claude-spawn' };
-  type StatusResponse = { status: 'running' | 'completed' | 'failed' | 'unknown'; receipt: Receipt | null };
+  type ActivationJourney = {
+    status: 'in-progress' | 'completed' | 'failed';
+    elapsedSeconds: number;
+    milestones: Array<{ milestone: ActivationMilestone; at: string }>;
+  };
+  type StatusResponse = {
+    status: 'running' | 'completed' | 'failed' | 'unknown';
+    receipt: Receipt | null;
+    journey?: ActivationJourney | null;
+    journeyWarning?: string;
+  };
 
   const HII_ACTIVATION_MOCK = import.meta.env.VITE_ACTIVATION_MOCK === '1';
   const agents: Array<{ id: AgentId; name: string; eyebrow: string; description: string }> = [
@@ -64,8 +75,17 @@
     'Make one small reversible improvement.',
     'Verify an artifact and produce a receipt.'
   ];
+  const milestoneLabels: Record<ActivationMilestone, string> = {
+    agents_detected: 'Local agents detected',
+    context_previewed: 'Project context previewed',
+    context_approved: 'Context explicitly approved',
+    run_started: 'Bounded run started',
+    receipt_verified: 'Verified receipt returned',
+    run_failed: 'Bounded run stopped'
+  };
 
   let step = $state(1);
+  let journeyId = $state('');
   let selectedAgent = $state<AgentId>('codex');
   let detectedAgents = $state<AgentDetection[]>([]);
   let rootPath = $state('');
@@ -77,6 +97,8 @@
   let activationId = $state('');
   let runStatus = $state<StatusResponse['status']>('running');
   let receipt = $state<Receipt | null>(null);
+  let activationJourney = $state<ActivationJourney | null>(null);
+  let journeyWarning = $state('');
   let busy = $state(false);
   let errorMessage = $state('');
   let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -85,6 +107,18 @@
   const isMock = () => HII_ACTIVATION_MOCK || (typeof location !== 'undefined' && new URLSearchParams(location.search).get('mock') === '1');
 
   function mockResponse(action: ActivationAction, params: Record<string, unknown>) {
+    const mockStartedAt = new Date(Date.now() - 42_000).toISOString();
+    const mockJourney: ActivationJourney = {
+      status: 'completed',
+      elapsedSeconds: 42,
+      milestones: [
+        { milestone: 'agents_detected', at: mockStartedAt },
+        { milestone: 'context_previewed', at: new Date(Date.now() - 36_000).toISOString() },
+        { milestone: 'context_approved', at: new Date(Date.now() - 31_000).toISOString() },
+        { milestone: 'run_started', at: new Date(Date.now() - 27_000).toISOString() },
+        { milestone: 'receipt_verified', at: new Date().toISOString() }
+      ]
+    };
     const fixtures = {
       detect: {
         agents: [
@@ -111,6 +145,7 @@
         ? { status: 'running', receipt: null }
         : {
             status: 'completed',
+            journey: mockJourney,
             receipt: {
               summary: 'The agent learned the workspace, identified its current product boundary, and finished the approved bounded task.',
               outcome: 'One reversible documentation improvement was completed without changing runtime behavior.',
@@ -135,10 +170,11 @@
     const response = await fetch('/api/activation', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action, ...params })
+      body: JSON.stringify({ action, journeyId, ...params })
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(typeof payload.error === 'string' ? payload.error : `Activation request failed (${response.status}).`);
+    if (typeof payload.journeyWarning === 'string') journeyWarning = payload.journeyWarning;
     return payload as T;
   }
 
@@ -242,6 +278,7 @@
     try {
       const result = await activationRequest<StatusResponse>('status', { activationId });
       runStatus = result.status;
+      activationJourney = result.journey ?? activationJourney;
       if (result.status === 'completed' && result.receipt) {
         receipt = result.receipt;
         stopPolling();
@@ -288,12 +325,19 @@
     return [...new Set([...(value.proofPaths ?? []), ...(value.proof_paths ?? []), ...artifactPaths])];
   }
 
+  function milestoneLabel(milestone: ActivationMilestone) {
+    return milestoneLabels[milestone];
+  }
+
   function goBack() {
     errorMessage = '';
     if (step > 1 && step < 5) step -= 1;
   }
 
-  onMount(() => void detectAgents());
+  onMount(() => {
+    journeyId = crypto.randomUUID();
+    void detectAgents();
+  });
   onDestroy(stopPolling);
 </script>
 
@@ -444,11 +488,23 @@
             {#if proofPaths(receipt).length}<div class="path-list">{#each proofPaths(receipt) as path}<code>{path}</code>{/each}</div>{:else}<p class="empty-proof">No proof paths were included.</p>{/if}
           </section>
         </div>
+        {#if activationJourney}
+          <section class="journey-card" aria-labelledby="journey-title">
+            <div class="section-label"><h2 id="journey-title">First win journey</h2><span>{activationJourney.milestones.length}</span></div>
+            <div class="journey-head"><p>HII records these milestones locally so the founder cohort can improve real drop-offs without external analytics or captured task content.</p><strong>{activationJourney.elapsedSeconds}s to receipt</strong></div>
+            <ol>
+              {#each activationJourney.milestones as milestone}
+                <li class:failed={milestone.milestone === 'run_failed'}><i>{milestone.milestone === 'run_failed' ? '!' : '✓'}</i><span><strong>{milestoneLabel(milestone.milestone)}</strong><small>{new Date(milestone.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</small></span></li>
+              {/each}
+            </ol>
+          </section>
+        {/if}
         {#if receipt.next}<div class="next-card"><span>Next action</span><p>{receipt.next}</p></div>{/if}
       </section>
     {/if}
 
     {#if errorMessage && step !== 5}<p class="error-message" role="alert">{errorMessage}</p>{/if}
+    {#if journeyWarning}<p class="journey-warning" role="status">{journeyWarning}</p>{/if}
     {#if isMock()}<div class="mock-flag">Demo data · activation mock</div>{/if}
   </main>
 </div>
@@ -570,15 +626,27 @@
   .path-list { display:grid; gap:8px; padding-top:16px; }
   .path-list code { overflow-wrap:anywhere; border-radius:8px; background:#f0f2ef; padding:11px; color:#4e534f; font-size:10px; }
   .empty-proof { color:#858a86; font-size:12px; }
+  .journey-card { margin-top:14px; border-radius:15px; background:white; padding:24px; }
+  .journey-head { display:flex; justify-content:space-between; gap:32px; align-items:start; padding:18px 0; }
+  .journey-head p { max-width:650px; margin:0; color:#686d69; font-size:12px; line-height:1.55; }
+  .journey-head > strong { flex-shrink:0; border-radius:999px; background:#edf3ff; padding:8px 11px; color:var(--blue); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; text-transform:uppercase; }
+  .journey-card ol { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:1px; margin:0; padding:0; background:#e4e6e3; list-style:none; }
+  .journey-card li { display:flex; min-height:96px; gap:10px; align-items:start; background:#f8f9f6; padding:14px; }
+  .journey-card li i { display:grid; width:22px; height:22px; flex:0 0 auto; place-items:center; border-radius:50%; background:#e5fbd0; color:#315e12; font-size:9px; font-style:normal; }
+  .journey-card li.failed i { background:#ffe2df; color:#a32b22; }
+  .journey-card li strong, .journey-card li small { display:block; }
+  .journey-card li strong { font-size:10px; line-height:1.35; }
+  .journey-card li small { margin-top:7px; color:#858a86; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:7px; }
   .next-card { margin-top:14px; border-radius:14px; background:var(--acid); padding:22px; }
   .next-card span { color:#3c4b22; }
   .next-card p { margin:10px 0 0; font-size:16px; }
   .error-message { position:fixed; right:20px; bottom:20px; z-index:10; max-width:440px; border-radius:12px; background:#fff0ee; padding:15px 18px; color:#9d271f; box-shadow:0 12px 35px rgba(70,20,15,.13); font-size:12px; }
+  .journey-warning { position:fixed; left:20px; bottom:20px; z-index:10; max-width:440px; border-radius:12px; background:#fff7dc; padding:15px 18px; color:#775b05; box-shadow:0 12px 35px rgba(70,55,15,.1); font-size:12px; }
   .mock-flag { position:fixed; right:16px; top:92px; z-index:5; border-radius:999px; background:var(--acid); padding:7px 10px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:7px; letter-spacing:.08em; text-transform:uppercase; }
   @keyframes pulse { 50% { opacity:.35; transform:scale(.75); } }
   @keyframes rotate { to { transform:rotate(360deg); } }
   @media (max-width:850px) {
-    .agent-grid, .receipt-grid, .proof-grid { grid-template-columns:1fr; }
+    .agent-grid, .receipt-grid, .proof-grid, .journey-card ol { grid-template-columns:1fr; }
     .agent-card { min-height:auto; }
     .agent-card > strong { margin-top:34px; }
     .agent-card > p { min-height:auto; }
@@ -587,6 +655,8 @@
     .presets { grid-template-columns:1fr; }
     .presets button { min-height:auto; }
     .receipt-stamp { width:140px; height:140px; }
+    .journey-head { display:block; }
+    .journey-head > strong { display:inline-block; margin-top:14px; }
   }
   @media (max-width:600px) {
     .activation-header { grid-template-columns:1fr auto; gap:14px; padding:0 16px; }
