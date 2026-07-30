@@ -30,6 +30,10 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/providers", "accounts and plans"),
     ("/login", "connect an account"),
     ("/proof", "latest receipt"),
+    ("/diff", "workspace changes"),
+    ("/review", "review current diff"),
+    ("/permissions", "authority boundary"),
+    ("/resume", "restore a session"),
     ("/agents", "managed workers"),
     ("/skills", "learned workflows"),
     ("/compact", "shrink context"),
@@ -191,6 +195,7 @@ fn public_command(command: &str) -> bool {
             | "/model"
             | "/models"
             | "/proof"
+            | "/permissions"
             | "/undo"
             | "/exit"
     )

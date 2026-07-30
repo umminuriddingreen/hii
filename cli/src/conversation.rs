@@ -803,6 +803,144 @@ impl Conversation {
         ))
     }
 
+    pub fn diff(&self) -> Result<String, String> {
+        self.workspace_diff()
+    }
+
+    pub fn review(&mut self) -> Result<String, String> {
+        let diff = self.workspace_diff()?;
+        if diff.contains("No workspace changes.") {
+            return Ok(diff);
+        }
+        let messages = vec![
+            Message::system(
+                "Review the supplied workspace diff as a senior engineer. Find concrete bugs, security regressions, broken behavior, and missing tests. Rank findings by severity and cite file paths. Do not praise, summarize implementation effort, or invent unavailable context. If there are no findings, say so plainly.",
+            ),
+            Message::user(diff),
+        ];
+        let review = redact_text(&self.call_activity("reviewing", messages, false)?.content);
+        self.store
+            .event("conversation.review", json!({ "content": review }))?;
+        Ok(review)
+    }
+
+    pub fn permissions(&self) -> String {
+        if self.public_test {
+            [
+                "PUBLIC TEST",
+                "Allowed: read, search, create, edit, local verification, installed creative tools.",
+                "Network: HII web search and loopback model services only.",
+                "Blocked: deletion, host-home reads, secrets, messages/email, purchases, account changes, installs, private uploads, host HII control.",
+                "Scope: disposable session workspace only.",
+            ]
+            .join("\n")
+        } else {
+            [
+                "LOCAL OPERATOR SESSION",
+                "Allowed: workspace reads and edits, local tools, verification, HII context.",
+                "Approval required: deletion and destructive shell actions.",
+                "Never implicit: publishing, pushing, spending, messaging, account changes, or secret access.",
+                "Scope: current workspace unless you explicitly authorize more.",
+            ]
+            .join("\n")
+        }
+    }
+
+    pub fn resume(&mut self, requested: Option<&str>) -> Result<String, String> {
+        let directory = self.paths.runtime.join("conversations").join("cli");
+        if requested.is_none() {
+            let mut sessions = std::fs::read_dir(&directory)
+                .map_err(|error| error.to_string())?
+                .filter_map(Result::ok)
+                .filter(|entry| {
+                    entry
+                        .path()
+                        .extension()
+                        .is_some_and(|value| value == "jsonl")
+                })
+                .filter_map(|entry| {
+                    let modified = entry.metadata().ok()?.modified().ok()?;
+                    let id = entry.path().file_stem()?.to_str()?.to_string();
+                    (id != self.store.id).then_some((modified, id))
+                })
+                .collect::<Vec<_>>();
+            sessions.sort_by(|left, right| right.0.cmp(&left.0));
+            if sessions.is_empty() {
+                return Ok("No prior HII sessions found.".into());
+            }
+            return Ok(format!(
+                "Recent sessions\n{}",
+                sessions
+                    .into_iter()
+                    .take(10)
+                    .map(|(_, id)| format!("  {id}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+        let id = requested.unwrap_or_default().trim();
+        if id.is_empty()
+            || id.len() > 100
+            || !id
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || character == '-')
+        {
+            return Err("invalid session id".into());
+        }
+        let path = directory.join(format!("{id}.jsonl"));
+        let raw = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
+        let restored = resumable_messages(&raw);
+        if restored.is_empty() {
+            return Err("session contains no resumable messages".into());
+        }
+        let system = self
+            .messages
+            .first()
+            .cloned()
+            .ok_or_else(|| "conversation system context is missing".to_string())?;
+        let count = restored.len();
+        self.messages = std::iter::once(system).chain(restored).collect();
+        self.store.event(
+            "conversation.resumed",
+            json!({ "source": id, "messages": count }),
+        )?;
+        Ok(format!("Resumed {count} messages from {id}."))
+    }
+
+    fn workspace_diff(&self) -> Result<String, String> {
+        fn output(workspace: &std::path::Path, arguments: &[&str]) -> Option<String> {
+            let result = std::process::Command::new("git")
+                .args(arguments)
+                .current_dir(workspace)
+                .output()
+                .ok()?;
+            result.status.success().then(|| {
+                String::from_utf8_lossy(&result.stdout)
+                    .chars()
+                    .take(40_000)
+                    .collect::<String>()
+            })
+        }
+        let workspace = self.tools.workspace();
+        let status = output(workspace, &["status", "--short"])
+            .ok_or_else(|| "current workspace is not a Git repository".to_string())?;
+        if status.trim().is_empty() {
+            return Ok("No workspace changes.".into());
+        }
+        let diff = output(workspace, &["diff", "--no-ext-diff", "HEAD", "--"])
+            .or_else(|| output(workspace, &["diff", "--no-ext-diff", "--"]))
+            .unwrap_or_default();
+        Ok(format!(
+            "WORKSPACE STATUS\n{}\n\nDIFF\n{}",
+            status.trim_end(),
+            if diff.trim().is_empty() {
+                "(Only untracked files are present; ask HII to inspect them explicitly.)"
+            } else {
+                diff.trim_end()
+            }
+        ))
+    }
+
     fn compact_internal(&mut self, reason: &str) -> Result<CompactionStats, String> {
         let before_messages = self.messages.len().saturating_sub(1);
         let before_chars = self.context_chars();
@@ -1355,6 +1493,25 @@ fn verification_failure_signature(output: &str) -> String {
         .collect()
 }
 
+fn resumable_messages(raw: &str) -> Vec<Message> {
+    raw.lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter_map(|event| {
+            let kind = event.get("kind").and_then(|value| value.as_str())?;
+            let data = event.get("data")?;
+            match kind {
+                "forked.message" => Some(Message {
+                    role: data.get("role")?.as_str()?.to_string(),
+                    content: data.get("content")?.as_str()?.to_string(),
+                }),
+                "user.message" => Some(Message::user(data.get("content")?.as_str()?)),
+                "assistant.message" => Some(Message::assistant(data.get("content")?.as_str()?)),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
 fn plain_message(raw: &str) -> Option<&str> {
     let value = raw.trim();
     (!value.is_empty()
@@ -1409,8 +1566,8 @@ Paths are literal, never Markdown links. Avoid generic greetings. Use one tool a
 mod tests {
     use super::{
         conversation_prompt, needs_verification, observation_signature, plain_message,
-        public_test_sensitive_shell, shell_command_is_preview, shell_command_is_read_only,
-        verification_required_message,
+        public_test_sensitive_shell, resumable_messages, shell_command_is_preview,
+        shell_command_is_read_only, verification_required_message,
     };
     use std::path::Path;
 
@@ -1511,5 +1668,19 @@ mod tests {
         assert!(public_test_sensitive_shell("npx serve public"));
         assert!(!public_test_sensitive_shell("npm run build"));
         assert!(!public_test_sensitive_shell("python3 scripts/render.py"));
+    }
+
+    #[test]
+    fn resumable_session_parser_ignores_protocol_events_and_keeps_dialogue() {
+        let raw = [
+            r#"{"kind":"user.message","data":{"content":"build it"}}"#,
+            r#"{"kind":"model.action","data":{"content":"internal"}}"#,
+            r#"{"kind":"assistant.message","data":{"content":"done"}}"#,
+        ]
+        .join("\n");
+        let messages = resumable_messages(&raw);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[1].content, "done");
     }
 }

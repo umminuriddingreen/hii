@@ -63,6 +63,7 @@ impl RawModeGuard {
 pub struct LiveInput {
     _guard: RawModeGuard,
     buf: String,
+    cursor: usize,
 }
 
 impl LiveInput {
@@ -73,6 +74,7 @@ impl LiveInput {
         Ok(Some(Self {
             _guard: RawModeGuard::enter()?,
             buf: String::new(),
+            cursor: 0,
         }))
     }
 
@@ -90,7 +92,7 @@ impl LiveInput {
         if key.kind != event::KeyEventKind::Press {
             return Ok(None);
         }
-        Ok(match apply_key(key, &mut self.buf) {
+        Ok(match apply_key(key, &mut self.buf, &mut self.cursor) {
             KeyOutcome::Emit(event) => Some(event),
             KeyOutcome::Continue => None,
         })
@@ -117,39 +119,183 @@ enum KeyOutcome {
 
 /// Pure translation of one key press into a [`KeyOutcome`], mutating `buf` for
 /// plain typing and line editing. No terminal I/O happens here.
-fn apply_key(key: KeyEvent, buf: &mut String) -> KeyOutcome {
+fn previous_boundary(buf: &str, cursor: usize) -> usize {
+    buf[..cursor]
+        .char_indices()
+        .last()
+        .map(|(index, _)| index)
+        .unwrap_or(0)
+}
+
+fn next_boundary(buf: &str, cursor: usize) -> usize {
+    buf[cursor..]
+        .chars()
+        .next()
+        .map(|character| cursor + character.len_utf8())
+        .unwrap_or(cursor)
+}
+
+fn apply_key(key: KeyEvent, buf: &mut String, cursor: &mut usize) -> KeyOutcome {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
     match key.code {
-        KeyCode::Enter => KeyOutcome::Emit(InputEvent::Submit(std::mem::take(buf))),
-        KeyCode::Tab => KeyOutcome::Emit(InputEvent::Queue(std::mem::take(buf))),
+        KeyCode::Enter => {
+            *cursor = 0;
+            KeyOutcome::Emit(InputEvent::Submit(std::mem::take(buf)))
+        }
+        KeyCode::Tab => {
+            *cursor = 0;
+            KeyOutcome::Emit(InputEvent::Queue(std::mem::take(buf)))
+        }
         KeyCode::Esc => KeyOutcome::Emit(InputEvent::Interrupt),
         KeyCode::Char('c') if ctrl => KeyOutcome::Emit(InputEvent::Interrupt),
         KeyCode::Char('b') if ctrl => KeyOutcome::Emit(InputEvent::Background),
         KeyCode::Char('t') if ctrl => KeyOutcome::Emit(InputEvent::TaskView),
+        KeyCode::Char('a') if ctrl => {
+            *cursor = 0;
+            KeyOutcome::Continue
+        }
+        KeyCode::Home => {
+            *cursor = 0;
+            KeyOutcome::Continue
+        }
+        KeyCode::Char('e') if ctrl => {
+            *cursor = buf.len();
+            KeyOutcome::Continue
+        }
+        KeyCode::End => {
+            *cursor = buf.len();
+            KeyOutcome::Continue
+        }
+        KeyCode::Left if !alt => {
+            *cursor = previous_boundary(buf, *cursor);
+            KeyOutcome::Continue
+        }
+        KeyCode::Right if !alt => {
+            *cursor = next_boundary(buf, *cursor);
+            KeyOutcome::Continue
+        }
+        KeyCode::Left if alt => {
+            while *cursor > 0
+                && buf[..*cursor]
+                    .chars()
+                    .last()
+                    .is_some_and(char::is_whitespace)
+            {
+                *cursor = previous_boundary(buf, *cursor);
+            }
+            while *cursor > 0
+                && buf[..*cursor]
+                    .chars()
+                    .last()
+                    .is_some_and(|character| !character.is_whitespace())
+            {
+                *cursor = previous_boundary(buf, *cursor);
+            }
+            KeyOutcome::Continue
+        }
+        KeyCode::Char('b') if alt => {
+            while *cursor > 0
+                && buf[..*cursor]
+                    .chars()
+                    .last()
+                    .is_some_and(char::is_whitespace)
+            {
+                *cursor = previous_boundary(buf, *cursor);
+            }
+            while *cursor > 0
+                && buf[..*cursor]
+                    .chars()
+                    .last()
+                    .is_some_and(|character| !character.is_whitespace())
+            {
+                *cursor = previous_boundary(buf, *cursor);
+            }
+            KeyOutcome::Continue
+        }
+        KeyCode::Right if alt => {
+            while *cursor < buf.len()
+                && buf[*cursor..]
+                    .chars()
+                    .next()
+                    .is_some_and(char::is_whitespace)
+            {
+                *cursor = next_boundary(buf, *cursor);
+            }
+            while *cursor < buf.len()
+                && buf[*cursor..]
+                    .chars()
+                    .next()
+                    .is_some_and(|character| !character.is_whitespace())
+            {
+                *cursor = next_boundary(buf, *cursor);
+            }
+            KeyOutcome::Continue
+        }
+        KeyCode::Char('f') if alt => {
+            while *cursor < buf.len()
+                && buf[*cursor..]
+                    .chars()
+                    .next()
+                    .is_some_and(char::is_whitespace)
+            {
+                *cursor = next_boundary(buf, *cursor);
+            }
+            while *cursor < buf.len()
+                && buf[*cursor..]
+                    .chars()
+                    .next()
+                    .is_some_and(|character| !character.is_whitespace())
+            {
+                *cursor = next_boundary(buf, *cursor);
+            }
+            KeyOutcome::Continue
+        }
         KeyCode::Char('u') if ctrl => {
-            buf.clear();
+            buf.drain(..*cursor);
+            *cursor = 0;
+            KeyOutcome::Continue
+        }
+        KeyCode::Char('k') if ctrl => {
+            buf.truncate(*cursor);
             KeyOutcome::Continue
         }
         KeyCode::Char('w') if ctrl => {
-            while buf.ends_with(char::is_whitespace) {
-                buf.pop();
-            }
-            while buf
-                .chars()
-                .last()
-                .is_some_and(|character| !character.is_whitespace())
+            let end = *cursor;
+            while *cursor > 0
+                && buf[..*cursor]
+                    .chars()
+                    .last()
+                    .is_some_and(char::is_whitespace)
             {
-                buf.pop();
+                *cursor = previous_boundary(buf, *cursor);
             }
+            while *cursor > 0
+                && buf[..*cursor]
+                    .chars()
+                    .last()
+                    .is_some_and(|character| !character.is_whitespace())
+            {
+                *cursor = previous_boundary(buf, *cursor);
+            }
+            buf.drain(*cursor..end);
             KeyOutcome::Continue
         }
-        KeyCode::Backspace => {
-            buf.pop();
+        KeyCode::Backspace if *cursor > 0 => {
+            let previous = previous_boundary(buf, *cursor);
+            buf.drain(previous..*cursor);
+            *cursor = previous;
+            KeyOutcome::Continue
+        }
+        KeyCode::Delete if *cursor < buf.len() => {
+            let next = next_boundary(buf, *cursor);
+            buf.drain(*cursor..next);
             KeyOutcome::Continue
         }
         // Ignore other control chords; only insert real characters.
-        KeyCode::Char(c) if !ctrl => {
-            buf.push(c);
+        KeyCode::Char(c) if !ctrl && !alt => {
+            buf.insert(*cursor, c);
+            *cursor += c.len_utf8();
             KeyOutcome::Continue
         }
         _ => KeyOutcome::Continue,
@@ -171,6 +317,7 @@ fn clear_menu(out: &mut impl Write, rows: usize) {
 fn redraw(
     prompt: &str,
     buf: &str,
+    cursor: usize,
     selected: usize,
     previous_rows: &mut usize,
     public_test: bool,
@@ -186,6 +333,10 @@ fn redraw(
                 .map_err(|e| format!("failed to draw command menu: {e}"))?;
         }
         write!(out, "\x1b[u").map_err(|e| format!("failed to restore cursor: {e}"))?;
+    }
+    let tail = buf[cursor..].chars().count();
+    if tail > 0 {
+        write!(out, "\x1b[{tail}D").map_err(|e| format!("failed to restore input cursor: {e}"))?;
     }
     *previous_rows = menu.len();
     out.flush()
@@ -226,6 +377,7 @@ fn selected_command(
 pub fn read_event(public_test: bool, history: &[String]) -> Result<InputEvent> {
     let _guard = RawModeGuard::enter()?;
     let mut buf = String::new();
+    let mut cursor = 0usize;
     let mut frame = 0usize;
     let mut selected = 0usize;
     let mut menu_rows = 0usize;
@@ -234,6 +386,7 @@ pub fn read_event(public_test: bool, history: &[String]) -> Result<InputEvent> {
     redraw(
         &crate::tui::prompt_frame(frame),
         &buf,
+        cursor,
         selected,
         &mut menu_rows,
         public_test,
@@ -247,6 +400,7 @@ pub fn read_event(public_test: bool, history: &[String]) -> Result<InputEvent> {
                 redraw(
                     &crate::tui::prompt_frame(frame),
                     &buf,
+                    cursor,
                     selected,
                     &mut menu_rows,
                     public_test,
@@ -267,6 +421,7 @@ pub fn read_event(public_test: bool, history: &[String]) -> Result<InputEvent> {
                     redraw(
                         &crate::tui::prompt_frame(frame),
                         &buf,
+                        cursor,
                         selected,
                         &mut menu_rows,
                         public_test,
@@ -278,6 +433,7 @@ pub fn read_event(public_test: bool, history: &[String]) -> Result<InputEvent> {
                     redraw(
                         &crate::tui::prompt_frame(frame),
                         &buf,
+                        cursor,
                         selected,
                         &mut menu_rows,
                         public_test,
@@ -294,10 +450,12 @@ pub fn read_event(public_test: bool, history: &[String]) -> Result<InputEvent> {
                 }
                 KeyCode::Esc if !matches.is_empty() => {
                     buf.clear();
+                    cursor = 0;
                     selected = 0;
                     redraw(
                         &crate::tui::prompt_frame(frame),
                         &buf,
+                        cursor,
                         selected,
                         &mut menu_rows,
                         public_test,
@@ -310,10 +468,12 @@ pub fn read_event(public_test: bool, history: &[String]) -> Result<InputEvent> {
                     }
                     history_index = history_index.saturating_sub(1);
                     buf.clone_from(&history[history_index]);
+                    cursor = buf.len();
                     selected = 0;
                     redraw(
                         &crate::tui::prompt_frame(frame),
                         &buf,
+                        cursor,
                         selected,
                         &mut menu_rows,
                         public_test,
@@ -327,10 +487,12 @@ pub fn read_event(public_test: bool, history: &[String]) -> Result<InputEvent> {
                     } else {
                         buf.clone_from(&history[history_index]);
                     }
+                    cursor = buf.len();
                     selected = 0;
                     redraw(
                         &crate::tui::prompt_frame(frame),
                         &buf,
+                        cursor,
                         selected,
                         &mut menu_rows,
                         public_test,
@@ -339,7 +501,7 @@ pub fn read_event(public_test: bool, history: &[String]) -> Result<InputEvent> {
                 }
                 _ => {}
             }
-            match apply_key(key, &mut buf) {
+            match apply_key(key, &mut buf, &mut cursor) {
                 KeyOutcome::Emit(ev) => {
                     // Move to a fresh line so subsequent output is not clobbered.
                     let mut out = io::stdout();
@@ -353,6 +515,7 @@ pub fn read_event(public_test: bool, history: &[String]) -> Result<InputEvent> {
                     redraw(
                         &crate::tui::prompt_frame(frame),
                         &buf,
+                        cursor,
                         selected,
                         &mut menu_rows,
                         public_test,
@@ -390,8 +553,12 @@ mod tests {
         KeyEvent::new(code, KeyModifiers::CONTROL)
     }
 
-    fn emit(key: KeyEvent, buf: &mut String) -> Option<InputEvent> {
-        match apply_key(key, buf) {
+    fn alt(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::ALT)
+    }
+
+    fn emit(key: KeyEvent, buf: &mut String, cursor: &mut usize) -> Option<InputEvent> {
+        match apply_key(key, buf, cursor) {
             KeyOutcome::Emit(ev) => Some(ev),
             KeyOutcome::Continue => None,
         }
@@ -400,10 +567,11 @@ mod tests {
     #[test]
     fn typing_then_enter_submits_buffer() {
         let mut buf = String::new();
-        assert!(emit(key(KeyCode::Char('h')), &mut buf).is_none());
-        assert!(emit(key(KeyCode::Char('i')), &mut buf).is_none());
+        let mut cursor = 0;
+        assert!(emit(key(KeyCode::Char('h')), &mut buf, &mut cursor).is_none());
+        assert!(emit(key(KeyCode::Char('i')), &mut buf, &mut cursor).is_none());
         assert_eq!(
-            emit(key(KeyCode::Enter), &mut buf),
+            emit(key(KeyCode::Enter), &mut buf, &mut cursor),
             Some(InputEvent::Submit("hi".to_string()))
         );
         // Buffer is drained on submit.
@@ -413,8 +581,9 @@ mod tests {
     #[test]
     fn tab_queues_current_line_without_losing_text() {
         let mut buf = String::from("deploy");
+        let mut cursor = buf.len();
         assert_eq!(
-            emit(key(KeyCode::Tab), &mut buf),
+            emit(key(KeyCode::Tab), &mut buf, &mut cursor),
             Some(InputEvent::Queue("deploy".to_string()))
         );
         assert!(buf.is_empty());
@@ -423,20 +592,21 @@ mod tests {
     #[test]
     fn control_keys_map_to_run_controls() {
         let mut buf = String::new();
+        let mut cursor = 0;
         assert_eq!(
-            emit(key(KeyCode::Esc), &mut buf),
+            emit(key(KeyCode::Esc), &mut buf, &mut cursor),
             Some(InputEvent::Interrupt)
         );
         assert_eq!(
-            emit(ctrl(KeyCode::Char('c')), &mut buf),
+            emit(ctrl(KeyCode::Char('c')), &mut buf, &mut cursor),
             Some(InputEvent::Interrupt)
         );
         assert_eq!(
-            emit(ctrl(KeyCode::Char('b')), &mut buf),
+            emit(ctrl(KeyCode::Char('b')), &mut buf, &mut cursor),
             Some(InputEvent::Background)
         );
         assert_eq!(
-            emit(ctrl(KeyCode::Char('t')), &mut buf),
+            emit(ctrl(KeyCode::Char('t')), &mut buf, &mut cursor),
             Some(InputEvent::TaskView)
         );
     }
@@ -444,15 +614,35 @@ mod tests {
     #[test]
     fn backspace_edits_and_ctrl_chars_are_not_inserted() {
         let mut buf = String::from("ab");
-        assert!(emit(key(KeyCode::Backspace), &mut buf).is_none());
+        let mut cursor = buf.len();
+        assert!(emit(key(KeyCode::Backspace), &mut buf, &mut cursor).is_none());
         assert_eq!(buf, "a");
         // A ctrl chord that is not a mapped control must not type a character.
-        assert!(emit(ctrl(KeyCode::Char('x')), &mut buf).is_none());
+        assert!(emit(ctrl(KeyCode::Char('x')), &mut buf, &mut cursor).is_none());
         assert_eq!(buf, "a");
         buf.push_str(" two words");
-        assert!(emit(ctrl(KeyCode::Char('w')), &mut buf).is_none());
+        cursor = buf.len();
+        assert!(emit(ctrl(KeyCode::Char('w')), &mut buf, &mut cursor).is_none());
         assert_eq!(buf, "a two ");
-        assert!(emit(ctrl(KeyCode::Char('u')), &mut buf).is_none());
+        assert!(emit(ctrl(KeyCode::Char('u')), &mut buf, &mut cursor).is_none());
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn composer_edits_at_the_cursor_and_moves_by_word() {
+        let mut buf = String::from("make blue");
+        let mut cursor = buf.len();
+        assert!(emit(alt(KeyCode::Left), &mut buf, &mut cursor).is_none());
+        assert_eq!(&buf[cursor..], "blue");
+        assert!(emit(key(KeyCode::Char('i')), &mut buf, &mut cursor).is_none());
+        assert!(emit(key(KeyCode::Char('t')), &mut buf, &mut cursor).is_none());
+        assert_eq!(buf, "make itblue");
+        assert!(emit(key(KeyCode::Right), &mut buf, &mut cursor).is_none());
+        assert!(emit(key(KeyCode::Delete), &mut buf, &mut cursor).is_none());
+        assert_eq!(buf, "make itbue");
+        assert!(emit(ctrl(KeyCode::Char('a')), &mut buf, &mut cursor).is_none());
+        assert_eq!(cursor, 0);
+        assert!(emit(ctrl(KeyCode::Char('k')), &mut buf, &mut cursor).is_none());
         assert!(buf.is_empty());
     }
 
