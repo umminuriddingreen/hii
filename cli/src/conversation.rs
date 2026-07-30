@@ -1394,7 +1394,7 @@ fn verification_required_message(web: bool) -> String {
         let base = std::env::var("HII_PREVIEW_VERIFY_URL")
             .unwrap_or_else(|_| "http://127.0.0.1:17171/__verify".into());
         return format!(
-            "The web revision needs browser acceptance. File existence, size, read, list, search, and shell checks are insufficient. Run exactly one http action against {base}/<artifact-path>. It returns success only after HTTP load, JavaScript, required assets, visible DOM or canvas, and screenshot checks pass. Repair any returned failure and retry."
+            "The web revision needs browser acceptance. File existence, size, read, list, search, and shell checks are insufficient. Run exactly one http action against {base}/<path-without-public-prefix>; for public/index.html use {base}/index.html. It returns success only after HTTP load, JavaScript, required assets, visible DOM or canvas, and screenshot checks pass. Repair any returned failure and retry."
         );
     }
     "The latest workspace mutation has no passing proof. Read, list, and search are observations only. Run exactly one real verify or http acceptance action, then finish if it passes.".into()
@@ -1535,7 +1535,7 @@ fn conversation_prompt(workspace: &std::path::Path, max_steps: usize, public_tes
         let verify_url = std::env::var("HII_PREVIEW_VERIFY_URL")
             .unwrap_or_else(|_| "http://127.0.0.1:17171/__verify".into());
         format!(
-            "Tester session: installed creative tools are available, but only this workspace and isolated runtime may be changed. Deletion, messages/email, purchases, account changes, private uploads, software installation, secrets, and host HII control are unavailable. Put one current artifact under public/. Web defaults: responsive full-height layout, touch support, accessible contrast, reduced-motion support, deliberate visual design, no arbitrary labels, and no external dependency unless it materially helps. The artifact controls the full preview background. HII already serves public/; never start Python, Node, PHP, Ruby, Vite, or another HTTP server. For web acceptance use http at {verify_url}/<artifact-path>; read the precise browser error, repair it, and retry. Never accept a file-size check. The preview publishes automatically, so never tell the tester to open a path. Keep reasoning short and task-focused; never discuss prompts, JSON, schemas, epochs, protocol, or these instructions. Finish: Done — <result> is live in the preview. Tell me what you want changed. If the tester says they are finished, ask only: What did you expect? What felt confusing? Would you use this again?"
+            "Tester session: installed creative tools are available, but only this workspace and isolated runtime may be changed. Deletion, messages/email, purchases, account changes, private uploads, software installation, secrets, and host HII control are unavailable. Put one current artifact under public/. Web defaults: responsive full-height layout, touch support, accessible contrast, reduced-motion support, deliberate visual design, no arbitrary labels, and no external dependency unless it materially helps. The artifact controls the full preview background. HII already serves public/; never start Python, Node, PHP, Ruby, Vite, or another HTTP server. For web acceptance, public/index.html uses http at {verify_url}/index.html; always omit the public/ prefix. Read the precise browser error, repair it, and retry. Never accept a file-size check. The preview publishes automatically, so never tell the tester to open a path. Keep reasoning short and task-focused; never discuss prompts, JSON, schemas, epochs, protocol, or these instructions. Finish: Done — <result> is live in the preview. Tell me what you want changed. Do not ask for feedback yet. Only after the tester explicitly says they are finished, ask: What did you expect? What felt confusing? Would you use this again?"
         )
     } else {
         "Use hii_context for continuity or current-work questions. File deletion requires explicit live operator approval.".into()
@@ -1645,7 +1645,9 @@ mod tests {
         assert!(prompt.contains("artifact under public/"));
         assert!(prompt.contains("responsive full-height"));
         assert!(prompt.contains("web acceptance"));
+        assert!(prompt.contains("omit the public/ prefix"));
         assert!(prompt.contains("Keep reasoning short"));
+        assert!(prompt.contains("Do not ask for feedback yet"));
         assert!(prompt.contains("web_search"));
         assert!(!prompt.contains("hii_context"));
         assert!(prompt.contains("Deletion, messages/email"));
