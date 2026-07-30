@@ -88,8 +88,13 @@
   let contextPreview: ContextPreview | null = node.payload.contextPreview as ContextPreview || null;
   let contextPreviewLoading = false;
   let contextPreviewError = '';
+  let mounted = false;
+  let previewedContextSignature = contextPreview
+    ? JSON.stringify(Array.isArray(node.payload.context) ? node.payload.context : [])
+    : '';
 
   $: context = (Array.isArray(node.payload.context) ? node.payload.context : []) as ContextItem[];
+  $: contextSignature = JSON.stringify(context);
   $: boundary = {
     capabilityId: 'hii.agent.workspace_run',
     workspaceRoot: String(node.payload.workspaceRoot || '/Users/ummi/hii'),
@@ -113,6 +118,15 @@
   $: evidence = workspaceRunEvidence(job, receipt);
   $: evidenceCount = evidence.ledger.length + evidence.proofArtifacts.length + evidence.checks.length + evidence.logs.length;
   $: approvalBlocked = boundaryManifest.blocked || contextPreview?.blocked || !contextPreview?.fingerprint;
+  $: if (
+    mounted
+    && ['waiting_approval', 'proposed'].includes(status)
+    && contextSignature !== previewedContextSignature
+    && !contextPreviewLoading
+  ) {
+    contextPreview = null;
+    void loadContextPreview();
+  }
 
   function objectStatus(value: string): SpatialObjectStatus {
     if (value === 'cancelled') return 'archived';
@@ -301,6 +315,7 @@
 
   async function loadContextPreview() {
     if (contextPreviewLoading) return;
+    const requestedContextSignature = contextSignature;
     contextPreviewLoading = true;
     contextPreviewError = '';
     try {
@@ -314,7 +329,9 @@
           context
         })
       }) as { preview: ContextPreview };
+      if (requestedContextSignature !== contextSignature) return;
       contextPreview = result.preview;
+      previewedContextSignature = requestedContextSignature;
       onPatch({
         payload: {
           ...node.payload,
@@ -323,11 +340,21 @@
       });
     } catch (cause) {
       contextPreview = null;
+      if (requestedContextSignature === contextSignature) {
+        previewedContextSignature = requestedContextSignature;
+      }
       contextPreviewError = cause instanceof Error
         ? cause.message
         : 'Could not build the execution context manifest.';
     } finally {
       contextPreviewLoading = false;
+      if (
+        mounted
+        && ['waiting_approval', 'proposed'].includes(status)
+        && contextSignature !== previewedContextSignature
+      ) {
+        queueMicrotask(() => void loadContextPreview());
+      }
     }
   }
 
@@ -399,6 +426,7 @@
 
   onMount(() => {
     active = true;
+    mounted = true;
     if (runId && ['queued', 'running'].includes(status)) {
       busy = true;
       void poll(runId);
@@ -411,6 +439,7 @@
     }
     return () => {
       active = false;
+      mounted = false;
     };
   });
 </script>
@@ -433,9 +462,10 @@
         <div class="mt-5">
           <div class="flex items-center justify-between">
             <h3 class="font-mono text-[8px] uppercase tracking-[.12em] text-neutral-400">Execution context manifest</h3>
-            <span class="font-mono text-[8px] text-neutral-400">
-              {contextPreviewLoading ? 'fingerprinting…' : `${contextPreview?.summary.executable ?? 0}/${context.length} executable`}
-            </span>
+            <div class="flex items-center gap-2 font-mono text-[8px] text-neutral-400">
+              {#if node.payload.contextSyncedAt}<span class="rounded-full bg-blue-50 px-2 py-1 uppercase tracking-[.05em] text-blue-700">focus refreshed</span>{/if}
+              <span>{contextPreviewLoading ? 'fingerprinting…' : `${contextPreview?.summary.executable ?? 0}/${context.length} executable`}</span>
+            </div>
           </div>
           {#if contextPreview?.items.length}
             <div class="mt-2 space-y-1.5">

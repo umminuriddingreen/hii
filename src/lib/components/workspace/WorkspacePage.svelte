@@ -24,6 +24,7 @@
   import { workspaceConnections } from '@/lib/workspace/connections';
   import { findOpenWorkspacePosition } from '@/lib/workspace/layout';
   import { normalizeWorkspaceContextAnchor } from '@/lib/workspace/context-anchor';
+  import { rebindPendingWorkspaceContext } from '@/lib/workspace/pending-context';
 
   export let data: { enabled: boolean };
   const surfaceCatalog = [
@@ -127,7 +128,20 @@
     if(!response.ok){saveError=result.error||'HII could not create the workspace.';return}
     workspaceMenu=false;selected=null;contextSelection=[];await load(id);
   }
-  function patch(id:string,patch:Partial<WorkspaceNode>){const before=doc;doc={...doc,nodes:doc.nodes.map(n=>n.id===id?{...n,...patch,updatedAt:new Date().toISOString()}:n)};remember(before);persist();}
+  function patch(id:string,patch:Partial<WorkspaceNode>){
+    const before=doc;
+    const current=doc.nodes.find(node=>node.id===id);
+    if(!current)return;
+    const updatedAt=new Date().toISOString();
+    const next={...current,...patch,updatedAt};
+    let nodes=doc.nodes.map(node=>node.id===id?next:node);
+    if(JSON.stringify(contextItem(current))!==JSON.stringify(contextItem(next))){
+      nodes=rebindPendingWorkspaceContext(nodes,id,contextItem(next),updatedAt);
+    }
+    doc={...doc,nodes};
+    remember(before);
+    persist();
+  }
   function addSeeds(seeds:NodeSeed[],at:{x:number;y:number}){const before=doc;if(seeds.some(seed=>seed.type==='model'))ensureModelPane();for(const [index,seed] of seeds.entries()){const node=makeNode(seed,at.x+index*28,at.y+index*28,++doc.nextZ);doc={...doc,nodes:[...doc.nodes,node]};selected=node.id}remember(before);persist();}
   function spawn(type:string,payload:Record<string,unknown>={}){const typedPayload=type==='frame'?{sceneOrder:scenes.length+1,...payload}:payload;const seed=seedFor(type as WorkspaceNodeType,type==='browser'?{url:'https://duckduckgo.com',...typedPayload}:type==='terminal'?{sessionId:crypto.randomUUID(),...typedPayload}:typedPayload);const center={x:(-doc.viewport.x+innerWidth/2)/doc.viewport.zoom,y:(-doc.viewport.y+innerHeight/2)/doc.viewport.zoom};addSeeds([seed],{x:center.x-seed.w/2,y:center.y-seed.h/2});omnibar=false;query='';if(type==='context')void refreshContext();if(type==='board')void refreshBoard();}
   function workspacePoint(clientX:number,clientY:number){return{x:(clientX-doc.viewport.x)/doc.viewport.zoom,y:(clientY-doc.viewport.y)/doc.viewport.zoom}}

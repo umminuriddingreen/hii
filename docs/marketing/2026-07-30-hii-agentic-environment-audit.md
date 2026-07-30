@@ -437,6 +437,18 @@ vetted working copy is `docs/launch/hii-x-launch-kit-opus5.md`. It keeps one
 first-cohort action, one honest labeled time jump when the local model takes
 longer than the published cut, and a claim table tied to current proof.
 
+A second read-only `claude-opus-5` collaboration used the primary Arry findings
+and the newly verified sub-asset anchor contract. It found a sharper cold-open:
+change a selected image region or design layer and show the approval fingerprint
+change before execution. Auditing that proposal exposed a real stale-context
+gap: pending runs retained their original anchor snapshot even when the source
+object changed. HII now rebinds edited source context only into unapproved runs
+and their intent, clears the stale preview, and recomputes the manifest.
+Queued and completed runs remain immutable. The vetted production brief is
+`docs/launch/hii-fingerprint-test-opus5.md`; unsupported zero-latency execution,
+crop handles, design-layer toggles, source-node hash badges, and public-download
+claims were removed.
+
 ### Current product comparisons
 
 | Product | What it teaches HII | What HII should not copy |

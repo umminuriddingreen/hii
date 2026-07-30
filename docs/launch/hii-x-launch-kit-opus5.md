@@ -8,6 +8,12 @@ This kit was developed with Claude Opus 5 and then checked against HII's live
 product receipts. Opus supplied the launch structure. HII's verified state
 decides every claim.
 
+The first cold-open is now the separate
+`docs/launch/hii-fingerprint-test-opus5.md`: a continuous pre-approval clip in
+which changing human focus visibly changes the pending manifest fingerprint.
+This document remains the full-loop follow-up showing execution, artifact, and
+receipt with an honestly labeled time jump.
+
 ## Positioning
 
 > HII is a local-first spatial workspace where you select the context, state
@@ -213,12 +219,14 @@ reviews it. Then it can be used again on new context.
 Do not publish placeholders. Set the rate, dates, number of sessions, consent
 terms, and removal contact first.
 
-> **HII first cohort — 12 Mac-based creative people, paid.**
+> **HII first cohort — five Mac-based creative people, paid.**
 >
 > We are paying **[rate]** per session for **[number]** sessions between
 > **[dates]**. Bring real digital or physical work. You keep what you make.
 >
-> This cohort is designed to pay and visibly credit creative Black makers.
+> Recruitment will deliberately reach creative Black makers and Black-led
+> studios while the application remains open. Participants are paid and
+> visibly credited.
 > Nothing appears in HII marketing without separate written approval for that
 > specific use.
 >

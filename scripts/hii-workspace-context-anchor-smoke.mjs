@@ -15,6 +15,7 @@ process.env.HII_RUNTIME_DIR = runtimeRoot;
 
 const contextModule = await import('../lib/server/hii-workspace-run-context.ts');
 const stagingModule = await import('../aii/daemon/workspace-run-staging.mjs');
+const pendingContextModule = await import('../lib/workspace/pending-context.ts');
 
 function addAsset(name, anchor) {
   const body = Buffer.from(`HII human focus proof: ${name}\n`);
@@ -65,6 +66,60 @@ try {
   });
   assert.notEqual(changedFocus.fingerprint, preview.fingerprint);
 
+  const now = new Date().toISOString();
+  const sourceNode = {
+    id: context[1].id,
+    type: 'image',
+    x: 0,
+    y: 0,
+    w: 100,
+    h: 100,
+    z: 1,
+    createdAt: now,
+    updatedAt: now,
+    payload: {}
+  };
+  const intentNode = {
+    ...sourceNode,
+    id: 'intent',
+    type: 'intent',
+    payload: { context: [context[1]] }
+  };
+  const runNode = {
+    ...sourceNode,
+    id: 'run',
+    type: 'run',
+    object: { kind: 'run', status: 'waiting_approval', parentId: 'intent' },
+    payload: {
+      status: 'waiting_approval',
+      context: [context[1]],
+      contextPreview: preview
+    }
+  };
+  const changedImage = {
+    ...context[1],
+    anchor: { kind: 'image-region', x: 0.25, y: 0.1, width: 0.5, height: 0.6, label: 'reframed hero' }
+  };
+  const rebound = pendingContextModule.rebindPendingWorkspaceContext(
+    [sourceNode, intentNode, runNode],
+    context[1].id,
+    changedImage,
+    now
+  );
+  assert.equal(rebound[2].payload.contextPreview, null);
+  assert.deepEqual(rebound[1].payload.context, [changedImage]);
+  const reboundPreview = await contextModule.previewWorkspaceRunContext({
+    runId: 'anchor-proof',
+    workspaceRoot,
+    context: rebound[2].payload.context
+  });
+  const originalImagePreview = await contextModule.previewWorkspaceRunContext({
+    runId: 'anchor-proof',
+    workspaceRoot,
+    context: [context[1]]
+  });
+  assert.notEqual(reboundPreview.fingerprint, originalImagePreview.fingerprint);
+
   const goal = contextModule.workspaceRunExecutionGoal('Create the reviewed launch demo.', preview);
   assert.match(goal, /Human-reviewed PDF focus: pages 2–4/);
   assert.match(goal, /Human-reviewed image focus: normalized crop/);
@@ -99,6 +154,7 @@ try {
   console.log('status:       ok');
   console.log(`asset types:  ${context.length}`);
   console.log('approval:     exact human focus changes the run fingerprint');
+  console.log('refresh:      pending intent + run rebind; stale approval manifest cleared');
   console.log('execution:    focus instructions and read-only staged copies agree');
   console.log('cleanup:      disposable copies removed; HII source assets preserved');
 } finally {

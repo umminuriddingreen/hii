@@ -37,6 +37,7 @@ const cadPane = readFileSync(resolve(root, 'src/lib/components/workspace/CadPane
 const modelPane = readFileSync(resolve(root, 'src/lib/components/workspace/ModelPane.svelte'), 'utf8');
 const contextAnchor = readFileSync(resolve(root, 'lib/workspace/context-anchor.ts'), 'utf8');
 const workspaceIngest = readFileSync(resolve(root, 'lib/workspace/ingest.ts'), 'utf8');
+const pendingContext = readFileSync(resolve(root, 'lib/workspace/pending-context.ts'), 'utf8');
 
 describe('agentic workspace interaction contract', () => {
   it('summons direct workspace intent from Option+Space', () => {
@@ -124,6 +125,10 @@ describe('agentic workspace interaction contract', () => {
     expect(cadPane).toContain('useDrawingView');
     expect(modelPane).toContain('useModelView');
     expect(workspaceIngest).toContain("anchorAdapter: 'design-selection'");
+    expect(workspace).toContain('rebindPendingWorkspaceContext');
+    expect(pendingContext).toContain("contextPreview: null");
+    expect(spatialRun).toContain('focus refreshed');
+    expect(spatialRun).toContain('requestedContextSignature !== contextSignature');
   });
 
   it('keeps governed progress concise and raw execution output behind inspection', () => {
