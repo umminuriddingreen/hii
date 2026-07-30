@@ -1,0 +1,1 @@
+If you ship work under your own name: what is the last thing you personally check before an AI-touched file goes to a client, and where does that check live right now?

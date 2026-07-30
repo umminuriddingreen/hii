@@ -451,8 +451,10 @@ compatibility boundary part of the permanent product CI gate.
   smoke tests exist.
 - Managed Run and legacy Chat surfaces now keep readable progress or assistant
   output primary and raw execution evidence explicitly nested. The terminal is
-  still intentionally raw, and the board showed duplicate or low-quality
-  generated tasks.
+  still intentionally raw. The board now records human, agent, and system
+  origin; holds generated active requests as proposals; rejects exact open
+  duplicates before append; and requires explicit approval before a proposal
+  enters `next` or `doing`.
 - Runtime state is hard to interpret: the surface showed roughly 90 `hiid`
   instances without explaining whether that was healthy or actionable.
 - During the initial audit, `hii space health`, `hii space snapshot`, and
@@ -518,6 +520,16 @@ Queued and completed runs remain immutable. The vetted production brief is
 `docs/launch/hii-fingerprint-test-opus5.md`; unsupported zero-latency execution,
 crop handles, design-layer toggles, source-node hash badges, and public-download
 claims were removed.
+
+A third read-only `claude-opus-5` collaboration reviewed the newly verified
+governed board boundary in session
+`316086a5-c3b8-4ccf-91c7-f1857b1c64a6`. Opus returned `revise`: the product
+mechanic was strong, but “refused” overstated a lane rule, duplicate rejection
+needed a visible count, and the clip needed to end on a concrete maker question
+instead of a slogan. The production brief is
+`docs/launch/hii-governed-proposals-opus5.md`. It states only the literal
+proposal, exact-open-duplicate, and recorded-approval behavior, and CI checks
+the six-beat storyboard, post length, session provenance, and forbidden claims.
 
 ### Current product comparisons
 

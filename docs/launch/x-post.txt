@@ -1,7 +1,1 @@
-I don’t want my work trapped in disconnected files, tools, and AI chats.
-
-HII is a visual workspace where you arrange the work, ask AI to help, and keep the context, result, and proof together.
-
-Actual interface ↓
-
-5 founder sessions. Reply “HII” + what you’re making.
+Two AI agents asked to put tasks in my active lane. HII held them as proposals, rejected the exact open duplicate, and would not promote either until I approved. The ledger shows who asked and who signed. What would you never let an agent move on its own? [video]
