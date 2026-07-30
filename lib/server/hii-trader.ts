@@ -153,6 +153,9 @@ const MODEL_PREFERENCES = ['qwen3.6:35b-mlx', 'qwen3.6:27b-mlx', 'gemma4:e2b-mlx
 const PAPER_FEE_PCT = 0.26;
 const PAPER_SLIPPAGE_PCT = 0.15;
 const CYCLE_MINUTES = 5;
+const CYCLE_LEASE_MS = 2 * 60_000;
+const FAVORABLE_CHANGE_24H_PCT = 2;
+const FAVORABLE_SPREAD_PCT = 0.25;
 
 function runtimeRoot() {
   return process.env.HII_RUNTIME_DIR || path.join(os.homedir(), '.hii');
@@ -504,6 +507,45 @@ export function validateProposalAgainstAsset(value: unknown, asset: MarketAsset,
   };
 }
 
+function parseIntelligencePayload(content: unknown) {
+  const text = String(content || '{}').trim();
+  const json = text
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '');
+  return JSON.parse(json) as { proposals?: unknown[] };
+}
+
+function ensureNonDegenerateProposals(assets: MarketAsset[], proposals: TradeProposal[]) {
+  if (proposals.some((proposal) => proposal.action !== 'hold')) return proposals;
+  const candidate = assets
+    .filter((asset) =>
+      asset.eligible
+      && asset.assetClass === 'core'
+      && asset.change24hPct >= FAVORABLE_CHANGE_24H_PCT
+      && asset.volume24hUsd >= 5_000_000
+      && asset.spreadPct !== null
+      && asset.spreadPct <= FAVORABLE_SPREAD_PCT
+    )
+    .sort((left, right) => right.change24hPct - left.change24hPct)[0];
+  if (!candidate) return proposals;
+
+  const fallback: TradeProposal = {
+    symbol: candidate.symbol,
+    action: 'buy',
+    confidence: 0.6,
+    thesis: 'Eligible core market evidence shows favorable momentum, verified volume, and an executable spread.',
+    invalidation: 'Momentum, volume, or spread evidence no longer satisfies the deterministic paper policy.',
+    featureRefs: [
+      `${candidate.symbol}.change24hPct`,
+      `${candidate.symbol}.volume24hUsd`,
+      `${candidate.symbol}.spreadPct`
+    ],
+    model: 'deterministic-paper-evidence-v1'
+  };
+  const remaining = proposals.filter((proposal) => proposal.symbol !== candidate.symbol);
+  return [fallback, ...remaining];
+}
+
 async function resolveOllamaModel(host: string) {
   const requested = process.env.HII_TRADER_MODEL;
   const response = await fetch(`${host}/api/tags`, { signal: AbortSignal.timeout(5_000) });
@@ -559,7 +601,7 @@ async function ollamaIntelligence(assets: MarketAsset[]): Promise<TradeProposal[
   });
   if (!response.ok) throw new Error(`Ollama returned HTTP ${response.status}`);
   const payload = await response.json() as { message?: { content?: string } };
-  const parsed = JSON.parse(String(payload.message?.content || '{}')) as { proposals?: unknown[] };
+  const parsed = parseIntelligencePayload(payload.message?.content);
   const bySymbol = new Map(
     (Array.isArray(parsed.proposals) ? parsed.proposals : [])
       .map((proposal) => [cleanText((proposal as Record<string, unknown>)?.symbol, 24).toUpperCase(), proposal])
@@ -797,7 +839,7 @@ export async function runTraderCycle(options: {
   resetDayAnchors(state, at, db);
   if (!options.force && state.mode !== 'paper') return getTraderSnapshot();
   if (state.mode === 'killed') throw new Error(`Trader is killed: ${state.killReason || 'operator kill switch'}`);
-  if (state.cycleStartedAt && Date.parse(at) - Date.parse(state.cycleStartedAt) < 120_000) {
+  if (state.cycleStartedAt && Date.parse(at) - Date.parse(state.cycleStartedAt) < CYCLE_LEASE_MS) {
     throw new Error('A trader cycle is already running.');
   }
   state.cycleStartedAt = at;
@@ -818,6 +860,7 @@ export async function runTraderCycle(options: {
     } catch (error) {
       proposals = fallbackIntelligence(assets, error instanceof Error ? error.message : String(error));
     }
+    proposals = ensureNonDegenerateProposals(assets, proposals);
     const proposalMap = new Map(proposals.map((proposal) => [proposal.symbol, proposal]));
     let positions = markPositions(listPositions(db), assets, at);
     for (const position of positions) savePosition(position, position.symbol, db);
@@ -1008,7 +1051,8 @@ export function getTraderSnapshot(): TraderSnapshot {
 
 export function traderCycleDue(at = Date.now()) {
   const state = getState();
-  if (state.mode !== 'paper' || state.cycleStartedAt) return false;
+  if (state.mode !== 'paper') return false;
+  if (state.cycleStartedAt && at - Date.parse(state.cycleStartedAt) < CYCLE_LEASE_MS) return false;
   return !state.lastCycleAt || at - Date.parse(state.lastCycleAt) >= CYCLE_MINUTES * 60_000;
 }
 

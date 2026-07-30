@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -97,6 +99,46 @@ describe('HII trader risk and execution', () => {
     expect(result.decisions.some((decision) => decision.fill?.side === 'buy')).toBe(true);
     expect(result.decisions.find((decision) => decision.asset.symbol === 'RUG')?.risk.approved).toBe(false);
     expect(fs.readFileSync(path.join(directory, 'receipts', 'trader.jsonl'), 'utf8')).toContain('trader.cycle');
+  });
+
+  it('produces a non-hold decision from favorable evidence when model decisions are degenerate', async () => {
+    controlTrader('start');
+    const result = await runTraderCycle({
+      force: true,
+      at: '2026-07-29T00:00:00.000Z',
+      marketProvider: async () => [asset({
+        change24hPct: 6,
+        volume24hUsd: 100_000_000,
+        spreadPct: 0.05
+      })],
+      intelligenceProvider: async () => [proposal({
+        action: 'hold',
+        confidence: 0.8,
+        thesis: 'The model declines every opportunity.'
+      })]
+    });
+
+    expect(result.decisions.some((decision) => decision.proposal.action !== 'hold')).toBe(true);
+  });
+
+  it('allows the scheduler to recover an expired cycle lease', async () => {
+    controlTrader('start');
+    const startedAt = '2026-07-29T00:00:00.000Z';
+    let releaseMarket!: (assets: MarketAsset[]) => void;
+    const market = new Promise<MarketAsset[]>((resolve) => {
+      releaseMarket = resolve;
+    });
+    const cycle = runTraderCycle({
+      force: true,
+      at: startedAt,
+      marketProvider: async () => market,
+      intelligenceProvider: async () => [proposal()]
+    });
+
+    expect(traderCycleDue(Date.parse(startedAt) + 119_999)).toBe(false);
+    expect(traderCycleDue(Date.parse(startedAt) + 120_000)).toBe(true);
+    releaseMarket([asset()]);
+    await cycle;
   });
 
   it('enforces confidence and loss limits deterministically', () => {
