@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 
 const { makeNode, seedsFromFiles } = await import('../lib/workspace/ingest.ts');
 const { organizeContactSheetReviewSet } = await import('../lib/workspace/contact-sheet-scene.ts');
+const { normalizePerceptualReviews, perceptualCandidatePairs } = await import('../lib/workspace/image-similarity.ts');
 const {
   contactSheetContextItems,
   contactSheetItemSeed,
@@ -106,6 +107,17 @@ assert.equal(reviewScene.scene.payload.title, 'material palette');
 assert.deepEqual(reviewScene.scene.object.proofRefs, selectedItems.map((item) => `sha256:${item.sha256}`));
 assert.equal(reviewScene.memberIds.length, 2);
 assert.equal(reviewScene.doc.nodes.filter((node) => node.frameId === reviewScene.scene.id).length, 2);
+const nearMatches = perceptualCandidatePairs([
+  { ...sheet.payload.items[0], perceptualHash: '0000000000000000' },
+  { ...sheet.payload.items[1], perceptualHash: '0000000000000001' },
+  { ...sheet.payload.items[2], perceptualHash: 'ffffffffffffffff' }
+], 1);
+assert.equal(nearMatches.length, 1);
+assert.equal(nearMatches[0].distance, 1);
+assert.deepEqual(normalizePerceptualReviews(nearMatches, {
+  [nearMatches[0].id]: 'separate',
+  unknown: 'stacked'
+}), { [nearMatches[0].id]: 'separate' });
 
 console.log('HII workspace media smoke');
 console.log('status:       ok');
@@ -115,6 +127,7 @@ console.log('proof:        unique source paths + hashes preserved');
 console.log('focus:        exact labeled thumbnails -> separate hashed run context');
 console.log('classification: selected references -> durable filterable batch label');
 console.log('stacking:     exact references -> compact reversible human-owned stack');
+console.log('similarity:   local dHash pair -> explicit human keep-separate or stack review');
 console.log('scenes:       exact classified review set -> reversible named Scene');
 console.log('promotion:    sheet item -> provenance-linked region-focusable image');
 console.log('mixed batch:  non-image artifact remains directly editable');

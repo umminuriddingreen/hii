@@ -349,7 +349,8 @@ The isolated `hii:scenes:check` product gate proves ordering, wrapping
 navigation, explicit membership, exact-selection organization at 240 objects,
 type summaries, deterministic viewport framing, and persistence after reload.
 This closes the named Scenes and explicit existing-object organization portions
-of orientation at scale. Reviewed near-duplicate handling remains open.
+of orientation at scale. Real-project calibration of local near-match
+suggestions remains open.
 
 ### Verified governed-outline and first-win checkpoint
 
@@ -413,8 +414,7 @@ the isolated import gate—not this browser step—proves chooser-to-contact-she
 batch behavior. That distinction keeps the visual and import claims separate.
 
 This is intentionally non-destructive. Existing flat image fields are not
-silently rewritten, and near-duplicate visual matching is not claimed. A
-future perceptual-deduplication review remains open.
+silently rewritten, and no near-match suggestion can omit a source.
 
 Contact sheets are now also direct context surfaces rather than terminal
 collages. A person can select up to twelve exact thumbnails, optionally label
@@ -441,6 +441,20 @@ flat view without deleting a source. A source belongs to at most one stack,
 moving membership is explicit, groups smaller than two dissolve, and repeating
 the same membership resolves to the existing stack. No visual similarity guess
 silently hides or discards an image.
+
+HII now computes a 64-bit difference hash from a 9 × 8 local decode when the
+browser can read the image. It compares at most eighty durable references,
+surfaces at most twenty-four candidate pairs within a bounded Hamming distance,
+and labels the number as a local signal rather than a confidence score. Decode
+failure simply produces no suggestion; it never blocks import or invokes a
+network service.
+
+Each candidate remains visibly two exact sources until a person chooses `Keep
+separate` or `Stack pair`. The decision is stored against the deterministic
+pair id. Keeping separate removes only the suggestion. Stacking invokes the
+same reversible exact-member stack contract and still deletes nothing. This is
+reviewed perceptual organization—not automatic deduplication—and its false
+positive rate still needs native calibration against real creative projects.
 
 Two or more selected references can now become a normal named HII Scene
 directly from the sheet. HII places lightweight source-linked image objects in
@@ -645,7 +659,7 @@ cloud sync, credits, or a general “AI operating system.”
 | 0 | Artifact-first closure | The output opens beside its inputs, is editable or launches its native editor, and reports exactly what changed. |
 | 0 | Trustworthy context selection | Before approval, the user can see the exact files/nodes/sources and sub-asset regions included, exclusions, provenance, content identity, and likely network boundary. |
 | 0 | Human-readable runtime health | One instance model, one clear status, failures with cause and recovery action, no unexplained process counts. |
-| 1 | Media organization | New multi-image imports become bounded proof-linked contact sheets, exact duplicates are visibly counted, selected references accept durable filterable batch labels and compact reversible stacks, and filtered existing nodes become an exact reversible Scene. Reviewed perceptual dedupe remains open. |
+| 1 | Media organization | New multi-image imports become bounded proof-linked contact sheets, exact duplicates are visibly counted, selected references accept durable filterable batch labels and compact reversible stacks, local difference-hash pairs require an explicit keep-separate or stack decision, and filtered existing nodes become an exact reversible Scene. Real-project false-positive calibration remains open. |
 | 1 | Run focus and log hygiene | Governed Runs use a five-step progress summary, raw logs require two disclosures, and legacy Chat transcripts render only the readable response by default while preserving inspectable evidence. Preventing duplicate or low-quality generated board tasks remains open. |
 | 1 | Capability reuse | A successful approved trace can become a draft capability, show required inputs and permissions, and be re-run on new context. |
 | 1 | Onboarding | The first-session journey and privacy-safe local funnel are implemented. A clean Mac install must still reach the first verified artifact in under ten minutes with no repository knowledge. |
@@ -680,8 +694,9 @@ cloud sync, credits, or a general “AI operating system.”
 ### Build next
 
 1. Extend the verified contact-sheet and exact-selection organization flow
-   with reviewed perceptual dedupe. Durable filterable batch labels and compact
-   exact-member stacks are implemented without weakening the context bound.
+   by calibrating reviewed local near-match pairs against real project media.
+   Durable labels, exact-member stacks, and explicit keep-separate or stack
+   decisions are implemented without weakening the context bound.
 2. Keep contact-sheet selection and promotion reliable at real-project scale.
    Exact sheet items, optional labels, local paths, hashes, proof lineage, and
    promoted per-thumbnail image-region focus now enter approval without

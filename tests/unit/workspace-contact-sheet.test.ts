@@ -72,6 +72,45 @@ describe('workspace contact-sheet import', () => {
     expect(seeds.every((seed) => seed.type === 'image' && seed.payload.adapter !== 'contact-sheet')).toBe(true);
   });
 
+  it('stores a local perceptual signal when the image decoder is available', async () => {
+    const decoded = vi.fn(async () => ({ close: vi.fn() }));
+    const pixels = new Uint8ClampedArray(9 * 8 * 4);
+    for (let offset = 0; offset < pixels.length; offset += 4) {
+      const x = (offset / 4) % 9;
+      pixels[offset] = pixels[offset + 1] = pixels[offset + 2] = 255 - x * 20;
+      pixels[offset + 3] = 255;
+    }
+    vi.stubGlobal('createImageBitmap', decoded);
+    vi.stubGlobal('OffscreenCanvas', class {
+      getContext() {
+        return { drawImage: vi.fn(), getImageData: () => ({ data: pixels }) };
+      }
+    });
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const file = (init?.body as FormData).get('file') as File;
+      const sha256 = file.name.charCodeAt(0).toString(16).padStart(64, '0');
+      return new Response(JSON.stringify({
+        name: file.name,
+        mime: file.type,
+        size: file.size,
+        path: `/project/${file.name}`,
+        url: `/api/workspace/assets/${file.name}`,
+        sha256
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+
+    const [sheet] = await seedsFromFiles(['a', 'b', 'c', 'd'].map((name) =>
+      new File([name], `${name}.png`, { type: 'image/png' })
+    ));
+    expect(decoded).toHaveBeenCalledTimes(4);
+    expect((sheet.payload.items as Array<Record<string, unknown>>).map((item) => item.perceptualHash)).toEqual([
+      'ffffffffffffffff',
+      'ffffffffffffffff',
+      'ffffffffffffffff',
+      'ffffffffffffffff'
+    ]);
+  });
+
   it('bounds a 164-image import into sheets without dropping a unique source', async () => {
     const store = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const file = (init?.body as FormData).get('file') as File;

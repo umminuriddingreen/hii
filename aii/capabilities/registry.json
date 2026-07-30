@@ -926,7 +926,7 @@
     "name": "Create in the HII Spatial Workspace",
     "owner": "hii",
     "runtime": "next-route",
-    "summary": "Create with editable text and durable media, collapse exact reference sets into reversible human-owned stacks, organize classified sets into provenance-linked Scenes, navigate large canvases through a searchable governed Scene and object outline, inspect source-linked PDF documents, local DXF drawings, and 3D models, bind human-selected pages, regions, layers, time ranges, and views into governed agent runs, keep managed chat readable while preserving raw run evidence, branch verified work, and edit receipt-linked text artifacts beside their source context.",
+    "summary": "Create with editable text and durable media, review local near-match signals, collapse exact reference sets into reversible human-owned stacks, organize classified sets into provenance-linked Scenes, navigate large canvases through a searchable governed Scene and object outline, inspect source-linked PDF documents, local DXF drawings, and 3D models, bind human-selected pages, regions, layers, time ranges, and views into governed agent runs, keep managed chat readable while preserving raw run evidence, branch verified work, and edit receipt-linked text artifacts beside their source context.",
     "inputs": [
       "typed canvas text",
       "local clipboard or dropped media",
@@ -964,6 +964,7 @@
       "bounded contact sheets with exact-duplicate counts and source hashes",
       "durable filterable labels bound to exact reference hashes",
       "compact reversible human-owned stacks with exact source membership",
+      "bounded local near-match pairs with explicit keep-separate or stack decisions",
       "idempotent named review-set Scene with parent and SHA-256 lineage"
     ],
     "permissions": [
@@ -971,6 +972,7 @@
       "write bounded assets under ~/.hii/workspace/assets",
       "render bounded local WebGL without external model upload",
       "no automatic external upload or publication",
+      "perceptual image signals are computed locally and never omit a source without review",
       "explicit Send action before intent reaches the configured agent provider",
       "local export requires an explicit user click",
       "artifact edits stay inside the completed run's approved workspace root",
@@ -991,6 +993,7 @@
       "src/lib/components/workspace/RunArtifactPane.svelte",
       "lib/workspace/ingest.ts",
       "lib/workspace/contact-sheet.ts",
+      "lib/workspace/image-similarity.ts",
       "lib/workspace/contact-sheet-scene.ts",
       "lib/workspace/organize.ts",
       "lib/workspace/scenes.ts",
@@ -1003,6 +1006,7 @@
       "tests/unit/workspace-viewers-contract.test.ts",
       "tests/unit/workspace-organize.test.ts",
       "tests/unit/workspace-contact-sheet.test.ts",
+      "tests/unit/workspace-image-similarity.test.ts",
       "tests/unit/workspace-contact-sheet-scene.test.ts",
       "tests/unit/chat-output.test.ts",
       "tests/unit/dxf.test.ts",

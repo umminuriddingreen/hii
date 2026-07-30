@@ -18,6 +18,12 @@
     unstackContactSheetItems,
     type ContactSheetStack
   } from '@/lib/workspace/contact-sheet';
+  import {
+    normalizePerceptualReviews,
+    perceptualCandidatePairs,
+    type PerceptualCandidatePair,
+    type PerceptualReviewDecision
+  } from '@/lib/workspace/image-similarity';
 
   export let node:WorkspaceNode;
   export let onPayload:(patch:Record<string,unknown>)=>void;
@@ -40,6 +46,7 @@
   let contactQuery='';
   let batchContactLabel='';
   let activeContactStackId='';
+  let activeSimilarityId='';
   $: anchor=normalizeWorkspaceContextAnchor(node.payload.contextAnchor);
   $: imageRegion=anchor?.kind==='image-region'?anchor:draftRegion;
   $: contactItems=normalizeContactSheetItems(node.payload.items);
@@ -47,10 +54,21 @@
   $: selectedContactItems=normalizeContactSheetSelection(contactItems,node.payload.selectedItems,contactLabels);
   $: contactStacks=normalizeContactSheetStacks(contactItems,node.payload.itemStacks);
   $: activeContactStack=contactStacks.find(stack=>stack.id===activeContactStackId);
-  $: shownContactStacks=activeContactStack?[]:filterContactSheetStacks({items:contactItems,labels:contactLabels,stacks:contactStacks,query:contactQuery});
+  $: similarityCandidates=perceptualCandidatePairs(contactItems);
+  $: similarityReviews=normalizePerceptualReviews(similarityCandidates,node.payload.similarityReviews);
+  $: unreviewedSimilarityCandidates=similarityCandidates.filter(candidate=>!similarityReviews[candidate.id]);
+  $: activeSimilarityCandidate=unreviewedSimilarityCandidates.find(candidate=>candidate.id===activeSimilarityId);
+  $: shownSimilarityCandidates=activeContactStack||activeSimilarityCandidate?[]:unreviewedSimilarityCandidates.filter(candidate=>
+    !contactQuery||filterContactSheetItems(similarityCandidateItems(candidate),contactLabels,contactQuery).length>0
+  );
+  $: shownContactStacks=activeContactStack||activeSimilarityCandidate?[]:filterContactSheetStacks({items:contactItems,labels:contactLabels,stacks:contactStacks,query:contactQuery});
   $: stackedContactHashes=new Set(contactStacks.flatMap(stack=>stack.sha256s));
   $: shownContactItems=filterContactSheetItems(contactItems,contactLabels,contactQuery).filter(item=>
-    activeContactStack?activeContactStack.sha256s.includes(item.sha256):!stackedContactHashes.has(item.sha256)
+    activeSimilarityCandidate
+      ?activeSimilarityCandidate.sha256s.includes(item.sha256)
+      :activeContactStack
+        ?activeContactStack.sha256s.includes(item.sha256)
+        :!stackedContactHashes.has(item.sha256)
   );
   $: shownContactSourceCount=shownContactItems.length+shownContactStacks.reduce((count,stack)=>count+contactSheetStackItems(contactItems,stack).length,0);
   function toggleContactItem(item:(typeof contactItems)[number]){
@@ -88,6 +106,24 @@
   function removeContactStack(stack:ContactSheetStack){
     onPayload({itemStacks:unstackContactSheetItems(contactItems,contactStacks,stack.id)});
     if(activeContactStackId===stack.id)activeContactStackId='';
+  }
+  function similarityCandidateItems(candidate:PerceptualCandidatePair){
+    const hashes=new Set(candidate.sha256s);
+    return contactItems.filter(item=>hashes.has(item.sha256));
+  }
+  function reviewSimilarity(candidate:PerceptualCandidatePair,decision:PerceptualReviewDecision){
+    onPayload({similarityReviews:{...similarityReviews,[candidate.id]:decision}});
+    if(activeSimilarityId===candidate.id)activeSimilarityId='';
+  }
+  function stackSimilarityPair(candidate:PerceptualCandidatePair){
+    const members=similarityCandidateItems(candidate);
+    const result=stackContactSheetSelection({
+      items:contactItems,labels:contactLabels,stacks:contactStacks,selectedItems:members,
+      title:`Near match · ${members[0]?.name||'reviewed pair'}`
+    });
+    onPayload({itemStacks:result.stacks,similarityReviews:{...similarityReviews,[candidate.id]:'stacked'}});
+    activeSimilarityId='';
+    activeContactStackId=result.stack.id;
   }
 
   function normalizedPoint(event:PointerEvent) {
@@ -171,11 +207,11 @@
   <section class="flex h-full min-h-0 flex-col overflow-hidden bg-white">
     <header class="border-b px-4 py-3">
       <div class="flex items-center justify-between gap-3">
-        <div class="min-w-0"><strong class="block truncate text-[13px]">{text('title')||'Reference contact sheet'}{activeContactStack?` / ${activeContactStack.title}`:''}</strong><small class="font-mono text-[8px] uppercase tracking-[.08em] text-neutral-400">{shownContactSourceCount} references shown · {contactStacks.length} stack{contactStacks.length===1?'':'s'} · {selectedContactItems.length} selected for context</small></div>
+        <div class="min-w-0"><strong class="block truncate text-[13px]">{text('title')||'Reference contact sheet'}{activeSimilarityCandidate?' / near-match review':activeContactStack?` / ${activeContactStack.title}`:''}</strong><small class="font-mono text-[8px] uppercase tracking-[.08em] text-neutral-400">{shownContactSourceCount} references shown · {contactStacks.length} stack{contactStacks.length===1?'':'s'} · {unreviewedSimilarityCandidates.length} near-match review{unreviewedSimilarityCandidates.length===1?'':'s'} · {Object.keys(similarityReviews).length} reviewed · {selectedContactItems.length} selected for context</small></div>
         {#if Number(node.payload.duplicateCount)>0}<span class="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 font-mono text-[8px] uppercase text-amber-700">{Number(node.payload.duplicateCount)} exact duplicate{Number(node.payload.duplicateCount)===1?'':'s'} omitted</span>{/if}
       </div>
       <div role="group" aria-label="Contact sheet review controls" class="mt-2 flex flex-wrap items-center gap-1.5" on:pointerdown|stopPropagation>
-        {#if activeContactStack}<button class="shrink-0 rounded-full bg-neutral-950 px-2.5 py-1.5 font-mono text-[8px] uppercase text-white" on:click={()=>activeContactStackId=''}>← Sheet</button>{/if}
+        {#if activeContactStack||activeSimilarityCandidate}<button class="shrink-0 rounded-full bg-neutral-950 px-2.5 py-1.5 font-mono text-[8px] uppercase text-white" on:click={()=>{activeContactStackId='';activeSimilarityId=''}}>← Sheet</button>{/if}
         <input aria-label="Filter contact sheet" bind:value={contactQuery} class="min-w-0 flex-1 rounded-full border border-neutral-900/10 bg-neutral-50 px-3 py-1.5 font-mono text-[8px] outline-none focus:border-blue-400" placeholder="filter names, paths, or labels"/>
         <button class="shrink-0 rounded-full bg-neutral-100 px-2.5 py-1.5 font-mono text-[8px] uppercase text-neutral-600 disabled:opacity-35" disabled={!shownContactItems.length||selectedContactItems.length>=12} on:click={selectShownContactItems}>Select shown</button>
         {#if selectedContactItems.length}
@@ -191,6 +227,23 @@
     </header>
     <div class="scroll min-h-0 flex-1 overflow-auto p-3">
       <div class="grid gap-2" style={`grid-template-columns:repeat(${Number(node.payload.columns)||4},minmax(0,1fr))`}>
+        {#each shownSimilarityCandidates as candidate (candidate.id)}
+          <div class="overflow-hidden rounded-xl border border-amber-200 bg-amber-50/40">
+            <button aria-label="Open near-match review pair" class="block w-full text-left" on:click={()=>activeSimilarityId=candidate.id}>
+              <span class="grid aspect-video grid-cols-2 gap-px overflow-hidden bg-amber-100">
+                {#each similarityCandidateItems(candidate) as member}
+                  <img src={member.url} alt="" loading="lazy" class="h-full min-h-0 w-full object-cover"/>
+                {/each}
+              </span>
+              <span class="block truncate px-2 pt-2 text-[10px] font-semibold text-amber-950">Review near match</span>
+              <span class="block px-2 pb-2 font-mono text-[8px] uppercase text-amber-700">local dHash distance {candidate.distance}/64 · no automatic action</span>
+            </button>
+            <div role="group" aria-label="Near-match review controls" class="flex flex-wrap items-center gap-1 border-t border-amber-100 p-1.5" on:pointerdown|stopPropagation>
+              <button class="rounded-full bg-neutral-950 px-2.5 py-1 font-mono text-[8px] uppercase text-white" on:click={()=>reviewSimilarity(candidate,'separate')}>Keep separate</button>
+              <button class="rounded-full bg-violet-600 px-2.5 py-1 font-mono text-[8px] uppercase text-white" on:click={()=>stackSimilarityPair(candidate)}>Stack pair</button>
+            </div>
+          </div>
+        {/each}
         {#each shownContactStacks as stack}
           <div class="overflow-hidden rounded-xl border border-violet-200 bg-violet-50/40">
             <button aria-label={`Open ${stack.title} stack`} class="block w-full text-left" on:click={()=>activeContactStackId=stack.id}>
@@ -222,7 +275,7 @@
           </div>
         {/each}
       </div>
-      {#if !shownContactItems.length&&!shownContactStacks.length}<p class="grid min-h-32 place-items-center font-mono text-[9px] text-neutral-400">No references match this filter.</p>{/if}
+      {#if !shownContactItems.length&&!shownContactStacks.length&&!shownSimilarityCandidates.length}<p class="grid min-h-32 place-items-center font-mono text-[9px] text-neutral-400">No references match this filter.</p>{/if}
     </div>
   </section>
 {:else if node.type==='image'}

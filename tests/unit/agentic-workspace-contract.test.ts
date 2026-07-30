@@ -358,6 +358,19 @@ describe('agentic workspace interaction contract', () => {
     expect(contactSheet).toContain('sha256s.length<2');
   });
 
+  it('keeps perceptual near-match handling local, bounded, and human-reviewed', () => {
+    const staticNode = readFileSync(resolve(root, 'src/lib/components/workspace/StaticNode.svelte'), 'utf8');
+    const ingest = readFileSync(resolve(root, 'lib/workspace/ingest.ts'), 'utf8');
+    const similarity = readFileSync(resolve(root, 'lib/workspace/image-similarity.ts'), 'utf8');
+    expect(ingest).toContain('perceptualHashForImage(file)');
+    expect(similarity).toContain('differenceHashFromRgba');
+    expect(similarity).toContain('.slice(0, 24)');
+    expect(staticNode).toContain('no automatic action');
+    expect(staticNode).toContain('Keep separate');
+    expect(staticNode).toContain('Stack pair');
+    expect(staticNode).toContain("reviewSimilarity(candidate,'separate')");
+  });
+
   it('bridges an explicit browser request into its paired terminal', () => {
     expect(explorer).toContain('curl -I -L --max-time 20 --');
     expect(explorer).toContain("new CustomEvent('hii:terminal-command'");

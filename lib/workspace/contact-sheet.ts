@@ -1,5 +1,5 @@
 import type { NodeSeed } from './ingest';
-export type ContactSheetItem = { url:string; path:string; name:string; mime:string; size:number; sha256:string };
+export type ContactSheetItem = { url:string; path:string; name:string; mime:string; size:number; sha256:string; perceptualHash?:string };
 export type ContactSheetSelection = ContactSheetItem & { label?:string };
 export type ContactSheetLabels = Record<string,string>;
 export type ContactSheetStack = { id:string; title:string; sha256s:string[] };
@@ -7,9 +7,10 @@ const text=(value:unknown,max=1000)=>String(value??'').replace(/[\u0000-\u001F\u
 
 export function normalizeContactSheetItems(value:unknown):ContactSheetItem[]{
   if(!Array.isArray(value))return[];
-  return value.map(raw=>{const item=raw&&typeof raw==='object'?raw as Record<string,unknown>:{},sha256=text(item.sha256,128);return{
+  return value.map(raw=>{const item=raw&&typeof raw==='object'?raw as Record<string,unknown>:{},sha256=text(item.sha256,128),perceptualHash=text(item.perceptualHash,32);return{
     url:text(item.url),path:text(item.path),name:text(item.name,240)||'image',mime:text(item.mime,120),
-    size:Math.max(0,Number(item.size)||0),sha256:/^[a-f0-9]{64}$/i.test(sha256)?sha256.toLowerCase():''
+    size:Math.max(0,Number(item.size)||0),sha256:/^[a-f0-9]{64}$/i.test(sha256)?sha256.toLowerCase():'',
+    ...(/^[a-f0-9]{16}$/i.test(perceptualHash)?{perceptualHash:perceptualHash.toLowerCase()}:{})
   }}).filter(item=>item.path&&item.sha256).slice(0,80);
 }
 

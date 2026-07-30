@@ -1,4 +1,5 @@
 import type { SpatialObjectMetadata, WorkspaceNode, WorkspaceNodeType } from './types';
+import { perceptualHashForImage } from './image-similarity.ts';
 
 export type NodeSeed = {
   type: WorkspaceNodeType;
@@ -445,14 +446,18 @@ function contactSheetSeed(
   sheetCount: number,
   duplicateNames: string[]
 ): NodeSeed {
-  const items = imageSeeds.map((seed) => ({
-    url: String(seed.payload.url || ''),
-    path: String(seed.payload.path || ''),
-    name: String(seed.payload.name || 'image'),
-    mime: String(seed.payload.mime || ''),
-    size: Number(seed.payload.size) || 0,
-    sha256: String(seed.payload.sha256 || '')
-  }));
+  const items = imageSeeds.map((seed) => {
+    const perceptualHash = String(seed.payload.perceptualHash || '');
+    return {
+      url: String(seed.payload.url || ''),
+      path: String(seed.payload.path || ''),
+      name: String(seed.payload.name || 'image'),
+      mime: String(seed.payload.mime || ''),
+      size: Number(seed.payload.size) || 0,
+      sha256: String(seed.payload.sha256 || ''),
+      ...(/^[a-f0-9]{16}$/i.test(perceptualHash) ? { perceptualHash: perceptualHash.toLowerCase() } : {})
+    };
+  });
   const durable = items.every((item) => item.path && item.sha256);
   const title = sheetCount > 1 ? `Reference contact sheet ${sheetIndex + 1} of ${sheetCount}` : 'Reference contact sheet';
   return {
@@ -505,7 +510,12 @@ export async function seedsFromFiles(files: File[]): Promise<NodeSeed[]> {
   }
 
   const [imageSeeds, otherSeeds] = await Promise.all([
-    Promise.all(uniqueImages.map(seedFromFile)),
+    Promise.all(uniqueImages.map(async (file) => {
+      const [seed, perceptualHash] = await Promise.all([seedFromFile(file), perceptualHashForImage(file)]);
+      return perceptualHash
+        ? { ...seed, payload: { ...seed.payload, perceptualHash } }
+        : seed;
+    })),
     Promise.all(nonImages.map(seedFromFile))
   ]);
   const sheetCount = Math.max(1, Math.ceil(imageSeeds.length / CONTACT_SHEET_LIMIT));
