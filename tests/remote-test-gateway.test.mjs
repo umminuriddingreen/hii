@@ -24,6 +24,7 @@ import { createSandbox, sanitizedHostEnv } from '../server/remote-test-sandbox.m
 import { replayTranscript, startRemoteTestGateway } from '../server/remote-test-gateway.mjs';
 import { createImprovementRecorder } from '../server/remote-test-learning.mjs';
 import { analyzeRemoteTests, formatHarnessInsights } from '../server/remote-test-insights.mjs';
+import { runRemoteEvaluation } from '../server/remote-test-eval.mjs';
 import { startModelBridge } from '../server/remote-test-model-bridge.mjs';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -176,6 +177,17 @@ test('harness insights report measured traces and name unmeasured evidence hones
   assert.match(formatted, /No harness source change is installed automatically/);
   assert.match(report.coverageGaps.join(' '), /Tester acceptance/);
   assert.doesNotMatch(report.coverageGaps.join(' '), /Tokens before first action/);
+});
+
+test('local evaluation refuses an empty goal before starting a gateway', async () => {
+  await assert.rejects(
+    runRemoteEvaluation({
+      root: '/tmp/unused-hii-eval',
+      hiiBinary: process.execPath,
+      prompt: '   '
+    }),
+    /evaluation prompt is required/
+  );
 });
 
 test('a failed browser check followed by proof becomes a reusable lesson, not an installed patch', async (context) => {

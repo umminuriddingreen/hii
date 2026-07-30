@@ -24,6 +24,7 @@ import {
   analyzeRemoteTests,
   formatHarnessInsights
 } from '../server/remote-test-insights.mjs';
+import { runRemoteEvaluation } from '../server/remote-test-eval.mjs';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const gatewayFile = path.join(repository, 'server', 'remote-test-gateway.mjs');
@@ -71,6 +72,14 @@ function requestedModel(args = process.argv.slice(3)) {
     throw new Error('invalid model name');
   }
   return model;
+}
+
+function optionValue(name, args = process.argv.slice(3)) {
+  const index = args.indexOf(name);
+  if (index < 0) return null;
+  const value = args[index + 1];
+  if (!value || value.startsWith('--')) throw new Error(`${name} requires a value`);
+  return value;
 }
 
 function reusableSession(state, manifest) {
@@ -248,6 +257,32 @@ async function insights() {
   print(process.argv.includes('--json') ? report : formatHarnessInsights(report));
 }
 
+async function evaluate() {
+  const report = await runRemoteEvaluation({
+    root: path.join(root, 'evals'),
+    hiiBinary: process.env.HII_REMOTE_TEST_BINARY || defaultBinary,
+    model: optionValue('--model') || MODEL,
+    prompt: optionValue('--prompt') ||
+      'Create a polished responsive interactive color dial in public/index.html. Use no external dependencies, verify it in the browser, and finish.',
+    timeoutMs: Number(optionValue('--timeout-ms')) || 240_000
+  });
+  if (process.argv.includes('--json')) {
+    print(report);
+    return;
+  }
+  print([
+    'HII LOCAL EVALUATION',
+    '',
+    `model:     ${report.model}`,
+    `complete:  ${report.completed ? 'yes' : 'no'}`,
+    `browser:   ${report.browserVerified ? 'verified' : 'failed'}`,
+    `action:    ${report.timings.firstActionMs ?? 'not measured'} ms`,
+    `artifact:  ${report.timings.firstVerifiedArtifactMs ?? 'not measured'} ms`,
+    `done:      ${report.timings.doneMs ?? 'not measured'} ms`,
+    `evidence:  ${report.evidence.report}`
+  ].join('\n'));
+}
+
 async function main() {
   await fs.mkdir(root, { recursive: true, mode: 0o700 });
   const command = process.argv[2] ?? 'status';
@@ -258,6 +293,7 @@ async function main() {
   if (command === 'reset') return await reset();
   if (command === 'model') return await switchModel();
   if (command === 'insights') return await insights();
+  if (command === 'eval') return await evaluate();
   if (command === 'preflight') {
     const report = await preflight();
     print(report);
@@ -265,7 +301,7 @@ async function main() {
     return;
   }
   if (command === '--help' || command === 'help') {
-    print('Usage: node scripts/hii-remote-test.mjs start [--model MODEL] | restart [--model MODEL] | reset [--model MODEL] | model [MODEL] | insights [--json] | status | stop | preflight');
+    print('Usage: node scripts/hii-remote-test.mjs start [--model MODEL] | restart [--model MODEL] | reset [--model MODEL] | model [MODEL] | insights [--json] | eval [--prompt TEXT] [--model MODEL] [--timeout-ms MS] | status | stop | preflight');
     return;
   }
   throw new Error(`unknown command: ${command}`);
