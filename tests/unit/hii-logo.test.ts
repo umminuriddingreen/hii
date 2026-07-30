@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest';
 import HiiLogo from '../../src/lib/components/HiiLogo.svelte';
 
 describe('HiiLogo', () => {
-  it('renders the lowercase Helvetica wordmark', () => {
+  it('renders the uppercase Helvetica wordmark', () => {
     const { container } = render(HiiLogo);
     const logo=container.querySelector('.hii-wordmark');
-    expect(logo).toHaveTextContent('hii');
+    expect(logo).toHaveTextContent('HII');
     expect(logo).toHaveAttribute('aria-hidden','true');
     expect(container.querySelector('svg')).not.toBeInTheDocument();
   });

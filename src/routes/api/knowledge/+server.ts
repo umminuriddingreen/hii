@@ -65,7 +65,7 @@ async function migrateWorkspaceRefs() {
       object: node.object || { kind: object.kind as SpatialObjectKind, owner: object.owner, status: object.status === 'accepted' ? 'approved' as const : 'unknown' as const, source: object.provenance?.path, memoryRefs: [object.id] }
     };
   });
-  if (changed) await writeWorkspace(workspace);
+  if (changed) await writeWorkspace(workspace, workspace.revision);
   return { changed, total: workspace.nodes.length };
 }
 
@@ -187,7 +187,7 @@ export const POST: RequestHandler = async ({ request }) => {
       };
       workspace.nodes.push(node);
       workspace.nextZ = node.z;
-      await writeWorkspace(workspace);
+      await writeWorkspace(workspace, workspace.revision);
       return json({ node }, { status: 201 });
     }
     return json({ error: 'Unknown knowledge action.' }, { status: 400 });

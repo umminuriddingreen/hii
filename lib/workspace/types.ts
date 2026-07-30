@@ -137,6 +137,7 @@ export type WorkspaceViewport = { x: number; y: number; zoom: number };
 
 export type WorkspaceDoc = {
   version: 1;
+  revision: number;
   updatedAt: string;
   viewport: WorkspaceViewport;
   nextZ: number;
@@ -146,6 +147,7 @@ export type WorkspaceDoc = {
 export function emptyWorkspace(): WorkspaceDoc {
   return {
     version: 1,
+    revision: 0,
     updatedAt: new Date().toISOString(),
     viewport: { x: 0, y: 0, zoom: 1 },
     nextZ: 1,
@@ -301,6 +303,7 @@ export function normalizeWorkspace(raw: unknown): WorkspaceDoc {
     : [];
   return {
     version: 1,
+    revision: isFiniteNumber(doc.revision) ? Math.max(0, Math.floor(doc.revision)) : 0,
     updatedAt: typeof doc.updatedAt === 'string' ? doc.updatedAt : new Date().toISOString(),
     viewport: {
       x: isFiniteNumber(viewport.x) ? viewport.x : 0,

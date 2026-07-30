@@ -23,8 +23,9 @@
     { id:'console', title:'Console', path:'/console', capabilityId:'hii.terminal.observe', detail:'agents · logs · receipts' },
     { id:'dashboard', title:'System', path:'/dashboard', capabilityId:'hii.og.operational_graph', detail:'live status · capabilities · next actions' }
   ];
-  let doc:WorkspaceDoc={version:1,updatedAt:new Date().toISOString(),viewport:{x:0,y:0,zoom:1},nextZ:1,nodes:[]};
-  let ready=false; let selected:string|null=null; let omnibar=false; let query=''; let saveTimer:ReturnType<typeof setTimeout>|undefined;
+  let doc:WorkspaceDoc={version:1,revision:0,updatedAt:new Date().toISOString(),viewport:{x:0,y:0,zoom:1},nextZ:1,nodes:[]};
+  let ready=false; let loadState:'loading'|'ready'|'recovery'='loading'; let loadError=''; let recoveryPath=''; let saveError='';
+  let selected:string|null=null; let omnibar=false; let query=''; let saveTimer:ReturnType<typeof setTimeout>|undefined; let saveInFlight=false; let savePending=false;
   let context:any=null; let board:any[]=[]; let daemon:any=null; let canvas:HTMLElement; let mouse={x:400,y:300};
   let commandInput:HTMLInputElement; let fileInput:HTMLInputElement;
   let composerOpen=false; let composerText=''; let composerInput:HTMLTextAreaElement; let composerAt={x:400,y:280}; let lastSummon=0;
@@ -45,8 +46,38 @@
   ].filter(item=>`${item[1]} ${item[2]}`.toLowerCase().includes(query.toLowerCase()));
 
   function ensureModelPane(){if(ModelPaneComponent||modelPanePromise)return;modelPanePromise=import('$lib/components/workspace/ModelPane.svelte').then(module=>{ModelPaneComponent=module.default;modelPaneError=''}).catch(error=>{modelPanePromise=null;modelPaneError=error instanceof Error?error.message:'3D viewer unavailable'})}
-  async function load(){ try{const response=await fetch('/api/workspace');if(response.ok){doc=await response.json();if(doc.nodes.some(node=>node.type==='model'))ensureModelPane();}}finally{ready=true;} }
-  function persist(){ if(saveTimer)clearTimeout(saveTimer); saveTimer=setTimeout(async()=>{doc.updatedAt=new Date().toISOString();await fetch('/api/workspace',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(doc)});},500); }
+  async function load(){
+    loadState='loading';loadError='';recoveryPath='';saveError='';
+    try{
+      const response=await fetch('/api/workspace');
+      const result=await response.json().catch(()=>({}));
+      if(!response.ok||result.status==='recovery'){
+        loadState='recovery';loadError=result.error||'HII could not load this workspace.';recoveryPath=result.recoveryPath||'';return;
+      }
+      doc=result.workspace;loadState='ready';
+      if(doc.nodes.some(node=>node.type==='model'))ensureModelPane();
+    }catch(error){
+      loadState='recovery';loadError=error instanceof Error?error.message:'HII could not load this workspace.';
+    }finally{ready=true;}
+  }
+  async function saveNow(){
+    if(loadState!=='ready')return;
+    if(saveInFlight){savePending=true;return;}
+    saveInFlight=true;savePending=false;
+    const expectedRevision=doc.revision;saveError='';
+    try{
+      const response=await fetch('/api/workspace',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({workspace:doc,expectedRevision})});
+      const result=await response.json().catch(()=>({}));
+      if(!response.ok){saveError=result.error||'HII could not save this workspace.';return;}
+      doc={...doc,revision:result.workspace.revision,updatedAt:result.workspace.updatedAt};
+    }catch(error){saveError=error instanceof Error?error.message:'HII could not save this workspace.';}
+    finally{saveInFlight=false;if(savePending)void saveNow();}
+  }
+  function persist(){
+    if(loadState!=='ready')return;
+    if(saveTimer)clearTimeout(saveTimer);
+    saveTimer=setTimeout(()=>void saveNow(),500);
+  }
   function patch(id:string,patch:Partial<WorkspaceNode>){doc={...doc,nodes:doc.nodes.map(n=>n.id===id?{...n,...patch,updatedAt:new Date().toISOString()}:n)};persist();}
   function addSeeds(seeds:NodeSeed[],at:{x:number;y:number}){if(seeds.some(seed=>seed.type==='model'))ensureModelPane();for(const [index,seed] of seeds.entries()){const node=makeNode(seed,at.x+index*28,at.y+index*28,++doc.nextZ);doc={...doc,nodes:[...doc.nodes,node]};selected=node.id}persist();}
   function spawn(type:string,payload:Record<string,unknown>={}){const seed=seedFor(type as WorkspaceNodeType,type==='browser'?{url:'https://duckduckgo.com',...payload}:type==='terminal'?{sessionId:crypto.randomUUID(),...payload}:payload);const center={x:(-doc.viewport.x+innerWidth/2)/doc.viewport.zoom,y:(-doc.viewport.y+innerHeight/2)/doc.viewport.zoom};addSeeds([seed],{x:center.x-seed.w/2,y:center.y-seed.h/2});omnibar=false;query='';if(type==='context')void refreshContext();if(type==='board')void refreshBoard();}
@@ -99,6 +130,23 @@
 
 {#if !data.enabled}<div class="hii-page flex min-h-[60vh] flex-col items-center justify-center gap-3"><p class="hii-kicker">surface off</p><h1 class="hii-page-title">HII is turned off</h1></div>
 {:else}<main bind:this={canvas} class="absolute inset-0 touch-none overflow-hidden" on:pointerdown={pan} on:dblclick={openExplorer} on:wheel={trackpad} on:dragover|preventDefault on:drop={drop} style="background:#fff radial-gradient(circle,rgba(23,23,23,.08) 1px,transparent 1px);background-size:32px 32px">
+  {#if loadState==='recovery'}
+    <section data-workspace-ui class="absolute inset-0 z-[10000] grid place-items-center bg-[#f4f5f7]/95 p-6" aria-labelledby="workspace-recovery-title">
+      <div class="w-[min(620px,92vw)] rounded-[28px] border border-amber-950/15 bg-white p-8 shadow-2xl sm:p-10">
+        <p class="font-mono text-[9px] font-bold uppercase tracking-[.14em] text-amber-700">Workspace recovery</p>
+        <h1 id="workspace-recovery-title" class="mt-3 text-[clamp(36px,6vw,58px)] font-semibold leading-[.95] tracking-[-.055em]">Your workspace was not opened.</h1>
+        <p class="mt-5 text-[16px] leading-7 text-neutral-600">{loadError} HII has blocked saving so the original cannot be overwritten.</p>
+        {#if recoveryPath}<p class="mt-4 break-all rounded-xl bg-neutral-100 p-3 font-mono text-[10px] leading-5 text-neutral-600">Preserved at {recoveryPath}</p>{/if}
+        <button class="mt-7 rounded-full bg-neutral-950 px-5 py-3 font-mono text-[10px] uppercase tracking-[.1em] text-white" on:click={()=>void load()}>Try loading again</button>
+      </div>
+    </section>
+  {/if}
+  {#if saveError}
+    <div data-workspace-ui role="alert" class="absolute left-1/2 top-4 z-[9999] flex w-[min(680px,90vw)] -translate-x-1/2 items-center justify-between gap-4 rounded-2xl border border-red-900/15 bg-white px-4 py-3 shadow-xl">
+      <p class="text-[13px] text-red-800"><strong>Workspace not saved.</strong> {saveError}</p>
+      <button class="shrink-0 font-mono text-[9px] uppercase underline" on:click={()=>void saveNow()}>Try again</button>
+    </div>
+  {/if}
   <div class="absolute left-0 top-0 origin-top-left will-change-transform" style={`transform:translate(${doc.viewport.x}px,${doc.viewport.y}px) scale(${doc.viewport.zoom})`}>
     {#each doc.nodes as node (node.id)}<section role="group" aria-label={`${node.type} workspace node`} class="group absolute left-0 top-0 flex flex-col overflow-hidden" on:pointerdown={(event)=>drag(event,node)} style={`transform:translate(${node.x}px,${node.y}px);width:${node.w}px;height:${node.h}px;z-index:${Math.round(node.z)}`}>
       <header class="pointer-events-none absolute right-1 top-1 z-20"><span class="sr-only">{String(node.payload.title||node.type)}</span><button class="pointer-events-auto grid h-6 w-6 place-items-center rounded-full bg-neutral-950/80 text-sm text-white opacity-0 shadow-sm transition-opacity hover:bg-neutral-950 group-hover:opacity-100 focus:opacity-100" on:click={()=>close(node.id)} aria-label="close node">×</button></header>
