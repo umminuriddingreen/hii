@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { SpatialObjectStatus, WorkspaceNode } from '@/lib/workspace/types';
+  import { terminalRunMessage, workspaceRunEvidence, workspaceRunProgress, type RunProgressStep } from '@/lib/workspace/run-progress';
 
   export let node: WorkspaceNode;
   export let onPatch: (patch: Partial<WorkspaceNode>) => void;
@@ -13,8 +14,11 @@
     id: string;
     status: string;
     logs?: string[];
+    ledger?: Array<{ actor?: string; type?: string; summary?: string; createdAt?: string }>;
     proofArtifacts?: Array<{ kind?: string; label?: string; path?: string; summary?: string }>;
     metadata?: Record<string, unknown>;
+    createdAt?: string;
+    updatedAt?: string;
   };
   type ReceiptCheck = { command?: string; ok?: boolean; output?: string };
   type Receipt = {
@@ -50,6 +54,10 @@
   let modelsLoading = false;
   let modelMessage = '';
   let cancellationBusy = false;
+  let job: Job | null = node.payload.job as Job || null;
+  let evidenceOpen = false;
+  let rawEvidenceOpen = false;
+  let transientFailure = false;
 
   $: context = (Array.isArray(node.payload.context) ? node.payload.context : []) as ContextItem[];
   $: boundary = {
@@ -60,17 +68,16 @@
     network: 'No publish, push, message, spend, or secret export'
   };
   $: checks = (receipt?.verification || []).filter((check) => check.ok === true);
-  $: currentStep = status === 'waiting_approval' || status === 'proposed'
-    ? 0
-    : status === 'queued'
-      ? 1
-      : status === 'running'
-        ? 2
-        : status === 'completed'
-          ? 4
-          : status === 'failed' || status === 'cancelled'
-            ? 2
-            : 3;
+  $: progressSteps = workspaceRunProgress({
+    status,
+    contextCount: context.length,
+    maxSteps: boundary.maxSteps,
+    workspaceRoot: boundary.workspaceRoot,
+    job,
+    receipt
+  }) as RunProgressStep[];
+  $: evidence = workspaceRunEvidence(job, receipt);
+  $: evidenceCount = evidence.ledger.length + evidence.proofArtifacts.length + evidence.checks.length + evidence.logs.length;
 
   function objectStatus(value: string): SpatialObjectStatus {
     if (value === 'cancelled') return 'archived';
@@ -134,17 +141,31 @@
     });
   }
 
+  async function loadRun(id: string) {
+    try {
+      const run = (await apiJson(`/api/workspace/runs?id=${encodeURIComponent(id)}`)) as RunResponse;
+      transientFailure = false;
+      job = run.job;
+      status = run.job.status;
+      if (run.receipt) receipt = run.receipt;
+      if (run.path) receiptPath = run.path;
+    } catch (cause) {
+      if (!receipt) error = cause instanceof Error ? cause.message : 'Could not read the managed workspace run.';
+    }
+  }
+
   async function poll(id: string) {
     while (active) {
       try {
         const run = (await apiJson(`/api/workspace/runs?id=${encodeURIComponent(id)}`)) as RunResponse;
+        job = run.job;
         status = run.job.status;
         if (run.receipt) receipt = run.receipt;
         if (run.path) receiptPath = run.path;
         if (terminalStatuses.has(run.job.status)) {
           const failureError = run.job.status === 'completed'
             ? ''
-            : run.job.logs?.at(-1) || 'The bounded run did not complete.';
+            : terminalRunMessage(run.job.status);
           const proofRefs = [
             ...(run.job.proofArtifacts || []).map((artifact) => artifact.path || artifact.label || '').filter(Boolean),
             `capability-job:${run.job.id}`
@@ -154,7 +175,15 @@
             receiptPath: run.path || '',
             completedAt: new Date().toISOString(),
             resultNodesCreated: run.job.status === 'completed' && Boolean(run.receipt),
-            error: failureError
+            error: failureError,
+            progress: workspaceRunProgress({
+              status: run.job.status,
+              contextCount: context.length,
+              maxSteps: boundary.maxSteps,
+              workspaceRoot: boundary.workspaceRoot,
+              job: run.job,
+              receipt: run.receipt
+            })
           }, proofRefs);
           if (run.job.status === 'completed') emitComplete(run);
           else error = failureError;
@@ -173,6 +202,7 @@
   async function approveAndStart() {
     if (busy || !selectedModel || !String(node.payload.prompt || '').trim()) return;
     busy = true;
+    transientFailure = false;
     error = '';
     status = 'queued';
     try {
@@ -209,6 +239,7 @@
       await poll(runId);
     } catch (cause) {
       status = 'failed';
+      transientFailure = true;
       error = cause instanceof Error ? cause.message : 'Could not start the bounded workspace run.';
       patchRun('failed', { error });
       busy = false;
@@ -293,11 +324,18 @@
     followUp = '';
   }
 
+  function toggleEvidence() {
+    evidenceOpen = !evidenceOpen;
+    if (!evidenceOpen) rawEvidenceOpen = false;
+  }
+
   onMount(() => {
     active = true;
     if (runId && ['queued', 'running'].includes(status)) {
       busy = true;
       void poll(runId);
+    } else if (runId && terminalStatuses.has(status)) {
+      void loadRun(runId);
     }
     if (['waiting_approval', 'proposed'].includes(status)) void loadModels();
     return () => {
@@ -363,11 +401,34 @@
       </section>
     {:else}
       <section class="p-5">
-        <div class="grid grid-cols-5 gap-1.5" aria-label="Run progress">
-          {#each ['approved', 'queued', 'working', 'proof', 'receipt'] as step, index}
-            <div>
-              <div class="h-1.5 rounded-full" class:bg-[var(--hii-electric-blue)]={index <= currentStep} class:bg-neutral-200={index > currentStep}></div>
-              <span class="mt-1 block truncate font-mono text-[7px] uppercase text-neutral-400">{step}</span>
+        <div class="space-y-1" aria-label="Run progress">
+          {#each progressSteps as step, index}
+            <div class="grid grid-cols-[18px_1fr] gap-2.5 rounded-xl px-1 py-2" class:bg-blue-50={step.state === 'current'} class:bg-red-50={step.state === 'attention'}>
+              <div class="relative flex justify-center">
+                {#if index < progressSteps.length - 1}<span class="absolute left-1/2 top-4 h-[calc(100%+5px)] w-px -translate-x-1/2 bg-neutral-200"></span>{/if}
+                <span class="relative z-10 grid h-4 w-4 place-items-center rounded-full border font-mono text-[8px]"
+                  class:border-emerald-500={step.state === 'done'}
+                  class:bg-[var(--hii-acid-green)]={step.state === 'done'}
+                  class:text-neutral-950={step.state === 'done'}
+                  class:border-[var(--hii-electric-blue)]={step.state === 'current'}
+                  class:bg-[var(--hii-electric-blue)]={step.state === 'current'}
+                  class:text-white={step.state === 'current'}
+                  class:border-red-400={step.state === 'attention'}
+                  class:bg-red-100={step.state === 'attention'}
+                  class:text-red-700={step.state === 'attention'}
+                  class:border-neutral-200={step.state === 'pending'}
+                  class:bg-white={step.state === 'pending'}
+                  class:text-neutral-300={step.state === 'pending'}>
+                  {step.state === 'done' ? '✓' : step.state === 'attention' ? '!' : index + 1}
+                </span>
+              </div>
+              <div class="min-w-0">
+                <div class="flex items-center justify-between gap-2">
+                  <strong class="text-[11px] text-neutral-800">{step.label}</strong>
+                  <span class="font-mono text-[7px] uppercase tracking-[.08em]" class:text-blue-600={step.state === 'current'} class:text-red-600={step.state === 'attention'} class:text-neutral-300={step.state === 'pending'} class:text-emerald-700={step.state === 'done'}>{step.state}</span>
+                </div>
+                <p class="mt-0.5 text-[9px] leading-4 text-neutral-500">{step.detail}</p>
+              </div>
             </div>
           {/each}
         </div>
@@ -390,10 +451,10 @@
           {/if}
           {#if capabilityError}<p class="mt-2 text-[10px] leading-5 text-red-700">{capabilityError}</p>{/if}
         {:else if status === 'cancelled'}
-          <div class="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] leading-5 text-amber-900">{error || 'AII stopped this bounded run. No further work will execute under its approval.'}</div>
+          <div class="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] leading-5 text-amber-900">{transientFailure && error ? error : terminalRunMessage(status)}</div>
           <button class="mt-4 w-full rounded-full border border-neutral-900/15 bg-white px-4 py-2.5 font-mono text-[9px] uppercase tracking-[.1em] text-neutral-800" on:click={prepareRetry}>Prepare fresh retry for approval</button>
         {:else if status === 'failed'}
-          <div class="mt-6 rounded-xl border border-red-200 bg-red-50 p-3 text-[11px] leading-5 text-red-800">{error || 'AII recorded this bounded run as failed. Its authority has ended.'}</div>
+          <div class="mt-6 rounded-xl border border-red-200 bg-red-50 p-3 text-[11px] leading-5 text-red-800">{transientFailure && error ? error : terminalRunMessage(status)}</div>
           <button class="mt-4 w-full rounded-full border border-neutral-900/15 bg-white px-4 py-2.5 font-mono text-[9px] uppercase tracking-[.1em] text-neutral-800" on:click={prepareRetry}>Prepare fresh retry for approval</button>
         {:else if error}
           <div class="mt-6 rounded-xl border border-red-200 bg-red-50 p-3 text-[11px] leading-5 text-red-800">{error}</div>
@@ -406,6 +467,74 @@
               {cancellationBusy ? 'Stop requested from AII…' : 'Stop bounded run'}
             </button>
           </div>
+        {/if}
+
+        {#if job || receipt}
+          <button class="mt-5 flex w-full items-center justify-between rounded-xl border border-neutral-900/10 bg-white px-3 py-2.5 text-left" aria-expanded={evidenceOpen} on:pointerdown|stopPropagation on:click|stopPropagation={toggleEvidence}>
+            <span>
+              <strong class="block text-[10px] text-neutral-800">Inspect evidence</strong>
+              <span class="font-mono text-[7px] uppercase tracking-[.08em] text-neutral-400">{evidenceCount} records · raw output stays nested</span>
+            </span>
+            <span class="font-mono text-[10px] text-neutral-400">{evidenceOpen ? '−' : '+'}</span>
+          </button>
+          {#if evidenceOpen}
+            <section class="mt-2 rounded-xl border border-neutral-900/10 bg-white p-3" aria-label="Run evidence">
+              <div class="grid grid-cols-3 gap-1.5 text-center font-mono text-[7px] uppercase tracking-[.06em] text-neutral-400">
+                <div class="rounded-lg bg-neutral-50 p-2"><strong class="block text-[13px] text-neutral-800">{evidence.passingChecks}</strong>passing</div>
+                <div class="rounded-lg bg-neutral-50 p-2"><strong class="block text-[13px] text-neutral-800">{evidence.proofArtifacts.length}</strong>proof</div>
+                <div class="rounded-lg bg-neutral-50 p-2"><strong class="block text-[13px] text-neutral-800">{evidence.duration || '—'}</strong>duration</div>
+              </div>
+
+              {#if evidence.checks.length}
+                <div class="mt-3">
+                  <h3 class="font-mono text-[7px] uppercase tracking-[.1em] text-neutral-400">Verification</h3>
+                  <div class="mt-1.5 space-y-1">
+                    {#each evidence.checks as check}
+                      <div class="flex gap-2 rounded-lg px-2 py-1.5 text-[9px]" class:bg-emerald-50={check.ok === true} class:bg-red-50={check.ok === false}>
+                        <span class={check.ok === true ? 'text-emerald-700' : 'text-red-700'}>{check.ok === true ? '✓' : '!'}</span>
+                        <span class="min-w-0 break-all text-neutral-700">{check.command || 'verification check'}</span>
+                      </div>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+
+              {#if evidence.proofArtifacts.length}
+                <div class="mt-3">
+                  <h3 class="font-mono text-[7px] uppercase tracking-[.1em] text-neutral-400">Proof returned</h3>
+                  <div class="mt-1.5 space-y-1">
+                    {#each evidence.proofArtifacts as artifact}
+                      <div class="rounded-lg bg-neutral-50 px-2 py-1.5">
+                        <strong class="block text-[9px] text-neutral-700">{artifact.label || artifact.kind || 'proof record'}</strong>
+                        {#if artifact.path}<span class="block truncate font-mono text-[7px] text-neutral-400">{artifact.path}</span>{/if}
+                      </div>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+
+              {#if evidence.ledger.length}
+                <div class="mt-3">
+                  <h3 class="font-mono text-[7px] uppercase tracking-[.1em] text-neutral-400">Decision trail</h3>
+                  <div class="mt-1.5 space-y-1">
+                    {#each evidence.ledger as entry}
+                      <p class="rounded-lg bg-neutral-50 px-2 py-1.5 text-[9px] leading-4 text-neutral-600">{entry.summary || entry.type || 'governed event'}</p>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+
+              {#if evidence.logs.length}
+                <button class="mt-3 flex w-full items-center justify-between border-t border-neutral-900/10 pt-3 font-mono text-[8px] uppercase tracking-[.08em] text-neutral-500" aria-expanded={rawEvidenceOpen} on:pointerdown|stopPropagation on:click|stopPropagation={()=>rawEvidenceOpen=!rawEvidenceOpen}>
+                  <span>Raw execution log · {evidence.logs.length}</span>
+                  <span>{rawEvidenceOpen ? 'hide' : 'show'}</span>
+                </button>
+                {#if rawEvidenceOpen}
+                  <pre class="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-neutral-950 p-3 font-mono text-[8px] leading-4 text-neutral-300">{evidence.logs.join('\n\n')}</pre>
+                {/if}
+              {/if}
+            </section>
+          {/if}
         {/if}
       </section>
     {/if}

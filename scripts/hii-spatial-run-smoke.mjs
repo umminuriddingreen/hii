@@ -14,6 +14,7 @@ process.env.HII_WORKSPACE_RUN_MODELS = 'qwen3.6:35b-mlx,qwen3.6:27b-mlx';
 const runs = await import('../lib/server/hii-workspace-runs.ts');
 const artifacts = await import('../lib/server/hii-workspace-artifacts.ts');
 const jobs = await import('../lib/capabilities/local-store.ts');
+const progress = await import('../lib/workspace/run-progress.ts');
 
 try {
   await assert.rejects(
@@ -92,6 +93,17 @@ try {
   const completed = await runs.getWorkspaceRun('spatial-demo');
   assert.equal(completed.job.status, 'completed');
   assert.equal(completed.receipt.summary, 'Created the isolated proof artifact.');
+  const progressSteps = progress.workspaceRunProgress({
+    status: completed.job.status,
+    contextCount: 1,
+    maxSteps: 5,
+    workspaceRoot,
+    job: completed.job,
+    receipt: completed.receipt
+  });
+  assert.deepEqual(progressSteps.map((step) => step.state), ['done', 'done', 'done', 'done', 'done']);
+  assert.doesNotMatch(JSON.stringify(progressSteps), /isolated spatial run verified/);
+  assert.match(progress.workspaceRunEvidence(completed.job, completed.receipt).logs.at(-1), /isolated spatial run verified/);
 
   const openedArtifact = await artifacts.readWorkspaceRunArtifact({ runId: 'spatial-demo', artifact: 'proof.txt' });
   assert.equal(openedArtifact.content, 'original proof\n');
@@ -141,6 +153,7 @@ try {
   console.log('models:       installed-only discovery and rejection verified');
   console.log('handoff:      selected canvas context -> AII workspace.run verified');
   console.log('receipt:      completed job -> structured receipt verified');
+  console.log('focus:        concise lifecycle -> evidence -> raw log hierarchy verified');
   console.log('artifact:     receipt-listed file -> editable HII object verified');
   console.log('edit proof:   atomic save + optimistic conflict + human receipt verified');
   console.log('boundary:     unlisted and symlink-escaped artifacts rejected');

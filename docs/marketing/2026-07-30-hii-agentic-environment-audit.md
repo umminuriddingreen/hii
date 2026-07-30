@@ -85,6 +85,36 @@ This closes governed cancellation/retry and installed-model discovery. Recovery
 is now deterministic for the daemon/job boundary, while packaged-app crash and
 upgrade recovery remain clean-machine release gates.
 
+### Verified run-focus checkpoint
+
+Governed run cards now lead with one five-step lifecycle: intent approved,
+accepted by AII, bounded work, proof collected, and receipt returned. Each step
+is derived from the real job ledger, timestamps, proof records, checks, and
+receipt. Raw execution text is not used as agent “thinking” or as the primary
+progress surface.
+
+Evidence is progressively disclosed in two deliberate layers. `Inspect
+evidence` opens verification, proof records, duration, and the decision trail.
+`Raw execution log` is a second nested control and remains closed by default.
+Failed and cancelled historical runs receive a human-readable terminal summary;
+their persisted raw final line is available only inside evidence. A transient
+failure before a job exists can still show its immediate diagnostic so the user
+is not left with a generic dead end.
+
+The isolated run-focus unit and product gates prove the lifecycle mapping,
+terminal summaries, evidence limits, and raw-log hierarchy. Live HII Space in
+`governed-run-demo` proved all five completed states, a verified receipt with
+one passing check, the closed evidence default, the opened evidence layer, and
+the separately opened raw log. The live pass also found and fixed canvas drag
+interference on the disclosures.
+
+The same live workspace exposed an important demo-quality gap: later proposal
+nodes overlap the completed run, so Map can focus the correct object while a
+higher node still obscures it. This does not invalidate the DOM and interaction
+proof, but it is not launch-grade choreography. The viral demo should use a
+small isolated workspace or named Scene with no overlapping drafts. Duplicate
+task prevention and automatic demo-layout cleanup remain open.
+
 ### Verified artifact checkpoint
 
 HII now returns each text or code file named in a completed run receipt as its

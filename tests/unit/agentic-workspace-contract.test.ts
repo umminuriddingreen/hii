@@ -6,6 +6,7 @@ const root = process.cwd();
 const workspace = readFileSync(resolve(root, 'src/lib/components/workspace/WorkspacePage.svelte'), 'utf8');
 const chat = readFileSync(resolve(root, 'src/lib/components/workspace/ChatPane.svelte'), 'utf8');
 const spatialRun = readFileSync(resolve(root, 'src/lib/components/workspace/SpatialRunPane.svelte'), 'utf8');
+const runProgress = readFileSync(resolve(root, 'lib/workspace/run-progress.ts'), 'utf8');
 const workspaceRuns = readFileSync(resolve(root, 'lib/server/hii-workspace-runs.ts'), 'utf8');
 const workspaceRunRoute = readFileSync(resolve(root, 'app/api/workspace/runs/route.ts'), 'utf8');
 const workspaceArtifacts = readFileSync(resolve(root, 'lib/server/hii-workspace-artifacts.ts'), 'utf8');
@@ -51,6 +52,17 @@ describe('agentic workspace interaction contract', () => {
     expect(chat).toContain('run.visibleOutput');
   });
 
+  it('keeps governed progress concise and raw execution output behind inspection', () => {
+    expect(spatialRun).toContain('workspaceRunProgress');
+    expect(spatialRun).toContain('Inspect evidence');
+    expect(spatialRun).toContain('Raw execution log');
+    expect(spatialRun).toContain('{#if rawEvidenceOpen}');
+    expect(spatialRun).toContain('on:pointerdown|stopPropagation');
+    expect(spatialRun).toContain('terminalRunMessage(status)');
+    expect(runProgress).toContain("'approval' | 'queue' | 'work' | 'proof' | 'receipt'");
+    expect(runProgress).toContain('No verified receipt was returned.');
+  });
+
   it('uses the installed HII model default and preserves truthful terminal failures', () => {
     expect(workspace).toContain("model:''");
     expect(workspaceRuns).toContain("defaultWorkspaceRunModel = 'qwen3.6:35b-mlx'");
@@ -63,7 +75,7 @@ describe('agentic workspace interaction contract', () => {
     expect(spatialRun).toContain("let error = String(node.payload.error || '')");
     expect(spatialRun).toContain("error: failureError");
     expect(spatialRun).toContain("status === 'failed'");
-    expect(spatialRun).toContain('Its authority has ended.');
+    expect(runProgress).toContain('Inspect its evidence for the final execution output.');
     expect(spatialRun).toContain('Branch a revised intent from this run…');
   });
 
