@@ -62,6 +62,9 @@ static ACTIVE_THEME: AtomicU8 = AtomicU8::new(Theme::Heritage as u8);
 const COMMANDS: &[(&str, &str)] = &[
     ("/help", "all controls"),
     ("/status", "session state"),
+    ("/attach", "add file or image"),
+    ("/attachments", "pending context"),
+    ("/detach", "remove pending context"),
     ("/goal", "persistent objective"),
     ("/plan", "inspect before acting"),
     ("/side", "ask without derailing"),
@@ -308,6 +311,9 @@ fn public_command(command: &str) -> bool {
             | "/compact"
             | "/clear"
             | "/status"
+            | "/attach"
+            | "/attachments"
+            | "/detach"
             | "/usage"
             | "/thinking"
             | "/raw"
@@ -594,6 +600,10 @@ mod tests {
         assert!(matches.iter().any(|(command, _)| *command == "/new"));
         assert!(matches.iter().any(|(command, _)| *command == "/raw"));
         assert!(matches.iter().any(|(command, _)| *command == "/theme"));
+        assert!(matches.iter().any(|(command, _)| *command == "/attach"));
+        assert!(matches
+            .iter()
+            .any(|(command, _)| *command == "/attachments"));
         assert!(!matches.iter().any(|(command, _)| *command == "/providers"));
         assert!(!matches.iter().any(|(command, _)| *command == "/copy"));
         assert!(!matches.iter().any(|(command, _)| *command == "/rename"));

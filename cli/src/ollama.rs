@@ -1,3 +1,4 @@
+use crate::attachments::ImagePayload;
 use crate::config::ModelProvider;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -11,6 +12,10 @@ use std::{
 pub struct Message {
     pub role: String,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
+    #[serde(skip)]
+    pub image_mime_types: Vec<String>,
 }
 
 impl Message {
@@ -18,6 +23,8 @@ impl Message {
         Self {
             role: "system".into(),
             content: content.into(),
+            images: Vec::new(),
+            image_mime_types: Vec::new(),
         }
     }
 
@@ -25,6 +32,8 @@ impl Message {
         Self {
             role: "user".into(),
             content: content.into(),
+            images: Vec::new(),
+            image_mime_types: Vec::new(),
         }
     }
 
@@ -32,6 +41,17 @@ impl Message {
         Self {
             role: "assistant".into(),
             content: content.into(),
+            images: Vec::new(),
+            image_mime_types: Vec::new(),
+        }
+    }
+
+    pub fn user_with_images(content: impl Into<String>, images: Vec<ImagePayload>) -> Self {
+        Self {
+            role: "user".into(),
+            content: content.into(),
+            images: images.iter().map(|image| image.base64.clone()).collect(),
+            image_mime_types: images.into_iter().map(|image| image.mime_type).collect(),
         }
     }
 }
@@ -166,6 +186,22 @@ impl Ollama {
         }
     }
 
+    pub fn model_supports_vision(&self, model: &str) -> Result<Option<bool>, String> {
+        if self.provider != ModelProvider::Ollama {
+            return Ok(None);
+        }
+        let value: Value = self
+            .agent
+            .post(&format!("{}/api/show", self.base_url))
+            .send_json(json!({ "model": model }))
+            .map_err(format_ureq)?
+            .into_json()
+            .map_err(|error| format!("invalid Ollama model details: {error}"))?;
+        Ok(Some(value["capabilities"].as_array().is_some_and(
+            |items| items.iter().any(|item| item.as_str() == Some("vision")),
+        )))
+    }
+
     pub fn chat_json_with_usage(
         &self,
         model: &str,
@@ -255,7 +291,7 @@ impl Ollama {
     ) -> Result<ChatResult, String> {
         let mut body = json!({
             "model": model,
-            "messages": messages,
+            "messages": openai_messages(messages),
             "stream": false,
             "temperature": 0.1,
         });
@@ -407,6 +443,32 @@ impl Ollama {
     }
 }
 
+fn openai_messages(messages: &[Message]) -> Value {
+    Value::Array(
+        messages
+            .iter()
+            .map(|message| {
+                if message.images.is_empty() {
+                    return json!({ "role": message.role, "content": message.content });
+                }
+                let mut content = vec![json!({ "type": "text", "text": message.content })];
+                for (index, image) in message.images.iter().enumerate() {
+                    let mime = message
+                        .image_mime_types
+                        .get(index)
+                        .map(String::as_str)
+                        .unwrap_or("image/png");
+                    content.push(json!({
+                        "type": "image_url",
+                        "image_url": { "url": format!("data:{mime};base64,{image}") }
+                    }));
+                }
+                json!({ "role": message.role, "content": content })
+            })
+            .collect(),
+    )
+}
+
 #[derive(Default)]
 struct RepetitionGuard {
     text: String,
@@ -526,7 +588,8 @@ fn format_ureq(error: ureq::Error) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::RepetitionGuard;
+    use super::{openai_messages, Message, RepetitionGuard};
+    use crate::attachments::ImagePayload;
 
     #[test]
     fn detects_three_substantial_repeated_blocks() {
@@ -558,5 +621,23 @@ mod tests {
         assert!(!types.iter().any(|value| value == "tool"));
         let bytes = serde_json::to_vec(&schema).expect("serialize schema").len();
         assert!(bytes <= 1_000, "action schema grew to {bytes} bytes");
+    }
+
+    #[test]
+    fn openai_images_use_data_url_content_parts() {
+        let message = Message::user_with_images(
+            "Describe this reference",
+            vec![ImagePayload {
+                mime_type: "image/png".into(),
+                base64: "aW1hZ2U=".into(),
+            }],
+        );
+        let value = openai_messages(&[message]);
+        assert_eq!(value[0]["content"][0]["type"], "text");
+        assert_eq!(value[0]["content"][1]["type"], "image_url");
+        assert_eq!(
+            value[0]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,aW1hZ2U="
+        );
     }
 }

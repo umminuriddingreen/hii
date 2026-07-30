@@ -1,6 +1,7 @@
 mod acp;
 mod agent;
 mod agents;
+mod attachments;
 mod board;
 mod config;
 mod context;
@@ -549,6 +550,9 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Some(SlashCommand::Compact) => conversation.compact(),
             Some(SlashCommand::Clear) => conversation.clear(),
             Some(SlashCommand::Status) => Ok(conversation.status()),
+            Some(SlashCommand::Attach(path)) => conversation.attach(&path),
+            Some(SlashCommand::Attachments) => Ok(conversation.attachments()),
+            Some(SlashCommand::Detach(requested)) => conversation.detach(requested.as_deref()),
             Some(SlashCommand::Goal(goal)) => conversation.goal(goal.as_deref()),
             Some(SlashCommand::Plan(requested)) => match requested.as_deref() {
                 Some("off") => conversation.plan(false),
@@ -658,6 +662,9 @@ enum SlashCommand {
     Compact,
     Clear,
     Status,
+    Attach(String),
+    Attachments,
+    Detach(Option<String>),
     Goal(Option<String>),
     Plan(Option<String>),
     Usage,
@@ -725,6 +732,9 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         "/compact" if argument.is_none() => SlashCommand::Compact,
         "/clear" if argument.is_none() => SlashCommand::Clear,
         "/status" if argument.is_none() => SlashCommand::Status,
+        "/attach" if argument.is_some() => SlashCommand::Attach(rest.to_string()),
+        "/attachments" if argument.is_none() => SlashCommand::Attachments,
+        "/detach" => SlashCommand::Detach(argument),
         "/goal" => SlashCommand::Goal(argument),
         "/plan" => SlashCommand::Plan(argument),
         "/usage" if argument.is_none() => SlashCommand::Usage,
@@ -810,10 +820,14 @@ fn slash_help() -> String {
         "/skills                       show automatically learned skill drafts\n",
         "/skills                       show automatically learned skill drafts\n/hooks                        inspect approved lifecycle policy\n",
     )
+    .replace(
+        "/status                       show session, workspace, model, and usage\n",
+        "/status                       show session, workspace, model, and usage\n/attach <path>                add workspace text/image context\n/attachments                  show pending context and size\n/detach [number|all]          remove pending context\n",
+    )
 }
 
 fn public_test_slash_help() -> &'static str {
-    "/help                         show commands\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/status                       show isolated session, workspace, model, and usage\n/theme [name]                 switch the terminal theme\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n/model [name]                 list or switch available models\n/proof [run-id]               inspect isolated execution proof\n/permissions                  show the tester-safe authority boundary\n/undo                         drop the last exchange\n/exit                         leave HII\n\nInstalled Mac tools are available to HII inside the disposable workspace. Direct shell input and deletion are unavailable."
+    "/help                         show commands\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/status                       show isolated session, workspace, model, and usage\n/attach <path>                add workspace text/image context\n/attachments                  show pending context and size\n/detach [number|all]          remove pending context\n/theme [name]                 switch the terminal theme\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n/model [name]                 list or switch available models\n/proof [run-id]               inspect isolated execution proof\n/permissions                  show the tester-safe authority boundary\n/undo                         drop the last exchange\n/exit                         leave HII\n\nAttachments must already exist inside this disposable workspace. Installed Mac tools are available to HII inside it. Direct shell input and deletion are unavailable."
 }
 
 fn lifecycle_hooks_enabled(no_hooks: bool, profile: SessionProfile) -> bool {
@@ -1175,6 +1189,9 @@ fn public_test_slash_allowed(command: &SlashCommand) -> bool {
             | SlashCommand::Compact
             | SlashCommand::Clear
             | SlashCommand::Status
+            | SlashCommand::Attach(_)
+            | SlashCommand::Attachments
+            | SlashCommand::Detach(_)
             | SlashCommand::Usage
             | SlashCommand::Thinking(_)
             | SlashCommand::Theme(_)
@@ -1416,6 +1433,18 @@ mod tests {
         assert_eq!(
             parse_slash_command("/model qwen3.6:35b-mlx"),
             Some(SlashCommand::Model(Some("qwen3.6:35b-mlx".into())))
+        );
+        assert_eq!(
+            parse_slash_command("/attach references/hero image.png"),
+            Some(SlashCommand::Attach("references/hero image.png".into()))
+        );
+        assert_eq!(
+            parse_slash_command("/attachments"),
+            Some(SlashCommand::Attachments)
+        );
+        assert_eq!(
+            parse_slash_command("/detach 2"),
+            Some(SlashCommand::Detach(Some("2".into())))
         );
         assert_eq!(
             parse_slash_command("/login codex"),
