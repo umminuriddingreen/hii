@@ -17,9 +17,10 @@
   export let onPayload:(patch:Record<string,unknown>)=>void;
   export let onSize:(size:{w:number;h:number})=>void=()=>{};
   export let onPromote:(item:Record<string,unknown>,label?:string)=>void=()=>{};
+  export let onOrganize:()=>void=()=>{};
   const text=(key:string)=>String(node.payload[key]??'');
   const size=(value:unknown)=>{const n=Number(value);return Number.isFinite(n)?n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:`${(n/1048576).toFixed(1)} MB`:''};
-  const fitImage=(event:Event)=>{const image=event.currentTarget as HTMLImageElement;if(!image.naturalWidth||!image.naturalHeight)return;const ratio=image.naturalWidth/image.naturalHeight,current=node.w/node.h;const next=current>ratio?{w:node.h*ratio,h:node.h}:{w:node.w,h:node.w/ratio};if(Math.abs(next.w-node.w)>1||Math.abs(next.h-node.h)>1)onSize(next)};
+  const fitImage=(event:Event)=>{if(text('adapter')==='contact-sheet-review-item')return;const image=event.currentTarget as HTMLImageElement;if(!image.naturalWidth||!image.naturalHeight)return;const ratio=image.naturalWidth/image.naturalHeight,current=node.w/node.h;const next=current>ratio?{w:node.h*ratio,h:node.h}:{w:node.w,h:node.w/ratio};if(Math.abs(next.w-node.w)>1||Math.abs(next.h-node.h)>1)onSize(next)};
   let imageHost: HTMLElement;
   let regionMode = false;
   let regionStart: { x: number; y: number } | null = null;
@@ -146,6 +147,7 @@
         {#if selectedContactItems.length}
           <input aria-label="Batch label selected references" bind:value={batchContactLabel} class="min-w-0 max-w-32 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 font-mono text-[8px] outline-none focus:border-blue-500" placeholder="label selected"/>
           <button class="shrink-0 rounded-full bg-blue-600 px-2.5 py-1.5 font-mono text-[8px] uppercase text-white disabled:opacity-35" disabled={!batchContactLabel.trim()} on:click={labelSelectedContactItems}>Label selected</button>
+          {#if selectedContactItems.length>1}<button class="shrink-0 rounded-full border border-blue-200 bg-white px-2.5 py-1.5 font-mono text-[8px] uppercase text-blue-700 hover:border-blue-500" on:click={onOrganize}>Make Scene ↗</button>{/if}
           <button class="shrink-0 rounded-full px-2 py-1.5 font-mono text-[8px] uppercase text-neutral-400 hover:bg-neutral-100" on:click={()=>onPayload({selectedItems:[]})}>Clear</button>
         {/if}
       </div>

@@ -334,6 +334,18 @@ describe('agentic workspace interaction contract', () => {
     expect(readFileSync(resolve(root, 'src/lib/components/workspace/StaticNode.svelte'), 'utf8')).toContain('Focus region ↗');
   });
 
+  it('turns an exact classified review set into a provenance-linked named Scene', () => {
+    const staticNode = readFileSync(resolve(root, 'src/lib/components/workspace/StaticNode.svelte'), 'utf8');
+    const reviewScene = readFileSync(resolve(root, 'lib/workspace/contact-sheet-scene.ts'), 'utf8');
+    expect(workspace).toContain('organizeContactSheetReviewSet');
+    expect(workspace).toContain('organizeContactSheetSelection');
+    expect(workspace).toContain('onOrganize={()=>organizeContactSheetSelection(node)}');
+    expect(staticNode).toContain('Make Scene ↗');
+    expect(reviewScene).toContain("adapter: 'contact-sheet-review-scene'");
+    expect(reviewScene).toContain("membership: 'contact-sheet-selection'");
+    expect(reviewScene).toContain('reviewSetSignature');
+  });
+
   it('bridges an explicit browser request into its paired terminal', () => {
     expect(explorer).toContain('curl -I -L --max-time 20 --');
     expect(explorer).toContain("new CustomEvent('hii:terminal-command'");

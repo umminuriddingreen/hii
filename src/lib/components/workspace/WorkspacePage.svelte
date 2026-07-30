@@ -26,6 +26,7 @@
   import { findOpenWorkspacePosition } from '@/lib/workspace/layout';
   import { normalizeWorkspaceContextAnchor } from '@/lib/workspace/context-anchor';
   import { contactSheetContextItems, contactSheetItemSeed } from '@/lib/workspace/contact-sheet';
+  import { organizeContactSheetReviewSet } from '@/lib/workspace/contact-sheet-scene';
   import { rebindPendingWorkspaceContext } from '@/lib/workspace/pending-context';
   import { organizeWorkspaceSelection } from '@/lib/workspace/organize';
   import { boardPatchForRunState, boardRunSyncKey } from '@/lib/workspace/board-run';
@@ -156,6 +157,17 @@
     const at=findOpenWorkspacePosition(doc.nodes,{x:sheet.x+sheet.w+32,y:sheet.y},{w:seed.w,h:seed.h});
     const promoted=makeNode(seed,at.x,at.y,doc.nextZ+1);
     doc={...doc,nextZ:doc.nextZ+1,nodes:[...doc.nodes,promoted]};selected=promoted.id;contextSelection=[promoted.id];remember(before);persist();fitNodes([sheet,promoted],1);
+  }
+  function organizeContactSheetSelection(sheet:WorkspaceNode){
+    const before=doc;
+    try{
+      const organized=organizeContactSheetReviewSet(doc,sheet);
+      if(!organized){saveError='Select at least two exact references before making a Scene.';return}
+      if(!organized.created){fitScene(organized.scene);organizationNotice=`${workspaceNodeTitle(organized.scene)} already holds this exact review set.`;return}
+      doc=organized.doc;selected=organized.scene.id;contextSelection=[];currentSceneId=organized.scene.id;
+      organizationNotice=`${workspaceNodeTitle(organized.scene)} now holds ${organized.memberIds.length} source-linked references.`;
+      remember(before);persist();mapMenu=false;fitNodes([organized.scene,...doc.nodes.filter(node=>organized.memberIds.includes(node.id))],1);
+    }catch(error){saveError=error instanceof Error?error.message:'HII could not organize this review set.'}
   }
   function spawn(type:string,payload:Record<string,unknown>={}){const typedPayload=type==='frame'?{sceneOrder:scenes.length+1,...payload}:payload;const seed=seedFor(type as WorkspaceNodeType,type==='browser'?{url:'https://duckduckgo.com',...typedPayload}:type==='terminal'?{sessionId:crypto.randomUUID(),...typedPayload}:typedPayload);const center={x:(-doc.viewport.x+innerWidth/2)/doc.viewport.zoom,y:(-doc.viewport.y+innerHeight/2)/doc.viewport.zoom};addSeeds([seed],{x:center.x-seed.w/2,y:center.y-seed.h/2});omnibar=false;query='';if(type==='context')void refreshContext();if(type==='board')void refreshBoard();}
   function workspacePoint(clientX:number,clientY:number){return{x:(clientX-doc.viewport.x)/doc.viewport.zoom,y:(clientY-doc.viewport.y)/doc.viewport.zoom}}
@@ -492,7 +504,7 @@
         {:else if node.object?.kind==='artifact'&&node.payload.adapter==='run-artifact'}<RunArtifactPane {node} onPatch={(next)=>patch(node.id,next)} />
         {:else if node.object?.kind==='capability'}<GovernedCapabilityPane {node} onPatch={(next)=>patch(node.id,next)} />
         {:else if ['artifact','receipt'].includes(node.object?.kind||'')}<GovernedResultPane {node} />
-        {:else if ['note','text','canvas-text','ink','link','file','image','media','html','font'].includes(node.type)}<StaticNode {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} onSize={(size)=>patch(node.id,size)} onPromote={(item,label)=>promoteContactSheetItem(node,item,label)} />
+        {:else if ['note','text','canvas-text','ink','link','file','image','media','html','font'].includes(node.type)}<StaticNode {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} onSize={(size)=>patch(node.id,size)} onPromote={(item,label)=>promoteContactSheetItem(node,item,label)} onOrganize={()=>organizeContactSheetSelection(node)} />
         {:else if node.type==='intent'}<IntentPane {node} />
         {:else if node.type==='run'}<SpatialRunPane {node} onPatch={(next)=>patchRunNode(node,next)} onFollowUp={(text)=>followUp(node,text)} onComplete={(result)=>completedRunNodes(node,result)} onCapabilityDraft={(result)=>materializeCapabilityDraft(node,result)} />
         {:else if node.type==='document'}<DocumentPane {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} />

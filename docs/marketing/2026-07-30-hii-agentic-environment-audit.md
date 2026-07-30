@@ -434,6 +434,17 @@ in the exact run-context annotation when that source is selected again. This
 adds the useful batch organization learned from Figma, Miro, and Freeform
 without turning AI guesses into silent project structure.
 
+Two or more selected references can now become a normal named HII Scene
+directly from the sheet. HII places lightweight source-linked image objects in
+an open lane, preserves the sheet as their parent, carries every selected
+SHA-256 proof onto the Scene, and uses the shared label as its initial name.
+The same sheet, membership, and human classification resolve to the existing
+Scene instead of creating duplicates. Undo, Map navigation, renaming,
+collapsing, and image-region focus all remain the existing HII behaviors. The
+isolated media and unit gates prove exact membership, persistence shape,
+idempotence, and one-step reversal; native multi-Scene presentation remains a
+live proof task.
+
 Any selected thumbnail can now be promoted beside its sheet as an ordinary HII
 image object. Promotion is idempotent for the sheet plus source hash, retains a
 parent link to the sheet and the exact SHA-256 proof, chooses an open canvas
@@ -621,7 +632,7 @@ cloud sync, credits, or a general “AI operating system.”
 
 | Priority | Gap | Evidence of done |
 | --- | --- | --- |
-| 0 | Orientation at scale | The searchable governed outline, named ordered Scenes, arbitrary-depth lineage, status summaries, off-screen rescue, deterministic Scene navigation, and exact filter → selection → Scene flow are implemented. The 240-object product gate and live 164-image proof demonstrate organization under hundreds-of-object load; the next scale proof is useful multi-Scene classification rather than one large Scene. |
+| 0 | Orientation at scale | The searchable governed outline, named ordered Scenes, arbitrary-depth lineage, status summaries, off-screen rescue, deterministic Scene navigation, exact filter → selection → Scene flow, and contact-sheet review-set → Scene flow are implemented. The 240-object product gate and live 164-image proof demonstrate organization under hundreds-of-object load; native proof of several useful human classifications remains open. |
 | 0 | One legible governed run | Selected context, intent, permission boundary, progress, artifact, proof, and receipt are visible as one connected flow without reading raw logs. |
 | 0 | Artifact-first closure | The output opens beside its inputs, is editable or launches its native editor, and reports exactly what changed. |
 | 0 | Trustworthy context selection | Before approval, the user can see the exact files/nodes/sources and sub-asset regions included, exclusions, provenance, content identity, and likely network boundary. |
@@ -643,8 +654,9 @@ cloud sync, credits, or a general “AI operating system.”
    receipt → save as draft capability.
 2. Keep the Map and named Scenes as permanent product infrastructure. The
    searchable outline, 240-object product gate, and live 164-image reversible
-   Scene proof are complete; next prove a useful human classification into
-   several named Scenes without losing provenance.
+   Scene proof are complete. Exact contact-sheet review sets now become
+   provenance-linked named Scenes; next live-prove several useful human
+   classifications without losing orientation.
 3. Preserve the verified Run and Chat focus hierarchy; next prevent duplicate
    or low-quality generated board tasks from becoming active work.
 4. Keep runtime and desktop-space health operator-readable; live-verify the

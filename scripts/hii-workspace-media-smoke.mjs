@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
-const { seedsFromFiles } = await import('../lib/workspace/ingest.ts');
+const { makeNode, seedsFromFiles } = await import('../lib/workspace/ingest.ts');
+const { organizeContactSheetReviewSet } = await import('../lib/workspace/contact-sheet-scene.ts');
 const {
   contactSheetContextItems,
   contactSheetItemSeed,
@@ -71,6 +72,26 @@ const promoted = contactSheetItemSeed(sheet.payload.items[1], 'proof-sheet', 'ma
 assert.equal(promoted.object.parentId, 'proof-sheet');
 assert.deepEqual(promoted.object.proofRefs, [`sha256:${sheet.payload.items[1].sha256}`]);
 assert.equal(promoted.payload.adapter, 'contact-sheet-item');
+const sheetNode = {
+  ...makeNode({
+    ...sheet,
+    payload: { ...sheet.payload, selectedItems, itemLabels }
+  }, 0, 0, 1),
+  id: 'proof-sheet'
+};
+const reviewScene = organizeContactSheetReviewSet({
+  version: 1,
+  revision: 0,
+  updatedAt: new Date(0).toISOString(),
+  viewport: { x: 0, y: 0, zoom: 1 },
+  nextZ: 1,
+  nodes: [sheetNode]
+}, sheetNode, { sceneId: 'material-scene', now: new Date(0).toISOString() });
+assert.equal(reviewScene.created, true);
+assert.equal(reviewScene.scene.payload.title, 'material palette');
+assert.deepEqual(reviewScene.scene.object.proofRefs, selectedItems.map((item) => `sha256:${item.sha256}`));
+assert.equal(reviewScene.memberIds.length, 2);
+assert.equal(reviewScene.doc.nodes.filter((node) => node.frameId === reviewScene.scene.id).length, 2);
 
 console.log('HII workspace media smoke');
 console.log('status:       ok');
@@ -79,5 +100,6 @@ console.log('dedupe:       exact SHA-256 duplicate omitted before storage');
 console.log('proof:        unique source paths + hashes preserved');
 console.log('focus:        exact labeled thumbnails -> separate hashed run context');
 console.log('classification: selected references -> durable filterable batch label');
+console.log('scenes:       exact classified review set -> reversible named Scene');
 console.log('promotion:    sheet item -> provenance-linked region-focusable image');
 console.log('mixed batch:  non-image artifact remains directly editable');
