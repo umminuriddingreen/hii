@@ -1303,45 +1303,5 @@
     "evidence": ["cli/src/system_monitor.rs", "/top", "/resources"],
     "status": "ready",
     "trustLevel": "first-party"
-  },
-  {
-    "id": "hii.trader.autonomous_paper",
-    "name": "Run Governed Autonomous Paper Trader",
-    "owner": "aii",
-    "runtime": "local-process",
-    "summary": "Use public crypto market APIs and local Ollama intelligence to run a source-linked paper-trading loop behind deterministic portfolio, meme-coin, loss, and live-capital gates.",
-    "inputs": [
-      "explicit local trading profile",
-      "Kraken public market observations",
-      "DEX Screener Solana watchlist",
-      "local Ollama thesis proposals"
-    ],
-    "outputs": [
-      "paper positions and fills",
-      "risk decisions and rejected trades",
-      "append-only cycle receipts",
-      "90-day live-promotion evidence"
-    ],
-    "permissions": [
-      "local HII operator only",
-      "public read-only market APIs",
-      "local Ollama inference",
-      "paper execution only",
-      "live trading locked",
-      "no credentials withdrawals leverage derivatives or shorting"
-    ],
-    "visibility": "local",
-    "costModel": {
-      "type": "free"
-    },
-    "evidence": [
-      "lib/server/hii-trader.ts",
-      "src/routes/api/trader",
-      "src/routes/(app)/trader",
-      "~/.hii/hii.db",
-      "~/.hii/receipts/trader.jsonl"
-    ],
-    "status": "ready",
-    "trustLevel": "experimental"
   }
 ]
