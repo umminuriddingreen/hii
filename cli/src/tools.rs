@@ -812,6 +812,166 @@ fn has_ripgrep() -> bool {
     *PRESENT.get_or_init(|| which_on_path("rg"))
 }
 
+/// A command that cannot run because the program it invokes is not installed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingDependency {
+    pub program: String,
+    pub command: String,
+}
+
+/// Shell builtins and keywords that never resolve on `PATH`.
+const SHELL_BUILTINS: &[&str] = &[
+    "cd", "echo", "export", "set", "unset", "test", "true", "false", "source", ".", "exit", "read",
+    "printf", "pwd", "eval", "exec", "wait", "trap", "shift", "return", "local", "if", "then",
+    "else", "fi", "for", "while", "do", "done", "case", "esac",
+];
+
+/// Confirm every program a command invokes actually exists.
+///
+/// Without this a declared check like `pytest -q` runs the entire agent loop and
+/// only then fails with exit 127, and a missing binary is indistinguishable from
+/// a real test failure — which drove the repair loop to rewrite correct code.
+pub(crate) fn preflight_command(command: &str, workspace: &Path) -> Result<(), MissingDependency> {
+    for segment in command.split(['|', ';']).flat_map(|part| part.split("&&")) {
+        let mut words = segment.split_whitespace().peekable();
+        // Skip `VAR=value` and `env VAR=value` prefixes to reach the program.
+        let program = loop {
+            match words.next() {
+                None => break None,
+                Some("env") => continue,
+                Some(word) if word.contains('=') && !word.starts_with('/') => continue,
+                Some(word) => break Some(word),
+            }
+        };
+        let Some(program) = program else { continue };
+        let program = program.trim_matches(|character| matches!(character, '\'' | '"' | '('));
+        if program.is_empty() || SHELL_BUILTINS.contains(&program) {
+            continue;
+        }
+        // A workspace-relative script is checked on disk rather than on PATH.
+        if program.starts_with("./") || program.contains('/') {
+            let candidate = workspace.join(program.trim_start_matches("./"));
+            if candidate.is_file() || Path::new(program).is_file() {
+                continue;
+            }
+            return Err(MissingDependency {
+                program: program.to_string(),
+                command: command.to_string(),
+            });
+        }
+        if !which_on_path(program) {
+            return Err(MissingDependency {
+                program: program.to_string(),
+                command: command.to_string(),
+            });
+        }
+        // `python3 -m pytest` names a module, not a program. The interpreter
+        // resolves fine while the module is absent, which is exactly how a
+        // missing test runner used to reach the loop disguised as a test failure.
+        if let Some(module) = interpreter_module(program, &mut words) {
+            if !module_is_importable(program, &module) {
+                return Err(MissingDependency {
+                    program: module,
+                    command: command.to_string(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The module name in `<python> -m <module>`, if this is that form.
+fn interpreter_module<'a>(
+    program: &str,
+    words: &mut impl Iterator<Item = &'a str>,
+) -> Option<String> {
+    let file = Path::new(program).file_name()?.to_str()?;
+    if !file.starts_with("python") {
+        return None;
+    }
+    let mut rest = words.skip_while(|word| *word != "-m");
+    rest.next()?;
+    rest.next().map(str::to_string)
+}
+
+/// Ask the interpreter itself, so virtualenvs and interpreter mismatches are
+/// judged the same way the check will be.
+fn module_is_importable(interpreter: &str, module: &str) -> bool {
+    if module.is_empty()
+        || !module
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+    {
+        return true; // Not a plain module name; leave it to the run.
+    }
+    Command::new(interpreter)
+        .args(["-c", &format!("import {module}")])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(true)
+}
+
+/// Why a command failed, when the reason is not the code under test.
+///
+/// A missing runner and a genuine assertion failure look identical from the
+/// outside, and treating the first as the second is what drives a repair loop to
+/// rewrite code that was never wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureClass {
+    MissingDependency,
+    PermissionDenied,
+    PortInUse,
+    Timeout,
+    /// A real failure of the thing being checked.
+    AssertionFailure,
+}
+
+pub fn classify_failure(output: &str) -> FailureClass {
+    let lower = output.to_ascii_lowercase();
+    if lower.contains("command not found")
+        || lower.contains("no such file or directory")
+        || lower.contains("modulenotfounderror")
+        || lower.contains("importerror")
+        || lower.contains("is not recognized as an internal")
+        || lower.contains("no module named")
+        || lower.contains("cannot find module")
+    {
+        FailureClass::MissingDependency
+    } else if lower.contains("permission denied") || lower.contains("eacces") {
+        FailureClass::PermissionDenied
+    } else if lower.contains("address already in use") || lower.contains("eaddrinuse") {
+        FailureClass::PortInUse
+    } else if lower.contains("command timed out after") {
+        FailureClass::Timeout
+    } else {
+        FailureClass::AssertionFailure
+    }
+}
+
+impl FailureClass {
+    /// What to tell the model. `None` means the failure is about the code and
+    /// the normal repair path applies.
+    pub fn environment_hint(self) -> Option<&'static str> {
+        match self {
+            FailureClass::AssertionFailure => None,
+            FailureClass::MissingDependency => Some(
+                "ENVIRONMENT_BLOCKED: the check could not run because something it needs is not installed. This is an environment problem, not a code problem — do not edit code to work around it. Use a check that relies on an available tool, or return final describing the blocker.",
+            ),
+            FailureClass::PermissionDenied => Some(
+                "ENVIRONMENT_BLOCKED: the check was refused by filesystem permissions. Do not edit code to work around it; return final describing the blocker.",
+            ),
+            FailureClass::PortInUse => Some(
+                "ENVIRONMENT_BLOCKED: the port the check needs is already in use. Do not edit code to work around it; choose another check or return final describing the blocker.",
+            ),
+            FailureClass::Timeout => Some(
+                "ENVIRONMENT_BLOCKED: the check exceeded its time limit rather than failing. Narrow the check instead of rewriting code.",
+            ),
+        }
+    }
+}
+
 /// Minimal cross-platform `which`: is `program` resolvable on `PATH`?
 pub(crate) fn which_on_path(program: &str) -> bool {
     let Some(paths) = std::env::var_os("PATH") else {
@@ -866,6 +1026,44 @@ fn platform_shell(command: &str) -> Command {
     }
 }
 
+/// The file a shell redirection would write, if it is a workspace file.
+///
+/// Redirecting into the workspace is how a model rewrites a file wholesale
+/// without going through `edit`, which skips both the exact-match discipline and
+/// the protected-file list — those live in path resolution, not here. Stream
+/// plumbing (`2>&1`, `>&2`) and `/dev/null` are not writes and stay allowed.
+fn workspace_redirect_target(command: &str) -> Option<String> {
+    let bytes = command.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] != b'>' {
+            at += 1;
+            continue;
+        }
+        // `2>`/`1>` and `>>` are still redirections; `>&` is a descriptor dup.
+        let mut cursor = at + 1;
+        if bytes.get(cursor) == Some(&b'>') {
+            cursor += 1;
+        }
+        if bytes.get(cursor) == Some(&b'&') {
+            at = cursor + 1;
+            continue;
+        }
+        let rest = command[cursor..].trim_start();
+        let target = rest
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .trim_matches(|character| matches!(character, '\'' | '"' | ';' | ')'));
+        at = cursor + 1;
+        if target.is_empty() || target.starts_with("/dev/") {
+            continue;
+        }
+        return Some(target.to_string());
+    }
+    None
+}
+
 fn validate_shell(command: &str, workspace: &Path, deletion_approved: bool) -> Result<(), String> {
     let normalized = command.to_ascii_lowercase();
     if crate::contract::deletion_shell(command) && !deletion_approved {
@@ -899,6 +1097,11 @@ fn validate_shell(command: &str, workspace: &Path, deletion_approved: bool) -> R
     }
     if normalized.contains("../") || normalized.contains("~/") || normalized.contains("$home") {
         return Err("shell command may not escape the workspace with parent or home paths".into());
+    }
+    if let Some(target) = workspace_redirect_target(command) {
+        return Err(format!(
+            "SHELL_REDIRECT_BLOCKED: writing {target} through a shell redirection bypasses HII's edit checks and protected-file guards. Use {{\"type\":\"edit\",...}} for an existing file or {{\"type\":\"write\",...}} for a new one."
+        ));
     }
     for token in command.split_whitespace() {
         let clean =
@@ -975,6 +1178,98 @@ mod tests {
             "verified"
         );
         assert!(!tools.write("../escape.txt", "no").ok);
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn shell_rejects_writing_a_workspace_file_through_a_redirect() {
+        let path = workspace();
+        assert!(validate_shell("echo 'x' > calc.py", &path, false)
+            .expect_err("redirect into the workspace should be refused")
+            .contains("SHELL_REDIRECT_BLOCKED"));
+        let _ = fs::remove_dir_all(path);
+    }
+
+    /// Stream plumbing is not a file write and must stay usable.
+    #[test]
+    fn shell_allows_devnull_and_descriptor_duplication() {
+        assert_eq!(workspace_redirect_target("ls 2>&1"), None);
+        assert_eq!(workspace_redirect_target("ls >/dev/null 2>&1"), None);
+        assert_eq!(workspace_redirect_target("echo hi >&2"), None);
+        assert_eq!(
+            workspace_redirect_target("echo hi > out.txt").as_deref(),
+            Some("out.txt")
+        );
+        assert_eq!(
+            workspace_redirect_target("cat a >> log.txt").as_deref(),
+            Some("log.txt")
+        );
+    }
+
+    #[test]
+    fn preflight_detects_a_missing_program() {
+        let path = workspace();
+        let missing = preflight_command("definitely-not-installed-xyz -q", &path)
+            .expect_err("missing program should be reported");
+        assert_eq!(missing.program, "definitely-not-installed-xyz");
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn preflight_accepts_pipelines_builtins_and_env_prefixes() {
+        let path = workspace();
+        preflight_command("echo hi", &path).expect("builtin");
+        preflight_command("ls | sort", &path).expect("pipeline of real programs");
+        preflight_command("FOO=1 ls", &path).expect("env assignment prefix");
+        preflight_command("env FOO=1 ls", &path).expect("env command prefix");
+        preflight_command("cd . && ls", &path).expect("builtin then program");
+        let _ = fs::remove_dir_all(path);
+    }
+
+    /// `python3 -m pytest` is the shape that started this work: the interpreter
+    /// resolves, the module does not, and the check looks like a test failure.
+    #[test]
+    fn preflight_checks_interpreter_modules_not_just_programs() {
+        let path = workspace();
+        if which_on_path("python3") {
+            let missing = preflight_command("python3 -m definitely_not_a_module_xyz", &path)
+                .expect_err("a missing module is a missing dependency");
+            assert_eq!(missing.program, "definitely_not_a_module_xyz");
+            preflight_command("python3 -m json.tool", &path).expect("stdlib module resolves");
+        }
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn environmental_failures_are_not_treated_as_code_failures() {
+        assert_eq!(
+            classify_failure("bash: pytest: command not found"),
+            FailureClass::MissingDependency
+        );
+        assert_eq!(
+            classify_failure("ModuleNotFoundError: No module named 'pytest'"),
+            FailureClass::MissingDependency
+        );
+        assert_eq!(
+            classify_failure("OSError: [Errno 48] Address already in use"),
+            FailureClass::PortInUse
+        );
+        // A real test failure must still drive the repair path.
+        let assertion = classify_failure("AssertionError: 5 != -1\nFAILED test_calc.py");
+        assert_eq!(assertion, FailureClass::AssertionFailure);
+        assert!(assertion.environment_hint().is_none());
+        assert!(FailureClass::MissingDependency
+            .environment_hint()
+            .is_some_and(|hint| hint.contains("not a code problem")));
+    }
+
+    /// A pipeline is only as runnable as its least-available program.
+    #[test]
+    fn preflight_checks_every_segment() {
+        let path = workspace();
+        let missing = preflight_command("ls | definitely-not-installed-xyz", &path)
+            .expect_err("later segments count too");
+        assert_eq!(missing.program, "definitely-not-installed-xyz");
         let _ = fs::remove_dir_all(path);
     }
 

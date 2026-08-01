@@ -183,6 +183,11 @@ enum Commands {
         stream: bool,
         #[arg(
             long,
+            help = "Start even when a declared --verify command's program is missing"
+        )]
+        allow_missing_verify_deps: bool,
+        #[arg(
+            long,
             value_name = "PATH",
             help = "Write the final model message to a file inside the workspace"
         )]
@@ -363,6 +368,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             jsonl,
             quiet,
             stream,
+            allow_missing_verify_deps,
             last_message,
         }) => {
             let workspace = cli
@@ -403,6 +409,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     use_context: !no_context,
                     output,
                     stream,
+                    allow_missing_verify_deps,
                     budgets: Budgets {
                         max_steps: cli.max_steps,
                         wall_clock: match cli.deadline.as_deref() {

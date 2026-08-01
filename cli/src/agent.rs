@@ -62,6 +62,9 @@ pub struct RunOptions {
     pub output: RunOutput,
     pub stream: StreamPolicy,
     pub budgets: Budgets,
+    /// Proceed past a declared check whose program is missing, so the model can
+    /// report the blocker itself instead of the run refusing to start.
+    pub allow_missing_verify_deps: bool,
     pub last_message: Option<PathBuf>,
     pub hooks: bool,
 }
@@ -188,9 +191,12 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     if options.goal.trim().is_empty() {
         return Err("goal cannot be empty".into());
     }
-    validate_declared_verification(&options.verify)?;
+    validate_declared_verification(&options.verify, None)?;
 
     let tools = Toolbelt::new(options.workspace)?;
+    if !options.allow_missing_verify_deps {
+        validate_declared_verification(&options.verify, Some(tools.workspace()))?;
+    }
     let mcp_clients = McpClients::load(&paths.runtime, tools.workspace())?;
     let hooks = HookRunner::load(&paths.runtime, tools.workspace(), options.hooks)?;
     let last_message = options
@@ -310,6 +316,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     });
     let mut interrupted = false;
     let mut budget_exceeded: Option<BudgetKind> = None;
+    let mut environment_blocked: Option<String> = None;
 
     let system = system_prompt(
         tools.workspace(),
@@ -490,6 +497,34 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                             target: label.to_string(),
                         }),
                 )?;
+                // A verification whose program is missing is an environment
+                // problem. Executing it would surface as a plain failure, and
+                // three of those drive the repair loop into rewriting code that
+                // was never wrong.
+                if matches!(tool.as_str(), "verify" | "shell") {
+                    if let Some(missing) = command.as_deref().and_then(|command| {
+                        crate::tools::preflight_command(command, tools.workspace()).err()
+                    }) {
+                        let feedback = journal.feedback(
+                            Event::new("verification.missing_dependency").data(json!({
+                                "step": steps,
+                                "program": &missing.program,
+                                "command": &missing.command
+                            })),
+                            format!(
+                                "MISSING_DEPENDENCY: '{}' is not installed or not on PATH, so `{}` cannot run. This is an environment problem, not a code problem — do not edit code to work around it. Use a check that relies on an available tool, or return final describing the blocker.",
+                                missing.program, missing.command
+                            ),
+                        )?;
+                        environment_blocked.get_or_insert_with(|| missing.program.clone());
+                        messages.push(Message::assistant(raw));
+                        push_feedback(&mut messages, feedback);
+                        rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
+                        continue;
+                    }
+                }
+                // Captured before `command` is consumed by the verification record.
+                let check_label = command.clone().unwrap_or_else(|| tool.clone());
                 let is_hii = crate::hii_tools::is_hii_tool(&tool);
                 let observation = matches!(
                     tool.as_str(),
@@ -654,6 +689,19 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     observations.clear();
                 }
                 hook_records.extend(post_hooks.records);
+                // A verification that failed for an environmental reason is
+                // reported as such, so the model stops treating it as evidence
+                // that the code is wrong.
+                let environment_hint = if !result.ok && matches!(tool.as_str(), "verify" | "shell")
+                {
+                    let class = crate::tools::classify_failure(&safe_output);
+                    if class != crate::tools::FailureClass::AssertionFailure {
+                        environment_blocked.get_or_insert_with(|| check_label.clone());
+                    }
+                    class.environment_hint()
+                } else {
+                    None
+                };
                 let proof_hint = if result.ok && mutates && !options.dry_run {
                     format!(
                         "\n\nMUTATION EPOCH {mutation_epoch} RECORDED. Run one actual verify or http acceptance check next. Read/list/search are observation only."
@@ -676,10 +724,13 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                             detail: (!result.ok).then(|| safe_output.clone()),
                         }),
                     format!(
-                        "TOOL RESULT [{}]:\n{}{}{}",
+                        "TOOL RESULT [{}]:\n{}{}{}{}",
                         if result.ok { "ok" } else { "error" },
                         safe_output,
                         proof_hint,
+                        environment_hint
+                            .map(|hint| format!("\n\n{hint}"))
+                            .unwrap_or_default(),
                         if hook_feedback.is_empty() {
                             String::new()
                         } else {
@@ -982,6 +1033,10 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 kind.label(),
                 deadline.elapsed().as_secs()
             )
+        } else if let Some(blocker) = environment_blocked.as_deref() {
+            format!(
+                "Blocked by the environment rather than the code: verification could not run ({blocker})."
+            )
         } else {
             format!("Run ended before the model returned a final result ({steps} steps).")
         }
@@ -1080,6 +1135,9 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         match budget_exceeded {
             Some(BudgetKind::Steps) => Outcome::StepCeiling,
             Some(_) => Outcome::Deadline,
+            // Say why the run could not prove anything, rather than leaving the
+            // operator to infer it from a generic abort.
+            None if environment_blocked.is_some() => Outcome::EnvironmentBlocked,
             None => Outcome::Aborted,
         }
     };
@@ -1206,6 +1264,7 @@ Done when: {done_when}
 Acceptance checks: {declared_verification}
 
 Loop: inspect -> act -> verify -> final.
+Change files with edit (exact replacement) or write; shell redirects into the workspace are refused.
 Proof MUST be one flat {{"type":"verify","command":"npm test"}} action (or `http`); shell/read/list/search and nested checks never count
 One JSON action/turn. Types:
 read,list,search,web_search,web_fetch,write,edit,shell,verify,http,hii_context,og_next,caps_check,board_read,board_write,skill_search,bridge_send,bridge_read.
@@ -1381,7 +1440,10 @@ fn indent_for(human: bool, delta: String) -> String {
     }
 }
 
-fn validate_declared_verification(commands: &[String]) -> Result<(), String> {
+fn validate_declared_verification(
+    commands: &[String],
+    workspace: Option<&Path>,
+) -> Result<(), String> {
     for command in commands {
         if command.trim().is_empty() {
             return Err("--verify commands cannot be empty".into());
@@ -1390,6 +1452,17 @@ fn validate_declared_verification(commands: &[String]) -> Result<(), String> {
             return Err(format!(
                 "--verify must be a local acceptance check, not an external action: {command}"
             ));
+        }
+        // Fail at second zero rather than after a full run. A declared check that
+        // cannot execute is an environment problem, and discovering it only after
+        // the loop finishes wastes the entire run.
+        if let Some(workspace) = workspace {
+            if let Err(missing) = crate::tools::preflight_command(command, workspace) {
+                return Err(format!(
+                    "--verify \"{}\" needs '{}', which is not installed or not on PATH. Install it, choose another check, or pass --allow-missing-verify-deps to decide during the run.",
+                    missing.command, missing.program
+                ));
+            }
         }
     }
     Ok(())
@@ -1948,8 +2021,11 @@ mod tests {
             "the focused tests pass",
             &[],
         );
+        // The ceiling is not arbitrary: small local models lose action-emission
+        // reliability as the system prompt grows, so additions must be paid for
+        // deliberately rather than accumulating.
         assert!(
-            prompt.len() <= 1_000,
+            prompt.len() <= 1_100,
             "agent prompt grew to {} bytes",
             prompt.len()
         );
@@ -2036,7 +2112,7 @@ mod tests {
     #[test]
     fn declared_verification_rejects_external_actions() {
         let commands = vec!["git push origin main".to_string()];
-        assert!(validate_declared_verification(&commands).is_err());
+        assert!(validate_declared_verification(&commands, None).is_err());
     }
 
     #[test]

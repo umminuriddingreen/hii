@@ -274,6 +274,35 @@ case_interrupt() {
   fi
 }
 
+# --- 2. missing dependency ----------------------------------------------------
+# A declared check whose program is absent must fail before the first model call,
+# and when forced through, must be diagnosed as environmental rather than driving
+# the model to rewrite correct code.
+case_missing_dependency() {
+  local rt="$EVAL_ROOT/rt-dep" ws="$EVAL_ROOT/ws-dep"
+  make_repo "$ws"
+  start_model happy_calc || return
+
+  hii_run "$rt" "$ws" "$EVAL_ROOT/dep-strict.log" \
+    run "fix the failing add test" --verify "definitely-not-installed-xyz -q"
+  local strict_exit=$RUN_EXIT
+  local events
+  events="$(find "$rt/runs/cli" -name events.jsonl 2>/dev/null | head -1)"
+  local model_calls=0
+  [[ -n "$events" ]] && model_calls="$(grep -c '"model.response"' "$events" 2>/dev/null || echo 0)"
+  stop_model
+
+  if [[ "$strict_exit" -eq 0 ]]; then
+    record missing_dependency failed "run started despite a missing verify program"
+  elif ! grep -q "definitely-not-installed-xyz" "$EVAL_ROOT/dep-strict.log"; then
+    record missing_dependency failed "error did not name the missing program: $(head -2 "$EVAL_ROOT/dep-strict.log")"
+  elif [[ "$model_calls" -ne 0 ]]; then
+    record missing_dependency failed "burned $model_calls model call(s) before failing"
+  else
+    record missing_dependency passed
+  fi
+}
+
 [[ -x "$BIN" ]] || {
   printf 'Missing binary: %s\nRun cargo build -p hii-cli first.\n' "$BIN" >&2
   exit 2
@@ -281,7 +310,7 @@ case_interrupt() {
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
 command -v node >/dev/null || { echo "node is required" >&2; exit 2; }
 
-for name in happy_path loop_abort provider_error proof_scope budgets interrupt; do
+for name in happy_path missing_dependency loop_abort provider_error proof_scope budgets interrupt; do
   selected "$name" && "case_$name"
 done
 
