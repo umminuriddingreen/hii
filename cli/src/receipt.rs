@@ -82,6 +82,7 @@ pub enum Outcome {
     Completed,
     VerifyFailed,
     StepCeiling,
+    Deadline,
     LoopAbort,
     Interrupted,
     ProviderError,
@@ -96,6 +97,7 @@ impl Outcome {
             Outcome::Completed => "completed",
             Outcome::VerifyFailed => "verify-failed",
             Outcome::StepCeiling => "step-ceiling",
+            Outcome::Deadline => "deadline",
             Outcome::LoopAbort => "loop-abort",
             Outcome::Interrupted => "interrupted",
             Outcome::ProviderError => "provider-error",
@@ -114,6 +116,7 @@ impl Outcome {
             Outcome::Running => 2,
             Outcome::VerifyFailed => 3,
             Outcome::StepCeiling => 4,
+            Outcome::Deadline => 5,
             Outcome::LoopAbort => 6,
             Outcome::Interrupted => 7,
         }
@@ -671,6 +674,7 @@ mod tests {
         assert_eq!(Outcome::Completed.exit_code(), 0);
         assert_eq!(Outcome::VerifyFailed.exit_code(), 3);
         assert_eq!(Outcome::StepCeiling.exit_code(), 4);
+        assert_eq!(Outcome::Deadline.exit_code(), 5);
         assert_eq!(Outcome::LoopAbort.exit_code(), 6);
         assert_eq!(Outcome::Interrupted.exit_code(), 7);
         // The coarse status stays limited to the three published values.

@@ -207,6 +207,73 @@ case_proof_scope() {
   fi
 }
 
+# --- 6. budgets ---------------------------------------------------------------
+# A model that never converges, and one that dribbles forever, must both stop on
+# their own and leave a receipt saying which bound they hit.
+case_budgets() {
+  local rt="$EVAL_ROOT/rt-budget" ws="$EVAL_ROOT/ws-budget"
+  make_repo "$ws"
+
+  start_model never_finalizes || return
+  hii_run "$rt" "$ws" "$EVAL_ROOT/ceiling.log" --max-steps 3 run "fix the failing add test"
+  local ceiling_exit=$RUN_EXIT
+  stop_model
+  local ceiling_outcome
+  ceiling_outcome="$(jq -r '.outcome // "<missing>"' "$(latest_receipt "$rt")" 2>/dev/null)"
+
+  start_model slow_dribble || return
+  local began ended
+  began="$(date +%s)"
+  hii_run "$rt" "$ws" "$EVAL_ROOT/deadline.log" --deadline 6s run "fix the failing add test"
+  local deadline_exit=$RUN_EXIT
+  ended="$(date +%s)"
+  stop_model
+  local deadline_outcome
+  deadline_outcome="$(jq -r '.outcome // "<missing>"' "$(latest_receipt "$rt")" 2>/dev/null)"
+
+  if [[ "$ceiling_exit" -ne 4 || "$ceiling_outcome" != "step-ceiling" ]]; then
+    record budgets failed "step ceiling: exit=$ceiling_exit outcome=$ceiling_outcome want 4/step-ceiling"
+  elif [[ "$deadline_exit" -ne 5 || "$deadline_outcome" != "deadline" ]]; then
+    record budgets failed "deadline: exit=$deadline_exit outcome=$deadline_outcome want 5/deadline"
+  elif [[ $((ended - began)) -gt 12 ]]; then
+    record budgets failed "deadline took $((ended - began))s for a 6s budget"
+  else
+    record budgets passed
+  fi
+}
+
+# --- 7. interrupt -------------------------------------------------------------
+# Ctrl-C must abandon a generation already in flight, not wait for it to finish.
+case_interrupt() {
+  local rt="$EVAL_ROOT/rt-int" ws="$EVAL_ROOT/ws-int"
+  make_repo "$ws"
+  start_model slow_dribble || return
+
+  local began ended
+  began="$(date +%s)"
+  HII_ROOT="$ROOT" HII_RUNTIME_DIR="$rt" HII_MODEL_URL="http://127.0.0.1:$PORT" \
+    "$BIN" --cwd "$ws" --model fake-model --max-steps 0 run "fix the failing add test" \
+    >"$EVAL_ROOT/interrupt.log" 2>&1 &
+  local run_pid=$!
+  sleep 4
+  kill -INT "$run_pid" 2>/dev/null
+  wait "$run_pid" 2>/dev/null
+  local exit_code=$?
+  ended="$(date +%s)"
+  stop_model
+
+  local receipt outcome
+  receipt="$(latest_receipt "$rt")"
+  outcome="$(jq -r '.outcome // "<missing>"' "$receipt" 2>/dev/null)"
+  if [[ $((ended - began)) -gt 10 ]]; then
+    record interrupt failed "took $((ended - began))s to honor SIGINT"
+  elif [[ "$exit_code" -ne 7 || "$outcome" != "interrupted" ]]; then
+    record interrupt failed "exit=$exit_code outcome=$outcome want 7/interrupted"
+  else
+    record interrupt passed
+  fi
+}
+
 [[ -x "$BIN" ]] || {
   printf 'Missing binary: %s\nRun cargo build -p hii-cli first.\n' "$BIN" >&2
   exit 2
@@ -214,7 +281,7 @@ case_proof_scope() {
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
 command -v node >/dev/null || { echo "node is required" >&2; exit 2; }
 
-for name in happy_path loop_abort provider_error proof_scope; do
+for name in happy_path loop_abort provider_error proof_scope budgets interrupt; do
   selected "$name" && "case_$name"
 done
 

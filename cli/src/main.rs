@@ -4,6 +4,7 @@ mod agents;
 mod attachments;
 mod background;
 mod board;
+mod budget;
 mod config;
 mod context;
 mod contract;
@@ -27,6 +28,7 @@ mod tools;
 mod tui;
 
 use agent::{RunOptions, RunOutput};
+use budget::{Budgets, DEFAULT_WALL_CLOCK_SECS};
 use clap::{Parser, Subcommand, ValueEnum};
 use config::{AppPaths, DEFAULT_MAX_STEPS, DEFAULT_MODEL, DEFAULT_REVIEW_MODEL};
 use conversation::Conversation;
@@ -38,7 +40,7 @@ use std::{
     io::{self, IsTerminal, Write},
     path::PathBuf,
     process::{Command, ExitCode},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 #[derive(Parser, Debug)]
@@ -72,6 +74,14 @@ struct Cli {
         help = "Optional tool-step ceiling; 0 means unlimited"
     )]
     max_steps: usize,
+
+    #[arg(
+        long,
+        global = true,
+        value_name = "DURATION",
+        help = "Wall-clock ceiling for a run, e.g. 90s, 15m, 1h; 0 means unlimited"
+    )]
+    deadline: Option<String>,
 
     #[arg(
         long,
@@ -358,7 +368,8 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             let workspace = cli
                 .cwd
                 .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
-            let authority = resolve_authority(yolo, authority.as_deref())?;
+            let authority =
+                resolve_authority(yolo, authority.as_deref(), AuthorityContext::Operator)?;
             let output = if jsonl {
                 RunOutput::Jsonl
             } else if json {
@@ -392,6 +403,14 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     use_context: !no_context,
                     output,
                     stream,
+                    budgets: Budgets {
+                        max_steps: cli.max_steps,
+                        wall_clock: match cli.deadline.as_deref() {
+                            Some(value) => parse_duration(value)?,
+                            None => Some(Duration::from_secs(DEFAULT_WALL_CLOCK_SECS)),
+                        },
+                        ..Budgets::default()
+                    },
                     last_message,
                     hooks: lifecycle_hooks_enabled(cli.no_hooks, cli.session_profile),
                 },
@@ -450,11 +469,13 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             let workspace = cli
                 .cwd
                 .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
-            let authority = resolve_authority(false, authority.as_deref())?;
+            let authority =
+                resolve_authority(false, authority.as_deref(), AuthorityContext::Server)?;
             mcp::serve(&paths, &workspace, authority)
         }
         Some(Commands::AcpServe { authority }) => {
-            let authority = resolve_authority(false, authority.as_deref())?;
+            let authority =
+                resolve_authority(false, authority.as_deref(), AuthorityContext::Server)?;
             acp::serve(&paths, authority)
         }
         #[cfg(feature = "preview")]
@@ -1312,6 +1333,25 @@ fn board_command(
 /// global flag cannot silently break goal normalization by leaving its value to be
 /// mistaken for the subcommand (`hii --deadline 10m "fix tests"` must not run the
 /// `10m` subcommand).
+/// Parse a human duration such as `90s`, `15m`, or `1h`. `0` disables the bound.
+fn parse_duration(value: &str) -> Result<Option<Duration>, String> {
+    let trimmed = value.trim();
+    if trimmed == "0" || trimmed.eq_ignore_ascii_case("none") || trimmed.eq_ignore_ascii_case("off")
+    {
+        return Ok(None);
+    }
+    let (digits, multiplier) = match trimmed.chars().last() {
+        Some('s') | Some('S') => (&trimmed[..trimmed.len() - 1], 1),
+        Some('m') | Some('M') => (&trimmed[..trimmed.len() - 1], 60),
+        Some('h') | Some('H') => (&trimmed[..trimmed.len() - 1], 3_600),
+        _ => (trimmed, 1),
+    };
+    let amount: u64 = digits.trim().parse().map_err(|_| {
+        format!("cannot read duration '{value}'; use forms like 90s, 15m, 1h, or 0")
+    })?;
+    Ok(Some(Duration::from_secs(amount * multiplier)))
+}
+
 fn value_taking_globals() -> &'static [String] {
     use clap::CommandFactory;
     use std::sync::OnceLock;
@@ -1439,10 +1479,31 @@ fn command_text(program: &str, args: &[&str], cwd: &std::path::Path) -> Option<S
 
 /// Resolve the authority envelope from flags + env. `--yolo` (or `HII_YOLO=1`)
 /// wins; otherwise `--authority <level>` maps by name; default is `workspace`.
-fn resolve_authority(yolo: bool, level: Option<&str>) -> Result<contract::Authority, String> {
+/// Where authority is being resolved. Servers are held to a stricter rule than
+/// an interactive run because nobody is present to notice what they are doing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AuthorityContext {
+    /// `hii run` or the REPL: the operator is present and typed the command.
+    Operator,
+    /// A long-lived stdio server whose caller is another program.
+    Server,
+}
+
+fn resolve_authority(
+    yolo: bool,
+    level: Option<&str>,
+    context: AuthorityContext,
+) -> Result<contract::Authority, String> {
     use contract::Authority;
-    if yolo
-        || matches!(
+    if yolo {
+        return Ok(Authority::Yolo);
+    }
+    // HII_YOLO used to escalate every command in the process, including
+    // `mcp-serve` and `acp-serve`. An ambient environment variable should not
+    // silently grant unbounded authority to a server a client is driving, so it
+    // is honored only where the operator invoked the work directly.
+    if context == AuthorityContext::Operator
+        && matches!(
             std::env::var("HII_YOLO").ok().as_deref(),
             Some("1") | Some("true")
         )
@@ -1548,12 +1609,60 @@ mod tests {
         assert_eq!(first_command(&args), Some("doctor"));
     }
 
+    /// Unattended runs need a bound by default; `0` remains the explicit opt-out.
     #[test]
-    fn cli_has_no_step_ceiling_by_default() {
+    fn cli_has_a_step_ceiling_by_default_but_zero_still_disables_it() {
         let cli = Cli::try_parse_from(["hii"]).expect("parse default CLI");
-        assert_eq!(cli.max_steps, 0);
+        assert_eq!(cli.max_steps, DEFAULT_MAX_STEPS);
+        assert!(cli.max_steps > 0, "an unattended run must be bounded");
         assert_eq!(cli.session_profile, SessionProfile::Local);
         assert!(!cli.no_hooks);
+
+        let unlimited =
+            Cli::try_parse_from(["hii", "--max-steps", "0"]).expect("parse explicit unlimited");
+        assert_eq!(unlimited.max_steps, 0);
+    }
+
+    /// An ambient environment variable must not grant a stdio server unbounded
+    /// authority; only an operator-invoked run honors HII_YOLO.
+    #[test]
+    fn hii_yolo_does_not_escalate_servers() {
+        use contract::Authority;
+        assert_eq!(
+            resolve_authority(true, None, AuthorityContext::Operator).expect("explicit flag"),
+            Authority::Yolo
+        );
+        assert_eq!(
+            resolve_authority(false, None, AuthorityContext::Server).expect("server default"),
+            Authority::Workspace
+        );
+        assert_eq!(
+            resolve_authority(false, Some("read-only"), AuthorityContext::Server)
+                .expect("server explicit"),
+            Authority::ReadOnly
+        );
+    }
+
+    #[test]
+    fn durations_accept_common_suffixes() {
+        assert_eq!(
+            parse_duration("90s").expect("secs"),
+            Some(Duration::from_secs(90))
+        );
+        assert_eq!(
+            parse_duration("15m").expect("mins"),
+            Some(Duration::from_secs(900))
+        );
+        assert_eq!(
+            parse_duration("1h").expect("hours"),
+            Some(Duration::from_secs(3600))
+        );
+        assert_eq!(
+            parse_duration("45").expect("bare"),
+            Some(Duration::from_secs(45))
+        );
+        assert_eq!(parse_duration("0").expect("disabled"), None);
+        assert!(parse_duration("soon").is_err());
     }
 
     #[test]

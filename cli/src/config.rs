@@ -2,9 +2,11 @@ use std::{env, path::PathBuf};
 
 pub const DEFAULT_MODEL: &str = "qwen3.6:35b-mlx";
 pub const DEFAULT_REVIEW_MODEL: &str = "qwen3.6:35b-mlx";
-/// Zero means the operator has not imposed a step ceiling. The model continues
-/// until it finishes or the operator interrupts it.
-pub const DEFAULT_MAX_STEPS: usize = 0;
+/// Default tool-step ceiling. `--max-steps 0` still means unlimited, but leaving
+/// it unlimited by default was unsafe unattended: nothing except the operator
+/// stopped a model that never converged. The wall-clock budget bounds a run in
+/// time; this bounds it in work.
+pub const DEFAULT_MAX_STEPS: usize = 60;
 
 /// Which local model runtime we are talking to. Both expose an OpenAI-compatible
 /// `/v1/chat/completions` endpoint that carries native tool-calling; they differ

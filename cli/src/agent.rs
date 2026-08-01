@@ -1,4 +1,5 @@
 use crate::{
+    budget::{BudgetKind, Budgets, Cancel, CancelReason, Deadline},
     config::{AppPaths, DEFAULT_MODEL, DEFAULT_REVIEW_MODEL},
     contract::{deletion_shell, sensitive_shell, Authority, Contract, Decision},
     hooks::{HookBatch, HookEvent, HookRunner},
@@ -18,23 +19,29 @@ use std::{
     fs,
     io::{self, IsTerminal, Write},
     path::{Component, Path, PathBuf},
-    sync::atomic::{AtomicBool, Ordering},
     sync::mpsc,
     sync::OnceLock,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
-/// Set by the Ctrl-C handler so an in-flight run can stop at the next step and
-/// still finalize a receipt, rather than being killed mid-work.
-static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+/// The process-wide cancellation signal driven by Ctrl-C.
+///
+/// A run clones this so the loop, the budget checks, and the provider's
+/// streaming thread all observe one decision. It used to be a bare bool checked
+/// only between steps, which meant Ctrl-C could not stop a generation already in
+/// flight.
+fn interrupt_signal() -> &'static Cancel {
+    static SIGNAL: OnceLock<Cancel> = OnceLock::new();
+    SIGNAL.get_or_init(Cancel::new)
+}
 
 /// Install the interrupt handler once per process. Idempotent and best-effort:
 /// if the host already owns the signal, the run simply won't be interruptible.
 fn arm_interrupt() {
     static ARMED: OnceLock<()> = OnceLock::new();
     ARMED.get_or_init(|| {
-        let _ = ctrlc::set_handler(|| INTERRUPTED.store(true, Ordering::SeqCst));
+        let _ = ctrlc::set_handler(|| interrupt_signal().cancel(CancelReason::Interrupt));
     });
 }
 
@@ -54,6 +61,7 @@ pub struct RunOptions {
     pub use_context: bool,
     pub output: RunOutput,
     pub stream: StreamPolicy,
+    pub budgets: Budgets,
     pub last_message: Option<PathBuf>,
     pub hooks: bool,
 }
@@ -294,8 +302,14 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     }
     let mut approvals: Vec<String> = Vec::new();
     arm_interrupt();
-    INTERRUPTED.store(false, Ordering::SeqCst);
+    let cancel = interrupt_signal().clone();
+    cancel.reset();
+    let deadline = Deadline::new(Budgets {
+        max_steps: options.max_steps,
+        ..options.budgets
+    });
     let mut interrupted = false;
+    let mut budget_exceeded: Option<BudgetKind> = None;
 
     let system = system_prompt(
         tools.workspace(),
@@ -326,16 +340,36 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let mut model_loop_detected = false;
 
     loop {
-        if options.max_steps > 0 && steps >= options.max_steps {
+        if let Some(kind) = deadline.exceeded(steps) {
+            budget_exceeded = Some(kind);
+            journal.emit(Event::new("budget.exceeded").data(json!({
+                "step": steps,
+                "budget": kind.label(),
+                "elapsed_ms": deadline.elapsed().as_millis()
+            })))?;
             break;
         }
-        if INTERRUPTED.load(Ordering::SeqCst) {
-            interrupted = true;
-            journal.emit(Event::new("run.interrupted").data(json!({ "step": steps })))?;
+        if cancel.is_cancelled() {
+            match cancel.reason() {
+                Some(CancelReason::Budget(kind)) => budget_exceeded = Some(kind),
+                _ => interrupted = true,
+            }
+            journal.emit(Event::new("run.interrupted").data(json!({
+                "step": steps,
+                "reason": cancellation_message(&cancel)
+            })))?;
             break;
         }
         steps += 1;
-        let raw = match stream_model_json(&ollama, &model, &messages, steps, &mut journal) {
+        let raw = match stream_model_json(
+            &ollama,
+            &model,
+            &messages,
+            steps,
+            &mut journal,
+            &deadline,
+            &cancel,
+        ) {
             Ok(result) => result.content,
             Err(error)
                 if error.contains("MODEL LOOP DETECTED")
@@ -352,6 +386,17 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 )?;
                 final_summary = Some(verified_completion_summary(&touched_artifacts));
                 final_next = None;
+                break;
+            }
+            Err(error) if cancel.is_cancelled() => {
+                match cancel.reason() {
+                    Some(CancelReason::Budget(kind)) => budget_exceeded = Some(kind),
+                    _ => interrupted = true,
+                }
+                journal.emit(Event::new("run.interrupted").data(json!({
+                    "step": steps,
+                    "reason": redact_text(&error)
+                })))?;
                 break;
             }
             Err(error) => {
@@ -931,13 +976,14 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             MODEL_LOOP_DETECTED_MESSAGE.into()
         } else if interrupted {
             format!("Interrupted by operator after {steps} step(s); partial work preserved.")
+        } else if let Some(kind) = budget_exceeded {
+            format!(
+                "{} reached after {steps} step(s) and {}s; partial work preserved.",
+                kind.label(),
+                deadline.elapsed().as_secs()
+            )
         } else {
-            match options.max_steps {
-                0 => format!("Run ended before the model returned a final result ({steps} steps)."),
-                limit => {
-                    format!("Operator step ceiling reached before completion ({limit} steps).")
-                }
-            }
+            format!("Run ended before the model returned a final result ({steps} steps).")
         }
     }));
     if !declared_checks_passed {
@@ -1030,10 +1076,12 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         Outcome::LoopAbort
     } else if !declared_checks_passed {
         Outcome::VerifyFailed
-    } else if options.max_steps > 0 && steps >= options.max_steps {
-        Outcome::StepCeiling
     } else {
-        Outcome::Aborted
+        match budget_exceeded {
+            Some(BudgetKind::Steps) => Outcome::StepCeiling,
+            Some(_) => Outcome::Deadline,
+            None => Outcome::Aborted,
+        }
     };
     let receipt = Receipt {
         schema_version: 5,
@@ -1175,13 +1223,23 @@ fn stream_model_json(
     messages: &[Message],
     step: usize,
     journal: &mut Journal,
+    deadline: &Deadline,
+    cancel: &Cancel,
 ) -> Result<ChatResult, String> {
     let ollama = ollama.clone();
     let model_for_thread = model.to_string();
     let messages = messages.to_vec();
+    let stream_cancel = cancel.clone();
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
-        ollama.chat_with_stream(&model_for_thread, &messages, true, true, sender);
+        ollama.chat_with_stream(
+            &model_for_thread,
+            &messages,
+            true,
+            true,
+            &stream_cancel,
+            sender,
+        );
     });
 
     // Whether progress is shown at all is the journal's decision, so `--stream`
@@ -1190,6 +1248,10 @@ fn stream_model_json(
     let human = matches!(journal.mode(), OutputMode::Human { .. });
     let mut thinking_started = false;
     let mut content_started = false;
+    let call_started = Instant::now();
+    let mut last_delta = Instant::now();
+    let call_budget = deadline.model_call_budget();
+    let idle_budget = deadline.stream_idle();
     loop {
         match receiver.recv_timeout(Duration::from_millis(120)) {
             Ok(ChatStreamEvent::Thinking(delta)) => {
@@ -1198,6 +1260,7 @@ fn stream_model_json(
                     print!("  ");
                     thinking_started = true;
                 }
+                last_delta = Instant::now();
                 journal.delta(Delta::Thinking(indent_for(human, delta)));
             }
             Ok(ChatStreamEvent::Content(delta)) => {
@@ -1209,6 +1272,7 @@ fn stream_model_json(
                     print!("  ");
                     content_started = true;
                 }
+                last_delta = Instant::now();
                 journal.delta(Delta::Content(indent_for(human, delta)));
             }
             Ok(ChatStreamEvent::Done(result)) => {
@@ -1218,9 +1282,33 @@ fn stream_model_json(
                 }
                 return result;
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            // Budgets and Ctrl-C are checked on the idle tick rather than only
+            // between steps, which is what lets a generation in progress be
+            // abandoned instead of running to completion first.
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if let Some(kind) = call_budget
+                    .filter(|limit| call_started.elapsed() >= *limit)
+                    .map(|_| BudgetKind::ModelCall)
+                    .or_else(|| {
+                        idle_budget
+                            .filter(|limit| last_delta.elapsed() >= *limit)
+                            .map(|_| BudgetKind::StreamIdle)
+                    })
+                {
+                    cancel.cancel(CancelReason::Budget(kind));
+                }
+                if cancel.is_cancelled() {
+                    // Dropping the receiver makes the producer's next send fail,
+                    // so the streaming thread unwinds on its own.
+                    return Err(cancellation_message(cancel));
+                }
+                continue;
+            }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                return Err("the local model stream stopped unexpectedly".into())
+                if cancel.is_cancelled() {
+                    return Err(cancellation_message(cancel));
+                }
+                return Err("the local model stream stopped unexpectedly".into());
             }
         }
     }
@@ -1268,6 +1356,19 @@ fn draft_receipt(
         hooks: Vec::new(),
         outcome: Outcome::Running.label().into(),
         exit_code: Outcome::Running.exit_code(),
+    }
+}
+
+/// Why a run stopped, phrased for the operator and the receipt.
+fn cancellation_message(cancel: &Cancel) -> String {
+    match cancel.reason() {
+        Some(CancelReason::Interrupt) => "Interrupted by operator.".into(),
+        Some(CancelReason::Client) => "Cancelled by the client.".into(),
+        Some(CancelReason::Budget(kind)) => format!(
+            "{} exhausted; the run stopped mid-generation and the receipt is preserved.",
+            kind.label()
+        ),
+        None => "Run cancelled.".into(),
     }
 }
 

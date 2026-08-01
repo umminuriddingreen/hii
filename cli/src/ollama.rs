@@ -1,4 +1,5 @@
 use crate::attachments::ImagePayload;
+use crate::budget::Cancel;
 use crate::config::ModelProvider;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -104,6 +105,9 @@ pub struct ChatResult {
     pub thinking: String,
     pub usage: ChatUsage,
 }
+
+/// Sent when a generation is abandoned rather than failing on its own.
+pub const CANCELLED: &str = "generation cancelled";
 
 #[derive(Debug)]
 pub enum ChatStreamEvent {
@@ -325,12 +329,19 @@ impl Ollama {
 
     /// Stream an Ollama response so provider-supplied thinking can be rendered
     /// without inserting it into the next model request.
+    /// Stream a completion.
+    ///
+    /// `cancel` is checked once per received chunk so a run can abandon a
+    /// generation in progress. The agent-level read timeout cannot do this: it
+    /// resets on every chunk, so a model emitting one token per second holds the
+    /// socket open indefinitely while satisfying it.
     pub fn chat_with_stream(
         &self,
         model: &str,
         messages: &[Message],
         json_format: bool,
         think: bool,
+        cancel: &Cancel,
         sender: mpsc::Sender<ChatStreamEvent>,
     ) {
         if self.provider != ModelProvider::Ollama {
@@ -389,6 +400,10 @@ impl Ollama {
         let mut thinking_repetition = RepetitionGuard::default();
         let mut content_repetition = RepetitionGuard::default();
         for line in BufReader::new(response.into_reader()).lines() {
+            if cancel.is_cancelled() {
+                let _ = sender.send(ChatStreamEvent::Done(Err(CANCELLED.into())));
+                return;
+            }
             let line = match line {
                 Ok(line) => line,
                 Err(error) => {

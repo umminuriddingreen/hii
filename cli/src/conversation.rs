@@ -5,6 +5,7 @@ use crate::{
     },
     attachments::AttachmentQueue,
     background::BackgroundJobs,
+    budget::{Cancel, CancelReason},
     config::AppPaths,
     contract::{deletion_shell, sensitive_shell, Authority, Decision},
     hooks::{HookBatch, HookEvent, HookRunner},
@@ -143,6 +144,9 @@ impl BackendOutcome {
 }
 
 pub struct Conversation {
+    /// Lets Esc abandon a generation already in flight. Previously the receiver
+    /// was simply dropped, so the model kept producing tokens nobody read.
+    cancel: Cancel,
     paths: AppPaths,
     ollama: Ollama,
     model: String,
@@ -208,6 +212,7 @@ impl Conversation {
             messages.push(Message::system(capsule.text));
         }
         let mut conversation = Self {
+            cancel: Cancel::new(),
             paths,
             ollama,
             model,
@@ -1937,8 +1942,17 @@ impl Conversation {
         let model_for_thread = model.clone();
         let (sender, receiver) = mpsc::channel();
         let raw_thinking = matches!(self.thinking_mode, ThinkingMode::Raw);
+        self.cancel.reset();
+        let turn_cancel = self.cancel.clone();
         thread::spawn(move || {
-            ollama.chat_with_stream(&model_for_thread, &messages, json, raw_thinking, sender);
+            ollama.chat_with_stream(
+                &model_for_thread,
+                &messages,
+                json,
+                raw_thinking,
+                &turn_cancel,
+                sender,
+            );
         });
 
         // The operator asked for the provider's real token stream, including
@@ -1976,6 +1990,7 @@ impl Conversation {
                             if interactive {
                                 print!("\x1b[2K\r");
                             }
+                            self.cancel.cancel(CancelReason::Interrupt);
                             return Err("operator interrupted model activity".into());
                         }
                         crate::keyboard::InputEvent::TaskView => {
