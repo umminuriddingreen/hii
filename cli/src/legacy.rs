@@ -40,6 +40,66 @@ pub const LEGACY_COMMANDS: &[&str] = &[
     "start",
 ];
 
+/// The delegated commands, grouped for `--help`.
+///
+/// These are intercepted before clap ever sees them and handed to the Node
+/// compatibility CLI, which is why they are absent from the generated help.
+/// `hii context --json` working while `hii --help` never mentions it is a
+/// discoverability bug, not a design.
+pub const LEGACY_GROUPS: &[(&str, &[&str])] = &[
+    (
+        "work",
+        &[
+            "now", "chat", "task", "capture", "work", "check", "ship", "loop",
+        ],
+    ),
+    (
+        "context",
+        &[
+            "context",
+            "agent-context",
+            "og",
+            "knowledge",
+            "links",
+            "feed",
+            "pack",
+        ],
+    ),
+    (
+        "infra",
+        &[
+            "health",
+            "probe",
+            "caps",
+            "jobs",
+            "daemon",
+            "instances",
+            "runner",
+            "registry",
+            "space",
+            "money",
+        ],
+    ),
+    (
+        "tools",
+        &[
+            "sdk", "console", "terminal", "bridge", "mcp", "codex", "skill", "skills",
+        ],
+    ),
+    ("build", &["dev", "build", "start", "schedule"]),
+];
+
+/// The `--help` footer naming every delegated command.
+pub fn help_footer() -> String {
+    let mut lines = vec!["Delegated commands (handled by the Node compatibility CLI):".to_string()];
+    for (group, commands) in LEGACY_GROUPS {
+        lines.push(format!("  {group:<9} {}", commands.join(" ")));
+    }
+    lines.push(String::new());
+    lines.push("  Run `hii <command> --help` for any of them.".into());
+    lines.join("\n")
+}
+
 pub fn is_legacy(command: &str) -> bool {
     LEGACY_COMMANDS.contains(&command) && !(cfg!(feature = "preview") && command == "schedule")
 }
@@ -60,4 +120,34 @@ pub fn run(repo: &Path, args: &[String]) -> Result<i32, String> {
         .status()
         .map_err(|error| format!("failed to start compatibility command: {error}"))?;
     Ok(status.code().unwrap_or(1))
+}
+
+#[cfg(test)]
+mod help_tests {
+    use super::*;
+
+    /// Every delegated command must appear in the help footer, or it stays as
+    /// invisible as `hii context` was.
+    #[test]
+    fn help_footer_names_every_delegated_command() {
+        let footer = help_footer();
+        for command in LEGACY_COMMANDS {
+            assert!(
+                footer.contains(command),
+                "{command} is delegated but missing from --help"
+            );
+        }
+    }
+
+    #[test]
+    fn help_groups_do_not_invent_commands() {
+        for (_, commands) in LEGACY_GROUPS {
+            for command in *commands {
+                assert!(
+                    LEGACY_COMMANDS.contains(command),
+                    "{command} is listed in help but is not delegated"
+                );
+            }
+        }
+    }
 }

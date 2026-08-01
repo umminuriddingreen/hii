@@ -48,7 +48,8 @@ use std::{
     name = "hii",
     version,
     about = "Fast, local-first workspace agent",
-    long_about = "HII turns a goal into bounded local work, verification, and an inspectable receipt.\n\nExamples:\n  hii \"fix the failing tests\"\n  hii run --review \"ship the smallest verified patch\"\n  hii proof"
+    long_about = "HII turns a goal into bounded local work, verification, and an inspectable receipt.\n\nExamples:\n  hii \"fix the failing tests\"\n  hii run --review \"ship the smallest verified patch\"\n  hii proof",
+    after_help = legacy::help_footer()
 )]
 struct Cli {
     #[arg(
