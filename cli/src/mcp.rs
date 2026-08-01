@@ -154,6 +154,9 @@ fn tool_specs() -> Vec<Value> {
     let tools = manifest["tools"].as_array().cloned().unwrap_or_default();
     tools
         .into_iter()
+        // Advertise only what this server can actually run; downstream MCP
+        // proxying is not implemented here.
+        .filter(|tool| acp::is_directly_executable(tool["name"].as_str().unwrap_or_default()))
         .map(|tool| {
             let name = tool["name"].as_str().unwrap_or_default();
             json!({
@@ -252,7 +255,7 @@ fn tools_call(
 
     let result = if is_hii {
         hii_tools::execute(repo, name, args["query"].as_str())
-    } else if acp::is_known_tool(name) {
+    } else if acp::is_directly_executable(name) {
         execute_tool(
             tools,
             ToolCall {
@@ -307,15 +310,24 @@ mod tests {
         assert_eq!(request.id, Some(json!(7)));
     }
 
+    /// Everything advertised must be executable here, and everything executable
+    /// must be advertised — this server never offers a tool it would refuse.
     #[test]
-    fn tools_list_covers_every_manifest_tool() {
+    fn tools_list_covers_every_directly_executable_manifest_tool() {
         let specs = tool_specs();
         let manifest = acp::manifest();
-        let expected = manifest["tools"].as_array().unwrap().len();
+        let expected = manifest["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|tool| acp::is_directly_executable(tool["name"].as_str().unwrap_or_default()))
+            .count();
         assert_eq!(specs.len(), expected);
         assert!(specs
             .iter()
             .all(|spec| spec["name"].is_string() && spec["inputSchema"]["type"] == "object"));
+        // mcp_call is an agent action, not something this server can proxy.
+        assert!(!specs.iter().any(|spec| spec["name"] == "mcp_call"));
     }
 
     #[test]

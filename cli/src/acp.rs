@@ -12,64 +12,211 @@ use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
 use std::process::ExitCode;
 
-/// One tool the agent exposes: name, side (filesystem vs HII operating logic),
-/// whether it mutates state, and a one-line description.
-const TOOLS: &[(&str, &str, bool, &str)] = &[
-    ("read", "fs", false, "read a file, optionally a line range"),
-    ("list", "fs", false, "list files under a path"),
-    ("search", "fs", false, "regex search across the workspace"),
-    (
+/// What a tool can actually touch.
+///
+/// `side` predates this and mislabelled `shell` and `http` as `"fs"` despite one
+/// executing arbitrary programs and the other opening sockets, so a consumer
+/// filtering on it to gate egress or to sandbox saw the wrong set. `side` is kept
+/// unchanged for existing readers and `reach` carries the accurate answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reach {
+    /// Reads or writes inside the workspace.
+    Local,
+    /// Opens a network connection.
+    Network,
+    /// Runs an arbitrary program.
+    Exec,
+    /// Crosses into HII's own operating logic.
+    Hii,
+    /// Dispatches to an operator-configured downstream MCP server.
+    Mcp,
+}
+
+impl Reach {
+    fn label(self) -> &'static str {
+        match self {
+            Reach::Local => "local",
+            Reach::Network => "network",
+            Reach::Exec => "exec",
+            Reach::Hii => "hii",
+            Reach::Mcp => "mcp",
+        }
+    }
+}
+
+/// One tool the agent exposes.
+pub struct ToolSpec {
+    pub name: &'static str,
+    /// Legacy grouping. Deprecated in favor of `reach`; kept byte-identical so
+    /// published manifests do not change meaning under existing readers.
+    pub side: &'static str,
+    pub reach: Reach,
+    pub mutates: bool,
+    pub description: &'static str,
+}
+
+const fn tool(
+    name: &'static str,
+    side: &'static str,
+    reach: Reach,
+    mutates: bool,
+    description: &'static str,
+) -> ToolSpec {
+    ToolSpec {
+        name,
+        side,
+        reach,
+        mutates,
+        description,
+    }
+}
+
+const TOOLS: &[ToolSpec] = &[
+    tool(
+        "read",
+        "fs",
+        Reach::Local,
+        false,
+        "read a file, optionally a line range",
+    ),
+    tool("list", "fs", Reach::Local, false, "list files under a path"),
+    tool(
+        "search",
+        "fs",
+        Reach::Local,
+        false,
+        "regex search across the workspace",
+    ),
+    tool(
         "web_search",
         "network",
+        Reach::Network,
         false,
         "search the public web and return compact cited results",
     ),
-    (
+    tool(
         "web_fetch",
         "network",
+        Reach::Network,
         false,
         "read one public web page with private-network protection",
     ),
-    ("write", "fs", true, "create or overwrite a file"),
-    (
+    tool(
+        "write",
+        "fs",
+        Reach::Local,
+        true,
+        "create or overwrite a file",
+    ),
+    tool(
         "edit",
         "fs",
+        Reach::Local,
         true,
         "exact unique string replacement in a file",
     ),
-    ("shell", "fs", true, "run a workspace-bounded shell command"),
-    ("verify", "fs", false, "run a command as a recorded proof"),
-    ("http", "fs", false, "GET a local (127.0.0.1/localhost) URL"),
-    ("hii_context", "hii", false, "repo/runtime context snapshot"),
-    ("og_next", "hii", false, "operational-graph next path"),
-    ("caps_check", "hii", false, "list HII capabilities"),
-    ("board_read", "hii", false, "read the local task board"),
-    ("board_write", "hii", true, "capture a task on the board"),
-    ("skill_search", "hii", false, "find a registered skill"),
-    (
+    tool(
+        "shell",
+        "fs",
+        Reach::Exec,
+        true,
+        "run a workspace-bounded shell command",
+    ),
+    tool(
+        "verify",
+        "fs",
+        Reach::Exec,
+        false,
+        "run a command as a recorded proof",
+    ),
+    tool(
+        "http",
+        "fs",
+        Reach::Network,
+        false,
+        "GET a local (127.0.0.1/localhost) URL",
+    ),
+    tool(
+        "mcp_call",
+        "mcp",
+        Reach::Mcp,
+        true,
+        "call a tool on an operator-configured MCP server",
+    ),
+    tool(
+        "hii_context",
+        "hii",
+        Reach::Hii,
+        false,
+        "repo/runtime context snapshot",
+    ),
+    tool(
+        "og_next",
+        "hii",
+        Reach::Hii,
+        false,
+        "operational-graph next path",
+    ),
+    tool(
+        "caps_check",
+        "hii",
+        Reach::Hii,
+        false,
+        "list HII capabilities",
+    ),
+    tool(
+        "board_read",
+        "hii",
+        Reach::Hii,
+        false,
+        "read the local task board",
+    ),
+    tool(
+        "board_write",
+        "hii",
+        Reach::Hii,
+        true,
+        "capture a task on the board",
+    ),
+    tool(
+        "skill_search",
+        "hii",
+        Reach::Hii,
+        false,
+        "find a registered skill",
+    ),
+    tool(
         "bridge_send",
         "hii",
+        Reach::Hii,
         true,
         "send an inter-agent bridge message",
     ),
-    ("bridge_read", "hii", false, "read the bridge inbox"),
+    tool(
+        "bridge_read",
+        "hii",
+        Reach::Hii,
+        false,
+        "read the bridge inbox",
+    ),
 ];
 
 /// The capability manifest as a JSON value.
 pub fn manifest() -> Value {
     let tools: Vec<Value> = TOOLS
         .iter()
-        .map(|(name, side, mutates, description)| {
+        .map(|spec| {
             json!({
-                "name": name,
-                "side": side,
-                "mutates": mutates,
-                "description": description,
+                "name": spec.name,
+                "side": spec.side,
+                "reach": spec.reach.label(),
+                "mutates": spec.mutates,
+                "description": spec.description,
             })
         })
         .collect();
     json!({
-        "schema": "hii.tool-manifest/1",
+        "schema": "hii.tool-manifest/2",
         "authority_levels": [
             "read-only",
             "workspace",
@@ -86,11 +233,24 @@ pub fn render() -> String {
     serde_json::to_string_pretty(&manifest()).unwrap_or_else(|_| "{}".into())
 }
 
-/// Is `name` a tool this agent exposes at all? The MCP dispatcher uses this to
-/// separate a filesystem tool from an unknown one, keeping the manifest the
-/// single source of truth for the capability surface.
+/// Is `name` a tool this agent exposes at all? Kept alongside
+/// [`is_directly_executable`] so tests can tell "not ours" apart from "ours but
+/// not runnable here".
+#[cfg(test)]
 pub fn is_known_tool(name: &str) -> bool {
-    TOOLS.iter().any(|(tool, ..)| *tool == name)
+    TOOLS.iter().any(|spec| spec.name == name)
+}
+
+/// Is `name` a tool this process can execute directly?
+///
+/// `mcp_call` is part of the agent's action surface but dispatches to an
+/// operator-configured downstream server, which the stdio MCP server does not
+/// proxy. It is listed in the manifest — the manifest describes what the agent
+/// can do — and excluded from what `hii mcp-serve` advertises.
+pub fn is_directly_executable(name: &str) -> bool {
+    TOOLS
+        .iter()
+        .any(|spec| spec.name == name && spec.reach != Reach::Mcp)
 }
 
 // ---------------------------------------------------------------------------
