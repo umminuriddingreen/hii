@@ -17,6 +17,7 @@ mod mcp;
 mod mcp_client;
 mod ollama;
 mod receipt;
+mod runlog;
 #[cfg(feature = "preview")]
 mod schedule;
 mod skills;
@@ -31,6 +32,7 @@ use config::{AppPaths, DEFAULT_MAX_STEPS, DEFAULT_MODEL, DEFAULT_REVIEW_MODEL};
 use conversation::Conversation;
 use ollama::Ollama;
 use receipt::{find_receipt, Receipt};
+use runlog::StreamPolicy;
 use std::{
     env, fs,
     io::{self, IsTerminal, Write},
@@ -158,6 +160,17 @@ enum Commands {
             help = "Stream machine-readable run events, one JSON object per line"
         )]
         jsonl: bool,
+        #[arg(
+            long,
+            conflicts_with_all = ["json", "jsonl", "verbose"],
+            help = "Write only the receipt; suppress progress and the final summary"
+        )]
+        quiet: bool,
+        #[arg(
+            long,
+            help = "Show step-by-step progress even when stdout is not a terminal"
+        )]
+        stream: bool,
         #[arg(
             long,
             value_name = "PATH",
@@ -338,6 +351,8 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             no_context,
             json,
             jsonl,
+            quiet,
+            stream,
             last_message,
         }) => {
             let workspace = cli
@@ -348,8 +363,17 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 RunOutput::Jsonl
             } else if json {
                 RunOutput::Json
+            } else if quiet {
+                RunOutput::Quiet
             } else {
                 RunOutput::Human
+            };
+            let stream = if stream {
+                StreamPolicy::Always
+            } else if quiet {
+                StreamPolicy::Never
+            } else {
+                StreamPolicy::Auto
             };
             let receipt = agent::run(
                 &paths,
@@ -367,6 +391,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     verify,
                     use_context: !no_context,
                     output,
+                    stream,
                     last_message,
                     hooks: lifecycle_hooks_enabled(cli.no_hooks, cli.session_profile),
                 },

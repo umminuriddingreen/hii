@@ -118,6 +118,12 @@ impl RunStore {
         })
     }
 
+    /// Location of this run's append-only event log.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn events_path(&self) -> &Path {
+        &self.events
+    }
+
     pub fn event(&self, kind: &str, data: Value) -> Result<(), String> {
         let entry = serde_json::json!({
             "ts_unix_ms": unix_ms(),

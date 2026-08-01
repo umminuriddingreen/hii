@@ -5,6 +5,7 @@ use crate::{
     mcp_client::McpClients,
     ollama::{ChatResult, ChatStreamEvent, Message, Ollama},
     receipt::{redact_text, unix_ms, HookRecord, Receipt, RunStore, VerificationRecord},
+    runlog::{Delta, Event, Feedback, Human, Journal, OutputMode, StreamPolicy},
     tools::{ToolResult, Toolbelt},
 };
 use serde::Deserialize;
@@ -49,6 +50,7 @@ pub struct RunOptions {
     pub verify: Vec<String>,
     pub use_context: bool,
     pub output: RunOutput,
+    pub stream: StreamPolicy,
     pub last_message: Option<PathBuf>,
     pub hooks: bool,
 }
@@ -58,23 +60,27 @@ pub enum RunOutput {
     Human,
     Json,
     Jsonl,
+    Quiet,
 }
 
-fn jsonl_event(event: &str, data: Value) -> Value {
-    json!({
-        "schemaVersion": 1,
-        "event": event,
-        "atUnixMs": unix_ms(),
-        "data": data
-    })
-}
-
-fn emit_jsonl(output: RunOutput, event: &str, data: Value) {
-    if output != RunOutput::Jsonl {
-        return;
+impl RunOutput {
+    fn mode(self, verbose: bool) -> OutputMode {
+        match self {
+            RunOutput::Human => OutputMode::Human { verbose },
+            RunOutput::Json => OutputMode::Json,
+            RunOutput::Jsonl => OutputMode::Jsonl,
+            RunOutput::Quiet => OutputMode::Quiet,
+        }
     }
-    println!("{}", jsonl_event(event, data));
-    let _ = io::stdout().flush();
+}
+
+/// Hand journaled text to the model.
+///
+/// Taking [`Feedback`] rather than a bare `String` is the point: the only way to
+/// obtain one is [`Journal::feedback`], so a message cannot reach the model
+/// without having been recorded first.
+fn push_feedback(messages: &mut Vec<Message>, feedback: Feedback) {
+    messages.push(Message::user(feedback.into_inner()));
 }
 
 #[derive(Debug, Deserialize)]
@@ -202,51 +208,41 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         None
     };
     let store = RunStore::create(&paths.runtime)?;
-    store.event(
-        "run.started",
-        json!({
-            "goal": options.goal,
-            "workspace": tools.workspace(),
-            "model": model,
-            "max_steps": options.max_steps,
-            "dry_run": options.dry_run
-        }),
-    )?;
-    emit_jsonl(
-        options.output,
-        "run.started",
-        json!({
-            "runId": &store.id,
-            "goal": redact_text(&options.goal),
-            "workspace": tools.workspace(),
-            "model": &model,
-            "authority": options.authority.label()
-        }),
-    );
+    let run_id = store.id.clone();
+    let mut journal = Journal::new(store, options.output.mode(options.verbose), options.stream);
+    journal.emit(Event::new("run.started").data(json!({
+        "run_id": &run_id,
+        "goal": redact_text(&options.goal),
+        "workspace": tools.workspace(),
+        "model": &model,
+        "authority": options.authority.label(),
+        "max_steps": options.max_steps,
+        "dry_run": options.dry_run
+    })))?;
     let mut hook_records: Vec<HookRecord> = Vec::new();
     let session_hooks = hooks.fire(
         HookEvent::SessionStart,
         None,
-        &store.id,
+        &run_id,
         json!({
             "goal": redact_text(&options.goal),
             "authority": options.authority.label()
         }),
     );
-    persist_hook_batch(&store, options.output, &session_hooks)?;
+    persist_hook_batch(&mut journal, &session_hooks)?;
     let session_hook_mutation = session_hooks.mutated_workspace();
     hook_records.extend(session_hooks.records);
     let prompt_hooks = hooks.fire(
         HookEvent::UserPrompt,
         None,
-        &store.id,
+        &run_id,
         json!({ "prompt": redact_text(&options.goal) }),
     );
-    persist_hook_batch(&store, options.output, &prompt_hooks)?;
+    persist_hook_batch(&mut journal, &prompt_hooks)?;
     let prompt_block = prompt_hooks.block_reason.clone();
     hook_records.extend(prompt_hooks.records);
     if let Some(reason) = prompt_block {
-        store.event("run.blocked", json!({ "reason": redact_text(&reason) }))?;
+        journal.emit(Event::new("run.blocked").data(json!({ "reason": redact_text(&reason) })))?;
         return Err(format!("Prompt blocked by lifecycle policy: {reason}"));
     }
 
@@ -257,24 +253,21 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     } else {
         crate::context::ContextCapsule::default()
     };
-    store.event(
-        "contract",
-        json!({
-            "goal": contract.goal,
-            "authority": contract.authority.label(),
-            "done_when": contract.done_when,
-            "context_sources": capsule.sources,
-            "declared_verification": options.verify,
-        }),
-    )?;
+    journal.emit(Event::new("contract").data(json!({
+        "goal": contract.goal,
+        "authority": contract.authority.label(),
+        "done_when": contract.done_when,
+        "context_sources": capsule.sources,
+        "declared_verification": options.verify,
+    })))?;
     if options.output == RunOutput::Human && options.authority == Authority::Yolo {
         println!(
             "⚡ YOLO — autonomous, no approval prompts. Authority: {}. Workspace/secret guards still apply; a full receipt is written.",
             tools.workspace().display()
         );
     }
-    if options.output == RunOutput::Human && options.verbose {
-        println!("HII run {}", store.id);
+    if journal.verbose() {
+        println!("HII run {run_id}");
         println!("{}\n", contract.banner());
     }
     let mut approvals: Vec<String> = Vec::new();
@@ -316,11 +309,11 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         }
         if INTERRUPTED.load(Ordering::SeqCst) {
             interrupted = true;
-            store.event("run.interrupted", json!({ "step": steps }))?;
+            journal.emit(Event::new("run.interrupted").data(json!({ "step": steps })))?;
             break;
         }
         steps += 1;
-        let raw = match stream_model_json(&ollama, &model, &messages, steps, options.output) {
+        let raw = match stream_model_json(&ollama, &model, &messages, steps, &mut journal) {
             Ok(result) => result.content,
             Err(error)
                 if error.contains("MODEL LOOP DETECTED")
@@ -328,13 +321,12 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     && verified_epoch == Some(mutation_epoch)
                     && verification.iter().any(|check| check.ok) =>
             {
-                store.event(
-                    "convergence.verified_loop_recovered",
-                    json!({
+                journal.emit(
+                    Event::new("convergence.verified_loop_recovered").data(json!({
                         "step": steps,
                         "mutation_epoch": mutation_epoch,
                         "reason": "model repeated while preparing the final response"
-                    }),
+                    })),
                 )?;
                 final_summary = Some(verified_completion_summary(&touched_artifacts));
                 final_next = None;
@@ -342,47 +334,47 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             }
             Err(error) => return Err(error),
         };
-        store.event(
-            "model.response",
-            json!({ "step": steps, "content": redact_text(&raw) }),
+        journal.emit(
+            Event::new("model.response")
+                .data(json!({ "step": steps, "content": redact_text(&raw) })),
         )?;
-        emit_jsonl(
-            options.output,
-            "model.response",
-            json!({ "step": steps, "content": redact_text(&raw) }),
-        );
         if rejected_actions.would_loop(&raw, mutation_epoch, verified_epoch) {
             model_loop_detected = true;
-            store.event(
-                "model.loop_detected",
-                json!({ "step": steps, "reason": "identical rejected action repeated three times" }),
+            journal.emit(
+                Event::new("model.loop_detected")
+                    .data(json!({
+                        "step": steps,
+                        "reason": "identical rejected action repeated three times",
+                        "message": MODEL_LOOP_DETECTED_MESSAGE
+                    }))
+                    .human(Human::Recovery(MODEL_LOOP_DETECTED_MESSAGE.into())),
             )?;
-            emit_jsonl(
-                options.output,
-                "model.loop_detected",
-                json!({ "step": steps, "message": MODEL_LOOP_DETECTED_MESSAGE }),
-            );
-            if options.output == RunOutput::Human {
-                crate::tui::recovery(MODEL_LOOP_DETECTED_MESSAGE);
-            }
             break;
         }
         let rejected_raw = raw.clone();
+        // An empty completion is reported on its own rather than as a parse
+        // failure, so a silent model is distinguishable from a malformed one in
+        // the log. Both are steered back to the protocol the same way.
         let action = match parse_action(&raw) {
             Ok(action) => action,
             Err(error) => {
-                emit_jsonl(
-                    options.output,
-                    "protocol.retry",
-                    json!({ "step": steps, "error": &error }),
-                );
-                if options.output == RunOutput::Human && options.verbose {
-                    println!("[step {steps}] protocol retry: {error}");
-                }
+                let kind = if raw.trim().is_empty() {
+                    "model.empty_response"
+                } else {
+                    "protocol.retry"
+                };
+                let feedback = journal.feedback(
+                    Event::new(kind)
+                        .data(json!({ "step": steps, "error": &error }))
+                        .human(Human::Line(format!(
+                            "[step {steps}] protocol retry: {error}"
+                        ))),
+                    format!(
+                        "Protocol error: {error}. Return one JSON object matching the required action schema."
+                    ),
+                )?;
                 messages.push(Message::assistant(raw));
-                messages.push(Message::user(format!(
-                    "Protocol error: {error}. Return one JSON object matching the required action schema."
-                )));
+                push_feedback(&mut messages, feedback);
                 rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                 continue;
             }
@@ -409,23 +401,25 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     verified_epoch,
                     &verification,
                 ) {
-                    store.event(
-                        "convergence.repeated_verification_completed",
-                        json!({ "step": steps, "tool": tool, "mutation_epoch": mutation_epoch }),
+                    journal.emit(
+                        Event::new("convergence.repeated_verification_completed").data(
+                            json!({ "step": steps, "tool": tool, "mutation_epoch": mutation_epoch }),
+                        ),
                     )?;
                     final_summary = Some(verified_completion_summary(&touched_artifacts));
                     final_next = None;
                     break;
                 }
                 let label = reason.as_deref().unwrap_or("using workspace tool");
-                emit_jsonl(
-                    options.output,
-                    "tool.started",
-                    json!({ "step": steps, "tool": &tool, "target": label }),
-                );
-                if options.output == RunOutput::Human && io::stdout().is_terminal() {
-                    crate::tui::tool_start(steps, &tool, label);
-                }
+                journal.emit(
+                    Event::new("tool.started")
+                        .data(json!({ "step": steps, "tool": &tool, "target": label }))
+                        .human(Human::ToolStart {
+                            step: steps,
+                            tool: tool.clone(),
+                            target: label.to_string(),
+                        }),
+                )?;
                 let is_hii = crate::hii_tools::is_hii_tool(&tool);
                 let observation = matches!(
                     tool.as_str(),
@@ -445,14 +439,14 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     .as_ref()
                     .is_some_and(|key| observations.contains(key))
                 {
-                    store.event(
-                        "convergence.repeated_action",
-                        json!({ "step": steps, "tool": tool, "mutation_epoch": mutation_epoch }),
+                    let feedback = journal.feedback(
+                        Event::new("convergence.repeated_action").data(
+                            json!({ "step": steps, "tool": tool, "mutation_epoch": mutation_epoch }),
+                        ),
+                        "REPEATED_ACTION: this exact observation already ran after the latest workspace change. Do not repeat read/list/search. Run one actual verify or http acceptance check next, then return final if it passes.",
                     )?;
                     messages.push(Message::assistant(raw));
-                    messages.push(Message::user(
-                        "REPEATED_ACTION: this exact observation already ran after the latest workspace change. Do not repeat read/list/search. Run one actual verify or http acceptance check next, then return final if it passes.",
-                    ));
+                    push_feedback(&mut messages, feedback);
                     rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                     continue;
                 }
@@ -475,19 +469,21 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 if let Some(blocked) =
                     enforce_authority(decision, &tool, label, command.as_deref(), &mut approvals)
                 {
-                    store.event(
-                        "authority.block",
-                        json!({ "step": steps, "tool": tool, "decision": format!("{decision:?}") }),
+                    let feedback = journal.feedback(
+                        Event::new("authority.block").data(
+                            json!({ "step": steps, "tool": tool, "decision": format!("{decision:?}") }),
+                        ),
+                        blocked,
                     )?;
                     messages.push(Message::assistant(raw));
-                    messages.push(Message::user(blocked));
+                    push_feedback(&mut messages, feedback);
                     rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                     continue;
                 }
                 let pre_hooks = hooks.fire(
                     HookEvent::PreTool,
                     Some(&tool),
-                    &store.id,
+                    &run_id,
                     json!({
                         "step": steps,
                         "tool": &tool,
@@ -499,14 +495,18 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                         "sensitive": sensitive
                     }),
                 );
-                persist_hook_batch(&store, options.output, &pre_hooks)?;
+                persist_hook_batch(&mut journal, &pre_hooks)?;
                 let hook_block = pre_hooks.block_reason.clone();
                 hook_records.extend(pre_hooks.records);
                 if let Some(blocked) = hook_block {
+                    let feedback = journal.feedback(
+                        Event::new("hook.block").data(
+                            json!({ "step": steps, "tool": tool, "reason": redact_text(&blocked) }),
+                        ),
+                        format!("HOOK_BLOCKED: {blocked}. Choose a compliant alternative."),
+                    )?;
                     messages.push(Message::assistant(raw));
-                    messages.push(Message::user(format!(
-                        "HOOK_BLOCKED: {blocked}. Choose a compliant alternative."
-                    )));
+                    push_feedback(&mut messages, feedback);
                     rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                     continue;
                 }
@@ -545,12 +545,6 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                         observations.insert(key);
                     }
                 }
-                if options.output == RunOutput::Human && io::stdout().is_terminal() {
-                    crate::tui::tool_result(result.ok, result.verification);
-                    if !result.ok {
-                        crate::tui::tool_failure_detail(&safe_output);
-                    }
-                }
                 if result.ok && matches!(tool.as_str(), "write" | "edit") {
                     if let Some(path) = path.as_deref() {
                         touched_artifacts.insert(path.to_string());
@@ -569,7 +563,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 let post_hooks = hooks.fire(
                     HookEvent::PostTool,
                     Some(&tool),
-                    &store.id,
+                    &run_id,
                     json!({
                         "step": steps,
                         "tool": &tool,
@@ -578,7 +572,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                         "output": &safe_output
                     }),
                 );
-                persist_hook_batch(&store, options.output, &post_hooks)?;
+                persist_hook_batch(&mut journal, &post_hooks)?;
                 let hook_feedback = post_hooks.model_feedback();
                 if post_hooks.mutated_workspace() {
                     mutation_epoch += 1;
@@ -587,28 +581,6 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     observations.clear();
                 }
                 hook_records.extend(post_hooks.records);
-                store.event(
-                    "tool.result",
-                    json!({
-                        "step": steps,
-                        "tool": &tool,
-                        "ok": result.ok,
-                        "verification": result.verification,
-                        "output": &safe_output
-                    }),
-                )?;
-                emit_jsonl(
-                    options.output,
-                    "tool.result",
-                    json!({
-                        "step": steps,
-                        "tool": tool,
-                        "ok": result.ok,
-                        "verification": result.verification,
-                        "output": safe_output
-                    }),
-                );
-                messages.push(Message::assistant(raw));
                 let proof_hint = if result.ok && mutates && !options.dry_run {
                     format!(
                         "\n\nMUTATION EPOCH {mutation_epoch} RECORDED. Run one actual verify or http acceptance check next. Read/list/search are observation only."
@@ -616,27 +588,44 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 } else {
                     String::new()
                 };
-                messages.push(Message::user(format!(
-                    "TOOL RESULT [{}]:\n{}{}{}",
-                    if result.ok { "ok" } else { "error" },
-                    safe_output,
-                    proof_hint,
-                    if hook_feedback.is_empty() {
-                        String::new()
-                    } else {
-                        format!("\n\n{hook_feedback}")
-                    }
-                )));
+                let feedback = journal.feedback(
+                    Event::new("tool.result")
+                        .data(json!({
+                            "step": steps,
+                            "tool": &tool,
+                            "ok": result.ok,
+                            "verification": result.verification,
+                            "output": &safe_output
+                        }))
+                        .human(Human::ToolResult {
+                            ok: result.ok,
+                            verification: result.verification,
+                            detail: (!result.ok).then(|| safe_output.clone()),
+                        }),
+                    format!(
+                        "TOOL RESULT [{}]:\n{}{}{}",
+                        if result.ok { "ok" } else { "error" },
+                        safe_output,
+                        proof_hint,
+                        if hook_feedback.is_empty() {
+                            String::new()
+                        } else {
+                            format!("\n\n{hook_feedback}")
+                        }
+                    ),
+                )?;
+                messages.push(Message::assistant(raw));
+                push_feedback(&mut messages, feedback);
                 if result.verification && result.ok {
                     if let Some(pending) = take_verified_pending_final(
                         &mut pending_final,
                         mutation_epoch,
                         verified_epoch,
                     ) {
-                        store.event(
-                            "convergence.pending_final_completed",
-                            json!({ "step": steps, "mutation_epoch": mutation_epoch }),
-                        )?;
+                        journal
+                            .emit(Event::new("convergence.pending_final_completed").data(
+                                json!({ "step": steps, "mutation_epoch": mutation_epoch }),
+                            ))?;
                         final_summary = Some(pending.summary);
                         final_next = pending.next;
                         break;
@@ -656,38 +645,38 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 let plan = match mcp_clients.plan(&server, &tool, arguments, options.authority) {
                     Ok(plan) => plan,
                     Err(error) => {
-                        store.event(
-                            "mcp.block",
-                            json!({
+                        let feedback = journal.feedback(
+                            Event::new("mcp.block").data(json!({
                                 "step": steps,
                                 "server": server,
                                 "tool": tool,
                                 "reason": redact_text(&error)
-                            }),
+                            })),
+                            format!(
+                                "MCP_BLOCKED: {}. Refresh the server catalog or choose a configured tool.",
+                                redact_text(&error)
+                            ),
                         )?;
                         messages.push(Message::assistant(raw));
-                        messages.push(Message::user(format!(
-                            "MCP_BLOCKED: {}. Refresh the server catalog or choose a configured tool.",
-                            redact_text(&error)
-                        )));
+                        push_feedback(&mut messages, feedback);
                         rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                         continue;
                     }
                 };
                 if options.dry_run && (plan.mutates || plan.sensitive) {
-                    store.event(
-                        "mcp.block",
-                        json!({
+                    let feedback = journal.feedback(
+                        Event::new("mcp.block").data(json!({
                             "step": steps,
                             "server": server,
                             "tool": tool,
                             "reason": "dry run forbids mutating or open-world MCP calls"
-                        }),
+                        })),
+                        format!(
+                            "MCP_BLOCKED: {qualified} may mutate state or reach an open-world system, so it cannot run in dry-run mode."
+                        ),
                     )?;
                     messages.push(Message::assistant(raw));
-                    messages.push(Message::user(format!(
-                        "MCP_BLOCKED: {qualified} may mutate state or reach an open-world system, so it cannot run in dry-run mode."
-                    )));
+                    push_feedback(&mut messages, feedback);
                     rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                     continue;
                 }
@@ -698,37 +687,38 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     Some(&qualified),
                     &mut approvals,
                 ) {
-                    store.event(
-                        "authority.block",
-                        json!({
+                    let feedback = journal.feedback(
+                        Event::new("authority.block").data(json!({
                             "step": steps,
                             "tool": format!("mcp:{qualified}"),
                             "serverTrust": plan.trust.label(),
                             "decision": format!("{:?}", plan.decision),
                             "destructive": plan.destructive
-                        }),
+                        })),
+                        blocked,
                     )?;
                     messages.push(Message::assistant(raw));
-                    messages.push(Message::user(blocked));
+                    push_feedback(&mut messages, feedback);
                     rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                     continue;
                 }
-                emit_jsonl(
-                    options.output,
-                    "tool.started",
-                    json!({
-                        "step": steps,
-                        "tool": format!("mcp:{qualified}"),
-                        "target": label
-                    }),
-                );
-                if options.output == RunOutput::Human && io::stdout().is_terminal() {
-                    crate::tui::tool_start(steps, &format!("mcp:{qualified}"), label);
-                }
+                journal.emit(
+                    Event::new("tool.started")
+                        .data(json!({
+                            "step": steps,
+                            "tool": format!("mcp:{qualified}"),
+                            "target": label
+                        }))
+                        .human(Human::ToolStart {
+                            step: steps,
+                            tool: format!("mcp:{qualified}"),
+                            target: label.to_string(),
+                        }),
+                )?;
                 let pre_hooks = hooks.fire(
                     HookEvent::PreTool,
                     Some("mcp_call"),
-                    &store.id,
+                    &run_id,
                     json!({
                         "step": steps,
                         "server": server,
@@ -738,14 +728,20 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                         "destructive": plan.destructive
                     }),
                 );
-                persist_hook_batch(&store, options.output, &pre_hooks)?;
+                persist_hook_batch(&mut journal, &pre_hooks)?;
                 let hook_block = pre_hooks.block_reason.clone();
                 hook_records.extend(pre_hooks.records);
                 if let Some(blocked) = hook_block {
+                    let feedback = journal.feedback(
+                        Event::new("hook.block").data(json!({
+                            "step": steps,
+                            "tool": format!("mcp:{qualified}"),
+                            "reason": redact_text(&blocked)
+                        })),
+                        format!("HOOK_BLOCKED: {blocked}. Choose a compliant alternative."),
+                    )?;
                     messages.push(Message::assistant(raw));
-                    messages.push(Message::user(format!(
-                        "HOOK_BLOCKED: {blocked}. Choose a compliant alternative."
-                    )));
+                    push_feedback(&mut messages, feedback);
                     rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                     continue;
                 }
@@ -762,16 +758,10 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     observations.clear();
                     pending_final = None;
                 }
-                if options.output == RunOutput::Human && io::stdout().is_terminal() {
-                    crate::tui::tool_result(ok, false);
-                    if !ok {
-                        crate::tui::tool_failure_detail(&output);
-                    }
-                }
                 let post_hooks = hooks.fire(
                     HookEvent::PostTool,
                     Some("mcp_call"),
-                    &store.id,
+                    &run_id,
                     json!({
                         "step": steps,
                         "server": server,
@@ -780,7 +770,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                         "output": &output
                     }),
                 );
-                persist_hook_batch(&store, options.output, &post_hooks)?;
+                persist_hook_batch(&mut journal, &post_hooks)?;
                 let hook_feedback = post_hooks.model_feedback();
                 if post_hooks.mutated_workspace() {
                     mutation_epoch += 1;
@@ -790,29 +780,6 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     pending_final = None;
                 }
                 hook_records.extend(post_hooks.records);
-                store.event(
-                    "mcp.result",
-                    json!({
-                        "step": steps,
-                        "server": server,
-                        "tool": tool,
-                        "ok": ok,
-                        "mutatesWorkspace": plan.mutates,
-                        "output": &output
-                    }),
-                )?;
-                emit_jsonl(
-                    options.output,
-                    "tool.result",
-                    json!({
-                        "step": steps,
-                        "tool": format!("mcp:{qualified}"),
-                        "ok": ok,
-                        "verification": false,
-                        "output": &output
-                    }),
-                );
-                messages.push(Message::assistant(raw));
                 let proof_hint = if ok && plan.mutates && !options.dry_run {
                     format!(
                         "\n\nMUTATION EPOCH {mutation_epoch} RECORDED. Run one actual verify or http acceptance check next."
@@ -820,17 +787,35 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 } else {
                     String::new()
                 };
-                messages.push(Message::user(format!(
-                    "MCP TOOL RESULT [{}] from {qualified}:\n{}{}{}",
-                    if ok { "ok" } else { "error" },
-                    output,
-                    proof_hint,
-                    if hook_feedback.is_empty() {
-                        String::new()
-                    } else {
-                        format!("\n\n{hook_feedback}")
-                    }
-                )));
+                let feedback = journal.feedback(
+                    Event::new("mcp.result")
+                        .data(json!({
+                            "step": steps,
+                            "server": server,
+                            "tool": tool,
+                            "ok": ok,
+                            "mutatesWorkspace": plan.mutates,
+                            "output": &output
+                        }))
+                        .human(Human::ToolResult {
+                            ok,
+                            verification: false,
+                            detail: (!ok).then(|| output.clone()),
+                        }),
+                    format!(
+                        "MCP TOOL RESULT [{}] from {qualified}:\n{}{}{}",
+                        if ok { "ok" } else { "error" },
+                        output,
+                        proof_hint,
+                        if hook_feedback.is_empty() {
+                            String::new()
+                        } else {
+                            format!("\n\n{hook_feedback}")
+                        }
+                    ),
+                )?;
+                messages.push(Message::assistant(raw));
+                push_feedback(&mut messages, feedback);
             }
             Action::Final {
                 summary,
@@ -847,12 +832,17 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                         next,
                         mutation_epoch,
                     });
+                    let feedback = journal.feedback(
+                        Event::new("convergence.proof_required")
+                            .data(json!({ "step": steps, "mutation_epoch": mutation_epoch })),
+                        format!(
+                            "No passing HII verification exists for the latest workspace mutation (model claim: {}). Read/list/search are observation only. Run one actual check with verify or http before finalizing.",
+                            if claimed.is_empty() { "none" } else { "present" }
+                        ),
+                    )?;
                     messages.push(Message::assistant(raw));
-                    messages.push(Message::user(format!(
-                        "No passing HII verification exists for the latest workspace mutation (model claim: {}). Read/list/search are observation only. Run one actual check with verify or http before finalizing.",
-                        if claimed.is_empty() { "none" } else { "present" }
-                    )));
-                    if options.output == RunOutput::Human && options.verbose {
+                    push_feedback(&mut messages, feedback);
+                    if journal.verbose() {
                         println!("[step {steps}] proof required before completion");
                     }
                     rejected_actions.reset();
@@ -863,10 +853,14 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 break;
             }
             Action::Message { message } => {
+                let feedback = journal.feedback(
+                    Event::new("model.message").data(json!({ "step": steps })),
+                    format!(
+                        "This is explicit run mode, not chat. Continue the bounded task, verify it, then return a final action. Your conversational message was: {message}"
+                    ),
+                )?;
                 messages.push(Message::assistant(raw));
-                messages.push(Message::user(format!(
-                    "This is explicit run mode, not chat. Continue the bounded task, verify it, then return a final action. Your conversational message was: {message}"
-                )));
+                push_feedback(&mut messages, feedback);
                 rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
             }
         }
@@ -876,14 +870,11 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         for command in &options.verify {
             let result = tools.shell(command, true);
             let safe_output = redact_text(&result.output);
-            store.event(
-                "acceptance.result",
-                json!({
-                    "command": command,
-                    "ok": result.ok,
-                    "output": safe_output,
-                }),
-            )?;
+            journal.emit(Event::new("acceptance.result").data(json!({
+                "command": command,
+                "ok": result.ok,
+                "output": safe_output,
+            })))?;
             verification.push(VerificationRecord {
                 command: command.clone(),
                 ok: result.ok,
@@ -915,14 +906,14 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let stop_hooks = hooks.fire(
         HookEvent::Stop,
         None,
-        &store.id,
+        &run_id,
         json!({
             "status": if completed { "completed" } else { "incomplete" },
             "summary": &summary,
             "steps": steps
         }),
     );
-    persist_hook_batch(&store, options.output, &stop_hooks)?;
+    persist_hook_batch(&mut journal, &stop_hooks)?;
     hook_records.extend(stop_hooks.records);
     if let Some(path) = last_message.as_deref() {
         if let Some(parent) = path.parent() {
@@ -945,20 +936,14 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             .display()
             .to_string();
         touched_artifacts.insert(relative.clone());
-        store.event(
-            "output.written",
-            json!({ "kind": "last_message", "path": &relative }),
+        journal.emit(
+            Event::new("output.written").data(json!({ "kind": "last_message", "path": &relative })),
         )?;
-        emit_jsonl(
-            options.output,
-            "output.written",
-            json!({ "kind": "last_message", "path": relative }),
-        );
     }
     let git_status = tools.git_snapshot();
     let review = match review_model.as_deref() {
         Some(reviewer) => {
-            if options.output == RunOutput::Human && options.verbose {
+            if journal.verbose() {
                 println!("review     {reviewer}");
             }
             let prompt = format!(
@@ -997,8 +982,8 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let reversible = Some(git_status != "not a git workspace");
     let receipt = Receipt {
         schema_version: 4,
-        id: store.id.clone(),
-        created_at_unix_ms: store.started_at_unix_ms,
+        id: run_id.clone(),
+        created_at_unix_ms: journal.store().started_at_unix_ms,
         finished_at_unix_ms: unix_ms(),
         status: if completed {
             "completed".into()
@@ -1027,11 +1012,16 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         preexisting_changes,
         hooks: hook_records,
     };
-    store.event(
-        "run.finished",
-        json!({ "status": receipt.status, "summary": receipt.summary }),
-    )?;
-    let path = store.finish(&paths.runtime, &receipt)?;
+    let path = journal.store().finish(&paths.runtime, &receipt)?;
+    // The receipt is embedded here as well as written to receipt.json so a
+    // consumer following the event stream never has to open a second file.
+    journal.emit(Event::new("run.finished").data(json!({
+        "status": receipt.status,
+        "summary": receipt.summary,
+        "receipt": &receipt,
+        "proof": &path
+    })))?;
+    journal.finish(&receipt, &path);
     match options.output {
         RunOutput::Json => println!(
             "{}",
@@ -1041,11 +1031,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 "proof": path
             })
         ),
-        RunOutput::Jsonl => emit_jsonl(
-            options.output,
-            "run.finished",
-            json!({ "receipt": &receipt, "proof": path }),
-        ),
+        RunOutput::Jsonl | RunOutput::Quiet => {}
         RunOutput::Human if options.verbose => print_receipt(&receipt, &path),
         RunOutput::Human => {
             if io::stdout().is_terminal() {
@@ -1060,15 +1046,10 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     Ok(receipt)
 }
 
-fn persist_hook_batch(
-    store: &RunStore,
-    output: RunOutput,
-    batch: &HookBatch,
-) -> Result<(), String> {
+fn persist_hook_batch(journal: &mut Journal, batch: &HookBatch) -> Result<(), String> {
     for record in &batch.records {
         let value = serde_json::to_value(record).map_err(|error| error.to_string())?;
-        store.event("hook.result", value.clone())?;
-        emit_jsonl(output, "hook.result", value);
+        journal.emit(Event::new("hook.result").data(value))?;
     }
     Ok(())
 }
@@ -1142,7 +1123,7 @@ fn stream_model_json(
     model: &str,
     messages: &[Message],
     step: usize,
-    output: RunOutput,
+    journal: &mut Journal,
 ) -> Result<ChatResult, String> {
     let ollama = ollama.clone();
     let model_for_thread = model.to_string();
@@ -1152,38 +1133,35 @@ fn stream_model_json(
         ollama.chat_with_stream(&model_for_thread, &messages, true, true, sender);
     });
 
-    let interactive = output == RunOutput::Human && io::stdout().is_terminal();
+    // Whether progress is shown at all is the journal's decision, so `--stream`
+    // reaches a piped run exactly the way it reaches a terminal.
+    let streaming = journal.streaming();
+    let human = matches!(journal.mode(), OutputMode::Human { .. });
     let mut thinking_started = false;
     let mut content_started = false;
     loop {
         match receiver.recv_timeout(Duration::from_millis(120)) {
             Ok(ChatStreamEvent::Thinking(delta)) => {
-                if interactive {
-                    if !thinking_started {
-                        println!("\n  THINKING · step {step}");
-                        print!("  ");
-                        thinking_started = true;
-                    }
-                    print!("{}", delta.replace('\n', "\n  "));
-                    let _ = io::stdout().flush();
+                if streaming && human && !thinking_started {
+                    println!("\n  THINKING · step {step}");
+                    print!("  ");
+                    thinking_started = true;
                 }
+                journal.delta(Delta::Thinking(indent_for(human, delta)));
             }
             Ok(ChatStreamEvent::Content(delta)) => {
-                if interactive {
-                    if !content_started {
-                        if thinking_started {
-                            println!();
-                        }
-                        println!("\n  MODEL · step {step}");
-                        print!("  ");
-                        content_started = true;
+                if streaming && human && !content_started {
+                    if thinking_started {
+                        println!();
                     }
-                    print!("{}", delta.replace('\n', "\n  "));
-                    let _ = io::stdout().flush();
+                    println!("\n  MODEL · step {step}");
+                    print!("  ");
+                    content_started = true;
                 }
+                journal.delta(Delta::Content(indent_for(human, delta)));
             }
             Ok(ChatStreamEvent::Done(result)) => {
-                if interactive && (thinking_started || content_started) {
+                if streaming && human && (thinking_started || content_started) {
                     println!("\n");
                     let _ = io::stdout().flush();
                 }
@@ -1194,6 +1172,15 @@ fn stream_model_json(
                 return Err("the local model stream stopped unexpectedly".into())
             }
         }
+    }
+}
+
+/// Terminal output is indented under a step header; machine streams stay raw.
+fn indent_for(human: bool, delta: String) -> String {
+    if human {
+        delta.replace('\n', "\n  ")
+    } else {
+        delta
     }
 }
 
@@ -1952,15 +1939,6 @@ mod tests {
         let before = " M existing.rs\n?? old.txt";
         let after = " M existing.rs\n?? old.txt\n?? new.txt";
         assert_eq!(artifact_inventory(before, after), vec!["new.txt"]);
-    }
-
-    #[test]
-    fn jsonl_events_have_a_stable_envelope() {
-        let event = jsonl_event("tool.started", json!({ "tool": "read" }));
-        assert_eq!(event["schemaVersion"], 1);
-        assert_eq!(event["event"], "tool.started");
-        assert_eq!(event["data"]["tool"], "read");
-        assert!(event["atUnixMs"].as_u64().is_some());
     }
 
     #[test]
