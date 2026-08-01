@@ -396,11 +396,9 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     hooks: lifecycle_hooks_enabled(cli.no_hooks, cli.session_profile),
                 },
             )?;
-            Ok(if receipt.status == "completed" {
-                ExitCode::SUCCESS
-            } else {
-                ExitCode::from(2)
-            })
+            // The receipt records the code it expects, so the shell and the
+            // artifact can never disagree about how the run ended.
+            Ok(ExitCode::from(receipt.exit_code))
         }
         Some(Commands::Status { json }) => {
             status(&paths, cli.cwd, json)?;
@@ -437,7 +435,10 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Proof { id, json }) => {
-            proof(&paths, id.as_deref(), json)?;
+            let workspace = cli
+                .cwd
+                .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+            proof(&paths, &workspace, id.as_deref(), json)?;
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Board { action }) => board_command(&paths, cli.cwd, action),
@@ -954,7 +955,16 @@ fn status(paths: &AppPaths, cwd: Option<PathBuf>, json: bool) -> Result<(), Stri
         .unwrap_or(0);
     let ollama = Ollama::new(AppPaths::ollama_url());
     let models = ollama.models().unwrap_or_default();
-    let latest = fs::read_to_string(paths.runtime.join("runs/cli/latest")).unwrap_or_default();
+    // Scoped to this workspace so `proof      hii proof <id>` points at a run
+    // that actually happened here.
+    let latest = find_receipt(&paths.runtime, None, &workspace)
+        .ok()
+        .and_then(|path| {
+            let raw = fs::read_to_string(path).ok()?;
+            serde_json::from_str::<Receipt>(&raw).ok()
+        })
+        .map(|receipt| receipt.id)
+        .unwrap_or_default();
     if json {
         println!(
             "{}",
@@ -1097,8 +1107,15 @@ fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
     Ok(ok)
 }
 
-fn proof(paths: &AppPaths, id: Option<&str>, json: bool) -> Result<(), String> {
-    let path = find_receipt(&paths.runtime, id)?;
+fn proof(
+    paths: &AppPaths,
+    workspace: &std::path::Path,
+    id: Option<&str>,
+    json: bool,
+) -> Result<(), String> {
+    // Without an explicit id the lookup is bound to this workspace, so an empty
+    // workspace reports that plainly instead of showing another workspace's run.
+    let path = find_receipt(&paths.runtime, id, workspace)?;
     let raw = fs::read_to_string(&path).map_err(|error| error.to_string())?;
     if json {
         println!("{raw}");
@@ -1107,6 +1124,9 @@ fn proof(paths: &AppPaths, id: Option<&str>, json: bool) -> Result<(), String> {
     let receipt: Receipt = serde_json::from_str(&raw).map_err(|error| error.to_string())?;
     println!("HII proof {}", receipt.id);
     println!("status     {}", receipt.status);
+    if !receipt.outcome.is_empty() && receipt.outcome != receipt.status {
+        println!("outcome    {}", receipt.outcome);
+    }
     println!("goal       {}", receipt.goal);
     println!("workspace  {}", receipt.workspace);
     println!("model      {}", receipt.model);

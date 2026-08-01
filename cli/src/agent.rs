@@ -4,7 +4,10 @@ use crate::{
     hooks::{HookBatch, HookEvent, HookRunner},
     mcp_client::McpClients,
     ollama::{ChatResult, ChatStreamEvent, Message, Ollama},
-    receipt::{redact_text, unix_ms, HookRecord, Receipt, RunStore, VerificationRecord},
+    receipt::{
+        classify_error, record_verification, redact_text, unix_ms, HookRecord, Outcome, Receipt,
+        RunGuard, RunStore, VerificationRecord,
+    },
     runlog::{Delta, Event, Feedback, Human, Journal, OutputMode, StreamPolicy},
     tools::{ToolResult, Toolbelt},
 };
@@ -209,6 +212,25 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     };
     let store = RunStore::create(&paths.runtime)?;
     let run_id = store.id.clone();
+    let started_at = store.started_at_unix_ms;
+    let run_dir = store.dir.clone();
+    // Claim the receipt before the first model call. Every later exit path —
+    // including `?` and the provider errors that used to return with nothing
+    // written — now leaves a receipt and a pointer that names this run.
+    let mut guard = RunGuard::start(
+        &paths.runtime,
+        &run_dir,
+        &run_id,
+        draft_receipt(
+            &run_id,
+            started_at,
+            &options.goal,
+            options.authority,
+            options.done_when.as_deref(),
+            tools.workspace(),
+            &model,
+        ),
+    )?;
     let mut journal = Journal::new(store, options.output.mode(options.verbose), options.stream);
     journal.emit(Event::new("run.started").data(json!({
         "run_id": &run_id,
@@ -332,7 +354,10 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 final_next = None;
                 break;
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                guard.record_error(classify_error(&error), &error);
+                return Err(error);
+            }
         };
         journal.emit(
             Event::new("model.response")
@@ -551,11 +576,14 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     }
                 }
                 if result.verification {
-                    verification.push(VerificationRecord {
-                        command: command.or(url).unwrap_or_else(|| tool.clone()),
-                        ok: result.ok,
-                        output: safe_output.clone(),
-                    });
+                    record_verification(
+                        &mut verification,
+                        VerificationRecord {
+                            command: command.or(url).unwrap_or_else(|| tool.clone()),
+                            ok: result.ok,
+                            output: safe_output.clone(),
+                        },
+                    );
                     if result.ok {
                         verified_epoch = Some(mutation_epoch);
                     }
@@ -868,6 +896,15 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
 
     if final_summary.is_some() {
         for command in &options.verify {
+            // The model may already have run this exact check. Re-running it
+            // would both double the recorded proof and pay for the suite twice.
+            if acceptance_passed(std::slice::from_ref(command), &verification) {
+                journal.emit(Event::new("acceptance.skipped").data(json!({
+                    "command": command,
+                    "reason": "already verified in the current mutation epoch",
+                })))?;
+                continue;
+            }
             let result = tools.shell(command, true);
             let safe_output = redact_text(&result.output);
             journal.emit(Event::new("acceptance.result").data(json!({
@@ -875,11 +912,14 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 "ok": result.ok,
                 "output": safe_output,
             })))?;
-            verification.push(VerificationRecord {
-                command: command.clone(),
-                ok: result.ok,
-                output: safe_output,
-            });
+            record_verification(
+                &mut verification,
+                VerificationRecord {
+                    command: command.clone(),
+                    ok: result.ok,
+                    output: safe_output,
+                },
+            );
         }
     }
     let declared_checks_passed = acceptance_passed(&options.verify, &verification);
@@ -980,18 +1020,27 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let artifacts = artifacts.into_iter().collect::<Vec<_>>();
     let preexisting_changes = artifact_inventory("clean", &git_before);
     let reversible = Some(git_status != "not a git workspace");
+    // One classification drives status, outcome, and the exit code, so the three
+    // can never disagree about why the run ended.
+    let outcome = if completed {
+        Outcome::Completed
+    } else if interrupted {
+        Outcome::Interrupted
+    } else if model_loop_detected {
+        Outcome::LoopAbort
+    } else if !declared_checks_passed {
+        Outcome::VerifyFailed
+    } else if options.max_steps > 0 && steps >= options.max_steps {
+        Outcome::StepCeiling
+    } else {
+        Outcome::Aborted
+    };
     let receipt = Receipt {
-        schema_version: 4,
+        schema_version: 5,
         id: run_id.clone(),
-        created_at_unix_ms: journal.store().started_at_unix_ms,
+        created_at_unix_ms: started_at,
         finished_at_unix_ms: unix_ms(),
-        status: if completed {
-            "completed".into()
-        } else if interrupted {
-            "interrupted".into()
-        } else {
-            "incomplete".into()
-        },
+        status: outcome.status().into(),
         goal: options.goal,
         workspace: tools.workspace().display().to_string(),
         model,
@@ -1011,8 +1060,10 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         context_sources: capsule.sources,
         preexisting_changes,
         hooks: hook_records,
+        outcome: outcome.label().into(),
+        exit_code: outcome.exit_code(),
     };
-    let path = journal.store().finish(&paths.runtime, &receipt)?;
+    let path = guard.finalize(&receipt)?;
     // The receipt is embedded here as well as written to receipt.json so a
     // consumer following the event stream never has to open a second file.
     journal.emit(Event::new("run.finished").data(json!({
@@ -1172,6 +1223,51 @@ fn stream_model_json(
                 return Err("the local model stream stopped unexpectedly".into())
             }
         }
+    }
+}
+
+/// The receipt written before the first model call.
+///
+/// It carries the real goal, workspace, and model so that a run which dies early
+/// is still identifiable; the outcome starts as `running` and is replaced by
+/// whatever actually happens.
+#[allow(clippy::too_many_arguments)]
+fn draft_receipt(
+    run_id: &str,
+    started_at: u128,
+    goal: &str,
+    authority: Authority,
+    done_when: Option<&str>,
+    workspace: &Path,
+    model: &str,
+) -> Receipt {
+    Receipt {
+        schema_version: 5,
+        id: run_id.to_string(),
+        created_at_unix_ms: started_at,
+        finished_at_unix_ms: 0,
+        status: Outcome::Running.status().into(),
+        goal: redact_text(goal),
+        workspace: workspace.display().to_string(),
+        model: model.to_string(),
+        review_model: None,
+        steps: 0,
+        summary: "Run in progress.".into(),
+        verification: Vec::new(),
+        git_status: String::new(),
+        next: None,
+        review: None,
+        risk: String::new(),
+        authority: Some(authority.label().to_string()),
+        done_when: done_when.map(str::to_string),
+        approvals: Vec::new(),
+        artifacts: Vec::new(),
+        reversible: None,
+        context_sources: Vec::new(),
+        preexisting_changes: Vec::new(),
+        hooks: Vec::new(),
+        outcome: Outcome::Running.label().into(),
+        exit_code: Outcome::Running.exit_code(),
     }
 }
 

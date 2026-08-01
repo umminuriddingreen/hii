@@ -12,8 +12,8 @@ use crate::{
     mcp_client::McpClients,
     ollama::{ChatResult, ChatStreamEvent, ChatUsage, Message, Ollama},
     receipt::{
-        find_receipt, redact_text, unix_ms, ConversationStore, HookRecord, Receipt, RunStore,
-        VerificationRecord,
+        find_receipt, redact_text, unix_ms, ConversationStore, HookRecord, Outcome, Receipt,
+        RunStore, VerificationRecord,
     },
     skills,
     tools::Toolbelt,
@@ -1654,7 +1654,7 @@ impl Conversation {
     }
 
     pub fn proof(&self, id: Option<&str>) -> Result<String, String> {
-        let path = find_receipt(&self.paths.runtime, id)?;
+        let path = find_receipt(&self.paths.runtime, id, self.tools.workspace())?;
         let raw = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
         let receipt: Receipt = serde_json::from_str(&raw).map_err(|error| error.to_string())?;
         let checks = receipt.verification.iter().filter(|check| check.ok).count();
@@ -2108,17 +2108,17 @@ impl Conversation {
         let Some(run) = run else {
             return Ok(());
         };
+        let outcome = if completed {
+            Outcome::Completed
+        } else {
+            Outcome::Aborted
+        };
         let receipt = Receipt {
-            schema_version: 4,
+            schema_version: 5,
             id: run.id.clone(),
             created_at_unix_ms: run.started_at_unix_ms,
             finished_at_unix_ms: unix_ms(),
-            status: if completed {
-                "completed"
-            } else {
-                "incomplete"
-            }
-            .into(),
+            status: outcome.status().into(),
             goal: redact_text(input),
             workspace: self.tools.workspace().display().to_string(),
             model: self.model.clone(),
@@ -2155,6 +2155,8 @@ impl Conversation {
             },
             preexisting_changes: Vec::new(),
             hooks: hook_records,
+            outcome: outcome.label().into(),
+            exit_code: outcome.exit_code(),
         };
         run.event(
             "run.finished",

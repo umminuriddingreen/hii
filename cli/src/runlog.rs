@@ -237,6 +237,7 @@ impl Journal {
         }
     }
 
+    #[cfg(test)]
     pub fn store(&self) -> &RunStore {
         &self.store
     }

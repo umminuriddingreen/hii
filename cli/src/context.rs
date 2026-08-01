@@ -5,12 +5,8 @@
 //! history without asking a model to search broadly or silently transmitting
 //! anything outside the local runtime.
 
-use crate::receipt::{redact_text, Receipt};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use crate::receipt::{receipts_for_workspace, redact_text, Receipt};
+use std::{fs, path::Path, process::Command};
 
 const MAX_INSTRUCTIONS_CHARS: usize = 12_000;
 const MAX_GIT_CHARS: usize = 8_000;
@@ -123,30 +119,12 @@ fn command(workspace: &Path, args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+/// Prior runs worth showing the model: this workspace only, and only ones that
+/// actually proved something.
 fn recent_receipts(runtime: &Path, workspace: &Path) -> Vec<Receipt> {
-    let runs = runtime.join("runs").join("cli");
-    let mut paths = fs::read_dir(runs)
+    receipts_for_workspace(runtime, workspace)
         .into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .map(|entry| entry.path().join("receipt.json"))
-        .filter(|path| path.is_file())
-        .collect::<Vec<PathBuf>>();
-    paths.sort_by(|left, right| right.cmp(left));
-
-    let canonical_workspace = workspace
-        .canonicalize()
-        .unwrap_or_else(|_| workspace.to_path_buf());
-    paths
-        .into_iter()
-        .filter_map(|path| fs::read_to_string(path).ok())
-        .filter_map(|raw| serde_json::from_str::<Receipt>(&raw).ok())
-        .filter(|receipt| {
-            Path::new(&receipt.workspace)
-                .canonicalize()
-                .unwrap_or_else(|_| PathBuf::from(&receipt.workspace))
-                == canonical_workspace
-        })
+        .map(|(_, receipt)| receipt)
         .filter(|receipt| {
             receipt.status == "completed" && receipt.verification.iter().any(|item| item.ok)
         })
@@ -177,6 +155,7 @@ fn one_line(value: &str, limit: usize) -> String {
 mod tests {
     use super::*;
     use crate::receipt::VerificationRecord;
+    use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TempDir(PathBuf);
@@ -240,6 +219,8 @@ mod tests {
             context_sources: Vec::new(),
             preexisting_changes: Vec::new(),
             hooks: Vec::new(),
+            outcome: "completed".into(),
+            exit_code: 0,
         };
         let run_dir = runtime.0.join("runs/cli/prior-run");
         fs::create_dir_all(&run_dir).expect("create run");
