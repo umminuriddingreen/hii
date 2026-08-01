@@ -1261,21 +1261,49 @@ fn board_command(
     }
 }
 
+/// Long and short forms of every global flag that consumes a following value.
+///
+/// Derived from the clap definition rather than hand-listed so that adding a new
+/// global flag cannot silently break goal normalization by leaving its value to be
+/// mistaken for the subcommand (`hii --deadline 10m "fix tests"` must not run the
+/// `10m` subcommand).
+fn value_taking_globals() -> &'static [String] {
+    use clap::CommandFactory;
+    use std::sync::OnceLock;
+    static FLAGS: OnceLock<Vec<String>> = OnceLock::new();
+    FLAGS.get_or_init(|| {
+        Cli::command()
+            .get_arguments()
+            .filter(|arg| {
+                arg.is_global_set()
+                    && matches!(
+                        arg.get_action(),
+                        clap::ArgAction::Set | clap::ArgAction::Append
+                    )
+            })
+            .flat_map(|arg| {
+                arg.get_long()
+                    .map(|long| format!("--{long}"))
+                    .into_iter()
+                    .chain(arg.get_short().map(|short| format!("-{short}")))
+            })
+            .collect()
+    })
+}
+
 fn first_command(args: &[String]) -> Option<&str> {
+    let value_flags = value_taking_globals();
     let mut skip_value = false;
     for arg in args {
         if skip_value {
             skip_value = false;
             continue;
         }
-        if matches!(
-            arg.as_str(),
-            "--cwd" | "--model" | "--max-steps" | "--session-profile"
-        ) {
-            skip_value = true;
-            continue;
-        }
         if arg.starts_with('-') {
+            // `--flag=value` carries its value inline, so nothing after it is consumed.
+            if !arg.contains('=') && value_flags.iter().any(|flag| flag == arg) {
+                skip_value = true;
+            }
             continue;
         }
         return Some(arg);
@@ -1446,6 +1474,33 @@ mod tests {
     fn native_command_is_preserved() {
         let args = vec!["hii".into(), "status".into()];
         assert_eq!(normalize_goal_args(args.clone()), args);
+    }
+
+    /// Every global flag that takes a value must have that value skipped when we
+    /// look for the subcommand. Driving the assertion off the derived list means a
+    /// newly added global flag is covered automatically instead of silently
+    /// regressing `normalize_goal_args`.
+    #[test]
+    fn first_command_skips_the_value_of_every_global_flag() {
+        let flags = value_taking_globals();
+        assert!(
+            flags.iter().any(|flag| flag == "--cwd"),
+            "expected --cwd to be derived as a value-taking global, got {flags:?}"
+        );
+        for flag in flags {
+            let args = vec![flag.clone(), "status".into(), "fix the bug".into()];
+            assert_eq!(
+                first_command(&args),
+                Some("fix the bug"),
+                "{flag}'s value was mistaken for the subcommand"
+            );
+        }
+    }
+
+    #[test]
+    fn first_command_reads_inline_flag_values() {
+        let args = vec!["--model=status".into(), "doctor".into()];
+        assert_eq!(first_command(&args), Some("doctor"));
     }
 
     #[test]

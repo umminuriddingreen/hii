@@ -813,7 +813,7 @@ fn has_ripgrep() -> bool {
 }
 
 /// Minimal cross-platform `which`: is `program` resolvable on `PATH`?
-fn which_on_path(program: &str) -> bool {
+pub(crate) fn which_on_path(program: &str) -> bool {
     let Some(paths) = std::env::var_os("PATH") else {
         return false;
     };
