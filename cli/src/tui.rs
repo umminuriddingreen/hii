@@ -72,6 +72,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/keymap", "keyboard profile"),
     ("/usage", "tokens and speed"),
     ("/thinking", "thought stream"),
+    ("/reasoning", "model effort"),
     ("/raw", "raw model stream"),
     ("/model", "choose available model"),
     ("/models", "list available models"),
@@ -321,6 +322,7 @@ fn public_command(command: &str) -> bool {
             | "/detach"
             | "/usage"
             | "/thinking"
+            | "/reasoning"
             | "/raw"
             | "/theme"
             | "/keymap"

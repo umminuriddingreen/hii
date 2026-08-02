@@ -139,6 +139,9 @@ pub(crate) enum Action {
 
 pub(crate) const MODEL_LOOP_DETECTED_MESSAGE: &str =
     "MODEL LOOP DETECTED — HII stopped the repeated rejected action and preserved the session. Revise or steer the request; completed workspace changes remain in place.";
+const ADAPTIVE_REASONING_BUDGET_RETRY: &str = "adaptive reasoning budget ended";
+const ADAPTIVE_REASONING_MAX_CHARS: usize = 4_096;
+const ADAPTIVE_REASONING_MAX_TIME: Duration = Duration::from_secs(12);
 
 #[derive(Debug, Default)]
 pub(crate) struct RejectedActionGuard {
@@ -345,6 +348,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let mut steps = 0usize;
     let mut rejected_actions = RejectedActionGuard::default();
     let mut model_loop_detected = false;
+    let mut action_failures = 0usize;
 
     loop {
         if let Some(kind) = deadline.exceeded(steps) {
@@ -368,6 +372,13 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             break;
         }
         steps += 1;
+        let request_reasoning = action_failures >= 2;
+        journal.emit(Event::new("model.reasoning_policy").data(json!({
+            "step": steps,
+            "mode": "auto",
+            "requested": request_reasoning,
+            "bounded": request_reasoning
+        })))?;
         let raw = match stream_model_json(
             &ollama,
             &model,
@@ -376,8 +387,23 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             &mut journal,
             &deadline,
             &cancel,
+            request_reasoning,
         ) {
             Ok(result) => result.content,
+            Err(error) if error == ADAPTIVE_REASONING_BUDGET_RETRY => {
+                cancel.reset();
+                action_failures = 0;
+                journal.emit(Event::new("model.reasoning_budget_exceeded").data(json!({
+                    "step": steps,
+                    "max_chars": ADAPTIVE_REASONING_MAX_CHARS,
+                    "max_ms": ADAPTIVE_REASONING_MAX_TIME.as_millis()
+                })))?;
+                messages.push(Message::user(
+                    "Reasoning budget ended. Emit the smallest safe relevant JSON action now. Do not narrate the plan.",
+                ));
+                steps = steps.saturating_sub(1);
+                continue;
+            }
             Err(error)
                 if error.contains("MODEL LOOP DETECTED")
                     && mutation_epoch > 0
@@ -435,6 +461,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         let action = match parse_action(&raw) {
             Ok(action) => action,
             Err(error) => {
+                action_failures += 1;
                 let kind = if raw.trim().is_empty() {
                     "model.empty_response"
                 } else {
@@ -639,6 +666,11 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     )
                 };
                 let safe_output = redact_text(&result.output);
+                if result.ok {
+                    action_failures = 0;
+                } else {
+                    action_failures += 1;
+                }
                 if result.ok {
                     if mutates && !options.dry_run {
                         mutation_epoch += 1;
@@ -875,6 +907,11 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     Ok(result) => (result.ok, redact_text(&result.output)),
                     Err(error) => (false, redact_text(&error)),
                 };
+                if ok {
+                    action_failures = 0;
+                } else {
+                    action_failures += 1;
+                }
                 if ok && plan.mutates && !options.dry_run {
                     mutation_epoch += 1;
                     verified_epoch = None;
@@ -1263,9 +1300,9 @@ Workspace: {workspace}
 Done when: {done_when}
 Acceptance checks: {declared_verification}
 
-Loop: inspect -> act -> verify -> final.
-Change files with edit (exact replacement) or write; shell redirects into the workspace are refused.
-Proof MUST be one flat {{"type":"verify","command":"npm test"}} action (or `http`); shell/read/list/search and nested checks never count
+Loop: inspect -> act -> verify -> final. Act on the smallest safe relevant step; never narrate search plans.
+Edit with edit or write; workspace shell redirects are refused.
+Proof: one flat {{"type":"verify","command":"npm test"}} or http action; shell/read/list/search never count.
 One JSON action/turn. Types:
 read,list,search,web_search,web_fetch,write,edit,shell,verify,http,hii_context,og_next,caps_check,board_read,board_write,skill_search,bridge_send,bridge_read.
 Fields: path,query,command,content,old,new,replace_all,offset,limit,url.
@@ -1284,6 +1321,7 @@ fn stream_model_json(
     journal: &mut Journal,
     deadline: &Deadline,
     cancel: &Cancel,
+    think: bool,
 ) -> Result<ChatResult, String> {
     let ollama = ollama.clone();
     let model_for_thread = model.to_string();
@@ -1295,7 +1333,7 @@ fn stream_model_json(
             &model_for_thread,
             &messages,
             true,
-            true,
+            think,
             &stream_cancel,
             sender,
         );
@@ -1307,6 +1345,7 @@ fn stream_model_json(
     let human = matches!(journal.mode(), OutputMode::Human { .. });
     let mut thinking_started = false;
     let mut content_started = false;
+    let mut reasoning_chars = 0usize;
     let call_started = Instant::now();
     let mut last_delta = Instant::now();
     let call_budget = deadline.model_call_budget();
@@ -1314,6 +1353,15 @@ fn stream_model_json(
     loop {
         match receiver.recv_timeout(Duration::from_millis(120)) {
             Ok(ChatStreamEvent::Thinking(delta)) => {
+                reasoning_chars += delta.chars().count();
+                if think
+                    && !content_started
+                    && (reasoning_chars >= ADAPTIVE_REASONING_MAX_CHARS
+                        || call_started.elapsed() >= ADAPTIVE_REASONING_MAX_TIME)
+                {
+                    cancel.cancel(CancelReason::Client);
+                    return Err(ADAPTIVE_REASONING_BUDGET_RETRY.into());
+                }
                 if streaming && human && !thinking_started {
                     println!("\n  THINKING · step {step}");
                     print!("  ");
@@ -2040,8 +2088,8 @@ mod tests {
             "verified",
             &[],
         );
-        assert!(prompt.contains("Proof MUST be one flat"));
-        assert!(prompt.contains("shell/read/list/search and nested checks never count"));
+        assert!(prompt.contains("Proof: one flat"));
+        assert!(prompt.contains("shell/read/list/search never count"));
         assert!(prompt.contains(r#"{"type":"verify","command":"npm test"}"#));
     }
 
