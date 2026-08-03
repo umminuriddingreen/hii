@@ -383,11 +383,13 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             &ollama,
             &model,
             &messages,
-            steps,
+            ModelStreamPolicy {
+                step: steps,
+                think: request_reasoning,
+            },
             &mut journal,
             &deadline,
             &cancel,
-            request_reasoning,
         ) {
             Ok(result) => result.content,
             Err(error) if error == ADAPTIVE_REASONING_BUDGET_RETRY => {
@@ -1313,16 +1315,21 @@ Read AGENTS.md. Use minimal, sliced context. Preserve unclear work. Verify chang
     )
 }
 
+struct ModelStreamPolicy {
+    step: usize,
+    think: bool,
+}
+
 fn stream_model_json(
     ollama: &Ollama,
     model: &str,
     messages: &[Message],
-    step: usize,
+    policy: ModelStreamPolicy,
     journal: &mut Journal,
     deadline: &Deadline,
     cancel: &Cancel,
-    think: bool,
 ) -> Result<ChatResult, String> {
+    let ModelStreamPolicy { step, think } = policy;
     let ollama = ollama.clone();
     let model_for_thread = model.to_string();
     let messages = messages.to_vec();

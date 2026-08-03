@@ -1672,10 +1672,6 @@ impl Conversation {
         }
     }
 
-    pub fn activity_footer(&self) -> Option<String> {
-        (self.usage.calls > 0).then(|| self.usage.summary())
-    }
-
     pub fn take_queued(&mut self) -> Option<String> {
         self.queued_inputs.pop_front()
     }
@@ -1771,6 +1767,37 @@ impl Conversation {
 
     pub fn diff(&self) -> Result<String, String> {
         self.workspace_diff()
+    }
+
+    pub fn final_output(&self, message: &str) -> String {
+        let workspace = self.tools.workspace();
+        let mut output = message.trim_end().to_string();
+        if let Ok(diff) = self.workspace_diff() {
+            if diff != "No workspace changes." {
+                output.push_str("\n\n");
+                output.push_str(&diff);
+            }
+        }
+
+        output.push_str("\n\n");
+        output.push_str(&format!("file://{}", workspace.display()));
+        if let Ok(status) = std::process::Command::new("git")
+            .args(["status", "--short"])
+            .current_dir(workspace)
+            .output()
+        {
+            if status.status.success() {
+                for line in String::from_utf8_lossy(&status.stdout).lines() {
+                    let path = line.get(3..).unwrap_or_default().trim();
+                    let path = path.rsplit(" -> ").next().unwrap_or(path);
+                    if !path.is_empty() {
+                        output.push('\n');
+                        output.push_str(&format!("file://{}", workspace.join(path).display()));
+                    }
+                }
+            }
+        }
+        output
     }
 
     pub fn review(&mut self) -> Result<String, String> {
@@ -1931,15 +1958,11 @@ impl Conversation {
         let diff = output(workspace, &["diff", "--no-ext-diff", "HEAD", "--"])
             .or_else(|| output(workspace, &["diff", "--no-ext-diff", "--"]))
             .unwrap_or_default();
-        Ok(format!(
-            "WORKSPACE STATUS\n{}\n\nDIFF\n{}",
-            status.trim_end(),
-            if diff.trim().is_empty() {
-                "(Only untracked files are present; ask HII to inspect them explicitly.)"
-            } else {
-                diff.trim_end()
-            }
-        ))
+        Ok(if diff.trim().is_empty() {
+            status.trim_end().to_string()
+        } else {
+            diff.trim_end().to_string()
+        })
     }
 
     fn compact_internal(&mut self, reason: &str) -> Result<CompactionStats, String> {
@@ -2188,11 +2211,8 @@ impl Conversation {
                 }
                 Ok(ChatStreamEvent::Content(delta)) => {
                     if interactive && show_content {
-                        if !content_started {
-                            print!("\n  MODEL\n  ");
-                            content_started = true;
-                        }
-                        print!("{}", delta.replace('\n', "\n  "));
+                        content_started = true;
+                        print!("{delta}");
                         let _ = io::stdout().flush();
                     }
                 }

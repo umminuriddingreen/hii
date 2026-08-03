@@ -740,10 +740,12 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         };
         match result {
             Ok(reply) => {
-                let activity = show_activity
-                    .then(|| conversation.activity_footer())
-                    .flatten();
-                tui::reply(&reply, activity.as_deref());
+                let reply = if show_activity {
+                    conversation.final_output(&reply)
+                } else {
+                    reply
+                };
+                tui::reply(&reply, None);
             }
             Err(error) => tui::error(&error),
         }

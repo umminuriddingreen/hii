@@ -26,7 +26,6 @@ enum Theme {
 struct Palette {
     primary: &'static str,
     secondary: &'static str,
-    success: &'static str,
     warning: &'static str,
     error: &'static str,
     muted: &'static str,
@@ -35,7 +34,6 @@ struct Palette {
 const HERITAGE: Palette = Palette {
     primary: "\x1b[38;5;220m",
     secondary: "\x1b[38;5;141m",
-    success: "\x1b[38;5;78m",
     warning: "\x1b[38;5;215m",
     error: "\x1b[38;5;203m",
     muted: "\x1b[38;5;250m",
@@ -43,7 +41,6 @@ const HERITAGE: Palette = Palette {
 const MIDNIGHT: Palette = Palette {
     primary: "\x1b[38;5;44m",
     secondary: "\x1b[38;5;75m",
-    success: "\x1b[38;5;78m",
     warning: "\x1b[38;5;215m",
     error: "\x1b[38;5;203m",
     muted: "\x1b[38;5;245m",
@@ -51,7 +48,6 @@ const MIDNIGHT: Palette = Palette {
 const MONO: Palette = Palette {
     primary: "\x1b[38;5;255m",
     secondary: "\x1b[38;5;252m",
-    success: "\x1b[38;5;255m",
     warning: "\x1b[38;5;250m",
     error: "\x1b[38;5;255m",
     muted: "\x1b[38;5;245m",
@@ -258,14 +254,12 @@ fn workspace_state(git: &str) -> String {
 }
 
 pub fn welcome(workspace: &Path, model: &str, max_steps: usize, git: &str, public_test: bool) {
-    let width = terminal_width();
-    let rule = "━".repeat(width.saturating_sub(4));
+    let _ = (model, max_steps);
     let workspace = if public_test {
         "shared workspace".to_string()
     } else {
         short_path(workspace)
     };
-    let model = model.strip_suffix("-mlx").unwrap_or(model);
     let git = workspace_state(git);
     let workspace = if public_test || git == "clean" || git == "not a Git workspace" {
         workspace
@@ -273,37 +267,7 @@ pub fn welcome(workspace: &Path, model: &str, max_steps: usize, git: &str, publi
         format!("{workspace} · {git}")
     };
 
-    println!();
-    println!(
-        "  {} {}  {}",
-        paint("◈", &[BOLD, palette().primary]),
-        paint("hii", &[BOLD]),
-        paint(&workspace, &[DIM, palette().muted])
-    );
-    println!("  {}", paint(&rule, &[DIM, palette().secondary]));
-    println!(
-        "  {}  {}",
-        paint("ready", &[palette().success]),
-        paint(
-            &format!(
-                "{model} · workspace · {} · live model stream · receipts",
-                if max_steps == 0 {
-                    "unlimited".to_string()
-                } else {
-                    format!("{max_steps} steps")
-                }
-            ),
-            &[DIM, palette().muted]
-        )
-    );
-    println!(
-        "  {}",
-        paint(
-            "state the outcome  ·  Enter steer  Tab queue  Esc stop  ·  / commands",
-            &[DIM, palette().muted]
-        )
-    );
-    println!();
+    println!("{}", paint(&workspace, &[DIM, palette().muted]));
 }
 
 pub fn prompt_frame(_frame: usize) -> String {
@@ -425,59 +389,19 @@ pub fn idle_background() {
 }
 
 pub fn stage(label: &str, message: &str) {
-    println!(
-        "  {}  {}",
-        paint(label, &[BOLD, palette().primary]),
-        paint(
-            &truncate(message, terminal_width().saturating_sub(label.len() + 6)),
-            &[palette().muted]
-        )
-    );
+    let _ = (label, message);
 }
 
 pub fn model_text(message: &str) {
-    println!(
-        "  {} {}",
-        paint("│", &[palette().secondary]),
-        paint(message, &[palette().muted])
-    );
+    println!("{message}");
 }
 
 pub fn tool_start(step: usize, tool: &str, target: &str) {
-    let stage = if matches!(tool, "verify" | "http") {
-        "VERIFYING"
-    } else if matches!(tool, "web_search" | "web_fetch") {
-        "RESEARCHING"
-    } else if matches!(tool, "write" | "edit" | "shell") {
-        "BUILDING"
-    } else {
-        "CHECKING"
-    };
-    println!(
-        "  {}  {:02} {}  {}",
-        paint(stage, &[BOLD, palette().secondary]),
-        paint(&format!("{step:02}"), &[DIM, palette().muted]),
-        paint(&tool.to_ascii_uppercase(), &[BOLD, palette().secondary]),
-        paint(
-            &truncate(target, terminal_width().saturating_sub(20)),
-            &[DIM, palette().muted]
-        )
-    );
+    let _ = (step, tool, target);
 }
 
 pub fn tool_result(ok: bool, verification: bool) {
-    let (mark, color, label) = if !ok {
-        ("╰─", palette().error, "failed")
-    } else if verification {
-        ("╰─", palette().success, "verified")
-    } else {
-        ("╰─", palette().success, "complete")
-    };
-    println!(
-        "  {} {}",
-        paint(mark, &[DIM, color]),
-        paint(label, &[color])
-    );
+    let _ = (ok, verification);
 }
 
 pub fn tool_failure_detail(output: &str) {
@@ -516,15 +440,8 @@ pub fn recovery(message: &str) {
 }
 
 pub fn reply(message: &str, activity: Option<&str>) {
-    println!();
-    println!("  {}", paint("DONE", &[BOLD, palette().success]));
-    for line in message.lines() {
-        println!("  {line}");
-    }
-    if let Some(activity) = activity {
-        println!("  {}", paint(activity, &[DIM, palette().muted]));
-    }
-    println!();
+    let _ = activity;
+    println!("{message}");
 }
 
 pub fn system(message: &str) {
