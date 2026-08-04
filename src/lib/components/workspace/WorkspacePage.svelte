@@ -8,12 +8,14 @@
   import CadPane from '$lib/components/workspace/CadPane.svelte';
   import IntentPane from '$lib/components/workspace/IntentPane.svelte';
   import SpatialRunPane from '$lib/components/workspace/SpatialRunPane.svelte';
+  import DevelopmentSessionPane from '$lib/components/workspace/DevelopmentSessionPane.svelte';
   import RunArtifactPane from '$lib/components/workspace/RunArtifactPane.svelte';
   import GovernedResultPane from '$lib/components/workspace/GovernedResultPane.svelte';
   import GovernedCapabilityPane from '$lib/components/workspace/GovernedCapabilityPane.svelte';
   import SurfacePane from '$lib/components/workspace/SurfacePane.svelte';
   import StaticNode from '$lib/components/workspace/StaticNode.svelte';
   import WorkspaceNavigator from '$lib/components/workspace/WorkspaceNavigator.svelte';
+  import SystemSpace from '$lib/components/workspace/SystemSpace.svelte';
   import HiiLogo from '$lib/components/HiiLogo.svelte';
   import type { WorkspaceDoc, WorkspaceNode, WorkspaceNodeType } from '@/lib/workspace/types';
   import { makeNode, seedFor, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
@@ -294,6 +296,18 @@
   }
   function contextItemsForNode(node:WorkspaceNode){if(node.payload.adapter==='contact-sheet'){const selected=contactSheetContextItems({nodeId:node.id,items:node.payload.items,selectedItems:node.payload.selectedItems,itemLabels:node.payload.itemLabels,proofRefs:node.object?.proofRefs});if(selected.length)return selected}return[contextItem(node)]}
   function createSpatialRun(intent:string,at:{x:number;y:number},parentId?:string,contextNodes:WorkspaceNode[]=[]){const before=doc;const title=intent.length>44?`${intent.slice(0,44)}…`:intent;const approvedContext=contextNodes.flatMap(contextItemsForNode).slice(0,24);let z=doc.nextZ;const intentSeed=seedFor('intent',{title:'your intent',text:intent,parentId,context:approvedContext}),intentNode=makeNode(intentSeed,at.x,at.y,++z),runSeed=seedFor('run',{title,prompt:intent,parentId:intentNode.id,autoStart:false,status:'waiting_approval',context:approvedContext,workspaceRoot:String(context?.identity?.repo||'/Users/ummi/hii'),model:'',maxSteps:8}),runNode=makeNode(runSeed,at.x,at.y+intentSeed.h+20,++z);doc={...doc,nextZ:z,nodes:[...doc.nodes,intentNode,runNode]};selected=runNode.id;contextSelection=[];remember(before);persist();}
+  function openDevelopmentSession(){
+    const existing=doc.nodes.find(node=>node.type==='run'&&node.payload.developmentSession===true&&!['completed','failed','cancelled'].includes(String(node.payload.status||'')));
+    if(existing){focusNode(existing);return}
+    const before=doc;
+    const prompt='Develop HII from inside this governed HII canvas object. Work only in /Users/ummi/hii. Start or reuse the Svelte development server on 127.0.0.1:5173 so web UI changes hot-load in this object, make the requested bounded change, run relevant tests, and attach proof to the run. Do not push or deploy. Web and Svelte changes use HMR. If Rust or Tauri changes are required, do not overwrite /Applications/HII.app; build and relaunch only a separate /Applications/HII Preview.app and report the rebuild boundary.';
+    const at=findOpenWorkspacePosition(doc.nodes,workspacePoint(innerWidth/2-520,innerHeight/2-360),{w:1040,h:720});
+    const seed=seedFor('run',{title:'HII development session',prompt,developmentSession:true,previewUrl:'http://127.0.0.1:5173/workspace',autoStart:false,status:'waiting_approval',context:[],workspaceRoot:'/Users/ummi/hii',model:'',maxSteps:16});
+    seed.w=1040;seed.h=720;
+    seed.object={...seed.object,kind:'run',source:'HII governed self-development canvas object',audit:[...(seed.object?.audit||[]),{ts:new Date().toISOString(),actor:'human',action:'opened HII self-development session'}]};
+    const node=makeNode(seed,at.x,at.y,doc.nextZ+1);
+    doc={...doc,nextZ:doc.nextZ+1,nodes:[...doc.nodes,node]};selected=node.id;contextSelection=[];remember(before);persist();fitNodes([node],1);
+  }
   async function updateBoardTask(id:string,patch:Record<string,unknown>){
     const response=await fetch('/api/board/tasks',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({id,...patch})});
     const result=await response.json().catch(()=>({}));
@@ -866,7 +880,7 @@
     }if(event.altKey&&event.code==='Space'&&!event.repeat){event.preventDefault();void summonComposer();return}if(command&&event.key.toLowerCase()==='k'){event.preventDefault();if(omnibar)omnibar=false;else void openCommands();}if(event.key==='Escape'){omnibar=false;composerOpen=false;selectedLinkId=null;}}
   async function drop(event:DragEvent){event.preventDefault();if(!event.dataTransfer)return;const at={x:(event.clientX-doc.viewport.x)/doc.viewport.zoom,y:(event.clientY-doc.viewport.y)/doc.viewport.zoom};addSeeds(await seedsFromDataTransfer(event.dataTransfer),at)}
   async function addFiles(files:File[]){const seeds=await seedsFromFiles(files);const center={x:(-doc.viewport.x+innerWidth/2)/doc.viewport.zoom,y:(-doc.viewport.y+innerHeight/2)/doc.viewport.zoom};addSeeds(seeds,{x:center.x-190,y:center.y-150})}
-  onMount(()=>{let disposed=false;let unlistenSummon:(()=>void)|undefined;load();refreshContext();refreshBoard();refreshDaemon();const daemonTimer=setInterval(()=>void refreshDaemon(),10000);const move=(e:PointerEvent)=>{pointer.x=e.clientX;pointer.y=e.clientY};const paste=(e:ClipboardEvent)=>{if((e.target as Element)?.closest?.('input,textarea,[contenteditable]'))return;const files=[...(e.clipboardData?.files||[])];if(files.length){e.preventDefault();void addFiles(files);return}const text=e.clipboardData?.getData('text/plain');if(!text)return;const at=workspacePoint(pointer.x,pointer.y);const copied=readWorkspaceClipboard(text);if(copied){e.preventDefault();pasteNodes(copied,at);return}addSeeds([seedFromString(text)],at)};const nativeSummon=()=>void summonComposer();const summonFromUrl=new URLSearchParams(location.search).get('summon')==='1';if(summonFromUrl){history.replaceState(history.state,'',location.pathname);void summonComposer()}void import('@tauri-apps/api/core').then(async(core)=>{if(!core.isTauri())return;const{listen}=await import('@tauri-apps/api/event');const stop=await listen('hii://summon',nativeSummon);if(disposed)stop();else unlistenSummon=stop}).catch(()=>{});window.addEventListener('hii:summon',nativeSummon);window.addEventListener('keydown',keydown);window.addEventListener('pointermove',move);window.addEventListener('paste',paste);return()=>{disposed=true;flushPatches();clearInterval(daemonTimer);unlistenSummon?.();window.removeEventListener('hii:summon',nativeSummon);window.removeEventListener('keydown',keydown);window.removeEventListener('pointermove',move);window.removeEventListener('paste',paste)}});
+  onMount(()=>{let disposed=false;const nativeStops:Array<()=>void>=[];load();refreshContext();refreshBoard();refreshDaemon();const daemonTimer=setInterval(()=>void refreshDaemon(),10000);const move=(e:PointerEvent)=>{pointer.x=e.clientX;pointer.y=e.clientY};const paste=(e:ClipboardEvent)=>{if((e.target as Element)?.closest?.('input,textarea,[contenteditable]'))return;const files=[...(e.clipboardData?.files||[])];if(files.length){e.preventDefault();void addFiles(files);return}const text=e.clipboardData?.getData('text/plain');if(!text)return;const at=workspacePoint(pointer.x,pointer.y);const copied=readWorkspaceClipboard(text);if(copied){e.preventDefault();pasteNodes(copied,at);return}addSeeds([seedFromString(text)],at)};const nativeSummon=()=>void summonComposer();const summonFromUrl=new URLSearchParams(location.search).get('summon')==='1';if(summonFromUrl){history.replaceState(history.state,'',location.pathname);void summonComposer()}void import('@tauri-apps/api/core').then(async(core)=>{if(!core.isTauri())return;const{listen}=await import('@tauri-apps/api/event');const listeners=await Promise.all([listen('hii://summon',nativeSummon),listen('hii://command-palette',()=>void openCommands()),listen('hii://open-browser',()=>spawn('browser')),listen('hii://fit-all',fitAll),listen('hii://space-refresh',()=>window.dispatchEvent(new CustomEvent('hii:space-refresh'))),listen('hii://develop-hii',openDevelopmentSession)]);if(disposed)listeners.forEach(stop=>stop());else nativeStops.push(...listeners)}).catch(()=>{});window.addEventListener('hii:summon',nativeSummon);window.addEventListener('keydown',keydown);window.addEventListener('pointermove',move);window.addEventListener('paste',paste);return()=>{disposed=true;flushPatches();clearInterval(daemonTimer);nativeStops.forEach(stop=>stop());window.removeEventListener('hii:summon',nativeSummon);window.removeEventListener('keydown',keydown);window.removeEventListener('pointermove',move);window.removeEventListener('paste',paste)}});
 </script>
 
 {#if !data.enabled}<div class="hii-page flex min-h-[60vh] flex-col items-center justify-center gap-3"><p class="hii-kicker">surface off</p><h1 class="hii-page-title">HII is turned off</h1></div>
@@ -987,6 +1001,7 @@
         {:else if node.type==='ink'}<InkPane {node} />
         {:else if ['note','text','canvas-text','link','file','image','media','html','font'].includes(node.type)}<StaticNode {node} onPayload={(payload)=>patchSoon(node.id,{payload:{...node.payload,...payload}})} onSize={(size)=>patch(node.id,size)} onPromote={(item,label)=>promoteContactSheetItem(node,item,label)} onOrganize={()=>organizeContactSheetSelection(node)} />
         {:else if node.type==='intent'}<IntentPane {node} />
+        {:else if node.type==='run'&&node.payload.developmentSession===true}<DevelopmentSessionPane {node} onPatch={(next)=>patchRunNode(node,next)} onFollowUp={(text)=>followUp(node,text)} onComplete={(result)=>completedRunNodes(node,result)} onCapabilityDraft={(result)=>materializeCapabilityDraft(node,result)} />
         {:else if node.type==='run'}<SpatialRunPane {node} onPatch={(next)=>patchRunNode(node,next)} onFollowUp={(text)=>followUp(node,text)} onComplete={(result)=>completedRunNodes(node,result)} onCapabilityDraft={(result)=>materializeCapabilityDraft(node,result)} />
         {:else if node.type==='document'}<DocumentPane {node} onPayload={(payload)=>patchSoon(node.id,{payload:{...node.payload,...payload}})} />
         {:else if node.type==='cad'}<CadPane {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} />
@@ -1081,6 +1096,7 @@
             <strong class="mt-3 block text-[15px]">Explore what HII can do</strong>
           </button>
         </div>
+        <SystemSpace />
         <p class="mt-6 text-center font-mono text-[9px] uppercase tracking-[0.1em] text-neutral-400">paste or drop anywhere · ⌘K for every command · your files stay local</p>
       </div>
     </section>

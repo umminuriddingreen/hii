@@ -1,6 +1,9 @@
 import { spawnSync } from 'node:child_process';
 
 const COMMAND_TIMEOUT_MS = 3000;
+const WORKSPACE_FORMAT = '%{workspace} %{workspace-is-focused} %{workspace-is-visible} %{monitor-id} %{monitor-name}';
+const WINDOW_FORMAT = '%{window-id} %{workspace} %{monitor-id} %{app-name} %{window-title}';
+const MONITOR_FORMAT = '%{monitor-id} %{monitor-name} %{monitor-is-main}';
 
 const NATIVE_OBSERVER_SCRIPT = String.raw`
 ObjC.import('AppKit');
@@ -112,6 +115,42 @@ function observerFailureDetail(result) {
   return result.stderr || result.error || result.stdout || 'The native macOS observer is unavailable.';
 }
 
+function systemLayer(backend, monitors, workspaces, windows, mutationAvailable) {
+  const normalizedWindows = windows.map((window) => ({
+    id: Number(window['window-id'] ?? window.windowId ?? 0),
+    app: String(window['app-name'] ?? window.appName ?? ''),
+    title: String(window['window-title'] ?? window.title ?? ''),
+    spaceId: String(window.workspace ?? ''),
+    monitorId: Number(window['monitor-id'] ?? window.monitorId ?? 0)
+  }));
+  const normalizedSpaces = workspaces.map((workspace) => {
+    const id = String(workspace.workspace ?? workspace.name ?? '');
+    const spaceWindows = normalizedWindows.filter((window) => window.spaceId === id);
+    return {
+      id,
+      monitorId: Number(workspace['monitor-id'] ?? workspace.monitorId ?? 0),
+      monitorName: String(workspace['monitor-name'] ?? workspace.monitorName ?? ''),
+      focused: Boolean(workspace['workspace-is-focused'] ?? workspace.focused),
+      visible: Boolean(workspace['workspace-is-visible'] ?? workspace.visible),
+      empty: spaceWindows.length === 0,
+      windowIds: spaceWindows.map((window) => window.id)
+    };
+  });
+  return {
+    schemaVersion: 1,
+    backend,
+    mutationAvailable,
+    focusedSpaceId: normalizedSpaces.find((space) => space.focused)?.id ?? null,
+    monitors: monitors.map((monitor) => ({
+      id: Number(monitor['monitor-id'] ?? monitor.index ?? 0),
+      name: String(monitor['monitor-name'] ?? monitor.name ?? ''),
+      main: Boolean(monitor['monitor-is-main'] ?? monitor.primary)
+    })),
+    spaces: normalizedSpaces,
+    windows: normalizedWindows
+  };
+}
+
 export function createSpaceController(run = runAeroSpace, observe = runNativeObserver) {
   function nativeState(status) {
     const result = observe();
@@ -140,7 +179,14 @@ export function createSpaceController(run = runAeroSpace, observe = runNativeObs
       activeApplication: state.activeApplication || null,
       applications: Array.isArray(state.applications) ? state.applications : [],
       monitors: Array.isArray(state.monitors) ? state.monitors : [],
-      windows: Array.isArray(state.windows) ? state.windows : []
+      windows: Array.isArray(state.windows) ? state.windows : [],
+      system: systemLayer(
+        state.windows?.length ? 'native-macos-observer' : 'native-macos-limited',
+        Array.isArray(state.monitors) ? state.monitors : [],
+        [],
+        Array.isArray(state.windows) ? state.windows : [],
+        false
+      )
     };
   }
 
@@ -191,24 +237,28 @@ export function createSpaceController(run = runAeroSpace, observe = runNativeObs
       const native = nativeState(status);
       return { ...native, workspaces: [] };
     }
-    const monitors = run(['list-monitors', '--json']);
-    const workspaces = run(['list-workspaces', '--all', '--json']);
-    const windows = run(['list-windows', '--all', '--json']);
+    const monitors = run(['list-monitors', '--format', MONITOR_FORMAT, '--json']);
+    const workspaces = run(['list-workspaces', '--all', '--format', WORKSPACE_FORMAT, '--json']);
+    const windows = run(['list-windows', '--all', '--format', WINDOW_FORMAT, '--json']);
     const failed = [monitors, workspaces, windows].find((result) => result.status !== 0);
     if (failed) {
       const changed = { ...status, state: 'attention', summary: 'AeroSpace state changed while HII read the desktop.', detail: failureDetail(failed) };
       const native = nativeState(changed);
       return { ...native, workspaces: [] };
     }
+    const monitorRows = parseJson(monitors);
+    const workspaceRows = parseJson(workspaces);
+    const windowRows = parseJson(windows);
     return {
       ok: true,
       health: status,
       backend: 'aerospace',
       observer: { name: 'AeroSpace', mode: 'read-only', available: true },
       activeApplication: null,
-      monitors: parseJson(monitors),
-      workspaces: parseJson(workspaces),
-      windows: parseJson(windows)
+      monitors: monitorRows,
+      workspaces: workspaceRows,
+      windows: windowRows,
+      system: systemLayer('aerospace', monitorRows, workspaceRows, windowRows, true)
     };
   }
 

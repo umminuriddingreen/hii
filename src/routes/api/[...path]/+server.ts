@@ -7,6 +7,7 @@ import * as config from '@/app/api/config/route';
 import * as context from '@/app/api/context/route';
 import * as daemonRun from '@/app/api/daemon/runs/[id]/route';
 import * as daemon from '@/app/api/daemon/route';
+import * as developmentSession from '@/app/api/development/session/route';
 import * as filesOpen from '@/app/api/files/open/route';
 import * as knowledge from '@/app/api/knowledge/route';
 import * as links from '@/app/api/links/route';
@@ -17,6 +18,7 @@ import * as runnerEvents from '@/app/api/runners/jobs/[id]/events/route';
 import * as runnerNext from '@/app/api/runners/jobs/next/route';
 import * as search from '@/app/api/search/route';
 import * as skills from '@/app/api/skills/route';
+import * as space from '@/app/api/space/route';
 import * as terminalSessions from '@/app/api/terminal/sessions/route';
 import * as terminalStream from '@/app/api/terminal/stream/route';
 import * as workspaceAsset from '@/app/api/workspace/assets/[name]/route';
@@ -39,6 +41,7 @@ const routes: Array<{ pattern: RegExp; module: LegacyModule; keys?: string[] }> 
   { pattern: /^context$/, module: context },
   { pattern: /^daemon\/runs\/([^/]+)$/, module: daemonRun, keys: ['id'] },
   { pattern: /^daemon$/, module: daemon },
+  { pattern: /^development\/session$/, module: developmentSession },
   { pattern: /^files\/open$/, module: filesOpen },
   { pattern: /^knowledge$/, module: knowledge },
   { pattern: /^links$/, module: links },
@@ -49,6 +52,7 @@ const routes: Array<{ pattern: RegExp; module: LegacyModule; keys?: string[] }> 
   { pattern: /^runners\/jobs\/next$/, module: runnerNext },
   { pattern: /^search$/, module: search },
   { pattern: /^skills$/, module: skills },
+  { pattern: /^space$/, module: space },
   { pattern: /^terminal\/sessions$/, module: terminalSessions },
   { pattern: /^terminal\/stream$/, module: terminalStream },
   { pattern: /^workspace\/assets\/([^/]+)$/, module: workspaceAsset, keys: ['name'] },

@@ -6,9 +6,12 @@ const readyRun = (args) => {
   calls.push(args);
   const key = args.join(' ');
   if (key === '--version') return { status: 0, stdout: 'AeroSpace 0.19.2', stderr: '', error: '', timedOut: false };
-  if (key === 'list-workspaces --all --json') return { status: 0, stdout: JSON.stringify([{ workspace: 'main' }, { workspace: 'build' }]), stderr: '', error: '', timedOut: false };
-  if (key === 'list-monitors --json') return { status: 0, stdout: JSON.stringify([{ 'monitor-id': 1 }]), stderr: '', error: '', timedOut: false };
-  if (key === 'list-windows --all --json') return { status: 0, stdout: JSON.stringify([{ 'window-id': 42, 'app-name': 'HII' }]), stderr: '', error: '', timedOut: false };
+  if (key.startsWith('list-workspaces --all --format ')) return { status: 0, stdout: JSON.stringify([
+    { workspace: 'main', 'workspace-is-focused': true, 'workspace-is-visible': true, 'monitor-id': 1, 'monitor-name': 'Studio' },
+    { workspace: 'build', 'workspace-is-focused': false, 'workspace-is-visible': false, 'monitor-id': 1, 'monitor-name': 'Studio' }
+  ]), stderr: '', error: '', timedOut: false };
+  if (key.startsWith('list-monitors --format ')) return { status: 0, stdout: JSON.stringify([{ 'monitor-id': 1, 'monitor-name': 'Studio', 'monitor-is-main': true }]), stderr: '', error: '', timedOut: false };
+  if (key.startsWith('list-windows --all --format ')) return { status: 0, stdout: JSON.stringify([{ 'window-id': 42, workspace: 'main', 'monitor-id': 1, 'app-name': 'HII', 'window-title': 'Workspace' }]), stderr: '', error: '', timedOut: false };
   if (key === 'list-apps --json') return { status: 0, stdout: JSON.stringify([{ 'app-name': 'HII' }]), stderr: '', error: '', timedOut: false };
   return { status: 0, stdout: '', stderr: '', error: '', timedOut: false };
 };
@@ -17,6 +20,10 @@ const ready = createSpaceController(readyRun);
 assert.equal(ready.health().state, 'ready');
 assert.deepEqual(ready.snapshot().workspaces.map((workspace) => workspace.workspace), ['main', 'build']);
 assert.equal(ready.snapshot().windows[0]['window-id'], 42);
+assert.equal(ready.snapshot().system.focusedSpaceId, 'main');
+assert.equal(ready.snapshot().system.spaces.find((space) => space.id === 'build').empty, true);
+assert.equal(ready.snapshot().system.spaces.find((space) => space.id === 'main').windowIds[0], 42);
+assert.equal(ready.snapshot().system.mutationAvailable, true);
 assert.equal(ready.apps().apps[0]['app-name'], 'HII');
 assert.equal(ready.action('focus', ['--window-id', '42']).ok, true);
 
@@ -41,6 +48,7 @@ assert.equal(offline.snapshot().backend, 'native-macos-observer');
 assert.equal(offline.snapshot().activeApplication.name, 'HII');
 assert.equal(offline.snapshot().windows[0].title, 'Workspace');
 assert.equal(offline.snapshot().monitors[0].primary, true);
+assert.equal(offline.snapshot().system.mutationAvailable, false);
 assert.equal(offline.apps().apps[0].name, 'HII');
 assert.equal(offline.action('focus', ['--window-id', '42']).ok, false);
 

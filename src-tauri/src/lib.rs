@@ -11,6 +11,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     Emitter, Manager, PhysicalPosition, RunEvent, Url, WebviewUrl, WebviewWindowBuilder,
     WindowEvent,
 };
@@ -18,6 +19,12 @@ use tauri::{
 const DEFAULT_HII_PORT: u16 = 3042;
 const CURSOR_BAR_WIDTH: f64 = 520.0;
 const CURSOR_BAR_HEIGHT: f64 = 76.0;
+const MENU_FOCUS_WORKSPACE: &str = "hii.focus-workspace";
+const MENU_COMMAND_PALETTE: &str = "hii.command-palette";
+const MENU_OPEN_BROWSER: &str = "hii.open-browser";
+const MENU_FIT_ALL: &str = "hii.fit-all";
+const MENU_REFRESH_SPACE: &str = "hii.refresh-space";
+const MENU_DEVELOP_HII: &str = "hii.develop-hii";
 
 struct HiiServer(Mutex<ServerState>);
 
@@ -284,6 +291,91 @@ fn stop_hii_server(app: &tauri::AppHandle) {
     }
 }
 
+fn focus_workspace(app: &tauri::AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "HII workspace window is unavailable.".to_string())?;
+    window.show().map_err(|error| error.to_string())?;
+    if window.is_minimized().map_err(|error| error.to_string())? {
+        window.unminimize().map_err(|error| error.to_string())?;
+    }
+    window.set_focus().map_err(|error| error.to_string())
+}
+
+fn emit_workspace_command(app: &tauri::AppHandle, event: &str) {
+    if let Err(error) = focus_workspace(app).and_then(|_| {
+        app.get_webview_window("main")
+            .ok_or_else(|| "HII workspace window is unavailable.".to_string())?
+            .emit(event, ())
+            .map_err(|error| error.to_string())
+    }) {
+        eprintln!("HII menu command {event} failed: {error}");
+    }
+}
+
+fn hii_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let menu = Menu::default(app)?;
+    let focus = MenuItem::with_id(
+        app,
+        MENU_FOCUS_WORKSPACE,
+        "Open or Focus HII Workspace",
+        true,
+        Some("CmdOrCtrl+Shift+H"),
+    )?;
+    let palette = MenuItem::with_id(
+        app,
+        MENU_COMMAND_PALETTE,
+        "Command Palette",
+        true,
+        Some("CmdOrCtrl+K"),
+    )?;
+    let browser = MenuItem::with_id(
+        app,
+        MENU_OPEN_BROWSER,
+        "New HII Browser Object",
+        true,
+        Some("CmdOrCtrl+Shift+B"),
+    )?;
+    let fit = MenuItem::with_id(
+        app,
+        MENU_FIT_ALL,
+        "Fit All Canvas Objects",
+        true,
+        Some("CmdOrCtrl+Shift+1"),
+    )?;
+    let refresh = MenuItem::with_id(
+        app,
+        MENU_REFRESH_SPACE,
+        "Refresh System Space",
+        true,
+        None::<&str>,
+    )?;
+    let develop = MenuItem::with_id(
+        app,
+        MENU_DEVELOP_HII,
+        "Develop HII in Canvas…",
+        true,
+        None::<&str>,
+    )?;
+    let commands = Submenu::with_id_and_items(
+        app,
+        "hii.commands",
+        "HII",
+        true,
+        &[
+            &focus,
+            &palette,
+            &browser,
+            &fit,
+            &refresh,
+            &PredefinedMenuItem::separator(app)?,
+            &develop,
+        ],
+    )?;
+    menu.insert(&commands, 1)?;
+    Ok(menu)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -291,6 +383,20 @@ pub fn run() {
             child: None,
             url: String::new(),
         })))
+        .menu(hii_menu)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            MENU_FOCUS_WORKSPACE => {
+                if let Err(error) = focus_workspace(app) {
+                    eprintln!("HII could not focus the workspace: {error}");
+                }
+            }
+            MENU_COMMAND_PALETTE => emit_workspace_command(app, "hii://command-palette"),
+            MENU_OPEN_BROWSER => emit_workspace_command(app, "hii://open-browser"),
+            MENU_FIT_ALL => emit_workspace_command(app, "hii://fit-all"),
+            MENU_REFRESH_SPACE => emit_workspace_command(app, "hii://space-refresh"),
+            MENU_DEVELOP_HII => emit_workspace_command(app, "hii://develop-hii"),
+            _ => {}
+        })
         .setup(|app| {
             #[cfg(desktop)]
             {
