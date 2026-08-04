@@ -128,7 +128,10 @@ async function parseWorkspace(file: string) {
 async function persistWorkspace(workspaceId: string, doc: WorkspaceDoc) {
   const { workspaces } = paths();
   await mkdir(workspaces, { recursive: true });
-  await atomicWriteFile(workspacePath(workspaceId), `${JSON.stringify(doc, null, 2)}\n`);
+  // Written compactly on purpose. This file is rewritten on every autosave and
+  // pretty-printing a board with image contact sheets in it roughly doubled the
+  // bytes serialized, written, and fsynced on each keystroke-triggered save.
+  await atomicWriteFile(workspacePath(workspaceId), `${JSON.stringify(doc)}\n`);
 }
 
 export async function getSelectedWorkspaceId(): Promise<string> {

@@ -2,12 +2,84 @@ import { spawnSync } from 'node:child_process';
 
 const COMMAND_TIMEOUT_MS = 3000;
 
+const NATIVE_OBSERVER_SCRIPT = String.raw`
+ObjC.import('AppKit');
+ObjC.import('CoreGraphics');
+const workspace = $.NSWorkspace.sharedWorkspace;
+const active = workspace.frontmostApplication;
+const activeApplication = active ? {
+  name: ObjC.unwrap(active.localizedName),
+  bundleId: ObjC.unwrap(active.bundleIdentifier),
+  pid: Number(active.processIdentifier)
+} : null;
+const applications = [];
+const windows = [];
+const monitors = [];
+const screens = $.NSScreen.screens;
+for (let index = 0; index < screens.count; index += 1) {
+  const screen = screens.objectAtIndex(index);
+  const frame = screen.frame;
+  monitors.push({
+    index,
+    primary: index === 0,
+    frame: { x: Number(frame.origin.x), y: Number(frame.origin.y), width: Number(frame.size.width), height: Number(frame.size.height) },
+    scaleFactor: Number(screen.backingScaleFactor)
+  });
+}
+const runningApplications = workspace.runningApplications;
+for (let index = 0; index < runningApplications.count; index += 1) {
+  const process = runningApplications.objectAtIndex(index);
+  const name = ObjC.unwrap(process.localizedName);
+  if (!name) continue;
+  applications.push({
+    name,
+    bundleId: ObjC.unwrap(process.bundleIdentifier) || '',
+    pid: Number(process.processIdentifier),
+    frontmost: active ? Number(process.processIdentifier) === Number(active.processIdentifier) : false,
+    windows: []
+  });
+}
+const windowInfo = $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly | $.kCGWindowListExcludeDesktopElements, $.kCGNullWindowID);
+for (let index = 0; index < windowInfo.count; index += 1) {
+  const window = ObjC.deepUnwrap(windowInfo.objectAtIndex(index));
+  if (Number(window.kCGWindowLayer) !== 0) continue;
+  const bounds = window.kCGWindowBounds || {};
+  const item = {
+    appName: window.kCGWindowOwnerName || '',
+    pid: Number(window.kCGWindowOwnerPID || 0),
+    title: window.kCGWindowName || '',
+    position: [Number(bounds.X || 0), Number(bounds.Y || 0)],
+    size: [Number(bounds.Width || 0), Number(bounds.Height || 0)],
+    windowId: Number(window.kCGWindowNumber || 0)
+  };
+  windows.push(item);
+  const app = applications.find((candidate) => candidate.pid === item.pid);
+  if (app) app.windows.push(item);
+}
+JSON.stringify({ activeApplication, applications, monitors, windows });
+`;
+
 function clean(value) {
   return String(value || '').trim();
 }
 
 export function runAeroSpace(args, options = {}) {
   const result = spawnSync(options.binary || process.env.HII_AEROSPACE_BIN || 'aerospace', args, {
+    encoding: 'utf8',
+    timeout: options.timeoutMs || COMMAND_TIMEOUT_MS,
+    maxBuffer: 4 * 1024 * 1024
+  });
+  return {
+    status: result.status,
+    stdout: clean(result.stdout),
+    stderr: clean(result.stderr),
+    error: result.error?.message || '',
+    timedOut: result.error?.code === 'ETIMEDOUT'
+  };
+}
+
+export function runNativeObserver(options = {}) {
+  const result = spawnSync(options.binary || process.env.HII_OSASCRIPT_BIN || 'osascript', ['-l', 'JavaScript', '-e', NATIVE_OBSERVER_SCRIPT], {
     encoding: 'utf8',
     timeout: options.timeoutMs || COMMAND_TIMEOUT_MS,
     maxBuffer: 4 * 1024 * 1024
@@ -35,7 +107,43 @@ function failureDetail(result) {
   return result.stderr || result.error || result.stdout || 'AeroSpace is unavailable.';
 }
 
-export function createSpaceController(run = runAeroSpace) {
+function observerFailureDetail(result) {
+  if (result.timedOut) return 'The native macOS observer did not answer within 3 seconds.';
+  return result.stderr || result.error || result.stdout || 'The native macOS observer is unavailable.';
+}
+
+export function createSpaceController(run = runAeroSpace, observe = runNativeObserver) {
+  function nativeState(status) {
+    const result = observe();
+    const state = parseJson(result, null);
+    if (!state || result.status !== 0) {
+      return {
+        ok: false,
+        health: status,
+        backend: 'unavailable',
+        observer: { name: 'macOS Window Server', mode: 'read-only', available: false, detail: observerFailureDetail(result) },
+        activeApplication: null,
+        applications: [],
+        windows: []
+      };
+    }
+    return {
+      ok: true,
+      health: status,
+      backend: state.windows?.length ? 'native-macos-observer' : 'native-macos-limited',
+      observer: {
+        name: 'macOS Window Server',
+        mode: 'read-only',
+        available: true,
+        limitations: state.windows?.length ? [] : ['Window metadata is unavailable; Screen Recording permission may be required.']
+      },
+      activeApplication: state.activeApplication || null,
+      applications: Array.isArray(state.applications) ? state.applications : [],
+      monitors: Array.isArray(state.monitors) ? state.monitors : [],
+      windows: Array.isArray(state.windows) ? state.windows : []
+    };
+  }
+
   function health() {
     const version = run(['--version']);
     if (version.status !== 0) {
@@ -79,23 +187,25 @@ export function createSpaceController(run = runAeroSpace) {
 
   function snapshot() {
     const status = health();
-    if (!status.ok) return { ok: false, health: status, monitors: [], workspaces: [], windows: [] };
+    if (!status.ok) {
+      const native = nativeState(status);
+      return { ...native, workspaces: [] };
+    }
     const monitors = run(['list-monitors', '--json']);
     const workspaces = run(['list-workspaces', '--all', '--json']);
     const windows = run(['list-windows', '--all', '--json']);
     const failed = [monitors, workspaces, windows].find((result) => result.status !== 0);
     if (failed) {
-      return {
-        ok: false,
-        health: { ...status, state: 'attention', summary: 'AeroSpace state changed while HII read the desktop.', detail: failureDetail(failed) },
-        monitors: [],
-        workspaces: [],
-        windows: []
-      };
+      const changed = { ...status, state: 'attention', summary: 'AeroSpace state changed while HII read the desktop.', detail: failureDetail(failed) };
+      const native = nativeState(changed);
+      return { ...native, workspaces: [] };
     }
     return {
       ok: true,
       health: status,
+      backend: 'aerospace',
+      observer: { name: 'AeroSpace', mode: 'read-only', available: true },
+      activeApplication: null,
       monitors: parseJson(monitors),
       workspaces: parseJson(workspaces),
       windows: parseJson(windows)
@@ -104,11 +214,17 @@ export function createSpaceController(run = runAeroSpace) {
 
   function apps() {
     const status = health();
-    if (!status.ok) return { ok: false, health: status, apps: [] };
+    if (!status.ok) {
+      const native = nativeState(status);
+      return { ...native, apps: native.applications };
+    }
     const result = run(['list-apps', '--json']);
-    return result.status === 0
-      ? { ok: true, health: status, apps: parseJson(result) }
-      : { ok: false, health: { ...status, state: 'attention', summary: 'HII could not read AeroSpace apps.', detail: failureDetail(result) }, apps: [] };
+    if (result.status === 0) {
+      return { ok: true, health: status, backend: 'aerospace', observer: { name: 'AeroSpace', mode: 'read-only', available: true }, activeApplication: null, apps: parseJson(result) };
+    }
+    const changed = { ...status, state: 'attention', summary: 'HII could not read AeroSpace apps.', detail: failureDetail(result) };
+    const native = nativeState(changed);
+    return { ...native, apps: native.applications };
   }
 
   function action(command, args) {
@@ -150,6 +266,8 @@ function humanSnapshot(snapshot, write) {
   humanHealth(snapshot.health, write);
   if (!snapshot.ok) return;
   write('');
+  write(`observer:   ${snapshot.backend}`);
+  if (snapshot.activeApplication) write(`active app: ${snapshot.activeApplication.name}${snapshot.activeApplication.bundleId ? ` (${snapshot.activeApplication.bundleId})` : ''}`);
   write(`monitors:   ${snapshot.monitors.length}`);
   write(`workspaces: ${snapshot.workspaces.length}`);
   write(`windows:    ${snapshot.windows.length}`);
@@ -197,6 +315,8 @@ export function cmdSpace(args, options = {}) {
     humanHealth(result.health, write);
     if (result.ok) {
       write('');
+      write(`observer: ${result.backend}`);
+      if (result.activeApplication) write(`active app: ${result.activeApplication.name}${result.activeApplication.bundleId ? ` (${result.activeApplication.bundleId})` : ''}`);
       write(`apps: ${result.apps.length}`);
       for (const app of result.apps) write(`  ${app['app-name'] ?? app.name ?? app['app-bundle-id'] ?? 'unknown app'}`);
     }

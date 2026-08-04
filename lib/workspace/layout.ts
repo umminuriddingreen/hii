@@ -16,6 +16,51 @@ export function workspaceRectsOverlap(a: WorkspaceRect, b: WorkspaceRect, gap = 
   );
 }
 
+export type TidyOptions = {
+  /** Space between packed nodes, in workspace units. */
+  gap?: number;
+  /** Target width of the packed block. Defaults to a roughly square result. */
+  maxWidth?: number;
+};
+
+/**
+ * Pack nodes into a masonry block anchored at their current top-left.
+ *
+ * Columns are fixed-width (the widest node in the set) and each node goes to the
+ * shortest column, which is what keeps a wall of mixed-height images reading as
+ * a board rather than a ragged grid. Original order is preserved so a tidy is
+ * predictable — the same selection always lands the same way.
+ *
+ * Returns new positions keyed by id, omitting nodes that would not move.
+ */
+export function tidyWorkspaceNodes(
+  nodes: WorkspaceNode[],
+  options: TidyOptions = {}
+): Map<string, { x: number; y: number }> {
+  const moves = new Map<string, { x: number; y: number }>();
+  const packable = nodes.filter((node) => node.type !== 'frame');
+  if (packable.length < 2) return moves;
+
+  const gap = Math.max(0, Number(options.gap) || 32);
+  const anchorX = Math.min(...packable.map((node) => node.x));
+  const anchorY = Math.min(...packable.map((node) => node.y));
+  const columnWidth = Math.max(...packable.map((node) => node.w));
+
+  const targetWidth = options.maxWidth
+    ?? Math.sqrt(packable.reduce((total, node) => total + node.w * node.h, 0)) * 1.4;
+  const columns = Math.max(1, Math.min(packable.length, Math.round(targetWidth / (columnWidth + gap)) || 1));
+  const heights = new Array(columns).fill(0) as number[];
+
+  for (const node of packable) {
+    const shortest = heights.indexOf(Math.min(...heights));
+    const x = anchorX + shortest * (columnWidth + gap);
+    const y = anchorY + heights[shortest];
+    heights[shortest] += node.h + gap;
+    if (x !== node.x || y !== node.y) moves.set(node.id, { x, y });
+  }
+  return moves;
+}
+
 export function findOpenWorkspacePosition(
   nodes: WorkspaceNode[],
   preferred: { x: number; y: number },

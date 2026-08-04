@@ -22,12 +22,27 @@ assert.equal(ready.action('focus', ['--window-id', '42']).ok, true);
 
 const offline = createSpaceController((args) => args[0] === '--version'
   ? { status: 0, stdout: 'AeroSpace 0.19.2', stderr: '', error: '', timedOut: false }
-  : { status: 2, stdout: '', stderr: "Can't connect to AeroSpace server.", error: '', timedOut: false });
+  : { status: 2, stdout: '', stderr: "Can't connect to AeroSpace server.", error: '', timedOut: false },
+() => ({
+  status: 0,
+  stdout: JSON.stringify({
+    activeApplication: { name: 'HII', bundleId: 'com.hii.app', pid: 42 },
+    applications: [{ name: 'HII', bundleId: 'com.hii.app', pid: 42, frontmost: true, windows: [{ title: 'Workspace' }] }],
+    monitors: [{ index: 0, primary: true }],
+    windows: [{ appName: 'HII', bundleId: 'com.hii.app', pid: 42, title: 'Workspace' }]
+  }),
+  stderr: '', error: '', timedOut: false
+}));
 const offlineHealth = offline.health();
 assert.equal(offlineHealth.state, 'offline');
 assert.equal(offlineHealth.installed, true);
 assert.equal(offlineHealth.running, false);
-assert.equal(offline.snapshot().windows.length, 0);
+assert.equal(offline.snapshot().backend, 'native-macos-observer');
+assert.equal(offline.snapshot().activeApplication.name, 'HII');
+assert.equal(offline.snapshot().windows[0].title, 'Workspace');
+assert.equal(offline.snapshot().monitors[0].primary, true);
+assert.equal(offline.apps().apps[0].name, 'HII');
+assert.equal(offline.action('focus', ['--window-id', '42']).ok, false);
 
 const timedOut = createSpaceController((args) => args[0] === '--version'
   ? { status: 0, stdout: 'AeroSpace 0.19.2', stderr: '', error: '', timedOut: false }

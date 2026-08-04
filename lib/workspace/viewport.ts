@@ -5,23 +5,69 @@ export const WORKSPACE_ZOOM_MAX = 2.5;
 
 type WorkspaceRect = Pick<WorkspaceNode, 'x' | 'y' | 'w' | 'h'>;
 
+export type WorkspaceViewportRect = { left: number; top: number; right: number; bottom: number };
+
+/**
+ * The visible region of the workspace, in workspace coordinates.
+ *
+ * `margin` expands the rect by that many screen-widths/heights on each side.
+ * Rendering uses a margin so a node is already mounted by the time it scrolls
+ * into view; the "is anything visible?" check uses none.
+ */
+export function workspaceViewportRect(
+  viewport: WorkspaceViewport,
+  size: { width: number; height: number },
+  margin = 0
+): WorkspaceViewportRect | null {
+  if (size.width <= 0 || size.height <= 0 || viewport.zoom <= 0) return null;
+  const padX = (size.width * margin) / viewport.zoom;
+  const padY = (size.height * margin) / viewport.zoom;
+  return {
+    left: -viewport.x / viewport.zoom - padX,
+    top: -viewport.y / viewport.zoom - padY,
+    right: (size.width - viewport.x) / viewport.zoom + padX,
+    bottom: (size.height - viewport.y) / viewport.zoom + padY
+  };
+}
+
+const intersects = (node: WorkspaceRect, rect: WorkspaceViewportRect) => (
+  node.x + node.w >= rect.left
+  && node.x <= rect.right
+  && node.y + node.h >= rect.top
+  && node.y <= rect.bottom
+);
+
 export function countWorkspaceNodesInViewport(
   nodes: WorkspaceRect[],
   viewport: WorkspaceViewport,
   size: { width: number; height: number }
 ) {
-  if (!nodes.length || size.width <= 0 || size.height <= 0 || viewport.zoom <= 0) return 0;
-  const left = -viewport.x / viewport.zoom;
-  const top = -viewport.y / viewport.zoom;
-  const right = (size.width - viewport.x) / viewport.zoom;
-  const bottom = (size.height - viewport.y) / viewport.zoom;
+  if (!nodes.length) return 0;
+  const rect = workspaceViewportRect(viewport, size);
+  if (!rect) return 0;
+  return nodes.filter((node) => intersects(node, rect)).length;
+}
 
-  return nodes.filter((node) => (
-    node.x + node.w >= left
-    && node.x <= right
-    && node.y + node.h >= top
-    && node.y <= bottom
-  )).length;
+/**
+ * Ids of the nodes worth mounting for this camera.
+ *
+ * The canvas renders every node as live DOM — including iframes, xterm
+ * terminals, and three.js scenes — so a board that has scrolled away still cost
+ * full mount and paint. Returning `null` means "no useful camera yet" (the
+ * element has not been measured), in which case the caller should render
+ * everything rather than blank the canvas.
+ */
+export function visibleWorkspaceNodeIds<T extends WorkspaceRect & { id: string }>(
+  nodes: T[],
+  viewport: WorkspaceViewport,
+  size: { width: number; height: number },
+  margin = 1
+): Set<string> | null {
+  const rect = workspaceViewportRect(viewport, size, margin);
+  if (!rect) return null;
+  const visible = new Set<string>();
+  for (const node of nodes) if (intersects(node, rect)) visible.add(node.id);
+  return visible;
 }
 
 export function fitWorkspaceViewport(

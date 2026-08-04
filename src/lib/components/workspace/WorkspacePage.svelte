@@ -17,19 +17,28 @@
   import HiiLogo from '$lib/components/HiiLogo.svelte';
   import type { WorkspaceDoc, WorkspaceNode, WorkspaceNodeType } from '@/lib/workspace/types';
   import { makeNode, seedFor, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
-  import { countWorkspaceNodesInViewport, fitWorkspaceViewport, panWorkspaceViewport, zoomWorkspaceViewportAt } from '@/lib/workspace/viewport';
+  import { countWorkspaceNodesInViewport, fitWorkspaceViewport, panWorkspaceViewport, visibleWorkspaceNodeIds, zoomWorkspaceViewportAt } from '@/lib/workspace/viewport';
   import { searchWorkspaceNodes, workspaceNodeTitle } from '@/lib/workspace/search';
   import { assignNodesToFrame, moveNodeAndFrameContents, removeFrame } from '@/lib/workspace/frames';
   import { adjacentWorkspaceScene, workspaceSceneMembers, workspaceScenes } from '@/lib/workspace/scenes';
   import { emptyWorkspaceHistory, recordWorkspaceChange, redoWorkspace, undoWorkspace } from '@/lib/workspace/history';
-  import { workspaceConnections } from '@/lib/workspace/connections';
-  import { findOpenWorkspacePosition } from '@/lib/workspace/layout';
+  import { workspaceConnections, workspaceLinkConnections } from '@/lib/workspace/connections';
+  import { INK_DEFAULT_COLOR, INK_DEFAULT_WIDTH, INK_PADDING, readStrokes, simplifyStroke, strokeBounds, translateStrokes, type InkStroke } from '@/lib/workspace/ink';
+  import InkPane from '$lib/components/workspace/InkPane.svelte';
+  import ImageLibrary from '$lib/components/workspace/ImageLibrary.svelte';
+  import { workspaceImageLibrary, type LibraryImage } from '@/lib/workspace/image-library';
+  import { scaleGestureDelta, trackPointerGesture } from '@/lib/workspace/gestures';
+  import { rebaseWorkspaceDoc } from '@/lib/workspace/rebase';
+  import { deleteWorkspaceNodes, duplicateWorkspaceNodes, linkWorkspaceNodes, nodesInLasso, nodesInMarquee, nudgeWorkspaceNodes, pasteWorkspaceNodes, readWorkspaceClipboard, unlinkWorkspaceNodes, writeWorkspaceClipboard } from '@/lib/workspace/selection';
+  import { alignWorkspaceNodes, distributeWorkspaceNodes, snapWorkspaceRect, type AlignEdge, type SnapGuide } from '@/lib/workspace/snap';
+  import { findOpenWorkspacePosition, tidyWorkspaceNodes } from '@/lib/workspace/layout';
   import { normalizeWorkspaceContextAnchor } from '@/lib/workspace/context-anchor';
   import { contactSheetContextItems, contactSheetItemSeed } from '@/lib/workspace/contact-sheet';
   import { organizeContactSheetReviewSet } from '@/lib/workspace/contact-sheet-scene';
   import { rebindPendingWorkspaceContext } from '@/lib/workspace/pending-context';
   import { organizeWorkspaceSelection } from '@/lib/workspace/organize';
   import { boardPatchForRunState, boardRunSyncKey } from '@/lib/workspace/board-run';
+  import { interpretCanvasIntent, type CanvasIntent } from '@/lib/workspace/canvas-intent';
 
   export let data: { enabled: boolean };
   const surfaceCatalog = [
@@ -38,11 +47,17 @@
     { id:'boards', title:'Boards', path:'/boards', capabilityId:'hii.board.task_kanban', detail:'bounded work · owners · blockers' },
     { id:'console', title:'Console', path:'/console', capabilityId:'hii.terminal.observe', detail:'agents · logs · receipts' }
   ];
-  let doc:WorkspaceDoc={version:1,revision:0,updatedAt:new Date().toISOString(),viewport:{x:0,y:0,zoom:1},nextZ:1,nodes:[]};
+  let doc:WorkspaceDoc={version:1,revision:0,updatedAt:new Date().toISOString(),viewport:{x:0,y:0,zoom:1},nextZ:1,nodes:[],links:[]};
+  // The document as of the last successful sync. It is the baseline that lets a
+  // save conflict be merged rather than reported as a dead end.
+  let syncedDoc:WorkspaceDoc|null=null;
   let ready=false; let loadState:'loading'|'ready'|'recovery'='loading'; let loadError=''; let recoveryPath=''; let saveError='';
   let workspaceId='default'; let workspaces:Array<{id:string;selected:boolean;status:'ready'|'recovery';revision?:number}>=[]; let workspaceMenu=false;
   let selected:string|null=null; let contextSelection:string[]=[]; let omnibar=false; let query=''; let mapMenu=false; let currentSceneId:string|null=null; let organizationNotice=''; let canvasWidth=0; let canvasHeight=0; let saveTimer:ReturnType<typeof setTimeout>|undefined; let saveInFlight=false; let savePending=false;
-  let context:any=null; let board:any[]=[]; let daemon:any=null; let healthOpen=false; let daemonActionBusy=false; let canvas:HTMLElement; let mouse={x:400,y:300};
+  let context:any=null; let board:any[]=[]; let daemon:any=null; let healthOpen=false; let daemonActionBusy=false; let canvas:HTMLElement; let worldLayer:HTMLElement;
+  // Deliberately not reactive: this is written on every pointermove, and letting
+  // Svelte see it invalidated the whole component on every mouse movement.
+  const pointer={x:400,y:300};
   const boardRunSync = new Map<string,string>();
   let commandInput:HTMLInputElement; let fileInput:HTMLInputElement;
   let composerOpen=false; let composerText=''; let composerInput:HTMLTextAreaElement; let composerAt={x:400,y:280}; let lastSummon=0;
@@ -50,6 +65,7 @@
   let workspaceHistory=emptyWorkspaceHistory();
   $: commands=[
     ['fit','Fit all content','take me to my stuff · ⇧1'],
+    ['tidy',organizableSelection.length>1?'Tidy the selection':'Tidy the whole board','masonry pack · ⌘Z to undo'],
     ...surfaceCatalog.map(item=>['surface',`Open ${item.title}`,item.detail,item.path,item.capabilityId]),
     ['intent','Tell HII what to do','create a bounded workspace intent'],
     ['upload','Upload a file or document','images · PDFs · documents · media'],
@@ -63,6 +79,22 @@
     ['board','Open board object','~/.hii board lanes'],
     ['frame','New scene','name, capture, focus, and move related objects together'],
     ...(organizableSelection.length>1?[['organize','Make Scene from selection','exact membership · reversible']]:[]),
+    ...(activeSelection.length?[
+      ['duplicate','Duplicate selection','offset copies · ⌘D'],
+      ['delete','Delete selection','removes objects · ⌘Z to undo']
+    ]:[]),
+    ...(organizableSelection.length>1?[
+      ['align-left','Align left edges','tidy the selection'],
+      ['align-center-x','Align horizontal centers','tidy the selection'],
+      ['align-right','Align right edges','tidy the selection'],
+      ['align-top','Align top edges','tidy the selection'],
+      ['align-center-y','Align vertical centers','tidy the selection'],
+      ['align-bottom','Align bottom edges','tidy the selection']
+    ]:[]),
+    ...(organizableSelection.length>2?[
+      ['distribute-x','Distribute horizontally','even gaps · outermost stay put'],
+      ['distribute-y','Distribute vertically','even gaps · outermost stay put']
+    ]:[]),
     ['sound-field','Open South Berkeley sound field','modeled dBA']
   ].filter(item=>`${item[1]} ${item[2]}`.toLowerCase().includes(query.toLowerCase()));
   $: nodeResults=searchWorkspaceNodes(doc.nodes,query);
@@ -71,7 +103,13 @@
   $: selectedContextNodes=contextSelection.map(id=>doc.nodes.find(node=>node.id===id)).filter((node):node is WorkspaceNode=>Boolean(node));
   $: organizableSelection=selectedContextNodes.filter(node=>node.type!=='frame');
   $: connections=workspaceConnections(doc.nodes);
+  $: authoredLinks=workspaceLinkConnections(doc.nodes,doc.links??[]);
   $: visibleNodeCount=countWorkspaceNodesInViewport(doc.nodes,doc.viewport,{width:canvasWidth,height:canvasHeight});
+  // Nodes keep their frame (geometry, selection, drag target) wherever they are,
+  // but only nodes near the camera mount their pane. Off-screen iframes, xterm
+  // terminals, and three.js scenes are what actually made a large board expensive.
+  $: mountedIds=visibleWorkspaceNodeIds(doc.nodes,doc.viewport,{width:canvasWidth,height:canvasHeight},1);
+  $: isMounted=(node:WorkspaceNode)=>!mountedIds||mountedIds.has(node.id);
   $: contentOutsideView=loadState==='ready'&&doc.nodes.length>0&&canvasWidth>0&&canvasHeight>0&&visibleNodeCount===0;
   $: runtimeHealth=daemon?.health||{state:'attention',label:'AII checking',summary:'Reading the local runtime heartbeat.',recoveryAction:null,recoveryLabel:null,heartbeatAgeSeconds:null,activeRuns:0,queuedRuns:0,ownedServices:0,observedProcesses:0};
 
@@ -85,23 +123,38 @@
       if(!response.ok||result.status==='recovery'){
         loadState='recovery';loadError=result.error||'HII could not load this workspace.';recoveryPath=result.recoveryPath||'';return;
       }
-      workspaceId=result.workspaceId||requestedWorkspaceId||'default';doc=result.workspace;workspaceHistory=emptyWorkspaceHistory();selected=null;contextSelection=[];currentSceneId=null;loadState='ready';
+      workspaceId=result.workspaceId||requestedWorkspaceId||'default';doc=result.workspace;syncedDoc=result.workspace;workspaceHistory=emptyWorkspaceHistory();selected=null;contextSelection=[];currentSceneId=null;loadState='ready';
       void refreshWorkspaces();
       if(doc.nodes.some(node=>node.type==='model'))ensureModelPane();
     }catch(error){
       loadState='recovery';loadError=error instanceof Error?error.message:'HII could not load this workspace.';
     }finally{ready=true;}
   }
+  async function putWorkspace(){
+    const response=await fetch('/api/workspace',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({workspaceId,workspace:doc,expectedRevision:doc.revision})});
+    return{response,result:await response.json().catch(()=>({}))};
+  }
   async function saveNow(){
     if(loadState!=='ready')return;
     if(saveInFlight){savePending=true;return;}
     saveInFlight=true;savePending=false;
-    const expectedRevision=doc.revision;saveError='';
+    saveError='';
     try{
-      const response=await fetch('/api/workspace',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({workspaceId,workspace:doc,expectedRevision})});
-      const result=await response.json().catch(()=>({}));
+      let{response,result}=await putWorkspace();
+      // Another writer (a second tab, the desktop shell, an agent run) advanced
+      // the file. Merge onto their revision and try once more before giving up —
+      // reporting "not saved" and stopping used to strand every later save too.
+      if(response.status===409&&result.code==='WORKSPACE_REVISION_CONFLICT'){
+        const fresh=await fetch(`/api/workspace?workspaceId=${encodeURIComponent(workspaceId)}`);
+        const reloaded=await fresh.json().catch(()=>({}));
+        if(fresh.ok&&reloaded.workspace){
+          doc=rebaseWorkspaceDoc(doc,reloaded.workspace,syncedDoc??reloaded.workspace);
+          ({response,result}=await putWorkspace());
+        }
+      }
       if(!response.ok){saveError=result.error||'HII could not save this workspace.';return;}
       doc={...doc,revision:result.workspace.revision,updatedAt:result.workspace.updatedAt};
+      syncedDoc=doc;
     }catch(error){saveError=error instanceof Error?error.message:'HII could not save this workspace.';}
     finally{saveInFlight=false;if(savePending)void saveNow();}
   }
@@ -114,6 +167,7 @@
   async function switchWorkspace(id:string){
     if(id===workspaceId){workspaceMenu=false;return}
     if(saveInFlight){saveError='Wait for the current workspace save to finish before switching.';return}
+    flushPatches();
     const needsSave=Boolean(saveTimer);
     if(saveTimer){clearTimeout(saveTimer);saveTimer=undefined}
     if(needsSave){await saveNow();if(saveError)return}
@@ -126,6 +180,7 @@
     const id=window.prompt('Name this workspace (lowercase letters, numbers, hyphens, or underscores):')?.trim();
     if(!id)return;
     if(saveInFlight){saveError='Wait for the current workspace save to finish before creating another workspace.';return}
+    flushPatches();
     const needsSave=Boolean(saveTimer);
     if(saveTimer){clearTimeout(saveTimer);saveTimer=undefined}
     if(needsSave){await saveNow();if(saveError)return}
@@ -134,21 +189,67 @@
     if(!response.ok){saveError=result.error||'HII could not create the workspace.';return}
     workspaceMenu=false;selected=null;contextSelection=[];await load(id);
   }
-  function patch(id:string,patch:Partial<WorkspaceNode>){
-    const before=doc;
+  // Geometry-only patches can never change a node's context item, so they skip the
+  // rebind check entirely. Everything else compares the derived fields directly
+  // rather than stringifying two objects that each carry a 2400-char excerpt.
+  const CONTEXT_NEUTRAL_KEYS=new Set(['x','y','w','h','z','frameId','updatedAt']);
+  function touchesContext(next:Partial<WorkspaceNode>){return Object.keys(next).some(key=>!CONTEXT_NEUTRAL_KEYS.has(key))}
+  function contextItemsEqual(a:ReturnType<typeof contextItem>,b:ReturnType<typeof contextItem>){
+    if(a.title!==b.title||a.type!==b.type||a.source!==b.source||a.expectedSha256!==b.expectedSha256)return false;
+    if(a.objectKind!==b.objectKind||a.owner!==b.owner||a.authority!==b.authority||a.excerpt!==b.excerpt)return false;
+    if(a.proofRefs.length!==b.proofRefs.length||a.proofRefs.some((ref,index)=>ref!==b.proofRefs[index]))return false;
+    return JSON.stringify(a.anchor)===JSON.stringify(b.anchor);
+  }
+  function patch(id:string,patch:Partial<WorkspaceNode>,historyBefore?:WorkspaceDoc){
+    const before=historyBefore??doc;
     const current=doc.nodes.find(node=>node.id===id);
     if(!current)return;
     const updatedAt=new Date().toISOString();
     const next={...current,...patch,updatedAt};
     let nodes=doc.nodes.map(node=>node.id===id?next:node);
-    if(JSON.stringify(contextItem(current))!==JSON.stringify(contextItem(next))){
-      nodes=rebindPendingWorkspaceContext(nodes,id,contextItem(next),updatedAt);
+    if(touchesContext(patch)){
+      const nextItem=contextItem(next);
+      if(!contextItemsEqual(contextItem(current),nextItem)){
+        nodes=rebindPendingWorkspaceContext(nodes,id,nextItem,updatedAt);
+      }
     }
     doc={...doc,nodes};
     remember(before);
     persist();
   }
-  function addSeeds(seeds:NodeSeed[],at:{x:number;y:number}){const before=doc;if(seeds.some(seed=>seed.type==='model'))ensureModelPane();for(const [index,seed] of seeds.entries()){const node=makeNode(seed,at.x+index*28,at.y+index*28,++doc.nextZ);doc={...doc,nodes:[...doc.nodes,node]};selected=node.id}remember(before);persist();}
+  // Typing in a note fired one patch — and therefore one full-document history
+  // snapshot — per keystroke. Coalescing them makes undo work in edits rather than
+  // characters, and keeps history memory proportional to edits made.
+  const pendingPatches=new Map<string,{next:Partial<WorkspaceNode>;before:WorkspaceDoc;timer:ReturnType<typeof setTimeout>}>();
+  function flushPatch(id:string){
+    const entry=pendingPatches.get(id);
+    if(!entry)return;
+    clearTimeout(entry.timer);
+    pendingPatches.delete(id);
+    patch(id,entry.next,entry.before);
+  }
+  function flushPatches(){for(const id of [...pendingPatches.keys()])flushPatch(id)}
+  function patchSoon(id:string,next:Partial<WorkspaceNode>,delay=200){
+    const existing=pendingPatches.get(id);
+    if(existing)clearTimeout(existing.timer);
+    const before=existing?.before??doc;
+    const merged:Partial<WorkspaceNode>=existing
+      ?{...existing.next,...next,...(existing.next.payload||next.payload?{payload:{...(existing.next.payload||{}),...(next.payload||{})}}:{})}
+      :next;
+    pendingPatches.set(id,{next:merged,before,timer:setTimeout(()=>flushPatch(id),delay)});
+  }
+  function addSeeds(seeds:NodeSeed[],at:{x:number;y:number}){
+    if(!seeds.length)return;
+    if(seeds.some(seed=>seed.type==='model'))ensureModelPane();
+    const before=doc;
+    let z=doc.nextZ;
+    // Build the whole batch first; reassigning `doc` inside the loop copied the
+    // node array once per seed, which is quadratic for a multi-file drop.
+    const created=seeds.map((seed,index)=>makeNode(seed,at.x+index*28,at.y+index*28,++z));
+    doc={...doc,nextZ:z,nodes:[...doc.nodes,...created]};
+    selected=created.at(-1)?.id??selected;
+    remember(before);persist();
+  }
   function promoteContactSheetItem(sheet:WorkspaceNode,item:Record<string,unknown>,label?:string){
     const sha256=String(item.sha256||'');
     const existing=doc.nodes.find(node=>node.object?.parentId===sheet.id&&String(node.payload.sha256||'')===sha256);
@@ -318,7 +419,30 @@
       saveError=error instanceof Error?error.message:'The run changed, but its board state was not recorded.';
     });
   }
-  function submitIntent(){const intent=composerText.trim();if(!intent)return;const width=seedFor('intent').w;createSpatialRun(intent,{x:composerAt.x-width/2,y:composerAt.y-72},undefined,selectedContextNodes);composerText='';composerOpen=false;}
+  function executeCanvasIntent(intent:CanvasIntent){
+    if(intent.kind==='clarify'){organizationNotice=intent.message;return}
+    if(intent.kind==='fit-all'){fitAll();return}
+    if(intent.kind==='focus'){const node=doc.nodes.find(candidate=>candidate.id===intent.nodeId);if(node)focusNode(node);return}
+    contextSelection=intent.targetIds;selected=intent.targetIds.at(-1)??null;
+    if(intent.kind==='delete')deleteSelection();
+    else if(intent.kind==='duplicate')duplicateSelection();
+    else if(intent.kind==='move')nudgeSelection(intent.dx,intent.dy);
+    else tidyNodeIds(intent.targetIds);
+  }
+  function submitNaturalLanguage(intent:string,at:{x:number;y:number}){
+    const visibleIds=[...(visibleWorkspaceNodeIds(doc.nodes,doc.viewport,{width:canvasWidth,height:canvasHeight},0)??new Set<string>())];
+    const canvasIntent=interpretCanvasIntent(intent,{nodes:doc.nodes,selectedIds:activeSelection,visibleIds});
+    if(canvasIntent){executeCanvasIntent(canvasIntent);return}
+    const width=seedFor('intent').w;createSpatialRun(intent,{x:at.x-width/2,y:at.y-72},undefined,selectedContextNodes);
+  }
+  function submitIntent(){
+    const intent=composerText.trim();if(!intent)return;
+    submitNaturalLanguage(intent,composerAt);composerText='';composerOpen=false;
+  }
+  function submitOmnibar(){
+    const intent=query.trim();if(!intent)return;
+    submitNaturalLanguage(intent,workspacePoint(innerWidth/2,innerHeight/2));omnibar=false;query='';
+  }
   async function openCommands(){omnibar=true;query='';await tick();commandInput?.focus();}
   function fitNodes(nodes:WorkspaceNode[],maxZoom=1){const rect=canvas?.getBoundingClientRect();if(!rect)return;const viewport=fitWorkspaceViewport(nodes,{width:rect.width,height:rect.height},{maxZoom});if(!viewport)return;doc={...doc,viewport};persist();}
   function fitAll(){fitNodes(doc.nodes);selected=null;contextSelection=[];currentSceneId=null;mapMenu=false;}
@@ -343,7 +467,14 @@
     mapMenu=false;omnibar=false;query='';
     fitNodes([organized.scene,...doc.nodes.filter(node=>organized.organizedIds.includes(node.id))],1);
   }
-  function runCommand(command:string[]){if(command[0]==='fit'){fitAll();omnibar=false;query=''}else if(command[0]==='organize')organizeSelection();else if(command[0]==='surface')spawn('surface',{title:command[1].replace('Open ',''),path:command[3],capabilityId:command[4]});else if(command[0]==='intent')void summonComposer();else if(command[0]==='upload'){omnibar=false;fileInput?.click()}else spawn(command[0]);}
+  function runCommand(command:string[]){
+    const close=()=>{omnibar=false;query=''};
+    if(command[0]==='tidy'){tidySelection();close();return}
+    if(command[0]==='duplicate'){duplicateSelection();close();return}
+    if(command[0]==='delete'){deleteSelection();close();return}
+    if(command[0].startsWith('align-')){alignSelection(command[0].slice(6) as AlignEdge);close();return}
+    if(command[0].startsWith('distribute-')){distributeSelection(command[0].slice(11) as 'x'|'y');close();return}
+    if(command[0]==='fit'){fitAll();omnibar=false;query=''}else if(command[0]==='organize')organizeSelection();else if(command[0]==='surface')spawn('surface',{title:command[1].replace('Open ',''),path:command[3],capabilityId:command[4]});else if(command[0]==='intent')void summonComposer();else if(command[0]==='upload'){omnibar=false;fileInput?.click()}else spawn(command[0]);}
   function followUp(node:WorkspaceNode,text:string){
     const intentSeed=seedFor('intent'),runSeed=seedFor('run');
     const at=findOpenWorkspacePosition(
@@ -394,20 +525,307 @@
   function openExplorer(event:MouseEvent){if(event.target!==canvas)return;const at=workspacePoint(event.clientX,event.clientY),seed=seedFor('explorer'),topLeft=workspacePoint(24,52),bottomRight=workspacePoint(innerWidth-24,innerHeight-72),x=Math.max(topLeft.x,Math.min(at.x-seed.w/2,bottomRight.x-seed.w)),y=Math.max(topLeft.y,Math.min(at.y-seed.h/2,bottomRight.y-seed.h));addSeeds([seed],{x,y});}
   function openSurface(id:string){const item=surfaceCatalog.find(candidate=>candidate.id===id);if(item)spawn('surface',{surface:item.id,title:item.title,path:item.path,capabilityId:item.capabilityId});}
   function close(id:string){const before=doc;const node=doc.nodes.find(candidate=>candidate.id===id);doc=node?.type==='frame'?removeFrame(doc,id):{...doc,nodes:doc.nodes.filter(n=>n.id!==id)};selected=null;contextSelection=contextSelection.filter(item=>item!==id);if(currentSceneId===id)currentSceneId=null;remember(before);persist();}
-  function select(node:WorkspaceNode,additive=false){organizationNotice='';if(additive){const removing=contextSelection.includes(node.id);contextSelection=removing?contextSelection.filter(id=>id!==node.id):[...contextSelection,node.id];selected=removing?contextSelection.at(-1)||null:node.id}else{selected=node.id;contextSelection=[node.id]}if(node.z<doc.nextZ)doc={...doc,nextZ:doc.nextZ+1,nodes:doc.nodes.map(candidate=>candidate.id===node.id?{...candidate,z:doc.nextZ+1}:candidate)}}
-  function drag(event:PointerEvent,node:WorkspaceNode){if((event.target as HTMLElement).closest('button,input,textarea,iframe,a,.scroll,.xterm'))return;event.preventDefault();if(event.shiftKey){select(node,true);return}const before=doc;select(node);const sx=event.clientX,sy=event.clientY,ox=node.x,oy=node.y;let changed=false;const move=(e:PointerEvent)=>{changed=true;doc=moveNodeAndFrameContents(doc,node.id,ox+(e.clientX-sx)/doc.viewport.zoom,oy+(e.clientY-sy)/doc.viewport.zoom)};const up=()=>{removeEventListener('pointermove',move);removeEventListener('pointerup',up);if(changed){remember(before);persist()}};addEventListener('pointermove',move);addEventListener('pointerup',up);}
-  function resize(event:PointerEvent,node:WorkspaceNode){event.preventDefault();event.stopPropagation();const before=doc,sx=event.clientX,sy=event.clientY,ow=node.w,oh=node.h;let changed=false;const move=(e:PointerEvent)=>{changed=true;doc={...doc,nodes:doc.nodes.map(candidate=>candidate.id===node.id?{...candidate,w:Math.max(140,ow+(e.clientX-sx)/doc.viewport.zoom),h:Math.max(80,oh+(e.clientY-sy)/doc.viewport.zoom)}:candidate)}};const up=()=>{removeEventListener('pointermove',move);removeEventListener('pointerup',up);if(changed){if(node.type==='frame')doc=assignNodesToFrame(doc,node.id);remember(before);persist()}};addEventListener('pointermove',move);addEventListener('pointerup',up);}
-  function pan(event:PointerEvent){if(event.target!==canvas)return;const sx=event.clientX,sy=event.clientY,ox=doc.viewport.x,oy=doc.viewport.y;const move=(e:PointerEvent)=>doc={...doc,viewport:{...doc.viewport,x:ox+e.clientX-sx,y:oy+e.clientY-sy}};const up=()=>{removeEventListener('pointermove',move);removeEventListener('pointerup',up);persist()};addEventListener('pointermove',move);addEventListener('pointerup',up);}
-  function canNestedSurfaceScroll(event:WheelEvent){
-    let element=event.target instanceof HTMLElement?event.target:null;
-    while(element&&element!==canvas){
-      const style=getComputedStyle(element),vertical=/(auto|scroll)/.test(style.overflowY),horizontal=/(auto|scroll)/.test(style.overflowX);
-      const canY=vertical&&element.scrollHeight>element.clientHeight&&((event.deltaY<0&&element.scrollTop>0)||(event.deltaY>0&&element.scrollTop+element.clientHeight<element.scrollHeight-1));
-      const canX=horizontal&&element.scrollWidth>element.clientWidth&&((event.deltaX<0&&element.scrollLeft>0)||(event.deltaX>0&&element.scrollLeft+element.clientWidth<element.scrollWidth-1));
-      if(canX||canY)return true;
-      element=element.parentElement;
+  // --- Editing primitives ------------------------------------------------------
+  // Everything here works on `activeSelection`: the multi-select if there is one,
+  // otherwise whatever single node is focused.
+  $: activeSelection=contextSelection.length?contextSelection:selected?[selected]:[];
+  function deleteSelection(){
+    if(!activeSelection.length)return;
+    const before=doc;
+    doc=deleteWorkspaceNodes(doc,activeSelection);
+    if(currentSceneId&&activeSelection.includes(currentSceneId))currentSceneId=null;
+    selected=null;contextSelection=[];
+    remember(before);persist();
+  }
+  function duplicateSelection(){
+    if(!activeSelection.length)return;
+    const before=doc;
+    const result=duplicateWorkspaceNodes(doc,activeSelection);
+    if(!result.createdIds.length)return;
+    doc=result.doc;contextSelection=result.createdIds;selected=result.createdIds.at(-1)??null;
+    remember(before);persist();
+  }
+  function nudgeSelection(dx:number,dy:number){
+    if(!activeSelection.length)return;
+    const before=doc;
+    doc=nudgeWorkspaceNodes(doc,activeSelection,dx,dy);
+    remember(before);persist();
+  }
+  function selectAll(){
+    const ids=doc.nodes.filter(node=>node.type!=='frame'&&!(node.frameId&&collapsedFrameIds.has(node.frameId))).map(node=>node.id);
+    if(!ids.length)return;
+    organizationNotice='';contextSelection=ids;selected=ids.at(-1)??null;
+  }
+  async function copySelection(cut=false){
+    if(!activeSelection.length)return;
+    try{await navigator.clipboard.writeText(writeWorkspaceClipboard(doc,activeSelection))}
+    catch{saveError='HII could not reach the system clipboard.';return}
+    if(cut)deleteSelection();
+  }
+  function pasteNodes(nodes:WorkspaceNode[],at:{x:number;y:number}){
+    const before=doc;
+    const result=pasteWorkspaceNodes(doc,nodes,at);
+    if(!result.createdIds.length)return;
+    if(nodes.some(node=>node.type==='model'))ensureModelPane();
+    doc=result.doc;contextSelection=result.createdIds;selected=result.createdIds.at(-1)??null;
+    remember(before);persist();
+  }
+  function applyMoves(moves:Map<string,{x:number;y:number}>,notice:string){
+    if(!moves.size)return;
+    const before=doc;
+    const updatedAt=new Date().toISOString();
+    doc={...doc,nodes:doc.nodes.map(node=>moves.has(node.id)?{...node,...moves.get(node.id)!,updatedAt}:node)};
+    organizationNotice=notice;
+    remember(before);persist();
+  }
+  function tidySelection(){
+    // With nothing selected, tidy is a whole-board command — that is the case
+    // where a wall of dropped images most needs it.
+    const targets=organizableSelection.length>1?organizableSelection:doc.nodes.filter(node=>node.type!=='frame');
+    const moves=tidyWorkspaceNodes(targets);
+    applyMoves(moves,`Tidied ${moves.size} objects into a packed board.`);
+    if(moves.size)fitNodes(doc.nodes.filter(node=>moves.has(node.id)),1);
+  }
+  function tidyNodeIds(ids:string[]){
+    const targets=doc.nodes.filter(node=>ids.includes(node.id)&&node.type!=='frame');
+    const moves=tidyWorkspaceNodes(targets);
+    applyMoves(moves,`Tidied ${moves.size} objects into a packed board.`);
+    if(moves.size)fitNodes(doc.nodes.filter(node=>moves.has(node.id)),1);
+  }
+  function alignSelection(edge:AlignEdge){applyMoves(alignWorkspaceNodes(organizableSelection,edge),`Aligned ${organizableSelection.length} objects.`)}
+  function distributeSelection(axis:'x'|'y'){applyMoves(distributeWorkspaceNodes(organizableSelection,axis),`Distributed ${organizableSelection.length} objects.`)}
+  // --- Image library ---------------------------------------------------------------
+  let libraryOpen=false;
+  // Only recomputed while the panel is open — scanning every contact sheet on
+  // each document change would undo the point of the derivation work above.
+  $: libraryImages=libraryOpen?workspaceImageLibrary(doc.nodes):[];
+  function placeLibraryImage(image:LibraryImage,at:{clientX:number;clientY:number}|null){
+    const seed=contactSheetItemSeed(image,image.sourceId,image.name);
+    const point=at?workspacePoint(at.clientX,at.clientY):workspacePoint(innerWidth/2,innerHeight/2);
+    const open=findOpenWorkspacePosition(doc.nodes,{x:point.x-seed.w/2,y:point.y-seed.h/2},{w:seed.w,h:seed.h});
+    addSeeds([seed],open);
+  }
+  // --- Freehand ink ---------------------------------------------------------------
+  // The pen is a mode: while it is on, dragging the canvas draws instead of
+  // panning. Strokes land in one ink node per drawing session, so a sketch is a
+  // single object that can be moved, duplicated, and deleted as a unit.
+  let penActive=false;
+  let inkNodeId:string|null=null;
+  // The in-progress stroke is previewed in world coordinates as a single SVG
+  // polyline. Committing it is what turns it into node-relative ink.
+  let livePreview:number[]|null=null;
+  function togglePen(){penActive=!penActive;if(!penActive)inkNodeId=null}
+  function draw(event:PointerEvent){
+    event.preventDefault();
+    const start=workspacePoint(event.clientX,event.clientY);
+    const target=inkNodeId?doc.nodes.find(candidate=>candidate.id===inkNodeId):undefined;
+    // Points are relative to the ink node's origin. A brand-new drawing anchors
+    // its node at the first point, less the padding the pane leaves for width.
+    const origin=target?{x:target.x,y:target.y}:{x:start.x-INK_PADDING,y:start.y-INK_PADDING};
+    const world=[start.x,start.y];
+    livePreview=[...world];
+    trackPointerGesture(event,{
+      onMove:(delta)=>{
+        const{dx,dy}=scaleGestureDelta(delta,doc.viewport.zoom);
+        world.push(start.x+dx,start.y+dy);
+        livePreview=[...world];
+      },
+      onEnd:(_delta,moved)=>{
+        livePreview=null;
+        if(!moved||world.length<4)return;
+        const relative=world.map((value,index)=>index%2===0?value-origin.x:value-origin.y);
+        commitStroke({points:simplifyStroke(relative),color:INK_DEFAULT_COLOR,width:INK_DEFAULT_WIDTH},origin);
+      },
+      onCancel:()=>{livePreview=null}
+    });
+  }
+  function commitStroke(stroke:InkStroke,origin:{x:number;y:number}){
+    const before=doc;
+    const existing=inkNodeId?doc.nodes.find(candidate=>candidate.id===inkNodeId):undefined;
+    const strokes=[...(existing?readStrokes(existing.payload.strokes):[]),stroke];
+    // Grow the node to whatever the strokes now cover. Bounds can move up or
+    // left, so points are re-based to keep them relative to the new origin.
+    const bounds=strokeBounds(strokes)??{x:0,y:0,w:240,h:180};
+    const rebased=translateStrokes(strokes,-bounds.x,-bounds.y);
+    const geometry={x:origin.x+bounds.x,y:origin.y+bounds.y,w:Math.max(40,bounds.w),h:Math.max(28,bounds.h)};
+    if(existing){
+      doc={...doc,nodes:doc.nodes.map(candidate=>candidate.id===existing.id
+        ?{...candidate,...geometry,updatedAt:new Date().toISOString(),payload:{...candidate.payload,strokes:rebased}}
+        :candidate)};
+    }else{
+      const seed=seedFor('ink',{strokes:rebased,title:'Ink'});
+      const created=makeNode({...seed,w:geometry.w,h:geometry.h},geometry.x,geometry.y,doc.nextZ+1);
+      doc={...doc,nextZ:doc.nextZ+1,nodes:[...doc.nodes,created]};
+      inkNodeId=created.id;
     }
-    return false;
+    remember(before);persist();
+  }
+  // --- Drawn connectors ----------------------------------------------------------
+  let linkDraft:{fromId:string;x1:number;y1:number;x2:number;y2:number}|null=null;
+  let selectedLinkId:string|null=null;
+  /** Which node sits under a screen point, topmost first, ignoring scene frames. */
+  function nodeAtPoint(clientX:number,clientY:number,excludeId:string){
+    const at=workspacePoint(clientX,clientY);
+    return [...doc.nodes]
+      .filter(node=>node.id!==excludeId&&node.type!=='frame'&&!(node.frameId&&collapsedFrameIds.has(node.frameId)))
+      .sort((a,b)=>b.z-a.z)
+      .find(node=>at.x>=node.x&&at.x<=node.x+node.w&&at.y>=node.y&&at.y<=node.y+node.h)??null;
+  }
+  function startLink(event:PointerEvent,node:WorkspaceNode){
+    event.preventDefault();event.stopPropagation();
+    const origin={x:node.x+node.w/2,y:node.y+node.h/2};
+    const start=workspacePoint(event.clientX,event.clientY);
+    linkDraft={fromId:node.id,x1:origin.x,y1:origin.y,x2:start.x,y2:start.y};
+    trackPointerGesture(event,{
+      onMove:(delta)=>{
+        const{dx,dy}=scaleGestureDelta(delta,doc.viewport.zoom);
+        linkTargetId=nodeAtPoint(event.clientX+delta.dx,event.clientY+delta.dy,node.id)?.id??null;
+        linkDraft={fromId:node.id,x1:origin.x,y1:origin.y,x2:start.x+dx,y2:start.y+dy};
+      },
+      onEnd:(delta,moved)=>{
+        const target=moved?nodeAtPoint(event.clientX+delta.dx,event.clientY+delta.dy,node.id):null;
+        linkDraft=null;linkTargetId=null;
+        if(!target)return;
+        const before=doc;
+        const next=linkWorkspaceNodes(doc,node.id,target.id);
+        if(next===doc)return; // self-link or already connected
+        doc=next;remember(before);persist();
+      },
+      onCancel:()=>{linkDraft=null;linkTargetId=null}
+    });
+  }
+  let linkTargetId:string|null=null;
+  function deleteLink(id:string){
+    const before=doc;
+    doc=unlinkWorkspaceNodes(doc,[id]);
+    selectedLinkId=null;
+    remember(before);persist();
+  }
+  // --- Marquee and lasso ---------------------------------------------------------
+  // Both are the same gesture. A rectangle is the precise tool; holding Alt turns
+  // it into a freeform lasso, which is what a scattered cluster of references
+  // actually needs.
+  let marquee:{x:number;y:number;w:number;h:number}|null=null;
+  let lassoPath:number[]|null=null;
+  function startMarquee(event:PointerEvent){
+    const origin=workspacePoint(event.clientX,event.clientY);
+    const additive=event.shiftKey;
+    const lasso=event.altKey;
+    const beforeSelection=[...contextSelection];
+    const path=[origin.x,origin.y];
+    trackPointerGesture(event,{
+      onMove:(delta)=>{
+        const {dx,dy}=scaleGestureDelta(delta,doc.viewport.zoom);
+        if(lasso){path.push(origin.x+dx,origin.y+dy);lassoPath=[...path];return}
+        marquee={x:origin.x,y:origin.y,w:dx,h:dy};
+      },
+      onEnd:(_delta,moved)=>{
+        const rect=marquee;marquee=null;lassoPath=null;
+        if(!moved)return;
+        const hits=lasso?nodesInLasso(doc.nodes,path):rect?nodesInMarquee(doc.nodes,rect):[];
+        organizationNotice='';
+        contextSelection=additive?[...new Set([...beforeSelection,...hits])]:hits;
+        selected=contextSelection.at(-1)??null;
+      },
+      onCancel:()=>{marquee=null;lassoPath=null}
+    });
+  }
+  function select(node:WorkspaceNode,additive=false){organizationNotice='';selectedLinkId=null;if(additive){const removing=contextSelection.includes(node.id);contextSelection=removing?contextSelection.filter(id=>id!==node.id):[...contextSelection,node.id];selected=removing?contextSelection.at(-1)||null:node.id}else{selected=node.id;contextSelection=[node.id]}if(node.z<doc.nextZ)doc={...doc,nextZ:doc.nextZ+1,nodes:doc.nodes.map(candidate=>candidate.id===node.id?{...candidate,z:doc.nextZ+1}:candidate)}}
+  // --- Transient gesture layer -------------------------------------------------
+  // Drag/resize/pan write geometry straight to the DOM for the duration of the
+  // gesture and commit to `doc` exactly once, on release. Mutating `doc` per
+  // pointermove used to re-run every whole-array derivation (connections, search,
+  // scenes, viewport count) on every frame of every drag.
+  let snapGuides:SnapGuide[]=[];
+  function nodeElement(id:string){return worldLayer?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`)??null}
+  type DragTargets=Array<{id:string;element:HTMLElement|null;x:number;y:number}>;
+  function restoreDragTargets(targets:DragTargets){for(const target of targets){if(target.element)target.element.style.transform=`translate(${target.x}px,${target.y}px)`}}
+  function drag(event:PointerEvent,node:WorkspaceNode){
+    if((event.target as HTMLElement).closest('button,input,textarea,iframe,a,.scroll,.xterm'))return;
+    event.preventDefault();
+    if(event.shiftKey){select(node,true);return}
+    const before=doc;
+    select(node);
+    // A frame carries its members, so they all need transient transforms too.
+    const moving=node.type==='frame'?[node,...doc.nodes.filter(candidate=>candidate.frameId===node.id)]:[node];
+    const targets:DragTargets=moving.map(target=>({id:target.id,element:nodeElement(target.id),x:target.x,y:target.y}));
+    const origin={x:node.x,y:node.y};
+    const movingIds=new Set(targets.map(target=>target.id));
+    const snapNeighbours=doc.nodes.filter(candidate=>!movingIds.has(candidate.id)&&candidate.type!=='frame');
+    // Snap the dragged node, then shift the whole group by the same correction so
+    // a frame and its members stay rigid.
+    const settle=(delta:{dx:number;dy:number})=>{
+      const{dx,dy}=scaleGestureDelta(delta,doc.viewport.zoom);
+      const snapped=snapWorkspaceRect({x:origin.x+dx,y:origin.y+dy,w:node.w,h:node.h},snapNeighbours,doc.viewport.zoom);
+      return{dx:dx+(snapped.x-(origin.x+dx)),dy:dy+(snapped.y-(origin.y+dy)),guides:snapped.guides};
+    };
+    trackPointerGesture(event,{
+      onMove:(delta)=>{
+        const settled=settle(delta);
+        snapGuides=settled.guides;
+        for(const target of targets){if(target.element)target.element.style.transform=`translate(${target.x+settled.dx}px,${target.y+settled.dy}px)`}
+      },
+      onEnd:(delta,moved)=>{
+        snapGuides=[];
+        if(!moved){restoreDragTargets(targets);return}
+        const settled=settle(delta);
+        doc=moveNodeAndFrameContents(doc,node.id,origin.x+settled.dx,origin.y+settled.dy);
+        remember(before);persist();
+      },
+      onCancel:()=>{snapGuides=[];restoreDragTargets(targets)}
+    });
+  }
+  function resize(event:PointerEvent,node:WorkspaceNode){
+    event.preventDefault();event.stopPropagation();
+    const before=doc;
+    const element=nodeElement(node.id);
+    const origin={w:node.w,h:node.h};
+    const nextSize=(delta:{dx:number;dy:number})=>({w:Math.max(140,origin.w+delta.dx),h:Math.max(80,origin.h+delta.dy)});
+    const restore=()=>{if(element){element.style.width=`${origin.w}px`;element.style.height=`${origin.h}px`}};
+    trackPointerGesture(event,{
+      onMove:(delta)=>{
+        if(!element)return;
+        const size=nextSize(scaleGestureDelta(delta,doc.viewport.zoom));
+        element.style.width=`${size.w}px`;element.style.height=`${size.h}px`;
+      },
+      onEnd:(delta,moved)=>{
+        if(!moved){restore();return}
+        const size=nextSize(scaleGestureDelta(delta,doc.viewport.zoom));
+        doc={...doc,nodes:doc.nodes.map(candidate=>candidate.id===node.id?{...candidate,...size}:candidate)};
+        if(node.type==='frame')doc=assignNodesToFrame(doc,node.id);
+        remember(before);persist();
+      },
+      onCancel:restore
+    });
+  }
+  function worldTransform(viewport:{x:number;y:number;zoom:number}){return `translate(${viewport.x}px,${viewport.y}px) scale(${viewport.zoom})`}
+  function pan(event:PointerEvent){
+    if(event.target!==canvas)return;
+    // Plain drag on empty canvas still pans, which is the gesture this canvas has
+    // always had. Holding a modifier turns the same drag into a marquee, and the
+    // pen tool turns it into a stroke.
+    if(penActive&&!event.metaKey&&!event.ctrlKey&&!event.shiftKey){draw(event);return}
+    if(event.metaKey||event.ctrlKey||event.shiftKey){startMarquee(event);return}
+    const origin={...doc.viewport};
+    trackPointerGesture(event,{
+      onMove:(delta)=>{if(worldLayer)worldLayer.style.transform=worldTransform({...origin,x:origin.x+delta.dx,y:origin.y+delta.dy})},
+      onEnd:(delta,moved)=>{
+        if(!moved){if(worldLayer)worldLayer.style.transform=worldTransform(doc.viewport);return}
+        doc={...doc,viewport:{...doc.viewport,x:origin.x+delta.dx,y:origin.y+delta.dy}};
+        persist();
+      },
+      onCancel:()=>{if(worldLayer)worldLayer.style.transform=worldTransform(doc.viewport)}
+    });
+  }
+  // Panes that own a scroller mark themselves with `data-scrollable`. The previous
+  // implementation walked every ancestor calling getComputedStyle, forcing a style
+  // recalc on the hottest input path in the app.
+  function canNestedSurfaceScroll(event:WheelEvent){
+    const element=event.target instanceof HTMLElement?event.target.closest<HTMLElement>('[data-scrollable],.scroll,.xterm-viewport,textarea'):null;
+    if(!element||!canvas?.contains(element))return false;
+    const canY=element.scrollHeight>element.clientHeight&&((event.deltaY<0&&element.scrollTop>0)||(event.deltaY>0&&element.scrollTop+element.clientHeight<element.scrollHeight-1));
+    const canX=element.scrollWidth>element.clientWidth&&((event.deltaX<0&&element.scrollLeft>0)||(event.deltaX>0&&element.scrollLeft+element.clientWidth<element.scrollWidth-1));
+    return canX||canY;
   }
   function trackpad(event:WheelEvent){
     const zooming=event.metaKey||event.ctrlKey;
@@ -426,15 +844,33 @@
   async function refreshBoard(){try{board=(await (await fetch('/api/board/tasks')).json()).tasks||[]}catch{}}
   async function refreshDaemon(){try{const response=await fetch('/api/daemon');const result=await response.json();if(response.ok)daemon=result}catch{}}
   async function controlDaemon(action:string){if(daemonActionBusy)return;daemonActionBusy=true;try{const response=await fetch('/api/daemon',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action})});const result=await response.json();if(!response.ok)throw new Error(result.error||'AII control failed.');daemon=result.snapshot;setTimeout(()=>void refreshDaemon(),800)}catch(error){saveError=error instanceof Error?error.message:'AII control failed.'}finally{daemonActionBusy=false}}
-  function changeHistory(direction:'undo'|'redo'){const result=direction==='undo'?undoWorkspace(workspaceHistory,doc):redoWorkspace(workspaceHistory,doc);if(!result)return;doc=result.doc;workspaceHistory=result.history;selected=null;contextSelection=[];currentSceneId=null;organizationNotice='';persist();}
-  function keydown(event:KeyboardEvent){const editable=(event.target as Element)?.closest?.('input,textarea,[contenteditable]');const command=event.metaKey||event.ctrlKey;if(!editable&&command&&event.key.toLowerCase()==='z'){event.preventDefault();changeHistory(event.shiftKey?'redo':'undo');return}if(!editable&&command&&event.key.toLowerCase()==='y'){event.preventDefault();changeHistory('redo');return}if(!editable&&event.shiftKey&&event.key==='1'){event.preventDefault();fitAll();return}if(event.altKey&&event.code==='Space'&&!event.repeat){event.preventDefault();void summonComposer();return}if(command&&event.key.toLowerCase()==='k'){event.preventDefault();if(omnibar)omnibar=false;else void openCommands();}if(event.key==='Escape'){omnibar=false;composerOpen=false;}}
+  function changeHistory(direction:'undo'|'redo'){flushPatches();const result=direction==='undo'?undoWorkspace(workspaceHistory,doc):redoWorkspace(workspaceHistory,doc);if(!result)return;doc=result.doc;workspaceHistory=result.history;selected=null;contextSelection=[];currentSceneId=null;organizationNotice='';persist();}
+  const ARROW_NUDGE:Record<string,[number,number]>={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0]};
+  function keydown(event:KeyboardEvent){const editable=(event.target as Element)?.closest?.('input,textarea,[contenteditable]');const command=event.metaKey||event.ctrlKey;if(!editable&&command&&event.key.toLowerCase()==='z'){event.preventDefault();changeHistory(event.shiftKey?'redo':'undo');return}if(!editable&&command&&event.key.toLowerCase()==='y'){event.preventDefault();changeHistory('redo');return}if(!editable&&event.shiftKey&&event.key==='1'){event.preventDefault();fitAll();return}
+    if(!editable&&!command){
+      if(event.key.toLowerCase()==='p'&&!event.altKey&&!event.repeat){event.preventDefault();togglePen();return}
+      if(['Delete','Backspace'].includes(event.key)&&selectedLinkId){event.preventDefault();deleteLink(selectedLinkId);return}
+      if(['Delete','Backspace'].includes(event.key)&&activeSelection.length){event.preventDefault();deleteSelection();return}
+      const nudge=ARROW_NUDGE[event.key];
+      // Shift takes the step from "adjust" to "reposition", matching every other
+      // canvas tool. Held arrows repeat, so this coalesces into one history entry
+      // only in the sense that each repeat is its own — acceptable for 1px steps.
+      if(nudge&&activeSelection.length){event.preventDefault();const step=event.shiftKey?10:1;nudgeSelection(nudge[0]*step,nudge[1]*step);return}
+    }
+    if(!editable&&command){
+      const key=event.key.toLowerCase();
+      if(key==='a'){event.preventDefault();selectAll();return}
+      if(key==='d'){event.preventDefault();duplicateSelection();return}
+      if(key==='c'&&activeSelection.length){event.preventDefault();void copySelection();return}
+      if(key==='x'&&activeSelection.length){event.preventDefault();void copySelection(true);return}
+    }if(event.altKey&&event.code==='Space'&&!event.repeat){event.preventDefault();void summonComposer();return}if(command&&event.key.toLowerCase()==='k'){event.preventDefault();if(omnibar)omnibar=false;else void openCommands();}if(event.key==='Escape'){omnibar=false;composerOpen=false;selectedLinkId=null;}}
   async function drop(event:DragEvent){event.preventDefault();if(!event.dataTransfer)return;const at={x:(event.clientX-doc.viewport.x)/doc.viewport.zoom,y:(event.clientY-doc.viewport.y)/doc.viewport.zoom};addSeeds(await seedsFromDataTransfer(event.dataTransfer),at)}
   async function addFiles(files:File[]){const seeds=await seedsFromFiles(files);const center={x:(-doc.viewport.x+innerWidth/2)/doc.viewport.zoom,y:(-doc.viewport.y+innerHeight/2)/doc.viewport.zoom};addSeeds(seeds,{x:center.x-190,y:center.y-150})}
-  onMount(()=>{let disposed=false;let unlistenSummon:(()=>void)|undefined;load();refreshContext();refreshBoard();refreshDaemon();const daemonTimer=setInterval(()=>void refreshDaemon(),10000);const move=(e:PointerEvent)=>mouse={x:e.clientX,y:e.clientY};const paste=(e:ClipboardEvent)=>{if((e.target as Element)?.closest?.('input,textarea,[contenteditable]'))return;const files=[...(e.clipboardData?.files||[])];if(files.length){e.preventDefault();void addFiles(files);return}const text=e.clipboardData?.getData('text/plain');if(text){const at={x:(mouse.x-doc.viewport.x)/doc.viewport.zoom,y:(mouse.y-doc.viewport.y)/doc.viewport.zoom};addSeeds([seedFromString(text)],at)}};const nativeSummon=()=>void summonComposer();const summonFromUrl=new URLSearchParams(location.search).get('summon')==='1';if(summonFromUrl){history.replaceState(history.state,'',location.pathname);void summonComposer()}void import('@tauri-apps/api/core').then(async(core)=>{if(!core.isTauri())return;const{listen}=await import('@tauri-apps/api/event');const stop=await listen('hii://summon',nativeSummon);if(disposed)stop();else unlistenSummon=stop}).catch(()=>{});window.addEventListener('hii:summon',nativeSummon);window.addEventListener('keydown',keydown);window.addEventListener('pointermove',move);window.addEventListener('paste',paste);return()=>{disposed=true;clearInterval(daemonTimer);unlistenSummon?.();window.removeEventListener('hii:summon',nativeSummon);window.removeEventListener('keydown',keydown);window.removeEventListener('pointermove',move);window.removeEventListener('paste',paste)}});
+  onMount(()=>{let disposed=false;let unlistenSummon:(()=>void)|undefined;load();refreshContext();refreshBoard();refreshDaemon();const daemonTimer=setInterval(()=>void refreshDaemon(),10000);const move=(e:PointerEvent)=>{pointer.x=e.clientX;pointer.y=e.clientY};const paste=(e:ClipboardEvent)=>{if((e.target as Element)?.closest?.('input,textarea,[contenteditable]'))return;const files=[...(e.clipboardData?.files||[])];if(files.length){e.preventDefault();void addFiles(files);return}const text=e.clipboardData?.getData('text/plain');if(!text)return;const at=workspacePoint(pointer.x,pointer.y);const copied=readWorkspaceClipboard(text);if(copied){e.preventDefault();pasteNodes(copied,at);return}addSeeds([seedFromString(text)],at)};const nativeSummon=()=>void summonComposer();const summonFromUrl=new URLSearchParams(location.search).get('summon')==='1';if(summonFromUrl){history.replaceState(history.state,'',location.pathname);void summonComposer()}void import('@tauri-apps/api/core').then(async(core)=>{if(!core.isTauri())return;const{listen}=await import('@tauri-apps/api/event');const stop=await listen('hii://summon',nativeSummon);if(disposed)stop();else unlistenSummon=stop}).catch(()=>{});window.addEventListener('hii:summon',nativeSummon);window.addEventListener('keydown',keydown);window.addEventListener('pointermove',move);window.addEventListener('paste',paste);return()=>{disposed=true;flushPatches();clearInterval(daemonTimer);unlistenSummon?.();window.removeEventListener('hii:summon',nativeSummon);window.removeEventListener('keydown',keydown);window.removeEventListener('pointermove',move);window.removeEventListener('paste',paste)}});
 </script>
 
 {#if !data.enabled}<div class="hii-page flex min-h-[60vh] flex-col items-center justify-center gap-3"><p class="hii-kicker">surface off</p><h1 class="hii-page-title">HII is turned off</h1></div>
-{:else}<main bind:this={canvas} bind:clientWidth={canvasWidth} bind:clientHeight={canvasHeight} class="absolute inset-0 touch-none overflow-hidden" on:pointerdown={pan} on:dblclick={openExplorer} on:wheel={trackpad} on:dragover|preventDefault on:drop={drop} style="background:#fff radial-gradient(circle,rgba(23,23,23,.08) 1px,transparent 1px);background-size:32px 32px">
+{:else}<main bind:this={canvas} bind:clientWidth={canvasWidth} bind:clientHeight={canvasHeight} class="absolute inset-0 touch-none overflow-hidden" class:cursor-crosshair={penActive} on:pointerdown={pan} on:dblclick={openExplorer} on:wheel={trackpad} on:dragover|preventDefault on:drop={drop} style="background:#fff radial-gradient(circle,rgba(23,23,23,.08) 1px,transparent 1px);background-size:32px 32px">
   {#if loadState==='recovery'}
     <section data-workspace-ui class="absolute inset-0 z-[10000] grid place-items-center bg-[#f4f5f7]/95 p-6" aria-labelledby="workspace-recovery-title">
       <div class="w-[min(620px,92vw)] rounded-[28px] border border-amber-950/15 bg-white p-8 shadow-2xl sm:p-10">
@@ -473,12 +909,45 @@
     <section data-workspace-ui role="status" class="absolute left-1/2 top-4 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-blue-900/10 bg-white/95 p-1.5 pl-4 shadow-xl backdrop-blur-xl">
       <span class="font-mono text-[9px] uppercase tracking-[.1em] text-blue-700">{contextSelection.length} context object{contextSelection.length===1?'':'s'} selected</span>
       {#if organizableSelection.length>1}<button class="rounded-full border border-blue-200 bg-blue-50 px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-blue-700 hover:border-blue-400" aria-label="Organize selection into scene" on:click={organizeSelection}>Make Scene</button>{/if}
+      <button class="rounded-full border border-neutral-200 px-3 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-neutral-600 hover:border-neutral-400" aria-label="Duplicate selection" on:click={duplicateSelection}>Duplicate <kbd class="ml-1 text-neutral-400">⌘D</kbd></button>
+      <button class="rounded-full border border-red-200 px-3 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-red-700 hover:border-red-400" aria-label="Delete selection" on:click={deleteSelection}>Delete <kbd class="ml-1 text-red-300">⌫</kbd></button>
       <button class="rounded-full bg-[var(--hii-electric-blue)] px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-white" on:click={()=>void summonComposer()}>Give intent <kbd class="ml-1 text-white/60">⌥Space</kbd></button>
       <button class="rounded-full px-2 py-2 font-mono text-[9px] uppercase text-neutral-400 hover:text-neutral-900" aria-label="Clear context selection" on:click={()=>{contextSelection=[];selected=null}}>×</button>
     </section>
   {/if}
-  <div class="absolute left-0 top-0 origin-top-left will-change-transform" style={`transform:translate(${doc.viewport.x}px,${doc.viewport.y}px) scale(${doc.viewport.zoom})`}>
+  <div bind:this={worldLayer} class="absolute left-0 top-0 origin-top-left will-change-transform" style={`transform:${worldTransform(doc.viewport)}`}>
     <svg class="pointer-events-none absolute left-0 top-0 overflow-visible" width="1" height="1" aria-hidden="true">
+      <defs>
+        <marker id="hii-link-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" markerUnits="strokeWidth" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#171717" />
+        </marker>
+      </defs>
+      {#each authoredLinks as link (link.id)}
+        <line x1={link.x1} y1={link.y1} x2={link.x2} y2={link.y2}
+          stroke={selectedLinkId===link.id?'#176bff':'#171717'}
+          stroke-width={selectedLinkId===link.id?2.5:1.75}
+          marker-end={link.arrow==='none'?undefined:'url(#hii-link-arrow)'}
+          marker-start={link.arrow==='both'?'url(#hii-link-arrow)':undefined}
+          vector-effect="non-scaling-stroke" />
+        <!-- A wide transparent line makes a 2px connector clickable at any zoom. -->
+        <line class="pointer-events-auto cursor-pointer" role="button" tabindex="0"
+          aria-label="Connector — select to delete" x1={link.x1} y1={link.y1} x2={link.x2} y2={link.y2}
+          stroke="transparent" stroke-width="14" vector-effect="non-scaling-stroke"
+          on:pointerdown|stopPropagation={()=>{selectedLinkId=link.id;selected=null;contextSelection=[]}}
+          on:keydown={(event)=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();selectedLinkId=link.id}}} />
+      {/each}
+      {#if lassoPath}
+        <polygon points={lassoPath.join(',')} fill="rgba(23,107,255,.08)" stroke="#176bff" stroke-width="1.5"
+          stroke-dasharray="5 4" vector-effect="non-scaling-stroke" />
+      {/if}
+      {#if livePreview}
+        <polyline points={livePreview.join(',')} fill="none"
+          stroke={INK_DEFAULT_COLOR} stroke-width={INK_DEFAULT_WIDTH} stroke-linecap="round" stroke-linejoin="round" />
+      {/if}
+      {#if linkDraft}
+        <line x1={linkDraft.x1} y1={linkDraft.y1} x2={linkDraft.x2} y2={linkDraft.y2}
+          stroke="#176bff" stroke-width="2" stroke-dasharray="5 5" marker-end="url(#hii-link-arrow)" vector-effect="non-scaling-stroke" />
+      {/if}
       {#each connections as connection (connection.id)}
         <line x1={connection.x1} y1={connection.y1} x2={connection.x2} y2={connection.y2}
           stroke={connection.kind==='context'?'#8aa4c8':'#176bff'}
@@ -487,11 +956,22 @@
           opacity={connection.kind==='context'?0.55:0.72}
           vector-effect="non-scaling-stroke" />
       {/each}
+      {#each snapGuides as guide, index (index)}
+        <line
+          x1={guide.axis==='x'?guide.position:guide.from} y1={guide.axis==='x'?guide.from:guide.position}
+          x2={guide.axis==='x'?guide.position:guide.to} y2={guide.axis==='x'?guide.to:guide.position}
+          stroke="#ff3d7f" stroke-width="1" stroke-dasharray="4 4" vector-effect="non-scaling-stroke" />
+      {/each}
     </svg>
-    {#each doc.nodes as node (node.id)}<section role="group" aria-label={`${node.type} workspace node`} data-context-selected={contextSelection.includes(node.id)} class="group absolute left-0 top-0 flex flex-col overflow-hidden" class:hidden={Boolean(node.frameId&&collapsedFrameIds.has(node.frameId))} class:pointer-events-none={node.type==='frame'} class:ring-2={contextSelection.includes(node.id)||selected===node.id} class:ring-blue-500={contextSelection.includes(node.id)||selected===node.id} on:pointerdown={(event)=>drag(event,node)} style={`transform:translate(${node.x}px,${node.y}px);width:${node.w}px;height:${node.h}px;z-index:${Math.round(node.z)}`}>
+    {#if marquee}
+      <div aria-hidden="true" class="pointer-events-none absolute border border-blue-500 bg-blue-500/10"
+        style={`left:${Math.min(marquee.x,marquee.x+marquee.w)}px;top:${Math.min(marquee.y,marquee.y+marquee.h)}px;width:${Math.abs(marquee.w)}px;height:${Math.abs(marquee.h)}px`}></div>
+    {/if}
+    {#each doc.nodes as node (node.id)}{#if !(node.frameId&&collapsedFrameIds.has(node.frameId))}<section role="group" aria-label={`${node.type} workspace node`} data-node-id={node.id} data-context-selected={contextSelection.includes(node.id)} class="group absolute left-0 top-0 flex flex-col overflow-hidden [contain:layout_paint]" class:pointer-events-none={node.type==='frame'} class:ring-2={contextSelection.includes(node.id)||selected===node.id||linkTargetId===node.id} class:ring-blue-500={contextSelection.includes(node.id)||selected===node.id} class:ring-emerald-500={linkTargetId===node.id&&!contextSelection.includes(node.id)&&selected!==node.id} on:pointerdown={(event)=>drag(event,node)} style={`transform:translate(${node.x}px,${node.y}px);width:${node.w}px;height:${node.h}px;z-index:${Math.round(node.z)}`}>
       <header class="pointer-events-none absolute right-1 top-1 z-20"><span class="sr-only">{String(node.payload.title||node.type)}</span><button class="pointer-events-auto grid h-6 w-6 place-items-center rounded-full bg-neutral-950/80 text-sm text-white opacity-0 shadow-sm transition-opacity hover:bg-neutral-950 group-hover:opacity-100 focus:opacity-100" on:click={()=>close(node.id)} aria-label="close node">×</button></header>
       <div class="relative min-h-0 flex-1">
-        {#if node.type==='frame'}<div class="h-full rounded-2xl border-2 border-dashed border-blue-500/60 bg-blue-50/10">
+        {#if !isMounted(node)}<div aria-hidden="true" class="h-full rounded-xl border border-neutral-900/5 bg-neutral-100/70"></div>
+        {:else if node.type==='frame'}<div class="h-full rounded-2xl border-2 border-dashed border-blue-500/60 bg-blue-50/10">
           <div class="pointer-events-auto flex h-10 cursor-move items-center gap-2 border-b border-blue-500/20 bg-blue-50/90 px-3 text-blue-950">
             <span class="shrink-0 rounded-full bg-blue-100 px-2 py-1 font-mono text-[8px] uppercase tracking-[.08em] text-blue-700">Scene {scenes.findIndex(scene=>scene.id===node.id)+1}</span>
             <input aria-label="Scene name" class="min-w-0 flex-1 bg-transparent text-[12px] font-semibold outline-none" value={String(node.payload.title||'Scene')} on:change={(event)=>patch(node.id,{payload:{...node.payload,title:event.currentTarget.value}})} />
@@ -504,10 +984,11 @@
         {:else if node.object?.kind==='artifact'&&node.payload.adapter==='run-artifact'}<RunArtifactPane {node} onPatch={(next)=>patch(node.id,next)} />
         {:else if node.object?.kind==='capability'}<GovernedCapabilityPane {node} onPatch={(next)=>patch(node.id,next)} />
         {:else if ['artifact','receipt'].includes(node.object?.kind||'')}<GovernedResultPane {node} />
-        {:else if ['note','text','canvas-text','ink','link','file','image','media','html','font'].includes(node.type)}<StaticNode {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} onSize={(size)=>patch(node.id,size)} onPromote={(item,label)=>promoteContactSheetItem(node,item,label)} onOrganize={()=>organizeContactSheetSelection(node)} />
+        {:else if node.type==='ink'}<InkPane {node} />
+        {:else if ['note','text','canvas-text','link','file','image','media','html','font'].includes(node.type)}<StaticNode {node} onPayload={(payload)=>patchSoon(node.id,{payload:{...node.payload,...payload}})} onSize={(size)=>patch(node.id,size)} onPromote={(item,label)=>promoteContactSheetItem(node,item,label)} onOrganize={()=>organizeContactSheetSelection(node)} />
         {:else if node.type==='intent'}<IntentPane {node} />
         {:else if node.type==='run'}<SpatialRunPane {node} onPatch={(next)=>patchRunNode(node,next)} onFollowUp={(text)=>followUp(node,text)} onComplete={(result)=>completedRunNodes(node,result)} onCapabilityDraft={(result)=>materializeCapabilityDraft(node,result)} />
-        {:else if node.type==='document'}<DocumentPane {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} />
+        {:else if node.type==='document'}<DocumentPane {node} onPayload={(payload)=>patchSoon(node.id,{payload:{...node.payload,...payload}})} />
         {:else if node.type==='cad'}<CadPane {node} onPayload={(payload)=>patch(node.id,{payload:{...node.payload,...payload}})} />
         {:else if node.type==='model'}{#if ModelPaneComponent}<svelte:component this={ModelPaneComponent} {node} onPayload={(payload:Record<string,unknown>)=>patch(node.id,{payload:{...node.payload,...payload}})} />{:else}<div class="grid h-full place-items-center bg-[#f3f1ec] p-5 text-center font-mono text-[10px] uppercase tracking-[0.12em] text-neutral-400">{modelPaneError||'loading 3D viewer…'}</div>{/if}
         {:else if node.type==='terminal'}<TerminalPane sessionId={String(node.payload.sessionId)} cwd={String(node.payload.cwd||'')} />
@@ -561,7 +1042,12 @@
         {:else if node.type==='sound-field'}<div class="relative h-full overflow-hidden bg-[#07131c] text-white"><div class="absolute inset-0 opacity-70" style="background:radial-gradient(circle at 65% 55%,#ffce3a 0,transparent 7%),radial-gradient(circle at 45% 40%,#ff6b35 0,transparent 14%),radial-gradient(circle at 50% 50%,#176bff 0,transparent 55%)"></div><div class="relative p-5"><p class="font-mono text-xs text-white/60">MODELED / WEEKDAY / 18:00</p><h2 class="mt-2 text-3xl">South Berkeley Sound Field</h2><p class="mt-3 max-w-sm text-sm text-white/70">A provenance-aware spatial scene. Replace modeled values with calibrated measurements before analysis.</p></div></div>
         {:else}<div class="grid h-full place-items-center p-4 font-mono text-[11px] text-neutral-400">{String(node.payload.text||node.payload.title||node.type)}</div>{/if}
       </div><button type="button" aria-label={`Resize ${node.type} node`} class="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize" on:pointerdown={(event)=>resize(event,node)}></button>
-    </section>{/each}
+      {#if node.type!=='frame'}
+        <button type="button" aria-label={`Draw a connector from this ${node.type} node`}
+          class="absolute -right-2 top-1/2 z-20 grid h-4 w-4 -translate-y-1/2 place-items-center rounded-full border border-neutral-900/20 bg-white text-[8px] text-neutral-500 opacity-0 shadow transition-opacity hover:bg-[var(--hii-electric-blue)] hover:text-white group-hover:opacity-100 focus:opacity-100"
+          on:pointerdown={(event)=>startLink(event,node)}>→</button>
+      {/if}
+    </section>{/if}{/each}
     {#if composerOpen}<section data-workspace-ui class="absolute z-[9999] w-[min(620px,80vw)] -translate-x-1/2 overflow-hidden rounded-2xl border border-neutral-900/10 bg-white/95 shadow-2xl backdrop-blur-xl" style={`left:${composerAt.x}px;top:${composerAt.y}px`}>
       {#if selectedContextNodes.length}<div class="flex max-h-24 flex-wrap gap-1.5 overflow-auto border-b px-4 py-3">{#each selectedContextNodes as contextNode}<span class="max-w-[220px] truncate rounded-full bg-blue-50 px-2.5 py-1 font-mono text-[8px] uppercase tracking-[.06em] text-blue-700">{workspaceNodeTitle(contextNode)}</span>{/each}</div>{/if}
       <div class="flex items-start gap-3 p-4">
@@ -599,6 +1085,9 @@
       </div>
     </section>
   {/if}
+  {#if libraryOpen}
+    <ImageLibrary images={libraryImages} onClose={()=>libraryOpen=false} onPlace={placeLibraryImage} />
+  {/if}
   <input bind:this={fileInput} type="file" multiple class="sr-only" aria-label="Upload files to workspace" on:change={(event)=>{void addFiles([...(event.currentTarget.files||[])]);event.currentTarget.value=''}}/>
   <div data-workspace-ui class="absolute left-5 top-4 z-40">
     <button class="rounded-full border border-neutral-900/10 bg-white/95 px-4 py-2 font-mono text-[10px] uppercase tracking-[.08em] text-neutral-700 shadow-lg backdrop-blur hover:border-neutral-900/25" on:click={()=>workspaceMenu=!workspaceMenu} aria-expanded={workspaceMenu} aria-haspopup="menu">{workspaceId} <span class="ml-2 text-neutral-400">⌄</span></button>
@@ -608,7 +1097,16 @@
       <button class="mt-1 w-full rounded-xl border border-dashed border-neutral-300 px-3 py-2 text-left text-[12px] text-neutral-600 hover:border-neutral-500" on:click={()=>void createNamedWorkspace()} role="menuitem">+ New workspace</button>
     </div>{/if}
   </div>
-  {#if doc.nodes.length}<div data-workspace-ui class="absolute bottom-5 left-5 z-40 flex gap-2">
+  <div data-workspace-ui class="absolute bottom-5 left-5 z-40 flex gap-2">
+    <button
+      class={`rounded-full border px-4 py-2 font-mono text-[10px] uppercase tracking-[.08em] shadow-lg backdrop-blur ${penActive?'border-transparent bg-neutral-950 text-white':'border-neutral-900/10 bg-white/95 text-neutral-700 hover:border-neutral-900/25'}`}
+      aria-pressed={penActive} on:click={togglePen}
+    >Pen <kbd class={`ml-2 ${penActive?'text-white/50':'text-neutral-400'}`}>P</kbd></button>
+    <button
+      class={`rounded-full border px-4 py-2 font-mono text-[10px] uppercase tracking-[.08em] shadow-lg backdrop-blur ${libraryOpen?'border-transparent bg-neutral-950 text-white':'border-neutral-900/10 bg-white/95 text-neutral-700 hover:border-neutral-900/25'}`}
+      aria-pressed={libraryOpen} on:click={()=>libraryOpen=!libraryOpen}
+    >Images</button>
+    {#if doc.nodes.length}
     <button class="rounded-full border border-neutral-900/10 bg-white/95 px-4 py-2 font-mono text-[10px] uppercase tracking-[.08em] text-neutral-700 shadow-lg backdrop-blur hover:border-neutral-900/25" on:click={fitAll} aria-label="Fit all workspace content">Fit all <kbd class="ml-2 text-neutral-400">⇧1</kbd></button>
     <div class="relative">
       <button class="rounded-full border border-neutral-900/10 bg-white/95 px-4 py-2 font-mono text-[10px] uppercase tracking-[.08em] text-neutral-700 shadow-lg backdrop-blur hover:border-neutral-900/25" on:click={()=>mapMenu=!mapMenu} aria-label="Open workspace map" aria-expanded={mapMenu}>Map <kbd class="ml-2 text-neutral-400">{scenes.length}</kbd></button>
@@ -623,7 +1121,8 @@
         onAdjacentScene={openAdjacentScene}
       />{/if}
     </div>
-  </div>{/if}
+    {/if}
+  </div>
   <div data-workspace-ui class="absolute right-5 top-4 z-40">
     <button class="rounded-full border px-4 py-2 font-mono text-[10px] uppercase tracking-[.08em] shadow-lg backdrop-blur" class:border-transparent={['ready','busy'].includes(runtimeHealth.state)} class:bg-neutral-950={runtimeHealth.state==='ready'} class:bg-[var(--hii-electric-blue)]={runtimeHealth.state==='busy'} class:text-white={['ready','busy'].includes(runtimeHealth.state)} class:border-amber-300={runtimeHealth.state==='attention'} class:bg-amber-50={runtimeHealth.state==='attention'} class:text-amber-900={runtimeHealth.state==='attention'} class:border-red-200={runtimeHealth.state==='offline'} class:bg-white={runtimeHealth.state==='offline'} class:text-red-700={runtimeHealth.state==='offline'} on:click={()=>{healthOpen=!healthOpen;if(healthOpen)void refreshDaemon()}} aria-expanded={healthOpen} aria-haspopup="dialog">
       <i class="mr-2 inline-block h-2 w-2 rounded-full" class:animate-pulse={runtimeHealth.state==='busy'} class:bg-[var(--hii-acid-green)]={runtimeHealth.state==='ready'} class:bg-white={runtimeHealth.state==='busy'} class:bg-amber-500={runtimeHealth.state==='attention'} class:bg-red-500={runtimeHealth.state==='offline'}></i>{runtimeHealth.label}
@@ -636,5 +1135,5 @@
       <div class="mt-4 flex justify-end gap-2"><button class="rounded-full border px-3 py-1.5 font-mono text-[8px] uppercase text-neutral-600" on:click={refreshDaemon}>Refresh</button>{#if runtimeHealth.recoveryAction}<button class="rounded-full bg-neutral-950 px-3 py-1.5 font-mono text-[8px] uppercase text-white disabled:opacity-40" disabled={daemonActionBusy} on:click={()=>controlDaemon(runtimeHealth.recoveryAction)}>{daemonActionBusy?'Working…':runtimeHealth.recoveryLabel}</button>{/if}</div>
     </div>{/if}
   </div>
-  {#if omnibar}<div class="absolute inset-0 z-50 bg-white/80 backdrop-blur-sm"><button type="button" class="absolute inset-0 cursor-default" aria-label="Close command palette" on:click={()=>omnibar=false}></button><div class="absolute left-1/2 top-1/2 w-[min(620px,90vw)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog" aria-modal="true" aria-label="Create workspace object"><div class="flex items-center gap-3 border-b p-4"><span>⌘K</span><input bind:this={commandInput} bind:value={query} class="w-full outline-none" placeholder="Find anything, open a tool, or create…" /></div><div class="max-h-[420px] overflow-auto p-2">{#if nodeResults.length}<p class="px-3 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[.12em] text-neutral-400">On this canvas</p>{#each nodeResults as result}<button class="flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-blue-50" on:click={()=>focusNode(result.node)}><span class="grid h-8 w-8 place-items-center rounded-lg bg-blue-50 text-sm text-blue-600">⌖</span><span class="min-w-0 flex-1"><strong class="block truncate">{result.title}</strong><small class="text-neutral-400">{result.node.type} · focus on canvas</small></span><kbd class="font-mono text-[10px] text-neutral-400">find</kbd></button>{/each}<div class="my-2 border-t"></div>{/if}{#each commands as command}<button class="flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-neutral-50" on:click={()=>runCommand(command)}><span class="text-xl">{command[0]==='fit'?'⌖':command[0]==='surface'?'↗':'+'}</span><span class="flex-1"><strong class="block">{command[1]}</strong><small class="text-neutral-400">{command[2]}</small></span><kbd class="font-mono text-[10px] text-neutral-400">{command[0]==='fit'?'view':command[0]==='surface'?'open':command[0]==='upload'?'choose':'create'}</kbd></button>{/each}</div></div></div>{/if}
+  {#if omnibar}<div class="absolute inset-0 z-50 bg-white/80 backdrop-blur-sm"><button type="button" class="absolute inset-0 cursor-default" aria-label="Close command palette" on:click={()=>omnibar=false}></button><div class="absolute left-1/2 top-1/2 w-[min(620px,90vw)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog" aria-modal="true" aria-label="Create workspace object"><div class="flex items-center gap-3 border-b p-4"><span>⌘K</span><input bind:this={commandInput} bind:value={query} class="w-full outline-none" placeholder="Tell HII what to do, find, open, or create…" on:keydown={(event)=>{if(event.key==='Enter'){event.preventDefault();submitOmnibar()}}} /></div><div class="max-h-[420px] overflow-auto p-2">{#if nodeResults.length}<p class="px-3 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[.12em] text-neutral-400">On this canvas</p>{#each nodeResults as result}<button class="flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-blue-50" on:click={()=>focusNode(result.node)}><span class="grid h-8 w-8 place-items-center rounded-lg bg-blue-50 text-sm text-blue-600">⌖</span><span class="min-w-0 flex-1"><strong class="block truncate">{result.title}</strong><small class="text-neutral-400">{result.node.type} · focus on canvas</small></span><kbd class="font-mono text-[10px] text-neutral-400">find</kbd></button>{/each}<div class="my-2 border-t"></div>{/if}{#each commands as command}<button class="flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-neutral-50" on:click={()=>runCommand(command)}><span class="text-xl">{command[0]==='fit'?'⌖':command[0]==='surface'?'↗':'+'}</span><span class="flex-1"><strong class="block">{command[1]}</strong><small class="text-neutral-400">{command[2]}</small></span><kbd class="font-mono text-[10px] text-neutral-400">{command[0]==='fit'?'view':command[0]==='surface'?'open':command[0]==='upload'?'choose':'create'}</kbd></button>{/each}</div></div></div>{/if}
 </main>{/if}

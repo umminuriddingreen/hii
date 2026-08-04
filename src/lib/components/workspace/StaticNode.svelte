@@ -173,6 +173,15 @@
     if(markOut>markIn)onPayload({contextAnchor:{kind:'media-range',startSeconds:markIn,endSeconds:markOut}});
   }
 
+  // Canvas text formatting. Sizes are a small ladder rather than a free number so
+  // a board keeps a consistent typographic rhythm.
+  const TEXT_SIZES=[{label:'S',size:16},{label:'M',size:22},{label:'L',size:34},{label:'XL',size:54}];
+  const TEXT_ALIGNMENTS=[{value:'left',glyph:'⇤'},{value:'center',glyph:'↔'},{value:'right',glyph:'⇥'}] as const;
+  const TEXT_COLORS=['#171717','#176bff','#e5484d','#12805c','#f5a623'];
+  $: textSize=Number(node.payload.fontSize)>0?Number(node.payload.fontSize):22;
+  $: textWeight=Number(node.payload.fontWeight)>0?Number(node.payload.fontWeight):500;
+  $: textAlign=['left','center','right'].includes(String(node.payload.textAlign))?String(node.payload.textAlign):'left';
+
   function useDesignSelection() {
     const layers=designLayers.split(',').map((value)=>value.trim()).filter(Boolean);
     if(!designFrame.trim()&&!layers.length)return;
@@ -185,7 +194,48 @@
 {:else if node.type==='text'}
   <div class="flex h-full flex-col bg-white"><div class="border-b px-3 py-1.5 font-mono text-[9px] text-neutral-400">{text('name')||'text'} {node.payload.truncated?'· preview truncated':''}</div><textarea class="min-h-0 flex-1 resize-none p-3 font-mono text-[11px] leading-relaxed outline-none" value={text('content')} on:input={(e)=>onPayload({content:e.currentTarget.value})}></textarea></div>
 {:else if node.type==='canvas-text'}
-  <textarea class="h-full w-full resize-none overflow-hidden bg-transparent p-2 text-[22px] font-medium leading-tight outline-none" style={`color:${text('color')||'#171717'}`} value={text('text')} on:input={(e)=>onPayload({text:e.currentTarget.value})} placeholder="Type…"></textarea>
+  <div class="group/text relative h-full w-full">
+    <textarea
+      class="h-full w-full resize-none overflow-hidden bg-transparent p-2 leading-tight outline-none"
+      style={`color:${text('color')||'#171717'};font-size:${textSize}px;font-weight:${textWeight};text-align:${textAlign}`}
+      value={text('text')} on:input={(e)=>onPayload({text:e.currentTarget.value})} placeholder="Type…"
+    ></textarea>
+    <!-- Formatting stays out of the way until the node is hovered or focused,
+         so a text object still reads as plain text on the board. -->
+    <div
+      class="pointer-events-none absolute -top-9 left-0 z-30 flex items-center gap-1 rounded-full border border-neutral-900/10 bg-white/95 px-1.5 py-1 opacity-0 shadow-lg backdrop-blur transition-opacity group-hover/text:pointer-events-auto group-hover/text:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100"
+      role="toolbar" tabindex="-1" aria-label="Text formatting"
+      on:pointerdown|stopPropagation
+    >
+      {#each TEXT_SIZES as option}
+        <button
+          class={`rounded-full px-2 py-1 font-mono text-[9px] uppercase ${textSize===option.size?'bg-neutral-950 text-white':'text-neutral-500 hover:bg-neutral-100'}`}
+          aria-pressed={textSize===option.size} aria-label={`${option.label} text`}
+          on:click={()=>onPayload({fontSize:option.size})}
+        >{option.label}</button>
+      {/each}
+      <span class="mx-0.5 h-4 w-px bg-neutral-200"></span>
+      <button
+        class={`rounded-full px-2 py-1 font-mono text-[9px] ${textWeight>=600?'bg-neutral-950 text-white':'text-neutral-500 hover:bg-neutral-100'}`}
+        aria-pressed={textWeight>=600} aria-label="Bold" on:click={()=>onPayload({fontWeight:textWeight>=600?400:700})}
+      ><strong>B</strong></button>
+      {#each TEXT_ALIGNMENTS as option}
+        <button
+          class={`rounded-full px-2 py-1 font-mono text-[9px] ${textAlign===option.value?'bg-neutral-950 text-white':'text-neutral-500 hover:bg-neutral-100'}`}
+          aria-pressed={textAlign===option.value} aria-label={`Align ${option.value}`}
+          on:click={()=>onPayload({textAlign:option.value})}
+        >{option.glyph}</button>
+      {/each}
+      <span class="mx-0.5 h-4 w-px bg-neutral-200"></span>
+      {#each TEXT_COLORS as swatch}
+        <button
+          class="h-4 w-4 rounded-full border border-neutral-900/15" style={`background:${swatch}`}
+          aria-pressed={(text('color')||'#171717')===swatch} aria-label={`Text colour ${swatch}`}
+          on:click={()=>onPayload({color:swatch})}
+        ></button>
+      {/each}
+    </div>
+  </div>
 {:else if node.type==='ink'}
   <svg class="h-full w-full overflow-visible" viewBox={`0 0 ${node.w} ${node.h}`} aria-label="Canvas ink stroke"><polyline points={(node.payload.points as Array<{x:number;y:number}>||[]).map(p=>`${p.x},${p.y}`).join(' ')} fill="none" stroke={text('color')||'#171717'} stroke-width={Number(node.payload.width)||4} stroke-linecap="round" stroke-linejoin="round" opacity={Number(node.payload.opacity)||1}></polyline></svg>
 {:else if node.type==='link'}

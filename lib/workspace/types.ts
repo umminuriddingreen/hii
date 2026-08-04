@@ -138,6 +138,22 @@ export type WorkspaceNode = {
 
 export type WorkspaceViewport = { x: number; y: number; zoom: number };
 
+/**
+ * A connector the user drew.
+ *
+ * Distinct from the edges derived from `object.parentId` and `payload.context`,
+ * which are records of how work actually flowed and must not be editable. An
+ * authored link is the user's own annotation and carries no provenance claim.
+ */
+export type WorkspaceLink = {
+  id: string;
+  fromId: string;
+  toId: string;
+  label?: string;
+  /** Arrowhead placement. Defaults to an arrow at the `to` end. */
+  arrow?: 'none' | 'end' | 'both';
+};
+
 export type WorkspaceDoc = {
   version: 1;
   revision: number;
@@ -145,6 +161,7 @@ export type WorkspaceDoc = {
   viewport: WorkspaceViewport;
   nextZ: number;
   nodes: WorkspaceNode[];
+  links: WorkspaceLink[];
 };
 
 export function emptyWorkspace(): WorkspaceDoc {
@@ -154,7 +171,8 @@ export function emptyWorkspace(): WorkspaceDoc {
     updatedAt: new Date().toISOString(),
     viewport: { x: 0, y: 0, zoom: 1 },
     nextZ: 1,
-    nodes: []
+    nodes: [],
+    links: []
   };
 }
 
@@ -315,6 +333,39 @@ export function normalizeWorkspace(raw: unknown): WorkspaceDoc {
       zoom: isFiniteNumber(viewport.zoom) ? Math.min(8, Math.max(0.05, viewport.zoom)) : 1
     },
     nextZ: isFiniteNumber(doc.nextZ) ? doc.nextZ : nodes.length + 1,
-    nodes
+    nodes,
+    links: normalizeLinks(doc.links, nodes)
   };
+}
+
+/**
+ * Keep only links whose endpoints still exist.
+ *
+ * A dangling connector would render to nowhere, so deleting a node implicitly
+ * deletes the links touching it — enforced here rather than at every delete site.
+ */
+export function normalizeLinks(raw: unknown, nodes: WorkspaceNode[]): WorkspaceLink[] {
+  if (!Array.isArray(raw)) return [];
+  const known = new Set(nodes.map((node) => node.id));
+  const seen = new Set<string>();
+  const links: WorkspaceLink[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const link = entry as Record<string, unknown>;
+    const fromId = typeof link.fromId === 'string' ? link.fromId : '';
+    const toId = typeof link.toId === 'string' ? link.toId : '';
+    if (!known.has(fromId) || !known.has(toId) || fromId === toId) continue;
+    const id = typeof link.id === 'string' && link.id ? link.id.slice(0, 64) : `${fromId}->${toId}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    links.push({
+      id,
+      fromId,
+      toId,
+      label: sanitizeText(link.label, 120),
+      arrow: link.arrow === 'none' || link.arrow === 'both' ? link.arrow : 'end'
+    });
+    if (links.length >= 1_000) break;
+  }
+  return links;
 }

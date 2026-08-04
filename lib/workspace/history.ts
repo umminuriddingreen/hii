@@ -3,7 +3,16 @@ import type { WorkspaceDoc } from './types';
 export type WorkspaceHistory = { past: WorkspaceDoc[]; future: WorkspaceDoc[] };
 const HISTORY_LIMIT = 50;
 
-const snapshot = (doc: WorkspaceDoc): WorkspaceDoc => structuredClone(doc);
+/**
+ * History snapshots share node objects with the document they came from.
+ *
+ * Nodes are already treated as immutable everywhere — every mutation path builds
+ * a new node object rather than writing into an existing one — so a shallow copy
+ * of the node array is as safe as a deep clone. It matters because a deep clone
+ * duplicated every contact sheet's `items[]` and every 2400-character context
+ * excerpt, fifty times over, purely so undo could exist.
+ */
+const snapshot = (doc: WorkspaceDoc): WorkspaceDoc => ({ ...doc, nodes: [...doc.nodes] });
 const restore = (saved: WorkspaceDoc, current: WorkspaceDoc): WorkspaceDoc => ({
   ...snapshot(saved),
   revision: current.revision,
