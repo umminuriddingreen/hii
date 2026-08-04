@@ -23,11 +23,11 @@ Human intent -> bounded agent/tool work -> logs/proof -> verification -> receipt
 
 ## Worktree Discipline
 
-- Start with `hii context --json` for a machine-readable map of repo paths,
-  runtime files, commands, capabilities, recent jobs, guardrails, and likely
-  next actions.
-- Then run `hii og status` when you need the operational graph's ranked next
-  path from current repo, bridge, job, and runtime context.
+- Start with `hii home --json`, the compact machine-readable map of the current
+  repo, work queue, capabilities, guardrails, and likely next actions.
+- Deepen only when needed with `hii context --json`, `hii work --json`,
+  `hii caps show`, or `hii og status`. The shared cross-agent contract is
+  always available at `hii agents guide`.
 - Check `git status --short` and targeted diffs before editing.
 - Do not reset, delete, format, or rewrite files outside your scoped task.
 - Treat broad untracked folders such as `.claude/`, `.hermes/`, screenshots, and `life/` as possibly owned by another agent or the user.

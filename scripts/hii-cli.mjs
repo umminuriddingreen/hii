@@ -991,6 +991,8 @@ function agentCommandCatalog() {
   return [
     { command: "hii health --text", purpose: "Human-readable repo, env-presence, codex, and bridge snapshot." },
     { command: "hii home --json", purpose: "Token-efficient agent landing snapshot; best first command for agents." },
+    { command: "hii agents status", purpose: "Show which installed agent instruction adapters are configured." },
+    { command: "hii agents guide", purpose: "Print the compact HII-first operating contract shared by agents." },
     { command: "hii context --json", purpose: "Full machine-readable repo, runtime, and capability context." },
     { command: "hii probe", purpose: "Print the full HII worktree probe and stale-runtime warnings." },
     { command: "hii caps show", purpose: "List backend-owned capabilities." },
@@ -1137,6 +1139,7 @@ function agentHomePayload() {
       .map((capability) => ({ id: capability.id, status: capability.status })),
     commands: [
       "hii home --json",
+      "hii agents guide",
       "hii context --json",
       "hii work --json",
       "hii caps show",
@@ -2079,20 +2082,47 @@ function cliSnapshot() {
   return { git, tasks, jobs, running, verified, next };
 }
 
+function compactTask(task) {
+  if (!task) return null;
+  return {
+    id: task.id,
+    title: task.title,
+    lane: task.lane,
+    priority: task.priority,
+    owner: task.owner,
+    coordinate: task.coordinate,
+    updatedAt: task.updatedAt
+  };
+}
+
+function compactJob(job) {
+  return {
+    id: job.id,
+    capabilityId: job.capabilityId,
+    status: job.status,
+    summary: redactText(job.inputSummary || "").replace(/\s+/g, " ").slice(0, 180),
+    proofCount: Array.isArray(job.proofArtifacts) ? job.proofArtifacts.length : 0,
+    updatedAt: job.updatedAt || job.createdAt || null
+  };
+}
+
 function cmdNow(args = []) {
   const snapshot = cliSnapshot();
   if (args.includes("--json")) {
+    const full = args.includes("--full");
     console.log(JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: full ? 1 : 2,
       kind: "hii.cli.snapshot",
       generatedAt: new Date().toISOString(),
       repo: ROOT,
       runtime: RUNTIME,
       git: snapshot.git.worktree,
-      tasks: snapshot.tasks,
-      activeJobs: snapshot.running,
-      recentVerifiedJobs: snapshot.verified.slice(0, 4),
-      next: snapshot.next ?? null
+      tasks: full ? snapshot.tasks : snapshot.tasks.map(compactTask),
+      activeJobs: full ? snapshot.running : snapshot.running.map(compactJob),
+      recentVerifiedJobs: full
+        ? snapshot.verified.slice(0, 4)
+        : snapshot.verified.slice(0, 4).map(compactJob),
+      next: full ? (snapshot.next ?? null) : compactTask(snapshot.next)
     }, null, 2));
     return;
   }
@@ -2189,14 +2219,73 @@ function cmdProof(args = []) {
   console.log("\nCompletion is a claim; proof is the receipt.\n");
 }
 
-function cmdHelp() {
+function cmdAgents(args = []) {
+  const sub = args.find((arg) => !arg.startsWith("-")) || "status";
+  const guide = [
+    "Use HII as the local home for meaningful work on this Mac.",
+    "1. Start with `hii home --json`; use its live workspace, work, and capability coordinates before broader discovery.",
+    "2. Deepen only as needed with `hii context --json`, `hii work --json`, `hii caps show`, or `hii og status`.",
+    "3. Keep human intent and local changes visible. Verify work, inspect `hii proof`, and preserve unclear concurrent work.",
+    "4. `hii ship` may validate and commit locally. Push, publish, spend, message, delete, or widen access only with explicit authority."
+  ];
+  const adapters = [
+    { agent: "codex", path: path.join(os.homedir(), ".codex", "AGENTS.md") },
+    { agent: "claude", path: path.join(os.homedir(), ".claude", "CLAUDE.md") },
+    { agent: "gemini", path: path.join(os.homedir(), ".gemini", "GEMINI.md") },
+    { agent: "hermes", path: path.join(os.homedir(), ".hermes", "config.yaml") }
+  ].map((adapter) => ({
+    ...adapter,
+    configured: fs.existsSync(adapter.path) && fs.readFileSync(adapter.path, "utf8").includes("hii home --json")
+  }));
+  if (sub === "guide") {
+    if (args.includes("--json")) {
+      console.log(JSON.stringify({ schemaVersion: 1, kind: "hii.agent.guide", guide, adapters }, null, 2));
+    } else {
+      console.log(guide.join("\n"));
+    }
+    return;
+  }
+  if (sub !== "status") {
+    console.error("usage: hii agents [status|guide] [--json]");
+    process.exit(1);
+  }
+  if (args.includes("--json")) {
+    console.log(JSON.stringify({ schemaVersion: 1, kind: "hii.agent.adapters", adapters }, null, 2));
+    return;
+  }
+  console.log("HII agent adapters\n");
+  for (const adapter of adapters) {
+    console.log(`${adapter.configured ? GLYPH.ready : GLYPH.warning}  ${adapter.agent.padEnd(8)} ${adapter.path}`);
+  }
+  console.log("\nCanonical guide: hii agents guide");
+}
+
+function cmdHelp(topic) {
+  if (topic) {
+    const entries = agentCommandCatalog().filter((item) =>
+      item.command === `hii ${topic}` || item.command.startsWith(`hii ${topic} `)
+    );
+    console.log(`\n${GLYPH.mark}  HII ${topic.toUpperCase()}\n`);
+    if (entries.length) {
+      for (const item of entries) {
+        console.log(`  ${item.command}`);
+        console.log(`      ${item.purpose}`);
+      }
+    } else {
+      console.log(`  Usage: hii ${topic} [options]`);
+      console.log("  Run `hii help` for the complete command map.");
+    }
+    return;
+  }
   console.log(`\n${GLYPH.mark}  HII COMMAND MAP\n`);
   console.log("  hii                         open the interactive HII terminal");
   console.log("  hii chat                    explicitly open the interactive terminal");
-  console.log("  hii now [--json]            same snapshot, script-friendly");
+  console.log("  hii home [--json]           compact live coordinate for agents and humans");
+  console.log("  hii now [--json]            control-plane snapshot; add --full for receipts");
   console.log("  hii task <intent>           capture a bounded task in the local board");
   console.log("  hii work [--json]           active tasks and governed agent work");
   console.log("  hii proof [receipt-id]      inspect logs, artifacts, and receipts");
+  console.log("  hii agents [status|guide]   show the shared instruction contract");
   console.log("  hii board | jobs | context  detailed state surfaces");
   console.log("  hii codex run <prompt>      managed run through HII daemon");
   console.log("  hii skill report            write a post-verification action receipt");
@@ -2527,6 +2616,10 @@ function cmdShip(args) {
 }
 
 const [cmd, ...rest] = process.argv.slice(2);
+if (cmd && !["help", "--help", "-h"].includes(cmd) && rest.some((arg) => arg === "--help" || arg === "-h")) {
+  cmdHelp(cmd);
+  process.exit(0);
+}
 switch (cmd) {
   case undefined:
     if (process.stdin.isTTY && process.stdout.isTTY) cmdChat(rest);
@@ -2541,7 +2634,7 @@ switch (cmd) {
   case "help":
   case "--help":
   case "-h":
-    cmdHelp();
+    cmdHelp(rest[0]);
     break;
   case "task":
   case "capture":
@@ -2576,6 +2669,7 @@ switch (cmd) {
     break;
   case "sdk": cmdSdk(rest); break;
   case "home": cmdHome(rest); break;
+  case "agents": cmdAgents(rest); break;
   case "context": cmdContext(rest); break;
   case "agent-context": cmdContext(rest); break;
   case "probe": cmdProbe(rest); break;
@@ -2640,11 +2734,13 @@ switch (cmd) {
 usage: hii <command>
 
   chat                open the full-screen conversational HII terminal
-  now [--json]        show the static control-plane snapshot
+  now [--json]        compact control-plane snapshot; add --full for receipts
   console [--open]    show or open the local HII console
   terminal [--open]   compatibility alias for the local HII console
   health [--text]     compatibility alias for status
   home [--json]       compact agent landing snapshot (best first command)
+  agents [status|guide]
+                      show installed instruction adapters or the shared guide
   context [--json]    full repo/runtime/capability context
   probe [--json]      full worktree probe + stale-runtime warnings
   status              env + git + codex snapshot

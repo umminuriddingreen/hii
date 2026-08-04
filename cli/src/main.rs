@@ -48,7 +48,7 @@ use std::{
     name = "hii",
     version,
     about = "Fast, local-first workspace agent",
-    long_about = "HII turns a goal into bounded local work, verification, and an inspectable receipt.\n\nExamples:\n  hii \"fix the failing tests\"\n  hii run --review \"ship the smallest verified patch\"\n  hii proof",
+    long_about = "HII is the local home for human intent, bounded agent work, and inspectable proof.\n\nStart here:\n  hii                          open the interactive workspace\n  hii home                     show the compact current coordinate\n  hii \"fix the failing tests\"  run a bounded goal\n  hii proof                    inspect what completed",
     after_help = legacy::help_footer()
 )]
 struct Cli {
@@ -337,6 +337,11 @@ fn main() -> ExitCode {
             Ok(code) => ExitCode::from(code as u8),
             Err(error) => fail(error),
         };
+    }
+    if let Some((typed, suggestion)) = command_suggestion(&raw[1..]) {
+        return fail(format!(
+            "unknown command `{typed}`; did you mean `hii {suggestion}`?\nIf `{typed}` is a goal, run `hii run {typed}`."
+        ));
     }
     let normalized = normalize_goal_args(raw);
     let cli = Cli::parse_from(normalized);
@@ -1463,6 +1468,80 @@ fn is_native_command(command: &str) -> bool {
     ) || (cfg!(feature = "preview") && command == "schedule")
 }
 
+fn command_suggestion(args: &[String]) -> Option<(String, &'static str)> {
+    let typed = first_command(args)?;
+    if is_native_command(typed) || legacy::is_legacy(typed) || typed.len() < 3 {
+        return None;
+    }
+    let commands = [
+        "run",
+        "status",
+        "doctor",
+        "models",
+        "providers",
+        "login",
+        "proof",
+        "board",
+        "help",
+        "home",
+        "agents",
+        "context",
+        "now",
+        "task",
+        "work",
+        "check",
+        "ship",
+        "caps",
+        "jobs",
+        "daemon",
+        "space",
+        "knowledge",
+        "skill",
+        "bridge",
+        "codex",
+    ];
+    commands
+        .into_iter()
+        .find(|candidate| {
+            edit_distance(typed, candidate) <= 1 || adjacent_transposition(typed, candidate)
+        })
+        .map(|suggestion| (typed.to_string(), suggestion))
+}
+
+fn adjacent_transposition(left: &str, right: &str) -> bool {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    if left.len() != right.len() {
+        return false;
+    }
+    let differences = left
+        .iter()
+        .zip(right)
+        .enumerate()
+        .filter_map(|(index, (a, b))| (a != b).then_some(index))
+        .collect::<Vec<_>>();
+    differences.len() == 2
+        && differences[1] == differences[0] + 1
+        && left[differences[0]] == right[differences[1]]
+        && left[differences[1]] == right[differences[0]]
+}
+
+fn edit_distance(left: &str, right: &str) -> usize {
+    let mut previous = (0..=right.len()).collect::<Vec<_>>();
+    for (left_index, left_byte) in left.bytes().enumerate() {
+        let mut current = vec![left_index + 1];
+        for (right_index, right_byte) in right.bytes().enumerate() {
+            current.push(
+                (current[right_index] + 1)
+                    .min(previous[right_index + 1] + 1)
+                    .min(previous[right_index] + usize::from(left_byte != right_byte)),
+            );
+        }
+        previous = current;
+    }
+    previous[right.len()]
+}
+
 fn normalize_goal_args(mut args: Vec<String>) -> Vec<String> {
     let Some(command) = first_command(&args[1..]).map(str::to_string) else {
         return args;
@@ -1599,6 +1678,19 @@ mod tests {
     fn native_command_is_preserved() {
         let args = vec!["hii".into(), "status".into()];
         assert_eq!(normalize_goal_args(args.clone()), args);
+    }
+
+    #[test]
+    fn command_typos_are_suggested_without_capturing_normal_goals() {
+        assert_eq!(
+            command_suggestion(&["staus".into()]),
+            Some(("staus".into(), "status"))
+        );
+        assert_eq!(
+            command_suggestion(&["contxt".into()]),
+            Some(("contxt".into(), "context"))
+        );
+        assert_eq!(command_suggestion(&["fix".into(), "tests".into()]), None);
     }
 
     /// Every global flag that takes a value must have that value skipped when we

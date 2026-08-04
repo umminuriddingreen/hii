@@ -187,6 +187,7 @@ execution or validation target.
 
 ```sh
 hii home --json
+hii agents guide
 hii og status
 hii caps show
 git status --short
@@ -214,6 +215,7 @@ hii proof
 
 # Existing HII contracts remain available during the Rust migration.
 hii home --json       # compact first read for agents
+hii agents guide      # shared HII-first contract for installed agents
 hii context --json    # full repo/runtime/capability detail when needed
 hii caps show
 hii task "Add source provenance to the import receipt" --coordinate /Users/ummi/hii

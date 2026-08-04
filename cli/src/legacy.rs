@@ -11,6 +11,7 @@ pub const LEGACY_COMMANDS: &[&str] = &[
     "ship",
     "health",
     "home",
+    "agents",
     "context",
     "agent-context",
     "probe",
@@ -41,12 +42,10 @@ pub const LEGACY_COMMANDS: &[&str] = &[
     "start",
 ];
 
-/// The delegated commands, grouped for `--help`.
+/// Additional HII commands, grouped for `--help`.
 ///
-/// These are intercepted before clap ever sees them and handed to the Node
-/// compatibility CLI, which is why they are absent from the generated help.
-/// `hii context --json` working while `hii --help` never mentions it is a
-/// discoverability bug, not a design.
+/// These are routed through the compatibility surface while the Rust migration
+/// continues. That implementation detail should not leak into user-facing help.
 pub const LEGACY_GROUPS: &[(&str, &[&str])] = &[
     (
         "work",
@@ -58,6 +57,7 @@ pub const LEGACY_GROUPS: &[(&str, &[&str])] = &[
         "context",
         &[
             "home",
+            "agents",
             "context",
             "agent-context",
             "og",
@@ -91,14 +91,14 @@ pub const LEGACY_GROUPS: &[(&str, &[&str])] = &[
     ("build", &["dev", "build", "start", "schedule"]),
 ];
 
-/// The `--help` footer naming every delegated command.
+/// The `--help` footer naming every additional command.
 pub fn help_footer() -> String {
-    let mut lines = vec!["Delegated commands (handled by the Node compatibility CLI):".to_string()];
+    let mut lines = vec!["More HII commands:".to_string()];
     for (group, commands) in LEGACY_GROUPS {
         lines.push(format!("  {group:<9} {}", commands.join(" ")));
     }
     lines.push(String::new());
-    lines.push("  Run `hii <command> --help` for any of them.".into());
+    lines.push("  Every command supports `hii <command> --help`.".into());
     lines.join("\n")
 }
 
