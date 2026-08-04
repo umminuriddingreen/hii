@@ -114,7 +114,7 @@ export default function BrowserNode({ node, onPayload }: BrowserNodeProps) {
   const search = useCallback(async (query: string) => {
     setView({ kind: 'loading', url: `search: ${query}` });
     onPayloadRef.current({ query, title: `search: ${query}` });
-    const directSearch = () => navigate(`https://duckduckgo.com/?q=${encodeURIComponent(query)}`);
+    const directSearch = () => navigate(`https://www.google.com/search?q=${encodeURIComponent(query)}`);
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
       const data = (await res.json()) as { results?: SearchResult[]; error?: string };

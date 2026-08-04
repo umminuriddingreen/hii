@@ -71,7 +71,7 @@ describe('workspace contract', () => {
       },
       payload: {
         title: 'live exploration',
-        url: 'https://duckduckgo.com'
+        url: 'https://www.google.com'
       }
     });
     expect(seed.payload.sessionId).toEqual(expect.any(String));

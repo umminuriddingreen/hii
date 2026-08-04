@@ -21,7 +21,7 @@ function normalizeUrl(input: string): string {
   if (!t) return HOME;
   if (/^https?:\/\//i.test(t)) return t;
   if (t.includes(".") && !t.includes(" ")) return `https://${t}`;
-  return `https://duckduckgo.com/?q=${encodeURIComponent(t)}`;
+  return `https://www.google.com/search?q=${encodeURIComponent(t)}`;
 }
 
 export function BrowserView() {

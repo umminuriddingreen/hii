@@ -162,7 +162,7 @@ export function seedFor(type: WorkspaceNodeType, payload: Record<string, unknown
       },
       payload: {
         title: 'live exploration',
-        url: 'https://duckduckgo.com',
+        url: 'https://www.google.com',
         sessionId: crypto.randomUUID(),
         ...payload
       }

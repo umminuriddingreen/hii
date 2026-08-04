@@ -27,7 +27,7 @@
     ? value
     : /^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(value)
       ? `https://${value}`
-      : `https://duckduckgo.com/?q=${encodeURIComponent(value)}`;
+      : `https://www.google.com/search?q=${encodeURIComponent(value)}`;
 
   async function send(command: BrowserCommand) {
     working = true;
@@ -87,7 +87,7 @@
   }
 
   onMount(() => {
-    const initial = String(node.payload.url || 'https://duckduckgo.com');
+    const initial = String(node.payload.url || 'https://www.google.com');
     void send({ type: 'navigate', url: normalize(initial) });
     poll = setInterval(refresh, 1500);
   });
