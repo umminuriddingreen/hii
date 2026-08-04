@@ -30,7 +30,7 @@ const packageJson = readFileSync(resolve(root, 'package.json'), 'utf8');
 const desktopBuild = readFileSync(resolve(root, 'scripts/hii-tauri-build.mjs'), 'utf8');
 const desktopInstall = readFileSync(resolve(root, 'scripts/hii-tauri-install.mjs'), 'utf8');
 const desktopRelease = readFileSync(resolve(root, 'scripts/hii-macos-release.mjs'), 'utf8');
-const cursorBar = readFileSync(resolve(root, 'src/routes/palette/+page.svelte'), 'utf8');
+const cursorBar = readFileSync(resolve(root, 'src/lib/components/NotchSurface.svelte'), 'utf8');
 const staticNode = readFileSync(resolve(root, 'src/lib/components/workspace/StaticNode.svelte'), 'utf8');
 const documentPane = readFileSync(resolve(root, 'src/lib/components/workspace/DocumentPane.svelte'), 'utf8');
 const cadPane = readFileSync(resolve(root, 'src/lib/components/workspace/CadPane.svelte'), 'utf8');
@@ -377,14 +377,15 @@ describe('agentic workspace interaction contract', () => {
     expect(terminal).toContain("window.addEventListener('hii:terminal-command'");
   });
 
-  it('registers a portable cursor-bar shortcut in the Tauri shell', () => {
+  it('registers a portable Notch shortcut in the Tauri shell', () => {
     expect(cargo).toContain('tauri-plugin-global-shortcut');
     expect(desktop).toContain('Modifiers::SUPER | Modifiers::SHIFT');
     expect(desktop).toContain('Modifiers::CONTROL | Modifiers::SHIFT');
     expect(desktop).toContain('"super+shift+space"');
     expect(desktop).toContain('"ctrl+shift+space"');
     expect(desktop).toContain('show_cursor_bar(app)');
-    expect(desktop).toContain('app.cursor_position()');
+    expect(desktop).toContain('set_notch_expanded(app.clone(), true)');
+    expect(desktop).toContain('app.primary_monitor()');
   });
 
   it('keeps cursor intent inside the shared HII runner', () => {
@@ -392,7 +393,7 @@ describe('agentic workspace interaction contract', () => {
     expect(desktop).toContain('.arg("run")');
     expect(desktop).toContain('.join("cursor-bar")');
     expect(cursorBar).toContain("invoke<string>('run_cursor_intent'");
-    expect(cursorBar).toContain("invoke('hide_cursor_bar')");
+    expect(cursorBar).toContain("invoke('set_notch_expanded'");
     expect(cursorBar).toContain('What do you want to happen?');
   });
 

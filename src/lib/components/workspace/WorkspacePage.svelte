@@ -17,6 +17,7 @@
   import WorkspaceNavigator from '$lib/components/workspace/WorkspaceNavigator.svelte';
   import SystemSpace from '$lib/components/workspace/SystemSpace.svelte';
   import HiiLogo from '$lib/components/HiiLogo.svelte';
+  import EcosystemNav from '$lib/components/EcosystemNav.svelte';
   import type { WorkspaceDoc, WorkspaceNode, WorkspaceNodeType } from '@/lib/workspace/types';
   import { makeNode, seedFor, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
   import { countWorkspaceNodesInViewport, fitWorkspaceViewport, panWorkspaceViewport, visibleWorkspaceNodeIds, zoomWorkspaceViewportAt } from '@/lib/workspace/viewport';
@@ -1112,6 +1113,9 @@
       {#each workspaces as item}<button class="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-[13px] hover:bg-neutral-50" class:bg-blue-50={item.id===workspaceId} on:click={()=>void switchWorkspace(item.id)} role="menuitem"><span>{item.id}</span><span class="font-mono text-[9px] uppercase" class:text-red-600={item.status==='recovery'} class:text-neutral-400={item.status!=='recovery'}>{item.status==='recovery'?'recovery':item.id===workspaceId?'open':''}</span></button>{/each}
       <button class="mt-1 w-full rounded-xl border border-dashed border-neutral-300 px-3 py-2 text-left text-[12px] text-neutral-600 hover:border-neutral-500" on:click={()=>void createNamedWorkspace()} role="menuitem">+ New workspace</button>
     </div>{/if}
+  </div>
+  <div data-workspace-ui class="absolute left-1/2 top-4 z-40 -translate-x-1/2">
+    <EcosystemNav current="workspace" />
   </div>
   <div data-workspace-ui class="absolute bottom-5 left-5 z-40 flex gap-2">
     <button

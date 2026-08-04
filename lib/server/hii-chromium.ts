@@ -119,7 +119,7 @@ class ChromiumSession {
   async snapshot() {
     const [shot, state] = await Promise.all([
       this.call('Page.captureScreenshot', { format: 'jpeg', quality: 82, captureBeyondViewport: false }),
-      this.call('Runtime.evaluate', { expression: `({title:document.title,url:location.href,text:document.body?.innerText?.slice(0,4000)||''})`, returnByValue: true })
+      this.call('Runtime.evaluate', { expression: `({title:document.title,url:location.href,text:document.body?.innerText?.slice(0,12000)||'',selection:getSelection()?.toString().slice(0,12000)||''})`, returnByValue: true })
     ]);
     return { image: `data:image/jpeg;base64,${shot.data}`, ...(state.result?.value ?? {}), width: WIDTH, height: HEIGHT };
   }

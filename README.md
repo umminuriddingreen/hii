@@ -31,6 +31,9 @@ product or architecture changes.
 
 HII brings the loop together as one spatial workspace:
 
+- **Notch:** the persistent macOS edge for intent, active state, approvals, and returning to work.
+- **Browser:** a quiet local retrieval mode that turns pages and selections into source-linked context.
+- **Create:** a visual workflow mode for versioned capabilities, reviewed execution, and verified artifacts.
 - **Sidebar:** durable projects, sources, memory, capabilities, and recent work.
 - **Canvas:** the active 2D workspace where people arrange knowledge and work;
   3D may become another view over the same state, not a separate product model.
@@ -45,6 +48,9 @@ HII brings the loop together as one spatial workspace:
 External apps, models, local runtimes, and specialist systems such as Termite
 are capabilities HII coordinates. HII should not recreate every tool it can
 govern.
+
+Notch, Browser, Create, and the spatial Workspace are views over the same HII
+project state and proof history. See [Notch, Browser, and Create](docs/NOTCH_BROWSER_CREATE.md).
 
 The interface should feel bright, spatial, calm, and playful: native to people
 who grew up on the internet without excluding anyone else. Terminal power

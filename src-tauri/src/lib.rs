@@ -12,13 +12,14 @@ use std::{
 };
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
-    Emitter, Manager, PhysicalPosition, RunEvent, Url, WebviewUrl, WebviewWindowBuilder,
-    WindowEvent,
+    Emitter, Manager, PhysicalPosition, PhysicalSize, RunEvent, Url, WebviewUrl,
+    WebviewWindowBuilder, WindowEvent,
 };
 
 const DEFAULT_HII_PORT: u16 = 3042;
-const CURSOR_BAR_WIDTH: f64 = 520.0;
-const CURSOR_BAR_HEIGHT: f64 = 76.0;
+const NOTCH_WIDTH: f64 = 460.0;
+const NOTCH_COLLAPSED_HEIGHT: f64 = 52.0;
+const NOTCH_EXPANDED_HEIGHT: f64 = 320.0;
 const MENU_FOCUS_WORKSPACE: &str = "hii.focus-workspace";
 const MENU_COMMAND_PALETTE: &str = "hii.command-palette";
 const MENU_OPEN_BROWSER: &str = "hii.open-browser";
@@ -57,11 +58,11 @@ fn ensure_cursor_bar(app: &tauri::AppHandle, server_url: &str) -> Result<(), Str
     if app.get_webview_window("cursor-bar").is_some() {
         return Ok(());
     }
-    let url = Url::parse(&format!("{}/palette", server_url.trim_end_matches('/')))
+    let url = Url::parse(&format!("{}/notch", server_url.trim_end_matches('/')))
         .map_err(|error| error.to_string())?;
     WebviewWindowBuilder::new(app, "cursor-bar", WebviewUrl::External(url))
-        .title("HII")
-        .inner_size(CURSOR_BAR_WIDTH, CURSOR_BAR_HEIGHT)
+        .title("HII Notch")
+        .inner_size(NOTCH_WIDTH, NOTCH_COLLAPSED_HEIGHT)
         .resizable(false)
         .maximizable(false)
         .minimizable(false)
@@ -71,8 +72,8 @@ fn ensure_cursor_bar(app: &tauri::AppHandle, server_url: &str) -> Result<(), Str
         .visible_on_all_workspaces(true)
         .skip_taskbar(true)
         .shadow(true)
-        .focused(true)
-        .visible(false)
+        .focused(false)
+        .visible(true)
         .build()
         .map(|_| ())
         .map_err(|error| error.to_string())
@@ -90,52 +91,66 @@ fn show_cursor_bar(app: &tauri::AppHandle) -> Result<(), String> {
         return Err("HII is still starting.".to_string());
     }
     ensure_cursor_bar(app, &server_url)?;
+    set_notch_expanded(app.clone(), true)?;
     let window = app
         .get_webview_window("cursor-bar")
-        .ok_or_else(|| "Cursor bar window is unavailable.".to_string())?;
-    let cursor = app.cursor_position().map_err(|error| error.to_string())?;
-    let monitor = app
-        .monitor_from_point(cursor.x, cursor.y)
-        .map_err(|error| error.to_string())?
-        .or_else(|| app.primary_monitor().ok().flatten());
-
-    let mut x = cursor.x + 18.0;
-    let mut y = cursor.y + 22.0;
-    if let Some(monitor) = monitor {
-        let area = monitor.work_area();
-        let scale = monitor.scale_factor();
-        let width = CURSOR_BAR_WIDTH * scale;
-        let height = CURSOR_BAR_HEIGHT * scale;
-        let left = f64::from(area.position.x);
-        let top = f64::from(area.position.y);
-        let right = left + f64::from(area.size.width);
-        let bottom = top + f64::from(area.size.height);
-        if x + width > right {
-            x = cursor.x - width - 18.0;
-        }
-        if y + height > bottom {
-            y = cursor.y - height - 22.0;
-        }
-        x = x.clamp(left + 8.0, (right - width - 8.0).max(left + 8.0));
-        y = y.clamp(top + 8.0, (bottom - height - 8.0).max(top + 8.0));
-    }
-
-    window
-        .set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32))
-        .map_err(|error| error.to_string())?;
-    window.show().map_err(|error| error.to_string())?;
+        .ok_or_else(|| "HII Notch is unavailable.".to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
     window
-        .emit("hii://cursor-bar-opened", ())
+        .emit("hii://notch-opened", ())
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn hide_cursor_bar(app: tauri::AppHandle) -> Result<(), String> {
+    set_notch_expanded(app, false)
+}
+
+#[tauri::command]
+fn set_notch_expanded(app: tauri::AppHandle, expanded: bool) -> Result<(), String> {
     let window = app
         .get_webview_window("cursor-bar")
-        .ok_or_else(|| "Cursor bar window is unavailable.".to_string())?;
-    window.hide().map_err(|error| error.to_string())
+        .ok_or_else(|| "HII Notch is unavailable.".to_string())?;
+    let height = if expanded {
+        NOTCH_EXPANDED_HEIGHT
+    } else {
+        NOTCH_COLLAPSED_HEIGHT
+    };
+    window
+        .set_size(PhysicalSize::new(NOTCH_WIDTH, height))
+        .map_err(|error| error.to_string())?;
+    if let Some(monitor) = app.primary_monitor().map_err(|error| error.to_string())? {
+        let area = monitor.work_area();
+        let scale = monitor.scale_factor();
+        let width = NOTCH_WIDTH * scale;
+        let x = f64::from(area.position.x) + (f64::from(area.size.width) - width) / 2.0;
+        let y = area.position.y;
+        window
+            .set_position(PhysicalPosition::new(x.round() as i32, y))
+            .map_err(|error| error.to_string())?;
+    }
+    window.show().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn open_hii_mode(app: tauri::AppHandle, route: String) -> Result<(), String> {
+    if !matches!(route.as_str(), "/browser" | "/create" | "/workspace") {
+        return Err("HII mode must be Browser, Create, or Workspace.".to_string());
+    }
+    let base = app
+        .state::<HiiServer>()
+        .0
+        .lock()
+        .map_err(|error| error.to_string())?
+        .url
+        .clone();
+    let url = Url::parse(&format!("{}{route}", base.trim_end_matches('/')))
+        .map_err(|error| error.to_string())?;
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "HII workspace window is unavailable.".to_string())?;
+    window.navigate(url).map_err(|error| error.to_string())?;
+    focus_workspace(&app)
 }
 
 #[tauri::command]
@@ -178,9 +193,7 @@ fn run_cursor_intent(app: tauri::AppHandle, goal: String) -> Result<String, Stri
         .stderr(Stdio::from(error_log))
         .spawn()
         .map_err(|error| error.to_string())?;
-    if let Some(window) = app.get_webview_window("cursor-bar") {
-        let _ = window.hide();
-    }
+    let _ = set_notch_expanded(app.clone(), false);
     Ok(log_path.display().to_string())
 }
 
@@ -454,6 +467,9 @@ pub fn run() {
             if let Err(error) = ensure_cursor_bar(app.handle(), &hii_url) {
                 eprintln!("HII could not prepare the cursor bar: {error}");
             }
+            if let Err(error) = set_notch_expanded(app.handle().clone(), false) {
+                eprintln!("HII could not position Notch: {error}");
+            }
 
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
@@ -480,7 +496,7 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if window.label() == "cursor-bar" && matches!(event, WindowEvent::Focused(false)) {
-                let _ = window.hide();
+                let _ = set_notch_expanded(window.app_handle().clone(), false);
             }
             if matches!(event, WindowEvent::CloseRequested { .. }) {
                 stop_hii_server(window.app_handle());
@@ -490,6 +506,8 @@ pub fn run() {
             desktop_surface,
             browser::browser_navigate,
             hide_cursor_bar,
+            set_notch_expanded,
+            open_hii_mode,
             run_cursor_intent
         ])
         .build(tauri::generate_context!())

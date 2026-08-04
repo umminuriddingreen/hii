@@ -8,6 +8,7 @@ import * as context from '@/app/api/context/route';
 import * as daemonRun from '@/app/api/daemon/runs/[id]/route';
 import * as daemon from '@/app/api/daemon/route';
 import * as developmentSession from '@/app/api/development/session/route';
+import * as ecosystem from '@/app/api/ecosystem/route';
 import * as filesOpen from '@/app/api/files/open/route';
 import * as knowledge from '@/app/api/knowledge/route';
 import * as links from '@/app/api/links/route';
@@ -42,6 +43,7 @@ const routes: Array<{ pattern: RegExp; module: LegacyModule; keys?: string[] }> 
   { pattern: /^daemon\/runs\/([^/]+)$/, module: daemonRun, keys: ['id'] },
   { pattern: /^daemon$/, module: daemon },
   { pattern: /^development\/session$/, module: developmentSession },
+  { pattern: /^ecosystem$/, module: ecosystem },
   { pattern: /^files\/open$/, module: filesOpen },
   { pattern: /^knowledge$/, module: knowledge },
   { pattern: /^links$/, module: links },

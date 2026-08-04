@@ -3,6 +3,8 @@
   import DeskSurfaceShell from '$lib/components/DeskSurfaceShell.svelte';
 
   const surfaces: Record<string, { title: string; id: string; flush?: boolean }> = {
+    '/browser': { title: 'Browser', id: 'browser', flush: true },
+    '/create': { title: 'Create', id: 'create', flush: true },
     '/activate': { title: 'Activation', id: 'activate', flush: true },
     '/boards': { title: 'Boards', id: 'boards' },
     '/console': { title: 'Console', id: 'console', flush: true },

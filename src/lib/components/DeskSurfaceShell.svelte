@@ -6,6 +6,8 @@
   export let flush = false;
 
   const rail = [
+    { href: '/browser', id: 'browser', glyph: '◎', label: 'Browser' },
+    { href: '/create', id: 'create', glyph: '◇', label: 'Create' },
     { href: '/knowledge', id: 'knowledge', glyph: 'K', label: 'Knowledge' },
     { href: '/activate', id: 'activate', glyph: '✦', label: 'Activate' },
     { href: '/boards', id: 'boards', glyph: 'B', label: 'Boards' },
@@ -13,6 +15,9 @@
   ];
   const dock = [
     { href: '/', id: 'desk', label: 'desk' },
+    { href: '/notch', id: 'notch', label: 'notch' },
+    { href: '/browser', id: 'browser', label: 'browser' },
+    { href: '/create', id: 'create', label: 'create' },
     { href: '/knowledge', id: 'knowledge', label: 'knowledge' },
     { href: '/activate', id: 'activate', label: 'activate' },
     { href: '/boards', id: 'boards', label: 'boards' },

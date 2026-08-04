@@ -1303,5 +1303,50 @@
     "evidence": ["cli/src/system_monitor.rs", "/top", "/resources"],
     "status": "ready",
     "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.notch.ambient",
+    "name": "Use HII Notch",
+    "owner": "hii",
+    "runtime": "next-route",
+    "summary": "Keep meaningful HII state persistently available at the top of the Mac, accept intent through the existing governed run path, and open Browser, Create, or Workspace without creating another agent runtime.",
+    "inputs": ["human intent", "local ecosystem events", "active HII run state"],
+    "outputs": ["bounded HII run", "ambient status projection", "mode navigation"],
+    "permissions": ["local HII origin only", "existing hii run authority", "no independent task store", "no external transmission without existing review"],
+    "visibility": "local",
+    "costModel": {"type": "free"},
+    "evidence": ["src/lib/components/NotchSurface.svelte", "src-tauri/src/lib.rs", "~/.hii/ecosystem/events.jsonl"],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.browser.retrieval",
+    "name": "Capture Source-Linked Browser Context",
+    "owner": "hii",
+    "runtime": "next-route",
+    "summary": "Browse through a temporary local Chromium session and turn an HTTP(S) page or explicit selection into a project-scoped local capture with provenance and a SHA-256 content hash.",
+    "inputs": ["HTTP(S) URL", "page text", "explicit browser selection", "project id"],
+    "outputs": ["local hii.capture record", "source hash", "Create handoff"],
+    "permissions": ["local HII origin only", "HTTP(S) navigation only", "capture stays local", "model delivery requires separate review"],
+    "visibility": "local",
+    "costModel": {"type": "free"},
+    "evidence": ["src/routes/(app)/browser/+page.svelte", "lib/server/hii-chromium.ts", "lib/server/hii-ecosystem.ts"],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.create.workflow",
+    "name": "Run Versioned Create Workflows",
+    "owner": "hii",
+    "runtime": "next-route",
+    "summary": "Version source-linked visual workflow graphs, require review of the exact revision, queue the ComfyUI API prompt through a local-only adapter, and retain output references as proof.",
+    "inputs": ["Browser capture", "workflow graph", "ComfyUI API prompt", "explicit revision approval"],
+    "outputs": ["append-only workflow revision", "ComfyUI prompt id", "run events", "verified output references"],
+    "permissions": ["local HII origin only", "local ComfyUI endpoint only", "explicit approval before queue", "no automatic publication or upload"],
+    "visibility": "local",
+    "costModel": {"type": "local-compute"},
+    "evidence": ["src/routes/(app)/create/+page.svelte", "lib/server/hii-comfy.ts", "app/api/ecosystem/route.ts"],
+    "status": "ready",
+    "trustLevel": "operator-reviewed"
   }
 ]
