@@ -990,7 +990,8 @@ function cmdStatus() {
 function agentCommandCatalog() {
   return [
     { command: "hii health --text", purpose: "Human-readable repo, env-presence, codex, and bridge snapshot." },
-    { command: "hii context --json", purpose: "Machine-readable agent context snapshot; best first command for agents." },
+    { command: "hii home --json", purpose: "Token-efficient agent landing snapshot; best first command for agents." },
+    { command: "hii context --json", purpose: "Full machine-readable repo, runtime, and capability context." },
     { command: "hii probe", purpose: "Print the full HII worktree probe and stale-runtime warnings." },
     { command: "hii caps show", purpose: "List backend-owned capabilities." },
     { command: "hii og status", purpose: "Infer likely next work from repo, bridge, job, and runtime context." },
@@ -1111,6 +1112,61 @@ function agentContextPayload() {
   };
 }
 
+function agentHomePayload() {
+  const context = agentContextPayload();
+  const activeJobs = context.localState.recentJobs.filter((job) =>
+    ["queued", "running", "working", "attention"].includes(job.status)
+  );
+  return {
+    schemaVersion: 1,
+    kind: "hii.agent.home",
+    generatedAt: context.generatedAt,
+    identity: context.identity,
+    workspace: {
+      branch: context.git.branch,
+      clean: context.git.worktree.clean,
+      changes: context.git.worktree.counts,
+      files: context.git.worktree.files.slice(0, 8)
+    },
+    work: {
+      board: context.localState.boardTasks,
+      activeJobs
+    },
+    capabilities: context.capabilities
+      .filter((capability) => capability.status === "ready" || capability.status === "partial")
+      .map((capability) => ({ id: capability.id, status: capability.status })),
+    commands: [
+      "hii home --json",
+      "hii context --json",
+      "hii work --json",
+      "hii caps show",
+      "hii og status",
+      "hii ship"
+    ],
+    guardrails: context.guardrails.slice(0, 5),
+    nextActions: context.nextActions.slice(0, 3)
+  };
+}
+
+function cmdHome(args) {
+  const payload = agentHomePayload();
+  if (args.includes("--json")) {
+    console.log(JSON.stringify(payload, null, 2));
+    return;
+  }
+  console.log("HII Home\n");
+  console.log(`repo:    ${payload.identity.repo}`);
+  console.log(`runtime: ${payload.identity.runtime}`);
+  console.log(`git:     ${payload.workspace.branch}${payload.workspace.clean ? " (clean)" : ` (${payload.workspace.changes.total} changes)`}`);
+  console.log(`work:    ${payload.work.board.open} open tasks · ${payload.work.activeJobs.length} active jobs`);
+  console.log(`caps:    ${payload.capabilities.length} ready or partial`);
+  if (payload.nextActions.length) {
+    console.log(`next:    ${payload.nextActions[0].track} — ${payload.nextActions[0].action}`);
+  }
+  console.log("\nFor agents: hii home --json");
+  console.log("Full detail: hii context --json");
+}
+
 function cmdContext(args) {
   const payload = agentContextPayload();
   if (args.includes("--json")) {
@@ -1133,7 +1189,8 @@ function cmdContext(args) {
   for (const item of payload.nextActions.slice(0, 3)) {
     console.log(`  ${item.score} ${item.track}: ${item.action}`);
   }
-  console.log("\nFor agents: hii context --json");
+  console.log("\nFor agents: hii home --json");
+  console.log("Full detail: hii context --json");
 }
 
 function cmdProbe(args) {
@@ -2518,6 +2575,7 @@ switch (cmd) {
     cmdCaps(rest);
     break;
   case "sdk": cmdSdk(rest); break;
+  case "home": cmdHome(rest); break;
   case "context": cmdContext(rest); break;
   case "agent-context": cmdContext(rest); break;
   case "probe": cmdProbe(rest); break;
@@ -2586,7 +2644,8 @@ usage: hii <command>
   console [--open]    show or open the local HII console
   terminal [--open]   compatibility alias for the local HII console
   health [--text]     compatibility alias for status
-  context [--json]    agent-readable repo/runtime/capability context
+  home [--json]       compact agent landing snapshot (best first command)
+  context [--json]    full repo/runtime/capability context
   probe [--json]      full worktree probe + stale-runtime warnings
   status              env + git + codex snapshot
   doctor              status + registry doctor

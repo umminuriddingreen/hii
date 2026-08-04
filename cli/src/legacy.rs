@@ -10,6 +10,7 @@ pub const LEGACY_COMMANDS: &[&str] = &[
     "check",
     "ship",
     "health",
+    "home",
     "context",
     "agent-context",
     "probe",
@@ -56,6 +57,7 @@ pub const LEGACY_GROUPS: &[(&str, &[&str])] = &[
     (
         "context",
         &[
+            "home",
             "context",
             "agent-context",
             "og",

@@ -510,8 +510,8 @@ Before mutation:
 1. Confirm repository, branch, status, and recent history.
 2. Read root and scoped `AGENTS.md` and this document.
 3. Read current Context Dock architecture and release decisions.
-4. Run `hii context --json`, `hii caps show`, and exact `hii og status` when
-   available.
+4. Run `hii home --json` first. Use `hii context --json`, `hii caps show`, and
+   exact `hii og status` only when the compact home snapshot is insufficient.
 5. Inspect schemas, migrations, capability contracts, scripts, routes, and
    relevant tests.
 6. Compare implementation truth with this context and report conflicts.

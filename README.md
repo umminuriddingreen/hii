@@ -186,7 +186,7 @@ execution or validation target.
 ## Agent Bootstrap
 
 ```sh
-hii context --json
+hii home --json
 hii og status
 hii caps show
 git status --short
@@ -213,7 +213,8 @@ hii models
 hii proof
 
 # Existing HII contracts remain available during the Rust migration.
-hii context --json
+hii home --json       # compact first read for agents
+hii context --json    # full repo/runtime/capability detail when needed
 hii caps show
 hii task "Add source provenance to the import receipt" --coordinate /Users/ummi/hii
 hii work
