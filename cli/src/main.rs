@@ -9,6 +9,7 @@ mod config;
 mod context;
 mod contract;
 mod conversation;
+mod governance;
 mod hii_tools;
 mod hooks;
 mod keyboard;
@@ -243,6 +244,12 @@ enum Commands {
             help = "Authority envelope for tools/call: read-only | workspace | external-preview | external-commit | yolo"
         )]
         authority: Option<String>,
+        #[arg(
+            long,
+            value_name = "ID",
+            help = "Apply the configured per-client ACL for this caller identity"
+        )]
+        client_identity: Option<String>,
     },
     #[command(
         name = "acp-serve",
@@ -478,13 +485,16 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             println!("{}", acp::render());
             Ok(ExitCode::SUCCESS)
         }
-        Some(Commands::McpServe { authority }) => {
+        Some(Commands::McpServe {
+            authority,
+            client_identity,
+        }) => {
             let workspace = cli
                 .cwd
                 .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
             let authority =
                 resolve_authority(false, authority.as_deref(), AuthorityContext::Server)?;
-            mcp::serve(&paths, &workspace, authority)
+            mcp::serve(&paths, &workspace, authority, client_identity.as_deref())
         }
         Some(Commands::AcpServe { authority }) => {
             let authority =

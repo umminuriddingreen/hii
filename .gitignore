@@ -16,6 +16,9 @@ next-env.d.ts
 src-tauri/target/
 /target/
 .hii/
+/.hii-run-context/
+/exit_code.txt
+/output.log
 supabase/.temp/
 
 .claude/worktrees/

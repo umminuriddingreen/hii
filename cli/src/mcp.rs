@@ -16,6 +16,7 @@
 use crate::agent::{execute_tool, ToolCall};
 use crate::config::AppPaths;
 use crate::contract::{deletion_shell, sensitive_shell, Authority, Decision};
+use crate::governance::AclConfig;
 use crate::tools::{ToolResult, Toolbelt};
 use crate::{acp, hii_tools};
 use serde::{Deserialize, Serialize};
@@ -84,10 +85,32 @@ impl Response {
 }
 
 /// Run the MCP server against `workspace`, gating every call at `authority`.
-/// Reads line-delimited requests from stdin until EOF and writes one response
-/// line per request to stdout. Notifications (no `id`) are consumed silently.
-pub fn serve(paths: &AppPaths, workspace: &Path, authority: Authority) -> Result<ExitCode, String> {
+/// Optionally accepts a `client_identity` for per-client ACL enforcement. Reads
+/// line-delimited requests from stdin until EOF and writes one response line
+/// per request to stdout. Notifications (no `id`) are consumed silently.
+pub fn serve(
+    paths: &AppPaths,
+    workspace: &Path,
+    authority: Authority,
+    client_identity: Option<&str>,
+) -> Result<ExitCode, String> {
     let tools = Toolbelt::new(workspace.to_path_buf())?;
+
+    // Load governance ACL config when a client identity is present.
+    // Falls back to default (reader-only) when no config exists.
+    let acl_config = client_identity
+        .map(|_| {
+            let config_path = std::env::var_os("HII_MCP_CONFIG")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| paths.runtime.join("mcp_acl.json"));
+            if config_path.exists() {
+                AclConfig::load_from_path(&config_path)
+            } else {
+                Ok(AclConfig::load_default())
+            }
+        })
+        .transpose()?;
+
     let stdin = io::stdin();
     let mut stdout = io::stdout().lock();
     for line in stdin.lock().lines() {
@@ -95,7 +118,14 @@ pub fn serve(paths: &AppPaths, workspace: &Path, authority: Authority) -> Result
         if line.trim().is_empty() {
             continue;
         }
-        if let Some(response) = handle_line(&line, &tools, &paths.repo, authority) {
+        if let Some(response) = handle_line(
+            &line,
+            &tools,
+            &paths.repo,
+            authority,
+            client_identity,
+            acl_config.as_ref(),
+        ) {
             let text = serde_json::to_string(&response).map_err(|error| error.to_string())?;
             writeln!(stdout, "{text}").map_err(|error| error.to_string())?;
             stdout.flush().map_err(|error| error.to_string())?;
@@ -111,6 +141,8 @@ fn handle_line(
     tools: &Toolbelt,
     repo: &Path,
     authority: Authority,
+    client_identity: Option<&str>,
+    acl_config: Option<&AclConfig>,
 ) -> Option<Response> {
     let request: Request = match serde_json::from_str(line) {
         Ok(request) => request,
@@ -118,16 +150,27 @@ fn handle_line(
         Err(error) => return Some(Response::err(Value::Null, -32700, error.to_string())),
     };
     let id = request.id.clone()?;
-    Some(dispatch(&request, id, tools, repo, authority))
+    Some(dispatch(
+        &request,
+        id,
+        tools,
+        repo,
+        authority,
+        client_identity,
+        acl_config,
+    ))
 }
 
-/// Route a request to its method handler.
+/// Route a JSON-RPC request to its method handler, gating all tool calls at the
+/// authority envelope and any active per-client ACL.
 fn dispatch(
     request: &Request,
     id: Value,
     tools: &Toolbelt,
     repo: &Path,
     authority: Authority,
+    client_identity: Option<&str>,
+    acl_config: Option<&AclConfig>,
 ) -> Response {
     match request.method.as_str() {
         "initialize" => Response::ok(
@@ -136,10 +179,19 @@ fn dispatch(
                 "protocolVersion": PROTOCOL_VERSION,
                 "serverInfo": { "name": "hii", "version": env!("CARGO_PKG_VERSION") },
                 "capabilities": { "tools": { "listChanged": false } },
+                // Advertise client governance when a config was loaded.
+                "governance": acl_config.map(|_| true),
             }),
         ),
         "tools/list" => Response::ok(id, json!({ "tools": tool_specs() })),
-        "tools/call" => match tools_call(&request.params, tools, repo, authority) {
+        "tools/call" => match tools_call(
+            &request.params,
+            tools,
+            repo,
+            authority,
+            client_identity.unwrap_or("anonymous"),
+            acl_config,
+        ) {
             Ok(result) => Response::ok(id, result),
             Err((code, message)) => Response::err(id, code, message),
         },
@@ -214,18 +266,27 @@ fn tools_call(
     tools: &Toolbelt,
     repo: &Path,
     authority: Authority,
+    client_identity: &str,
+    acl_config: Option<&AclConfig>,
 ) -> Result<Value, (i64, String)> {
     let name = params["name"]
         .as_str()
         .ok_or((-32602, "tools/call requires a string `name`".to_string()))?;
-    let args = &params["arguments"];
-    let is_hii = hii_tools::is_hii_tool(name);
-    let command = args["command"].as_str();
 
-    // Authority gate — mirrors the run loop's classification (agent.rs).
+    // ACL enforcement — per-client governance gate runs before authority.
+    if let Some(acl) = acl_config {
+        let param_count = params["arguments"].as_object().map_or(0, |args| args.len());
+        if let Err(err) = acl.check_acl_with_params(client_identity, name, param_count) {
+            return Err((-32099, format!("acl denied: {err}")));
+        }
+    }
+
+    // Authority gate - mirrors the run loop's classification (agent.rs).
+    let args = &params["arguments"];
+    let command = args["command"].as_str();
     let mutates = matches!(name, "write" | "edit")
         || (name == "shell" && command.is_some())
-        || (is_hii && hii_tools::is_mutating(name));
+        || (hii_tools::is_hii_tool(name) && hii_tools::is_mutating(name));
     let sensitive = matches!(name, "shell" | "verify") && command.is_some_and(sensitive_shell);
     let deletion = matches!(name, "shell" | "verify") && command.is_some_and(deletion_shell);
     let decision = if deletion {
@@ -252,6 +313,8 @@ fn tools_call(
             ));
         }
     }
+
+    let is_hii = hii_tools::is_hii_tool(name);
 
     let result = if is_hii {
         hii_tools::execute(repo, name, args["query"].as_str())
@@ -334,10 +397,30 @@ mod tests {
     fn read_only_rejects_a_mutating_call() {
         let (tools, path) = tempbelt("reject");
         let params = json!({ "name": "write", "arguments": { "path": "x.txt", "content": "no" } });
-        let error = tools_call(&params, &tools, &path, Authority::ReadOnly).unwrap_err();
+        let error = tools_call(
+            &params,
+            &tools,
+            &path,
+            Authority::ReadOnly,
+            "anonymous",
+            None,
+        )
+        .unwrap_err();
         assert_eq!(error.0, AUTHORITY_DENIED);
         // The refused write must not have touched the workspace.
         assert!(!path.join("x.txt").exists());
+        let _ = std::fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn deletion_is_refused_even_with_yolo_authority() {
+        let (tools, path) = tempbelt("nested-delete");
+        std::fs::write(path.join("f.txt"), "keep").unwrap();
+        let params = json!({ "name": "shell", "arguments": { "command": "rm f.txt" } });
+        let error =
+            tools_call(&params, &tools, &path, Authority::Yolo, "anonymous", None).unwrap_err();
+        assert_eq!(error.0, AUTHORITY_DENIED);
+        assert!(path.join("f.txt").exists());
         let _ = std::fs::remove_dir_all(path);
     }
 
@@ -346,7 +429,15 @@ mod tests {
         let (tools, path) = tempbelt("allow");
         std::fs::write(path.join("f.txt"), "hello").unwrap();
         let params = json!({ "name": "read", "arguments": { "path": "f.txt" } });
-        let result = tools_call(&params, &tools, &path, Authority::ReadOnly).unwrap();
+        let result = tools_call(
+            &params,
+            &tools,
+            &path,
+            Authority::ReadOnly,
+            "anonymous",
+            None,
+        )
+        .unwrap();
         assert_eq!(result["isError"], json!(false));
         let _ = std::fs::remove_dir_all(path);
     }
@@ -356,7 +447,8 @@ mod tests {
         let (tools, path) = tempbelt("delete");
         std::fs::write(path.join("f.txt"), "keep").unwrap();
         let params = json!({ "name": "shell", "arguments": { "command": "rm f.txt" } });
-        let error = tools_call(&params, &tools, &path, Authority::Yolo).unwrap_err();
+        let error =
+            tools_call(&params, &tools, &path, Authority::Yolo, "anonymous", None).unwrap_err();
         assert_eq!(error.0, AUTHORITY_DENIED);
         assert!(path.join("f.txt").exists());
         let _ = std::fs::remove_dir_all(path);
