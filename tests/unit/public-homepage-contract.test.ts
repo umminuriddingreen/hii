@@ -20,32 +20,30 @@ describe('public HII homepage', () => {
 
   it('states the product truth and carries canonical metadata', () => {
     expect(homepage).toContain('https://humaninformationinterface.com/');
-    expect(homepage).toContain('Think it.<br />Make it.<br /><em>Keep it together.</em>');
-    expect(homepage).toContain('Try HII in your browser');
+    expect(homepage).toContain('A workspace for<br />everything you’re<br /><em>making.</em>');
+    expect(homepage).toContain('Open HII');
     expect(homepage).toContain('Join the Mac beta');
-    expect(homepage).toContain('Signed Mac installer · preparing');
+    expect(homepage).toContain('Signed Mac installer preparing');
     expect(homepage).toContain('/marketing/hii-workspace-live.png');
-    expect(homepage).toContain('/marketing/hii-command-palette-live.png');
     expect(homepage).toContain('/marketing/hii-first-win-demo.mp4');
-    expect(homepage).toContain('Actual interface · silent-first demo · captions included');
+    expect(homepage).toContain('actual interface');
   });
 
   it('presents HII as a broad visual workspace with concrete, truthful uses', () => {
-    expect(homepage).toContain('A visual workspace that works with you');
-    expect(homepage).toContain('For ideas · projects · research · design · code');
-    expect(homepage).toContain('Think visually');
-    expect(homepage).toContain('Make something');
-    expect(homepage).toContain('Move work forward');
-    expect(homepage).toContain('No agent runs and no files are touched on the demo page');
+    expect(homepage).toContain('Like a canvas.<br /><em>But it can help.</em>');
+    expect(homepage).toContain('Find a direction');
+    expect(homepage).toContain('Make an artifact');
+    expect(homepage).toContain('Understand a project');
+    expect(homepage).toContain('The browser demo uses sample data and cannot access your Mac');
     expect(homepage).toContain('href="/learn"');
   });
 
   it('presents one truthful free product and one concrete paid activation', () => {
     expect(homepage).toContain('Local beta');
     expect(homepage).toContain('Founder activation');
-    expect(homepage).toContain('$500 <small>one time</small>');
-    expect(homepage).toContain('Developer ID signing and Apple notarization pass');
-    expect(homepage).toContain('We will never ask you to bypass Gatekeeper');
+    expect(homepage).toContain('<strong>$500</strong>');
+    expect(homepage).toContain('Public download opens after Apple notarization passes');
+    expect(homepage).toContain('will never ask you to bypass Gatekeeper');
   });
 
   it('links to a plain-language privacy boundary before public recruitment', () => {
