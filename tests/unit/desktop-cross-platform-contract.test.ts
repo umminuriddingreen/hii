@@ -16,7 +16,11 @@ describe('desktop cross-platform release contract', () => {
   });
 
   it('packages the correct embedded runtime and profile paths on both platforms', () => {
-    expect(read('scripts/hii-svelte-tauri-build.mjs')).toContain("process.platform==='win32'?'node.exe':'node'");
+    const svelteBuild = read('scripts/hii-svelte-tauri-build.mjs');
+    expect(svelteBuild).toContain("process.platform==='win32'?'node.exe':'node'");
+    expect(svelteBuild).toContain("process.platform==='win32'?'npm.cmd':'npm'");
+    expect(svelteBuild).toContain("shell:process.platform==='win32'");
+    expect(read('scripts/hii-tauri-build.mjs')).toContain("shell: process.platform === 'win32'");
     const desktop = read('src-tauri/src/lib.rs');
     expect(desktop).toContain('std::env::var_os("USERPROFILE")');
     expect(desktop).toContain('join("node.exe")');

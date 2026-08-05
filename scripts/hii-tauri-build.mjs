@@ -9,7 +9,12 @@ const requestedArgs = process.argv.slice(2);
 const args = requestedArgs.some((arg) => arg === '--bundles' || arg === '-b')
   ? ['build', ...requestedArgs]
   : ['build', '--bundles', process.platform === 'win32' ? 'nsis' : 'app', ...requestedArgs];
-const build = spawnSync(tauri, args, { cwd: root, stdio: 'inherit' });
+const build = spawnSync(tauri, args, {
+  cwd: root,
+  stdio: 'inherit',
+  shell: process.platform === 'win32'
+});
+if (build.error) console.error(`Unable to start the Tauri build: ${build.error.message}`);
 if (build.status !== 0) process.exit(build.status ?? 1);
 
 if (process.platform === 'darwin') {
