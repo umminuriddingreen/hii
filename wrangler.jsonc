@@ -2,7 +2,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "hii",
   "main": ".svelte-kit/cloudflare/_worker.js",
-  "compatibility_date": "2026-07-08",
+  "compatibility_date": "2026-08-04",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": true,
@@ -13,6 +13,9 @@
   },
   "observability": {
     "enabled": true
+  },
+  "vars": {
+    "HII_REMOTE_USER": "ummi"
   },
   "r2_buckets": [
     {
