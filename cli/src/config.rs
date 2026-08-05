@@ -66,11 +66,6 @@ impl AppPaths {
             .trim_end_matches('/')
             .to_string()
     }
-
-    /// Backwards-compatible alias retained for existing call sites.
-    pub fn ollama_url() -> String {
-        Self::model_url()
-    }
 }
 
 /// Cross-platform home directory. Uses `dirs::home_dir()` so it resolves

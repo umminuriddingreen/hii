@@ -452,7 +452,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             })
         }
         Some(Commands::Models) => {
-            let ollama = Ollama::new(AppPaths::ollama_url());
+            let ollama = Ollama::discover();
             for model in ollama.models()? {
                 let role = if model == DEFAULT_MODEL {
                     "default"
@@ -667,6 +667,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Some(SlashCommand::Usage) => Ok(conversation.usage()),
             Some(SlashCommand::Thinking(mode)) => conversation.thinking(mode.as_deref()),
             Some(SlashCommand::Reasoning(mode)) => conversation.reasoning(mode.as_deref()),
+            Some(SlashCommand::Mode(mode)) => conversation.mode(mode.as_deref()),
             Some(SlashCommand::Theme(theme)) => conversation.theme(theme.as_deref()),
             Some(SlashCommand::Keymap(requested)) => {
                 conversation.keymap_command(requested.as_deref())
@@ -782,6 +783,7 @@ enum SlashCommand {
     Usage,
     Thinking(Option<String>),
     Reasoning(Option<String>),
+    Mode(Option<String>),
     Theme(Option<String>),
     Keymap(Option<String>),
     Model(Option<String>),
@@ -861,6 +863,7 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         "/usage" if argument.is_none() => SlashCommand::Usage,
         "/thinking" => SlashCommand::Thinking(argument),
         "/reasoning" => SlashCommand::Reasoning(argument),
+        "/mode" => SlashCommand::Mode(argument),
         "/theme" => SlashCommand::Theme(argument),
         "/keymap" => SlashCommand::Keymap(argument),
         "/raw" => match rest {
@@ -970,7 +973,7 @@ fn slash_help() -> String {
     )
     .replace(
         "/thinking [mode]              off | compact | raw model stream\n",
-        "/thinking [mode]              off | compact | raw display\n/reasoning [mode]             auto | off | deep model effort\n",
+        "/thinking [mode]              off | compact | raw display\n/reasoning [mode]             auto | off | deep model effort\n/mode [auto|local|private|best]\n                               choose utility/privacy routing\n",
     )
 }
 
@@ -1007,7 +1010,7 @@ fn status(paths: &AppPaths, cwd: Option<PathBuf>, json: bool) -> Result<(), Stri
     let dirty = command_text("git", &["status", "--porcelain"], &workspace)
         .map(|output| output.lines().count())
         .unwrap_or(0);
-    let ollama = Ollama::new(AppPaths::ollama_url());
+    let ollama = Ollama::discover();
     let models = ollama.models().unwrap_or_default();
     // Scoped to this workspace so `proof      hii proof <id>` points at a run
     // that actually happened here.
@@ -1133,7 +1136,7 @@ fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
         ok &= passed;
         println!("{}  {name:<14} {detail}", if passed { "ok" } else { "!!" });
     }
-    let ollama = Ollama::new(AppPaths::ollama_url());
+    let ollama = Ollama::discover();
     match ollama.models() {
         Ok(models) => {
             let default = models.iter().any(|model| model == DEFAULT_MODEL);
@@ -1442,6 +1445,7 @@ fn public_test_slash_allowed(command: &SlashCommand) -> bool {
             | SlashCommand::Usage
             | SlashCommand::Thinking(_)
             | SlashCommand::Reasoning(_)
+            | SlashCommand::Mode(_)
             | SlashCommand::Theme(_)
             | SlashCommand::Keymap(_)
             | SlashCommand::Model(_)
@@ -1912,6 +1916,10 @@ mod tests {
         assert_eq!(
             parse_slash_command("/reasoning auto"),
             Some(SlashCommand::Reasoning(Some("auto".into())))
+        );
+        assert_eq!(
+            parse_slash_command("/mode private"),
+            Some(SlashCommand::Mode(Some("private".into())))
         );
         assert_eq!(
             parse_slash_command("/theme heritage"),

@@ -197,7 +197,7 @@ impl Conversation {
     ) -> Result<Self, String> {
         crate::tui::load_theme(&paths.runtime);
         let tools = Toolbelt::new(workspace)?;
-        let ollama = Ollama::new(AppPaths::ollama_url());
+        let ollama = Ollama::discover();
         let model = choose_model(requested_model.as_deref(), &ollama.models()?)?;
         let store = ConversationStore::create(&paths.runtime)?;
         let hooks = HookRunner::load(
@@ -1749,6 +1749,32 @@ impl Conversation {
             json!({ "from": previous, "to": selected }),
         )?;
         Ok(format!("Switched to {selected}."))
+    }
+
+    pub fn mode(&mut self, requested: Option<&str>) -> Result<String, String> {
+        let mode = requested.unwrap_or("auto");
+        if !matches!(mode, "auto" | "local" | "private" | "best") {
+            return Err("mode must be auto, local, private, or best".into());
+        }
+        let next = Ollama::for_mode(mode);
+        let models = next.models()?;
+        let model = choose_model(None, &models)?;
+        self.ollama = next;
+        self.model = model;
+        self.store.event(
+            "conversation.routing_mode",
+            json!({
+                "mode": mode,
+                "provider": self.ollama.provider_label(),
+                "endpoint": self.ollama.base_url(),
+                "model": self.model,
+                "hostedTransmission": "explicit-only"
+            }),
+        )?;
+        Ok(format!(
+            "Mode: {mode}\nProvider: {}\nModel: {}\nHosted use remains explicit through /codex or /claude.",
+            self.ollama.provider_label(), self.model
+        ))
     }
 
     pub fn proof(&self, id: Option<&str>) -> Result<String, String> {

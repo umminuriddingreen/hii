@@ -216,7 +216,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         })
         .transpose()?;
     let git_before = tools.git_snapshot();
-    let ollama = Ollama::new(AppPaths::ollama_url());
+    let ollama = Ollama::discover();
     let models = ollama.models()?;
     let model = choose_model(options.model.as_deref(), &models)?;
     let review_model = if options.review {
@@ -1254,12 +1254,31 @@ pub(crate) fn choose_model(
     requested: Option<&str>,
     installed: &[String],
 ) -> Result<String, String> {
-    let requested = requested
+    choose_model_with_env(
+        requested,
+        std::env::var("HII_MODEL").ok().as_deref(),
+        installed,
+    )
+}
+
+fn choose_model_with_env(
+    requested: Option<&str>,
+    env_model: Option<&str>,
+    installed: &[String],
+) -> Result<String, String> {
+    let explicit = requested
         .map(str::to_string)
-        .or_else(|| std::env::var("HII_MODEL").ok())
+        .or_else(|| env_model.map(str::to_string));
+    let requested = explicit
+        .clone()
         .unwrap_or_else(|| DEFAULT_MODEL.to_string());
     if installed.iter().any(|model| model == &requested) {
         Ok(requested)
+    } else if explicit.is_none() {
+        installed
+            .first()
+            .cloned()
+            .ok_or_else(|| "no local models are available; run `hii runner doctor`".into())
     } else {
         Err(format!(
             "model '{requested}' is not installed; run `hii models`"
@@ -2297,4 +2316,13 @@ mod tests {
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
         fs::remove_dir_all(outside).expect("remove outside directory");
     }
+}
+#[test]
+fn automatic_model_selection_falls_back_but_explicit_selection_stays_strict() {
+    let native = vec!["Qwen/Qwen3-4B".to_string()];
+    assert_eq!(
+        choose_model_with_env(None, None, &native).unwrap(),
+        "Qwen/Qwen3-4B"
+    );
+    assert!(choose_model_with_env(Some("missing"), None, &native).is_err());
 }

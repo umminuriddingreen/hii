@@ -1025,6 +1025,9 @@ function agentCommandCatalog() {
     { command: "hii skill export <id>", purpose: "Export one registered skill as a portable local package without publishing it." },
     { command: "hii runner init <name>", purpose: "Register an owned runner and print its local token once." },
     { command: "hii runner start --once", purpose: "Heartbeat, claim one whitelisted capability job, stream logs, and exit." },
+    { command: "hii runner doctor", purpose: "Inspect the native model runtime, consumer hardware tier, and privacy route." },
+    { command: "hii runner model start", purpose: "Start the HII-owned mistral.rs/Metal service with an explicit model acquisition boundary." },
+    { command: "hii runner bench", purpose: "Measure an end-to-end native completion and print model usage." },
     { command: "hii jobs", purpose: "List recent local capability jobs." },
     { command: "hii jobs reconcile", purpose: "Append local reconciliation receipts for completed Claude-backed HII agent jobs." },
     { command: "hii jobs cancel <id> --reason <reason>", purpose: "Append a cancellation receipt for one stale local capability job." },
@@ -2509,11 +2512,19 @@ function cmdCheck() {
 }
 
 function runnerUsage() {
-  console.error("usage: hii runner <init <name>|start [--once]>");
+  console.error("usage: hii runner <model <doctor|start|stop|status|models|bench|logs>|init <name>|start [--once]>");
 }
 
 async function cmdRunner(args) {
   const sub = args[0];
+  if (sub === "model") {
+    nodeScript(HIID, ["model-runtime", ...(args.slice(1).length ? args.slice(1) : ["status"])]);
+    return;
+  }
+  if (["doctor", "status", "models", "bench", "stop", "logs"].includes(sub)) {
+    nodeScript(HIID, ["model-runtime", sub, ...args.slice(1)]);
+    return;
+  }
   if (sub === "init") {
     const name = args.slice(1).join(" ").trim();
     if (!name) {
@@ -2801,6 +2812,12 @@ usage: hii <command>
   skill doctor        validate registry, bundles, receipts, and legacy count
   runner init <name>  register an owned runner and print its token once
   runner start --once claim one whitelisted runner job and exit
+  runner model doctor inspect native runtime, hardware tier, and privacy route
+  runner model start  start mistral.rs/Metal on 127.0.0.1:11435
+  runner model status show native runtime process, model, endpoint, and log
+  runner model models list models loaded by the native runtime
+  runner model bench  run a timed end-to-end completion
+  runner model stop   stop the HII-owned native model runtime
   check               typecheck (the inner fix loop)
   ship [message]      typecheck -> local commit only
   ship --push [msg]   explicit external push to origin

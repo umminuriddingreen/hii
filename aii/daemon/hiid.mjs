@@ -11,6 +11,10 @@ import {
   cleanupWorkspaceRunContext,
   stageWorkspaceRunContext
 } from "./workspace-run-staging.mjs";
+import {
+  selectConsumerModelProfile,
+  totalMemoryGiB
+} from "../model-runtime/profiles.mjs";
 
 const ROOT = process.env.HII_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const RUNTIME = process.env.HII_RUNTIME_DIR || path.join(os.homedir(), ".hii");
@@ -28,6 +32,12 @@ const CODEX_APP_SERVER_PID = path.join(CODEX_APP_SERVER_DIR, "app-server.pid");
 const CODEX_APP_SERVER_STATUS = path.join(CODEX_APP_SERVER_DIR, "status.json");
 const CODEX_APP_SERVER_LOG = path.join(CODEX_APP_SERVER_DIR, "app-server.log");
 const CODEX_APP_SERVER_SOCKET = path.join(CODEX_APP_SERVER_DIR, "app-server.sock");
+const MODEL_RUNTIME_DIR = path.join(RUNTIME, "model-runtime");
+const MODEL_RUNTIME_PID = path.join(MODEL_RUNTIME_DIR, "runner.pid");
+const MODEL_RUNTIME_STATUS = path.join(MODEL_RUNTIME_DIR, "status.json");
+const MODEL_RUNTIME_LOG = path.join(MODEL_RUNTIME_DIR, "runner.log");
+const MODEL_RUNTIME_URL = "http://127.0.0.1:11435";
+const MODEL_PROFILES = path.join(ROOT, "config", "native-model-profiles.json");
 const CONTEXT_DB = path.join(RUNTIME, "hii.db");
 const OWNED_PATTERNS = [
   `${ROOT}/aii/daemon/hiid.mjs`,
@@ -758,6 +768,7 @@ function ensureDirs() {
   fs.mkdirSync(RUNS_DIR, { recursive: true });
   fs.mkdirSync(path.dirname(CODEX_INDEX), { recursive: true });
   fs.mkdirSync(CODEX_APP_SERVER_DIR, { recursive: true });
+  fs.mkdirSync(MODEL_RUNTIME_DIR, { recursive: true });
 }
 
 function now() {
@@ -922,6 +933,218 @@ function stopCodexAppServer() {
   console.log(`stopped Codex app-server pid=${pid}`);
 }
 
+function nativeRunnerBin() {
+  const configured = process.env.HII_NATIVE_RUNNER_BIN;
+  if (configured) return configured;
+  const release = path.join(ROOT, "target", "release", "hii-native-runner");
+  if (fs.existsSync(release)) return release;
+  return path.join(ROOT, "target", "debug", "hii-native-runner");
+}
+
+function modelRuntimePid() {
+  const pid = Number(fs.existsSync(MODEL_RUNTIME_PID) ? fs.readFileSync(MODEL_RUNTIME_PID, "utf8").trim() : "");
+  if (!pidAlive(pid)) return null;
+  const observed = spawnSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" });
+  if (observed.status !== 0 || !observed.stdout.includes(path.basename(nativeRunnerBin()))) return null;
+  return pid;
+}
+
+function consumerModelProfile(memoryGiB = totalMemoryGiB()) {
+  return selectConsumerModelProfile(MODEL_PROFILES, memoryGiB);
+}
+
+function modelRuntimeStatus() {
+  const pid = modelRuntimePid();
+  const previous = safeReadJson(MODEL_RUNTIME_STATUS, {});
+  const status = {
+    schemaVersion: 1,
+    ...previous,
+    pid,
+    endpoint: MODEL_RUNTIME_URL,
+    backend: "mistral.rs-metal",
+    modelHome: path.join(RUNTIME, "models"),
+    log: MODEL_RUNTIME_LOG,
+    binary: nativeRunnerBin(),
+    profile: consumerModelProfile(),
+    state: pid ? (previous.state === "starting" ? "starting" : "running") : "stopped",
+    updatedAt: now()
+  };
+  writeJson(MODEL_RUNTIME_STATUS, status);
+  return status;
+}
+
+async function printModelRuntimeStatus() {
+  const status = modelRuntimeStatus();
+  if (status.pid) {
+    try {
+      const response = await fetch(`${MODEL_RUNTIME_URL}/health`, { signal: AbortSignal.timeout(500) });
+      status.state = response.ok ? "ready" : "starting";
+    } catch {
+      status.state = "starting";
+    }
+    writeJson(MODEL_RUNTIME_STATUS, status);
+  }
+  console.log(JSON.stringify(status, null, 2));
+}
+
+async function startModelRuntime(args) {
+  ensureDirs();
+  const existing = modelRuntimePid();
+  if (existing) {
+    console.log(`HII native runner already running pid=${existing}`);
+    await printModelRuntimeStatus();
+    return;
+  }
+  const binary = nativeRunnerBin();
+  if (!fs.existsSync(binary)) {
+    throw new Error(`native runner binary missing at ${binary}; run npm run runner:build`);
+  }
+  const modelIndex = args.indexOf("--model");
+  const quantIndex = args.indexOf("--quant");
+  const profile = consumerModelProfile();
+  const model = modelIndex >= 0 ? args[modelIndex + 1] : "Qwen/Qwen3-4B";
+  const quant = quantIndex >= 0 ? args[quantIndex + 1] : "4";
+  if (!model) throw new Error("--model requires a model ID or local path");
+  if (!quant) throw new Error("--quant requires a mistral.rs ISQ value");
+  const out = fs.openSync(MODEL_RUNTIME_LOG, "a");
+  const child = spawn(binary, [
+    "serve", "--model", model, "--quant", quant,
+    "--model-home", path.join(RUNTIME, "models")
+  ], {
+    cwd: ROOT,
+    detached: true,
+    stdio: ["ignore", out, out],
+    env: { ...process.env, HII_RUNTIME_DIR: RUNTIME }
+  });
+  child.unref();
+  fs.closeSync(out);
+  fs.writeFileSync(MODEL_RUNTIME_PID, String(child.pid));
+  writeJson(MODEL_RUNTIME_STATUS, {
+    schemaVersion: 1,
+    state: "starting",
+    pid: child.pid,
+    endpoint: MODEL_RUNTIME_URL,
+    backend: "mistral.rs-metal",
+    model,
+    quantization: quant,
+    profile,
+    modelHome: path.join(RUNTIME, "models"),
+    log: MODEL_RUNTIME_LOG,
+    binary,
+    startedAt: now(),
+    updatedAt: now()
+  });
+  event("model_runtime.started", {
+    actor: "hii.cli", target: MODEL_RUNTIME_URL, status: "starting", pid: child.pid,
+    text: `Started HII native model runtime with ${model}`
+  });
+  console.log(`started HII native runner pid=${child.pid}`);
+  console.log(`model ${model}`);
+  console.log(`endpoint ${MODEL_RUNTIME_URL}`);
+  console.log("Model acquisition is explicit to this start command and may take time on first use.");
+}
+
+function stopModelRuntime() {
+  const pid = modelRuntimePid();
+  if (!pid) {
+    writeJson(MODEL_RUNTIME_STATUS, { ...modelRuntimeStatus(), state: "stopped", pid: null, stoppedAt: now() });
+    console.log("HII native runner is not running");
+    return;
+  }
+  process.kill(pid, "SIGTERM");
+  writeJson(MODEL_RUNTIME_STATUS, { ...modelRuntimeStatus(), state: "stopped", pid: null, stoppedAt: now() });
+  event("model_runtime.stopped", {
+    actor: "hii.cli", target: MODEL_RUNTIME_URL, status: "stopped", pid,
+    text: "Stopped HII native model runtime"
+  });
+  console.log(`stopped HII native runner pid=${pid}`);
+}
+
+function doctorModelRuntime() {
+  ensureDirs();
+  const profile = consumerModelProfile();
+  const binary = nativeRunnerBin();
+  const build = fs.existsSync(binary)
+    ? spawnSync(binary, ["doctor", "--json", "--model-home", path.join(RUNTIME, "models")], { encoding: "utf8" })
+    : null;
+  const report = {
+    ok: Boolean(build?.status === 0),
+    hardware: { platform: process.platform, arch: process.arch, memoryGiB: totalMemoryGiB() },
+    profile,
+    runner: build?.status === 0 ? JSON.parse(build.stdout) : {
+      state: "not-built",
+      binary,
+      fix: "npm run runner:build"
+    },
+    routing: ["native", "ollama", "approved-hosted"],
+    privacy: "Hosted transmission requires an explicit provider action or approved escalation."
+  };
+  console.log(JSON.stringify(report, null, 2));
+  if (!report.ok) process.exitCode = 1;
+}
+
+async function listModelRuntimeModels() {
+  const response = await fetch(`${MODEL_RUNTIME_URL}/v1/models`, { signal: AbortSignal.timeout(1500) });
+  if (!response.ok) throw new Error(`native model listing failed with ${response.status}`);
+  console.log(JSON.stringify(await response.json(), null, 2));
+}
+
+async function benchModelRuntime(args) {
+  const prompt = args.join(" ").trim() || "Reply with exactly: HII_NATIVE_OK";
+  const status = modelRuntimeStatus();
+  if (!status.pid) throw new Error("HII native runner is not running");
+  const started = performance.now();
+  const response = await fetch(`${MODEL_RUNTIME_URL}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: status.model,
+      stream: false,
+      temperature: 0,
+      max_tokens: 32,
+      messages: [{ role: "user", content: prompt }]
+    }),
+    signal: AbortSignal.timeout(600000)
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body?.error?.message || `benchmark failed with ${response.status}`);
+  const wallMs = Math.round(performance.now() - started);
+  const gate = safeReadJson(MODEL_PROFILES, {}).performanceGate || {};
+  const completionTokens = Number(body.usage?.completion_tokens || 0);
+  const completionTokensPerSecond = Number(body.usage?.avg_compl_tok_per_sec || 0);
+  const gates = {
+    completion: gate.requiresCompletion !== true || completionTokens > 0,
+    wall: wallMs <= Number(gate.maxWallMs || 120000),
+    throughput: completionTokensPerSecond >= Number(gate.minCompletionTokensPerSecond || 8)
+  };
+  const ok = Object.values(gates).every(Boolean);
+  console.log(JSON.stringify({
+    ok,
+    gates,
+    thresholds: gate,
+    wallMs,
+    model: status.model,
+    usage: body.usage || null,
+    output: body.choices?.[0]?.message?.content || ""
+  }, null, 2));
+  if (!ok) process.exitCode = 1;
+}
+
+async function cmdModelRuntime(args) {
+  const sub = args[0] || "status";
+  if (sub === "start") {
+    if (!currentDaemonPid()) startDaemon();
+    await startModelRuntime(args.slice(1));
+  }
+  else if (sub === "stop") stopModelRuntime();
+  else if (sub === "status") await printModelRuntimeStatus();
+  else if (sub === "doctor") doctorModelRuntime();
+  else if (sub === "models") await listModelRuntimeModels();
+  else if (sub === "bench") await benchModelRuntime(args.slice(1));
+  else if (sub === "logs") tailFile(MODEL_RUNTIME_LOG, Number(args[1] || 80));
+  else throw new Error("usage: hiid model-runtime <start|stop|status|doctor|models|bench|logs>");
+}
+
 function runningDaemonPids() {
   const r = spawnSync("ps", ["auxww"], { encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
   if (r.status !== 0) return [];
@@ -1026,6 +1249,8 @@ function codexInstances() {
 
 function instanceSnapshot() {
   const processInstances = discoverProcesses();
+  const runtimePid = modelRuntimePid();
+  const runtimeState = safeReadJson(MODEL_RUNTIME_STATUS, {});
   const instances = [
     {
       id: "daemon:hiid",
@@ -1038,6 +1263,17 @@ function instanceSnapshot() {
       heartbeatAt: now(),
       coordinate: DAEMON_DIR
     },
+    ...(runtimePid ? [{
+      id: "service:model-runtime",
+      type: "model-runtime",
+      title: `HII Native · ${runtimeState.model || "loading"}`,
+      pid: runtimePid,
+      status: runtimeState.state === "ready" ? "running" : "starting",
+      owned: true,
+      autonomy: "local-inference-only",
+      heartbeatAt: runtimeState.updatedAt || now(),
+      coordinate: MODEL_RUNTIME_URL
+    }] : []),
     ...codexInstances(),
     ...processInstances.filter((item) => item.pid !== process.pid)
   ];
@@ -1336,6 +1572,7 @@ process.on("SIGTERM", () => {
         text: "Cancelled bounded workspace execution during daemon shutdown."
       });
     }
+    if (modelRuntimePid()) stopModelRuntime();
     writeStatus("stopped");
     event("daemon.exiting", { actor: "hii.daemon", target: "hiid", status: "stopped", text: "hiid exiting" });
   } finally {
@@ -1360,6 +1597,7 @@ try {
   else if (cmd === "config") cmdConfig(args);
   else if (cmd === "instances") printInstances();
   else if (cmd === "runs") printRuns(Number(args[0] || 20));
+  else if (cmd === "model-runtime") await cmdModelRuntime(args);
   else if (cmd === "codex") {
     const sub = args[0] || "status";
     if (sub === "app-server") {
@@ -1401,7 +1639,7 @@ try {
       throw new Error("usage: hiid claude <run|status>");
     }
   } else {
-    throw new Error("usage: hiid <start|stop|restart|status|feed|logs|config|instances|runs|codex|claude>");
+    throw new Error("usage: hiid <start|stop|restart|status|feed|logs|config|instances|runs|model-runtime|codex|claude>");
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

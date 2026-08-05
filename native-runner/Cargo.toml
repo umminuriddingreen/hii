@@ -1,0 +1,28 @@
+[package]
+name = "hii-native-runner"
+version = "0.1.0"
+edition = "2021"
+description = "HII-owned native Apple-Silicon model runtime"
+license = "UNLICENSED"
+
+[[bin]]
+name = "hii-native-runner"
+path = "src/main.rs"
+
+[features]
+default = ["metal"]
+metal = ["mistralrs-core/metal", "mistralrs-server-core/metal"]
+
+[dependencies]
+anyhow = "1.0.100"
+axum = "0.8.8"
+clap = { version = "4.5.58", features = ["derive"] }
+mistralrs-core = { version = "=0.8.1", default-features = false }
+mistralrs-server-core = { version = "=0.8.1", default-features = false }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+sha2 = "0.10.9"
+tokio = { version = "1.49.0", features = ["macros", "net", "rt-multi-thread", "signal"] }
+
+[dev-dependencies]
+tempfile = "3.24.0"

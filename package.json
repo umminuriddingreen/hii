@@ -4,6 +4,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "runner:build": "cargo build --release -p hii-native-runner",
+    "runner:check": "cargo test -p hii-native-runner && cargo clippy -p hii-native-runner --all-targets -- -D warnings",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true",
     "dev": "HII_TARGET=web vite dev --host 127.0.0.1",
     "dev:web": "HII_TARGET=web vite dev --host 127.0.0.1",

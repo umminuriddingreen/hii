@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "objective": "utility-per-wait",
+  "tiers": [
+    {
+      "memoryGiBMax": 8,
+      "name": "8gb",
+      "localClass": "3-4B",
+      "model": "Qwen/Qwen3-4B",
+      "quantization": "4"
+    },
+    {
+      "memoryGiBMax": 18,
+      "name": "16gb",
+      "localClass": "8B",
+      "model": "Qwen/Qwen3-8B",
+      "quantization": "4"
+    },
+    {
+      "memoryGiBMax": 36,
+      "name": "24-32gb",
+      "localClass": "14B",
+      "model": "Qwen/Qwen3-14B",
+      "quantization": "4"
+    },
+    {
+      "memoryGiBMax": null,
+      "name": "48gb+",
+      "localClass": "30-35B MoE",
+      "model": "Qwen/Qwen3.5-35B-A3B",
+      "quantization": "4"
+    }
+  ],
+  "routing": {
+    "auto": ["hii-native", "ollama", "approved-hosted"],
+    "local": ["hii-native", "ollama"],
+    "private": ["hii-native", "ollama"],
+    "best": ["strongest-local", "approved-hosted"]
+  },
+  "performanceGate": {
+    "maxWallMs": 120000,
+    "minCompletionTokensPerSecond": 8,
+    "requiresCompletion": true
+  },
+  "hostedTransmission": "explicit-only"
+}

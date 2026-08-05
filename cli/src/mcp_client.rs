@@ -1034,6 +1034,7 @@ fn schema_hint(schema: &Value) -> String {
             )
         })
         .collect::<Vec<_>>();
+    fields.sort();
     if properties.len() > fields.len() {
         fields.push("…".into());
     }

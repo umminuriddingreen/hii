@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     io::{BufRead, BufReader},
+    net::ToSocketAddrs,
     sync::mpsc,
     time::Duration,
 };
@@ -159,6 +160,40 @@ impl Ollama {
             provider,
             agent,
         }
+    }
+
+    /// Choose the lowest-friction local runtime. An explicit model URL always
+    /// wins; otherwise a ready HII Native endpoint wins over Ollama.
+    pub fn discover() -> Self {
+        if std::env::var_os("HII_MODEL_URL").is_some()
+            || std::env::var_os("HII_OLLAMA_URL").is_some()
+        {
+            return Self::new(crate::config::AppPaths::model_url());
+        }
+        Self::for_mode("auto")
+    }
+
+    pub fn for_mode(mode: &str) -> Self {
+        let native = "http://127.0.0.1:11435";
+        let ollama = "http://127.0.0.1:11434";
+        let url = match mode {
+            "best" if endpoint_ready(ollama) => ollama,
+            _ if endpoint_ready(native) => native,
+            _ => ollama,
+        };
+        Self::new(url.to_string())
+    }
+
+    pub fn provider_label(&self) -> &'static str {
+        match self.provider {
+            ModelProvider::Native => "HII Native",
+            ModelProvider::LmStudio => "LM Studio",
+            ModelProvider::Ollama => "Ollama",
+        }
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base_url
     }
 
     pub fn models(&self) -> Result<Vec<String>, String> {
@@ -535,6 +570,21 @@ impl Ollama {
         log_llm_request(model, self.provider, &result.usage);
         let _ = sender.send(ChatStreamEvent::Done(Ok(result)));
     }
+}
+
+fn endpoint_ready(base_url: &str) -> bool {
+    let address = base_url
+        .strip_prefix("http://")
+        .unwrap_or(base_url)
+        .split('/')
+        .next()
+        .unwrap_or(base_url);
+    let Ok(mut addresses) = address.to_socket_addrs() else {
+        return false;
+    };
+    addresses.next().is_some_and(|address| {
+        std::net::TcpStream::connect_timeout(&address, Duration::from_millis(120)).is_ok()
+    })
 }
 
 fn openai_reasoning_delta(delta: &Value) -> Option<&str> {
