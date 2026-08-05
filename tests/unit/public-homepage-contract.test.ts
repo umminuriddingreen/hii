@@ -20,20 +20,21 @@ describe('public HII homepage', () => {
 
   it('states the product truth and carries canonical metadata', () => {
     expect(homepage).toContain('https://humaninformationinterface.com/');
-    expect(homepage).toContain('A workspace for<br />everything you’re<br /><em>making.</em>');
+    expect(homepage).toContain('Your context.<br />Agent work<br /><em>you can verify.</em>');
     expect(homepage).toContain('Open HII');
-    expect(homepage).toContain('Visual workspace · Mac + Windows');
+    expect(homepage).toContain('Local-first workspace + native CLI');
     expect(homepage).toContain('Get the desktop app');
-    expect(homepage).toContain('/marketing/hii-workspace-live.png');
-    expect(homepage).toContain('/marketing/hii-first-win-demo.mp4');
-    expect(homepage).toContain('actual interface');
+    expect(homepage).toContain('/marketing/hii-run-receipt-live.png');
+    expect(homepage).toContain('/marketing/hii-cli-terminal-live.png');
+    expect(homepage).toContain('captured live');
   });
 
-  it('presents HII as a broad visual workspace with concrete, truthful uses', () => {
-    expect(homepage).toContain('Like a canvas.<br /><em>But it can help.</em>');
-    expect(homepage).toContain('Find a direction');
-    expect(homepage).toContain('Make an artifact');
-    expect(homepage).toContain('Understand a project');
+  it('presents the current verified-work loop and shared native surfaces', () => {
+    expect(homepage).toContain('See the state.<br /><em>Approve the move.</em><br />Keep the proof.');
+    expect(homepage).toContain("HII's native terminal");
+    expect(homepage).toContain('Intent approved');
+    expect(homepage).toContain('Bounded work completed');
+    expect(homepage).toContain('Receipt returned');
     expect(homepage).toContain('The browser demo uses sample data and cannot access your computer');
     expect(homepage).toContain('href="/learn"');
   });

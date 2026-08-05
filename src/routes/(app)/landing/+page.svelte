@@ -1,57 +1,48 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import HiiLogo from '$lib/components/HiiLogo.svelte';
 
-  let workspaceVideo: HTMLVideoElement;
-
-  onMount(() => {
-    workspaceVideo?.play().catch(() => {
-      // The poster and native controls remain available when autoplay is blocked.
-    });
-  });
-
-  const objects = ['notes', 'images', 'websites', 'files', '3D models', 'drawings', 'chats', 'tools'];
+  const objects = ['Context Dock', 'Workspace', 'Knowledge', 'Terminal', 'Browser', 'Notch', 'Create', 'HII CLI'];
 
   const moves = [
     {
-      mark: '↙',
-      title: 'Put the work here.',
-      copy: 'Bring the pieces into one visual space. Move them around, connect them, and keep their sources visible.'
+      mark: '⌖',
+      title: 'See the real context.',
+      copy: 'Bring in the project, notes, files, links, and live machine state that matter. HII keeps every source and boundary visible.'
     },
     {
-      mark: '✦',
-      title: 'Ask HII for a move.',
-      copy: 'Point at what matters and say what you want to understand, change, organize, or make.'
+      mark: '↳',
+      title: 'Approve one move.',
+      copy: 'Name the outcome, choose what an agent may use, and review the workspace, capability, and external-action boundary before it runs.'
     },
     {
       mark: '✓',
-      title: 'Keep what happened.',
-      copy: 'The result, changed files, checks, and proof return to the workspace instead of disappearing into chat.'
+      title: 'Get proof back.',
+      copy: 'The artifact, changed files, checks, logs, and receipt return to the same workspace—ready to inspect, continue, or reuse.'
     }
   ];
 
   const examples = [
-    ['Find a direction', 'Arrange references, compare possibilities, and turn a loose idea into a visible path.'],
-    ['Make an artifact', 'Work from your real files and tools toward something you can open, edit, and use.'],
-    ['Understand a project', 'See the relevant context, ask questions in place, and leave with the next move completed.']
+    ['Workspace', 'Arrange sources, live tools, agent work, and receipts as connected objects on one spatial canvas.'],
+    ['Knowledge', 'Write, link, search, graph, import, and export local knowledge without losing provenance.'],
+    ['HII CLI', 'Use the same local runtime from HII’s native terminal: observe state, act within bounds, and verify the result.']
   ];
 </script>
 
 <svelte:head>
-  <title>HII — A workspace for everything you are making</title>
+  <title>HII — Verified agent work, grounded in your context</title>
   <meta
     name="description"
-    content="HII is a visual, local-first workspace where your ideas, files, tools, and AI can work together."
+    content="HII is a local-first workspace and native CLI for source-linked context, bounded agent work, proof, and durable receipts."
   />
   <link rel="canonical" href="https://humaninformationinterface.com/" />
-  <meta property="og:title" content="HII — A workspace for everything you are making" />
+  <meta property="og:title" content="HII — Verified agent work, grounded in your context" />
   <meta
     property="og:description"
-    content="Put the work in one visual space. Ask HII for a move. Keep the result connected."
+    content="See the context. Approve the move. Inspect the proof."
   />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://humaninformationinterface.com/" />
-  <meta property="og:image" content="https://humaninformationinterface.com/marketing/hii-workspace-live.png" />
+  <meta property="og:image" content="https://humaninformationinterface.com/marketing/hii-run-receipt-live.png" />
   <meta name="twitter:card" content="summary_large_image" />
 </svelte:head>
 
@@ -62,9 +53,9 @@
       <span>Human Information Interface</span>
     </a>
     <nav aria-label="Homepage">
-      <a href="#how">How it works</a>
-      <a href="#examples">Examples</a>
-      <a href="#trust">Trust</a>
+      <a href="#how">The loop</a>
+      <a href="#surfaces">Surfaces</a>
+      <a href="#live-run">Live run</a>
     </nav>
     <a class="nav-cta" href="/learn">Open HII <span aria-hidden="true">↗</span></a>
   </header>
@@ -72,52 +63,45 @@
   <main id="top">
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <p class="kicker"><i></i> Visual workspace · Mac + Windows</p>
-        <h1 id="hero-title">A workspace for<br />everything you’re<br /><em>making.</em></h1>
+        <p class="kicker"><i></i> Local-first workspace + native CLI</p>
+        <h1 id="hero-title">Your context.<br />Agent work<br /><em>you can verify.</em></h1>
         <p class="deck">
-          Put your ideas, files, websites, images, models, chats, and tools in one place. HII helps
-          you work with what is there—and keeps the result connected.
+          HII turns your files, notes, repos, tools, and current machine state into approved,
+          bounded agent work—then returns the artifact, the checks, and the receipt.
         </p>
         <div class="actions">
           <a class="primary" href="/learn">Try the workspace <span aria-hidden="true">↗</span></a>
           <a class="secondary" href="#download">Get the desktop app</a>
         </div>
-        <p class="small-note">The browser demo uses sample data and cannot access your computer.</p>
+        <p class="small-note">The browser demo uses sample data and cannot access your computer. The capture at right is from a completed local HII run.</p>
       </div>
 
       <figure class="workspace-window">
         <div class="window-bar">
           <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span>HII / WORKSPACE</span>
-          <span class="live"><i></i> actual interface</span>
+          <span>HII / VERIFIED RUN / 43S</span>
+          <span class="live"><i></i> captured live</span>
         </div>
-        <video
-          bind:this={workspaceVideo}
-          autoplay
-          muted
-          loop
-          playsinline
-          controls
-          preload="metadata"
-          poster="/marketing/hii-command-palette-live.png"
-          aria-label="A 27-second silent demonstration of the actual HII visual workspace"
-        >
-          <source src="/marketing/hii-first-win-demo.mp4" type="video/mp4" />
-        </video>
+        <img
+          src="/marketing/hii-run-receipt-live.png"
+          alt="A live HII workspace showing approved context, a completed bounded run, its editable artifact, passing checks, and a saved receipt"
+          width="1920"
+          height="1080"
+        />
         <div class="cursor-stamp" aria-hidden="true">
           <svg viewBox="0 0 22 28"><path d="M2 2L19 17L11 18L7 26Z" /></svg>
           <span>you + HII</span>
         </div>
         <figcaption>
-          <span>Move the work</span>
-          <span>Ask in place</span>
-          <span>Open the result</span>
+          <span>3 sources approved</span>
+          <span>2 checks passed</span>
+          <span>receipt saved</span>
         </figcaption>
       </figure>
     </section>
 
     <section class="object-strip" aria-label="Things you can bring into HII">
-      <p>Put anything on the workspace</p>
+      <p>One local runtime · multiple ways in</p>
       <div>
         {#each objects as object, index}
           <span>{object}</span>{#if index < objects.length - 1}<i>+</i>{/if}
@@ -127,11 +111,11 @@
 
     <section class="moves" id="how" aria-labelledby="moves-title">
       <header>
-        <p class="kicker"><i></i> How HII feels</p>
-        <h2 id="moves-title">Like a canvas.<br /><em>But it can help.</em></h2>
+        <p class="kicker"><i></i> The HII loop</p>
+        <h2 id="moves-title">See the state.<br /><em>Approve the move.</em><br />Keep the proof.</h2>
         <p>
-          HII gives you the freedom of a visual workspace and the utility of an AI assistant,
-          without turning the project into one endless conversation.
+          Models and tools can change. Your context, authority, project memory, and evidence stay
+          with you in HII.
         </p>
       </header>
       <div class="move-list">
@@ -146,54 +130,59 @@
       </div>
     </section>
 
-    <section class="examples" id="examples" aria-labelledby="examples-title">
+    <section class="examples" id="surfaces" aria-labelledby="examples-title">
       <div class="example-intro">
-        <p class="kicker"><i></i> Start with what is in front of you</p>
-        <h2 id="examples-title">One workspace.<br />Different kinds<br />of making.</h2>
+        <p class="kicker"><i></i> One system, not one screen</p>
+        <h2 id="examples-title">Work visually.<br />Work in text.<br />Keep one truth.</h2>
         <p>
-          Architecture is one example. So are research, code, media, learning, writing, planning,
-          and the projects that do not fit neatly into a category.
+          Workspace, Knowledge, Browser, Create, Notch, the native Terminal, and the HII CLI all
+          read from the same local project state and proof history.
         </p>
       </div>
       <div class="example-board">
         {#each examples as example, index}
           <article class:tilt-left={index === 0} class:tilt-right={index === 2}>
             <div class="card-top">
-              <span>HII / 0{index + 1}</span>
-              <i aria-hidden="true">{index === 0 ? '↗' : index === 1 ? '✦' : '↘'}</i>
+              <span>{index === 2 ? 'HII / CLI / NATIVE TERMINAL' : `HII / ${example[0]}`}</span>
+              <i aria-hidden="true">{index === 0 ? '⌖' : index === 1 ? '⌘I' : '>_'}</i>
             </div>
             <h3>{example[0]}</h3>
             <p>{example[1]}</p>
-            <span class="card-result">{index === 0 ? 'direction' : index === 1 ? 'artifact' : 'next move'} kept on the workspace</span>
+            {#if index === 2}
+              <img src="/marketing/hii-cli-terminal-live.png" alt="The HII CLI running hii home inside HII's native terminal" width="680" height="440" />
+            {/if}
+            <span class="card-result">{index === 0 ? 'spatial control' : index === 1 ? 'source-linked memory' : 'observe → act → verify'} · same local runtime</span>
           </article>
         {/each}
       </div>
     </section>
 
-    <section class="proof" id="trust" aria-labelledby="proof-title">
+    <section class="proof" id="live-run" aria-labelledby="proof-title">
       <figure>
         <div class="window-bar">
-          <span>HII / REAL WORKSPACE</span>
-          <span class="live"><i></i> proof ready</span>
+          <span>HII / ACTUAL LOCAL RUN</span>
+          <span class="live"><i></i> completed + receipted</span>
         </div>
         <img
-          src="/marketing/hii-workspace-live.png"
-          alt="The actual HII spatial workspace with project context, HII chat, and a verified receipt"
-          width="1280"
-          height="720"
+          src="/marketing/hii-run-receipt-live.png"
+          alt="The actual HII spatial workspace with approved context, bounded work, an editable artifact, verification, and a receipt"
+          width="1920"
+          height="1080"
         />
       </figure>
       <div class="proof-copy">
-        <p class="kicker kicker-light"><i></i> Your work stays understandable</p>
-        <h2 id="proof-title">AI should leave<br />the room clearer<br />than it found it.</h2>
+        <p class="kicker kicker-light"><i></i> Captured from HII, not a mockup</p>
+        <h2 id="proof-title">One run.<br />Five visible<br />states.</h2>
         <p>
-          HII shows what information an agent may use, keeps risky actions separate, and returns
-          evidence you can inspect.
+          This run used three approved source objects, wrote one editable artifact, passed two
+          checks, and returned an inspectable local receipt in 43 seconds.
         </p>
         <ul>
-          <li><span>01</span><strong>Your files stay yours.</strong></li>
-          <li><span>02</span><strong>You approve the context.</strong></li>
-          <li><span>03</span><strong>Results come back with proof.</strong></li>
+          <li><span>01</span><strong>Intent approved</strong></li>
+          <li><span>02</span><strong>Accepted by AII</strong></li>
+          <li><span>03</span><strong>Bounded work completed</strong></li>
+          <li><span>04</span><strong>Proof collected</strong></li>
+          <li><span>05</span><strong>Receipt returned</strong></li>
         </ul>
         <a href="/privacy">Read the plain-language boundary <span aria-hidden="true">↗</span></a>
       </div>
@@ -227,7 +216,7 @@
 
   <footer>
     <HiiLogo />
-    <p>A place to think. A way to act.</p>
+    <p>Context → approval → work → proof → receipt.</p>
     <div>
       <a href="/architecture">Architecture example</a>
       <a href="/privacy">Privacy</a>
@@ -269,7 +258,7 @@
   .lights i:nth-child(2) { background:var(--lime); }
   .live { display:flex; align-items:center; gap:7px; }
   .live i { width:6px; height:6px; border-radius:50%; background:var(--blue); }
-  .workspace-window video, .proof img { display:block; width:100%; height:auto; }
+  .workspace-window > img, .proof img { display:block; width:100%; height:auto; }
   .workspace-window figcaption { display:grid; grid-template-columns:repeat(3,1fr); padding:12px 14px; color:#737986; font-size:7px; }
   .workspace-window figcaption span:nth-child(2) { text-align:center; }
   .workspace-window figcaption span:last-child { text-align:right; }
@@ -289,11 +278,11 @@
   .move-list h3 { margin:24px 0 10px; font-size:clamp(28px,3vw,44px); letter-spacing:-.05em; line-height:1; }
   .move-list p { max-width:580px; margin:0; color:#53584f; font-size:15px; line-height:1.5; }
   .examples { display:grid; grid-template-columns:minmax(320px,.78fr) minmax(0,1.22fr); gap:80px; padding:135px clamp(24px,6vw,92px); background:var(--canvas); }
-  .example-board { position:relative; min-height:690px; }
+  .example-board { position:relative; min-height:760px; }
   .example-board article { position:absolute; display:flex; width:min(78%,560px); min-height:330px; flex-direction:column; border:1px solid var(--line); border-radius:18px; background:white; padding:28px; box-shadow:0 28px 60px rgba(32,38,54,.12); }
   .example-board article:first-child { top:0; left:0; z-index:1; }
   .example-board article:nth-child(2) { top:175px; right:0; z-index:2; border-color:var(--blue); }
-  .example-board article:last-child { bottom:0; left:7%; z-index:3; background:var(--blue); color:white; }
+  .example-board article:last-child { bottom:0; left:7%; z-index:3; min-height:410px; background:var(--blue); color:white; }
   .tilt-left { transform:rotate(-2deg); }
   .tilt-right { transform:rotate(2deg); }
   .card-top { display:flex; align-items:center; justify-content:space-between; color:#858b97; font-size:8px; }
@@ -301,6 +290,7 @@
   .example-board h3 { max-width:390px; margin:42px 0 14px; font-size:clamp(34px,4vw,57px); letter-spacing:-.06em; line-height:.95; }
   .example-board p { max-width:430px; margin:0; color:#646a76; font-size:15px; line-height:1.5; }
   .example-board article:last-child p, .example-board article:last-child .card-top { color:#d9deff; }
+  .example-board article img { display:block; width:100%; height:auto; margin:22px 0 18px; border:1px solid rgba(255,255,255,.22); border-radius:8px; background:white; }
   .card-result { margin-top:auto; border-top:1px solid currentColor; padding-top:15px; font-size:7px; opacity:.72; }
   .proof { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(340px,.85fr); gap:80px; align-items:center; padding:125px clamp(24px,6vw,92px); background:var(--ink); color:white; }
   .proof figure { overflow:hidden; border-color:#353740; border-radius:16px; background:#202127; box-shadow:none; }
