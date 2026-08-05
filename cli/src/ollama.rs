@@ -127,7 +127,7 @@ struct ModelTag {
     name: String,
 }
 
-/// OpenAI-compatible `/v1/models` listing (served by LM Studio and Ollama).
+/// OpenAI-compatible `/v1/models` listing used by LM Studio and HII Native.
 #[derive(Debug, Deserialize)]
 struct OpenAiModels {
     #[serde(default)]
@@ -177,7 +177,7 @@ impl Ollama {
                     .map(|model| model.name)
                     .collect())
             }
-            ModelProvider::LmStudio => {
+            ModelProvider::LmStudio | ModelProvider::Native => {
                 let response: OpenAiModels = self
                     .agent
                     .get(&format!("{}/v1/models", self.base_url))
@@ -206,14 +206,6 @@ impl Ollama {
         )))
     }
 
-    pub fn chat_json_with_usage(
-        &self,
-        model: &str,
-        messages: &[Message],
-    ) -> Result<ChatResult, String> {
-        self.chat(model, messages, Some(action_schema()))
-    }
-
     pub fn chat_text(&self, model: &str, messages: &[Message]) -> Result<String, String> {
         Ok(self.chat_text_with_usage(model, messages)?.content)
     }
@@ -234,7 +226,9 @@ impl Ollama {
     ) -> Result<ChatResult, String> {
         let result = match self.provider {
             ModelProvider::Ollama => self.chat_ollama(model, messages, format),
-            ModelProvider::LmStudio => self.chat_openai(model, messages, format),
+            ModelProvider::LmStudio | ModelProvider::Native => {
+                self.chat_openai(model, messages, format)
+            }
         };
         if let Ok(chat) = &result {
             log_llm_request(model, self.provider, &chat.usage);
@@ -284,9 +278,9 @@ impl Ollama {
         })
     }
 
-    /// OpenAI-compatible chat (`/v1/chat/completions`), used for LM Studio. A
-    /// requested JSON schema maps to `response_format: json_object` since not
-    /// all backends honor a full schema constraint.
+    /// OpenAI-compatible chat (`/v1/chat/completions`), used for LM Studio and
+    /// HII Native. A requested JSON schema maps to `response_format:
+    /// json_object` since not all backends honor a full schema constraint.
     fn chat_openai(
         &self,
         model: &str,
@@ -345,20 +339,7 @@ impl Ollama {
         sender: mpsc::Sender<ChatStreamEvent>,
     ) {
         if self.provider != ModelProvider::Ollama {
-            let result = if json_format {
-                self.chat_json_with_usage(model, messages)
-            } else {
-                self.chat_text_with_usage(model, messages)
-            };
-            if let Ok(chat) = &result {
-                if !chat.thinking.is_empty() {
-                    let _ = sender.send(ChatStreamEvent::Thinking(chat.thinking.clone()));
-                }
-                if !chat.content.is_empty() {
-                    let _ = sender.send(ChatStreamEvent::Content(chat.content.clone()));
-                }
-            }
-            let _ = sender.send(ChatStreamEvent::Done(result));
+            self.chat_openai_with_stream(model, messages, json_format, cancel, sender);
             return;
         }
 
@@ -460,6 +441,106 @@ impl Ollama {
         log_llm_request(model, self.provider, &result.usage);
         let _ = sender.send(ChatStreamEvent::Done(Ok(result)));
     }
+
+    fn chat_openai_with_stream(
+        &self,
+        model: &str,
+        messages: &[Message],
+        json_format: bool,
+        cancel: &Cancel,
+        sender: mpsc::Sender<ChatStreamEvent>,
+    ) {
+        let mut body = json!({
+            "model": model,
+            "messages": openai_messages(messages),
+            "stream": true,
+            "stream_options": { "include_usage": true },
+            "temperature": 0.1,
+        });
+        if json_format {
+            body["response_format"] = json!({ "type": "json_object" });
+        }
+        let response = match self
+            .agent
+            .post(&format!("{}/v1/chat/completions", self.base_url))
+            .send_json(body)
+            .map_err(format_ureq)
+        {
+            Ok(response) => response,
+            Err(error) => {
+                let _ = sender.send(ChatStreamEvent::Done(Err(error)));
+                return;
+            }
+        };
+
+        let mut content = String::new();
+        let mut thinking = String::new();
+        let mut usage = ChatUsage::default();
+        let mut content_repetition = RepetitionGuard::default();
+        for line in BufReader::new(response.into_reader()).lines() {
+            if cancel.is_cancelled() {
+                let _ = sender.send(ChatStreamEvent::Done(Err(CANCELLED.into())));
+                return;
+            }
+            let line = match line {
+                Ok(line) => line,
+                Err(error) => {
+                    let _ = sender.send(ChatStreamEvent::Done(Err(format!(
+                        "failed to read model stream: {error}"
+                    ))));
+                    return;
+                }
+            };
+            let Some(data) = line.strip_prefix("data:").map(str::trim) else {
+                continue;
+            };
+            if data == "[DONE]" {
+                break;
+            }
+            let value: Value = match serde_json::from_str(data) {
+                Ok(value) => value,
+                Err(error) => {
+                    let _ = sender.send(ChatStreamEvent::Done(Err(format!(
+                        "invalid model stream response: {error}"
+                    ))));
+                    return;
+                }
+            };
+            let delta = &value["choices"][0]["delta"];
+            if let Some(text) = openai_reasoning_delta(delta) {
+                thinking.push_str(text);
+                let _ = sender.send(ChatStreamEvent::Thinking(text.to_string()));
+            }
+            if let Some(text) = delta["content"].as_str().filter(|text| !text.is_empty()) {
+                if content_repetition.observe(text) {
+                    let _ = sender.send(ChatStreamEvent::Done(Err(
+                        "MODEL LOOP DETECTED — the current generation repeated the same substantial block three times. The session is preserved; revise or retry the request."
+                            .into(),
+                    )));
+                    return;
+                }
+                content.push_str(text);
+                let _ = sender.send(ChatStreamEvent::Content(text.to_string()));
+            }
+            if let Some(value) = value.get("usage") {
+                usage.prompt_tokens = value["prompt_tokens"].as_u64().unwrap_or(0);
+                usage.completion_tokens = value["completion_tokens"].as_u64().unwrap_or(0);
+            }
+        }
+        let result = ChatResult {
+            content,
+            thinking,
+            usage,
+        };
+        log_llm_request(model, self.provider, &result.usage);
+        let _ = sender.send(ChatStreamEvent::Done(Ok(result)));
+    }
+}
+
+fn openai_reasoning_delta(delta: &Value) -> Option<&str> {
+    ["reasoning_content", "reasoning", "thinking"]
+        .into_iter()
+        .find_map(|key| delta[key].as_str().filter(|text| !text.is_empty()))
 }
 
 fn openai_messages(messages: &[Message]) -> Value {
@@ -575,6 +656,7 @@ fn log_llm_request(model: &str, provider: ModelProvider, usage: &ChatUsage) {
     let provider = match provider {
         ModelProvider::Ollama => "ollama",
         ModelProvider::LmStudio => "lmstudio",
+        ModelProvider::Native => "native",
     };
     let entry = json!({
         "ts": chrono_now(),
@@ -602,15 +684,15 @@ fn format_ureq(error: ureq::Error) -> String {
     match error {
         ureq::Error::Status(code, response) => {
             let body = response.into_string().unwrap_or_default();
-            format!("Ollama returned HTTP {code}: {}", body.trim())
+            format!("model provider returned HTTP {code}: {}", body.trim())
         }
-        ureq::Error::Transport(error) => format!("cannot reach local Ollama: {error}"),
+        ureq::Error::Transport(error) => format!("cannot reach local model provider: {error}"),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{openai_messages, Message, RepetitionGuard};
+    use super::{openai_messages, openai_reasoning_delta, Message, RepetitionGuard};
     use crate::attachments::ImagePayload;
 
     #[test]
@@ -672,5 +754,17 @@ mod tests {
             value[0]["content"][1]["image_url"]["url"],
             "data:image/png;base64,aW1hZ2U="
         );
+    }
+
+    #[test]
+    fn openai_stream_accepts_common_reasoning_delta_names() {
+        for key in ["reasoning_content", "reasoning", "thinking"] {
+            let mut delta = serde_json::Map::new();
+            delta.insert(key.into(), serde_json::Value::String("trace".into()));
+            assert_eq!(
+                openai_reasoning_delta(&serde_json::Value::Object(delta)),
+                Some("trace")
+            );
+        }
     }
 }

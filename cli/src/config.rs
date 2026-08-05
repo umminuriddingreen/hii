@@ -8,18 +8,19 @@ pub const DEFAULT_REVIEW_MODEL: &str = "qwen3.6:35b-mlx";
 /// time; this bounds it in work.
 pub const DEFAULT_MAX_STEPS: usize = 60;
 
-/// Which local model runtime we are talking to. Both expose an OpenAI-compatible
-/// `/v1/chat/completions` endpoint that carries native tool-calling; they differ
-/// in the model-listing endpoint and default port.
+/// Which local model runtime we are talking to. LM Studio and HII Native expose
+/// OpenAI-compatible endpoints; Ollama uses its native API for richer local
+/// metadata and streaming controls.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModelProvider {
     Ollama,
     LmStudio,
+    Native,
 }
 
 impl ModelProvider {
     /// Resolve the provider from `HII_MODEL_PROVIDER`, else infer from the URL
-    /// (LM Studio conventionally serves on port 1234), else default to Ollama.
+    /// (HII Native uses 11435 and LM Studio uses 1234), else default to Ollama.
     pub fn discover(url: &str) -> Self {
         match env::var("HII_MODEL_PROVIDER")
             .ok()
@@ -27,7 +28,9 @@ impl ModelProvider {
             .as_deref()
         {
             Some("lmstudio") | Some("lm-studio") | Some("lm_studio") => ModelProvider::LmStudio,
+            Some("native") | Some("hii-native") | Some("hii_native") => ModelProvider::Native,
             Some("ollama") => ModelProvider::Ollama,
+            _ if url.contains(":11435") => ModelProvider::Native,
             _ if url.contains(":1234") => ModelProvider::LmStudio,
             _ => ModelProvider::Ollama,
         }

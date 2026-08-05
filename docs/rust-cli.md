@@ -166,6 +166,21 @@ and proof record to `qwen3.6:35b-mlx` for a stricter second pass. Ollama remains
 a replaceable local model provider; workspace policy, tools, events, and proof
 belong to HII/AII.
 
+HII can also talk directly to its native Rust/Metal runner through the same
+OpenAI-compatible boundary. The runner lives at
+`/Users/ummi/dev/hii-native-runner` and binds to loopback port 11435 by
+default:
+
+```sh
+HII_MODEL_PROVIDER=native \
+HII_MODEL_URL=http://127.0.0.1:11435 \
+hii --model Qwen/Qwen3.6-35B-A3B
+```
+
+The native provider supports incremental response and reasoning streams,
+interrupt cancellation, model discovery, and token telemetry. HII continues
+to own the agent loop, tools, verification, and durable receipts.
+
 ## Runtime contract
 
 Each run is stored under:

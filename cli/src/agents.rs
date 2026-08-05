@@ -53,7 +53,7 @@ impl AgentManager {
         let codex = provider_status("codex")?;
         let claude = provider_status("claude")?;
         Ok(format!(
-            "local   ready · Ollama / LM Studio\ncodex   {codex}\nclaude  {claude}\n\n/login codex  ·  /login claude"
+            "local   ready · Ollama / LM Studio / HII Native\ncodex   {codex}\nclaude  {claude}\n\n/login codex  ·  /login claude"
         ))
     }
 
