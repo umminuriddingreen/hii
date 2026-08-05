@@ -2,6 +2,9 @@ name: Windows packaged app
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - release/new-user-ready
 
 permissions:
   contents: read
