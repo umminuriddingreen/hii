@@ -72,7 +72,8 @@ async function detectBinary(
   try {
     const result = await execFileAsync(command, versionArgs, {
       timeout: 5_000,
-      maxBuffer: 512 * 1024
+      maxBuffer: 512 * 1024,
+      shell: process.platform === 'win32'
     });
     return {
       id,
@@ -122,7 +123,8 @@ export async function detectAgents(): Promise<DetectedAgent[]> {
     try {
       const result = await execFileAsync(ollamaCommand, ['list'], {
         timeout: 5_000,
-        maxBuffer: 2 * 1024 * 1024
+        maxBuffer: 2 * 1024 * 1024,
+        shell: process.platform === 'win32'
       });
       const models = result.stdout
         .split(/\r?\n/)
