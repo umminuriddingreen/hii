@@ -8,6 +8,8 @@ const cloudflareLaunchRoutes = new Set([
   '/learn',
   '/activate',
   '/architecture',
+  '/download/macos',
+  '/download/windows',
   '/pilot',
   '/privacy',
   '/remote',

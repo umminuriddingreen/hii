@@ -9,7 +9,10 @@ describe('desktop download contract', () => {
   it('serves versioned desktop artifacts from the bound release bucket', () => {
     const route = read('src/routes/download/[platform]/+server.ts');
     const wrangler = read('wrangler.jsonc');
+    const hooks = read('src/hooks.server.ts');
     expect(wrangler).toContain('"binding": "DOWNLOADS"');
+    expect(hooks).toContain("'/download/windows'");
+    expect(hooks).toContain("'/download/macos'");
     expect(route).toContain('releases/latest-${target}.json');
     expect(route).toContain('content-disposition');
     expect(route).toContain('x-hii-sha256');
