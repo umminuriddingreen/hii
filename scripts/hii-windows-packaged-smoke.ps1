@@ -46,7 +46,9 @@ try {
   }
 
   $start = Invoke-RestMethod -Method Post -ContentType 'application/json' -Body '{"action":"start"}' -Uri 'http://127.0.0.1:3042/api/daemon'
-  if ($start.action -ne 'start') { throw 'HII did not accept the embedded AII start request.' }
+  if ($start.ok -ne $true -or $start.result.action -ne 'start') {
+    throw 'HII did not accept the embedded AII start request.'
+  }
 
   $alive = $false
   for ($attempt = 0; $attempt -lt 30; $attempt += 1) {

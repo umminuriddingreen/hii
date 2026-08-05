@@ -35,5 +35,6 @@ describe('desktop cross-platform release contract', () => {
     expect(workflow).toContain('hii-windows-packaged-smoke.ps1');
     expect(smoke).toContain("'/S'");
     expect(smoke).toContain("'http://127.0.0.1:3042/api/daemon'");
+    expect(smoke).toContain("$start.result.action -ne 'start'");
   });
 });
