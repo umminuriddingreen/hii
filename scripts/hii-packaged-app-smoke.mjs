@@ -181,6 +181,28 @@ try {
   assert.equal(firstLoad.body.status, 'missing');
   assert.equal(firstLoad.body.workspace.version, 1);
 
+  const daemonStart = await requestJson(server.baseUrl, '/api/daemon', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'start' })
+  });
+  assert.equal(daemonStart.response.status, 200);
+  assert.equal(daemonStart.body.ok, true);
+  const daemonDeadline = Date.now() + 10_000;
+  let daemonSnapshot = daemonStart.body.snapshot;
+  while (!daemonSnapshot?.alive && Date.now() < daemonDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const probe = await requestJson(server.baseUrl, '/api/daemon');
+    assert.equal(probe.response.status, 200);
+    daemonSnapshot = probe.body;
+  }
+  assert.equal(daemonSnapshot?.alive, true, 'Packaged HII could not start its embedded AII runtime.');
+  const daemonStop = await requestJson(server.baseUrl, '/api/daemon', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'stop' })
+  });
+  assert.equal(daemonStop.response.status, 200);
+  assert.equal(daemonStop.body.ok, true);
+
   const assetBytes = Buffer.alloc(600 * 1024, 0x68);
   const firstAssetForm = new FormData();
   firstAssetForm.set('file', new File([assetBytes], 'reference.png', { type: 'image/png' }));
@@ -274,6 +296,7 @@ try {
   console.log('status:       ok');
   console.log('isolation:    copied HII.app ran outside the source repository');
   console.log('clean user:   empty isolated runtime initialized');
+  console.log('local AII:    embedded daemon started and stopped without a source checkout');
   console.log('persistence:  receipt workspace survived packaged reinstall + restart');
   console.log('assets:       content-addressed upload deduplicated and survived reinstall');
   console.log('recovery:     corrupt workspace preserved with an inspectable recovery path');

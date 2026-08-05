@@ -1,0 +1,37 @@
+name: Windows packaged app
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-packaged-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows x64 installer and clean install proof
+    runs-on: windows-2025
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm run check
+      - run: npm run test
+      - run: npm run build:tauri:windows
+      - name: Install and smoke-test the packaged app
+        shell: pwsh
+        run: ./scripts/hii-windows-packaged-smoke.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HII-${{ github.sha }}-windows-x64
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 14

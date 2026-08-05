@@ -17,10 +17,18 @@ describe('activation wizard contract', () => {
 
   it('keeps approval explicit and exposes the required task presets', () => {
     expect(activate).toContain('I approve this project context.');
-    expect(activate).toContain('disabled={!approved || busy}');
+    expect(activate).toContain('disabled={!approved || includedCount() === 0 || busy}');
+    expect(activate).toContain('No supported files found.');
     expect(activate).toContain('Explain this project and one next action.');
     expect(activate).toContain('Make one small reversible improvement.');
     expect(activate).toContain('Verify an artifact and produce a receipt.');
+  });
+
+  it('blocks the first run until the selected agent is actually ready', () => {
+    expect(activate).toContain('function agentReadiness(agentId: AgentId)');
+    expect(activate).toContain('Setup needed');
+    expect(activate).toContain('Run `codex login` in Terminal, then check again.');
+    expect(activate).toContain('disabled={!selectedReadiness.ready || detecting}');
   });
 
   it('supports desktop folder picking, local mock fixtures, and complete receipts', () => {

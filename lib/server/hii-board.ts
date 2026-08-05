@@ -281,7 +281,7 @@ export async function createBoardTask(input: {
   const lane = reviewState === 'proposed' && ['next', 'doing'].includes(requestedLane)
     ? 'backlog'
     : requestedLane;
-  const coordinate = sanitizeText(input.coordinate, 240) || '/Users/ummi/hii';
+  const coordinate = sanitizeText(input.coordinate, 240);
   const existingTask = (await listBoardTasks()).find((candidate) =>
     boardTaskKey(candidate) === boardTaskKey({ title, coordinate })
   );

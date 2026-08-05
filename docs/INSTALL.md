@@ -1,71 +1,54 @@
-# Install HII on your Mac
+# Install HII
 
-HII is designed for Apple Silicon Macs running macOS 13 or newer. You will receive a signed `HII.app` and a bootstrap script named `hii-bootstrap.sh`. The bootstrap does not use administrator access, install other agents, or connect to the internet.
+HII runs as a local desktop app on Apple Silicon Macs with macOS 13 or newer and on x64 Windows 10 or 11 PCs. The app includes its own local HII server. It does not require the source repository and stores your HII state in your user profile under `.hii`.
 
-## 1. Drag HII.app to Applications
+## Windows 10 or 11
 
-Open the folder or disk image you received. Drag **HII.app** into the **Applications** folder. Wait for the copy to finish before opening it.
+1. Download the Windows installer from the HII website.
+2. Open the downloaded `HII-*-windows-x64-setup.exe` file.
+3. Finish the current-user installation. Administrator access is not required.
+4. Open **HII** from the Start menu.
 
-## 2. Open HII for the first time
+The installer includes the WebView2 bootstrapper HII needs for its desktop interface. A public release should identify a verified publisher in Windows; do not weaken Windows Security or SmartScreen for an unexpected or unverified file.
 
-Open **Applications**, right-click **HII**, and choose **Open**. In the confirmation window, choose **Open** again. This right-click path is useful on a Mac that has not seen this HII build before.
+## macOS 13 or newer
 
-For a notarized build, macOS checks the app and then opens it normally. You may see a short “Verifying HII” message on the first launch. You should not need to weaken Gatekeeper or change your Mac's general security settings.
+The public Mac download remains closed until Apple Developer ID signing and notarization pass. When the notarized archive is available:
 
-## 3. Run the bootstrap
+1. Download and open the HII archive.
+2. Drag **HII.app** to **Applications**.
+3. Open HII normally from Applications.
+4. If macOS blocks a build that is supposed to be notarized, stop and report it. Do not disable Gatekeeper.
 
-The bootstrap script is supplied alongside the app. Open Terminal, type `cd ` (including the space), drag the folder containing `hii-bootstrap.sh` into the Terminal window, and press Return. Then run:
+The optional `hii-bootstrap.sh` included with the Mac archive prepares the local CLI folders and reports supported agents. Run it from Terminal with `bash hii-bootstrap.sh`. It does not use administrator access, install agents, or sign in to external services.
 
-```sh
-bash hii-bootstrap.sh
-```
+## Connect an agent
 
-The script checks compatibility, prepares HII's private local folders, reports which supported agents it can see, and configures the optional local daemon. It is safe to run again. By default, it writes the daemon configuration but does not load it; follow the command printed at the end if you want the daemon to start automatically.
+HII detects agents already installed on the computer. It does not install them or handle their account credentials.
 
-## 4. Connect your agent
+- **Codex:** run `codex login`, finish sign-in, then use **Check again** in HII.
+- **Claude Code:** run `claude`, finish sign-in, then use **Check again** in HII.
+- **Ollama:** local use needs no account, but the activation beta still requires an authenticated Codex executor for a verified first run.
 
-HII works with an agent already installed on your Mac. The bootstrap detects agents but never installs, launches, or signs in to them.
+HII will not continue activation until the chosen agent is installed and signed in. Choose one specific project folder containing at least one supported file; HII never infers access to your whole home directory.
 
-- **Codex:** run `codex login` in Terminal and complete the sign-in prompts. See the official OpenAI Codex documentation if your organization uses a different login method.
-- **Claude:** run `claude` in Terminal, then follow its login or authentication prompts. See the official Anthropic Claude Code documentation for current account and authentication options.
-- **Ollama:** an account is not required for local use. If your partner package calls for Ollama, run `bash hii-bootstrap.sh --with-ollama` to print the exact optional setup commands. The bootstrap will not run them for you.
+## First use
 
-## 5. Activate HII
+Open **Activate**, choose the agent, choose a project folder, review the included files, and state one bounded task. The first run is complete only when HII returns a verified receipt.
 
-Open **HII** from Applications. Go to the **Activate** screen, select the agent you connected, and follow the on-screen check. HII keeps runtime state on this Mac under `~/.hii`.
-
-## 6. Troubleshooting
-
-### Gatekeeper blocks HII
-
-Confirm that HII is in Applications. Right-click **HII**, choose **Open**, then choose **Open** in the confirmation window. If macOS still blocks the app, open **System Settings → Privacy & Security**, find the message about HII, and use **Open Anyway** only if the app came directly from your HII design-partner package. Do not disable Gatekeeper globally.
+## Troubleshooting
 
 ### An agent is not detected
 
-Quit and reopen Terminal after installing the agent, then run `bash hii-bootstrap.sh` again. HII checks your normal command path and `/opt/homebrew/bin`. Confirm the agent's own command works in Terminal (`codex`, `claude`, or `ollama`) and complete its vendor login flow if needed. The bootstrap intentionally does not install or start agents.
+Quit and reopen HII after installing or signing in to the agent. Confirm its command works in Terminal or PowerShell (`codex`, `claude`, or `ollama`), then select **Check again**.
 
-### The daemon is not running
+### AII is offline
 
-The bootstrap does not load the daemon by default. Run:
+Open the AII health control in the workspace and choose **Start AII**. The packaged app contains this runtime; a source checkout should not be required. If startup still fails, use the error shown there when reporting the problem.
 
-```sh
-launchctl load ~/Library/LaunchAgents/com.ummi.hii.hiid.plist
-```
+### Uninstall
 
-Or run `bash hii-bootstrap.sh --enable-daemon`. If the plist was not created, confirm that the complete partner build is installed at `/Applications/HII.app`, then run the bootstrap again.
+- **Windows:** uninstall HII from **Settings → Apps → Installed apps**.
+- **macOS:** quit HII and move `/Applications/HII.app` to Trash.
 
-### Fully uninstall HII
-
-First quit HII. If the daemon was enabled, unload it:
-
-```sh
-launchctl unload ~/Library/LaunchAgents/com.ummi.hii.hiid.plist
-```
-
-Then remove these three paths:
-
-- `/Applications/HII.app` — the application
-- `~/.hii` — all local HII runtime state, logs, activations, traces, skills, and run history
-- `~/Library/LaunchAgents/com.ummi.hii.hiid.plist` — the per-user daemon configuration
-
-Deleting `~/.hii` permanently removes your local HII state. Copy anything you need from it before uninstalling.
+Application removal intentionally leaves `.hii` in your user profile so an update or reinstall keeps your work. Deleting that folder permanently removes local HII state, logs, activations, and run history; copy anything you need before deleting it.

@@ -1,5 +1,6 @@
 import 'server-only';
 import { execFile } from 'child_process';
+import { existsSync } from 'fs';
 import { mkdir, readFile, readdir, writeFile } from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
@@ -10,8 +11,11 @@ import { summarizeHiiDaemonHealth } from '@/lib/workspace/daemon-health';
 
 const execFileAsync = promisify(execFile);
 
-const home = process.env.HOME || '/Users/ummi';
-const hiiRoot = path.join(home, 'hii');
+const home = process.env.HOME || process.cwd();
+const hiiRootCandidates = [process.env.HII_ROOT, process.cwd(), path.join(home, 'hii')].filter(
+  (candidate): candidate is string => Boolean(candidate)
+);
+const hiiRoot = hiiRootCandidates.find((candidate) => existsSync(path.join(candidate, 'aii', 'daemon', 'hiid.mjs'))) ?? hiiRootCandidates[0] ?? process.cwd();
 const runtime = process.env.HII_RUNTIME_DIR || path.join(home, '.hii');
 const daemonDir = path.join(runtime, 'daemon');
 const runsDir = path.join(daemonDir, 'runs');
@@ -20,6 +24,19 @@ const instancesPath = path.join(daemonDir, 'instances.json');
 const eventsPath = path.join(daemonDir, 'events.jsonl');
 const daemonLogPath = path.join(daemonDir, 'daemon.log');
 const hiidScript = path.join(hiiRoot, 'aii', 'daemon', 'hiid.mjs');
+
+function nodeRuntime() {
+  const candidates = [
+    process.env.HII_NODE_RUNTIME,
+    process.execPath,
+    '/opt/homebrew/opt/node/bin/node',
+    '/usr/local/bin/node',
+    '/usr/bin/node'
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found) throw new Error('HII could not find a working Node runtime. Reinstall the HII app and try again.');
+  return found;
+}
 
 export type HiiDaemonEvent = {
   id: string;
@@ -204,8 +221,12 @@ export async function controlHiiDaemon(action: string, body: Record<string, unkn
   }
 
   await mkdir(daemonDir, { recursive: true });
-  const result = await execFileAsync(process.execPath, [hiidScript, ...args], {
+  if (!existsSync(hiidScript)) {
+    throw new Error('HII local runtime is incomplete. Reinstall HII.app, then try again.');
+  }
+  const result = await execFileAsync(nodeRuntime(), [hiidScript, ...args], {
     cwd: hiiRoot,
+    env: { ...process.env, HII_ROOT: hiiRoot },
     timeout: action === 'restart' ? 5000 : 8000,
     maxBuffer: 1024 * 1024
   });

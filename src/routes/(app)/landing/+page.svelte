@@ -72,7 +72,7 @@
   <main id="top">
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <p class="kicker"><i></i> Visual workspace · Mac app</p>
+        <p class="kicker"><i></i> Visual workspace · Mac + Windows</p>
         <h1 id="hero-title">A workspace for<br />everything you’re<br /><em>making.</em></h1>
         <p class="deck">
           Put your ideas, files, websites, images, models, chats, and tools in one place. HII helps
@@ -80,9 +80,9 @@
         </p>
         <div class="actions">
           <a class="primary" href="/learn">Try the workspace <span aria-hidden="true">↗</span></a>
-          <a class="secondary" href="#join">Join the Mac beta</a>
+          <a class="secondary" href="#download">Get the desktop app</a>
         </div>
-        <p class="small-note">The browser demo uses sample data and cannot access your Mac.</p>
+        <p class="small-note">The browser demo uses sample data and cannot access your computer.</p>
       </div>
 
       <figure class="workspace-window">
@@ -199,28 +199,28 @@
       </div>
     </section>
 
-    <section class="join" id="join" aria-labelledby="join-title">
+    <section class="join" id="download" aria-labelledby="join-title">
       <div>
-        <p class="kicker"><i></i> HII for macOS</p>
-        <h2 id="join-title">Bring something<br />you want to make.</h2>
+        <p class="kicker"><i></i> HII on your computer</p>
+        <h2 id="join-title">Download.<br />Choose a project.<br />Make one move.</h2>
       </div>
       <div class="join-card">
-        <span>Local beta</span>
-        <strong>Free</strong>
-        <p>Use HII on your Mac with your own information and your choice of AI tools.</p>
-        <a href="mailto:hello@humaninformationinterface.com?subject=Join%20the%20HII%20Mac%20beta&body=The%20thing%20I%20want%20to%20make%20or%20move%20forward%20with%20HII%20is%3A%0A">
-          Join the Mac beta <span aria-hidden="true">↗</span>
+        <span>Windows 10 / 11 · x64</span>
+        <strong>Windows</strong>
+        <p>A current-user installer with HII’s local runtime included. No administrator account required.</p>
+        <a href="/download/windows">
+          Download for Windows <span aria-hidden="true">↓</span>
         </a>
       </div>
       <div class="join-card founder">
-        <span>Founder activation</span>
-        <strong>$500</strong>
-        <p>We shape HII around one valuable project and stay through the first verified result.</p>
-        <a href="/pilot">Work with the founder <span aria-hidden="true">↗</span></a>
+        <span>macOS 13+ · Apple Silicon</span>
+        <strong>Mac</strong>
+        <p>The Mac build is ready locally; public download stays closed until Apple notarization passes.</p>
+        <a href="mailto:hello@humaninformationinterface.com?subject=Notify%20me%20when%20HII%20for%20Mac%20is%20notarized">Get the Mac release notice <span aria-hidden="true">↗</span></a>
       </div>
       <p class="installer-note">
-        Signed Mac installer preparing. Public download opens after Apple notarization passes. We
-        will never ask you to bypass Gatekeeper.
+        HII keeps project state on your computer under <code>~/.hii</code>. We do not ask you to disable
+        Gatekeeper or Windows security protections.
       </p>
     </section>
   </main>

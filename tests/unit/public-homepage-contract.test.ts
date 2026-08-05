@@ -22,8 +22,8 @@ describe('public HII homepage', () => {
     expect(homepage).toContain('https://humaninformationinterface.com/');
     expect(homepage).toContain('A workspace for<br />everything you’re<br /><em>making.</em>');
     expect(homepage).toContain('Open HII');
-    expect(homepage).toContain('Join the Mac beta');
-    expect(homepage).toContain('Signed Mac installer preparing');
+    expect(homepage).toContain('Visual workspace · Mac + Windows');
+    expect(homepage).toContain('Get the desktop app');
     expect(homepage).toContain('/marketing/hii-workspace-live.png');
     expect(homepage).toContain('/marketing/hii-first-win-demo.mp4');
     expect(homepage).toContain('actual interface');
@@ -34,16 +34,16 @@ describe('public HII homepage', () => {
     expect(homepage).toContain('Find a direction');
     expect(homepage).toContain('Make an artifact');
     expect(homepage).toContain('Understand a project');
-    expect(homepage).toContain('The browser demo uses sample data and cannot access your Mac');
+    expect(homepage).toContain('The browser demo uses sample data and cannot access your computer');
     expect(homepage).toContain('href="/learn"');
   });
 
-  it('presents one truthful free product and one concrete paid activation', () => {
-    expect(homepage).toContain('Local beta');
-    expect(homepage).toContain('Founder activation');
-    expect(homepage).toContain('<strong>$500</strong>');
-    expect(homepage).toContain('Public download opens after Apple notarization passes');
-    expect(homepage).toContain('will never ask you to bypass Gatekeeper');
+  it('offers the verified Windows path without overstating Mac release trust', () => {
+    expect(homepage).toContain('Windows 10 / 11 · x64');
+    expect(homepage).toContain('Download for Windows');
+    expect(homepage).toContain('No administrator account required');
+    expect(homepage).toContain('public download stays closed until Apple notarization passes');
+    expect(homepage).toContain('We do not ask you to disable');
   });
 
   it('links to a plain-language privacy boundary before public recruitment', () => {

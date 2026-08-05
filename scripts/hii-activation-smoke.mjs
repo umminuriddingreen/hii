@@ -22,6 +22,10 @@ function stubBinary(name, body) {
 
 process.env.HII_CODEX_BIN = stubBinary('codex', 'echo "codex-cli smoke"');
 process.env.HII_CLAUDE_BIN = stubBinary('claude', 'echo "claude smoke"');
+process.env.HII_CODEX_AUTH_PATH = path.join(directory, 'codex-auth.json');
+process.env.HII_CLAUDE_AUTH_PATH = path.join(directory, 'claude-auth.json');
+fs.writeFileSync(process.env.HII_CODEX_AUTH_PATH, '{"signedIn":true}\n');
+fs.writeFileSync(process.env.HII_CLAUDE_AUTH_PATH, '{"signedIn":true}\n');
 process.env.HII_OLLAMA_BIN = stubBinary('ollama', '[ "$1" = "list" ] && printf "NAME ID SIZE MODIFIED\\nqwen-smoke:latest abc 1GB now\\n" || echo "ollama smoke"');
 
 const contextDock = await import('../lib/server/hii-context-dock.ts');
@@ -31,8 +35,8 @@ const activationJourney = await import('../lib/server/hii-activation-journey.ts'
 try {
   const agents = await activation.detectAgents();
   assert.deepEqual(agents.map((agent) => [agent.id, agent.installed, agent.authenticated]), [
-    ['codex', true, null],
-    ['claude', true, null],
+    ['codex', true, true],
+    ['claude', true, true],
     ['ollama', true, null]
   ]);
   assert.equal(agents[2].detail, 'qwen-smoke:latest');

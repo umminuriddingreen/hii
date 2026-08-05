@@ -9,9 +9,10 @@ import { appendCapabilityJob } from '@/lib/capabilities/local-store';
 
 const execFileAsync = promisify(execFile);
 
-const hiiRoot = '/Users/ummi/hii';
-const spawnLogPath = path.join(hiiRoot, '.hii', 'terminal-spawns.jsonl');
-const claudeBin = '/opt/homebrew/bin/claude';
+const runtimeRoot = process.env.HII_RUNTIME_DIR || path.join(os.homedir(), '.hii');
+const hiiRoot = process.env.HII_ROOT || process.cwd();
+const spawnLogPath = path.join(runtimeRoot, 'terminal-spawns.jsonl');
+const claudeBin = process.env.HII_CLAUDE_BIN || (process.platform === 'win32' ? 'claude' : '/opt/homebrew/bin/claude');
 
 export type ProcessLine = {
   pid: string;
@@ -141,6 +142,24 @@ async function getHostName() {
 }
 
 async function listProcesses() {
+  if (process.platform === 'win32') {
+    const result = await execFileAsync('tasklist.exe', ['/FO', 'CSV', '/NH'], {
+      timeout: 5000,
+      maxBuffer: 4 * 1024 * 1024
+    });
+    return result.stdout
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => {
+        const fields = [...line.matchAll(/"([^"]*)"/g)].map((match) => match[1]);
+        const command = redactProcessLine(fields[0] || line);
+        return {
+          pid: fields[1] || '', user: '', cpu: '', mem: fields[4] || '', command,
+          raw: redactProcessLine(line),
+          agent: /claude|codex|hii|aii|ollama|rhino|node/i.test(command)
+        } satisfies ProcessLine;
+      });
+  }
   const result = await execFileAsync('ps', ['auxww'], {
     timeout: 5000,
     maxBuffer: 4 * 1024 * 1024
@@ -213,7 +232,7 @@ export async function spawnClaudeAgent(request: SpawnRequest) {
   };
 
   const intentsPath = path.join(
-    process.env.HII_RUNTIME_DIR || path.join(os.homedir(), '.hii'),
+    runtimeRoot,
     'daemon',
     'intents.jsonl'
   );

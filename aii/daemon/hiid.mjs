@@ -6,12 +6,13 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import {
   cleanupWorkspaceRunContext,
   stageWorkspaceRunContext
 } from "./workspace-run-staging.mjs";
 
-const ROOT = path.join(os.homedir(), "hii");
+const ROOT = process.env.HII_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const RUNTIME = process.env.HII_RUNTIME_DIR || path.join(os.homedir(), ".hii");
 const DAEMON_DIR = path.join(RUNTIME, "daemon");
 const RUNS_DIR = path.join(DAEMON_DIR, "runs");
@@ -32,8 +33,7 @@ const OWNED_PATTERNS = [
   `${ROOT}/aii/daemon/hiid.mjs`,
   `${ROOT}/server.mjs`,
   `${ROOT}/node_modules/.bin/next`,
-  "codex exec",
-  "codex app-server"
+  "codex exec"
 ];
 
 const activeRuns = new Map();
@@ -157,8 +157,8 @@ function cmdConfig(args) {
 const INTENTS = path.join(DAEMON_DIR, "intents.jsonl");
 const INTENTS_CURSOR = path.join(DAEMON_DIR, "intents.cursor.json");
 const CAPABILITY_JOBS = path.join(RUNTIME, "capability-jobs.jsonl");
-const CLAUDE_BIN = "/opt/homebrew/bin/claude";
-const HII_BIN = process.env.HII_WORKSPACE_RUNNER_BIN || path.join(os.homedir(), "bin", "hii");
+const CLAUDE_BIN = process.env.HII_CLAUDE_BIN || (process.platform === "win32" ? "claude" : "/opt/homebrew/bin/claude");
+const HII_BIN = process.env.HII_WORKSPACE_RUNNER_BIN || (process.platform === "win32" ? "hii" : path.join(os.homedir(), "bin", "hii"));
 
 function cleanSessionName(value) {
   return String(value || "")
@@ -933,7 +933,7 @@ function runningDaemonPids() {
       const pid = Number(parts[1]);
       const command = parts.slice(10).join(" ");
       if (pid === process.pid) return null;
-      if (!command.includes("scripts/hiid.mjs run")) return null;
+      if (!command.includes(`${ROOT}/aii/daemon/hiid.mjs run`)) return null;
       return pid;
     })
     .filter(Boolean);
@@ -950,14 +950,15 @@ function parseProcessLine(line) {
   if (!trimmed || trimmed.startsWith("USER ")) return null;
   const parts = trimmed.split(/\s+/);
   if (parts.length < 11) return null;
+  const pid = Number(parts[1]);
   const command = redact(parts.slice(10).join(" "));
-  const owned = OWNED_PATTERNS.some((pattern) => command.includes(pattern));
+  const owned = OWNED_PATTERNS.some((pattern) => command.includes(pattern)) || pid === appServerPid();
   const relevant = owned || /claude|codex|hii|aii|termite|ollama|rhino|node.*next|python.*hii/i.test(command);
   if (!relevant) return null;
   return {
     id: `process:${parts[1]}`,
     type: "process",
-    pid: Number(parts[1]),
+    pid,
     title: command.split(/\s+/).slice(0, 4).join(" "),
     command,
     cpu: parts[2],
@@ -1221,7 +1222,7 @@ function startDaemon() {
     return;
   }
   const out = fs.openSync(LOG, "a");
-  const child = spawn(process.execPath, [new URL(import.meta.url).pathname, "run"], {
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), "run"], {
     cwd: ROOT,
     detached: true,
     stdio: ["ignore", out, out],

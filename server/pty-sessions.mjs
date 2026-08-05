@@ -57,8 +57,10 @@ function broadcast(session, message) {
 export function createSession(sessionId, { cwd, cols, rows }) {
   if (sessions.has(sessionId)) return sessions.get(sessionId);
   const safeCwd = cwd && isInside(cwd) ? path.resolve(cwd) : ALLOWED_ROOT;
-  const shell = process.env.SHELL || '/bin/zsh';
-  const pty = spawn(shell, ['-l'], {
+  const windows = process.platform === 'win32';
+  const shell = windows ? (process.env.ComSpec || 'powershell.exe') : (process.env.SHELL || '/bin/zsh');
+  const shellArgs = windows && /powershell/i.test(shell) ? ['-NoLogo'] : windows ? [] : ['-l'];
+  const pty = spawn(shell, shellArgs, {
     name: 'xterm-256color',
     cwd: safeCwd,
     cols: Math.max(20, Math.min(500, cols || 80)),

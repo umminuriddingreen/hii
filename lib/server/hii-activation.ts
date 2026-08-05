@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -54,6 +54,16 @@ function firstLine(value: string) {
   return value.trim().split(/\r?\n/, 1)[0]?.trim() || null;
 }
 
+function credentialPresent(paths: string[]) {
+  return paths.some((candidate) => {
+    try {
+      return statSync(candidate).isFile() && statSync(candidate).size > 0;
+    } catch {
+      return false;
+    }
+  });
+}
+
 async function detectBinary(
   id: DetectedAgent['id'],
   command: string,
@@ -80,13 +90,33 @@ export async function detectAgents(): Promise<DetectedAgent[]> {
   const home = os.homedir();
   const pinnedCodex = path.join(home, '.local', 'bin', 'codex');
   const codexCommand = process.env.HII_CODEX_BIN || (existsSync(pinnedCodex) ? pinnedCodex : 'codex');
-  const claudeCommand = process.env.HII_CLAUDE_BIN || '/opt/homebrew/bin/claude';
-  const ollamaCommand = process.env.HII_OLLAMA_BIN || '/opt/homebrew/bin/ollama';
+  const claudeCommand = process.env.HII_CLAUDE_BIN || (process.platform === 'win32' ? 'claude' : '/opt/homebrew/bin/claude');
+  const ollamaCommand = process.env.HII_OLLAMA_BIN || (process.platform === 'win32' ? 'ollama' : '/opt/homebrew/bin/ollama');
   const [codex, claude, ollama] = await Promise.all([
     detectBinary('codex', codexCommand, ['--version']),
     detectBinary('claude', claudeCommand, ['--version']),
     detectBinary('ollama', ollamaCommand, ['--version'])
   ]);
+
+  if (codex.installed) {
+    const authPaths = process.env.HII_CODEX_AUTH_PATH
+      ? [process.env.HII_CODEX_AUTH_PATH]
+      : [path.join(home, '.codex', 'auth.json')];
+    codex.authenticated = credentialPresent(authPaths);
+    codex.detail = codex.authenticated
+      ? 'Ready for bounded workspace runs.'
+      : 'Run `codex login` in Terminal, then check again.';
+  }
+
+  if (claude.installed) {
+    const authPaths = process.env.HII_CLAUDE_AUTH_PATH
+      ? [process.env.HII_CLAUDE_AUTH_PATH]
+      : [path.join(home, '.claude.json'), path.join(home, '.claude', '.credentials.json')];
+    claude.authenticated = credentialPresent(authPaths);
+    claude.detail = claude.authenticated
+      ? 'Ready for bounded workspace runs.'
+      : 'Run `claude` in Terminal and complete sign-in, then check again.';
+  }
 
   if (ollama.installed) {
     try {
@@ -177,6 +207,19 @@ export async function startActivationRun(input: {
   if (input.agent !== 'codex' && input.agent !== 'claude') throw new Error('Activation agent must be codex or claude.');
   const projectState = contextProjectState(String(input.projectId || '').trim());
   if (!projectState) throw new Error(`Context project not found: ${input.projectId}`);
+  const includedSources = projectState.sources.filter((source) => source.approvedRoot && !source.excluded);
+  if (includedSources.length === 0) {
+    throw new Error('Choose a project folder with at least one supported file before starting activation.');
+  }
+  const detection = (await detectAgents()).find((agent) => agent.id === input.agent);
+  if (!detection?.installed) throw new Error(`${input.agent === 'codex' ? 'Codex' : 'Claude Code'} is not installed.`);
+  if (detection.authenticated !== true) {
+    throw new Error(
+      input.agent === 'codex'
+        ? 'Codex sign-in is required. Run `codex login` in Terminal, then check again.'
+        : 'Claude Code sign-in is required. Run `claude` in Terminal, complete sign-in, then check again.'
+    );
+  }
   const task = String(input.task || '').trim();
   const prompt = buildOrientationContract({ projectState, task, agent: input.agent });
   const activationId = `activation-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;

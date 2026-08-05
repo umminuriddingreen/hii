@@ -53,7 +53,7 @@ export function prepareKnowledgeRun(input: { id?: unknown; projectId?: unknown; 
     proposal: {
       capabilityId,
       goal,
-      workspaceRoot: '/Users/ummi/hii',
+      workspaceRoot: '',
       model: defaultWorkspaceRunModel,
       maxSteps: 8,
       permissions: [

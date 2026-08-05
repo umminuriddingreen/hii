@@ -426,7 +426,7 @@ function staleLegacyRuntimeProbe() {
     findings.push({
       path: legacyPath,
       state: "present",
-      action: "remove or mine then discard; current HII is /Users/ummi/hii"
+      action: `remove or mine then discard; current HII is ${ROOT}`
     });
   }
   if (fs.existsSync(capabilityCache)) {
@@ -1102,7 +1102,7 @@ function agentContextPayload() {
       "Complete work locally by default; do not fetch, push, publish, upload, or call external services unless the user explicitly asks.",
       "Use hii ship for local typecheck and commit only; use hii ship --push only after explicit external publish approval.",
       "Run npm run build after meaningful HII product edits.",
-      "Use /Users/ummi/hii as the only HII product/runtime surface; legacy patterns are migrated into this repo before old checkouts are discarded."
+      `Use ${ROOT} as the only HII product/runtime surface; legacy patterns are migrated into this repo before old checkouts are discarded.`
     ],
     nextActions: inferNextActions({
       prompt: "agent context accessibility",
@@ -2106,6 +2106,14 @@ function compactJob(job) {
   };
 }
 
+function compactWorktree(worktree) {
+  return {
+    clean: worktree.clean,
+    counts: worktree.counts,
+    files: Array.isArray(worktree.files) ? worktree.files.slice(0, 12) : []
+  };
+}
+
 function cmdNow(args = []) {
   const snapshot = cliSnapshot();
   if (args.includes("--json")) {
@@ -2116,8 +2124,8 @@ function cmdNow(args = []) {
       generatedAt: new Date().toISOString(),
       repo: ROOT,
       runtime: RUNTIME,
-      git: snapshot.git.worktree,
-      tasks: full ? snapshot.tasks : snapshot.tasks.map(compactTask),
+      git: full ? snapshot.git.worktree : compactWorktree(snapshot.git.worktree),
+      tasks: full ? snapshot.tasks : snapshot.tasks.slice(0, 12).map(compactTask),
       activeJobs: full ? snapshot.running : snapshot.running.map(compactJob),
       recentVerifiedJobs: full
         ? snapshot.verified.slice(0, 4)
@@ -2726,7 +2734,7 @@ switch (cmd) {
   }
   case "codex": cmdCodex(rest); break;
   case "legacy":
-    console.error("HII is now a single current surface at /Users/ummi/hii. Migrate needed legacy behavior into the current repo instead of running ~/hii-old.");
+    console.error(`HII is now a single current surface at ${ROOT}. Migrate needed legacy behavior into the current repo instead of running ~/hii-old.`);
     process.exit(1);
   default:
     console.log(`HII — Human Information Interface

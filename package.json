@@ -18,6 +18,8 @@
     "cf-typegen": "wrangler types worker-configuration.d.ts",
     "build:web:tauri": "node scripts/hii-svelte-tauri-build.mjs",
     "build:tauri": "node scripts/hii-tauri-build.mjs",
+    "build:tauri:mac": "node scripts/hii-tauri-build.mjs --bundles app",
+    "build:tauri:windows": "node scripts/hii-tauri-build.mjs --bundles nsis",
     "release:mac": "node scripts/hii-macos-release.mjs",
     "install:tauri": "npm run build:tauri && node scripts/hii-tauri-install.mjs",
     "start": "NODE_ENV=production node server.mjs",

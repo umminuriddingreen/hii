@@ -64,11 +64,12 @@
   const boardRunSync = new Map<string,string>();
   let commandInput:HTMLInputElement; let fileInput:HTMLInputElement;
   let composerOpen=false; let composerText=''; let composerInput:HTMLTextAreaElement; let composerAt={x:400,y:280}; let lastSummon=0;
+  let shortcutMod='⌘'; let intentShortcut='⌥ Space';
   let ModelPaneComponent:any=null; let modelPanePromise:Promise<void>|null=null; let modelPaneError='';
   let workspaceHistory=emptyWorkspaceHistory();
   $: commands=[
     ['fit','Fit all content','take me to my stuff · ⇧1'],
-    ['tidy',organizableSelection.length>1?'Tidy the selection':'Tidy the whole board','masonry pack · ⌘Z to undo'],
+    ['tidy',organizableSelection.length>1?'Tidy the selection':'Tidy the whole board',`masonry pack · ${shortcutMod} Z to undo`],
     ...surfaceCatalog.map(item=>['surface',`Open ${item.title}`,item.detail,item.path,item.capabilityId]),
     ['intent','Tell HII what to do','create a bounded workspace intent'],
     ['upload','Upload a file or document','images · PDFs · documents · media'],
@@ -83,8 +84,8 @@
     ['frame','New scene','name, capture, focus, and move related objects together'],
     ...(organizableSelection.length>1?[['organize','Make Scene from selection','exact membership · reversible']]:[]),
     ...(activeSelection.length?[
-      ['duplicate','Duplicate selection','offset copies · ⌘D'],
-      ['delete','Delete selection','removes objects · ⌘Z to undo']
+      ['duplicate','Duplicate selection',`offset copies · ${shortcutMod} D`],
+      ['delete','Delete selection',`removes objects · ${shortcutMod} Z to undo`]
     ]:[]),
     ...(organizableSelection.length>1?[
       ['align-left','Align left edges','tidy the selection'],
@@ -100,6 +101,7 @@
     ]:[]),
     ['sound-field','Open South Berkeley sound field','modeled dBA']
   ].filter(item=>`${item[1]} ${item[2]}`.toLowerCase().includes(query.toLowerCase()));
+  $: paletteCommands=query.trim()?commands:commands.filter(command=>['intent','upload','note','browser'].includes(String(command[0])));
   $: nodeResults=searchWorkspaceNodes(doc.nodes,query);
   $: collapsedFrameIds=new Set(doc.nodes.filter(node=>node.type==='frame'&&node.payload.collapsed===true).map(node=>node.id));
   $: scenes=workspaceScenes(doc.nodes);
@@ -296,14 +298,15 @@
     }
   }
   function contextItemsForNode(node:WorkspaceNode){if(node.payload.adapter==='contact-sheet'){const selected=contactSheetContextItems({nodeId:node.id,items:node.payload.items,selectedItems:node.payload.selectedItems,itemLabels:node.payload.itemLabels,proofRefs:node.object?.proofRefs});if(selected.length)return selected}return[contextItem(node)]}
-  function createSpatialRun(intent:string,at:{x:number;y:number},parentId?:string,contextNodes:WorkspaceNode[]=[]){const before=doc;const title=intent.length>44?`${intent.slice(0,44)}…`:intent;const approvedContext=contextNodes.flatMap(contextItemsForNode).slice(0,24);let z=doc.nextZ;const intentSeed=seedFor('intent',{title:'your intent',text:intent,parentId,context:approvedContext}),intentNode=makeNode(intentSeed,at.x,at.y,++z),runSeed=seedFor('run',{title,prompt:intent,parentId:intentNode.id,autoStart:false,status:'waiting_approval',context:approvedContext,workspaceRoot:String(context?.identity?.repo||'/Users/ummi/hii'),model:'',maxSteps:8}),runNode=makeNode(runSeed,at.x,at.y+intentSeed.h+20,++z);doc={...doc,nextZ:z,nodes:[...doc.nodes,intentNode,runNode]};selected=runNode.id;contextSelection=[];remember(before);persist();}
+  function createSpatialRun(intent:string,at:{x:number;y:number},parentId?:string,contextNodes:WorkspaceNode[]=[]){const before=doc;const title=intent.length>44?`${intent.slice(0,44)}…`:intent;const approvedContext=contextNodes.flatMap(contextItemsForNode).slice(0,24);let z=doc.nextZ;const intentSeed=seedFor('intent',{title:'your intent',text:intent,parentId,context:approvedContext}),intentNode=makeNode(intentSeed,at.x,at.y,++z),runSeed=seedFor('run',{title,prompt:intent,parentId:intentNode.id,autoStart:false,status:'waiting_approval',context:approvedContext,workspaceRoot:String(context?.identity?.repo||''),model:'',maxSteps:8}),runNode=makeNode(runSeed,at.x,at.y+intentSeed.h+20,++z);doc={...doc,nextZ:z,nodes:[...doc.nodes,intentNode,runNode]};selected=runNode.id;contextSelection=[];remember(before);persist();}
   function openDevelopmentSession(){
     const existing=doc.nodes.find(node=>node.type==='run'&&node.payload.developmentSession===true&&!['completed','failed','cancelled'].includes(String(node.payload.status||'')));
     if(existing){focusNode(existing);return}
     const before=doc;
-    const prompt='Develop HII from inside this governed HII canvas object. Work only in /Users/ummi/hii. Start or reuse the Svelte development server on 127.0.0.1:5173 so web UI changes hot-load in this object, make the requested bounded change, run relevant tests, and attach proof to the run. Do not push or deploy. Web and Svelte changes use HMR. If Rust or Tauri changes are required, do not overwrite /Applications/HII.app; build and relaunch only a separate /Applications/HII Preview.app and report the rebuild boundary.';
+    const workspaceRoot=String(context?.identity?.repo||'');
+    const prompt=`Develop HII from inside this governed HII canvas object. Work only in ${workspaceRoot || 'the HII source checkout selected below'}. Start or reuse the Svelte development server on 127.0.0.1:5173 so web UI changes hot-load in this object, make the requested bounded change, run relevant tests, and attach proof to the run. Do not push or deploy. Web and Svelte changes use HMR. If Rust or Tauri changes are required, do not overwrite /Applications/HII.app; build and relaunch only a separate /Applications/HII Preview.app and report the rebuild boundary.`;
     const at=findOpenWorkspacePosition(doc.nodes,workspacePoint(innerWidth/2-520,innerHeight/2-360),{w:1040,h:720});
-    const seed=seedFor('run',{title:'HII development session',prompt,developmentSession:true,previewUrl:'http://127.0.0.1:5173/workspace',autoStart:false,status:'waiting_approval',context:[],workspaceRoot:'/Users/ummi/hii',model:'',maxSteps:16});
+    const seed=seedFor('run',{title:'HII development session',prompt,developmentSession:true,previewUrl:'http://127.0.0.1:5173/workspace',autoStart:false,status:'waiting_approval',context:[],workspaceRoot,model:'',maxSteps:16});
     seed.w=1040;seed.h=720;
     seed.object={...seed.object,kind:'run',source:'HII governed self-development canvas object',audit:[...(seed.object?.audit||[]),{ts:new Date().toISOString(),actor:'human',action:'opened HII self-development session'}]};
     const node=makeNode(seed,at.x,at.y,doc.nextZ+1);
@@ -382,7 +385,7 @@
       autoStart:false,
       status:'waiting_approval',
       context:approvedContext,
-      workspaceRoot:String(task.coordinate||context?.identity?.repo||'/Users/ummi/hii'),
+      workspaceRoot:String(task.coordinate||context?.identity?.repo||''),
       model:'',
       maxSteps:8
     });
@@ -881,7 +884,7 @@
     }if(event.altKey&&event.code==='Space'&&!event.repeat){event.preventDefault();void summonComposer();return}if(command&&event.key.toLowerCase()==='k'){event.preventDefault();if(omnibar)omnibar=false;else void openCommands();}if(event.key==='Escape'){omnibar=false;composerOpen=false;selectedLinkId=null;}}
   async function drop(event:DragEvent){event.preventDefault();if(!event.dataTransfer)return;const at={x:(event.clientX-doc.viewport.x)/doc.viewport.zoom,y:(event.clientY-doc.viewport.y)/doc.viewport.zoom};addSeeds(await seedsFromDataTransfer(event.dataTransfer),at)}
   async function addFiles(files:File[]){const seeds=await seedsFromFiles(files);const center={x:(-doc.viewport.x+innerWidth/2)/doc.viewport.zoom,y:(-doc.viewport.y+innerHeight/2)/doc.viewport.zoom};addSeeds(seeds,{x:center.x-190,y:center.y-150})}
-  onMount(()=>{let disposed=false;const nativeStops:Array<()=>void>=[];load();refreshContext();refreshBoard();refreshDaemon();const daemonTimer=setInterval(()=>void refreshDaemon(),10000);const move=(e:PointerEvent)=>{pointer.x=e.clientX;pointer.y=e.clientY};const paste=(e:ClipboardEvent)=>{if((e.target as Element)?.closest?.('input,textarea,[contenteditable]'))return;const files=[...(e.clipboardData?.files||[])];if(files.length){e.preventDefault();void addFiles(files);return}const text=e.clipboardData?.getData('text/plain');if(!text)return;const at=workspacePoint(pointer.x,pointer.y);const copied=readWorkspaceClipboard(text);if(copied){e.preventDefault();pasteNodes(copied,at);return}addSeeds([seedFromString(text)],at)};const nativeSummon=()=>void summonComposer();const summonFromUrl=new URLSearchParams(location.search).get('summon')==='1';if(summonFromUrl){history.replaceState(history.state,'',location.pathname);void summonComposer()}void import('@tauri-apps/api/core').then(async(core)=>{if(!core.isTauri())return;const{listen}=await import('@tauri-apps/api/event');const listeners=await Promise.all([listen('hii://summon',nativeSummon),listen('hii://command-palette',()=>void openCommands()),listen('hii://open-browser',()=>spawn('browser')),listen('hii://fit-all',fitAll),listen('hii://space-refresh',()=>window.dispatchEvent(new CustomEvent('hii:space-refresh'))),listen('hii://develop-hii',openDevelopmentSession)]);if(disposed)listeners.forEach(stop=>stop());else nativeStops.push(...listeners)}).catch(()=>{});window.addEventListener('hii:summon',nativeSummon);window.addEventListener('keydown',keydown);window.addEventListener('pointermove',move);window.addEventListener('paste',paste);return()=>{disposed=true;flushPatches();clearInterval(daemonTimer);nativeStops.forEach(stop=>stop());window.removeEventListener('hii:summon',nativeSummon);window.removeEventListener('keydown',keydown);window.removeEventListener('pointermove',move);window.removeEventListener('paste',paste)}});
+  onMount(()=>{const mac=/Mac|iPhone|iPad/.test(navigator.platform);shortcutMod=mac?'⌘':'Ctrl';intentShortcut=mac?'⌥ Space':'Alt Space';let disposed=false;const nativeStops:Array<()=>void>=[];load();refreshContext();refreshBoard();refreshDaemon();const daemonTimer=setInterval(()=>void refreshDaemon(),10000);const move=(e:PointerEvent)=>{pointer.x=e.clientX;pointer.y=e.clientY};const paste=(e:ClipboardEvent)=>{if((e.target as Element)?.closest?.('input,textarea,[contenteditable]'))return;const files=[...(e.clipboardData?.files||[])];if(files.length){e.preventDefault();void addFiles(files);return}const text=e.clipboardData?.getData('text/plain');if(!text)return;const at=workspacePoint(pointer.x,pointer.y);const copied=readWorkspaceClipboard(text);if(copied){e.preventDefault();pasteNodes(copied,at);return}addSeeds([seedFromString(text)],at)};const nativeSummon=()=>void summonComposer();const summonFromUrl=new URLSearchParams(location.search).get('summon')==='1';if(summonFromUrl){history.replaceState(history.state,'',location.pathname);void summonComposer()}void import('@tauri-apps/api/core').then(async(core)=>{if(!core.isTauri())return;const{listen}=await import('@tauri-apps/api/event');const listeners=await Promise.all([listen('hii://summon',nativeSummon),listen('hii://command-palette',()=>void openCommands()),listen('hii://open-browser',()=>spawn('browser')),listen('hii://fit-all',fitAll),listen('hii://space-refresh',()=>window.dispatchEvent(new CustomEvent('hii:space-refresh'))),listen('hii://develop-hii',openDevelopmentSession)]);if(disposed)listeners.forEach(stop=>stop());else nativeStops.push(...listeners)}).catch(()=>{});window.addEventListener('hii:summon',nativeSummon);window.addEventListener('keydown',keydown);window.addEventListener('pointermove',move);window.addEventListener('paste',paste);return()=>{disposed=true;flushPatches();clearInterval(daemonTimer);nativeStops.forEach(stop=>stop());window.removeEventListener('hii:summon',nativeSummon);window.removeEventListener('keydown',keydown);window.removeEventListener('pointermove',move);window.removeEventListener('paste',paste)}});
 </script>
 
 {#if !data.enabled}<div class="hii-page flex min-h-[60vh] flex-col items-center justify-center gap-3"><p class="hii-kicker">surface off</p><h1 class="hii-page-title">HII is turned off</h1></div>
@@ -916,7 +919,7 @@
   {#if organizationNotice&&!contextSelection.length}
     <section data-workspace-ui role="status" aria-live="polite" class="absolute left-1/2 top-4 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-emerald-900/10 bg-white/95 p-1.5 pl-4 shadow-xl backdrop-blur-xl">
       <span class="font-mono text-[9px] uppercase tracking-[.08em] text-emerald-800">{organizationNotice}</span>
-      <button class="rounded-full bg-neutral-950 px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-white" on:click={()=>changeHistory('undo')}>Undo <kbd class="ml-1 text-white/50">⌘Z</kbd></button>
+      <button class="rounded-full bg-neutral-950 px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-white" on:click={()=>changeHistory('undo')}>Undo <kbd class="ml-1 text-white/50">{shortcutMod} Z</kbd></button>
       <button class="rounded-full px-2 py-2 font-mono text-[9px] uppercase text-neutral-400 hover:text-neutral-900" aria-label="Dismiss organization notice" on:click={()=>organizationNotice=''}>×</button>
     </section>
   {/if}
@@ -924,9 +927,9 @@
     <section data-workspace-ui role="status" class="absolute left-1/2 top-4 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-blue-900/10 bg-white/95 p-1.5 pl-4 shadow-xl backdrop-blur-xl">
       <span class="font-mono text-[9px] uppercase tracking-[.1em] text-blue-700">{contextSelection.length} context object{contextSelection.length===1?'':'s'} selected</span>
       {#if organizableSelection.length>1}<button class="rounded-full border border-blue-200 bg-blue-50 px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-blue-700 hover:border-blue-400" aria-label="Organize selection into scene" on:click={organizeSelection}>Make Scene</button>{/if}
-      <button class="rounded-full border border-neutral-200 px-3 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-neutral-600 hover:border-neutral-400" aria-label="Duplicate selection" on:click={duplicateSelection}>Duplicate <kbd class="ml-1 text-neutral-400">⌘D</kbd></button>
+      <button class="rounded-full border border-neutral-200 px-3 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-neutral-600 hover:border-neutral-400" aria-label="Duplicate selection" on:click={duplicateSelection}>Duplicate <kbd class="ml-1 text-neutral-400">{shortcutMod} D</kbd></button>
       <button class="rounded-full border border-red-200 px-3 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-red-700 hover:border-red-400" aria-label="Delete selection" on:click={deleteSelection}>Delete <kbd class="ml-1 text-red-300">⌫</kbd></button>
-      <button class="rounded-full bg-[var(--hii-electric-blue)] px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-white" on:click={()=>void summonComposer()}>Give intent <kbd class="ml-1 text-white/60">⌥Space</kbd></button>
+      <button class="rounded-full bg-[var(--hii-electric-blue)] px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-white" on:click={()=>void summonComposer()}>Give intent <kbd class="ml-1 text-white/60">{intentShortcut}</kbd></button>
       <button class="rounded-full px-2 py-2 font-mono text-[9px] uppercase text-neutral-400 hover:text-neutral-900" aria-label="Clear context selection" on:click={()=>{contextSelection=[];selected=null}}>×</button>
     </section>
   {/if}
@@ -1083,7 +1086,7 @@
         <p class="mt-12 font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--hii-electric-blue)]">Start with what you already have</p>
         <h1 id="empty-workspace-title" class="mt-3 max-w-[620px] text-[clamp(40px,7vw,72px)] font-semibold leading-[.92] tracking-[-.065em] text-neutral-950">Bring your information. Give it an intention.</h1>
         <p class="mt-5 max-w-[570px] text-[16px] leading-7 text-neutral-500">HII keeps your sources, agent work, and proof together on this canvas.</p>
-        <div class="mt-8 grid gap-3 sm:grid-cols-3">
+        <div class="mt-8 grid gap-3 sm:grid-cols-2">
           <button class="rounded-2xl bg-[var(--hii-electric-blue)] p-4 text-left text-white shadow-lg shadow-blue-500/15" on:click={()=>void summonComposer()}>
             <span class="block font-mono text-[9px] uppercase tracking-[0.1em] text-white/70">⌥ Space</span>
             <strong class="mt-3 block text-[15px]">Tell HII the outcome</strong>
@@ -1092,13 +1095,9 @@
             <span class="block font-mono text-[9px] uppercase tracking-[0.1em] text-neutral-400">Files + folders</span>
             <strong class="mt-3 block text-[15px]">Bring in information</strong>
           </button>
-          <button class="rounded-2xl border border-neutral-900/10 bg-neutral-50 p-4 text-left hover:border-neutral-900/25" on:click={()=>spawn('explorer')}>
-            <span class="block font-mono text-[9px] uppercase tracking-[0.1em] text-neutral-400">Workspace objects</span>
-            <strong class="mt-3 block text-[15px]">Explore what HII can do</strong>
-          </button>
         </div>
         <SystemSpace />
-        <p class="mt-6 text-center font-mono text-[9px] uppercase tracking-[0.1em] text-neutral-400">paste or drop anywhere · ⌘K for every command · your files stay local</p>
+        <p class="mt-6 text-center font-mono text-[9px] uppercase tracking-[0.1em] text-neutral-400">paste or drop anywhere · {shortcutMod} K for commands · your files stay local</p>
       </div>
     </section>
   {/if}
@@ -1155,5 +1154,5 @@
       <div class="mt-4 flex justify-end gap-2"><button class="rounded-full border px-3 py-1.5 font-mono text-[8px] uppercase text-neutral-600" on:click={refreshDaemon}>Refresh</button>{#if runtimeHealth.recoveryAction}<button class="rounded-full bg-neutral-950 px-3 py-1.5 font-mono text-[8px] uppercase text-white disabled:opacity-40" disabled={daemonActionBusy} on:click={()=>controlDaemon(runtimeHealth.recoveryAction)}>{daemonActionBusy?'Working…':runtimeHealth.recoveryLabel}</button>{/if}</div>
     </div>{/if}
   </div>
-  {#if omnibar}<div class="absolute inset-0 z-50 bg-white/80 backdrop-blur-sm"><button type="button" class="absolute inset-0 cursor-default" aria-label="Close command palette" on:click={()=>omnibar=false}></button><div class="absolute left-1/2 top-1/2 w-[min(620px,90vw)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog" aria-modal="true" aria-label="Create workspace object"><div class="flex items-center gap-3 border-b p-4"><span>⌘K</span><input bind:this={commandInput} bind:value={query} class="w-full outline-none" placeholder="Tell HII what to do, find, open, or create…" on:keydown={(event)=>{if(event.key==='Enter'){event.preventDefault();submitOmnibar()}}} /></div><div class="max-h-[420px] overflow-auto p-2">{#if nodeResults.length}<p class="px-3 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[.12em] text-neutral-400">On this canvas</p>{#each nodeResults as result}<button class="flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-blue-50" on:click={()=>focusNode(result.node)}><span class="grid h-8 w-8 place-items-center rounded-lg bg-blue-50 text-sm text-blue-600">⌖</span><span class="min-w-0 flex-1"><strong class="block truncate">{result.title}</strong><small class="text-neutral-400">{result.node.type} · focus on canvas</small></span><kbd class="font-mono text-[10px] text-neutral-400">find</kbd></button>{/each}<div class="my-2 border-t"></div>{/if}{#each commands as command}<button class="flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-neutral-50" on:click={()=>runCommand(command)}><span class="text-xl">{command[0]==='fit'?'⌖':command[0]==='surface'?'↗':'+'}</span><span class="flex-1"><strong class="block">{command[1]}</strong><small class="text-neutral-400">{command[2]}</small></span><kbd class="font-mono text-[10px] text-neutral-400">{command[0]==='fit'?'view':command[0]==='surface'?'open':command[0]==='upload'?'choose':'create'}</kbd></button>{/each}</div></div></div>{/if}
+  {#if omnibar}<div class="absolute inset-0 z-50 bg-white/80 backdrop-blur-sm"><button type="button" class="absolute inset-0 cursor-default" aria-label="Close command palette" on:click={()=>omnibar=false}></button><div class="absolute left-1/2 top-1/2 w-[min(620px,90vw)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog" aria-modal="true" aria-label="Create workspace object"><div class="flex items-center gap-3 border-b p-4"><span>{shortcutMod} K</span><input bind:this={commandInput} bind:value={query} class="w-full outline-none" placeholder="Tell HII what to do, find, open, or create…" on:keydown={(event)=>{if(event.key==='Enter'){event.preventDefault();submitOmnibar()}}} /></div><div class="max-h-[420px] overflow-auto p-2">{#if nodeResults.length}<p class="px-3 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[.12em] text-neutral-400">On this canvas</p>{#each nodeResults as result}<button class="flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-blue-50" on:click={()=>focusNode(result.node)}><span class="grid h-8 w-8 place-items-center rounded-lg bg-blue-50 text-sm text-blue-600">⌖</span><span class="min-w-0 flex-1"><strong class="block truncate">{result.title}</strong><small class="text-neutral-400">{result.node.type} · focus on canvas</small></span><kbd class="font-mono text-[10px] text-neutral-400">find</kbd></button>{/each}<div class="my-2 border-t"></div>{/if}{#each paletteCommands as command}<button class="flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-neutral-50" on:click={()=>runCommand(command)}><span class="text-xl">{command[0]==='fit'?'⌖':command[0]==='surface'?'↗':'+'}</span><span class="flex-1"><strong class="block">{command[1]}</strong><small class="text-neutral-400">{command[2]}</small></span><kbd class="font-mono text-[10px] text-neutral-400">{command[0]==='fit'?'view':command[0]==='surface'?'open':command[0]==='upload'?'choose':'create'}</kbd></button>{/each}</div></div></div>{/if}
 </main>{/if}

@@ -78,6 +78,7 @@
   let completedEmitted = Boolean(node.payload.resultNodesCreated);
   let modelOptions: string[] = [];
   let selectedModel = String(node.payload.model || '');
+  let workspaceRoot = String(node.payload.workspaceRoot || '');
   let modelsLoading = false;
   let modelMessage = '';
   let cancellationBusy = false;
@@ -90,14 +91,14 @@
   let contextPreviewError = '';
   let mounted = false;
   let previewedContextSignature = contextPreview
-    ? JSON.stringify(Array.isArray(node.payload.context) ? node.payload.context : [])
+    ? JSON.stringify({ context: Array.isArray(node.payload.context) ? node.payload.context : [], workspaceRoot })
     : '';
 
   $: context = (Array.isArray(node.payload.context) ? node.payload.context : []) as ContextItem[];
-  $: contextSignature = JSON.stringify(context);
+  $: contextSignature = JSON.stringify({ context, workspaceRoot });
   $: boundary = {
     capabilityId: 'hii.agent.workspace_run',
-    workspaceRoot: String(node.payload.workspaceRoot || '/Users/ummi/hii'),
+    workspaceRoot: workspaceRoot.trim(),
     model: selectedModel,
     maxSteps: Number(node.payload.maxSteps || 8),
     network: 'No publish, push, message, spend, or secret export'
@@ -320,6 +321,12 @@
   async function loadContextPreview() {
     if (contextPreviewLoading) return;
     const requestedContextSignature = contextSignature;
+    if (!workspaceRoot.trim()) {
+      contextPreview = null;
+      contextPreviewError = 'Choose a specific project folder before reviewing this run.';
+      previewedContextSignature = requestedContextSignature;
+      return;
+    }
     contextPreviewLoading = true;
     contextPreviewError = '';
     try {
@@ -382,6 +389,12 @@
   function prepareRetry() {
     const prompt = String(node.payload.prompt || '').trim();
     if (prompt) onFollowUp(prompt);
+  }
+
+  function updateWorkspaceRoot() {
+    contextPreview = null;
+    contextPreviewError = '';
+    onPatch({ payload: { ...node.payload, workspaceRoot: workspaceRoot.trim() } });
   }
 
   async function createCapabilityDraft() {
@@ -523,6 +536,12 @@
           <div class="col-span-2 rounded-xl bg-neutral-100 p-3"><dt class="font-mono uppercase text-neutral-400">External boundary</dt><dd class="mt-1 text-neutral-700">{boundaryManifest.externalScope}</dd></div>
           <div class="col-span-2 rounded-xl bg-neutral-100 p-3"><dt class="font-mono uppercase text-neutral-400">Secret policy</dt><dd class="mt-1 text-neutral-700">{boundaryManifest.secretPolicy}</dd></div>
         </dl>
+
+        <label class="mt-3 block rounded-xl bg-neutral-100 p-3 font-mono text-[8px] uppercase tracking-[.1em] text-neutral-400">
+          Approved project folder
+          <input class="mt-1.5 w-full bg-transparent text-[10px] normal-case tracking-normal text-neutral-800 outline-none" bind:value={workspaceRoot} on:change={updateWorkspaceRoot} placeholder="/Users/you/Projects/my-project" />
+          <span class="mt-1.5 block normal-case tracking-normal text-neutral-500">HII requires one specific existing folder. Your home directory is never inferred.</span>
+        </label>
 
         <label class="mt-3 block rounded-xl bg-neutral-100 p-3 font-mono text-[8px] uppercase tracking-[.1em] text-neutral-400">
           Installed local model

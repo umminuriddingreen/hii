@@ -14,6 +14,12 @@
   "observability": {
     "enabled": true
   },
+  "r2_buckets": [
+    {
+      "binding": "DOWNLOADS",
+      "bucket_name": "hii"
+    }
+  ],
   "routes": [
     {
       "pattern": "humaninformationinterface.com",

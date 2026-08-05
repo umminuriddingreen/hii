@@ -163,8 +163,7 @@ fn run_cursor_intent(app: tauri::AppHandle, goal: String) -> Result<String, Stri
         return Err("Keep the intent under 8,000 characters.".to_string());
     }
 
-    let home = std::env::var_os("HOME").ok_or_else(|| "HOME is not available".to_string())?;
-    let home = PathBuf::from(home);
+    let home = user_home()?;
     let hii = home.join("bin").join("hii");
     if !hii.is_file() {
         return Err(format!("HII launcher is missing at {}", hii.display()));
@@ -227,8 +226,14 @@ fn available_port() -> Result<u16, String> {
 }
 
 fn runtime_root() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME").ok_or_else(|| "HOME is not available".to_string())?;
-    Ok(Path::new(&home).join(".hii"))
+    Ok(user_home()?.join(".hii"))
+}
+
+fn user_home() -> Result<PathBuf, String> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .ok_or_else(|| "The current user profile folder is not available".to_string())
 }
 
 fn resource_root(app: &tauri::App) -> Result<PathBuf, String> {
@@ -258,6 +263,9 @@ fn resource_root(app: &tauri::App) -> Result<PathBuf, String> {
 fn spawn_hii_server(app: &tauri::App, port: u16) -> Result<Child, String> {
     let resource_dir = resource_root(app)?;
     let app_dir = resource_dir.join("hii-app");
+    #[cfg(target_os = "windows")]
+    let node = app_dir.join("bin").join("node.exe");
+    #[cfg(not(target_os = "windows"))]
     let node = app_dir.join("bin").join("node");
     let server_dir = app_dir.join("server");
     let entry = server_dir.join("server.mjs");
@@ -411,7 +419,7 @@ pub fn run() {
             _ => {}
         })
         .setup(|app| {
-            #[cfg(desktop)]
+            #[cfg(target_os = "macos")]
             {
                 use tauri_plugin_global_shortcut::{
                     Code, GlobalShortcutExt, Modifiers, ShortcutState,
@@ -464,11 +472,14 @@ pub fn run() {
                 child,
                 url: hii_url.clone(),
             };
-            if let Err(error) = ensure_cursor_bar(app.handle(), &hii_url) {
-                eprintln!("HII could not prepare the cursor bar: {error}");
-            }
-            if let Err(error) = set_notch_expanded(app.handle().clone(), false) {
-                eprintln!("HII could not position Notch: {error}");
+            #[cfg(target_os = "macos")]
+            {
+                if let Err(error) = ensure_cursor_bar(app.handle(), &hii_url) {
+                    eprintln!("HII could not prepare the cursor bar: {error}");
+                }
+                if let Err(error) = set_notch_expanded(app.handle().clone(), false) {
+                    eprintln!("HII could not position Notch: {error}");
+                }
             }
 
             let app_handle = app.handle().clone();

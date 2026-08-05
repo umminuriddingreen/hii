@@ -5,7 +5,10 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tauri = path.join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'tauri.cmd' : 'tauri');
-const args = ['build', ...process.argv.slice(2)];
+const requestedArgs = process.argv.slice(2);
+const args = requestedArgs.some((arg) => arg === '--bundles' || arg === '-b')
+  ? ['build', ...requestedArgs]
+  : ['build', '--bundles', process.platform === 'win32' ? 'nsis' : 'app', ...requestedArgs];
 const build = spawnSync(tauri, args, { cwd: root, stdio: 'inherit' });
 if (build.status !== 0) process.exit(build.status ?? 1);
 

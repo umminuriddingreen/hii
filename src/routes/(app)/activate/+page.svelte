@@ -100,6 +100,8 @@
   let activationJourney = $state<ActivationJourney | null>(null);
   let journeyWarning = $state('');
   let busy = $state(false);
+  let detecting = $state(false);
+  let selectedReadiness = $derived(agentReadiness(selectedAgent));
   let errorMessage = $state('');
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let mockPollCount = 0;
@@ -128,7 +130,7 @@
         ]
       },
       inventory: {
-        rootPath: String(params.rootPath || '/Users/ummi/hii'),
+        rootPath: String(params.rootPath || '/Users/you/Projects/my-project'),
         items: [
           { sourcePath: 'README.md', kind: 'markdown', format: 'md', sizeBytes: 12480, freshnessAt: new Date().toISOString() },
           { sourcePath: 'package.json', kind: 'config', format: 'json', sizeBytes: 3892, freshnessAt: new Date().toISOString() },
@@ -179,17 +181,56 @@
   }
 
   async function detectAgents() {
+    detecting = true;
     errorMessage = '';
     try {
       const result = await activationRequest<DetectionResponse>('detect');
       detectedAgents = result.agents;
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : 'Could not inspect local agents.';
+    } finally {
+      detecting = false;
     }
   }
 
   function detectionFor(agentId: AgentId) {
     return detectedAgents.find((candidate) => candidate.id === agentId);
+  }
+
+  function agentReadiness(agentId: AgentId) {
+    const detection = detectionFor(agentId);
+    if (!detection) return { ready: false, message: 'Checking this Mac for the selected agent…' };
+    if (!detection.installed) {
+      return {
+        ready: false,
+        message: agentId === 'ollama'
+          ? 'Install Ollama and pull at least one model before continuing.'
+          : `Install ${agentId === 'codex' ? 'Codex' : 'Claude Code'} before continuing.`
+      };
+    }
+    if (agentId === 'ollama') {
+      const codex = detectionFor('codex');
+      if (!detection.detail || ['No local models', 'Local models unavailable'].includes(detection.detail)) {
+        return { ready: false, message: 'Pull at least one Ollama model, then check again.' };
+      }
+      if (!codex?.installed || codex.authenticated !== true) {
+        return { ready: false, message: 'The local-model beta currently uses the bounded Codex executor. Run `codex login`, then check again.' };
+      }
+      return { ready: true, message: 'Local model and bounded executor are ready.' };
+    }
+    if (detection.authenticated !== true) {
+      return {
+        ready: false,
+        message: agentId === 'codex'
+          ? 'Run `codex login` in Terminal, then check again.'
+          : 'Run `claude` in Terminal and complete sign-in, then check again.'
+      };
+    }
+    return { ready: true, message: detection.detail || 'Ready for a bounded first task.' };
+  }
+
+  function includedCount() {
+    return inventory ? inventory.count - exclusions.length : 0;
   }
 
   async function chooseFolder() {
@@ -377,8 +418,10 @@
               <span class="badges">
                 {#if detection}
                   <em class:ready={detection.installed}>{detection.installed ? 'Installed' : 'Not installed'}</em>
-                  <em class:ready={detection.authenticated === true} class:neutral={detection.authenticated === null}>
-                    {detection.authenticated === true ? 'Authenticated' : detection.authenticated === null ? 'Auth unknown' : 'Sign-in needed'}
+                  <em class:ready={detection.authenticated === true || (agent.id === 'ollama' && detection.installed)} class:neutral={detection.authenticated === null}>
+                    {agent.id === 'ollama'
+                      ? detection.installed ? 'No account needed' : 'Setup needed'
+                      : detection.authenticated === true ? 'Authenticated' : detection.authenticated === null ? 'Auth unknown' : 'Sign-in needed'}
                   </em>
                   {#if detection.version}<em>{detection.version}</em>{/if}
                 {:else}
@@ -390,7 +433,11 @@
           {/each}
         </div>
 
-        <div class="step-actions end"><button class="primary" type="button" onclick={() => step = 2}>Continue <span>→</span></button></div>
+        <div class:ready={selectedReadiness.ready} class="readiness-panel" role="status">
+          <div><strong>{selectedReadiness.ready ? 'Ready to continue' : 'Setup needed'}</strong><p>{selectedReadiness.message}</p></div>
+          <button type="button" onclick={() => void detectAgents()} disabled={detecting}>{detecting ? 'Checking…' : 'Check again'}</button>
+        </div>
+        <div class="step-actions end"><button class="primary" type="button" disabled={!selectedReadiness.ready || detecting} onclick={() => step = 2}>Continue <span>→</span></button></div>
       </section>
     {:else if step === 2}
       <section class="step-section narrow" aria-labelledby="step-two-title">
@@ -414,7 +461,7 @@
         <p class="eyebrow"><span></span> Step three · approve context</p>
         <div class="title-split">
           <div><h1 id="step-three-title">Review what<br />HII may read.</h1><p class="deck">Exclude anything that does not belong. Approval is explicit and applies only to this project.</p></div>
-          <div class="inventory-stat"><strong>{inventory.count - exclusions.length}</strong><span>included files</span><small>{formatBytes(inventory.totalBytes)} previewed</small></div>
+          <div class="inventory-stat"><strong>{includedCount()}</strong><span>included files</span><small>{formatBytes(inventory.totalBytes)} previewed</small></div>
         </div>
 
         <div class="inventory-panel">
@@ -426,15 +473,17 @@
                 <span class="file-meta"><em>{item.kind}</em>{formatBytes(item.sizeBytes)}</span>
                 <input type="checkbox" checked={!exclusions.includes(item.sourcePath)} onchange={() => toggleExclusion(item.sourcePath)} aria-label={`Include ${item.sourcePath}`} />
               </label>
+            {:else}
+              <div class="empty-inventory"><strong>No supported files found.</strong><p>Choose a folder containing project notes, text, code, or configuration files.</p></div>
             {/each}
           </div>
         </div>
 
-        <label class="approval-box">
-          <input type="checkbox" bind:checked={approved} />
+        <label class:disabled={includedCount() === 0} class="approval-box">
+          <input type="checkbox" bind:checked={approved} disabled={includedCount() === 0} />
           <span><strong>I approve this project context.</strong><small>HII may index only the included files above for this bounded local workspace.</small></span>
         </label>
-        <div class="step-actions"><button class="back" type="button" onclick={goBack}>← Back</button><button class="primary" type="button" disabled={!approved || busy} onclick={() => void approveAndCreate()}>{busy ? 'Creating project…' : 'Approve + continue'} <span>→</span></button></div>
+        <div class="step-actions"><button class="back" type="button" onclick={goBack}>← Back</button><button class="primary" type="button" disabled={!approved || includedCount() === 0 || busy} onclick={() => void approveAndCreate()}>{busy ? 'Creating project…' : 'Approve + continue'} <span>→</span></button></div>
       </section>
     {:else if step === 4}
       <section class="step-section narrow" aria-labelledby="step-four-title">
@@ -544,6 +593,13 @@
   .badges em.ready { background:#e5fbd0; color:#315e12; }
   .badges em.neutral { background:#f0f1ee; color:#757a76; }
   .agent-card small { display:block; margin-top:13px; color:#868b87; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; line-height:1.5; }
+  .readiness-panel { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-top:18px; border:1px solid #edc8c3; border-radius:14px; background:#fff4f2; padding:17px 19px; }
+  .readiness-panel.ready { border-color:#c9e4b3; background:#f1fae9; }
+  .readiness-panel strong, .readiness-panel p { display:block; }
+  .readiness-panel strong { font-size:13px; }
+  .readiness-panel p { margin:5px 0 0; color:#656a67; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9px; line-height:1.5; }
+  .readiness-panel button { flex:0 0 auto; border:0; border-radius:999px; background:var(--ink); padding:9px 12px; color:white; cursor:pointer; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; text-transform:uppercase; }
+  .readiness-panel button:disabled { cursor:wait; opacity:.45; }
   .step-actions { display:flex; justify-content:space-between; align-items:center; margin-top:34px; }
   .step-actions.end { justify-content:flex-end; }
   .primary, .back, .browse, .retry { border:0; cursor:pointer; }
@@ -570,12 +626,16 @@
   .inventory-list label { min-height:67px; padding:11px 20px; border-bottom:1px solid #eceeeb; cursor:pointer; transition:opacity 120ms ease; }
   .inventory-list label:last-child { border:0; }
   .inventory-list label.excluded { opacity:.4; }
+  .empty-inventory { padding:34px 20px; text-align:center; }
+  .empty-inventory strong { font-size:15px; }
+  .empty-inventory p { margin:8px 0 0; color:var(--muted); font-size:12px; }
   .file-name strong { display:block; overflow:hidden; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
   .file-name small { color:#8b908c; font-size:9px; }
   .file-meta { display:flex; align-items:center; gap:12px; color:#727773; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9px; }
   .file-meta em { border-radius:999px; background:#edf2ff; padding:5px 7px; color:var(--blue); font-size:7px; font-style:normal; text-transform:uppercase; }
   .inventory-list input, .approval-box input { width:18px; height:18px; accent-color:var(--blue); justify-self:center; }
   .approval-box { display:grid; grid-template-columns:auto 1fr; gap:15px; align-items:start; margin-top:22px; border:1px solid #cdd1cc; border-radius:14px; background:white; padding:19px; cursor:pointer; }
+  .approval-box.disabled { cursor:not-allowed; opacity:.48; }
   .approval-box input { margin-top:2px; }
   .approval-box strong, .approval-box small { display:block; }
   .approval-box strong { font-size:14px; }
@@ -651,6 +711,7 @@
     .agent-card > strong { margin-top:34px; }
     .agent-card > p { min-height:auto; }
     .title-split, .receipt-hero { grid-template-columns:1fr; }
+    .readiness-panel { align-items:flex-start; flex-direction:column; }
     .inventory-stat { border-left:0; border-top:1px solid #d5d8d4; padding:22px 0 0; }
     .presets { grid-template-columns:1fr; }
     .presets button { min-height:auto; }

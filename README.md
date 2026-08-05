@@ -176,17 +176,17 @@ AII → publishes governed state → ~/.hii ← HII reads and presents state
 ## Current Coordinates
 
 ```text
-Repository:       /Users/ummi/hii
-Runtime:          /Users/ummi/.hii
-Launcher:         /Users/ummi/bin/hii
-Launcher source:  /Users/ummi/hii/scripts/hii-launcher.sh
-Context database: /Users/ummi/.hii/hii.db
-Knowledge store:  /Users/ummi/.hii/hii.db + /Users/ummi/.hii/knowledge
-AII source:       /Users/ummi/hii/aii
-Capability source:/Users/ummi/hii/aii/capabilities/registry.json
+Repository:       current source checkout
+Runtime:          ~/.hii
+Launcher:         resolved by `command -v hii`
+Launcher source:  <repository>/scripts/hii-launcher.sh
+Context database: ~/.hii/hii.db
+Knowledge store:  ~/.hii/hii.db + ~/.hii/knowledge
+AII source:       <repository>/aii
+Capability source:<repository>/aii/capabilities/registry.json
 ```
 
-`/Users/ummi/hii-old` is legacy evidence only if present. It is never a current
+`~/hii-old` is legacy evidence only if present. It is never a current
 execution or validation target.
 
 ## Agent Bootstrap
@@ -224,7 +224,7 @@ hii home --json       # compact first read for agents
 hii agents guide      # shared HII-first contract for installed agents
 hii context --json    # full repo/runtime/capability detail when needed
 hii caps show
-hii task "Add source provenance to the import receipt" --coordinate /Users/ummi/hii
+hii task "Add source provenance to the import receipt" --coordinate /path/to/project
 hii work
 ```
 
@@ -270,7 +270,7 @@ After meaningful work, agents record a structured receipt:
 hii skill report \
   --agent codex \
   --project hii \
-  --coordinate /Users/ummi/hii \
+  --coordinate /path/to/project \
   --summary "Implemented a bounded workflow" \
   --outcome completed \
   --verification verified \
@@ -336,18 +336,23 @@ Vite now powers development, Vitest, and the SvelteKit production build. GitHub
 CI runs the fast gate first, then starts the production build only after the
 fast lane passes.
 
-Build the standalone macOS application with:
+Build the standalone application on its target operating system with:
 
 ```sh
-npm run build:tauri
+npm run build:tauri:mac      # macOS .app
+npm run build:tauri:windows  # Windows NSIS setup.exe
 ```
 
-The resulting `src-tauri/target/release/bundle/macos/HII.app` contains its own
+The resulting app contains its own
 SvelteKit adapter-node server, local terminal websocket gateway, and Node
 runtime. It reads user-owned state from `~/.hii` and does not require the source
 repository to launch. Because the web runtime is embedded, source commits do
 not update an existing `.app`; rebuild and restart the bundle whenever shipped
 UI, server code, public assets, or native resources change.
+
+Windows packages are built and installed on a native Windows runner by
+`.github/workflows/windows-packaged-app.yml`; the gate must prove the installed
+app, local server, and embedded AII start/stop before its NSIS artifact is used.
 
 ## Verification
 

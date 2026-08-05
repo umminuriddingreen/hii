@@ -28,7 +28,7 @@ export function workspaceRunBoundaryManifest(input: {
   workspaceRoot?: unknown;
 }) {
   const context = Array.isArray(input.context) ? input.context : [];
-  const workspaceRoot = String(input.workspaceRoot || '/Users/ummi/hii');
+  const workspaceRoot = String(input.workspaceRoot || '').trim();
   const provenanceCount = context.filter((item) => String(item.source || '').trim()).length;
   const missingProvenanceCount = Math.max(0, context.length - provenanceCount);
   const sensitiveCount = context.filter((item) =>
@@ -40,11 +40,13 @@ export function workspaceRunBoundaryManifest(input: {
     provenanceCount,
     missingProvenanceCount,
     sensitiveCount,
-    blocked: sensitiveCount > 0,
-    readScope: context.length
+    blocked: sensitiveCount > 0 || !workspaceRoot,
+    readScope: !workspaceRoot
+      ? 'Choose a specific project folder before HII can resolve the run boundary.'
+      : context.length
       ? `${context.length} selected canvas object${context.length === 1 ? '' : 's'} ${context.length === 1 ? 'guides' : 'guide'} the run. AII may inspect other non-secret files inside ${workspaceRoot} when the intent requires them.`
       : `No canvas object is attached. AII may inspect non-secret files inside ${workspaceRoot} when the intent requires them.`,
-    writeScope: workspaceRoot,
+    writeScope: workspaceRoot || 'No project folder selected',
     externalScope: 'No publish, push, message, spend, upload, or secret export',
     secretPolicy: 'Secret files and credential values remain blocked even inside the workspace boundary.'
   };

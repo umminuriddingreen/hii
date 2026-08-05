@@ -74,13 +74,22 @@ export const POST: RequestHandler = async ({ request }) => {
       });
     }
     if (action === 'create') {
+      const rootPath = String(body?.rootPath || '');
+      const exclusions = Array.isArray(body?.exclusions) ? body.exclusions.map(String) : undefined;
+      const approvedItems = inventoryContextRoot({ rootPath, approved: true, exclusions });
+      if (approvedItems.length === 0) {
+        return json(
+          { error: 'Choose a project folder with at least one supported file before continuing.' },
+          { status: 400 }
+        );
+      }
       const project = createContextProject({
-        rootPath: String(body?.rootPath || ''),
+        rootPath,
         name: body?.name,
         approved: true
       });
       const scan = scanContextProject(project.id, {
-        exclusions: Array.isArray(body?.exclusions) ? body.exclusions.map(String) : undefined
+        exclusions
       });
       const sourceCount = contextProjectState(project.id)?.sources.length ?? 0;
       const journeyWarning = await recordMilestone(body?.journeyId, 'context_approved', {

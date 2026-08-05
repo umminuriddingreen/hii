@@ -120,7 +120,7 @@ function staleLegacyRuntimeProbe() {
     findings.push({
       path: legacyPath,
       state: 'present',
-      action: 'remove or mine then discard; current HII is /Users/ummi/hii'
+      action: `remove or mine then discard; current HII is ${root}`
     });
   }
   if (fs.existsSync(capabilityCache)) {
