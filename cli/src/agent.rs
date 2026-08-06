@@ -1758,7 +1758,53 @@ pub(crate) fn parse_action(raw: &str) -> Result<Action, String> {
         value["type"] = serde_json::Value::String("tool".into());
         value["tool"] = serde_json::Value::String(action_type);
     }
-    serde_json::from_value(value).map_err(|error| error.to_string())
+    let action = serde_json::from_value(value).map_err(|error| error.to_string())?;
+    validate_action_fields(&action)?;
+    Ok(action)
+}
+
+/// Reject incomplete calls before they consume a tool step. Compact models
+/// often emit `{\"type\":\"verify\"}` while trying to finish a simple task;
+/// executing that shape only produces a vague tool failure and encourages a
+/// recovery loop. Keep this beside parsing so both managed runs and the REPL
+/// return the same precise correction to the model.
+fn validate_action_fields(action: &Action) -> Result<(), String> {
+    let Action::Tool {
+        tool,
+        path,
+        query,
+        command,
+        content,
+        url,
+        old,
+        new,
+        ..
+    } = action
+    else {
+        return Ok(());
+    };
+    let present = |value: Option<&String>| value.is_some_and(|value| !value.trim().is_empty());
+    match tool.as_str() {
+        "read" => present(path.as_ref())
+            .then_some(())
+            .ok_or_else(|| "read requires a non-empty path".into()),
+        "search" | "web_search" => present(query.as_ref())
+            .then_some(())
+            .ok_or_else(|| format!("{tool} requires a non-empty query")),
+        "web_fetch" | "http" => present(url.as_ref())
+            .then_some(())
+            .ok_or_else(|| format!("{tool} requires a non-empty url")),
+        "write" => (present(path.as_ref()) && content.is_some())
+            .then_some(())
+            .ok_or_else(|| "write requires a path and content".into()),
+        "edit" => (present(path.as_ref()) && old.is_some() && new.is_some())
+            .then_some(())
+            .ok_or_else(|| "edit requires path, old, and new fields".into()),
+        "shell" | "verify" => present(command.as_ref())
+            .then_some(())
+            .ok_or_else(|| format!("{tool} requires a non-empty command")),
+        _ => Ok(()),
+    }
 }
 
 /// Local models occasionally emit otherwise valid JSON tool actions with
@@ -2024,6 +2070,16 @@ mod tests {
         let action =
             parse_action(r#"{"type":"write","path":"hello.txt","content":"hello\n"}"#).unwrap();
         assert!(matches!(action, Action::Tool { tool, .. } if tool == "write"));
+    }
+
+    #[test]
+    fn rejects_incomplete_tool_actions_before_execution() {
+        assert!(parse_action(r#"{"type":"verify"}"#)
+            .unwrap_err()
+            .contains("verify requires a non-empty command"));
+        assert!(parse_action(r#"{"type":"http"}"#)
+            .unwrap_err()
+            .contains("http requires a non-empty url"));
     }
 
     #[test]

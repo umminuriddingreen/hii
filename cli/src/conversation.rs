@@ -14,7 +14,7 @@ use crate::{
     ollama::{ChatResult, ChatStreamEvent, ChatUsage, Message, Ollama},
     receipt::{
         find_receipt, redact_text, unix_ms, ConversationStore, HookRecord, Outcome, Receipt,
-        RunStore, VerificationRecord,
+        RunGuard, RunStore, VerificationRecord,
     },
     skills,
     tools::Toolbelt,
@@ -135,6 +135,48 @@ struct BackendOutcome {
     verification: Vec<VerificationRecord>,
     hook_records: Vec<HookRecord>,
     completed: bool,
+}
+
+fn conversation_draft_receipt(
+    run: &RunStore,
+    goal: &str,
+    workspace: &std::path::Path,
+    model: &str,
+    public_test: bool,
+    authority: Authority,
+) -> Receipt {
+    Receipt {
+        schema_version: 5,
+        id: run.id.clone(),
+        created_at_unix_ms: run.started_at_unix_ms,
+        finished_at_unix_ms: 0,
+        status: Outcome::Running.status().into(),
+        goal: redact_text(goal),
+        workspace: workspace.display().to_string(),
+        model: model.to_string(),
+        review_model: None,
+        steps: 0,
+        summary: "Conversation tool run in progress.".into(),
+        verification: Vec::new(),
+        git_status: String::new(),
+        next: None,
+        review: None,
+        risk: String::new(),
+        authority: Some(if public_test {
+            "public-test".into()
+        } else {
+            authority.label().into()
+        }),
+        done_when: None,
+        approvals: Vec::new(),
+        artifacts: Vec::new(),
+        reversible: None,
+        context_sources: Vec::new(),
+        preexisting_changes: Vec::new(),
+        hooks: Vec::new(),
+        outcome: Outcome::Running.label().into(),
+        exit_code: Outcome::Running.exit_code(),
+    }
 }
 
 impl BackendOutcome {
@@ -319,6 +361,12 @@ impl Conversation {
         ));
 
         let mut run: Option<RunStore> = None;
+        // A conversational tool turn used to create its receipt only after a
+        // clean final response. Provider errors, interrupts, and step ceilings
+        // therefore left a plausible-looking event log with no result for
+        // `hii proof` to inspect. Claim a draft as soon as the first tool run
+        // exists; RunGuard rewrites it on every non-happy exit.
+        let mut run_guard: Option<RunGuard> = None;
         let mut verification = Vec::new();
         let mut used_tools = false;
         let mut mutation_epoch = 0usize;
@@ -421,6 +469,7 @@ impl Conversation {
                 self.messages.push(Message::user(message.clone()));
                 self.finish_backend_run(
                     run,
+                    run_guard,
                     input,
                     step,
                     &message,
@@ -450,6 +499,7 @@ impl Conversation {
                     self.messages.push(Message::assistant(message.clone()));
                     self.finish_backend_run(
                         run,
+                        run_guard,
                         input,
                         step,
                         &message,
@@ -484,6 +534,7 @@ impl Conversation {
                     self.messages.push(Message::assistant(message.clone()));
                     self.finish_backend_run(
                         run,
+                        run_guard,
                         input,
                         step,
                         &message,
@@ -511,6 +562,7 @@ impl Conversation {
                     self.messages.push(Message::assistant(message.clone()));
                     self.finish_backend_run(
                         run,
+                        run_guard,
                         input,
                         step,
                         &message,
@@ -619,6 +671,19 @@ impl Conversation {
                                 "conversation": self.store.id
                             }),
                         )?;
+                        run_guard = Some(RunGuard::start(
+                            &self.paths.runtime,
+                            &created.dir,
+                            &created.id,
+                            conversation_draft_receipt(
+                                &created,
+                                input,
+                                self.tools.workspace(),
+                                &self.model,
+                                self.public_test,
+                                self.authority,
+                            ),
+                        )?);
                         run = Some(created);
                     }
                     if io::stdout().is_terminal() {
@@ -938,6 +1003,19 @@ impl Conversation {
                                 "conversation": self.store.id
                             }),
                         )?;
+                        run_guard = Some(RunGuard::start(
+                            &self.paths.runtime,
+                            &created.dir,
+                            &created.id,
+                            conversation_draft_receipt(
+                                &created,
+                                input,
+                                self.tools.workspace(),
+                                &self.model,
+                                self.public_test,
+                                self.authority,
+                            ),
+                        )?);
                         run = Some(created);
                     }
                     let pre_hooks = self.hooks.fire(
@@ -1124,6 +1202,7 @@ impl Conversation {
         if used_tools {
             self.finish_backend_run(
                 run,
+                run_guard,
                 input,
                 steps,
                 "The operator step ceiling was reached before I could finish cleanly.",
@@ -2301,6 +2380,7 @@ impl Conversation {
     fn finish_backend_run(
         &mut self,
         run: Option<RunStore>,
+        run_guard: Option<RunGuard>,
         input: &str,
         steps: usize,
         summary: &str,
@@ -2381,7 +2461,10 @@ impl Conversation {
             "run.finished",
             json!({ "status": receipt.status, "summary": receipt.summary }),
         )?;
-        let receipt_path = run.finish(&self.paths.runtime, &receipt)?;
+        let receipt_path = match run_guard {
+            Some(guard) => guard.finalize(&receipt)?,
+            None => run.finish(&self.paths.runtime, &receipt)?,
+        };
         if completed && !self.public_test && receipt.verification.iter().any(|check| check.ok) {
             let checks = receipt
                 .verification
