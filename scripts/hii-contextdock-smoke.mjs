@@ -99,6 +99,16 @@ try {
     .find((hit) => hit.sourcePath === 'src/index.ts');
   assert.equal(rescannedHit.chunkId, stableHit.chunkId);
 
+  const removed = contextDock.deleteContextProjectDerivedData(project.id);
+  assert.equal(removed.projectId, project.id);
+  assert.equal(removed.rootPath, project.rootPath);
+  assert.ok(removed.removedChunks >= 4);
+  assert.equal(removed.sourceFilesTouched, false);
+  assert.equal(contextDock.getContextProject(project.id), null);
+  assert.equal(contextDock.contextProjectState(project.id), null);
+  assert.equal(contextDock.searchContext(project.id, 'deterministic atlas').length, 0);
+  assert.equal(fs.readFileSync(path.join(projectRoot, 'README.md'), 'utf8').includes('deterministic atlas phrase'), true);
+
   const database = new DatabaseSync(process.env.HII_DB_PATH, { readOnly: true });
   const tables = database.prepare(`
     SELECT name FROM sqlite_master
@@ -115,6 +125,7 @@ try {
   ]) assert.ok(tables.includes(table), `missing ${table}`);
   assert.ok(database.prepare("SELECT 1 FROM schema_migrations WHERE version = 'context-dock-v1'").get());
   assert.equal(database.prepare('PRAGMA journal_mode').get().journal_mode, 'wal');
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM context_chunks_fts').get().count, 0);
   database.close();
 
   console.log('HII Context Dock smoke');
@@ -123,6 +134,7 @@ try {
   console.log('inventory:   approved-root deterministic local traversal verified');
   console.log('extraction:  Markdown/text/code/config + redaction + Git provenance verified');
   console.log('search:      deterministic provenance hits + pin/exclusion state verified');
+  console.log('recovery:    derived project index deletion preserves source files verified');
   console.log('network:     no network or embeddings used');
 } finally {
   contextDock.resetContextDockDbForTests();

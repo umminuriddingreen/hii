@@ -3,7 +3,7 @@
 
   type AgentId = 'codex' | 'claude' | 'ollama';
   type StartAgent = 'codex' | 'claude';
-  type ActivationAction = 'detect' | 'inventory' | 'create' | 'start' | 'status';
+  type ActivationAction = 'detect' | 'inventory' | 'create' | 'start' | 'status' | 'deleteDerivedData';
   type ActivationMilestone = 'agents_detected' | 'context_previewed' | 'context_approved' | 'run_started' | 'receipt_verified' | 'run_failed';
 
   type AgentDetection = {
@@ -63,6 +63,7 @@
     journey?: ActivationJourney | null;
     journeyWarning?: string;
   };
+  type DeleteDerivedDataResponse = { removed: { removedChunks: number; sourceFilesTouched: boolean } };
 
   const HII_ACTIVATION_MOCK = import.meta.env.VITE_ACTIVATION_MOCK === '1';
   const agents: Array<{ id: AgentId; name: string; eyebrow: string; description: string }> = [
@@ -100,6 +101,9 @@
   let activationJourney = $state<ActivationJourney | null>(null);
   let journeyWarning = $state('');
   let busy = $state(false);
+  let deletingDerivedData = $state(false);
+  let deleteDerivedDataConfirmed = $state(false);
+  let derivedDataRemoved = $state(false);
   let detecting = $state(false);
   let selectedReadiness = $derived(agentReadiness(selectedAgent));
   let errorMessage = $state('');
@@ -142,6 +146,7 @@
         totalBytes: 44524
       },
       create: { project: { id: 'project_demo_local', name: 'HII demo project' }, scan: { added: 4, excluded: 1 } },
+      deleteDerivedData: { removed: { removedChunks: 5, sourceFilesTouched: false } },
       start: { activationId: 'activation_demo_01', startedAt: new Date().toISOString(), runKind: selectedAgent === 'claude' ? 'claude-spawn' : 'codex-exec' },
       status: mockPollCount++ < 1
         ? { status: 'running', receipt: null }
@@ -178,6 +183,21 @@
     if (!response.ok) throw new Error(typeof payload.error === 'string' ? payload.error : `Activation request failed (${response.status}).`);
     if (typeof payload.journeyWarning === 'string') journeyWarning = payload.journeyWarning;
     return payload as T;
+  }
+
+  async function deleteDerivedData() {
+    if (!projectId || !deleteDerivedDataConfirmed) return;
+    deletingDerivedData = true;
+    errorMessage = '';
+    try {
+      await activationRequest<DeleteDerivedDataResponse>('deleteDerivedData', { projectId, confirm: true });
+      derivedDataRemoved = true;
+      deleteDerivedDataConfirmed = false;
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Could not remove HII-derived project data.';
+    } finally {
+      deletingDerivedData = false;
+    }
   }
 
   async function detectAgents() {
@@ -549,6 +569,15 @@
           </section>
         {/if}
         {#if receipt.next}<div class="next-card"><span>Next action</span><p>{receipt.next}</p></div>{/if}
+        <section class="derived-data-card" aria-labelledby="derived-data-title">
+          <div><span>Local recovery</span><h2 id="derived-data-title">Remove HII’s derived project data</h2><p>This removes the local Context Dock index, search records, and scan history for this project. It never deletes or changes your project files.</p></div>
+          {#if derivedDataRemoved}
+            <p class="derived-data-confirmed">Local derived data removed. Your source folder was not touched.</p>
+          {:else}
+            <label><input type="checkbox" bind:checked={deleteDerivedDataConfirmed} /> I understand this removes HII’s local project index.</label>
+            <button class="back" type="button" disabled={!deleteDerivedDataConfirmed || deletingDerivedData} onclick={() => void deleteDerivedData()}>{deletingDerivedData ? 'Removing local data…' : 'Remove local derived data'}</button>
+          {/if}
+        </section>
       </section>
     {/if}
 
@@ -668,6 +697,12 @@
   .receipt-stamp strong { margin-top:9px; font-size:9px; letter-spacing:.11em; }
   .receipt-stamp small { margin-top:6px; color:var(--muted); font-size:6px; letter-spacing:.09em; }
   .receipt-grid { display:grid; grid-template-columns:1.3fr .7fr .7fr; gap:1px; margin-top:65px; background:#d6d9d5; border:1px solid #d6d9d5; }
+  .derived-data-card { display:grid; gap:16px; margin-top:28px; padding:24px; border:1px solid #d6d9d5; background:#fafaf8; }
+  .derived-data-card span { color:var(--blue); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; font-weight:700; letter-spacing:.11em; text-transform:uppercase; }
+  .derived-data-card h2 { margin:8px 0; font-size:18px; letter-spacing:-.02em; }
+  .derived-data-card p { margin:0; color:#5e635f; font-size:13px; line-height:1.55; }
+  .derived-data-card label { display:flex; gap:8px; align-items:flex-start; color:#454a46; font-size:12px; line-height:1.45; }
+  .derived-data-card .derived-data-confirmed { color:#237044; font-weight:600; }
   .receipt-grid article { min-height:200px; background:white; padding:25px; }
   .receipt-grid article > span, .section-label h2, .next-card span { color:var(--blue); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; font-weight:700; letter-spacing:.11em; text-transform:uppercase; }
   .receipt-grid h2 { margin:40px 0 0; font-size:25px; font-weight:550; letter-spacing:-.035em; line-height:1.25; }

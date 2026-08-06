@@ -51,10 +51,18 @@ describe('Context Dock foundation contract', () => {
     ]) expect(contextDock).toContain(`${field}:`);
   });
 
+  it('can remove derived project data without mutating the approved source root', () => {
+    expect(contextDock).toContain('export function deleteContextProjectDerivedData');
+    expect(contextDock).toContain("DELETE FROM context_chunks_fts WHERE project_id = ?");
+    expect(contextDock).toContain("DELETE FROM context_projects WHERE id = ?");
+    expect(contextDock).toContain('sourceFilesTouched: false');
+  });
+
   it('wires an isolated behavioral smoke check', () => {
     expect(packageJson.scripts['hii:contextdock:check']).toBe('node --experimental-strip-types scripts/hii-contextdock-smoke.mjs');
     expect(smoke).toContain('process.env.HII_DB_PATH');
     expect(smoke).toContain('fs.mkdtempSync');
     expect(smoke).toContain('deterministic provenance hits + pin/exclusion state verified');
+    expect(smoke).toContain('derived project index deletion preserves source files verified');
   });
 });

@@ -454,6 +454,32 @@ export function getContextProject(projectId: string) {
   return row ? projectFromRow(row) : null;
 }
 
+/** Remove only Context Dock's derived records; never mutate the source root. */
+export function deleteContextProjectDerivedData(projectId: string) {
+  const database = db();
+  const project = getContextProject(projectId);
+  if (!project) throw new Error(`Context project not found: ${projectId}`);
+
+  database.exec('BEGIN IMMEDIATE');
+  try {
+    const indexedChunks = database.prepare('SELECT COUNT(*) AS count FROM context_chunks WHERE project_id = ?')
+      .get(projectId) as { count: number };
+    database.prepare('DELETE FROM context_chunks_fts WHERE project_id = ?').run(projectId);
+    database.prepare('DELETE FROM context_projects WHERE id = ?').run(projectId);
+    database.exec('COMMIT');
+    return {
+      projectId,
+      rootPath: project.rootPath,
+      removedChunks: Number(indexedChunks.count),
+      sourceFilesTouched: false,
+      localOnly: true as const
+    };
+  } catch (error) {
+    database.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 function deleteSourceIndex(database: DatabaseSync, sourceId: string) {
   database.prepare(`
     DELETE FROM context_chunks_fts

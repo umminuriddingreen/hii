@@ -6,6 +6,7 @@ import { localTerminalAllowed } from '@/lib/server/hii-terminal';
 import {
   contextProjectState,
   createContextProject,
+  deleteContextProjectDerivedData,
   inventoryContextRoot,
   scanContextProject,
   setContextSourceState
@@ -107,6 +108,12 @@ export const POST: RequestHandler = async ({ request }) => {
         excluded: typeof body?.excluded === 'boolean' ? body.excluded : undefined
       });
       return json({ ok: true });
+    }
+    if (action === 'deleteDerivedData') {
+      if (body?.confirm !== true) {
+        return json({ error: 'Explicit confirmation is required to remove derived Context Dock data.' }, { status: 400 });
+      }
+      return json({ removed: deleteContextProjectDerivedData(String(body?.projectId || '')) });
     }
     if (action === 'start') {
       const started = await startActivationRun({
