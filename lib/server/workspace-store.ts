@@ -3,6 +3,7 @@ import { copyFile, mkdir, readFile, readdir } from 'fs/promises';
 import path from 'path';
 import { emptyWorkspace, normalizeWorkspace, type WorkspaceDoc } from '../workspace/types.ts';
 import { atomicWriteFile, withFileLock } from './atomic-write.ts';
+import { projectWorkspaceIntoOperationalGraph } from './operational-object-store.ts';
 
 const legacySpatialKey = ['can', 'vas'].join('');
 export const DEFAULT_WORKSPACE_ID = 'default';
@@ -132,6 +133,7 @@ async function persistWorkspace(workspaceId: string, doc: WorkspaceDoc) {
   // pretty-printing a board with image contact sheets in it roughly doubled the
   // bytes serialized, written, and fsynced on each keystroke-triggered save.
   await atomicWriteFile(workspacePath(workspaceId), `${JSON.stringify(doc)}\n`);
+  projectWorkspaceIntoOperationalGraph(workspaceId, doc);
 }
 
 export async function getSelectedWorkspaceId(): Promise<string> {
@@ -186,6 +188,17 @@ export async function loadWorkspace(requestedWorkspaceId?: string): Promise<Work
 
 export async function readWorkspace(workspaceId?: string): Promise<WorkspaceDoc> {
   return (await loadWorkspace(workspaceId)).workspace;
+}
+
+export async function backfillWorkspaceOperationalGraph(workspaceId?: string) {
+  const loaded = await loadWorkspace(workspaceId);
+  projectWorkspaceIntoOperationalGraph(loaded.workspaceId, loaded.workspace, 'hii:workspace-migration');
+  return {
+    workspaceId: loaded.workspaceId,
+    revision: loaded.workspace.revision,
+    objectCount: loaded.workspace.nodes.length,
+    relationCount: loaded.workspace.links.length
+  };
 }
 
 export async function createWorkspace(workspaceId: string, select = true): Promise<WorkspaceLoadResult> {

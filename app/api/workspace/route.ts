@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { localTerminalAllowed } from '@/lib/server/hii-terminal';
 import {
+  backfillWorkspaceOperationalGraph,
   createWorkspace,
   getSelectedWorkspaceId,
   listWorkspaces,
@@ -9,8 +10,10 @@ import {
   WorkspaceNotFoundError,
   WorkspaceRevisionConflictError,
   selectWorkspace,
+  validateWorkspaceId,
   writeWorkspace
 } from '@/lib/server/workspace-store';
+import { readOperationalSpace } from '@/lib/server/operational-object-store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -25,6 +28,12 @@ export async function GET(request: Request) {
       return NextResponse.json(await listWorkspaces());
     }
     const workspaceId = url.searchParams.get('workspaceId') || undefined;
+    if (url.searchParams.get('graph') === '1') {
+      const selectedWorkspaceId = workspaceId
+        ? validateWorkspaceId(workspaceId)
+        : await getSelectedWorkspaceId();
+      return NextResponse.json(readOperationalSpace(selectedWorkspaceId));
+    }
     return NextResponse.json(await loadWorkspace(workspaceId));
   } catch (error) {
     if (error instanceof WorkspaceLoadError) {
@@ -55,6 +64,12 @@ export async function POST(request: Request) {
   }
   const payload = body as { action?: unknown; workspaceId?: unknown; select?: unknown };
   try {
+    if (payload.action === 'migrate_graph') {
+      const result = await backfillWorkspaceOperationalGraph(
+        payload.workspaceId === undefined ? undefined : String(payload.workspaceId)
+      );
+      return NextResponse.json({ ok: true, migration: result });
+    }
     if (payload.action === 'create') {
       const result = await createWorkspace(String(payload.workspaceId ?? ''), payload.select !== false);
       return NextResponse.json({ ok: true, ...result }, { status: 201 });
@@ -63,7 +78,7 @@ export async function POST(request: Request) {
       const result = await selectWorkspace(String(payload.workspaceId ?? ''));
       return NextResponse.json({ ok: true, ...result });
     }
-    return NextResponse.json({ error: 'action must be "create" or "select"' }, { status: 400 });
+    return NextResponse.json({ error: 'action must be "create", "select", or "migrate_graph"' }, { status: 400 });
   } catch (error) {
     if (error instanceof WorkspaceLoadError) {
       return NextResponse.json(
