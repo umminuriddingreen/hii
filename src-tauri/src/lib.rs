@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Mutex,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
@@ -153,47 +153,36 @@ fn open_hii_mode(app: tauri::AppHandle, route: String) -> Result<(), String> {
     focus_workspace(&app)
 }
 
+/// Refuses the legacy cursor-bar execution path.
+///
+/// This command used to spawn `hii run --cwd $HOME <goal>`. That path did reach
+/// RunGuard and did write a CLI receipt, so the defect was never a missing
+/// receipt. What it lacked was governance:
+///
+/// - `$HOME` was used as the workspace root, which is an over-broad boundary for
+///   an agent started by one keystroke.
+/// - There was no reviewed context manifest — nothing recorded what the run was
+///   allowed to read.
+/// - There was no Workspace intent, and so no Prepare-agent-run transition.
+/// - There was no visible product approval boundary before execution began.
+/// - There was no durable object or context scope to bound it.
+/// - The receipt it produced was not bound to an originating proposal, to
+///   reviewed context, or to a Workspace intent, so it could not answer what a
+///   human had actually authorized.
+///
+/// A Tauri command is callable from any page loaded in the webview, so leaving
+/// it functional left that bypass open even after the cursor bar stopped calling
+/// it. It is kept registered, and failing loudly, so a stale caller gets a clear
+/// redirect instead of a missing-command error. Capture now goes through
+/// `/api/voice`, which produces a proposal the human approves before anything
+/// runs.
 #[tauri::command]
-fn run_cursor_intent(app: tauri::AppHandle, goal: String) -> Result<String, String> {
-    let goal = goal.trim();
-    if goal.is_empty() {
-        return Err("Tell HII what you want to happen.".to_string());
-    }
-    if goal.len() > 8_000 {
-        return Err("Keep the intent under 8,000 characters.".to_string());
-    }
-
-    let home = user_home()?;
-    let hii = home.join("bin").join("hii");
-    if !hii.is_file() {
-        return Err(format!("HII launcher is missing at {}", hii.display()));
-    }
-    let runs = runtime_root()?.join("runs").join("cursor-bar");
-    create_dir_all(&runs).map_err(|error| error.to_string())?;
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| error.to_string())?
-        .as_millis();
-    let log_path = runs.join(format!("{stamp}.log"));
-    let log = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&log_path)
-        .map_err(|error| error.to_string())?;
-    let error_log = log.try_clone().map_err(|error| error.to_string())?;
-    Command::new(hii)
-        .arg("run")
-        .arg("--cwd")
-        .arg(&home)
-        .arg(goal)
-        .current_dir(&home)
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(log))
-        .stderr(Stdio::from(error_log))
-        .spawn()
-        .map_err(|error| error.to_string())?;
-    let _ = set_notch_expanded(app.clone(), false);
-    Ok(log_path.display().to_string())
+fn run_cursor_intent(_app: tauri::AppHandle, _goal: String) -> Result<String, String> {
+    Err(
+        "Direct cursor-bar execution has been withdrawn. Capture the intent through HII so it \
+         carries reviewed context, authority and a receipt before it runs."
+            .to_string(),
+    )
 }
 
 fn hii_is_reachable(port: u16) -> bool {

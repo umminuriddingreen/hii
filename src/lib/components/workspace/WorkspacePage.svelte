@@ -35,8 +35,8 @@
   import { deleteWorkspaceNodes, duplicateWorkspaceNodes, linkWorkspaceNodes, nodesInLasso, nodesInMarquee, nudgeWorkspaceNodes, pasteWorkspaceNodes, readWorkspaceClipboard, unlinkWorkspaceNodes, writeWorkspaceClipboard } from '@/lib/workspace/selection';
   import { alignWorkspaceNodes, distributeWorkspaceNodes, snapWorkspaceRect, type AlignEdge, type SnapGuide } from '@/lib/workspace/snap';
   import { findOpenWorkspacePosition, tidyWorkspaceNodes } from '@/lib/workspace/layout';
-  import { normalizeWorkspaceContextAnchor } from '@/lib/workspace/context-anchor';
-  import { contactSheetContextItems, contactSheetItemSeed } from '@/lib/workspace/contact-sheet';
+  import { contactSheetItemSeed } from '@/lib/workspace/contact-sheet';
+  import { workspaceNodeContextItem as contextItem, workspaceNodeContextItems } from '@/lib/workspace/context-item';
   import { organizeContactSheetReviewSet } from '@/lib/workspace/contact-sheet-scene';
   import { rebindPendingWorkspaceContext } from '@/lib/workspace/pending-context';
   import { organizeWorkspaceSelection } from '@/lib/workspace/organize';
@@ -278,27 +278,11 @@
   function spawn(type:string,payload:Record<string,unknown>={}){const typedPayload=type==='frame'?{sceneOrder:scenes.length+1,...payload}:payload;const seed=seedFor(type as WorkspaceNodeType,type==='browser'?{url:'https://www.google.com',...typedPayload}:type==='terminal'?{sessionId:crypto.randomUUID(),...typedPayload}:typedPayload);const center={x:(-doc.viewport.x+innerWidth/2)/doc.viewport.zoom,y:(-doc.viewport.y+innerHeight/2)/doc.viewport.zoom};addSeeds([seed],{x:center.x-seed.w/2,y:center.y-seed.h/2});omnibar=false;query='';if(type==='context')void refreshContext();if(type==='board')void refreshBoard();}
   function workspacePoint(clientX:number,clientY:number){return{x:(clientX-doc.viewport.x)/doc.viewport.zoom,y:(clientY-doc.viewport.y)/doc.viewport.zoom}}
   async function summonComposer(at?:{x:number;y:number}){const now=Date.now();if(now-lastSummon<180)return;lastSummon=now;composerAt=at||workspacePoint(innerWidth/2,innerHeight/2);composerOpen=true;omnibar=false;await tick();composerInput?.focus();}
-  function contextExcerpt(node:WorkspaceNode){
-    const candidates=[node.payload.content,node.payload.text,node.payload.summary,node.payload.description,node.payload.markdown];
-    return String(candidates.find(value=>typeof value==='string'&&value.trim())||'').replace(/\s+/g,' ').trim().slice(0,2400);
-  }
-  function contextItem(node:WorkspaceNode){
-    return{
-      id:node.id,
-      title:workspaceNodeTitle(node),
-      type:node.type,
-      source:String(node.payload.path||node.payload.url||node.object?.source||'').slice(0,1000),
-      expectedSha256:String(node.payload.sha256||'').slice(0,64),
-      anchor:normalizeWorkspaceContextAnchor(node.payload.contextAnchor),
-      excerpt:contextExcerpt(node),
-      objectKind:String(node.object?.kind||''),
-      owner:String(node.object?.owner||''),
-      authority:String(node.objectRef?.authority||''),
-      proofRefs:(node.object?.proofRefs||[]).slice(0,12)
-    }
-  }
-  function contextItemsForNode(node:WorkspaceNode){if(node.payload.adapter==='contact-sheet'){const selected=contactSheetContextItems({nodeId:node.id,items:node.payload.items,selectedItems:node.payload.selectedItems,itemLabels:node.payload.itemLabels,proofRefs:node.object?.proofRefs});if(selected.length)return selected}return[contextItem(node)]}
-  function createSpatialRun(intent:string,at:{x:number;y:number},parentId?:string,contextNodes:WorkspaceNode[]=[]){const before=doc;const title=intent.length>44?`${intent.slice(0,44)}…`:intent;const approvedContext=contextNodes.flatMap(contextItemsForNode).slice(0,24);let z=doc.nextZ;const intentSeed=seedFor('intent',{title:'your intent',text:intent,parentId,context:approvedContext}),intentNode=makeNode(intentSeed,at.x,at.y,++z),runSeed=seedFor('run',{title,prompt:intent,parentId:intentNode.id,autoStart:false,status:'waiting_approval',context:approvedContext,workspaceRoot:String(context?.identity?.repo||''),model:'',maxSteps:8}),runNode=makeNode(runSeed,at.x,at.y+intentSeed.h+20,++z);doc={...doc,nextZ:z,nodes:[...doc.nodes,intentNode,runNode]};selected=runNode.id;contextSelection=[];remember(before);persist();}
+  const contextItemsForNode=(node:WorkspaceNode)=>workspaceNodeContextItems(node);
+  function createIntent(intent:string,at:{x:number;y:number},parentId?:string,contextNodes:WorkspaceNode[]=[]){const before=doc;const approvedContext=contextNodes.flatMap(contextItemsForNode).slice(0,24);const intentSeed=seedFor('intent',{title:'your intent',text:intent,parentId,context:approvedContext}),intentNode=makeNode(intentSeed,at.x,at.y,doc.nextZ+1);doc={...doc,nextZ:doc.nextZ+1,nodes:[...doc.nodes,intentNode]};selected=intentNode.id;contextSelection=[];remember(before);persist();}
+
+
+function prepareRunForIntent(intentNode:WorkspaceNode){const existing=doc.nodes.find(node=>node.type==='run'&&node.object?.parentId===intentNode.id);if(existing){focusNode(existing);return}const before=doc;const intent=String(intentNode.payload.text||intentNode.payload.prompt||'').trim()||'Explore this intent';const title=intent.length>44?`${intent.slice(0,44)}…`:intent;const approvedContext=Array.isArray(intentNode.payload.context)?intentNode.payload.context.slice(0,24):[];const runSeed=seedFor('run',{title,prompt:intent,parentId:intentNode.id,autoStart:false,status:'waiting_approval',context:approvedContext,workspaceRoot:String(context?.identity?.repo||''),model:'',maxSteps:8}),runNode=makeNode(runSeed,intentNode.x,intentNode.y+intentNode.h+20,doc.nextZ+1);doc={...doc,nextZ:doc.nextZ+1,nodes:[...doc.nodes,runNode]};selected=runNode.id;remember(before);persist();}
   function openDevelopmentSession(){
     const existing=doc.nodes.find(node=>node.type==='run'&&node.payload.developmentSession===true&&!['completed','failed','cancelled'].includes(String(node.payload.status||'')));
     if(existing){focusNode(existing);return}
@@ -451,7 +435,7 @@
     const visibleIds=[...(visibleWorkspaceNodeIds(doc.nodes,doc.viewport,{width:canvasWidth,height:canvasHeight},0)??new Set<string>())];
     const canvasIntent=interpretCanvasIntent(intent,{nodes:doc.nodes,selectedIds:activeSelection,visibleIds});
     if(canvasIntent){executeCanvasIntent(canvasIntent);return}
-    const width=seedFor('intent').w;createSpatialRun(intent,{x:at.x-width/2,y:at.y-72},undefined,selectedContextNodes);
+    const width=seedFor('intent').w;createIntent(intent,{x:at.x-width/2,y:at.y-72},undefined,selectedContextNodes);
   }
   function submitIntent(){
     const intent=composerText.trim();if(!intent)return;
@@ -493,14 +477,33 @@
     if(command[0].startsWith('align-')){alignSelection(command[0].slice(6) as AlignEdge);close();return}
     if(command[0].startsWith('distribute-')){distributeSelection(command[0].slice(11) as 'x'|'y');close();return}
     if(command[0]==='fit'){fitAll();omnibar=false;query=''}else if(command[0]==='organize')organizeSelection();else if(command[0]==='surface')spawn('surface',{title:command[1].replace('Open ',''),path:command[3],capabilityId:command[4]});else if(command[0]==='intent')void summonComposer();else if(command[0]==='upload'){omnibar=false;fileInput?.click()}else spawn(command[0]);}
+  /**
+   * Continues an existing run with a new stated intent.
+   *
+   * The follow-up carries its own text, the source node as approved context and
+   * a parent link back to the run it continues. The prepared run is created
+   * alongside it but stays in waiting_approval: continuing a thread is an
+   * explicit act, executing it still is not.
+   */
   function followUp(node:WorkspaceNode,text:string){
+    const followUpText=String(text??'').trim();
+    if(!followUpText)return;
     const intentSeed=seedFor('intent'),runSeed=seedFor('run');
     const at=findOpenWorkspacePosition(
       doc.nodes,
       {x:node.x+node.w+48,y:node.y},
       {w:Math.max(intentSeed.w,runSeed.w),h:intentSeed.h+20+runSeed.h}
     );
-    createSpatialRun(text,at,node.id,[node]);
+    const before=doc;
+    const title=followUpText.length>44?`${followUpText.slice(0,44)}…`:followUpText;
+    const approvedContext=contextItemsForNode(node).slice(0,24);
+    let z=doc.nextZ;
+    const seededIntent=seedFor('intent',{title:'your intent',text:followUpText,parentId:node.id,context:approvedContext});
+    const intentNode=makeNode(seededIntent,at.x,at.y,++z);
+    const seededRun=seedFor('run',{title,prompt:followUpText,parentId:intentNode.id,autoStart:false,status:'waiting_approval',context:approvedContext,workspaceRoot:String(context?.identity?.repo||''),model:'',maxSteps:8});
+    const runNode=makeNode(seededRun,at.x,at.y+seededIntent.h+20,++z);
+    doc={...doc,nextZ:z,nodes:[...doc.nodes,intentNode,runNode]};
+    selected=runNode.id;remember(before);persist();
   }
   function completedRunNodes(runNode:WorkspaceNode,result:Record<string,unknown>){
     const runId=String(result.runId||runNode.id);
@@ -1004,7 +1007,7 @@
         {:else if ['artifact','receipt'].includes(node.object?.kind||'')}<GovernedResultPane {node} />
         {:else if node.type==='ink'}<InkPane {node} />
         {:else if ['note','text','canvas-text','link','file','image','media','html','font'].includes(node.type)}<StaticNode {node} onPayload={(payload)=>patchSoon(node.id,{payload:{...node.payload,...payload}})} onSize={(size)=>patch(node.id,size)} onPromote={(item,label)=>promoteContactSheetItem(node,item,label)} onOrganize={()=>organizeContactSheetSelection(node)} />
-        {:else if node.type==='intent'}<IntentPane {node} />
+        {:else if node.type==='intent'}<IntentPane {node} onPayload={(payload)=>patchSoon(node.id,{payload:{...node.payload,...payload}})} onPrepareRun={()=>prepareRunForIntent(node)} />
         {:else if node.type==='run'&&node.payload.developmentSession===true}<DevelopmentSessionPane {node} onPatch={(next)=>patchRunNode(node,next)} onFollowUp={(text)=>followUp(node,text)} onComplete={(result)=>completedRunNodes(node,result)} onCapabilityDraft={(result)=>materializeCapabilityDraft(node,result)} />
         {:else if node.type==='run'}<SpatialRunPane {node} onPatch={(next)=>patchRunNode(node,next)} onFollowUp={(text)=>followUp(node,text)} onComplete={(result)=>completedRunNodes(node,result)} onCapabilityDraft={(result)=>materializeCapabilityDraft(node,result)} />
         {:else if node.type==='document'}<DocumentPane {node} onPayload={(payload)=>patchSoon(node.id,{payload:{...node.payload,...payload}})} />

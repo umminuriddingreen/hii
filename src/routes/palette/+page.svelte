@@ -14,18 +14,39 @@
     await invoke('hide_cursor_bar');
   }
 
+  /**
+   * Captures a typed intent as a proposal that still needs approval.
+   *
+   * The cursor bar used to spawn `hii run` directly against the home directory.
+   * That did produce a CLI receipt, but the run had `$HOME` as its workspace
+   * root, no reviewed context manifest, no Workspace intent, no approval
+   * boundary, and a receipt bound to none of those. Capture now enters the same
+   * governed path as every other intent: interpret, then approve in the Notch
+   * before anything runs.
+   */
   async function run() {
     const goal = intent.trim();
     if (!goal || busy) return;
     busy = true;
     error = '';
     try {
-      await invoke<string>('run_cursor_intent', { goal });
+      const response = await fetch('/api/voice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'interpret', utterance: goal, requestedBy: 'cursor-bar' })
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(typeof payload?.error === 'string' ? payload.error : 'HII could not capture that intent.');
+      }
       intent = '';
+      await invoke('hide_cursor_bar').catch(() => {});
+      await invoke('set_notch_expanded', { expanded: true }).catch(() => {});
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
-      busy = false;
       await tickFocus();
+    } finally {
+      busy = false;
     }
   }
 
@@ -67,11 +88,11 @@
     bind:this={input}
     bind:value={intent}
     disabled={busy}
-    aria-label="Tell HII what you want to happen"
+    aria-label="Tell HII what you want to happen. It is captured for review, not run immediately."
     aria-describedby={error ? 'cursor-bar-status' : undefined}
     autocomplete="off"
     spellcheck="true"
-    placeholder={busy ? 'Starting verified work…' : 'What do you want to happen?'}
+    placeholder={busy ? 'Capturing for review…' : 'What do you want to happen?'}
     on:keydown={keydown}
   />
   <div class="key" aria-hidden="true">{busy ? '•••' : '↵'}</div>

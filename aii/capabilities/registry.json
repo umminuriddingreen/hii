@@ -1320,6 +1320,49 @@
     "trustLevel": "first-party"
   },
   {
+    "id": "hii.voice.interpret",
+    "name": "Interpret Voice and Dictation for HII",
+    "owner": "hii",
+    "runtime": "next-route",
+    "summary": "Interpret spoken or typed commands with context-aware intent routing, persistent voice snapshots, proposal state, and approval-gated action execution through existing HII capabilities.",
+    "inputs": [
+      "spoken transcript",
+      "local context snapshot",
+      "screen and selection context",
+      "proposal and receipt references"
+    ],
+    "outputs": [
+      "interpreted intent",
+      "proposal id",
+      "approval state",
+      "workspace run queue result"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "selection and app/window context as hints",
+      "approval required for risky or irreversible actions",
+      "no direct file or publish side effects before approval"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "src/routes/api/voice/+server.ts",
+      "src/lib/components/NotchSurface.svelte",
+      "lib/server/hii-voice.ts",
+      "lib/server/hii-voice-workspace-context.ts",
+      "lib/server/voice-proposal-ledger.ts",
+      "lib/voice/interpreter.ts",
+      "tests/unit/voice-context-authority.test.ts",
+      "tests/unit/voice-proposal-ledger.test.ts",
+      "~/.hii/voice"
+    ],
+    "status": "partial",
+    "statusNotes": "Interpretation, approval gating and the append-only proposal ledger are verified by unit tests and by exercising /api/voice on a live server. The server resolves supplied selection ids against authoritative Workspace state; it is not fully selection-aware, because the Notch does not yet publish live Workspace selection, so spoken context is only as rich as what a caller supplies and the no-selection state is reported honestly rather than backfilled. Not yet verified: queued execution end-to-end (requires a running local model provider) and microphone capture in the packaged Tauri application.",
+    "trustLevel": "first-party"
+  },
+  {
     "id": "hii.browser.retrieval",
     "name": "Capture Source-Linked Browser Context",
     "owner": "hii",

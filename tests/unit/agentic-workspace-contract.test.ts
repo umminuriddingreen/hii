@@ -36,6 +36,7 @@ const documentPane = readFileSync(resolve(root, 'src/lib/components/workspace/Do
 const cadPane = readFileSync(resolve(root, 'src/lib/components/workspace/CadPane.svelte'), 'utf8');
 const modelPane = readFileSync(resolve(root, 'src/lib/components/workspace/ModelPane.svelte'), 'utf8');
 const contextAnchor = readFileSync(resolve(root, 'lib/workspace/context-anchor.ts'), 'utf8');
+const workspaceContextItem = readFileSync(resolve(root, 'lib/workspace/context-item.ts'), 'utf8');
 const workspaceIngest = readFileSync(resolve(root, 'lib/workspace/ingest.ts'), 'utf8');
 const pendingContext = readFileSync(resolve(root, 'lib/workspace/pending-context.ts'), 'utf8');
 const workspaceNavigator = readFileSync(resolve(root, 'src/lib/components/workspace/WorkspaceNavigator.svelte'), 'utf8');
@@ -103,8 +104,8 @@ describe('agentic workspace interaction contract', () => {
   });
 
   it('binds approval to an executable context manifest rather than decorative node labels', () => {
-    expect(workspace).toContain('contextExcerpt(node)');
-    expect(workspace).toContain('proofRefs:(node.object?.proofRefs||[])');
+    expect(workspaceContextItem).toContain('workspaceNodeContextExcerpt(node)');
+    expect(workspaceContextItem).toContain('proofRefs: (node.object?.proofRefs || []).slice(0, 12)');
     expect(spatialRun).toContain('Execution context manifest');
     expect(spatialRun).toContain("action: 'preview-context'");
     expect(spatialRun).toContain('contextFingerprint: contextPreview?.fingerprint');
@@ -117,7 +118,7 @@ describe('agentic workspace interaction contract', () => {
   });
 
   it('stages explicitly selected local creative assets without widening runner authority', () => {
-    expect(workspace).toContain("expectedSha256:String(node.payload.sha256||'')");
+    expect(workspaceContextItem).toContain("expectedSha256: String(node.payload.sha256 || '').slice(0, 64)");
     expect(spatialRun).toContain("runId: node.id");
     expect(spatialRun).toContain('run copy · {item.stagedRelativePath}');
     expect(workspaceAssetsRoute).toContain("storage: 'hii-content-addressed'");
@@ -135,7 +136,7 @@ describe('agentic workspace interaction contract', () => {
   });
 
   it('binds the human selected part of an asset to the same governed run manifest', () => {
-    expect(workspace).toContain('normalizeWorkspaceContextAnchor(node.payload.contextAnchor)');
+    expect(workspaceContextItem).toContain('normalizeWorkspaceContextAnchor(node.payload.contextAnchor)');
     expect(spatialRun).toContain('human focus · {workspaceContextAnchorLabel(item.anchor)}');
     expect(workspaceRunContext).toContain('anchor: item.anchor || null');
     expect(workspaceRunContext).toContain('Context anchor:');
@@ -316,7 +317,7 @@ describe('agentic workspace interaction contract', () => {
   });
 
   it('turns exact contact-sheet thumbnail choices into governed run context', () => {
-    expect(workspace).toContain('contactSheetContextItems');
+    expect(workspaceContextItem).toContain('contactSheetContextItems');
     expect(workspace).toContain('contextNodes.flatMap(contextItemsForNode)');
     const staticNode = readFileSync(resolve(root, 'src/lib/components/workspace/StaticNode.svelte'), 'utf8');
     expect(staticNode).toContain('selected for context');
@@ -324,7 +325,7 @@ describe('agentic workspace interaction contract', () => {
     expect(staticNode).toContain('Filter contact sheet');
     expect(staticNode).toContain('Label selected');
     expect(staticNode).toContain('labelContactSheetItems');
-    expect(workspace).toContain('itemLabels:node.payload.itemLabels');
+    expect(workspaceContextItem).toContain('itemLabels: node.payload.itemLabels');
   });
 
   it('promotes a chosen sheet item into the existing image-region workflow', () => {
@@ -388,13 +389,18 @@ describe('agentic workspace interaction contract', () => {
     expect(desktop).toContain('app.primary_monitor()');
   });
 
-  it('keeps cursor intent inside the shared HII runner', () => {
+  it('refuses cursor intent that would bypass the approval contract', () => {
+    const palette = readFileSync(resolve(root, 'src/routes/palette/+page.svelte'), 'utf8');
+    // The command stays registered so a stale caller gets a redirect, but it
+    // must no longer be able to spawn execution of its own.
     expect(desktop).toContain('fn run_cursor_intent');
-    expect(desktop).toContain('.arg("run")');
-    expect(desktop).toContain('.join("cursor-bar")');
-    expect(cursorBar).toContain("invoke<string>('run_cursor_intent'");
+    expect(desktop).toContain('Direct cursor-bar execution has been withdrawn');
+    expect(desktop).not.toContain('.join("cursor-bar")');
+    expect(palette).not.toContain('run_cursor_intent');
+    expect(palette).toContain("action: 'interpret'");
     expect(cursorBar).toContain("invoke('set_notch_expanded'");
-    expect(cursorBar).toContain('What do you want to happen?');
+    expect(cursorBar).toContain("invoke('hide_cursor_bar'");
+    expect(cursorBar).toContain('Hold to speak');
   });
 
   it('starts the baked HII runtime in production instead of attaching to stale UI', () => {
