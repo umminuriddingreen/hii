@@ -1,7 +1,10 @@
 import { readWorkspace } from './workspace-store.ts';
 import { normalizeWorkspaceRunContext, type WorkspaceRunContextItem } from './hii-workspace-run-context.ts';
+import { workspaceSelectionRefs } from './context-refs.ts';
+import { readWorkspaceSelection } from './workspace-selection-channel.ts';
 import { workspaceNodeContextItems } from '../workspace/context-item.ts';
 import { workspaceNodeTitle } from '../workspace/search.ts';
+import type { ContextRef } from '../context/refs.ts';
 import type { WorkspaceNode } from '../workspace/types.ts';
 
 /**
@@ -28,6 +31,10 @@ export type VoiceWorkspaceContext = {
   /** Requested node ids that are not present in the workspace. */
   unresolvedNodeIds: string[];
   selectedNodeIds: string[];
+  /** Durable pointers to the same selection, for the run that follows. */
+  refs: ContextRef[];
+  /** How the selection reached the server: spoken caller, or live handoff. */
+  selectionSource: 'caller' | 'window-handoff' | 'none';
   sceneId?: string;
   sceneTitle?: string;
   selectedText?: string;
@@ -71,6 +78,8 @@ function emptyContext(notice: string): VoiceWorkspaceContext {
     items: [],
     unresolvedNodeIds: [],
     selectedNodeIds: [],
+    refs: [],
+    selectionSource: 'none',
     notice
   };
 }
@@ -78,16 +87,37 @@ function emptyContext(notice: string): VoiceWorkspaceContext {
 /**
  * Resolves a spoken selection into the same context entries the spatial
  * workspace would have produced for those nodes.
+ *
+ * When the caller names nothing, the live cross-window handoff is consulted:
+ * the Notch is a separate window and cannot see the canvas selection, so the
+ * Workspace publishes coordinates and this reads them. That is not fabricated
+ * fallback context — it is a real selection, published by the window that has
+ * it, and every id in it is still resolved against the persisted document. If
+ * nothing was published, or it has expired, the honest no-selection state
+ * stands.
  */
 export async function resolveVoiceWorkspaceContext(
   selection: VoiceWorkspaceSelection
 ): Promise<VoiceWorkspaceContext> {
-  const requestedNodeIds = selection.nodeIds ?? [];
-  let doc;
+  let requestedNodeIds = selection.nodeIds ?? [];
+  let selectionSource: VoiceWorkspaceContext['selectionSource'] = requestedNodeIds.length
+    ? 'caller'
+    : 'none';
   let workspaceId = selection.workspaceId ?? '';
+  let sceneId = selection.sceneId;
+  if (!requestedNodeIds.length) {
+    const handoff = readWorkspaceSelection(workspaceId || undefined);
+    if (handoff?.selectedNodeIds.length) {
+      requestedNodeIds = handoff.selectedNodeIds;
+      workspaceId = workspaceId || handoff.workspaceId;
+      sceneId = sceneId || handoff.activeSceneId;
+      selectionSource = 'window-handoff';
+    }
+  }
+
+  let doc;
   try {
-    doc = await readWorkspace(selection.workspaceId);
-    workspaceId = selection.workspaceId || workspaceId;
+    doc = await readWorkspace(workspaceId || undefined);
   } catch (error) {
     return emptyContext(
       `No workspace context: ${error instanceof Error ? cleanText(error.message, 240) : 'workspace unavailable'}.`
@@ -104,13 +134,14 @@ export async function resolveVoiceWorkspaceContext(
   }
 
   const items = normalizeWorkspaceRunContext(resolvedNodes.flatMap(workspaceNodeContextItems));
-  const scene = selection.sceneId ? byId.get(selection.sceneId) : undefined;
+  const scene = sceneId ? byId.get(sceneId) : undefined;
+  const selectedNodeIds = resolvedNodes.map((node) => node.id);
 
   const notice = !requestedNodeIds.length
     ? 'No workspace objects were selected when this was spoken.'
     : unresolvedNodeIds.length
       ? `${items.length} of ${requestedNodeIds.length} selected object${requestedNodeIds.length === 1 ? '' : 's'} resolved; ${unresolvedNodeIds.length} could not be found in this workspace.`
-      : `${items.length} selected workspace object${items.length === 1 ? '' : 's'} resolved.`;
+      : `${items.length} selected workspace object${items.length === 1 ? '' : 's'} resolved${selectionSource === 'window-handoff' ? ' from the live Workspace selection' : ''}.`;
 
   return {
     workspaceId,
@@ -118,7 +149,11 @@ export async function resolveVoiceWorkspaceContext(
     available: true,
     items,
     unresolvedNodeIds,
-    selectedNodeIds: resolvedNodes.map((node) => node.id),
+    selectedNodeIds,
+    // Durable pointers alongside the resolved copies. The run that follows binds
+    // to these, so it can be re-resolved and drift can be detected.
+    refs: workspaceSelectionRefs(workspaceId, selectedNodeIds),
+    selectionSource,
     ...(scene ? { sceneId: scene.id, sceneTitle: workspaceNodeTitle(scene) } : {}),
     ...(selection.selectedText ? { selectedText: selection.selectedText } : {}),
     notice
