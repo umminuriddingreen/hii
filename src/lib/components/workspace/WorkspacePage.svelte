@@ -550,6 +550,19 @@ function prepareRunForIntent(intentNode:WorkspaceNode){const existing=doc.nodes.
   // Everything here works on `activeSelection`: the multi-select if there is one,
   // otherwise whatever single node is focused.
   $: activeSelection=contextSelection.length?contextSelection:selected?[selected]:[];
+  // Publish coordinates so the Notch, which is a separate window and cannot see
+  // this canvas, can reference what is selected. Ids only -- no titles and no
+  // content -- and the server resolves every id against the persisted document.
+  // Deliberately not written into the workspace: selection is transient UI
+  // state, and persisting it would make every click a revision.
+  $: if(loadState==='ready')void publishSelection(workspaceId,activeSelection,doc.revision,currentSceneId);
+  let lastPublishedSelection='';
+  async function publishSelection(id:string,ids:string[],revision:number,sceneId:string|null){
+    const key=`${id}:${revision}:${ids.join(',')}:${sceneId??''}`;
+    if(key===lastPublishedSelection)return;
+    lastPublishedSelection=key;
+    try{await fetch('/api/workspace/selection',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({workspaceId:id,workspaceRevision:revision,selectedNodeIds:ids,...(sceneId?{activeSceneId:sceneId}:{}),sourceWindow:'workspace'})})}catch{}
+  }
   function deleteSelection(){
     if(!activeSelection.length)return;
     const before=doc;
@@ -557,6 +570,42 @@ function prepareRunForIntent(intentNode:WorkspaceNode){const existing=doc.nodes.
     if(currentSceneId&&activeSelection.includes(currentSceneId))currentSceneId=null;
     selected=null;contextSelection=[];
     remember(before);persist();
+  }
+  // --- generative branching ---------------------------------------------
+  // Create variant makes a sibling, never an edit. The proposal is prepared and
+  // reviewed before anything runs, and the resulting object is materialized only
+  // if the run met the outcome it declared.
+  let variantProposal:any=null;
+  let variantInstruction='';
+  let variantBusy=false;
+  let variantNotice='';
+  $:variantSource=activeSelection.length===1?doc.nodes.find((node)=>node.id===activeSelection[0])??null:null;
+  $:variantMedium=variantSource?(variantSource.type==='image'?'image':variantSource.type==='document'?'document':'text'):'text';
+  async function prepareVariant(){
+    if(!variantSource||variantBusy)return;
+    if(variantInstruction.trim().length<4){variantNotice='Say how the variant should differ.';return}
+    variantBusy=true;variantNotice='';
+    try{
+      const response=await fetch('/api/workspace/variant',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'prepare',workspaceId,sourceNodeId:variantSource.id,instruction:variantInstruction,medium:variantMedium})});
+      const result=await response.json();
+      if(!response.ok)throw new Error(result.error||'Could not prepare the variant.');
+      variantProposal=result;
+    }catch(error){variantNotice=error instanceof Error?error.message:'Could not prepare the variant.'}
+    finally{variantBusy=false}
+  }
+  async function approveVariant(){
+    if(!variantProposal||variantBusy)return;
+    variantBusy=true;variantNotice='';
+    try{
+      // The approval quotes the fingerprint it saw, so it cannot be carried onto
+      // context that changed after review.
+      const response=await fetch('/api/workspace/variant',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'approve',proposal:variantProposal,approvedFingerprint:variantProposal.manifest.fingerprint,contextFingerprint:variantProposal.manifest.fingerprint,workspaceRoot:context?.projectPath})});
+      const result=await response.json();
+      if(!response.ok)throw new Error(result.error||'Could not queue the variant run.');
+      variantNotice=`Variant run queued. It becomes an object beside "${variantProposal.sourceTitle}" only if it produces ${variantProposal.requiredArtifact}.`;
+      variantProposal=null;variantInstruction='';
+    }catch(error){variantNotice=error instanceof Error?error.message:'Could not queue the variant run.'}
+    finally{variantBusy=false}
   }
   function duplicateSelection(){
     if(!activeSelection.length)return;
@@ -932,9 +981,35 @@ function prepareRunForIntent(intentNode:WorkspaceNode){const existing=doc.nodes.
       {#if organizableSelection.length>1}<button class="rounded-full border border-blue-200 bg-blue-50 px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-blue-700 hover:border-blue-400" aria-label="Organize selection into scene" on:click={organizeSelection}>Make Scene</button>{/if}
       <button class="rounded-full border border-neutral-200 px-3 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-neutral-600 hover:border-neutral-400" aria-label="Duplicate selection" on:click={duplicateSelection}>Duplicate <kbd class="ml-1 text-neutral-400">{shortcutMod} D</kbd></button>
       <button class="rounded-full border border-red-200 px-3 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-red-700 hover:border-red-400" aria-label="Delete selection" on:click={deleteSelection}>Delete <kbd class="ml-1 text-red-300">⌫</kbd></button>
+      {#if variantSource}<button class="rounded-full border border-violet-200 bg-violet-50 px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-violet-700 hover:border-violet-400" aria-label="Create a variant of the selected object" on:click={()=>{variantProposal=null;variantNotice='';variantInstruction=variantInstruction||''}}>Create variant</button>{/if}
       <button class="rounded-full bg-[var(--hii-electric-blue)] px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-white" on:click={()=>void summonComposer()}>Give intent <kbd class="ml-1 text-white/60">{intentShortcut}</kbd></button>
-      <button class="rounded-full px-2 py-2 font-mono text-[9px] uppercase text-neutral-400 hover:text-neutral-900" aria-label="Clear context selection" on:click={()=>{contextSelection=[];selected=null}}>×</button>
+      <button class="rounded-full px-2 py-2 font-mono text-[9px] uppercase text-neutral-400 hover:text-neutral-900" aria-label="Clear context selection" on:click={()=>{contextSelection=[];selected=null;variantProposal=null;variantInstruction=''}}>×</button>
     </section>
+    {#if variantSource}
+      <section data-workspace-ui class="absolute left-1/2 top-20 z-40 w-[min(560px,calc(100vw-40px))] -translate-x-1/2 rounded-2xl border border-violet-900/10 bg-white/95 p-4 shadow-xl backdrop-blur-xl" aria-label="Create variant">
+        <p class="font-mono text-[9px] uppercase tracking-[.1em] text-violet-700">Variant of “{workspaceNodeTitle(variantSource)}” · {variantMedium}</p>
+        <p class="mt-1 text-[11px] text-neutral-500">The original is never modified. The variant appears beside it.</p>
+        <input bind:value={variantInstruction} class="mt-3 w-full rounded-xl border border-neutral-200 px-3 py-2 text-[13px] outline-none focus:border-violet-400" placeholder="How should it differ?" aria-label="How the variant should differ" on:keydown={(event)=>{if(event.key==='Enter'){event.preventDefault();void prepareVariant()}}} />
+        {#if variantProposal}
+          <div class="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
+            <p class="font-mono text-[9px] uppercase tracking-[.1em] text-neutral-500">Reviewed context · fingerprint {variantProposal.manifest.fingerprint.slice(0,12)}</p>
+            <ul class="mt-2 space-y-1">{#each variantProposal.manifest.entries as entry}<li class="truncate text-[11px] text-neutral-700">{entry.title} <span class="text-neutral-400">· {entry.type}</span></li>{/each}</ul>
+            {#if variantProposal.manifest.unresolved.length}<p class="mt-2 text-[11px] text-amber-700">{variantProposal.manifest.unresolved.length} reference needs attention.</p>{/if}
+            <p class="mt-2 font-mono text-[9px] uppercase tracking-[.1em] text-neutral-500">Must produce</p>
+            <p class="truncate text-[11px] text-neutral-700">{variantProposal.requiredArtifact}</p>
+          </div>
+        {/if}
+        {#if variantNotice}<p class="mt-3 text-[11px] text-neutral-600">{variantNotice}</p>{/if}
+        <div class="mt-3 flex items-center gap-2">
+          {#if variantProposal}
+            <button class="rounded-full bg-violet-600 px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-white disabled:opacity-50" disabled={variantBusy} on:click={()=>void approveVariant()}>Approve and run</button>
+            <button class="rounded-full border border-neutral-200 px-3 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-neutral-600" on:click={()=>variantProposal=null}>Change</button>
+          {:else}
+            <button class="rounded-full bg-violet-600 px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-white disabled:opacity-50" disabled={variantBusy} on:click={()=>void prepareVariant()}>Review context</button>
+          {/if}
+        </div>
+      </section>
+    {/if}
   {/if}
   <div bind:this={worldLayer} class="absolute left-0 top-0 origin-top-left will-change-transform" style={`transform:${worldTransform(doc.viewport)}`}>
     <svg class="pointer-events-none absolute left-0 top-0 overflow-visible" width="1" height="1" aria-hidden="true">
