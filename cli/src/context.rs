@@ -221,6 +221,7 @@ mod tests {
             hooks: Vec::new(),
             outcome: "completed".into(),
             exit_code: 0,
+            completion: None,
         };
         let run_dir = runtime.0.join("runs/cli/prior-run");
         fs::create_dir_all(&run_dir).expect("create run");

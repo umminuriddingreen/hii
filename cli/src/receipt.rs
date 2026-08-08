@@ -1,3 +1,4 @@
+use crate::completion::CompletionAssessment;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -68,6 +69,12 @@ pub struct Receipt {
     pub outcome: String,
     #[serde(default)]
     pub exit_code: u8,
+    // --- schema v6: one canonical completion assessment ---
+    /// Absent on every receipt written before this existed. A reader that finds
+    /// `None` is looking at legacy proof semantics and must not treat the
+    /// receipt as stronger evidence than it carries.
+    #[serde(default)]
+    pub completion: Option<CompletionAssessment>,
 }
 
 /// Why a run ended, at the granularity the exit code reports.
@@ -568,6 +575,7 @@ mod tests {
             hooks: Vec::new(),
             outcome: "completed".into(),
             exit_code: 0,
+            completion: None,
         }
     }
 

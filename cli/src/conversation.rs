@@ -176,6 +176,7 @@ fn conversation_draft_receipt(
         hooks: Vec::new(),
         outcome: Outcome::Running.label().into(),
         exit_code: Outcome::Running.exit_code(),
+        completion: None,
     }
 }
 
@@ -2456,6 +2457,7 @@ impl Conversation {
             hooks: hook_records,
             outcome: outcome.label().into(),
             exit_code: outcome.exit_code(),
+            completion: None,
         };
         run.event(
             "run.finished",

@@ -5,6 +5,7 @@ mod attachments;
 mod background;
 mod board;
 mod budget;
+mod completion;
 mod config;
 mod context;
 mod contract;
@@ -155,6 +156,18 @@ enum Commands {
             help = "Deterministic local acceptance check; repeat for multiple checks"
         )]
         verify: Vec<String>,
+        #[arg(
+            long,
+            value_name = "KIND",
+            help = "Declared outcome the run must produce: informational | file-artifact"
+        )]
+        outcome: Option<String>,
+        #[arg(
+            long = "require-artifact",
+            value_name = "PATH",
+            help = "Workspace-relative artifact the run must produce: path[:ext][xN][@sha256]; repeat for several"
+        )]
+        require_artifact: Vec<String>,
         #[arg(
             long,
             help = "Do not preload workspace instructions, Git state, or prior HII receipts"
@@ -376,6 +389,8 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             authority,
             done_when,
             verify,
+            outcome,
+            require_artifact,
             no_context,
             json,
             jsonl,
@@ -419,6 +434,10 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     authority,
                     done_when,
                     verify,
+                    outcome_requirements: contract::OutcomeRequirements::from_flags(
+                        outcome.as_deref(),
+                        &require_artifact,
+                    )?,
                     use_context: !no_context,
                     output,
                     stream,

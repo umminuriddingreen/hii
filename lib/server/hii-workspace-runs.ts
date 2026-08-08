@@ -4,6 +4,7 @@ import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { workspaceRunCompletion } from '@/lib/server/workspace-run-completion';
 import { appendCapabilityJob, listCapabilityJobs } from '../capabilities/local-store.ts';
 import type { CapabilityJob } from '../capabilities/types.ts';
 import { createContextProject } from './hii-context-dock.ts';
@@ -315,7 +316,8 @@ export async function getWorkspaceRun(idValue: unknown) {
   if (!id) throw new Error('A workspace run id is required.');
   const job = (await listCapabilityJobs({ limit: 500 })).find((candidate) => candidate.id === id);
   if (!job) return null;
-  return { job, ...(await receiptForJob(job)) };
+  const resolved = await receiptForJob(job);
+  return { job, ...resolved, completion: workspaceRunCompletion(resolved.receipt) };
 }
 
 function receiptChecks(receipt: Record<string, unknown> | null) {
@@ -332,6 +334,13 @@ export async function createWorkspaceRunCapabilityDraft(input: { id?: unknown; n
   if (!current) throw new Error('Workspace run not found.');
   if (current.job.status !== 'completed' || !current.receipt || !current.path) {
     throw new Error('Only a completed workspace run with a receipt can become a capability draft.');
+  }
+  // A draft is a claim that this run is worth repeating, so it needs the same
+  // verdict the run itself was held to — not just a receipt on disk.
+  if (!current.completion.completed) {
+    throw new Error(
+      `This run did not meet its declared outcome, so it cannot become a capability draft. ${current.completion.reasons.join(' ')}`.trim()
+    );
   }
   const checks = receiptChecks(current.receipt);
   if (!checks.length) throw new Error('A verified receipt is required before capability drafting.');

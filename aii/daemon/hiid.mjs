@@ -273,7 +273,52 @@ function findWorkspaceReceipt(intent, startedAt) {
   return null;
 }
 
-function reportWorkspaceJob(intent, { status, output, startedAt, receiptMatch = null, pid = null }) {
+/**
+ * Read the receipt's completion assessment.
+ *
+ * The daemon used to decide completion itself: receipt status plus any passing
+ * check. That was a second, weaker definition of the same word, so a run could
+ * be failed by the CLI and completed here. The assessment in the receipt is now
+ * the authority; this function reads it rather than re-deriving it.
+ *
+ * Receipts written before the assessment existed carry no `completion` field.
+ * They stay readable and fall back to the old rule, but are marked `legacy` so
+ * nothing treats them as stronger evidence than they hold.
+ */
+function receiptCompletion(receipt) {
+  if (!receipt) {
+    return { completed: false, legacy: false, proofStrength: "none", reasons: ["No receipt was produced for this run."] };
+  }
+  const assessment = receipt.completion;
+  if (assessment && typeof assessment === "object") {
+    const reasons = [
+      ...(Array.isArray(assessment.unmetRequirements) ? assessment.unmetRequirements : []),
+      ...(Array.isArray(assessment.failedChecks) ? assessment.failedChecks.map((check) => `Declared check failed: ${check}`) : []),
+      ...(Array.isArray(assessment.missingArtifacts) ? assessment.missingArtifacts.map((path) => `Required artifact missing: ${path}`) : []),
+      ...(Array.isArray(assessment.invalidArtifacts) ? assessment.invalidArtifacts.map((detail) => `Required artifact invalid: ${detail}`) : [])
+    ];
+    const completed = assessment.satisfied === true && receipt.status === "completed";
+    if (assessment.satisfied === true && receipt.status !== "completed") {
+      reasons.push(`Receipt status is ${receipt.status || "unknown"} despite a satisfied assessment.`);
+    }
+    return {
+      completed,
+      legacy: false,
+      proofStrength: String(assessment.proofStrength || "none"),
+      reasons: completed ? [] : (reasons.length ? reasons : ["The completion assessment was not satisfied."])
+    };
+  }
+  const hasPassingCheck = Array.isArray(receipt.verification) && receipt.verification.some((check) => check?.ok === true);
+  const completed = receipt.status === "completed" && hasPassingCheck;
+  return {
+    completed,
+    legacy: true,
+    proofStrength: "legacy",
+    reasons: completed ? [] : [`Legacy receipt: status ${receipt.status || "unknown"}${hasPassingCheck ? "" : " with no passing verification"}.`]
+  };
+}
+
+function reportWorkspaceJob(intent, { status, output, startedAt, receiptMatch = null, pid = null, completion = null }) {
   const ts = now();
   const previous = latestCapabilityJob(intent.id);
   const receipt = receiptMatch?.receipt || null;
@@ -319,7 +364,10 @@ function reportWorkspaceJob(intent, { status, output, startedAt, receiptMatch = 
       requestedBy: intent.requestedBy, model: intent.model, maxSteps: intent.maxSteps,
       pid: status === "running" ? pid : null,
       startedAt: previous?.metadata?.startedAt || startedAt,
-      receiptId: receipt?.id || null
+      receiptId: receipt?.id || null,
+      // Carried onto the job so every surface reads the same verdict and the
+      // same reasons, rather than re-deriving completion from the receipt.
+      completion: completion || previous?.metadata?.completion || null
     }
   };
   appendJsonl(CAPABILITY_JOBS, job);
@@ -482,18 +530,22 @@ function executeWorkspaceIntent(intent) {
     }
     const output = redact(`${stdout ?? ""}${stderr ?? ""}`.trim());
     const receiptMatch = findWorkspaceReceipt(terminalIntent, startedAt);
-    const receiptStatus = receiptMatch?.receipt?.status;
-    const hasVerifiedProof = Array.isArray(receiptMatch?.receipt?.verification)
-      && receiptMatch.receipt.verification.some((check) => check?.ok === true);
+    // One assessment, read from the receipt. The daemon presents it; it does not
+    // apply a rule of its own.
+    const completion = receiptCompletion(receiptMatch?.receipt || null);
     const cleanupPassed = ["removed", "not-required"].includes(cleanedStaging.cleanupStatus);
-    const status = error || receiptStatus !== "completed" || !hasVerifiedProof || !cleanupPassed ? "failed" : "completed";
+    const status = error || !completion.completed || !cleanupPassed ? "failed" : "completed";
     reportWorkspaceJob(terminalIntent, {
       status,
       output: !cleanupPassed
         ? `Context cleanup needs attention: ${cleanedStaging.cleanupError || cleanedStaging.cleanupStatus}`
-        : output || receiptMatch?.receipt?.summary || (error ? String(error.message) : "Bounded workspace run finished."),
+        : !completion.completed
+          // Say why, in the same words the receipt used, instead of a bare "failed".
+          ? `Run did not meet its declared outcome. ${completion.reasons.join(" ")}`.trim()
+          : output || receiptMatch?.receipt?.summary || (error ? String(error.message) : "Bounded workspace run finished."),
       startedAt,
-      receiptMatch
+      receiptMatch,
+      completion
     });
     event(`workspace.run.${status}`, {
       actor: "aii.hiid", target: intent.id, status,
@@ -620,9 +672,8 @@ function reconcileWorkspaceRuns() {
     if (ownedWorkspacePid(pid, intent)) continue;
     const startedAt = String(job.metadata?.startedAt || job.createdAt || now());
     const receiptMatch = findWorkspaceReceipt(intent, startedAt);
-    const verified = receiptMatch?.receipt?.status === "completed"
-      && Array.isArray(receiptMatch.receipt.verification)
-      && receiptMatch.receipt.verification.some((check) => check?.ok === true);
+    const completion = receiptCompletion(receiptMatch?.receipt || null);
+    const verified = completion.completed;
     let cleanedStaging;
     try {
       cleanedStaging = cleanupWorkspaceRunContext({
@@ -647,9 +698,10 @@ function reconcileWorkspaceRuns() {
           ? "AII reconciled the interrupted run as cancelled."
           : !cleanupPassed
             ? `AII could not safely remove the interrupted run context: ${cleanedStaging.cleanupError || cleanedStaging.cleanupStatus}`
-          : "AII found no owned process or verified receipt after daemon interruption.",
+          : `AII found no owned process and no satisfied receipt after daemon interruption. ${completion.reasons.join(" ")}`.trim(),
       startedAt,
-      receiptMatch
+      receiptMatch,
+      completion
     });
     event(`workspace.run.${status}`, {
       actor: "aii.hiid", target: job.id, status,

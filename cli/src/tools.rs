@@ -396,7 +396,11 @@ impl Toolbelt {
         if let Err(error) = validate_shell(command, &self.workspace, deletion_approved) {
             return tool_result(Err(error), verification);
         }
-        let process = platform_shell(command);
+        let process = if verification {
+            platform_shell(&pipeline_strict(command))
+        } else {
+            platform_shell(command)
+        };
         self.run_command(process, verification, DEFAULT_TIMEOUT_SECS)
     }
 
@@ -1026,6 +1030,20 @@ fn platform_shell(command: &str) -> Command {
     }
 }
 
+/// Make a verification command report the failure of any stage in a pipeline.
+///
+/// `a | b` exits with `b`'s status, so `npm test | tee log` reported success
+/// while the tests failed. A check that cannot see its own failure is not a
+/// check. `pipefail` is enabled only for verification commands, and only when
+/// the shell accepts it — a shell without it (dash) leaves the command
+/// unchanged rather than failing on the option itself.
+fn pipeline_strict(command: &str) -> String {
+    if cfg!(windows) || !command.contains('|') {
+        return command.to_string();
+    }
+    format!("set -o pipefail 2>/dev/null || true\n{command}")
+}
+
 /// The file a shell redirection would write, if it is a workspace file.
 ///
 /// Redirecting into the workspace is how a model rewrites a file wholesale
@@ -1429,5 +1447,55 @@ mod tests {
         assert!(validate_shell("Remove-Item x", &path, false).is_err());
         assert!(validate_shell("cargo test", &path, false).is_ok());
         let _ = fs::remove_dir_all(path);
+    }
+
+    /// A check that exits non-zero must be recorded as failed, not merely noisy.
+    #[test]
+    fn verification_reports_a_non_zero_exit_as_failure() {
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        let result = tools.shell("exit 7", true);
+        assert!(!result.ok);
+        assert!(result.verification);
+        assert!(result.output.contains("exit 7"), "{}", result.output);
+        let _ = fs::remove_dir_all(path);
+    }
+
+    /// A process killed by a signal has no exit code at all. It must never be
+    /// mistaken for success just because `code()` is absent.
+    #[cfg(unix)]
+    #[test]
+    fn verification_reports_signal_termination_as_failure() {
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        let result = tools.shell("kill -9 $$", true);
+        assert!(
+            !result.ok,
+            "signal termination must fail: {}",
+            result.output
+        );
+        let _ = fs::remove_dir_all(path);
+    }
+
+    /// `a | b` exits with b's status, so a failing first stage used to be
+    /// invisible to verification.
+    #[cfg(unix)]
+    #[test]
+    fn verification_does_not_let_a_pipeline_mask_an_earlier_failure() {
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        let result = tools.shell("exit 3 | cat", true);
+        assert!(
+            !result.ok,
+            "pipeline failure must surface: {}",
+            result.output
+        );
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn pipeline_strictness_is_only_added_where_it_is_needed() {
+        assert_eq!(pipeline_strict("cargo test"), "cargo test");
+        assert!(pipeline_strict("cargo test | tee log").contains("pipefail"));
     }
 }

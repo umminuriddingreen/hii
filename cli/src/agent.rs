@@ -58,6 +58,9 @@ pub struct RunOptions {
     pub authority: Authority,
     pub done_when: Option<String>,
     pub verify: Vec<String>,
+    /// Declared before execution. `None` keeps informational-task behavior, so
+    /// every contract written before this existed still means what it meant.
+    pub outcome_requirements: Option<crate::contract::OutcomeRequirements>,
     pub use_context: bool,
     pub output: RunOutput,
     pub stream: StreamPolicy,
@@ -286,7 +289,8 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     }
 
     let contract = Contract::infer(&options.goal, options.authority)
-        .with_done_when(options.done_when.as_deref());
+        .with_done_when(options.done_when.as_deref())
+        .with_outcome_requirements(options.outcome_requirements.clone());
     let capsule = if options.use_context {
         crate::context::ContextCapsule::build(&paths.runtime, tools.workspace())
     } else {
@@ -1058,10 +1062,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         }
     }
     let declared_checks_passed = acceptance_passed(&options.verify, &verification);
-    let completed = final_summary.is_some()
-        && verification.iter().any(|check| check.ok)
-        && declared_checks_passed;
-    let mut summary = redact_text(&final_summary.unwrap_or_else(|| {
+    let mut summary = redact_text(&final_summary.clone().unwrap_or_else(|| {
         if model_loop_detected {
             MODEL_LOOP_DETECTED_MESSAGE.into()
         } else if interrupted {
@@ -1083,18 +1084,6 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     if !declared_checks_passed {
         summary.push_str(" Declared acceptance verification failed.");
     }
-    let stop_hooks = hooks.fire(
-        HookEvent::Stop,
-        None,
-        &run_id,
-        json!({
-            "status": if completed { "completed" } else { "incomplete" },
-            "summary": &summary,
-            "steps": steps
-        }),
-    );
-    persist_hook_batch(&mut journal, &stop_hooks)?;
-    hook_records.extend(stop_hooks.records);
     if let Some(path) = last_message.as_deref() {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|error| {
@@ -1160,6 +1149,69 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let artifacts = artifacts.into_iter().collect::<Vec<_>>();
     let preexisting_changes = artifact_inventory("clean", &git_before);
     let reversible = Some(git_status != "not a git workspace");
+
+    // One assessment decides completion for every surface. The receipt carries
+    // it, and the daemon, CapabilityJob and workspace read it rather than each
+    // applying a weaker rule of their own.
+    let terminated = if interrupted {
+        Some("The run was interrupted before the work finished.".to_string())
+    } else if model_loop_detected {
+        Some("The run was stopped after the model looped.".to_string())
+    } else {
+        // A blocked environment is deliberately absent here. One incidental
+        // command failing for environmental reasons must not veto a run whose
+        // declared checks and outcome were satisfied; it stays a fallback
+        // classification for a run that failed with nothing else to explain it.
+        budget_exceeded.map(|kind| format!("{} reached before the work finished.", kind.label()))
+    };
+    let completion = crate::completion::assess(crate::completion::CompletionInput {
+        workspace: tools.workspace(),
+        requirements: contract.outcome_requirements.as_ref(),
+        final_summary: final_summary.as_deref(),
+        declared_checks: &options.verify,
+        verification: &verification,
+        artifacts: &artifacts,
+        terminated: terminated.as_deref(),
+    });
+    let completed = completion.satisfied;
+    // A required artifact that was found belongs in the inventory even when the
+    // run did not modify it, so the receipt lists what the outcome actually
+    // rests on rather than only what changed.
+    let mut artifacts = artifacts;
+    for evidence in &completion.evidence {
+        if evidence.exists && evidence.is_file && !artifacts.contains(&evidence.path) {
+            artifacts.push(evidence.path.clone());
+        }
+    }
+    artifacts.sort();
+    if !completed && !completion.unmet_requirements.is_empty() {
+        journal.emit(Event::new("completion.unsatisfied").data(json!({
+            "unmetRequirements": &completion.unmet_requirements,
+            "failedChecks": &completion.failed_checks,
+            "missingArtifacts": &completion.missing_artifacts,
+            "invalidArtifacts": &completion.invalid_artifacts,
+        })))?;
+    }
+    for reason in &completion.missing_artifacts {
+        summary.push_str(&format!(" Required artifact missing: {reason}."));
+    }
+    for reason in &completion.invalid_artifacts {
+        summary.push_str(&format!(" Required artifact invalid: {reason}."));
+    }
+
+    let stop_hooks = hooks.fire(
+        HookEvent::Stop,
+        None,
+        &run_id,
+        json!({
+            "status": if completed { "completed" } else { "incomplete" },
+            "summary": &summary,
+            "steps": steps
+        }),
+    );
+    persist_hook_batch(&mut journal, &stop_hooks)?;
+    hook_records.extend(stop_hooks.records);
+
     // One classification drives status, outcome, and the exit code, so the three
     // can never disagree about why the run ended.
     let outcome = if completed {
@@ -1168,7 +1220,12 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         Outcome::Interrupted
     } else if model_loop_detected {
         Outcome::LoopAbort
-    } else if !declared_checks_passed {
+    } else if !declared_checks_passed
+        || !completion.missing_artifacts.is_empty()
+        || !completion.invalid_artifacts.is_empty()
+    {
+        // A declared outcome that was not produced is a verification failure,
+        // not a generic abort: the run did not do what it said it would.
         Outcome::VerifyFailed
     } else {
         match budget_exceeded {
@@ -1181,7 +1238,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         }
     };
     let receipt = Receipt {
-        schema_version: 5,
+        schema_version: 6,
         id: run_id.clone(),
         created_at_unix_ms: started_at,
         finished_at_unix_ms: unix_ms(),
@@ -1207,6 +1264,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         hooks: hook_records,
         outcome: outcome.label().into(),
         exit_code: outcome.exit_code(),
+        completion: Some(completion),
     };
     let path = guard.finalize(&receipt)?;
     // The receipt is embedded here as well as written to receipt.json so a
@@ -1214,6 +1272,13 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     journal.emit(Event::new("run.finished").data(json!({
         "status": receipt.status,
         "summary": receipt.summary,
+        // Named alongside the status so a stream consumer can see how strong the
+        // evidence behind it is without opening the receipt.
+        "proofStrength": receipt
+            .completion
+            .as_ref()
+            .map(|assessment| assessment.proof_strength.label())
+            .unwrap_or("legacy"),
         "receipt": &receipt,
         "proof": &path
     })))?;
@@ -1489,6 +1554,7 @@ fn draft_receipt(
         hooks: Vec::new(),
         outcome: Outcome::Running.label().into(),
         exit_code: Outcome::Running.exit_code(),
+        completion: None,
     }
 }
 
