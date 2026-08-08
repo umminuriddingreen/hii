@@ -129,6 +129,57 @@ async function stopPackagedServer(instance) {
   }
 }
 
+/**
+ * The packaged server must not outlive the application that spawned it.
+ *
+ * The desktop app stops the server when it exits cleanly, but a crash or a Force
+ * Quit never reaches that handler. What survived was a headless server
+ * reparented to launchd, still bound to its port and still holding the user's
+ * runtime open with no window anywhere to close.
+ */
+async function orphanedServerExits() {
+  const paths = installedPaths();
+  const port = await freePort();
+  const supervisor = spawn(paths.node, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  const child = spawn(paths.node, ['server.mjs'], {
+    cwd: paths.server,
+    stdio: ['ignore', 'ignore', 'ignore'],
+    env: {
+      ...process.env,
+      HOME: path.dirname(runtimeDir),
+      HII_RUNTIME_DIR: runtimeDir,
+      HOST: '127.0.0.1',
+      PORT: String(port),
+      ORIGIN: `http://127.0.0.1:${port}`,
+      HII_TAURI: '1',
+      NODE_ENV: 'production',
+      HII_SUPERVISOR_PID: String(supervisor.pid)
+    }
+  });
+  const exited = new Promise((resolve) => child.once('exit', resolve));
+  const ready = Date.now() + 15_000;
+  while (Date.now() < ready) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/workspace?workspaceId=default`);
+      if (response.ok) break;
+    } catch {
+      // Still starting.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.equal(child.exitCode, null, 'The packaged server exited before its supervisor did.');
+
+  supervisor.kill('SIGKILL');
+  const stopped = await Promise.race([
+    exited.then(() => true),
+    new Promise((resolve) => setTimeout(() => resolve(false), 15_000))
+  ]);
+  if (!stopped) {
+    child.kill('SIGKILL');
+    throw new Error('The packaged server kept running after its supervisor was killed.');
+  }
+}
+
 async function requestJson(baseUrl, pathname, init) {
   const response = await fetch(`${baseUrl}${pathname}`, {
     ...init,
@@ -292,6 +343,8 @@ try {
   );
   assert(listing.body.workspaces.some((item) => item.id === 'broken' && item.status === 'recovery'));
 
+  await orphanedServerExits();
+
   console.log('HII packaged app smoke');
   console.log('status:       ok');
   console.log('isolation:    copied HII.app ran outside the source repository');
@@ -301,6 +354,7 @@ try {
   console.log('assets:       content-addressed upload deduplicated and survived reinstall');
   console.log('recovery:     corrupt workspace preserved with an inspectable recovery path');
   console.log('signature:    copied app passed strict deep code-sign verification');
+  console.log('supervision:  server stopped itself when its supervising process was killed');
 } finally {
   if (server) await stopPackagedServer(server);
   if (keepTemporaryRoot) {

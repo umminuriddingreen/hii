@@ -146,9 +146,7 @@ fn open_hii_mode(app: tauri::AppHandle, route: String) -> Result<(), String> {
         .clone();
     let url = Url::parse(&format!("{}{route}", base.trim_end_matches('/')))
         .map_err(|error| error.to_string())?;
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "HII workspace window is unavailable.".to_string())?;
+    let window = ensure_main_window(&app)?;
     window.navigate(url).map_err(|error| error.to_string())?;
     focus_workspace(&app)
 }
@@ -285,6 +283,9 @@ fn spawn_hii_server(app: &tauri::App, port: u16) -> Result<Child, String> {
         .env("NODE_ENV", "production")
         .env("HII_TAURI", "1")
         .env("HII_RUNTIME_DIR", runtime)
+        // So the server can stop itself if this process dies without the chance
+        // to stop it — a crash or a Force Quit leaves no other signal.
+        .env("HII_SUPERVISOR_PID", std::process::id().to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(error_log))
@@ -301,10 +302,41 @@ fn stop_hii_server(app: &tauri::AppHandle) {
     }
 }
 
+/// Recreates the main window if it has been closed.
+///
+/// Closing the workspace window used to be unrecoverable. The Notch is
+/// deliberately not closable, so the application never exits when the workspace
+/// window goes away, and every path back to it went through
+/// `get_webview_window("main")` and failed. What remained on screen was an
+/// ambient surface with nothing behind it and no way to reach HII again short of
+/// quitting. The window is a view onto a running server, not the session itself,
+/// so it is reopened on demand.
+fn ensure_main_window(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window("main") {
+        return Ok(window);
+    }
+    let server_url = app
+        .state::<HiiServer>()
+        .0
+        .lock()
+        .map_err(|error| error.to_string())?
+        .url
+        .clone();
+    if server_url.is_empty() {
+        return Err("HII is still starting.".to_string());
+    }
+    let url = Url::parse(&server_url).map_err(|error| error.to_string())?;
+    WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
+        .title("HII")
+        .inner_size(1440.0, 960.0)
+        .min_inner_size(900.0, 620.0)
+        .resizable(true)
+        .build()
+        .map_err(|error| error.to_string())
+}
+
 fn focus_workspace(app: &tauri::AppHandle) -> Result<(), String> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "HII workspace window is unavailable.".to_string())?;
+    let window = ensure_main_window(app)?;
     window.show().map_err(|error| error.to_string())?;
     if window.is_minimized().map_err(|error| error.to_string())? {
         window.unminimize().map_err(|error| error.to_string())?;
@@ -314,8 +346,7 @@ fn focus_workspace(app: &tauri::AppHandle) -> Result<(), String> {
 
 fn emit_workspace_command(app: &tauri::AppHandle, event: &str) {
     if let Err(error) = focus_workspace(app).and_then(|_| {
-        app.get_webview_window("main")
-            .ok_or_else(|| "HII workspace window is unavailable.".to_string())?
+        ensure_main_window(app)?
             .emit(event, ())
             .map_err(|error| error.to_string())
     }) {
@@ -498,9 +529,11 @@ pub fn run() {
             if window.label() == "cursor-bar" && matches!(event, WindowEvent::Focused(false)) {
                 let _ = set_notch_expanded(window.app_handle().clone(), false);
             }
-            if matches!(event, WindowEvent::CloseRequested { .. }) {
-                stop_hii_server(window.app_handle());
-            }
+            // Deliberately not stopping the server here. Closing one window is not
+            // leaving HII: the Notch cannot be closed, so the application keeps
+            // running, and tearing the server down on any window close left an
+            // ambient surface backed by nothing. The server belongs to the
+            // application, so it is stopped when the application exits.
         })
         .invoke_handler(tauri::generate_handler![
             desktop_surface,

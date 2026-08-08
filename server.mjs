@@ -28,3 +28,25 @@ server.on('error', (error) => {
   process.exit(1);
 });
 server.listen(port, host, () => console.log(`hii ready on http://${host}:${port} (SvelteKit + Vite)`));
+
+// The desktop app spawns this process and stops it when it exits. A crash or a
+// Force Quit never reaches that handler, and what survived was a headless server
+// reparented to launchd, still bound to its port and still holding the user's
+// runtime open with no window anywhere. Outliving the application that started
+// it is never correct, so the supervisor is watched rather than trusted to say
+// goodbye.
+const supervisor = Number(process.env.HII_SUPERVISOR_PID || 0);
+if (supervisor > 0) {
+  const watch = setInterval(() => {
+    try {
+      process.kill(supervisor, 0);
+    } catch {
+      console.log(`hii supervisor ${supervisor} is gone; shutting down`);
+      server.close(() => process.exit(0));
+      // A held-open connection must not keep an orphan alive indefinitely.
+      setTimeout(() => process.exit(0), 2000).unref();
+      clearInterval(watch);
+    }
+  }, 2000);
+  watch.unref();
+}
