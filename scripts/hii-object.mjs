@@ -7,15 +7,17 @@
  * operation permissions, frame scope, stale-write refusal and VERIFIED_BY proof
  * are enforced identically wherever the request came from.
  *
- * The scope arrives as JSON on the command line because Slice 5 has no durable
- * grant store yet. Slice 7 replaces `--scope` with a persisted, human-approved
- * grant; nothing about the enforcement below changes when it does.
+ * The scope is read from an approved grant, never taken from the command line.
+ * `--scope` remains only so a test or a first-run bootstrap can pass an explicit
+ * scope; it is refused unless HII_ALLOW_INLINE_OBJECT_SCOPE is set, because a
+ * caller describing its own authority is not authority.
  */
 
 function usage() {
   console.error(`usage: hii object <list|read|create|patch|annotate|project|relate|tombstone> [options]
 
-  --scope <json>       approved object scope (required)
+  --grant <id>         approved object grant to act under (required)
+  --scope <json>       explicit scope; needs HII_ALLOW_INLINE_OBJECT_SCOPE
   --actor <id>         acting subject (required for writes)
   --run <id>           run this operation belongs to
   --intent <id>        intent this operation serves
@@ -57,8 +59,19 @@ export async function cmdObject(args) {
     process.exit(operation ? 0 : 1);
   }
   const options = parseArgs(args.slice(1));
-  const scope = parseJsonFlag(options.scope, 'scope');
-  if (!scope) throw new Error('An approved object scope is required: pass --scope <json>.');
+  let scope;
+  if (options.grant) {
+    const { scopeForGrant } = await import('../lib/server/object-grants.ts');
+    ({ scope } = await scopeForGrant(options.grant));
+  } else if (options.scope) {
+    if (!process.env.HII_ALLOW_INLINE_OBJECT_SCOPE) {
+      throw new Error(
+        'An inline --scope is a caller describing its own authority. Pass --grant <id> for an approved grant, or set HII_ALLOW_INLINE_OBJECT_SCOPE for a bootstrap or test.'
+      );
+    }
+    scope = parseJsonFlag(options.scope, 'scope');
+  }
+  if (!scope) throw new Error('An approved object grant is required: pass --grant <id>.');
   const input = parseJsonFlag(options.input, 'input') ?? {};
   const proof = parseJsonFlag(options.proof, 'proof');
 

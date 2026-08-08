@@ -13,6 +13,7 @@ import {
   tombstoneApprovedObject,
   type ObjectAccessScope
 } from '@/lib/server/governed-objects';
+import { scopeForGrant } from '@/lib/server/object-grants';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,10 +21,9 @@ export const dynamic = 'force-dynamic';
 /**
  * The governed object interface, over HTTP.
  *
- * The scope arrives with the request because Slice 5 has no durable grant store
- * yet — Slice 7 replaces this parameter with a persisted, human-approved grant.
- * The enforcement below does not change when it does; only where the scope comes
- * from changes.
+ * The scope is never taken from the request. A caller names the grant it is
+ * acting under and the scope is read from the approved grant ledger — otherwise
+ * the caller would be describing its own authority, which is not authority.
  */
 function localOnly(request: Request) {
   return localTerminalAllowed(request)
@@ -56,15 +56,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'invalid json' }, { status: 400 });
   }
   const input = (body ?? {}) as Record<string, unknown>;
-  const scope = input.scope as ObjectAccessScope | undefined;
   const actor = (input.actor ?? {}) as { actorId?: string };
-  if (!scope || typeof scope !== 'object') {
-    return NextResponse.json({ error: 'An approved object scope is required.' }, { status: 400 });
+  const grantId = String(input.grantId ?? '');
+  if (!grantId) {
+    return NextResponse.json({ error: 'A grant id is required.' }, { status: 400 });
   }
   if (!actor.actorId) {
     return NextResponse.json({ error: 'An actor is required.' }, { status: 400 });
   }
   const payload = (input.input ?? {}) as Record<string, never>;
+  let scope: ObjectAccessScope;
+  try {
+    ({ scope } = await scopeForGrant(grantId));
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'That grant is not usable.', code: 'object-grant-unavailable' },
+      { status: 403 }
+    );
+  }
   try {
     switch (input.operation) {
       case 'list':

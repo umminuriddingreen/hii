@@ -66,22 +66,23 @@ pub fn execute(repo: &Path, tool: &str, query: Option<&str>) -> ToolResult {
         // agent tool: a mutation needs an approved scope, a base version and an
         // idempotency key, none of which fit a single free-text argument, and
         // guessing them is exactly what the governed interface exists to stop.
-        // `query` carries the approved scope JSON the run was granted.
+        // `query` names the approved grant, never the scope itself: a caller that
+        // describes its own authority does not have any.
         "object_list" => {
             if arg.is_empty() {
-                Err("object_list needs the approved object scope as JSON in `query`".to_string())
+                Err("object_list needs the approved grant id in `query`".to_string())
             } else {
-                hii(repo, &["object", "list", "--json", "--scope", arg])
+                hii(repo, &["object", "list", "--json", "--grant", arg])
             }
         }
         "object_read" => {
-            let (scope, id) = arg.split_once("::").unwrap_or(("", ""));
-            if scope.trim().is_empty() || id.trim().is_empty() {
-                Err("object_read needs `<scope json>::<object id>` in `query`".to_string())
+            let (grant, id) = arg.split_once("::").unwrap_or(("", ""));
+            if grant.trim().is_empty() || id.trim().is_empty() {
+                Err("object_read needs `<grant id>::<object id>` in `query`".to_string())
             } else {
                 hii(
                     repo,
-                    &["object", "read", "--json", "--scope", scope, "--object", id],
+                    &["object", "read", "--json", "--grant", grant, "--object", id],
                 )
             }
         }
