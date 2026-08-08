@@ -109,6 +109,30 @@ pub fn explicit_candidate(goal: &str, summary: &str) -> SkillCandidate {
     )
 }
 
+/// Why this receipt may not be promoted to a skill, if it may not.
+///
+/// A draft written with `--verification verified` is a durable claim that this
+/// workflow is proven. Only a satisfied assessment with declared proof supports
+/// that claim; `incidental` means nothing was declared, and a receipt with no
+/// assessment predates declared outcomes entirely.
+pub fn promotion_refusal(receipt: &Receipt) -> Option<String> {
+    match receipt.completion.as_ref() {
+        Some(completion) if completion.qualifies_for_high_trust() => None,
+        Some(completion) if !completion.satisfied => Some(format!(
+            "This run did not meet its declared outcome, so it cannot become a verified skill. {}",
+            completion.unmet_requirements.join(" ")
+        )),
+        Some(completion) => Some(format!(
+            "This run's proof is {}, not declared. Nothing was declared for it to prove, so it cannot become a verified skill.",
+            completion.proof_strength.label()
+        )),
+        None => Some(
+            "This receipt predates declared outcomes, so its proof is legacy and unclassified. It cannot become a verified skill."
+                .to_string(),
+        ),
+    }
+}
+
 pub fn report_draft(
     paths: &AppPaths,
     receipt: &Receipt,
@@ -116,6 +140,9 @@ pub fn report_draft(
     candidate: &SkillCandidate,
     session_id: &str,
 ) -> Result<String, String> {
+    if let Some(refusal) = promotion_refusal(receipt) {
+        return Err(refusal);
+    }
     let checks = receipt
         .verification
         .iter()
@@ -276,9 +303,89 @@ fn truncate(value: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::completion::{CompletionAssessment, ProofStrength};
+
+    fn receipt_with(completion: Option<CompletionAssessment>) -> Receipt {
+        Receipt {
+            schema_version: 6,
+            id: "r1".into(),
+            created_at_unix_ms: 0,
+            finished_at_unix_ms: 0,
+            status: "completed".into(),
+            goal: "g".into(),
+            workspace: "/tmp".into(),
+            model: "m".into(),
+            review_model: None,
+            steps: 1,
+            summary: "s".into(),
+            verification: Vec::new(),
+            git_status: String::new(),
+            next: None,
+            review: None,
+            risk: "change".into(),
+            authority: None,
+            done_when: None,
+            approvals: Vec::new(),
+            artifacts: Vec::new(),
+            reversible: None,
+            context_sources: Vec::new(),
+            preexisting_changes: Vec::new(),
+            hooks: Vec::new(),
+            outcome: "completed".into(),
+            exit_code: 0,
+            completion,
+        }
+    }
+
+    fn assessment(satisfied: bool, proof_strength: ProofStrength) -> CompletionAssessment {
+        CompletionAssessment {
+            version: 1,
+            satisfied,
+            proof_strength,
+            outcome_kind: None,
+            unmet_requirements: Vec::new(),
+            failed_checks: Vec::new(),
+            missing_artifacts: Vec::new(),
+            invalid_artifacts: Vec::new(),
+            warnings: Vec::new(),
+            evidence: Vec::new(),
+        }
+    }
+
     #[test]
     fn sanitizes_skill_ids() {
         let item = parse_candidate(r#"{"repeatable":true,"id":"Build HII!!!","name":"Build HII","description":"Use when building HII."}"#).unwrap();
         assert_eq!(item.id, "build-hii");
+    }
+
+    #[test]
+    fn only_declared_satisfied_proof_may_become_a_verified_skill() {
+        assert!(promotion_refusal(&receipt_with(Some(assessment(
+            true,
+            ProofStrength::Declared
+        ))))
+        .is_none());
+
+        let incidental = promotion_refusal(&receipt_with(Some(assessment(
+            true,
+            ProofStrength::Incidental,
+        ))))
+        .expect("incidental proof must be refused");
+        assert!(incidental.contains("incidental"), "{incidental}");
+
+        let none = promotion_refusal(&receipt_with(Some(assessment(true, ProofStrength::None))))
+            .expect("no proof must be refused");
+        assert!(none.contains("none"), "{none}");
+
+        let unsatisfied = promotion_refusal(&receipt_with(Some(assessment(
+            false,
+            ProofStrength::Declared,
+        ))))
+        .expect("an unsatisfied run must be refused");
+        assert!(unsatisfied.contains("declared outcome"), "{unsatisfied}");
+
+        // A receipt written before assessments existed carries legacy proof.
+        let legacy = promotion_refusal(&receipt_with(None)).expect("legacy proof must be refused");
+        assert!(legacy.contains("legacy"), "{legacy}");
     }
 }

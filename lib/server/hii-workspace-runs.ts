@@ -4,6 +4,7 @@ import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { requireHighTrust } from '@/lib/server/proof-policy';
 import { workspaceRunCompletion } from '@/lib/server/workspace-run-completion';
 import { appendCapabilityJob, listCapabilityJobs } from '../capabilities/local-store.ts';
 import type { CapabilityJob } from '../capabilities/types.ts';
@@ -335,13 +336,10 @@ export async function createWorkspaceRunCapabilityDraft(input: { id?: unknown; n
   if (current.job.status !== 'completed' || !current.receipt || !current.path) {
     throw new Error('Only a completed workspace run with a receipt can become a capability draft.');
   }
-  // A draft is a claim that this run is worth repeating, so it needs the same
-  // verdict the run itself was held to — not just a receipt on disk.
-  if (!current.completion.completed) {
-    throw new Error(
-      `This run did not meet its declared outcome, so it cannot become a capability draft. ${current.completion.reasons.join(' ')}`.trim()
-    );
-  }
+  // A draft is a claim that this run is worth repeating, and it writes a skill
+  // marked `--verification verified`. That is high-trust: it needs declared,
+  // satisfied proof, not just a receipt on disk and a passing command.
+  requireHighTrust(current.completion, 'capability-draft');
   const checks = receiptChecks(current.receipt);
   if (!checks.length) throw new Error('A verified receipt is required before capability drafting.');
   const existingId = clean(current.job.metadata?.skillDraftId, 120);

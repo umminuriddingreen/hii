@@ -393,11 +393,32 @@ impl Toolbelt {
         verification: bool,
         deletion_approved: bool,
     ) -> ToolResult {
+        self.shell_in_family(command, verification, deletion_approved, shell_family())
+    }
+
+    /// The shell family is a parameter rather than a read of the ambient
+    /// environment so the fail-closed path can be exercised without a test
+    /// mutating process-global state that its neighbours also read.
+    fn shell_in_family(
+        &self,
+        command: &str,
+        verification: bool,
+        deletion_approved: bool,
+        family: ShellFamily,
+    ) -> ToolResult {
         if let Err(error) = validate_shell(command, &self.workspace, deletion_approved) {
             return tool_result(Err(error), verification);
         }
         let process = if verification {
-            platform_shell(&pipeline_strict(command))
+            match pipeline_guard(command, family) {
+                PipelineGuard::AsWritten => platform_shell(command),
+                PipelineGuard::Guarded(wrapped) => platform_shell(&wrapped),
+                // Refused rather than run: a check that cannot see a stage fail
+                // would report `ok`, which is worse evidence than none.
+                PipelineGuard::Unavailable(reason) => {
+                    return tool_result(Err(reason), verification)
+                }
+            }
         } else {
             platform_shell(command)
         };
@@ -1030,19 +1051,119 @@ fn platform_shell(command: &str) -> Command {
     }
 }
 
+/// Which shell family `platform_shell` will hand the command to.
+///
+/// Pipeline exit-status semantics differ per family, and the difference decides
+/// whether a declared check can fail closed at all, so the choice is made once
+/// here rather than inferred from `cfg!(windows)` at each site.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ShellFamily {
+    Posix,
+    PowerShell,
+    Cmd,
+}
+
+pub(crate) fn shell_family() -> ShellFamily {
+    if let Ok(shell) = std::env::var("HII_SHELL") {
+        let lower = shell.trim().to_ascii_lowercase();
+        if lower == "powershell" || lower == "pwsh" {
+            return ShellFamily::PowerShell;
+        }
+        if lower == "cmd" || lower.ends_with("cmd.exe") {
+            return ShellFamily::Cmd;
+        }
+        if !lower.is_empty() {
+            return ShellFamily::Posix;
+        }
+    }
+    if cfg!(windows) {
+        ShellFamily::PowerShell
+    } else {
+        ShellFamily::Posix
+    }
+}
+
+/// What to do with a declared verification command that contains a pipeline.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PipelineGuard {
+    /// No pipeline, or a family where the plain command already fails closed.
+    AsWritten,
+    /// Wrapped so every stage's failure is visible.
+    Guarded(String),
+    /// Pipeline status cannot be established here, so the check must not run.
+    Unavailable(String),
+}
+
+/// True when the command contains a real `|` pipeline.
+///
+/// `||` is an or-operator and `|` inside quotes is data. Neither masks an exit
+/// status, and treating them as pipelines would refuse to run checks that are
+/// already fail-closed.
+fn has_pipeline(command: &str) -> bool {
+    let bytes = command.as_bytes();
+    let mut at = 0;
+    let mut single = false;
+    let mut double = false;
+    while at < bytes.len() {
+        match bytes[at] {
+            b'\\' if !single => at += 1,
+            b'\'' if !double => single = !single,
+            b'"' if !single => double = !double,
+            b'|' if !single && !double => {
+                if bytes.get(at + 1) == Some(&b'|') {
+                    at += 1; // `||`, an or-operator
+                } else if at > 0 && bytes[at - 1] == b'|' {
+                    // already consumed as the tail of `||`
+                } else {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+        at += 1;
+    }
+    false
+}
+
 /// Make a verification command report the failure of any stage in a pipeline.
 ///
 /// `a | b` exits with `b`'s status, so `npm test | tee log` reported success
 /// while the tests failed. A check that cannot see its own failure is not a
-/// check. `pipefail` is enabled only for verification commands, and only when
-/// the shell accepts it — a shell without it (dash) leaves the command
-/// unchanged rather than failing on the option itself.
-fn pipeline_strict(command: &str) -> String {
-    if cfg!(windows) || !command.contains('|') {
-        return command.to_string();
+/// check.
+///
+/// When pipeline status cannot be established the command is refused rather
+/// than run. Falling back to last-command status would reintroduce exactly the
+/// masking this exists to prevent, and it would do it silently — the check would
+/// still report `ok`, which is worse than not running.
+pub(crate) fn pipeline_guard(command: &str, family: ShellFamily) -> PipelineGuard {
+    if !has_pipeline(command) {
+        return PipelineGuard::AsWritten;
     }
-    format!("set -o pipefail 2>/dev/null || true\n{command}")
+    match family {
+        ShellFamily::Posix => PipelineGuard::Guarded(format!(
+            "if ! (set -o pipefail) 2>/dev/null; then\n  \
+             echo 'hii: this shell cannot report pipeline exit status' >&2\n  \
+             exit {PIPELINE_STATUS_UNAVAILABLE}\n\
+             fi\n\
+             set -o pipefail\n{command}"
+        )),
+        ShellFamily::PowerShell => PipelineGuard::Unavailable(
+            "PowerShell reports only the last stage of a pipeline, so this declared check cannot \
+             fail closed. Split the pipeline into separate checks, or write the intermediate \
+             output to a file and check it separately."
+                .to_string(),
+        ),
+        ShellFamily::Cmd => PipelineGuard::Unavailable(
+            "cmd.exe reports only the last stage of a pipeline, so this declared check cannot \
+             fail closed. Split the pipeline into separate checks, or write the intermediate \
+             output to a file and check it separately."
+                .to_string(),
+        ),
+    }
 }
+
+/// Exit status used when a pipeline's real status cannot be established.
+const PIPELINE_STATUS_UNAVAILABLE: i32 = 97;
 
 /// The file a shell redirection would write, if it is a workspace file.
 ///
@@ -1493,9 +1614,112 @@ mod tests {
         let _ = fs::remove_dir_all(path);
     }
 
+    /// The mirror case: a failing *last* stage was always visible, and must stay
+    /// visible once the guard wraps the command.
+    #[cfg(unix)]
     #[test]
-    fn pipeline_strictness_is_only_added_where_it_is_needed() {
-        assert_eq!(pipeline_strict("cargo test"), "cargo test");
-        assert!(pipeline_strict("cargo test | tee log").contains("pipefail"));
+    fn verification_reports_a_failing_final_pipeline_stage() {
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        let result = tools.shell("echo hi | grep -q nothing-here", true);
+        assert!(
+            !result.ok,
+            "failing final stage must surface: {}",
+            result.output
+        );
+        let _ = fs::remove_dir_all(path);
+    }
+
+    /// The guard must not turn a genuinely passing pipeline into a failure.
+    #[cfg(unix)]
+    #[test]
+    fn verification_passes_when_every_pipeline_stage_succeeds() {
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        let result = tools.shell("echo hi | grep -q hi", true);
+        assert!(result.ok, "passing pipeline must pass: {}", result.output);
+        let _ = fs::remove_dir_all(path);
+    }
+
+    /// A stage killed by a signal is a failure even mid-pipeline, where the exit
+    /// code of the last stage would otherwise be zero.
+    #[cfg(unix)]
+    #[test]
+    fn verification_reports_signal_termination_inside_a_pipeline() {
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        let result = tools.shell("sh -c 'kill -9 $$' | cat", true);
+        assert!(
+            !result.ok,
+            "signalled pipeline stage must fail: {}",
+            result.output
+        );
+        let _ = fs::remove_dir_all(path);
+    }
+
+    /// Where pipeline status cannot be established, the check is refused. The
+    /// forbidden outcome is running it anyway and reporting `ok` from the last
+    /// stage.
+    #[test]
+    fn verification_refuses_a_pipeline_when_status_cannot_be_established() {
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        let result =
+            tools.shell_in_family("echo hi | findstr nothing", true, false, ShellFamily::Cmd);
+        assert!(!result.ok, "must fail closed: {}", result.output);
+        assert!(result.verification);
+        assert!(
+            result.output.contains("cannot fail closed"),
+            "refusal must say why: {}",
+            result.output
+        );
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn pipeline_guarding_is_only_added_where_it_is_needed() {
+        assert_eq!(
+            pipeline_guard("cargo test", ShellFamily::Posix),
+            PipelineGuard::AsWritten
+        );
+        // `||` is an or-operator and a quoted `|` is data; neither masks status.
+        assert_eq!(
+            pipeline_guard("cargo test || exit 1", ShellFamily::Posix),
+            PipelineGuard::AsWritten
+        );
+        assert_eq!(
+            pipeline_guard("grep 'a|b' file", ShellFamily::Posix),
+            PipelineGuard::AsWritten
+        );
+        match pipeline_guard("cargo test | tee log", ShellFamily::Posix) {
+            PipelineGuard::Guarded(script) => assert!(script.contains("pipefail")),
+            other => panic!("expected a guarded pipeline, got {other:?}"),
+        }
+        // Never silently fall back to last-command status.
+        for family in [ShellFamily::PowerShell, ShellFamily::Cmd] {
+            assert!(matches!(
+                pipeline_guard("a | b", family),
+                PipelineGuard::Unavailable(_)
+            ));
+        }
+    }
+
+    /// A shell that accepts `set -o pipefail` in a subshell but not in the
+    /// script body would leave the pipeline unguarded, so the guard sets it for
+    /// real after the probe rather than trusting the probe alone.
+    #[test]
+    fn the_posix_guard_sets_pipefail_outside_the_probe() {
+        let PipelineGuard::Guarded(script) = pipeline_guard("a | b", ShellFamily::Posix) else {
+            panic!("expected a guarded pipeline");
+        };
+        let lines: Vec<&str> = script.lines().collect();
+        assert!(
+            lines.iter().any(|line| line.trim() == "set -o pipefail"),
+            "{script}"
+        );
+        assert!(
+            script.contains(&format!("exit {PIPELINE_STATUS_UNAVAILABLE}")),
+            "{script}"
+        );
     }
 }

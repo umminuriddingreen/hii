@@ -45,6 +45,17 @@ impl ProofStrength {
             ProofStrength::None => "none",
         }
     }
+
+    /// Whether this strength may unlock high-trust behaviour: capability and
+    /// skill promotion, verified workflows, VERIFIED_BY relations, trusted
+    /// generated provenance, automatic external effects, and any label that says
+    /// "verified".
+    ///
+    /// `incidental` and `none` are not weaker verification — they mean nothing
+    /// was declared, so there is no claim that was satisfied.
+    pub fn qualifies_for_high_trust(self) -> bool {
+        matches!(self, ProofStrength::Declared)
+    }
 }
 
 /// What was found at a required artifact path. Recorded whether or not it
@@ -100,6 +111,12 @@ impl CompletionAssessment {
             warnings: Vec::new(),
             evidence: Vec::new(),
         }
+    }
+
+    /// The single gate for high-trust behaviour: the declared outcome was met
+    /// *and* something was actually declared for it to meet.
+    pub fn qualifies_for_high_trust(&self) -> bool {
+        self.satisfied && self.proof_strength.qualifies_for_high_trust()
     }
 }
 
@@ -396,14 +413,19 @@ mod tests {
         dir
     }
 
+    /// The clock alone is not unique enough: these tests run in parallel and
+    /// macOS reports coarser than nanosecond resolution, so two workspaces could
+    /// collide and one test would see another's files.
     fn uuid() -> String {
+        static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         format!(
-            "{:x}-{:x}",
+            "{:x}-{:x}-{:x}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos(),
-            std::process::id()
+            std::process::id(),
+            SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         )
     }
 
