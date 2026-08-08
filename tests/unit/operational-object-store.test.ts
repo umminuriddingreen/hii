@@ -43,7 +43,21 @@ describe('universal operational object store', () => {
 
     expect(snapshot.objects).toHaveLength(2);
     expect(snapshot.objects[0]).toMatchObject({ id: 'workspace:default:object:idea-1', type: 'idea', ownerActorId: 'human', deletedAt: null, properties: { legacyId: 'idea-1', payload: { title: 'Shared objects' } }, provenance: { system: 'hii-workspace-json', revision: 1 } });
-    expect(snapshot.relations).toEqual([expect.objectContaining({ id: 'workspace:default:relation:supports-1', type: 'SUPPORTS', fromObjectId: 'workspace:default:object:idea-1', toObjectId: 'workspace:default:object:decision-1', deletedAt: null })]);
+    // A user-drawn arrow is authored, not verified provenance. Its label is kept
+    // as data; it never becomes the relation type, or typing "VERIFIED_BY" on a
+    // line would forge proof.
+    expect(snapshot.relations).toEqual([
+      expect.objectContaining({
+        id: 'workspace:default:relation:supports-1',
+        type: 'AUTHORED_LINK',
+        provenanceClass: 'authored',
+        canonicalSource: 'workspace-json',
+        properties: expect.objectContaining({ authoredLabel: 'SUPPORTS' }),
+        fromObjectId: 'workspace:default:object:idea-1',
+        toObjectId: 'workspace:default:object:decision-1',
+        deletedAt: null
+      })
+    ]);
     expect(snapshot.projections).toContainEqual(expect.objectContaining({ objectId: 'workspace:default:object:idea-1', projection: 'workspace-spatial', state: { x: 10, y: 20, w: 240, h: 160, z: 1 } }));
     expect(snapshot.operations).toEqual([expect.objectContaining({ type: 'PROJECT_WORKSPACE_REVISION', lamport: 1, payload: { revision: 1, objectCount: 2, relationCount: 1 } })]);
   });
@@ -72,7 +86,7 @@ describe('universal operational object store', () => {
     const doc = workspace(0);
     const saved = await writeWorkspace(doc, initial.workspace.revision);
     expect(saved.revision).toBe(1);
-    expect(readOperationalSpace('default')).toMatchObject({ objects: [{ id: 'workspace:default:object:idea-1' }, { id: 'workspace:default:object:decision-1' }], relations: [{ type: 'SUPPORTS' }] });
+    expect(readOperationalSpace('default')).toMatchObject({ objects: [{ id: 'workspace:default:object:idea-1' }, { id: 'workspace:default:object:decision-1' }], relations: [{ type: 'AUTHORED_LINK' }] });
     expect((await loadWorkspace()).workspace.nodes).toHaveLength(2);
   });
 

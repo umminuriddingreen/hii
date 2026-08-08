@@ -25,6 +25,56 @@ Workspace node IDs and link IDs are preserved inside stable namespaced IDs and
 provenance. Removed legacy records become tombstones. Replaying a Workspace
 revision is idempotent.
 
+## Versioned mutations (2026-08-08)
+
+The graph is now writable directly, not only by projecting Workspace JSON. It
+remains one graph: the same four tables, extended additively.
+
+**Three version domains, deliberately separate.** Semantic version covers
+properties, type, ownership and semantic tombstone state. Projection version
+covers position, size, z-order, frame placement and visibility. Relation version
+covers relation metadata, provenance state and relation tombstone state. A move
+must not invalidate the semantic context an approved run was reviewed against,
+and a semantic edit must not look like the object was dragged. One number could
+not express either.
+
+**Optimistic concurrency.** Every patch and tombstone states the version it was
+decided against. A caller holding a stale version is refused rather than having
+its decision applied to state it never saw.
+
+**Idempotency.** A mutation may carry a replay key. The key is stored with a
+deterministic hash of the operation's content, so a retry returns the original
+result and a *different* write reusing a key is refused rather than silently
+dropped.
+
+**Canonical ownership.** Objects, relations and projections carry
+`canonical_source`. Records projected from Workspace JSON are `workspace-json`
+and cannot be mutated graph-first — the next autosave would overwrite the change
+without anyone noticing, so the write is refused with that reason. Records
+created through the mutation API are `graph` and are not tombstoned for being
+absent from the JSON.
+
+**Authored links are not provenance.** Every workspace link projects as
+`AUTHORED_LINK` with its label preserved as a property. Previously the label
+became the relation type, which meant typing `VERIFIED_BY` on an arrow forged
+proof. `VERIFIED_BY` now requires a satisfied completion assessment with declared
+proof, checked through the same policy every other high-trust surface uses.
+
+**Atomicity, and its boundary.** Validation, operation recording, mutation and
+resulting-version recording happen in one SQLite transaction: an operation record
+exists only if it applied. HII does *not* claim atomicity across Workspace JSON
+and SQLite — they are two files with no shared transaction. Workspace save stays
+canonical; the graph follows idempotently and is reconciled by replaying a
+revision.
+
+Refusals are structured codes, not strings: `missing-target`, `stale-version`,
+`tombstoned-target`, `idempotency-conflict`, `invalid-operation`,
+`invalid-relation`, `dangling-relation`, `canonical-owner-mismatch`,
+`authority-mismatch`.
+
+Tombstones hide records; they never remove rows or the operations that produced
+them.
+
 ## Migration boundary
 
 Workspace JSON remains the authority and rollback/export source during this
