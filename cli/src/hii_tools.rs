@@ -24,6 +24,8 @@ pub const HII_TOOLS: &[&str] = &[
     "skill_search",
     "bridge_send",
     "bridge_read",
+    "object_list",
+    "object_read",
 ];
 
 pub fn is_hii_tool(tool: &str) -> bool {
@@ -60,6 +62,29 @@ pub fn execute(repo: &Path, tool: &str, query: Option<&str>) -> ToolResult {
             }
         }
         "bridge_read" => hii(repo, &["bridge", "read"]),
+        // Object reads only. Object *writes* are not exposed as a free-form
+        // agent tool: a mutation needs an approved scope, a base version and an
+        // idempotency key, none of which fit a single free-text argument, and
+        // guessing them is exactly what the governed interface exists to stop.
+        // `query` carries the approved scope JSON the run was granted.
+        "object_list" => {
+            if arg.is_empty() {
+                Err("object_list needs the approved object scope as JSON in `query`".to_string())
+            } else {
+                hii(repo, &["object", "list", "--json", "--scope", arg])
+            }
+        }
+        "object_read" => {
+            let (scope, id) = arg.split_once("::").unwrap_or(("", ""));
+            if scope.trim().is_empty() || id.trim().is_empty() {
+                Err("object_read needs `<scope json>::<object id>` in `query`".to_string())
+            } else {
+                hii(
+                    repo,
+                    &["object", "read", "--json", "--scope", scope, "--object", id],
+                )
+            }
+        }
         other => Err(format!("unknown HII tool: {other}")),
     };
     match result {

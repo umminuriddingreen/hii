@@ -2738,6 +2738,17 @@ switch (cmd) {
     npmRun(`hii:registry:${sub}`, rest.slice(1));
     break;
   }
+  case "object":
+  case "objects": {
+    // The governed object interface. Agents reach objects only through here:
+    // never Workspace JSON, never the graph mutation API directly.
+    const { cmdObject } = await import("./hii-object.mjs");
+    await cmdObject(rest).catch((error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    });
+    break;
+  }
   case "bridge": cmdBridge(rest); break;
   case "mcp": {
     const r = spawnSync(codexBin(), ["mcp", ...(rest.length ? rest : ["list"])], { stdio: "inherit" });
