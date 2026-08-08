@@ -79,35 +79,29 @@ export async function discoverWorkspaceRunModels(): Promise<WorkspaceRunModels> 
     };
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2500);
-  try {
-    const base = String(process.env.HII_OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
-    const response = await fetch(`${base}/api/tags`, { signal: controller.signal });
-    if (!response.ok) throw new Error(`Ollama returned ${response.status}.`);
-    const payload = await response.json() as { models?: unknown[] };
-    const models = normalizeModelNames(payload.models);
-    const defaultModel = preferredModels.find((model) => models.includes(model)) || models[0] || null;
-    return {
-      models,
-      defaultModel,
-      available: models.length > 0,
-      source: 'ollama',
-      message: models.length
-        ? `${models.length} installed local model${models.length === 1 ? '' : 's'} available.`
-        : 'Ollama is reachable, but no local models are installed.'
-    };
-  } catch {
-    return {
-      models: [],
-      defaultModel: null,
-      available: false,
-      source: 'unavailable',
-      message: 'No local model runtime is available. Start Ollama or install a model before approval.'
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
+  // One catalog, shared with Voice, Create and the CLI-facing APIs. Asking
+  // Ollama directly here is what made each surface know a different subset.
+  const { readModelCatalog, routeModel } = await import('./model-catalog.ts');
+  const catalog = await readModelCatalog();
+  // A bounded workspace run sends reviewed local context, so external providers
+  // are not eligible without an explicit widening.
+  const routed = routeModel(catalog, { privacy: 'local', outputModalities: ['text'] });
+  const models = normalizeModelNames(
+    routed.eligible.filter((model) => model.provider === 'ollama' || model.provider === 'lm-studio').map((model) => model.id)
+  );
+  const defaultModel = preferredModels.find((model) => models.includes(model)) || models[0] || null;
+  const ollama = catalog.providers.find((provider) => provider.provider === 'ollama');
+  return {
+    models,
+    defaultModel,
+    available: models.length > 0,
+    source: models.length ? 'ollama' : 'unavailable',
+    message: models.length
+      ? `${models.length} installed local model${models.length === 1 ? '' : 's'} available.`
+      : ollama?.reachable
+        ? 'Ollama is reachable, but no local models are installed.'
+        : 'No local model runtime is available. Start Ollama or install a model before approval.'
+  };
 }
 
 async function initializeIntentCursor(intentsPath: string, cursorPath: string) {
