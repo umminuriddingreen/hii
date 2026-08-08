@@ -7,6 +7,7 @@
     voiceProposals,
     type VoiceApiRuntimeState,
   } from '$lib/voice/client';
+  import { emptyNotchInputs, notchPresentation } from '@/lib/notch/ambient-state';
 
   type VoiceApiProposal = {
     id: string;
@@ -47,6 +48,46 @@
   let recognition: any = null;
   let finalTranscript = '';
   let input: HTMLInputElement;
+
+  // --- ambient state --------------------------------------------------------
+  // The Notch answers one question: what needs my attention right now? It used
+  // to decide that from a handful of independent booleans, which multiply into
+  // combinations nobody enumerated and which could contradict each other. The
+  // state model resolves them to exactly one answer with one primary action.
+  // Native window mechanics are untouched: positioning, always-on-top,
+  // all-spaces, expansion and the global shortcut stay in the Tauri layer.
+  let liveSelection: { workspaceId: string; selectedNodeIds: string[] } | null = null;
+  let lastCompletedRun: { id: string; summary: string; satisfied: boolean } | null = null;
+  $: ambient = notchPresentation({
+    ...emptyNotchInputs(),
+    capturing: expanded && !isListening && !busy,
+    listening: isListening,
+    transcribing: speechBusy,
+    interpreting: busy,
+    error,
+    unseenProposal: null,
+    pendingProposals: proposals
+      .filter((proposal) => proposal.status === 'pending')
+      .map((proposal) => ({ id: proposal.id, summary: proposal.purpose || 'An action is waiting.' })),
+    activeRun: summary?.active
+      ? { id: latestQueuedRunId || 'active', summary: summary.active.summary || 'Working…', status: summary.active.status || 'running' }
+      : null,
+    lastCompletedRun,
+    selection: liveSelection
+  });
+  // Coordinates only, from the ephemeral cross-window channel. The Notch shows a
+  // count; the ids are resolved server-side against the persisted workspace.
+  async function refreshSelection() {
+    try {
+      const response = await fetch('/api/workspace/selection');
+      const result = await response.json();
+      liveSelection = response.ok && result.selection
+        ? { workspaceId: result.selection.workspaceId, selectedNodeIds: result.selection.selectedNodeIds }
+        : null;
+    } catch {
+      liveSelection = null;
+    }
+  }
 
   async function emitNotchEvent({ summaryText, status = 'ready' }: { summaryText: string; status?: string }) {
     await fetch('/api/ecosystem', {
@@ -283,7 +324,13 @@
     let timer: ReturnType<typeof setInterval> | null = null;
     const stops: Array<() => void> = [];
     void refresh();
-    timer = setInterval(() => void refresh(), 3000);
+    void refreshSelection();
+    timer = setInterval(() => {
+      void refresh();
+      // The live selection is what lets a spoken intent say "these" and mean the
+      // objects on the canvas in the other window.
+      void refreshSelection();
+    }, 3000);
 
     (async () => {
       try {
@@ -340,8 +387,8 @@
     <button class="collapsed" on:click={() => void setExpanded(true)} aria-label="Open HII Notch">
       <i class:active={Boolean(summary?.active)}></i>
       <strong>hii</strong>
-      <span>{summary?.active?.summary || summary?.recent?.[0]?.summary || 'Notch'}</span>
-      <b>{summary?.active?.status || 'ready'}</b>
+      <span>{ambient.message}</span>
+      <b>{ambient.state.toLowerCase().replace(/_/g, ' ')}</b>
     </button>
   {:else}
     <section class="expanded-panel">
@@ -349,10 +396,14 @@
         <div>
           <i class:active={Boolean(summary?.active)}></i>
           <strong>Notch</strong>
-          <span>{summary?.active?.status || 'local'}</span>
+          <span>{ambient.state.toLowerCase().replace(/_/g, ' ')}</span>
         </div>
         <button on:click={() => void setExpanded(false)} aria-label="Collapse Notch">−</button>
       </header>
+
+      <!-- One sentence and one action. Everything else lives below, so the
+           surface never asks the human to decide what it should have decided. -->
+      <p class="ambient-line" role="status" aria-live="polite">{ambient.message}</p>
 
       <form on:submit|preventDefault={runText}>
         <input
@@ -494,6 +545,16 @@
   .collapsed strong { font-size: 13px; letter-spacing: -0.04em; }
   .collapsed span { overflow: hidden; color: #b4b7bc; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
   .collapsed b { color: #74787e; font: 8px ui-monospace, monospace; text-transform: uppercase; }
+
+  /* The one sentence. Sized to be read at a glance from the edge of the screen. */
+  .ambient-line {
+    margin: 0;
+    padding: 10px 16px 0;
+    color: #e8e9eb;
+    font-size: 13px;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+  }
 
   .expanded-panel {
     height: 100%;
