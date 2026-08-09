@@ -32,7 +32,7 @@ mod tui;
 use agent::{RunOptions, RunOutput};
 use budget::{Budgets, DEFAULT_WALL_CLOCK_SECS};
 use clap::{Parser, Subcommand, ValueEnum};
-use config::{AppPaths, DEFAULT_MAX_STEPS, DEFAULT_MODEL, DEFAULT_REVIEW_MODEL};
+use config::{AppPaths, DEFAULT_MAX_STEPS};
 use conversation::Conversation;
 use ollama::Ollama;
 use receipt::{find_receipt, Receipt};
@@ -124,8 +124,10 @@ enum Commands {
             help = "Ask the stronger local model to review the final receipt"
         )]
         review: bool,
-        #[arg(long, default_value = DEFAULT_REVIEW_MODEL)]
-        review_model: String,
+        /// Left unset so the review model resolves per provider at run time; a
+        /// fixed clap default would pin an Ollama tag onto every runtime.
+        #[arg(long)]
+        review_model: Option<String>,
         #[arg(
             long,
             help = "Inspect and reason without writes or non-verification shell actions"
@@ -427,7 +429,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     workspace,
                     model: cli.model,
                     review,
-                    review_model: Some(review_model),
+                    review_model,
                     max_steps: cli.max_steps,
                     dry_run,
                     verbose,
@@ -471,11 +473,13 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             })
         }
         Some(Commands::Models) => {
-            let ollama = Ollama::discover();
+            let ollama = Ollama::discover().ensure_reachable()?;
+            let default_model = ollama.provider().default_model();
+            let review_model = ollama.provider().default_review_model();
             for model in ollama.models()? {
-                let role = if model == DEFAULT_MODEL {
+                let role = if model == default_model {
                     "default"
-                } else if model == DEFAULT_REVIEW_MODEL {
+                } else if model == review_model {
                     "review"
                 } else {
                     "available"
@@ -1052,8 +1056,9 @@ fn status(paths: &AppPaths, cwd: Option<PathBuf>, json: bool) -> Result<(), Stri
                 "changes": dirty,
                 "ollama": !models.is_empty(),
                 "models": models,
-                "defaultModel": DEFAULT_MODEL,
-                "reviewModel": DEFAULT_REVIEW_MODEL,
+                "provider": ollama.provider_label(),
+                "defaultModel": ollama.provider().default_model(),
+                "reviewModel": ollama.provider().default_review_model(),
                 "latestRun": latest.trim(),
                 "runtime": paths.runtime,
                 "elapsedMs": started.elapsed().as_millis()
@@ -1075,7 +1080,7 @@ fn status(paths: &AppPaths, cwd: Option<PathBuf>, json: bool) -> Result<(), Stri
         );
         println!(
             "agent      {}  ·  {}",
-            DEFAULT_MODEL,
+            ollama.provider().default_model(),
             if DEFAULT_MAX_STEPS == 0 {
                 "unlimited"
             } else {
@@ -1158,25 +1163,27 @@ fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
     let ollama = Ollama::discover();
     match ollama.models() {
         Ok(models) => {
-            let default = models.iter().any(|model| model == DEFAULT_MODEL);
-            let review = models.iter().any(|model| model == DEFAULT_REVIEW_MODEL);
+            let default_model = ollama.provider().default_model();
+            let review_model = ollama.provider().default_review_model();
+            let default = models.iter().any(|model| model == default_model);
+            let review = models.iter().any(|model| model == review_model);
             ok &= default;
             println!(
                 "{}  {:<14} {}",
                 if default { "ok" } else { "!!" },
-                "Ollama agent",
-                DEFAULT_MODEL
+                format!("{} agent", ollama.provider_label()),
+                default_model
             );
             println!(
                 "{}  {:<14} {}",
                 if review { "ok" } else { "--" },
-                "Ollama review",
-                DEFAULT_REVIEW_MODEL
+                format!("{} review", ollama.provider_label()),
+                review_model
             );
         }
         Err(error) => {
             ok = false;
-            println!("!!  {:<14} {error}", "Ollama");
+            println!("!!  {:<14} {error}", ollama.provider_label());
         }
     }
     println!("\n{}", if ok { "ready" } else { "not ready" });

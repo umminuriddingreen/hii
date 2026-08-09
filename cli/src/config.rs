@@ -2,6 +2,11 @@ use std::{env, path::PathBuf};
 
 pub const DEFAULT_MODEL: &str = "qwen3.6:35b-mlx";
 pub const DEFAULT_REVIEW_MODEL: &str = "qwen3.6:35b-mlx";
+/// HII Native names models by HuggingFace repo id, so an Ollama tag can never
+/// match there. Each provider therefore carries its own default rather than
+/// sharing one string that is only valid on one runtime.
+pub const DEFAULT_NATIVE_MODEL: &str = "Qwen/Qwen3.6-35B-A3B";
+pub const DEFAULT_NATIVE_REVIEW_MODEL: &str = "Qwen/Qwen3.6-35B-A3B";
 /// Default tool-step ceiling. `--max-steps 0` still means unlimited, but leaving
 /// it unlimited by default was unsafe unattended: nothing except the operator
 /// stopped a model that never converged. The wall-clock budget bounds a run in
@@ -33,6 +38,22 @@ impl ModelProvider {
             _ if url.contains(":11435") => ModelProvider::Native,
             _ if url.contains(":1234") => ModelProvider::LmStudio,
             _ => ModelProvider::Ollama,
+        }
+    }
+
+    /// The work model to use on this runtime when the operator names none.
+    pub fn default_model(self) -> &'static str {
+        match self {
+            ModelProvider::Native => DEFAULT_NATIVE_MODEL,
+            ModelProvider::Ollama | ModelProvider::LmStudio => DEFAULT_MODEL,
+        }
+    }
+
+    /// The second-pass review model for this runtime.
+    pub fn default_review_model(self) -> &'static str {
+        match self {
+            ModelProvider::Native => DEFAULT_NATIVE_REVIEW_MODEL,
+            ModelProvider::Ollama | ModelProvider::LmStudio => DEFAULT_REVIEW_MODEL,
         }
     }
 }

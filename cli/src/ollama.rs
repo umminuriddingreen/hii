@@ -196,6 +196,46 @@ impl Ollama {
         &self.base_url
     }
 
+    pub fn provider(&self) -> ModelProvider {
+        self.provider
+    }
+
+    /// Bring a local provider up when none is listening yet, preferring HII's
+    /// own native runner so inference stays inside a runtime HII owns. The
+    /// native runner is only started when its weights were already acquired —
+    /// model download stays an explicit operator action — otherwise we fall
+    /// back to starting Ollama on loopback. An explicitly pinned model URL is
+    /// never second-guessed.
+    pub fn ensure_reachable(self) -> Result<Self, String> {
+        if endpoint_ready(&self.base_url) {
+            return Ok(self);
+        }
+        if pinned_model_url() {
+            return Err(self.unreachable_error());
+        }
+        if let Some(native) = start_native_runner() {
+            return Ok(native);
+        }
+        if self.provider == ModelProvider::Ollama
+            && is_loopback(&self.base_url)
+            && spawn_detached("ollama", &["serve"])
+            && wait_ready(&self.base_url)
+        {
+            return Ok(self);
+        }
+        Err(self.unreachable_error())
+    }
+
+    fn unreachable_error(&self) -> String {
+        format!(
+            "cannot reach {} at {}. Bring up HII's own runtime with \
+`hii-native-runner serve` (acquire weights first: `hii runner model start --model <id>`), \
+start Ollama with `ollama serve`, or pin a provider with HII_MODEL_URL=<url>.",
+            self.provider_label(),
+            self.base_url
+        )
+    }
+
     pub fn models(&self) -> Result<Vec<String>, String> {
         match self.provider {
             ModelProvider::Ollama => {
@@ -570,6 +610,71 @@ impl Ollama {
         log_llm_request(model, self.provider, &result.usage);
         let _ = sender.send(ChatStreamEvent::Done(Ok(result)));
     }
+}
+
+fn pinned_model_url() -> bool {
+    std::env::var_os("HII_MODEL_URL").is_some() || std::env::var_os("HII_OLLAMA_URL").is_some()
+}
+
+fn spawn_detached(program: &str, args: &[&str]) -> bool {
+    std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .is_ok()
+}
+
+fn wait_ready(base_url: &str) -> bool {
+    for _ in 0..40 {
+        if endpoint_ready(base_url) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    false
+}
+
+/// Start the HII native runner when a previous run already left a runtime
+/// manifest behind, meaning its weights are on disk and serving costs nothing
+/// but process startup.
+fn start_native_runner() -> Option<Ollama> {
+    let native_url = "http://127.0.0.1:11435";
+    let paths = crate::config::AppPaths::discover().ok()?;
+    let model_home = paths.runtime.join("models");
+    let manifest: Value =
+        serde_json::from_slice(&std::fs::read(model_home.join("runtime-manifest.json")).ok()?)
+            .ok()?;
+    let model = manifest.get("model")?.as_str()?.to_string();
+    let binary = paths.repo.join("target/release/hii-native-runner");
+    if !binary.is_file() {
+        return None;
+    }
+    if !spawn_detached(
+        binary.to_str()?,
+        &[
+            "serve",
+            "--model",
+            &model,
+            "--model-home",
+            model_home.to_str()?,
+        ],
+    ) {
+        return None;
+    }
+    wait_ready(native_url).then(|| Ollama::new(native_url.to_string()))
+}
+
+fn is_loopback(base_url: &str) -> bool {
+    let host = base_url
+        .rsplit("://")
+        .next()
+        .unwrap_or(base_url)
+        .split('/')
+        .next()
+        .unwrap_or(base_url);
+    host.starts_with("127.0.0.1") || host.starts_with("localhost") || host.starts_with("[::1]")
 }
 
 fn endpoint_ready(base_url: &str) -> bool {

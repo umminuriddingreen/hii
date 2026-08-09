@@ -240,8 +240,8 @@ impl Conversation {
     ) -> Result<Self, String> {
         crate::tui::load_theme(&paths.runtime);
         let tools = Toolbelt::new(workspace)?;
-        let ollama = Ollama::discover();
-        let model = choose_model(requested_model.as_deref(), &ollama.models()?)?;
+        let ollama = Ollama::discover().ensure_reachable()?;
+        let model = choose_model(requested_model.as_deref(), ollama.provider(), &ollama.models()?)?;
         let store = ConversationStore::create(&paths.runtime)?;
         let hooks = HookRunner::load(
             &paths.runtime,
@@ -1822,7 +1822,7 @@ impl Conversation {
                 .join("\n");
             return Ok(rows);
         };
-        let selected = choose_model(Some(requested), &models)?;
+        let selected = choose_model(Some(requested), self.ollama.provider(), &models)?;
         let previous = std::mem::replace(&mut self.model, selected.clone());
         self.store.event(
             "conversation.model_changed",
@@ -1838,7 +1838,7 @@ impl Conversation {
         }
         let next = Ollama::for_mode(mode);
         let models = next.models()?;
-        let model = choose_model(None, &models)?;
+        let model = choose_model(None, next.provider(), &models)?;
         self.ollama = next;
         self.model = model;
         self.store.event(

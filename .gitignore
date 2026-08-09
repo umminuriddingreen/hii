@@ -27,3 +27,6 @@ life/
 enaefe-next*.png
 life/
 .hermes/
+
+# Playwright CLI debug captures (local diagnostic output)
+.playwright-cli/

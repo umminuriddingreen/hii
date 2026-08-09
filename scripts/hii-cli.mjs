@@ -990,7 +990,8 @@ function cmdStatus() {
 function agentCommandCatalog() {
   return [
     { command: "hii health --text", purpose: "Human-readable repo, env-presence, codex, and bridge snapshot." },
-    { command: "hii home --json", purpose: "Token-efficient agent landing snapshot; best first command for agents." },
+    { command: "hii home --brief", purpose: "Smallest possible agent landing snapshot; cheapest first command for agents." },
+    { command: "hii home --json", purpose: "Token-efficient agent landing snapshot; full detail when brief is not enough." },
     { command: "hii agents status", purpose: "Show which installed agent instruction adapters are configured." },
     { command: "hii agents guide", purpose: "Print the compact HII-first operating contract shared by agents." },
     { command: "hii context --json", purpose: "Full machine-readable repo, runtime, and capability context." },
@@ -1154,8 +1155,30 @@ function agentHomePayload() {
   };
 }
 
+function agentHomeBriefPayload(payload = agentHomePayload()) {
+  return {
+    kind: "hii.agent.home.brief",
+    repo: payload.identity.repo,
+    branch: payload.workspace.branch,
+    clean: payload.workspace.clean,
+    changes: payload.workspace.changes.total,
+    openTasks: payload.work.board.open,
+    activeJobs: payload.work.activeJobs.length,
+    capabilities: payload.capabilities.length,
+    nextActions: payload.nextActions.map((action) => ({
+      score: action.score,
+      track: action.track,
+      action: action.action
+    }))
+  };
+}
+
 function cmdHome(args) {
   const payload = agentHomePayload();
+  if (args.includes("--brief")) {
+    console.log(JSON.stringify(agentHomeBriefPayload(payload)));
+    return;
+  }
   if (args.includes("--json")) {
     console.log(JSON.stringify(payload, null, 2));
     return;
@@ -2191,6 +2214,17 @@ function cmdTask(args) {
 
 function cmdWork(args = []) {
   const snapshot = cliSnapshot();
+  const activeLanes = ["next", "doing", "blocked"];
+  if (args.includes("--brief")) {
+    console.log(JSON.stringify({
+      kind: "hii.agent.work.brief",
+      tasks: snapshot.tasks
+        .filter((task) => activeLanes.includes(task.lane))
+        .map((task) => ({ id: shortId(task.id), lane: task.lane, priority: task.priority, title: task.title })),
+      jobs: snapshot.running.map((job) => ({ id: shortId(job.id), capabilityId: job.capabilityId, status: job.status }))
+    }));
+    return;
+  }
   if (args.includes("--json")) {
     console.log(JSON.stringify({ activeTasks: snapshot.tasks.filter((task) => ["next", "doing", "blocked"].includes(task.lane)), activeJobs: snapshot.running }, null, 2));
     return;
@@ -2291,10 +2325,10 @@ function cmdHelp(topic) {
   console.log(`\n${GLYPH.mark}  HII COMMAND MAP\n`);
   console.log("  hii                         open the interactive HII terminal");
   console.log("  hii chat                    explicitly open the interactive terminal");
-  console.log("  hii home [--json]           compact live coordinate for agents and humans");
+  console.log("  hii home [--json|--brief]   compact live coordinate for agents and humans");
   console.log("  hii now [--json]            control-plane snapshot; add --full for receipts");
   console.log("  hii task <intent>           capture a bounded task in the local board");
-  console.log("  hii work [--json]           active tasks and governed agent work");
+  console.log("  hii work [--json|--brief]   active tasks and governed agent work");
   console.log("  hii proof [receipt-id]      inspect logs, artifacts, and receipts");
   console.log("  hii agents [status|guide]   show the shared instruction contract");
   console.log("  hii board | jobs | context  detailed state surfaces");

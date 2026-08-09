@@ -161,10 +161,16 @@ goal
 → write receipt
 ```
 
-`qwen3.6:35b-mlx` is the default work model. `--review` sends the final result
-and proof record to `qwen3.6:35b-mlx` for a stricter second pass. Ollama remains
-a replaceable local model provider; workspace policy, tools, events, and proof
-belong to HII/AII.
+The default work and review model is resolved per provider, because model names
+are not portable between runtimes: Ollama and LM Studio default to
+`qwen3.6:35b-mlx`, HII Native to `Qwen/Qwen3.6-35B-A3B`. `--review` sends the
+final result and proof record to that provider's review model for a stricter
+second pass; `--review-model` overrides it. Ollama remains a replaceable local
+model provider; workspace policy, tools, events, and proof belong to HII/AII.
+
+When the operator names no model, a default that is not installed is an error
+listing what is available — HII never silently substitutes a different model,
+because the receipt would then misreport what produced the run.
 
 HII can also talk directly to its native Rust/Metal runner through the same
 OpenAI-compatible boundary. The runner lives at

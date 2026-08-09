@@ -1,6 +1,6 @@
 use crate::{
     budget::{BudgetKind, Budgets, Cancel, CancelReason, Deadline},
-    config::{AppPaths, DEFAULT_MODEL, DEFAULT_REVIEW_MODEL},
+    config::{AppPaths, ModelProvider},
     contract::{deletion_shell, sensitive_shell, Authority, Contract, Decision},
     hooks::{HookBatch, HookEvent, HookRunner},
     mcp_client::McpClients,
@@ -219,12 +219,13 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         })
         .transpose()?;
     let git_before = tools.git_snapshot();
-    let ollama = Ollama::discover();
+    let ollama = Ollama::discover().ensure_reachable()?;
     let models = ollama.models()?;
-    let model = choose_model(options.model.as_deref(), &models)?;
+    let model = choose_model(options.model.as_deref(), ollama.provider(), &models)?;
     let review_model = if options.review {
         Some(choose_review_model(
             options.review_model.as_deref(),
+            ollama.provider(),
             &models,
         )?)
     } else {
@@ -1317,11 +1318,13 @@ fn persist_hook_batch(journal: &mut Journal, batch: &HookBatch) -> Result<(), St
 
 pub(crate) fn choose_model(
     requested: Option<&str>,
+    provider: ModelProvider,
     installed: &[String],
 ) -> Result<String, String> {
     choose_model_with_env(
         requested,
         std::env::var("HII_MODEL").ok().as_deref(),
+        provider,
         installed,
     )
 }
@@ -1329,6 +1332,7 @@ pub(crate) fn choose_model(
 fn choose_model_with_env(
     requested: Option<&str>,
     env_model: Option<&str>,
+    provider: ModelProvider,
     installed: &[String],
 ) -> Result<String, String> {
     let explicit = requested
@@ -1336,23 +1340,35 @@ fn choose_model_with_env(
         .or_else(|| env_model.map(str::to_string));
     let requested = explicit
         .clone()
-        .unwrap_or_else(|| DEFAULT_MODEL.to_string());
+        .unwrap_or_else(|| provider.default_model().to_string());
     if installed.iter().any(|model| model == &requested) {
-        Ok(requested)
-    } else if explicit.is_none() {
-        installed
-            .first()
-            .cloned()
-            .ok_or_else(|| "no local models are available; run `hii runner doctor`".into())
-    } else {
-        Err(format!(
-            "model '{requested}' is not installed; run `hii models`"
-        ))
+        return Ok(requested);
     }
+    if installed.is_empty() {
+        return Err("no local models are available; run `hii runner doctor`".into());
+    }
+    if explicit.is_some() {
+        return Err(format!(
+            "model '{requested}' is not installed; run `hii models`"
+        ));
+    }
+    // A missing default is never silently swapped for whatever the provider
+    // happens to list first: the substitute model has different capabilities,
+    // and a run that quietly changed models is a run whose proof record lies
+    // about what produced it. Say what is missing and let the operator choose.
+    Err(format!(
+        "default model '{requested}' is not installed on this provider (available: {}). \
+Install it, or choose one explicitly with `--model <name>` or HII_MODEL=<name>.",
+        installed.join(", ")
+    ))
 }
 
-fn choose_review_model(requested: Option<&str>, installed: &[String]) -> Result<String, String> {
-    let requested = requested.unwrap_or(DEFAULT_REVIEW_MODEL);
+fn choose_review_model(
+    requested: Option<&str>,
+    provider: ModelProvider,
+    installed: &[String],
+) -> Result<String, String> {
+    let requested = requested.unwrap_or_else(|| provider.default_review_model());
     if installed.iter().any(|model| model == requested) {
         Ok(requested.to_string())
     } else {
@@ -2440,11 +2456,52 @@ mod tests {
     }
 }
 #[test]
-fn automatic_model_selection_falls_back_but_explicit_selection_stays_strict() {
-    let native = vec!["Qwen/Qwen3-4B".to_string()];
+fn model_selection_is_strict_and_defaults_per_provider() {
+    use crate::config::{DEFAULT_MODEL, DEFAULT_NATIVE_MODEL};
+
+    // An Ollama tag can never appear in a native catalog, so the native
+    // default must be resolved from the provider, not from one shared string.
+    let native = vec![DEFAULT_NATIVE_MODEL.to_string(), "Qwen/Qwen3-4B".to_string()];
     assert_eq!(
-        choose_model_with_env(None, None, &native).unwrap(),
+        choose_model_with_env(None, None, ModelProvider::Native, &native).unwrap(),
+        DEFAULT_NATIVE_MODEL
+    );
+    let ollama = vec![DEFAULT_MODEL.to_string(), "qwen3:14b".to_string()];
+    assert_eq!(
+        choose_model_with_env(None, None, ModelProvider::Ollama, &ollama).unwrap(),
+        DEFAULT_MODEL
+    );
+
+    // A missing default fails loudly rather than silently running whatever the
+    // provider happens to list first.
+    let partial = vec!["Qwen/Qwen3-4B".to_string()];
+    let error = choose_model_with_env(None, None, ModelProvider::Native, &partial)
+        .expect_err("native default is not installed");
+    assert!(error.contains(DEFAULT_NATIVE_MODEL), "{error}");
+    assert!(error.contains("Qwen/Qwen3-4B"), "{error}");
+
+    // Explicit selection stays strict, and an explicit name still wins.
+    assert!(choose_model_with_env(Some("missing"), None, ModelProvider::Native, &partial).is_err());
+    assert_eq!(
+        choose_model_with_env(None, Some("Qwen/Qwen3-4B"), ModelProvider::Native, &partial)
+            .unwrap(),
         "Qwen/Qwen3-4B"
     );
-    assert!(choose_model_with_env(Some("missing"), None, &native).is_err());
+}
+
+#[test]
+fn review_model_defaults_per_provider() {
+    use crate::config::{DEFAULT_NATIVE_REVIEW_MODEL, DEFAULT_REVIEW_MODEL};
+
+    let native = vec![DEFAULT_NATIVE_REVIEW_MODEL.to_string()];
+    assert_eq!(
+        choose_review_model(None, ModelProvider::Native, &native).unwrap(),
+        DEFAULT_NATIVE_REVIEW_MODEL
+    );
+    let ollama = vec![DEFAULT_REVIEW_MODEL.to_string()];
+    assert_eq!(
+        choose_review_model(None, ModelProvider::Ollama, &ollama).unwrap(),
+        DEFAULT_REVIEW_MODEL
+    );
+    assert!(choose_review_model(None, ModelProvider::Native, &ollama).is_err());
 }
