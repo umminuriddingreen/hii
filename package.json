@@ -38,6 +38,7 @@
     "hii:knowledge:check": "node --experimental-strip-types scripts/hii-knowledge-smoke.mjs",
     "hii:knowledge-runs:check": "node --experimental-strip-types scripts/hii-knowledge-run-smoke.mjs",
     "hii:knowledge:import": "node --experimental-strip-types scripts/hii-knowledge-import.mjs",
+    "hii:memory:check": "vitest run tests/unit/hii-memory-workspace.test.ts tests/unit/hii-memory-api.test.ts",
     "hii:contextdock:check": "node --experimental-strip-types scripts/hii-contextdock-smoke.mjs",
     "hii:activation:check": "node --experimental-strip-types scripts/hii-activation-smoke.mjs",
     "hii:windows:check": "node --experimental-strip-types scripts/hii-window-state-smoke.mjs",

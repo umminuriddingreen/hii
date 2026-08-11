@@ -12,6 +12,7 @@ import * as ecosystem from '@/app/api/ecosystem/route';
 import * as filesOpen from '@/app/api/files/open/route';
 import * as knowledge from '@/app/api/knowledge/route';
 import * as links from '@/app/api/links/route';
+import * as memory from '@/app/api/memory/route';
 import * as ogStatus from '@/app/api/og/status/route';
 import * as runnerHeartbeat from '@/app/api/runners/heartbeat/route';
 import * as runnerComplete from '@/app/api/runners/jobs/[id]/complete/route';
@@ -47,6 +48,7 @@ const routes: Array<{ pattern: RegExp; module: LegacyModule; keys?: string[] }> 
   { pattern: /^files\/open$/, module: filesOpen },
   { pattern: /^knowledge$/, module: knowledge },
   { pattern: /^links$/, module: links },
+  { pattern: /^memory$/, module: memory },
   { pattern: /^og\/status$/, module: ogStatus },
   { pattern: /^runners\/heartbeat$/, module: runnerHeartbeat },
   { pattern: /^runners\/jobs\/([^/]+)\/complete$/, module: runnerComplete, keys: ['id'] },
