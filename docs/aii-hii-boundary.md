@@ -1,6 +1,19 @@
-# AII / HII Boundary Contract
+# HII Runtime Boundary Contract
 
-*Established 2026-07-10. This is the source of truth for what belongs in which layer.*
+*Established 2026-07-10. Superseded in product direction by ADR 004 on
+2026-08-11: HII is CLI-first and AII is no longer a separate product or planning
+track. This file remains as migration history for the old split.*
+
+## Current rule
+
+HII owns the whole product and runtime direction. The Rust CLI is the primary
+surface and source of authority for now.
+
+Existing `aii/` code is internal HII runtime migration debt. Do not introduce
+new AII-branded surfaces, daemons, apps, registries, or docs. Preserve the
+execution boundary as HII runtime contracts: declared capabilities, explicit
+approval, bounded work, verification, receipts, and durable proof under
+`~/.hii`.
 
 ## The two layers
 

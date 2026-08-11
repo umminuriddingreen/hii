@@ -1,21 +1,26 @@
-# HII / AII Master Context
+# HII Master Context
 
 **Founder:** Ummi Nuriddin Green  
 **Status:** Founder-level product and architecture context  
 **Version:** 1.0  
 **Date:** 2026-07-14
 
-This document gives implementation agents one coherent account of what HII and
-AII mean, why they exist, what is being shipped now, what belongs later, and
-how work must be performed. It prevents product drift, architecture drift,
-scope explosion, and truth fragmentation.
+This document gives implementation agents one coherent account of what HII
+means, what is being shipped now, what belongs later, and how work must be
+performed. It prevents product drift, architecture drift, scope explosion, and
+truth fragmentation.
+
+**Current override, 2026-08-11:** ADR 004 makes HII CLI-first. AII is no
+longer a separate product, brand, app, repo, or planning track. Existing `aii/`
+paths are internal HII runtime migration debt until moved behind CLI-owned
+modules and commands.
 
 ## Authority and use
 
 Agents must distinguish four levels of truth:
 
 1. **Founder thesis** explains why HII exists and protects its direction.
-2. **System architecture** defines the HII/AII boundary and operating loop.
+2. **System architecture** defines the HII CLI/runtime boundary and operating loop.
 3. **Current product decision** defines immediate scope: HII Context Dock 0.1.
 4. **Future ecosystem** preserves Workstation, Foundry, Interform, commerce,
    fabrication, and personal intelligence as roadmap context.
@@ -40,9 +45,9 @@ human-facing interface and context system that turns intent into verified agent
 work across information, tools, files, machines, memory, and reusable
 capabilities.
 
-**AII means Agent Information Interface.** AII is the agent-facing coordination,
-policy, and execution layer beneath HII. It publishes capabilities, manages
-agent lifecycles, governs actions, coordinates execution, and records proof.
+HII's agent-facing coordination, policy, execution, capability publication,
+agent lifecycle management, action governance, and proof recording are internal
+HII runtime responsibilities. They should be operated through the CLI first.
 
 The canonical loop is:
 
@@ -74,15 +79,15 @@ fabrication, education, memory, business systems, and civic institutions are
 different materials for designing environments in which intelligence and
 coordinated action can emerge.
 
-### HII/AII as platform architecture
+### HII as platform architecture
 
-At the platform level, HII/AII is the operating architecture for:
+At the platform level, HII is the operating architecture for:
 
 ```text
 context → assignment → execution → observation → verification → memory → repeatability
 ```
 
-HII makes state understandable and controllable. AII makes agent work bounded,
+HII makes state understandable and controllable while making agent work bounded,
 observable, policy-aware, and repeatable. The shared runtime preserves durable
 state and proof while models remain replaceable reasoning engines.
 
@@ -134,17 +139,19 @@ The ideal daily question is:
 > What am I doing, why does it matter, what is blocked, what proof exists, and
 > what is the next executable action?
 
-## HII/AII system boundary
+## HII CLI/runtime boundary
 
-### HII owns the human-facing layer
+### HII owns the whole product direction
 
-HII owns the Next.js interface, Tauri desktop shell, projects and sources,
-context-pack review, boards, spatial workspace, feed, activity history, terminal surfaces,
-approvals, verification views, and receipts.
+HII owns the CLI, Next.js interface, Tauri desktop shell, projects and sources,
+context-pack review, boards, spatial workspace, feed, activity history,
+terminal surfaces, approvals, verification views, receipts, agent lifecycle,
+capabilities, policy, managed execution, handoffs, proof collection, runtime
+configuration, and skill promotion.
 
-The spatial visual interface is named **HII**. It is not a separately branded
-surface or application. HII presents governed data and execution state
-published by AII through the shared local runtime.
+The CLI is the primary product and control surface for now. Visual surfaces are
+named **HII** when they are used, but they are projections over CLI-owned HII
+state and proof history.
 
 HII answers:
 
@@ -155,19 +162,9 @@ HII answers:
 - What needs approval?
 - What happens next?
 
-### AII owns the agent-facing layer
-
-AII owns agent lifecycle, capability publication, policy and approval tiers,
-task and run records, managed agent runs, inter-agent messaging, fleet and
-process observation, runtime configuration, execution supervision, event
-publication, proof collection, and reusable skill promotion.
-
-AII makes execution governable. It must not grant an agent broader authority
-than the human supplied.
-
 ### Shared runtime
 
-The layers meet through explicit state under `~/.hii`:
+HII records explicit state under `~/.hii`:
 
 ```text
 ~/.hii/
@@ -189,22 +186,20 @@ The layers meet through explicit state under `~/.hii`:
 The intended dependency is:
 
 ```text
-AII → publishes configuration, capabilities, events, and execution state
-    → shared runtime
-HII ← reads and presents understandable state
+HII CLI/runtime → records configuration, capabilities, events, and execution state
+                → shared runtime
+HII views       ← read and present understandable state
 ```
 
-HII must not import private AII implementation merely to render state. Typed
-contracts, APIs, database records, files, capabilities, and events form the
-boundary.
+Typed contracts, APIs, database records, files, capabilities, and events form
+the boundary between CLI-owned runtime authority and optional visual views.
 
 ### Models, agents, and tools
 
 ```text
 Model   = replaceable reasoning engine
 Agent   = model + role + task + tools + limits
-AII     = policy + coordination + execution management
-HII     = human understanding + control + review
+HII CLI = human understanding + control + review + policy + coordination + execution management
 Runtime = durable state + context + evidence
 Tool    = bounded action with declared inputs, outputs, and side effects
 ```
@@ -231,8 +226,9 @@ Every serious workflow should map to:
 13. Promote repeated verified success into reusable capability.
 14. Publish, deliver, fabricate, or monetize only when authorized.
 
-Context Dock owns the before-work context layer. AII owns the during-work
-governance layer. Receipts, memory, and skills close the after-work layer.
+Context Dock owns the before-work context layer. HII runtime owns the
+during-work governance layer. Receipts, memory, and skills close the after-work
+layer.
 
 ## Current product: HII Knowledge Workspace on Context Dock
 
@@ -278,7 +274,7 @@ A user should be able to:
 ### Hard architecture decisions
 
 - Use `/Users/ummi/hii`; do not create a parallel product repository.
-- Use the existing HII/AII runtime; do not create another daemon.
+- Use the existing HII CLI/runtime; do not create another daemon.
 - Use the local HII instance and `~/.hii/hii.db` as authority for authored
   memory objects, typed knowledge, indexing, and the operational ledger.
 - Import complete user-approved vaults through hash-locked, non-mutating batches and preserve portable Markdown export so HII authority never becomes data lock-in.
@@ -457,10 +453,10 @@ screenshots, receipts, or commits.
 
 ```text
 Level 0 — Founder practice and mission
-Level 1 — HII/AII substrate and verified-work loop
+Level 1 — HII CLI/runtime substrate and verified-work loop
 Level 2 — Current launch: Context Dock 0.1
 Level 3 — Daily project operating intelligence
-Level 4 — AII agent operations and multi-machine work
+Level 4 — HII agent operations and multi-machine work
 Level 5 — Foundry and productization systems
 Level 6 — Interform, AEC, geometry, media, and business applications
 Level 7 — Networks, services, licensing, fabrication, and commerce
@@ -486,11 +482,11 @@ Do not expand the current release into:
 - a dashboard of nonfunctional controls;
 - a parallel runtime, daemon, database, or product repository.
 
-Future projects such as AII Workstation, Memory Dock, Foundry, Interform, the
-Form Compiler, fabrication networks, and personal operational intelligence
-remain strategically aligned modules. They must consume the same context,
-policy, proof, memory, and capability substrate rather than create competing
-systems.
+Future projects such as Memory Dock, Foundry, Interform, the Form Compiler,
+fabrication networks, and personal operational intelligence remain
+strategically aligned modules. They must consume the same HII CLI/runtime
+context, policy, proof, memory, and capability substrate rather than create
+competing systems.
 
 ## Current implementation sequence
 
@@ -564,9 +560,9 @@ artifact without losing context or agency?
 give it to an agent, and receive a verified receipt without re-explaining the
 project?
 
-**AII operations:** Can an agent receive bounded work, run through approved
-capabilities, remain observable, and return proof that is easy to review and
-reuse?
+**HII operations:** Can an agent receive bounded work, run through approved
+capabilities, remain observable through the CLI/runtime, and return proof that
+is easy to review and reuse?
 
 **Platform:** Can one local-first system eventually support code, design,
 architecture, fabrication, media, and business through the same context →

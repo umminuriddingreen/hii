@@ -1,7 +1,7 @@
 # HII — Human Information Interface
 
-HII is a local-first context manager and spatial control plane for verified
-agent work. It gives people one human-facing workspace for turning intent,
+HII is a local-first CLI and control plane for verified agent work. It gives
+people one owner-operated path for turning intent,
 source-linked knowledge, tools, files, machines, and memory into work that can
 be reviewed, proved, and reused.
 
@@ -9,9 +9,10 @@ HII is not another AI chat UI and it is not an autonomous system that silently
 owns the user's state. The user owns the workspace and final decisions. Agents
 propose, annotate, execute within explicit bounds, and return evidence.
 
-AII—the Agent Information Interface—is the coordination, policy, and execution
-layer beneath HII. It publishes capabilities, manages agents, governs actions,
-and records proof through shared runtime state under `~/.hii`.
+HII's coordination, policy, execution, capability, and proof systems are
+internal HII runtime modules. The project is CLI-first for now: every important
+operation should work through `hii` before it is promoted into web, desktop,
+Notch, Browser, Create, or spatial workspace views.
 
 The durable product loop is:
 
@@ -24,8 +25,9 @@ human intent
 → reviewed reusable capability
 ```
 
-Read [the HII/AII master context](docs/HII_AII_MASTER_CONTEXT.md) before making
-product or architecture changes.
+Read [the HII master context](docs/HII_AII_MASTER_CONTEXT.md) and
+[ADR 004: CLI-First HII Runtime](docs/decisions/004-cli-first-hii-runtime.md)
+before making product or architecture changes.
 
 ## Product Shape
 
@@ -43,7 +45,7 @@ HII brings the loop together as one spatial workspace:
   artifacts, verification, and receipts.
 - **Context Dock:** the source-aware knowledge layer that makes selected
   material useful to agents without losing provenance.
-- **AII:** bounded coordination and execution behind the interface.
+- **HII runtime:** bounded coordination and execution behind the CLI contract.
 
 External apps, models, local runtimes, and specialist systems such as Termite
 are capabilities HII coordinates. HII should not recreate every tool it can
@@ -52,9 +54,9 @@ govern.
 Notch, Browser, Create, and the spatial Workspace are views over the same HII
 project state and proof history. See [Notch, Browser, and Create](docs/NOTCH_BROWSER_CREATE.md).
 
-The interface should feel bright, spatial, calm, and playful: native to people
-who grew up on the internet without excluding anyone else. Terminal power
-remains available, but it is not the product metaphor.
+The CLI is the product center for now. Visual surfaces should feel bright,
+spatial, calm, and playful when they return to the foreground, but they are
+projections over the same CLI-owned state and proof history.
 
 ## Privacy and Human Authority
 
@@ -153,24 +155,24 @@ decentralized compute network, geometry platform, or personal-data harvester.
 - No future surface may bypass preview, permission, proof, or user approval
   merely because the underlying agent or model can act.
 
-## HII / AII Boundary
+## HII Runtime Boundary
 
-- **HII** owns the human-facing Next.js/Tauri interface, context review,
-  projects, boards, approvals, activity, verification, and receipts.
-- **AII** owns agent lifecycle, capabilities, policy, managed execution,
-  handoffs, proof collection, runtime configuration, and skill promotion.
-- **Shared runtime** under `~/.hii` is the explicit contract between them.
+- **HII CLI** owns the primary product loop, context review, projects,
+  approvals, verification, receipts, agent lifecycle commands, capabilities,
+  policy, managed execution, handoffs, proof collection, runtime configuration,
+  and skill promotion.
+- **Shared runtime** under `~/.hii` is the durable local state substrate.
 - **Models** are replaceable reasoning engines; they do not own permissions or
   durable project truth.
 
-The visual interface and desktop application are called **HII**. Its spatial
-workspace displays and controls governed state published by AII through the
-shared runtime; there is no separately named interface product.
+The visual interface and desktop application are called **HII** when they are
+used, but they are projections over CLI-owned HII state. There is no separately
+named interface or execution product.
 
 The dependency direction is:
 
 ```text
-AII → publishes governed state → ~/.hii ← HII reads and presents state
+HII CLI/runtime → records governed state → ~/.hii ← HII views read and present state
 ```
 
 ## Current Coordinates
@@ -182,8 +184,8 @@ Launcher:         resolved by `command -v hii`
 Launcher source:  <repository>/scripts/hii-launcher.sh
 Context database: ~/.hii/hii.db
 Knowledge store:  ~/.hii/hii.db + ~/.hii/knowledge
-AII source:       <repository>/aii
-Capability source:<repository>/aii/capabilities/registry.json
+Runtime debt:     <repository>/aii (temporary internal HII runtime paths)
+Capability source:<repository>/aii/capabilities/registry.json (migration target)
 ```
 
 `~/hii-old` is legacy evidence only if present. It is never a current
@@ -204,8 +206,8 @@ summaries.
 
 ## Terminal Control Plane
 
-The `hii` command is a fast Rust workspace agent for the same governed HII/AII
-loop. Bare `hii` opens an ongoing conversation with session memory and a live
+The `hii` command is the fast Rust workspace agent for the governed HII loop.
+Bare `hii` opens an ongoing conversation with session memory and a live
 stream of the local model's provider-supplied thinking, response text, tool
 actions, and results. A quoted intent or `hii run` uses the same visible stream
 for explicit work.
@@ -300,7 +302,7 @@ or licensed by the export command.
 
 ## Context Dock Architectural Constraints
 
-- Use this repository and the current HII/AII runtime.
+- Use this repository and the current HII CLI/runtime.
 - Use `~/.hii/hii.db` for canonical authored knowledge, Context Dock indexing, and operational state; preserve imported vaults as immutable provenance and portable export sources.
 - Do not create another daemon, runtime, database, or product repository.
 - Use SQLite FTS5 and deterministic retrieval before embeddings.
@@ -352,7 +354,8 @@ UI, server code, public assets, or native resources change.
 
 Windows packages are built and installed on a native Windows runner by
 `.github/workflows/windows-packaged-app.yml`; the gate must prove the installed
-app, local server, and embedded AII start/stop before its NSIS artifact is used.
+app, local server, and embedded HII runtime start/stop before its NSIS artifact
+is used.
 
 ## Verification
 

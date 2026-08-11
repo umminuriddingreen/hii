@@ -5,11 +5,12 @@
 Before planning or modifying HII, read:
 
 - `docs/HII_AII_MASTER_CONTEXT.md`
+- `docs/decisions/004-cli-first-hii-runtime.md`
 
-This document defines the founder thesis, HII/AII boundary, current Context
-Dock product scope, architecture constraints, deferred roadmap, trust model,
-and required agent behavior. Historical brainstorms do not override the
-current product decision.
+These documents define the founder thesis, the CLI-first product direction,
+current Context Dock product scope, architecture constraints, deferred roadmap,
+trust model, and required agent behavior. Historical brainstorms do not
+override the current product decision.
 
 This repo is an active multi-agent worktree. Codex, Claude, HII workers, and the user may all be editing or generating artifacts at the same time.
 
@@ -45,9 +46,14 @@ Human intent -> bounded agent/tool work -> logs/proof -> verification -> receipt
 ## Current Product Direction
 
 - HII is a local-first control plane for verified agent work.
-- The visual interface and desktop application are named HII. Never append a
-  separate product name. HII's spatial workspace displays governed state
-  published by AII through the shared runtime.
+- HII is CLI-first for now. The Rust CLI is the primary product, control
+  surface, runtime entrypoint, verification surface, and agent contract.
+- Do not introduce or revive AII as a separate product, brand, app, repo,
+  daemon family, or planning track. Existing `aii/` code is legacy/internal HII
+  runtime code until it is migrated behind CLI-owned modules and commands.
+- Web, Tauri, Notch, Browser, Create, and spatial workspace surfaces are
+  projections over CLI-owned HII state. They should not become the source of
+  truth until the CLI loop is boringly reliable.
 - Founder decision ADR 001 reopens an Obsidian-class HII Knowledge Workspace
   built on Context Dock and `~/.hii/hii.db`.
 - The current implementation target is an end-to-end local knowledge loop:
