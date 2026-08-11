@@ -5,6 +5,7 @@ mod attachments;
 mod background;
 mod board;
 mod budget;
+mod capability_discovery;
 mod completion;
 mod config;
 mod context;
@@ -249,6 +250,11 @@ enum Commands {
         #[command(subcommand)]
         action: Option<BoardCommand>,
     },
+    #[command(about = "Discover and download capability sources from trusted online indexes")]
+    Discover {
+        #[command(subcommand)]
+        action: DiscoverCommand,
+    },
     #[command(about = "Manage local recurring HII work through cron")]
     Schedule {
         #[command(subcommand)]
@@ -378,6 +384,38 @@ enum ScheduleCommand {
     Remove { id: String },
     #[command(hide = true)]
     Tick,
+}
+
+#[derive(Subcommand, Debug)]
+enum DiscoverCommand {
+    #[command(about = "Search GitHub repositories above a safe star floor")]
+    Github {
+        #[arg(required = true, num_args = 1..)]
+        query: Vec<String>,
+        #[arg(long, default_value_t = capability_discovery::default_min_stars())]
+        min_stars: u64,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+    },
+    #[command(about = "Prepare a bounded public search query for X/Twitter capability signals")]
+    X {
+        #[arg(required = true, num_args = 1..)]
+        query: Vec<String>,
+    },
+    #[command(about = "Prepare a bounded public web discovery query")]
+    Web {
+        #[arg(required = true, num_args = 1..)]
+        query: Vec<String>,
+    },
+    #[command(about = "Clone a GitHub capability source after checking its star count")]
+    Install {
+        #[arg(value_name = "OWNER/REPO_OR_URL")]
+        repo: String,
+        #[arg(long, default_value_t = capability_discovery::default_min_stars())]
+        min_stars: u64,
+        #[arg(long, value_name = "DIR")]
+        name: Option<String>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
@@ -556,6 +594,38 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Board { action }) => board_command(&paths, cli.cwd, action),
+        Some(Commands::Discover { action }) => {
+            match action {
+                DiscoverCommand::Github {
+                    query,
+                    min_stars,
+                    limit,
+                } => println!(
+                    "{}",
+                    capability_discovery::search_github(&query.join(" "), min_stars, limit)?
+                ),
+                DiscoverCommand::X { query } => {
+                    println!("{}", capability_discovery::search_x(&query.join(" "))?)
+                }
+                DiscoverCommand::Web { query } => {
+                    println!("{}", capability_discovery::search_web(&query.join(" "))?)
+                }
+                DiscoverCommand::Install {
+                    repo,
+                    min_stars,
+                    name,
+                } => println!(
+                    "{}",
+                    capability_discovery::install_github(
+                        &paths.repo,
+                        &repo,
+                        min_stars,
+                        name.as_deref()
+                    )?
+                ),
+            }
+            Ok(ExitCode::SUCCESS)
+        }
         Some(Commands::ToolsManifest) => {
             println!("{}", acp::render());
             Ok(ExitCode::SUCCESS)
@@ -1552,6 +1622,7 @@ fn is_native_command(command: &str) -> bool {
             | "proof"
             | "receipt"
             | "board"
+            | "discover"
             | "legacy"
             | "help"
             | "tools-manifest"
@@ -1574,6 +1645,7 @@ fn command_suggestion(args: &[String]) -> Option<(String, &'static str)> {
         "login",
         "proof",
         "board",
+        "discover",
         "help",
         "home",
         "agents",
@@ -1769,6 +1841,17 @@ mod tests {
     #[test]
     fn native_command_is_preserved() {
         let args = vec!["hii".into(), "status".into()];
+        assert_eq!(normalize_goal_args(args.clone()), args);
+    }
+
+    #[test]
+    fn discover_command_is_preserved() {
+        let args = vec![
+            "hii".into(),
+            "discover".into(),
+            "github".into(),
+            "cad".into(),
+        ];
         assert_eq!(normalize_goal_args(args.clone()), args);
     }
 
