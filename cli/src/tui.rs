@@ -282,11 +282,10 @@ pub fn prompt_frame(_frame: usize) -> String {
 
 pub fn prompt_footer() -> String {
     let width = terminal_width().saturating_sub(4);
-    let hint = " Enter steer · Tab queue ";
-    let rule = "─".repeat(width.saturating_sub(hint.chars().count() + 2));
+    let rule = "─".repeat(width.saturating_sub(2));
     format!(
         "  {}",
-        paint(&format!("╰─{hint}{rule}╯"), &[DIM, palette().muted])
+        paint(&format!("╰─{rule}╯"), &[DIM, palette().muted])
     )
 }
 
@@ -514,7 +513,7 @@ mod tests {
         assert!(!prompt_frame(0).trim().is_empty());
         assert_eq!(prompt_frame(0), prompt_frame(99));
         assert!(!prompt_frame(0).contains("STEER MODEL"));
-        assert!(super::prompt_footer().contains("Enter steer"));
+        assert!(!super::prompt_footer().contains("Enter steer"));
     }
 
     #[test]
