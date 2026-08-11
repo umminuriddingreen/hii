@@ -320,6 +320,18 @@
     }
   }
 
+  function openFromNotchHover() {
+    if (!expanded) void setExpanded(true);
+  }
+
+  function collapseAfterHover(event: PointerEvent) {
+    const next = event.relatedTarget as Node | null;
+    if (next && event.currentTarget instanceof Node && event.currentTarget.contains(next)) return;
+    if (document.activeElement && event.currentTarget instanceof Node && event.currentTarget.contains(document.activeElement)) return;
+    if (isListening || busy || speechBusy) return;
+    void setExpanded(false);
+  }
+
   onMount(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     const stops: Array<() => void> = [];
@@ -382,9 +394,9 @@
   <title>Notch — HII</title>
 </svelte:head>
 
-<main class:expanded class="notch-shell">
+<main class:expanded class="notch-shell" on:pointerenter={openFromNotchHover} on:pointerleave={collapseAfterHover}>
   {#if !expanded}
-    <button class="collapsed" on:click={() => void setExpanded(true)} aria-label="Open HII Notch">
+    <button class="collapsed" on:pointerenter={openFromNotchHover} on:click={() => void setExpanded(true)} aria-label="Open HII Notch">
       <i class:active={Boolean(summary?.active)}></i>
       <strong>hii</strong>
       <span>{ambient.message}</span>

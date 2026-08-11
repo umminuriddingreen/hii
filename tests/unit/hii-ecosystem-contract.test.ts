@@ -27,6 +27,8 @@ describe('HII ecosystem surface contract', () => {
     expect(rust).toContain('/notch');
     expect(rust).toContain('set_notch_expanded');
     expect(rust).toContain('open_hii_mode');
+    expect(notch).toContain('openFromNotchHover');
+    expect(notch).toContain('on:pointerenter={openFromNotchHover}');
     expect(notch).toContain("openMode('/browser')");
     expect(notch).toContain("openMode('/create')");
   });
