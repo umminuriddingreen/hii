@@ -365,8 +365,9 @@ fn redraw(
     let rows_below_input = 1 + menu.len();
     write!(out, "\x1b[{rows_below_input}A\r")
         .map_err(|e| format!("failed to restore composer row: {e}"))?;
-    let prompt_tail = prompt.rsplit_once('\n').map_or(prompt, |(_, tail)| tail);
-    let column = prompt_tail.chars().count() + buf[..cursor].chars().count();
+    // ANSI paint sequences in `prompt` occupy bytes but no terminal columns.
+    // The visible input prefix is always "  │ ", which is four columns.
+    let column = 4 + buf[..cursor].chars().count();
     if column > 0 {
         write!(out, "\x1b[{column}C")
             .map_err(|e| format!("failed to restore input cursor: {e}"))?;

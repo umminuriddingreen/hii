@@ -275,7 +275,7 @@ pub fn prompt_frame(_frame: usize) -> String {
     let label = " STEER MODEL ";
     let rule = "─".repeat(width.saturating_sub(label.chars().count() + 2));
     format!(
-        "  {}\n  {} ",
+        "  {}\r\n  {} ",
         paint(&format!("╭─{label}{rule}╮"), &[DIM, palette().primary]),
         paint("│", &[BOLD, palette().primary])
     )
