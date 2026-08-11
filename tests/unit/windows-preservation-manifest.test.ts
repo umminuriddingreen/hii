@@ -11,7 +11,7 @@ describe('windows preservation manifest', () => {
     const manifest = buildWindowsPreservationManifest(
       {
         machine: { os: 'Windows', build: '1.2.3' },
-        credentials: { api_key: 'sk-REDACTED-KEY-01234567890', token: 'abc', OPENAI_API_KEY: 'bearer abc' },
+        credentials: { api_key: 'placeholder-openai-key', token: 'abc', OPENAI_API_KEY: 'bearer abc' },
         commands: {
           hii: { present: true, path: 'C:\\Users\\alice\\hii.exe', version: '2.0', commandLine: 'hii --token abc' }
         },
