@@ -439,16 +439,15 @@ fn redraw(
     .map_err(|e| format!("failed to write prompt: {e}"))?;
     let menu = crate::tui::command_menu(buf, selected, public_test);
     if !menu.is_empty() {
-        write!(out, "\x1b[s").map_err(|e| format!("failed to save cursor: {e}"))?;
         for line in &menu {
             write!(out, "\r\n\x1b[2K{line}")
                 .map_err(|e| format!("failed to draw command menu: {e}"))?;
         }
-        write!(out, "\x1b[u").map_err(|e| format!("failed to restore cursor: {e}"))?;
     }
-    // Return from the footer/menu to the editable row, then restore the
-    // in-buffer cursor. Keeping the cursor inside the bordered composer makes
-    // the steering affordance visible without changing the input grammar.
+    // Return from the last painted row to the editable row, then restore the
+    // in-buffer cursor. Use relative movement instead of save/restore: saved
+    // terminal coordinates become unreliable if drawing the menu scrolls at the
+    // bottom of the viewport.
     let rows_below_input = 1 + menu.len();
     write!(out, "\x1b[{rows_below_input}A\r")
         .map_err(|e| format!("failed to restore composer row: {e}"))?;
