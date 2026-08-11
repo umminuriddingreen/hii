@@ -271,7 +271,24 @@ pub fn welcome(workspace: &Path, model: &str, max_steps: usize, git: &str, publi
 }
 
 pub fn prompt_frame(_frame: usize) -> String {
-    format!("  {} ", paint("◇", &[BOLD, palette().primary]))
+    let width = terminal_width().saturating_sub(4);
+    let label = " STEER MODEL ";
+    let rule = "─".repeat(width.saturating_sub(label.chars().count() + 2));
+    format!(
+        "  {}\n  {} ",
+        paint(&format!("╭─{label}{rule}╮"), &[DIM, palette().primary]),
+        paint("│", &[BOLD, palette().primary])
+    )
+}
+
+pub fn prompt_footer() -> String {
+    let width = terminal_width().saturating_sub(4);
+    let hint = " Enter steer · Tab queue ";
+    let rule = "─".repeat(width.saturating_sub(hint.chars().count() + 2));
+    format!(
+        "  {}",
+        paint(&format!("╰─{hint}{rule}╯"), &[DIM, palette().muted])
+    )
 }
 
 fn public_command(command: &str) -> bool {
@@ -497,6 +514,8 @@ mod tests {
     fn prompt_frame_is_always_present() {
         assert!(!prompt_frame(0).trim().is_empty());
         assert_eq!(prompt_frame(0), prompt_frame(99));
+        assert!(prompt_frame(0).contains("STEER MODEL"));
+        assert!(super::prompt_footer().contains("Enter steer"));
     }
 
     #[test]

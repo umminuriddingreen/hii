@@ -321,11 +321,17 @@ fn clear_menu(out: &mut impl Write, rows: usize) {
     if rows == 0 {
         return;
     }
-    let _ = write!(out, "\x1b[s");
-    for _ in 0..rows {
-        let _ = write!(out, "\r\n\x1b[2K");
+    // The cursor rests on the composer's editable middle row. Move to the
+    // frame's top, erase the complete frame plus any command-menu rows, and
+    // return to that top coordinate for a clean redraw.
+    let _ = write!(out, "\x1b[1A\r");
+    for index in 0..rows {
+        let _ = write!(out, "\x1b[2K");
+        if index + 1 < rows {
+            let _ = write!(out, "\r\n");
+        }
     }
-    let _ = write!(out, "\x1b[u");
+    let _ = write!(out, "\x1b[{}A\r", rows.saturating_sub(1));
 }
 
 fn redraw(
@@ -338,7 +344,12 @@ fn redraw(
 ) -> Result<()> {
     let mut out = io::stdout();
     clear_menu(&mut out, *previous_rows);
-    write!(out, "\r\x1b[2K{prompt}{buf}").map_err(|e| format!("failed to write prompt: {e}"))?;
+    write!(
+        out,
+        "\r\x1b[2K{prompt}{buf}\r\n\x1b[2K{}",
+        crate::tui::prompt_footer()
+    )
+    .map_err(|e| format!("failed to write prompt: {e}"))?;
     let menu = crate::tui::command_menu(buf, selected, public_test);
     if !menu.is_empty() {
         write!(out, "\x1b[s").map_err(|e| format!("failed to save cursor: {e}"))?;
@@ -348,11 +359,19 @@ fn redraw(
         }
         write!(out, "\x1b[u").map_err(|e| format!("failed to restore cursor: {e}"))?;
     }
-    let tail = buf[cursor..].chars().count();
-    if tail > 0 {
-        write!(out, "\x1b[{tail}D").map_err(|e| format!("failed to restore input cursor: {e}"))?;
+    // Return from the footer/menu to the editable row, then restore the
+    // in-buffer cursor. Keeping the cursor inside the bordered composer makes
+    // the steering affordance visible without changing the input grammar.
+    let rows_below_input = 1 + menu.len();
+    write!(out, "\x1b[{rows_below_input}A\r")
+        .map_err(|e| format!("failed to restore composer row: {e}"))?;
+    let prompt_tail = prompt.rsplit_once('\n').map_or(prompt, |(_, tail)| tail);
+    let column = prompt_tail.chars().count() + buf[..cursor].chars().count();
+    if column > 0 {
+        write!(out, "\x1b[{column}C")
+            .map_err(|e| format!("failed to restore input cursor: {e}"))?;
     }
-    *previous_rows = menu.len();
+    *previous_rows = 3 + menu.len();
     out.flush()
         .map_err(|e| format!("failed to flush stdout: {e}"))?;
     Ok(())
