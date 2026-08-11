@@ -21,7 +21,6 @@ mod mcp_client;
 mod ollama;
 mod receipt;
 mod runlog;
-#[cfg(feature = "preview")]
 mod schedule;
 mod skills;
 #[cfg(feature = "preview")]
@@ -240,9 +239,11 @@ enum Commands {
         #[command(subcommand)]
         action: Option<BoardCommand>,
     },
-    #[cfg(feature = "preview")]
-    #[command(hide = true)]
-    Schedule { action: String },
+    #[command(about = "Manage local recurring HII work through cron")]
+    Schedule {
+        #[command(subcommand)]
+        action: ScheduleCommand,
+    },
     #[command(
         name = "tools-manifest",
         about = "Print the agent tool capability manifest (ACP/MCP boundary) as JSON"
@@ -346,6 +347,27 @@ enum BoardCommand {
         #[arg(long = "dry-run")]
         dry_run: bool,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum ScheduleCommand {
+    #[command(about = "Create a recurring local HII task")]
+    Add {
+        #[arg(help = "Five-field cron expression, quoted as one argument")]
+        cron: String,
+        #[arg(required = true, num_args = 1..)]
+        task: Vec<String>,
+    },
+    #[command(alias = "ls", about = "List recurring HII tasks")]
+    List,
+    #[command(about = "Pause a recurring task")]
+    Pause { id: String },
+    #[command(about = "Resume a recurring task")]
+    Resume { id: String },
+    #[command(about = "Remove a recurring task")]
+    Remove { id: String },
+    #[command(hide = true)]
+    Tick,
 }
 
 fn main() -> ExitCode {
@@ -524,12 +546,19 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 resolve_authority(false, authority.as_deref(), AuthorityContext::Server)?;
             acp::serve(&paths, authority)
         }
-        #[cfg(feature = "preview")]
         Some(Commands::Schedule { action }) => {
-            if action != "tick" {
-                return Err("usage: hii schedule tick".into());
+            let service = schedule::ScheduleService::new(&paths)?;
+            match action {
+                ScheduleCommand::Add { cron, task } => {
+                    let workspace = cli.cwd.unwrap_or(paths.repo.clone());
+                    println!("{}", service.add(&cron, &task.join(" "), &workspace)?);
+                }
+                ScheduleCommand::List => println!("{}", service.list()?),
+                ScheduleCommand::Pause { id } => println!("{}", service.set_enabled(&id, false)?),
+                ScheduleCommand::Resume { id } => println!("{}", service.set_enabled(&id, true)?),
+                ScheduleCommand::Remove { id } => println!("{}", service.remove(&id)?),
+                ScheduleCommand::Tick => println!("{}", service.tick()?),
             }
-            println!("{}", schedule::ScheduleService::new(&paths)?.tick()?);
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Legacy { args }) => {
@@ -740,19 +769,16 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             }
             #[cfg(feature = "preview")]
             Some(SlashCommand::Top) => system_monitor::launch_btop(),
-            #[cfg(feature = "preview")]
-            Some(SlashCommand::Schedule { cron, task }) => {
-                schedule::ScheduleService::new(conversation.paths())?.add(&cron, &task)
-            }
-            #[cfg(feature = "preview")]
+            Some(SlashCommand::Schedule { cron, task }) => schedule::ScheduleService::new(
+                conversation.paths(),
+            )?
+            .add(&cron, &task, conversation.workspace()),
             Some(SlashCommand::Schedules) => {
                 schedule::ScheduleService::new(conversation.paths())?.list()
             }
-            #[cfg(feature = "preview")]
             Some(SlashCommand::Calendar) => {
                 schedule::ScheduleService::new(conversation.paths())?.calendar_list(7)
             }
-            #[cfg(feature = "preview")]
             Some(SlashCommand::CalendarAdd { date, time, title }) => {
                 schedule::ScheduleService::new(conversation.paths())?.calendar_add(
                     &date,
@@ -760,7 +786,6 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     &title,
                 )
             }
-            #[cfg(feature = "preview")]
             Some(SlashCommand::SyncCalendar) => {
                 schedule::ScheduleService::new(conversation.paths())?.sync_calendar()
             }
@@ -845,22 +870,17 @@ enum SlashCommand {
     Resources,
     #[cfg(feature = "preview")]
     Top,
-    #[cfg(feature = "preview")]
     Schedule {
         cron: String,
         task: String,
     },
-    #[cfg(feature = "preview")]
     Schedules,
-    #[cfg(feature = "preview")]
     Calendar,
-    #[cfg(feature = "preview")]
     CalendarAdd {
         date: String,
         time: Option<String>,
         title: String,
     },
-    #[cfg(feature = "preview")]
     SyncCalendar,
     Unknown(String),
 }
@@ -954,7 +974,6 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         "/resources" if rest.is_empty() => SlashCommand::Resources,
         #[cfg(feature = "preview")]
         "/top" if rest.is_empty() => SlashCommand::Top,
-        #[cfg(feature = "preview")]
         "/schedule" => match rest.split_once("::") {
             Some((cron, task)) if !cron.trim().is_empty() && !task.trim().is_empty() => {
                 SlashCommand::Schedule {
@@ -964,15 +983,11 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
             }
             _ => SlashCommand::Unknown(input.into()),
         },
-        #[cfg(feature = "preview")]
         "/schedules" if rest.is_empty() => SlashCommand::Schedules,
-        #[cfg(feature = "preview")]
         "/calendar" if rest.is_empty() => SlashCommand::Calendar,
-        #[cfg(feature = "preview")]
         "/calendar" if rest.starts_with("add ") => {
             parse_calendar_add(rest).unwrap_or_else(|| SlashCommand::Unknown(input.into()))
         }
-        #[cfg(feature = "preview")]
         "/sync" if rest == "calendar" => SlashCommand::SyncCalendar,
         _ => SlashCommand::Unknown(input.to_string()),
     })
@@ -982,7 +997,7 @@ fn slash_help() -> String {
     let help = if cfg!(feature = "preview") {
         "/help                         show commands\n/providers                    show local, Codex, and Claude access\n/login codex|claude           connect an existing provider plan\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/rename <name>                name this saved session\n/copy                         copy the latest response\n/status                       show session, workspace, model, and usage\n/goal [edit|pause|resume|clear] [objective]\n                               track a persistent session objective\n/plan [off|prompt]            inspect and research without changes\n/side <question>              ask without changing the main conversation\n/theme [name]                 switch the persistent visual signature\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n/model [name]                 list or switch available models\n/proof [run-id]               inspect execution proof\n/diff                         inspect scoped workspace changes\n/review                       review current diff for defects\n/permissions [level]          show or switch the live authority boundary\n/resume [session-id]          list or restore a prior session\n/skills                       show automatically learned skill drafts\n/agents | /ps                 show HII-managed and observed agents\n/codex <task>                 use authenticated Codex CLI\n/claude <task>                use authenticated Claude CLI\n/agent <id> status|logs|stop  manage an agent by id\n/stop <id>                    stop one managed agent\n/resources                    quick CPU, memory, storage, and Ollama view\n/top                          open the embedded btop resource monitor\n/schedule <cron> :: <task>    create a local recurring HII task\n/schedules                    list HII schedules\n/calendar                     show the next 7 days\n/calendar add DATE [TIME] :: TITLE\n/sync calendar                sync next HII runs to Apple Calendar\n/exit                         leave HII\n\nWhile running: type + Enter steers · type + Tab queues · Esc stops"
     } else {
-        "/help                         show commands\n/providers                    show local, Codex, and Claude access\n/login codex|claude           connect an existing provider plan\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/rename <name>                name this saved session\n/copy                         copy the latest response\n/status                       show session, workspace, model, and usage\n/goal [edit|pause|resume|clear] [objective]\n                               track a persistent session objective\n/plan [off|prompt]            inspect and research without changes\n/side <question>              ask without changing the main conversation\n/theme [name]                 switch the persistent visual signature\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n/model [name]                 list or switch available models\n/proof [run-id]               inspect execution proof\n/diff                         inspect scoped workspace changes\n/review                       review current diff for defects\n/permissions [level]          show or switch the live authority boundary\n/resume [session-id]          list or restore a prior session\n/skills                       show automatically learned skill drafts\n/agents | /ps                 show HII-managed and observed agents\n/codex <task>                 use authenticated Codex CLI\n/claude <task>                use authenticated Claude CLI\n/agent <id> status|logs|stop  manage an agent by id\n/stop <id>                    stop one managed agent\n/undo                         drop the last exchange to steer away\n/fork                         snapshot this session to a resumable fork\n/teach <name>                 graduate this session into a reusable skill\n!<command>                    run a shell command directly\n/exit                         leave HII\n\nWhile running: type + Enter steers · type + Tab queues · Esc stops"
+        "/help                         show commands\n/providers                    show local, Codex, and Claude access\n/login codex|claude           connect an existing provider plan\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/rename <name>                name this saved session\n/copy                         copy the latest response\n/status                       show session, workspace, model, and usage\n/goal [edit|pause|resume|clear] [objective]\n                               track a persistent session objective\n/plan [off|prompt]            inspect and research without changes\n/side <question>              ask without changing the main conversation\n/theme [name]                 switch the persistent visual signature\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n/model [name]                 list or switch available models\n/proof [run-id]               inspect execution proof\n/diff                         inspect scoped workspace changes\n/review                       review current diff for defects\n/permissions [level]          show or switch the live authority boundary\n/resume [session-id]          list or restore a prior session\n/skills                       show automatically learned skill drafts\n/agents | /ps                 show HII-managed and observed agents\n/codex <task>                 use authenticated Codex CLI\n/claude <task>                use authenticated Claude CLI\n/agent <id> status|logs|stop  manage an agent by id\n/stop <id>                    stop one managed agent\n/schedule <cron> :: <task>    create local recurring HII work\n/schedules                    list recurring HII work\n/calendar                     show the next 7 days\n/calendar add DATE [TIME] :: TITLE\n/sync calendar                sync HII schedules to Apple Calendar\n/undo                         drop the last exchange to steer away\n/fork                         snapshot this session to a resumable fork\n/teach <name>                 graduate this session into a reusable skill\n!<command>                    run a shell command directly\n/exit                         leave HII\n\nWhile running: type + Enter steers · type + Tab queues · Esc stops"
     };
     help.replace(
         "/skills                       show automatically learned skill drafts\n",
@@ -1011,7 +1026,6 @@ fn lifecycle_hooks_enabled(no_hooks: bool, profile: SessionProfile) -> bool {
     !no_hooks && profile != SessionProfile::PublicTest
 }
 
-#[cfg(feature = "preview")]
 fn parse_calendar_add(rest: &str) -> Option<SlashCommand> {
     let (when, title) = rest.strip_prefix("add ")?.split_once("::")?;
     let mut fields = when.split_whitespace();
@@ -1507,7 +1521,7 @@ fn is_native_command(command: &str) -> bool {
             | "tools-manifest"
             | "mcp-serve"
             | "acp-serve"
-    ) || (cfg!(feature = "preview") && command == "schedule")
+    ) || command == "schedule"
 }
 
 fn command_suggestion(args: &[String]) -> Option<(String, &'static str)> {
@@ -2037,18 +2051,10 @@ mod tests {
 
     #[cfg(not(feature = "preview"))]
     #[test]
-    fn preview_commands_are_unreachable_by_default() {
-        assert!(!is_native_command("schedule"));
-        assert!(legacy::is_legacy("schedule"));
-        for command in [
-            "/resources",
-            "/top",
-            "/schedule 0 * * * * :: inspect",
-            "/schedules",
-            "/calendar",
-            "/calendar add 2026-07-20 :: Review",
-            "/sync calendar",
-        ] {
+    fn preview_only_system_monitor_commands_are_unreachable_by_default() {
+        assert!(is_native_command("schedule"));
+        assert!(!legacy::is_legacy("schedule"));
+        for command in ["/resources", "/top"] {
             assert_eq!(
                 parse_slash_command(command),
                 Some(SlashCommand::Unknown(command.into()))
@@ -2056,9 +2062,8 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "preview")]
     #[test]
-    fn parses_preview_conversational_controls() {
+    fn parses_native_schedule_and_calendar_controls() {
         assert_eq!(
             parse_slash_command("/schedule */15 * * * * :: inspect build health"),
             Some(SlashCommand::Schedule {

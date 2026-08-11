@@ -8,45 +8,33 @@ hii_cargo_bin="${HII_CARGO_BIN:-cargo}"
 hii_manifest="${hii_repo}/Cargo.toml"
 
 needs_build=0
-cli_tree_dirty=0
+source_stamp="${hii_rust_bin}.source"
+
+source_fingerprint() {
+  {
+    for source_marker in Cargo.toml Cargo.lock cli/Cargo.toml; do
+      if [[ -f "${hii_repo}/${source_marker}" ]]; then
+        printf '%s\t' "${source_marker}"
+        cksum "${hii_repo}/${source_marker}"
+      fi
+    done
+    if [[ -d "${hii_repo}/cli/src" ]]; then
+      find "${hii_repo}/cli/src" -type f \( -name '*.rs' -o -name '*.toml' \) -print \
+        | LC_ALL=C sort \
+        | while IFS= read -r source_file; do
+            printf '%s\t' "${source_file#"${hii_repo}/"}"
+            cksum "${source_file}"
+          done
+    fi
+  } | cksum | awk '{print $1 ":" $2}'
+}
+
+current_source="$(source_fingerprint)"
 
 if [[ ! -x "${hii_rust_bin}" ]]; then
   needs_build=1
-else
-  if command -v git >/dev/null 2>&1; then
-    dirty_cli="$(
-      git -C "${hii_repo}" status --porcelain --untracked-files=normal -- \
-        Cargo.toml Cargo.lock cli 2>/dev/null || true
-    )"
-    if [[ -n "${dirty_cli}" ]]; then
-      cli_tree_dirty=1
-    fi
-  fi
-
-  source_markers=(
-    "${hii_repo}/Cargo.toml"
-    "${hii_repo}/Cargo.lock"
-    "${hii_repo}/cli/Cargo.toml"
-  )
-  if (( ! cli_tree_dirty )); then
-    for source_marker in "${source_markers[@]}"; do
-      if [[ -f "${source_marker}" && "${source_marker}" -nt "${hii_rust_bin}" ]]; then
-        needs_build=1
-        break
-      fi
-    done
-  fi
-
-  if (( ! cli_tree_dirty && ! needs_build )) && [[ -d "${hii_repo}/cli/src" ]]; then
-    newer_source="$(
-      find "${hii_repo}/cli/src" \
-        \( -type d -o \( -type f \( -name '*.rs' -o -name '*.toml' \) \) \) \
-        -newer "${hii_rust_bin}" -print -quit
-    )"
-    if [[ -n "${newer_source}" ]]; then
-      needs_build=1
-    fi
-  fi
+elif [[ ! -f "${source_stamp}" ]] || [[ "$(<"${source_stamp}")" != "${current_source}" ]]; then
+  needs_build=1
 fi
 
 if (( needs_build )); then
@@ -59,6 +47,7 @@ if (( needs_build )); then
     --package hii-cli \
     --release \
     --quiet
+  printf '%s\n' "${current_source}" > "${source_stamp}"
 fi
 
 if [[ ! -x "${hii_rust_bin}" ]]; then

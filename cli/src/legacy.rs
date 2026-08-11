@@ -6,7 +6,6 @@ pub const LEGACY_COMMANDS: &[&str] = &[
     "task",
     "capture",
     "work",
-    "schedule",
     "check",
     "ship",
     "health",
@@ -88,7 +87,7 @@ pub const LEGACY_GROUPS: &[(&str, &[&str])] = &[
             "sdk", "console", "terminal", "bridge", "mcp", "codex", "skill", "skills",
         ],
     ),
-    ("build", &["dev", "build", "start", "schedule"]),
+    ("build", &["dev", "build", "start"]),
 ];
 
 /// The `--help` footer naming every additional command.

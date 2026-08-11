@@ -5,12 +5,18 @@
 //! history without asking a model to search broadly or silently transmitting
 //! anything outside the local runtime.
 
-use crate::receipt::{receipts_for_workspace, redact_text, Receipt};
+use crate::{
+    board::Board,
+    receipt::{receipts_for_workspace, redact_text, Receipt},
+};
+use serde_json::Value;
 use std::{fs, path::Path, process::Command};
 
 const MAX_INSTRUCTIONS_CHARS: usize = 12_000;
 const MAX_GIT_CHARS: usize = 8_000;
 const MAX_HISTORY: usize = 3;
+const MAX_PROFILE_CHARS: usize = 8_000;
+const MAX_SHARED_STATE_CHARS: usize = 8_000;
 
 #[derive(Debug, Default)]
 pub struct ContextCapsule {
@@ -22,6 +28,16 @@ impl ContextCapsule {
     pub fn build(runtime: &Path, workspace: &Path) -> Self {
         let mut sections = Vec::new();
         let mut sources = Vec::new();
+
+        if let Some((profile, source)) = user_profile(runtime) {
+            sections.push(profile);
+            sources.push(source);
+        }
+
+        if let Some((state, state_sources)) = shared_hii_state(runtime) {
+            sections.push(state);
+            sources.extend(state_sources);
+        }
 
         let instructions = workspace.join("AGENTS.md");
         if let Ok(content) = fs::read_to_string(&instructions) {
@@ -76,6 +92,152 @@ impl ContextCapsule {
                 sections.join("\n\n")
             ),
             sources,
+        }
+    }
+}
+
+fn user_profile(runtime: &Path) -> Option<(String, String)> {
+    let mut candidates = vec![runtime.join("profile.md"), runtime.join("user.md")];
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".hermes/memories/USER.md"));
+    }
+    candidates.into_iter().find_map(|path| {
+        let content = fs::read_to_string(&path).ok()?;
+        (!content.trim().is_empty()).then(|| {
+            let label = if path.starts_with(runtime) {
+                "HII USER PROFILE"
+            } else {
+                "HII USER PROFILE (migrating local Hermes context; may be stale)"
+            };
+            (
+                format!(
+                    "{label}\nsource: {}\nCurrent operator statements and current system state override this working profile.\n{}",
+                    path.display(),
+                    truncate_chars(&redact_text(&content), MAX_PROFILE_CHARS)
+                ),
+                path.display().to_string(),
+            )
+        })
+    })
+}
+
+fn shared_hii_state(runtime: &Path) -> Option<(String, Vec<String>)> {
+    let mut sections = Vec::new();
+    let mut sources = Vec::new();
+
+    let board = Board::open(runtime);
+    if let Ok(tasks) = board.tasks(false) {
+        if !tasks.is_empty() {
+            let rows = tasks
+                .iter()
+                .take(12)
+                .map(|task| {
+                    format!(
+                        "- {} [{} {}] {} @ {}",
+                        &task.id[..8.min(task.id.len())],
+                        task.lane,
+                        task.priority,
+                        one_line(&task.title, 180),
+                        one_line(&task.coordinate, 180)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            sections.push(format!("ACTIVE HII GOALS AND TASKS\n{rows}"));
+            sources.push(board.store_path().display().to_string());
+        }
+    }
+
+    let schedules_path = runtime.join("schedules/schedules.json");
+    if let Ok(value) = fs::read(&schedules_path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .ok_or(())
+    {
+        let rows = value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|item| item.get("enabled").and_then(Value::as_bool) != Some(false))
+            .take(12)
+            .map(|item| {
+                format!(
+                    "- {}  {}  {}",
+                    item.get("id").and_then(Value::as_str).unwrap_or("schedule"),
+                    item.get("cron").and_then(Value::as_str).unwrap_or(""),
+                    one_line(item.get("task").and_then(Value::as_str).unwrap_or(""), 220)
+                )
+            })
+            .collect::<Vec<_>>();
+        if !rows.is_empty() {
+            sections.push(format!("ACTIVE HII SCHEDULES\n{}", rows.join("\n")));
+            sources.push(schedules_path.display().to_string());
+        }
+    }
+
+    let skill_index = runtime.join("skills/_index.json");
+    if let Ok(value) = fs::read(&skill_index)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .ok_or(())
+    {
+        let names = value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .take(80)
+            .filter_map(|item| item.get("id").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        if !names.is_empty() {
+            sections.push(format!(
+                "HII SKILL LIBRARY\n{} indexed skills. Use skill_search before inventing a workflow.\n{}",
+                value.as_array().map_or(0, Vec::len),
+                names.join(", ")
+            ));
+            sources.push(skill_index.display().to_string());
+        }
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        let hermes_skills = home.join(".hermes/skills");
+        let mut names = Vec::new();
+        collect_skill_names(&hermes_skills, &mut names);
+        names.sort();
+        names.dedup();
+        if !names.is_empty() {
+            sections.push(format!(
+                "HERMES SKILL LIBRARY (local migration source)\n{} skills available through skill_search; HII remains the runtime and authority.\n{}",
+                names.len(),
+                names.iter().take(100).cloned().collect::<Vec<_>>().join(", ")
+            ));
+            sources.push(hermes_skills.display().to_string());
+        }
+    }
+
+    (!sections.is_empty()).then(|| {
+        (
+            truncate_chars(&sections.join("\n\n"), MAX_SHARED_STATE_CHARS),
+            sources,
+        )
+    })
+}
+
+fn collect_skill_names(root: &Path, names: &mut Vec<String>) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_skill_names(&path, names);
+        } else if path.file_name().and_then(|name| name.to_str()) == Some("SKILL.md") {
+            if let Some(name) = path
+                .parent()
+                .and_then(Path::file_name)
+                .and_then(|name| name.to_str())
+            {
+                names.push(name.to_string());
+            }
         }
     }
 }
@@ -154,7 +316,7 @@ fn one_line(value: &str, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::receipt::VerificationRecord;
+    use crate::{board::AddOptions, receipt::VerificationRecord};
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -236,5 +398,51 @@ mod tests {
         assert!(capsule.text.contains("[redacted]"));
         assert!(capsule.text.contains("prior-run"));
         assert!(capsule.sources.contains(&"hii-receipt:prior-run".into()));
+    }
+
+    #[test]
+    fn capsule_joins_profile_goals_schedules_and_skills_from_shared_hii_state() {
+        let workspace = TempDir::new("shared-workspace");
+        let runtime = TempDir::new("shared-runtime");
+        fs::write(
+            runtime.0.join("profile.md"),
+            "Ummi prefers direct local work.",
+        )
+        .expect("write profile");
+        Board::open(&runtime.0)
+            .add(
+                &workspace.0,
+                AddOptions {
+                    title: "Finish the context loop".into(),
+                    lane: Some("doing".into()),
+                    priority: Some("high".into()),
+                    owner: None,
+                    coordinate: None,
+                    notes: None,
+                    tags: None,
+                },
+            )
+            .expect("add task");
+        fs::create_dir_all(runtime.0.join("schedules")).expect("schedule dir");
+        fs::write(
+            runtime.0.join("schedules/schedules.json"),
+            r#"[{"id":"sched-1","cron":"0 9 * * *","task":"review goals","enabled":true}]"#,
+        )
+        .expect("write schedule");
+        fs::create_dir_all(runtime.0.join("skills")).expect("skills dir");
+        fs::write(
+            runtime.0.join("skills/_index.json"),
+            r#"[{"id":"local-planning"}]"#,
+        )
+        .expect("write skills");
+
+        let capsule = ContextCapsule::build(&runtime.0, &workspace.0);
+        assert!(capsule.text.contains("HII USER PROFILE"));
+        assert!(capsule.text.contains("Finish the context loop"));
+        assert!(capsule.text.contains("review goals"));
+        assert!(capsule.text.contains("local-planning"));
+        assert!(capsule
+            .sources
+            .contains(&runtime.0.join("board/tasks.jsonl").display().to_string()));
     }
 }

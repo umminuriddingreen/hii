@@ -18,6 +18,8 @@ pub struct LocalSchedule {
     pub cron: String,
     pub task: String,
     pub enabled: bool,
+    #[serde(default)]
+    pub workspace: Option<PathBuf>,
     pub created_at: DateTime<Local>,
 }
 
@@ -38,7 +40,7 @@ impl ScheduleService {
         })
     }
 
-    pub fn add(&self, cron: &str, task: &str) -> Result<String, String> {
+    pub fn add(&self, cron: &str, task: &str, workspace: &Path) -> Result<String, String> {
         Cron::parse(cron)?;
         if task.trim().is_empty() {
             return Err("schedule task cannot be empty".into());
@@ -49,6 +51,7 @@ impl ScheduleService {
             cron: cron.trim().into(),
             task: task.trim().into(),
             enabled: true,
+            workspace: Some(workspace.to_path_buf()),
             created_at: Local::now(),
         };
         schedules.push(item.clone());
@@ -76,7 +79,7 @@ impl ScheduleService {
                     .map(|date| date.format("%b %-d %-I:%M %p").to_string())
                     .unwrap_or_else(|_| "invalid".into());
                 format!(
-                    "{}  {}  {}  next {}",
+                    "{}  {}  {}  [{}]  next {}",
                     item.id,
                     if item.enabled {
                         item.cron.as_str()
@@ -84,6 +87,10 @@ impl ScheduleService {
                         "disabled"
                     },
                     item.task,
+                    item.workspace
+                        .as_deref()
+                        .unwrap_or(&self.paths.repo)
+                        .display(),
                     next
                 )
             })
@@ -101,10 +108,10 @@ impl ScheduleService {
             {
                 continue;
             }
-            let output = Command::new("node")
-                .arg(self.paths.repo.join("aii/daemon/hiid.mjs"))
-                .args(["codex", "run", &item.task])
-                .current_dir(&self.paths.repo)
+            let workspace = item.workspace.as_deref().unwrap_or(&self.paths.repo);
+            let output = Command::new(std::env::current_exe().map_err(|error| error.to_string())?)
+                .args(["--cwd", &workspace.display().to_string(), "run", &item.task])
+                .current_dir(workspace)
                 .output()
                 .map_err(|error| error.to_string())?;
             self.event(
@@ -113,12 +120,61 @@ impl ScheduleService {
                     "id": item.id,
                     "minute": minute_key,
                     "ok": output.status.success(),
-                    "output": String::from_utf8_lossy(&output.stdout).trim()
+                    "workspace": workspace,
+                    "output": String::from_utf8_lossy(&output.stdout).trim(),
+                    "error": String::from_utf8_lossy(&output.stderr).trim()
                 }),
             )?;
             fired += 1;
         }
         Ok(format!("{fired} schedule(s) fired"))
+    }
+
+    pub fn set_enabled(&self, id: &str, enabled: bool) -> Result<String, String> {
+        let mut schedules = self.read()?;
+        let item = schedules
+            .iter_mut()
+            .find(|item| item.id.starts_with(id))
+            .ok_or_else(|| format!("schedule not found: {id}"))?;
+        item.enabled = enabled;
+        let item = item.clone();
+        self.write(&schedules)?;
+        self.event(
+            if enabled {
+                "schedule.resumed"
+            } else {
+                "schedule.paused"
+            },
+            json!({"schedule": item}),
+        )?;
+        Ok(format!(
+            "{} {}",
+            if enabled { "Resumed" } else { "Paused" },
+            item.id
+        ))
+    }
+
+    pub fn remove(&self, id: &str) -> Result<String, String> {
+        let mut schedules = self.read()?;
+        let matches = schedules
+            .iter()
+            .filter(|item| item.id.starts_with(id))
+            .count();
+        if matches != 1 {
+            return Err(if matches == 0 {
+                format!("schedule not found: {id}")
+            } else {
+                format!("schedule id is ambiguous: {id}")
+            });
+        }
+        let index = schedules
+            .iter()
+            .position(|item| item.id.starts_with(id))
+            .expect("one matching schedule");
+        let item = schedules.remove(index);
+        self.write(&schedules)?;
+        self.event("schedule.removed", json!({"schedule": item}))?;
+        Ok(format!("Removed {}", item.id))
     }
 
     pub fn calendar_list(&self, days: i64) -> Result<String, String> {
@@ -468,6 +524,7 @@ impl<T> Pipe for T {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
     #[test]
     fn parses_standard_cron() {
         assert!(Cron::parse("*/15 9-17 * * 1-5").is_ok());
@@ -475,5 +532,42 @@ mod tests {
     #[test]
     fn rejects_bad_cron() {
         assert!(Cron::parse("every day").is_err());
+    }
+
+    #[test]
+    fn recurring_tasks_keep_workspace_and_support_pause_resume_remove() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("hii-schedule-{}-{nonce}", std::process::id()));
+        let runtime = root.join("runtime");
+        let repo = root.join("repo");
+        fs::create_dir_all(&repo).expect("repo");
+        let service = ScheduleService::new(&AppPaths {
+            repo: repo.clone(),
+            runtime: runtime.clone(),
+        })
+        .expect("service");
+        service
+            .write(&[LocalSchedule {
+                id: "sched-test".into(),
+                cron: "0 9 * * *".into(),
+                task: "review goals".into(),
+                enabled: true,
+                workspace: Some(repo.clone()),
+                created_at: Local::now(),
+            }])
+            .expect("seed");
+
+        service.set_enabled("sched-t", false).expect("pause");
+        let paused = service.read().expect("read paused");
+        assert!(!paused[0].enabled);
+        assert_eq!(paused[0].workspace.as_deref(), Some(repo.as_path()));
+        service.set_enabled("sched-t", true).expect("resume");
+        service.remove("sched-t").expect("remove");
+        assert!(service.read().expect("read removed").is_empty());
+        fs::remove_dir_all(root).expect("cleanup");
     }
 }

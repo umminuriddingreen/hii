@@ -27,6 +27,13 @@ const MONEY_IDEAS = path.join(MONEY_DIR, "ideas.jsonl");
 const MONEY_OFFERS_DIR = path.join(MONEY_DIR, "offers");
 const BOARD_DIR = path.join(RUNTIME, "board");
 const BOARD_TASKS = path.join(BOARD_DIR, "tasks.jsonl");
+const HII_PROFILE = path.join(RUNTIME, "profile.md");
+const HII_USER = path.join(RUNTIME, "user.md");
+const HERMES_USER = path.join(os.homedir(), ".hermes", "memories", "USER.md");
+const HII_SCHEDULES = path.join(RUNTIME, "schedules", "schedules.json");
+const HII_SKILL_INDEX = path.join(RUNTIME, "skills", "_index.json");
+const HERMES_SKILLS = path.join(os.homedir(), ".hermes", "skills");
+const HII_KNOWLEDGE_DB = path.join(RUNTIME, "hii.db");
 const HIID = path.join(ROOT, "aii", "daemon", "hiid.mjs");
 const HII_TUI = path.join(ROOT, "scripts", "hii-tui.mjs");
 const CODEX_APP_SERVER_PROBE = path.join(ROOT, "scripts", "hii-codex-app-server-probe.mjs");
@@ -190,6 +197,28 @@ function readJsonl(file) {
   } catch {
     return [];
   }
+}
+
+function personalContextSummary() {
+  const profile = [HII_PROFILE, HII_USER, HERMES_USER].find((file) => fs.existsSync(file));
+  const schedules = readJsonArray(HII_SCHEDULES)
+    .filter((item) => item?.enabled !== false)
+    .slice(0, 12)
+    .map((item) => ({
+      id: item.id,
+      cron: item.cron,
+      task: redactText(item.task ?? "").slice(0, 240),
+      workspace: item.workspace ?? ROOT
+    }));
+  return {
+    profile: profile ? fileExistsSummary(profile) : { path: HII_PROFILE, exists: false },
+    schedules: { path: HII_SCHEDULES, active: schedules.length, items: schedules },
+    knowledge: fileExistsSummary(HII_KNOWLEDGE_DB),
+    skills: {
+      hii: { path: HII_SKILL_INDEX, indexed: readJsonArray(HII_SKILL_INDEX).length },
+      hermes: { path: HERMES_SKILLS, available: fs.existsSync(HERMES_SKILLS), role: "local migration source" }
+    }
+  };
 }
 
 function appendJsonl(file, entry) {
@@ -1087,6 +1116,7 @@ function agentContextPayload() {
           updatedAt: task.updatedAt
         }))
       },
+      personalContext: personalContextSummary(),
       capabilityJobs: fileExistsSummary(LOCAL_CAPABILITY_JOBS),
       ogEvents: fileExistsSummary(OG_EVENTS),
       runtimePointers: runtimePointers(),
@@ -1138,6 +1168,7 @@ function agentHomePayload() {
       board: context.localState.boardTasks,
       activeJobs
     },
+    context: context.localState.personalContext,
     capabilities: context.capabilities
       .filter((capability) => capability.status === "ready" || capability.status === "partial")
       .map((capability) => ({ id: capability.id, status: capability.status })),
@@ -1188,6 +1219,7 @@ function cmdHome(args) {
   console.log(`runtime: ${payload.identity.runtime}`);
   console.log(`git:     ${payload.workspace.branch}${payload.workspace.clean ? " (clean)" : ` (${payload.workspace.changes.total} changes)`}`);
   console.log(`work:    ${payload.work.board.open} open tasks · ${payload.work.activeJobs.length} active jobs`);
+  console.log(`context: profile=${payload.context.profile.exists ? "ready" : "missing"} · ${payload.context.schedules.active} schedules · knowledge=${payload.context.knowledge.exists ? "ready" : "missing"} · ${payload.context.skills.hii.indexed} HII skills`);
   console.log(`caps:    ${payload.capabilities.length} ready or partial`);
   if (payload.nextActions.length) {
     console.log(`next:    ${payload.nextActions[0].track} — ${payload.nextActions[0].action}`);

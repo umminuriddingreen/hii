@@ -43,7 +43,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     const installed = installLauncher();
     console.log(`hii CLI launcher installed: ${installed.destination}`);
-    console.log('The launcher rebuilds after committed CLI changes and preserves the last release during dirty work.');
+    console.log('The launcher runs the current local HII source and rebuilds automatically whenever CLI source changes.');
   } catch (error) {
     console.error(`hii CLI launcher install failed: ${error.message}`);
     process.exit(1);

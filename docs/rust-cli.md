@@ -241,12 +241,12 @@ command or write evaluation receipts into the user's normal `~/.hii` runtime.
 The canonical global launcher is `scripts/hii-launcher.sh`. Install or refresh
 `/Users/ummi/bin/hii` with `npm run cli:install`. It executes
 `/Users/ummi/hii/target/release/hii`, builds it on first use when absent, and
-rebuilds when the clean, committed workspace manifest, lockfile, or CLI Rust
-source tree changed after the release binary was built. While those paths have
-uncommitted work, the launcher preserves the last successful release instead
-of compiling a partial multi-agent edit. `npm run ci:full` also builds the
-release workspace, so a green full CI run and the installed command exercise
-the same compiled source.
+fingerprints the manifests, lockfile, and CLI Rust source tree on every launch.
+Any local source change—including an uncommitted edit, addition, or deletion—
+rebuilds before the command runs. There is no separate CLI update step during
+local development. A compile failure is surfaced instead of silently running a
+stale binary. `npm run ci:full` also builds the release workspace, so a green
+full CI run and the installed command exercise the same source.
 
 ## Migration rule
 

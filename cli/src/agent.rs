@@ -1400,17 +1400,17 @@ fn system_prompt(
 Workspace: {workspace}
 {limit} Dry run: {dry_run}.
 Done when: {done_when}
-Acceptance checks: {declared_verification}
+Checks: {declared_verification}
 
-Loop: inspect -> act -> verify -> final. Act on the smallest safe relevant step; never narrate search plans.
+Loop: inspect -> act -> verify -> final. Act on the smallest safe step; never narrate search plans.
 Edit with edit or write; workspace shell redirects are refused.
 Proof: one flat {{"type":"verify","command":"npm test"}} or http action; shell/read/list/search never count.
 One JSON action/turn. Types:
-read,list,search,web_search,web_fetch,write,edit,shell,verify,http,hii_context,og_next,caps_check,board_read,board_write,skill_search,bridge_send,bridge_read.
+read,list,search,web_search,web_fetch,write,edit,shell,verify,http,hii_context,og_next,caps_check,board_read,board_write,skill_search,schedule_read,schedule_write,bridge_send,bridge_read.
 Fields: path,query,command,content,old,new,replace_all,offset,limit,url.
 Finish: {{"type":"final","summary":"result","verification":["checks run"],"next":null}}
 
-Read AGENTS.md. Use minimal, sliced context. Preserve unclear work. Verify changes. Stay inside the workspace; never publish, push, spend, message, or read secrets. Deletion needs live approval; never hide it in a script. Never claim unrun proof."#,
+Read AGENTS.md. Use minimal context. Preserve unclear work. Verify changes. Stay inside the workspace; never publish, push, spend, message, or read secrets. Deletion needs live approval; never hide it in a script. Never claim unrun proof."#,
         workspace = workspace.display()
     )
 }
@@ -1834,6 +1834,8 @@ pub(crate) fn parse_action(raw: &str) -> Result<Action, String> {
             | "board_read"
             | "board_write"
             | "skill_search"
+            | "schedule_read"
+            | "schedule_write"
             | "bridge_send"
             | "bridge_read"
     ) {
@@ -2461,7 +2463,10 @@ fn model_selection_is_strict_and_defaults_per_provider() {
 
     // An Ollama tag can never appear in a native catalog, so the native
     // default must be resolved from the provider, not from one shared string.
-    let native = vec![DEFAULT_NATIVE_MODEL.to_string(), "Qwen/Qwen3-4B".to_string()];
+    let native = vec![
+        DEFAULT_NATIVE_MODEL.to_string(),
+        "Qwen/Qwen3-4B".to_string(),
+    ];
     assert_eq!(
         choose_model_with_env(None, None, ModelProvider::Native, &native).unwrap(),
         DEFAULT_NATIVE_MODEL

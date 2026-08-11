@@ -22,6 +22,8 @@ pub const HII_TOOLS: &[&str] = &[
     "board_read",
     "board_write",
     "skill_search",
+    "schedule_read",
+    "schedule_write",
     "bridge_send",
     "bridge_read",
     "object_list",
@@ -34,7 +36,7 @@ pub fn is_hii_tool(tool: &str) -> bool {
 
 /// Does this HII tool change state (and so count as a mutation for authority)?
 pub fn is_mutating(tool: &str) -> bool {
-    matches!(tool, "board_write" | "bridge_send")
+    matches!(tool, "board_write" | "schedule_write" | "bridge_send")
 }
 
 /// Dispatch an HII tool. `repo` is the HII repository root; `query` carries the
@@ -53,7 +55,16 @@ pub fn execute(repo: &Path, tool: &str, query: Option<&str>) -> ToolResult {
                 hii(repo, &["task", arg])
             }
         }
-        "skill_search" => hii(repo, &["skills", "search", arg]),
+        "skill_search" => skill_search(repo, arg),
+        "schedule_read" => hii(repo, &["schedule", "list"]),
+        "schedule_write" => {
+            let (cron, task) = arg.split_once("::").unwrap_or(("", ""));
+            if cron.trim().is_empty() || task.trim().is_empty() {
+                Err("schedule_write needs `<five-field cron>::<task>` in `query`".to_string())
+            } else {
+                hii(repo, &["schedule", "add", cron.trim(), task.trim()])
+            }
+        }
         "bridge_send" => {
             if arg.is_empty() {
                 Err("bridge_send needs a message in `query`".to_string())
@@ -99,6 +110,62 @@ pub fn execute(repo: &Path, tool: &str, query: Option<&str>) -> ToolResult {
             output,
             verification: false,
         },
+    }
+}
+
+fn skill_search(repo: &Path, query: &str) -> Result<String, String> {
+    let mut sections = Vec::new();
+    if let Ok(hii_output) = hii(repo, &["skills", "search", query]) {
+        if !hii_output.trim().is_empty() {
+            sections.push(format!("HII registered skills\n{}", hii_output.trim()));
+        }
+    }
+    let Some(home) = dirs::home_dir() else {
+        return Ok(sections.join("\n\n"));
+    };
+    let root = home.join(".hermes/skills");
+    let mut matches = Vec::new();
+    collect_matching_skills(&root, &query.to_ascii_lowercase(), &mut matches);
+    matches.sort();
+    for path in matches.into_iter().take(3) {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            sections.push(format!(
+                "Hermes skill migration source\nsource: {}\n{}",
+                path.display(),
+                content.chars().take(12_000).collect::<String>()
+            ));
+        }
+    }
+    if sections.is_empty() {
+        Err(format!("no local HII or Hermes skill matched: {query}"))
+    } else {
+        Ok(sections.join("\n\n"))
+    }
+}
+
+fn collect_matching_skills(root: &Path, query: &str, matches: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_matching_skills(&path, query, matches);
+        } else if path.file_name().and_then(|name| name.to_str()) == Some("SKILL.md") {
+            let haystack = format!(
+                "{} {}",
+                path.display(),
+                std::fs::read_to_string(&path)
+                    .unwrap_or_default()
+                    .chars()
+                    .take(2_000)
+                    .collect::<String>()
+            )
+            .to_ascii_lowercase();
+            if query.is_empty() || query.split_whitespace().all(|term| haystack.contains(term)) {
+                matches.push(path);
+            }
+        }
     }
 }
 
@@ -172,6 +239,23 @@ fn compact_context(raw: String) -> Result<String, String> {
         })
         .collect::<Vec<_>>()
         .join("\n");
+    let schedules = context["localState"]["personalContext"]["schedules"]["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .take(8)
+        .filter_map(|item| {
+            Some(format!(
+                "- {}  {}",
+                item["cron"].as_str()?,
+                item["task"].as_str()?
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let profile = context["localState"]["personalContext"]["profile"]["path"]
+        .as_str()
+        .unwrap_or("none");
     let repo = context["identity"]["repo"].as_str().unwrap_or("unknown");
     let branch = context["git"]["branch"].as_str().unwrap_or("unknown");
     let total = context["git"]["worktree"]["counts"]["total"]
@@ -181,10 +265,11 @@ fn compact_context(raw: String) -> Result<String, String> {
         .as_u64()
         .unwrap_or(0);
     Ok(format!(
-        "HII CURRENT CONTEXT\nrepo: {repo}\nbranch: {branch}\nworktree: {total} change(s)\nfiles: {}\n\nRECENT COMMITS\n{}\n\nOPEN BOARD ({open})\n{}\n\nRECENT RUNS\n{}\n\nLIKELY NEXT\n{}",
+        "HII CURRENT CONTEXT\nrepo: {repo}\nbranch: {branch}\nworktree: {total} change(s)\nfiles: {}\nprofile: {profile}\n\nRECENT COMMITS\n{}\n\nOPEN BOARD ({open})\n{}\n\nACTIVE SCHEDULES\n{}\n\nRECENT RUNS\n{}\n\nLIKELY NEXT\n{}",
         if paths.is_empty() { "none" } else { &paths },
         if commits.is_empty() { "none" } else { &commits },
         if tasks.is_empty() { "none" } else { &tasks },
+        if schedules.is_empty() { "none" } else { &schedules },
         if jobs.is_empty() { "none" } else { &jobs },
         if next.is_empty() { "none" } else { &next }
     ))
