@@ -15,6 +15,12 @@ longer a separate product, brand, app, repo, or planning track. Existing `aii/`
 paths are internal HII runtime migration debt until moved behind CLI-owned
 modules and commands.
 
+The cleanup is not primarily a rename. HII must first make one boring, fast,
+receipt-backed CLI loop excellent: intent, approved context, bounded work,
+verification, saved receipt, and repeatable capability. If that loop cannot
+repeatedly complete concrete external tasks with less prompting and clear proof,
+new or expanded surfaces are still decoration.
+
 ## Authority and use
 
 Agents must distinguish four levels of truth:
@@ -152,6 +158,12 @@ configuration, and skill promotion.
 The CLI is the primary product and control surface for now. Visual surfaces are
 named **HII** when they are used, but they are projections over CLI-owned HII
 state and proof history.
+
+Do not expand product surfaces until the CLI loop is strong enough to finish
+useful work outside HII development. Web, Tauri, Notch, Browser, Create, and
+spatial workspace work must either expose existing CLI-owned state or remove
+friction from the intent-to-receipt loop; they must not become parallel product
+tracks.
 
 HII answers:
 
@@ -488,6 +500,11 @@ strategically aligned modules. They must consume the same HII CLI/runtime
 context, policy, proof, memory, and capability substrate rather than create
 competing systems.
 
+`aii/workstation` is not a forward surface. Archive it or mine it for useful
+runtime ideas only. Useful `aii/*` pieces belong behind `hii agent`, `hii caps`,
+`hii skills`, `hii proof`, `hii context`, and `hii work`, with receipts as the
+completion boundary.
+
 ## Current implementation sequence
 
 ```text
@@ -510,6 +527,16 @@ ADR = README = AGENTS.md = CLI help = UI = database = capability metadata
 ```
 
 Truth fragmentation is a larger immediate risk than missing features.
+
+The current product acceptance test is not a larger interface. It is a concrete
+external task completed through:
+
+```text
+intent -> context -> bounded CLI work -> verification -> receipt -> repeatable report
+```
+
+HII development tasks may prove implementation health, but non-HII tasks prove
+product value.
 
 ## Agent operating directive
 

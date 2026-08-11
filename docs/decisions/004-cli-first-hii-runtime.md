@@ -31,6 +31,11 @@ The CLI is the narrowest place to make that loop reliable because it can own
 state inspection, execution, proof, receipts, local models, provider handoffs,
 and automation without requiring a polished visual surface first.
 
+This cleanup is not mainly a rename. The real product win is one boring, fast,
+receipt-backed CLI loop that can run useful work outside HII development with
+less prompting, clear proof, and a saved receipt. Until that loop repeatedly
+finishes concrete external tasks, additional surfaces are decoration.
+
 ## Consequences
 
 - New HII capabilities start as CLI commands or CLI-backed internal modules.
@@ -43,6 +48,11 @@ and automation without requiring a polished visual surface first.
   and `aii/model-runtime` should be treated as HII runtime migration targets.
 - Do not create another daemon, workstation, registry, memory store, or agent
   control plane outside HII CLI ownership.
+- Stop expanding product surfaces until the CLI loop from intent to context to
+  bounded work to verification to receipt is excellent.
+- Treat non-HII-development tasks as the acceptance test for agent usefulness.
+  The CLI must prove it can repeatedly complete bounded external work with
+  less re-prompting, inspectable proof, and durable receipts.
 
 ## Migration Order
 
@@ -65,6 +75,18 @@ npm run cli:check
 bash cli/scripts/regression.sh
 npm run hii:agent-home:check
 npm run hii:launcher:check
+```
+
+Architecture cleanup is not product-successful until HII also demonstrates a
+real external-task loop:
+
+```text
+concrete non-HII task
+-> approved context pack
+-> bounded CLI-run work
+-> verification named in the receipt
+-> saved receipt visible through hii proof
+-> repeatable skill/report candidate when appropriate
 ```
 
 For any change touching web projections, also run:
