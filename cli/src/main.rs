@@ -784,7 +784,9 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 } else {
                     reply
                 };
-                tui::reply(&reply, None);
+                if !reply.trim().is_empty() {
+                    tui::reply(&reply, None);
+                }
             }
             Err(error) => tui::error(&error),
         }

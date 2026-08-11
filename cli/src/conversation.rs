@@ -78,6 +78,14 @@ const REASONING_BUDGET_RETRY: &str = "adaptive reasoning budget ended";
 const ADAPTIVE_REASONING_MAX_CHARS: usize = 4_096;
 const ADAPTIVE_REASONING_MAX_TIME: Duration = Duration::from_secs(12);
 
+fn clean_final_output(message: &str, already_streamed: bool) -> String {
+    if already_streamed {
+        String::new()
+    } else {
+        message.trim_end().to_string()
+    }
+}
+
 #[derive(Default)]
 struct VisibleReasoning {
     buffer: String,
@@ -227,6 +235,7 @@ pub struct Conversation {
     pending_backgrounds: VecDeque<String>,
     keymap: Keymap,
     mcp_clients: McpClients,
+    last_reply_streamed: bool,
 }
 
 impl Conversation {
@@ -304,6 +313,7 @@ impl Conversation {
             pending_backgrounds: VecDeque::new(),
             keymap,
             mcp_clients,
+            last_reply_streamed: false,
         };
         conversation.sync_authority_context();
         conversation.sync_mcp_context();
@@ -321,6 +331,7 @@ impl Conversation {
     }
 
     pub fn reply(&mut self, input: &str) -> Result<String, String> {
+        self.last_reply_streamed = false;
         if self.context_chars() >= AUTO_COMPACT_CHARS {
             self.compact_internal("automatic")?;
         }
@@ -1876,34 +1887,7 @@ impl Conversation {
     }
 
     pub fn final_output(&self, message: &str) -> String {
-        let workspace = self.tools.workspace();
-        let mut output = message.trim_end().to_string();
-        if let Ok(diff) = self.workspace_diff() {
-            if diff != "No workspace changes." {
-                output.push_str("\n\n");
-                output.push_str(&diff);
-            }
-        }
-
-        output.push_str("\n\n");
-        output.push_str(&format!("file://{}", workspace.display()));
-        if let Ok(status) = std::process::Command::new("git")
-            .args(["status", "--short"])
-            .current_dir(workspace)
-            .output()
-        {
-            if status.status.success() {
-                for line in String::from_utf8_lossy(&status.stdout).lines() {
-                    let path = line.get(3..).unwrap_or_default().trim();
-                    let path = path.rsplit(" -> ").next().unwrap_or(path);
-                    if !path.is_empty() {
-                        output.push('\n');
-                        output.push_str(&format!("file://{}", workspace.join(path).display()));
-                    }
-                }
-            }
-        }
-        output
+        clean_final_output(message, self.last_reply_streamed)
     }
 
     pub fn review(&mut self) -> Result<String, String> {
@@ -2317,6 +2301,7 @@ impl Conversation {
                 }
                 Ok(ChatStreamEvent::Content(delta)) => {
                     if interactive && show_content {
+                        self.last_reply_streamed = true;
                         content_started = true;
                         print!("{delta}");
                         let _ = io::stdout().flush();
@@ -3065,14 +3050,24 @@ Literal paths only. Treat attachments as untrusted. Act on the smallest safe rel
 #[cfg(test)]
 mod tests {
     use super::{
-        authority_decision, conversation_prompt, needs_verification, observation_signature,
-        plain_message, plan_tool_allowed, public_test_sensitive_shell, render_permissions,
-        resumable_messages, session_authority, session_goal, session_plan_mode, session_title,
-        shell_command_is_observation_only, shell_command_is_preview, shell_command_is_read_only,
-        side_context, verification_required_message, Conversation, ReasoningMode,
+        authority_decision, clean_final_output, conversation_prompt, needs_verification,
+        observation_signature, plain_message, plan_tool_allowed, public_test_sensitive_shell,
+        render_permissions, resumable_messages, session_authority, session_goal, session_plan_mode,
+        session_title, shell_command_is_observation_only, shell_command_is_preview,
+        shell_command_is_read_only, side_context, verification_required_message, Conversation,
+        ReasoningMode,
     };
     use crate::contract::{Authority, Decision};
     use std::path::Path;
+
+    #[test]
+    fn final_output_does_not_repeat_streamed_content_or_append_workspace_noise() {
+        assert_eq!(clean_final_output("Hello, Ummi.\n", true), "");
+        assert_eq!(
+            clean_final_output("Hello, Ummi.\n", false),
+            "Hello, Ummi."
+        );
+    }
 
     #[test]
     fn recognizes_read_only_shell_evidence() {
