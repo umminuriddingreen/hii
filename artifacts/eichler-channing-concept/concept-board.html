@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Channing Court Concept Board</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1d2724;
+      --muted: #53615c;
+      --paper: #f6f0e5;
+      --panel: #fffaf0;
+      --line: #25302d;
+      --green: #7fa68e;
+      --blue: #9eb0c5;
+      --ochre: #d5bd8c;
+      --clay: #b97358;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+    }
+    main {
+      width: min(1180px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 36px 0 48px;
+    }
+    header {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 28px;
+      align-items: end;
+      border-bottom: 3px solid var(--line);
+      padding-bottom: 24px;
+    }
+    h1 {
+      font-size: clamp(44px, 7vw, 96px);
+      line-height: 0.9;
+      margin: 0;
+      letter-spacing: 0;
+    }
+    .kicker, .small {
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.45;
+    }
+    .facts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .fact {
+      border: 2px solid var(--line);
+      background: var(--panel);
+      padding: 14px;
+      min-height: 74px;
+    }
+    .fact strong {
+      display: block;
+      font-size: 22px;
+    }
+    section {
+      margin-top: 28px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .tile {
+      background: var(--panel);
+      border: 2px solid var(--line);
+      min-height: 220px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .tile h2 {
+      font-size: 26px;
+      margin: 0 0 10px;
+      line-height: 1;
+    }
+    .swatch {
+      height: 84px;
+      border: 2px solid var(--line);
+      margin-top: 20px;
+    }
+    .green { background: var(--green); }
+    .blue { background: var(--blue); }
+    .ochre { background: var(--ochre); }
+    .clay { background: var(--clay); }
+    .wide {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 18px;
+    }
+    .diagram {
+      background: var(--panel);
+      border: 2px solid var(--line);
+      min-height: 520px;
+      padding: 16px;
+    }
+    .diagram img {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    .moves {
+      display: grid;
+      gap: 14px;
+    }
+    .move {
+      border-left: 14px solid var(--green);
+      background: var(--panel);
+      padding: 18px 20px;
+      min-height: 94px;
+    }
+    .move:nth-child(2) { border-color: var(--blue); }
+    .move:nth-child(3) { border-color: var(--ochre); }
+    .move:nth-child(4) { border-color: var(--clay); }
+    .move h3 { margin: 0 0 8px; font-size: 22px; }
+    .move p { margin: 0; color: var(--muted); line-height: 1.45; }
+    .qr {
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 18px;
+      align-items: center;
+      border: 3px solid var(--line);
+      background: var(--panel);
+      padding: 18px;
+    }
+    .qrbox {
+      width: 160px;
+      aspect-ratio: 1;
+      border: 3px solid var(--line);
+      background:
+        linear-gradient(90deg, var(--ink) 14px, transparent 14px 28px, var(--ink) 28px 42px, transparent 42px),
+        linear-gradient(var(--ink) 14px, transparent 14px 28px, var(--ink) 28px 42px, transparent 42px);
+      background-size: 56px 56px;
+      background-color: #fff;
+    }
+    @media (max-width: 820px) {
+      header, .wide, .qr { grid-template-columns: 1fr; }
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 520px) {
+      main { width: min(100vw - 24px, 1180px); padding-top: 20px; }
+      .grid, .facts { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="kicker">Bay Area Eichler retrofit concept / HII project object</p>
+        <h1>Channing Court</h1>
+      </div>
+      <div class="facts">
+        <div class="fact"><strong>1601 Channing</strong><span>Palo Alto, CA</span></div>
+        <div class="fact"><strong>1951</strong><span>single-story modern home</span></div>
+        <div class="fact"><strong>7,125 sf</strong><span>public listing lot area</span></div>
+        <div class="fact"><strong>R1</strong><span>preserve low neighborhood rhythm</span></div>
+      </div>
+    </header>
+
+    <section class="grid" aria-label="Design palette">
+      <article class="tile">
+        <h2>Atrium Calm</h2>
+        <p class="small">Restore the outdoor room as daylight, air, and social core.</p>
+        <div class="swatch green"></div>
+      </article>
+      <article class="tile">
+        <h2>Service Spine</h2>
+        <p class="small">Electrification, storage, laundry, and maker/work functions in one disciplined band.</p>
+        <div class="swatch blue"></div>
+      </article>
+      <article class="tile">
+        <h2>Rear Pavilion</h2>
+        <p class="small">A low garden room that can shift between office, guest suite, and ADU-ready lease space.</p>
+        <div class="swatch ochre"></div>
+      </article>
+      <article class="tile">
+        <h2>QR Commons</h2>
+        <p class="small">A public project node for feedback, bids, bookings, and budget movement.</p>
+        <div class="swatch clay"></div>
+      </article>
+    </section>
+
+    <section class="wide">
+      <div class="diagram">
+        <img src="site-plan.svg" alt="Diagrammatic site plan for Channing Court">
+      </div>
+      <div class="moves">
+        <article class="move">
+          <h3>Keep the front quiet</h3>
+          <p>The street elevation remains low, horizontal, and neighbor-compatible.</p>
+        </article>
+        <article class="move">
+          <h3>Make the middle work</h3>
+          <p>The service spine handles the invisible work: electrification, storage, utility, and flexibility.</p>
+        </article>
+        <article class="move">
+          <h3>Turn the rear into value</h3>
+          <p>The garden room tests lease, work, guest, and ADU scenarios without forcing a second story.</p>
+        </article>
+        <article class="move">
+          <h3>Let the site talk</h3>
+          <p>The QR sign gathers local feedback and pre-commitments before the project spends full construction money.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="qr">
+      <div class="qrbox" aria-hidden="true"></div>
+      <div>
+        <h2>Scan-to-Signal Layer</h2>
+        <p class="small">A HII project page would collect votes, comments, contractor bids, ADU lease interest, sponsor packages, and investor allocation signals. Each meaningful action becomes a receipt attached to the project.</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

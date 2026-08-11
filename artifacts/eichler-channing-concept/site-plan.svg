@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1180" role="img" aria-labelledby="title desc">
+  <title id="title">Channing Court Eichler Retrofit Site Concept</title>
+  <desc id="desc">Conceptual site plan for 1601 Channing Ave Palo Alto showing existing Eichler house, atrium, rear garden room ADU option, service spine, permeable garden, and QR project sign.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7f3ea; }
+      .lot { fill: #fbfaf5; stroke: #26322f; stroke-width: 4; }
+      .house { fill: #d7c6a2; stroke: #26322f; stroke-width: 3; }
+      .new { fill: #8fb5a2; stroke: #26322f; stroke-width: 3; }
+      .atrium { fill: #dbe8cf; stroke: #627567; stroke-width: 3; stroke-dasharray: 8 8; }
+      .garden { fill: #c9d8ba; stroke: #627567; stroke-width: 2; }
+      .service { fill: #b9c7d8; stroke: #26322f; stroke-width: 2; }
+      .path { fill: none; stroke: #7c6d56; stroke-width: 12; stroke-linecap: round; stroke-dasharray: 16 18; }
+      .tree { fill: #486b4d; }
+      .trunk { fill: #7c5a3b; }
+      .text { font-family: Arial, Helvetica, sans-serif; fill: #1f2926; }
+      .small { font-size: 22px; }
+      .med { font-size: 30px; font-weight: 700; }
+      .title { font-size: 40px; font-weight: 700; }
+      .note { font-size: 19px; fill: #4b5551; }
+      .qr { fill: #fff; stroke: #26322f; stroke-width: 3; }
+      .qrbit { fill: #26322f; }
+    </style>
+  </defs>
+  <rect class="bg" width="900" height="1180"/>
+  <text class="text title" x="70" y="70">Channing Court</text>
+  <text class="text small" x="70" y="106">1601 Channing Ave, Palo Alto - concept site plan</text>
+  <text class="text note" x="70" y="136">Diagrammatic only. Final dimensions require survey, parcel report, tree review, and code analysis.</text>
+
+  <rect class="lot" x="150" y="190" width="600" height="760" rx="0"/>
+  <text class="text med" x="388" y="180">Approx. 75' x 95' lot</text>
+  <text class="text small" x="390" y="985">Channing Ave / public edge</text>
+
+  <rect class="house" x="235" y="520" width="430" height="245"/>
+  <text class="text med" x="285" y="555">Existing Eichler-era house</text>
+  <text class="text small" x="285" y="590">single-story public identity retained</text>
+
+  <rect class="atrium" x="395" y="590" width="115" height="92"/>
+  <text class="text small" x="410" y="642">Atrium</text>
+
+  <rect class="service" x="235" y="470" width="430" height="42"/>
+  <text class="text small" x="275" y="499">all-electric service spine + storage + maker/work wall</text>
+
+  <rect class="new" x="455" y="270" width="205" height="145"/>
+  <text class="text med" x="480" y="318">Garden room</text>
+  <text class="text small" x="486" y="353">office / guest / ADU-ready</text>
+  <text class="text small" x="486" y="383">single-story rear pavilion</text>
+
+  <rect class="garden" x="235" y="270" width="180" height="145"/>
+  <text class="text med" x="273" y="327">Food +</text>
+  <text class="text med" x="265" y="362">shade garden</text>
+
+  <path class="path" d="M455 735 C455 660 455 510 555 415"/>
+  <text class="text small" x="520" y="690">covered exterior commons</text>
+
+  <circle class="tree" cx="215" cy="248" r="34"/>
+  <rect class="trunk" x="211" y="248" width="8" height="28"/>
+  <circle class="tree" cx="704" cy="455" r="30"/>
+  <rect class="trunk" x="700" y="455" width="8" height="26"/>
+  <circle class="tree" cx="205" cy="855" r="30"/>
+  <rect class="trunk" x="201" y="855" width="8" height="24"/>
+  <text class="text note" x="174" y="228">tree review zone</text>
+
+  <rect class="qr" x="555" y="820" width="92" height="92"/>
+  <rect class="qrbit" x="570" y="835" width="18" height="18"/>
+  <rect class="qrbit" x="606" y="835" width="18" height="18"/>
+  <rect class="qrbit" x="570" y="871" width="18" height="18"/>
+  <rect class="qrbit" x="624" y="871" width="18" height="18"/>
+  <rect class="qrbit" x="606" y="889" width="18" height="18"/>
+  <text class="text small" x="420" y="810">QR project sign:</text>
+  <text class="text note" x="415" y="945">scan for concept, feedback, pre-booking, bids, and budget ladder</text>
+
+  <text class="text med" x="70" y="1055">Project moves</text>
+  <text class="text small" x="70" y="1090">1. Preserve street silhouette  2. Restore atrium  3. Add service spine</text>
+  <text class="text small" x="70" y="1125">4. Rear ADU-ready pavilion  5. Publish QR-backed HII project object</text>
+</svg>
