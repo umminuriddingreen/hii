@@ -75,6 +75,19 @@ pub struct Receipt {
     /// receipt as stronger evidence than it carries.
     #[serde(default)]
     pub completion: Option<CompletionAssessment>,
+    // --- schema v7: user-owned model policy, autonomy, and learning ---
+    #[serde(default)]
+    pub model_source: Option<String>,
+    #[serde(default)]
+    pub autonomy_level: Option<String>,
+    #[serde(default)]
+    pub learning_candidates: Vec<String>,
+    #[serde(default)]
+    pub user_corrections: Vec<String>,
+    #[serde(default)]
+    pub failure_patterns: Vec<String>,
+    #[serde(default)]
+    pub skill_draft_ref: Option<String>,
 }
 
 /// Why a run ended, at the granularity the exit code reports.
@@ -576,6 +589,12 @@ mod tests {
             outcome: "completed".into(),
             exit_code: 0,
             completion: None,
+            model_source: None,
+            autonomy_level: None,
+            learning_candidates: Vec::new(),
+            user_corrections: Vec::new(),
+            failure_patterns: Vec::new(),
+            skill_draft_ref: None,
         }
     }
 

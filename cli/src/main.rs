@@ -15,6 +15,7 @@ mod hii_tools;
 mod hooks;
 mod keyboard;
 mod keymap;
+mod learning;
 mod legacy;
 mod mcp;
 mod mcp_client;
@@ -28,7 +29,7 @@ mod system_monitor;
 mod tools;
 mod tui;
 
-use agent::{RunOptions, RunOutput};
+use agent::{AutonomyLevel, RunOptions, RunOutput};
 use budget::{Budgets, DEFAULT_WALL_CLOCK_SECS};
 use clap::{Parser, Subcommand, ValueEnum};
 use config::{AppPaths, DEFAULT_MAX_STEPS};
@@ -202,6 +203,15 @@ enum Commands {
             help = "Start even when a declared --verify command's program is missing"
         )]
         allow_missing_verify_deps: bool,
+        #[arg(long, help = "Use the stricter native coding agent loop")]
+        coding: bool,
+        #[arg(
+            long,
+            value_enum,
+            default_value_t = AutonomyArg::LocalFull,
+            help = "Autonomy mode: local-full | approval"
+        )]
+        autonomy: AutonomyArg,
         #[arg(
             long,
             value_name = "PATH",
@@ -370,6 +380,22 @@ enum ScheduleCommand {
     Tick,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+enum AutonomyArg {
+    Approval,
+    #[default]
+    LocalFull,
+}
+
+impl From<AutonomyArg> for AutonomyLevel {
+    fn from(value: AutonomyArg) -> Self {
+        match value {
+            AutonomyArg::Approval => AutonomyLevel::Approval,
+            AutonomyArg::LocalFull => AutonomyLevel::LocalFull,
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let paths = match AppPaths::discover() {
         Ok(paths) => paths,
@@ -421,6 +447,8 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             quiet,
             stream,
             allow_missing_verify_deps,
+            coding,
+            autonomy,
             last_message,
         }) => {
             let workspace = cli
@@ -476,6 +504,8 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     },
                     last_message,
                     hooks: lifecycle_hooks_enabled(cli.no_hooks, cli.session_profile),
+                    coding,
+                    autonomy_level: autonomy.into(),
                 },
             )?;
             // The receipt records the code it expects, so the shell and the
@@ -720,6 +750,8 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Some(SlashCommand::Thinking(mode)) => conversation.thinking(mode.as_deref()),
             Some(SlashCommand::Reasoning(mode)) => conversation.reasoning(mode.as_deref()),
             Some(SlashCommand::Mode(mode)) => conversation.mode(mode.as_deref()),
+            Some(SlashCommand::Autonomy(mode)) => conversation.autonomy(mode.as_deref()),
+            Some(SlashCommand::Learn(requested)) => conversation.learn(&requested),
             Some(SlashCommand::Theme(theme)) => conversation.theme(theme.as_deref()),
             Some(SlashCommand::Keymap(requested)) => {
                 conversation.keymap_command(requested.as_deref())
@@ -834,6 +866,8 @@ enum SlashCommand {
     Thinking(Option<String>),
     Reasoning(Option<String>),
     Mode(Option<String>),
+    Autonomy(Option<String>),
+    Learn(String),
     Theme(Option<String>),
     Keymap(Option<String>),
     Model(Option<String>),
@@ -909,6 +943,8 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         "/thinking" => SlashCommand::Thinking(argument),
         "/reasoning" => SlashCommand::Reasoning(argument),
         "/mode" => SlashCommand::Mode(argument),
+        "/autonomy" => SlashCommand::Autonomy(argument),
+        "/learn" => SlashCommand::Learn(rest.to_string()),
         "/theme" => SlashCommand::Theme(argument),
         "/keymap" => SlashCommand::Keymap(argument),
         "/raw" => match rest {
@@ -1013,7 +1049,7 @@ fn slash_help() -> String {
     )
     .replace(
         "/thinking [mode]              off | compact | raw model stream\n",
-        "/thinking [mode]              off | compact | raw display\n/reasoning [mode]             auto | off | deep model effort\n/mode [auto|local|private|best]\n                               choose utility/privacy routing\n",
+        "/thinking [mode]              off | compact | raw display\n/reasoning [mode]             auto | off | deep model effort\n/mode [coding|general|auto|local|private|best]\n                               choose coding behavior or provider routing\n/autonomy [local-full|approval]\n                               choose local autonomy policy\n/model save                   persist the current user-determined model\n/learn [status]               show learning memory\nAuto-compact is on by default.\n",
     )
 }
 

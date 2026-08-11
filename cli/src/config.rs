@@ -1,4 +1,8 @@
-use std::{env, path::PathBuf};
+use serde::{Deserialize, Serialize};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 pub const DEFAULT_MODEL: &str = "qwen3.6:35b-mlx";
 pub const DEFAULT_REVIEW_MODEL: &str = "qwen3.6:35b-mlx";
@@ -56,12 +60,26 @@ impl ModelProvider {
             ModelProvider::Ollama | ModelProvider::LmStudio => DEFAULT_REVIEW_MODEL,
         }
     }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            ModelProvider::Ollama => "ollama",
+            ModelProvider::LmStudio => "lmstudio",
+            ModelProvider::Native => "native",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct AppPaths {
     pub repo: PathBuf,
     pub runtime: PathBuf,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct UserModelPreference {
+    pub provider: Option<String>,
+    pub model: String,
 }
 
 impl AppPaths {
@@ -87,10 +105,48 @@ impl AppPaths {
             .trim_end_matches('/')
             .to_string()
     }
+
+    pub fn user_model_preference(&self) -> Result<Option<UserModelPreference>, String> {
+        let path = self.runtime.join("config/model.json");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let raw = fs::read_to_string(path).map_err(|error| error.to_string())?;
+        let preference: UserModelPreference =
+            serde_json::from_str(&raw).map_err(|error| error.to_string())?;
+        if preference.model.trim().is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(preference))
+        }
+    }
+
+    pub fn save_user_model_preference(
+        &self,
+        provider: ModelProvider,
+        model: &str,
+    ) -> Result<PathBuf, String> {
+        let path = self.runtime.join("config/model.json");
+        ensure_parent(&path)?;
+        let preference = UserModelPreference {
+            provider: Some(provider.id().into()),
+            model: model.trim().to_string(),
+        };
+        let raw = serde_json::to_string_pretty(&preference).map_err(|error| error.to_string())?;
+        fs::write(&path, format!("{raw}\n")).map_err(|error| error.to_string())?;
+        Ok(path)
+    }
 }
 
 /// Cross-platform home directory. Uses `dirs::home_dir()` so it resolves
 /// `USERPROFILE` on Windows and `HOME` on Unix.
 pub fn home_dir() -> Result<PathBuf, String> {
     dirs::home_dir().ok_or_else(|| "could not determine the home directory".to_string())
+}
+
+fn ensure_parent(path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }

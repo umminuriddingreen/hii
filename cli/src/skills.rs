@@ -334,6 +334,12 @@ mod tests {
             outcome: "completed".into(),
             exit_code: 0,
             completion,
+            model_source: None,
+            autonomy_level: None,
+            learning_candidates: Vec::new(),
+            user_corrections: Vec::new(),
+            failure_patterns: Vec::new(),
+            skill_draft_ref: None,
         }
     }
 

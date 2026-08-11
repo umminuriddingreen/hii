@@ -70,6 +70,8 @@ pub struct RunOptions {
     pub allow_missing_verify_deps: bool,
     pub last_message: Option<PathBuf>,
     pub hooks: bool,
+    pub coding: bool,
+    pub autonomy_level: AutonomyLevel,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,6 +80,21 @@ pub enum RunOutput {
     Json,
     Jsonl,
     Quiet,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AutonomyLevel {
+    Approval,
+    LocalFull,
+}
+
+impl AutonomyLevel {
+    pub fn label(self) -> &'static str {
+        match self {
+            AutonomyLevel::Approval => "approval",
+            AutonomyLevel::LocalFull => "local-full",
+        }
+    }
 }
 
 impl RunOutput {
@@ -221,7 +238,28 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let git_before = tools.git_snapshot();
     let ollama = Ollama::discover().ensure_reachable()?;
     let models = ollama.models()?;
-    let model = choose_model(options.model.as_deref(), ollama.provider(), &models)?;
+    let saved_model = if options.model.is_none() {
+        paths
+            .user_model_preference()?
+            .map(|preference| preference.model)
+    } else {
+        None
+    };
+    let model_source = if options.model.is_some() {
+        "explicit"
+    } else if saved_model.is_some() {
+        "saved-user"
+    } else if std::env::var_os("HII_MODEL").is_some() {
+        "env"
+    } else {
+        "provider-default"
+    }
+    .to_string();
+    let model = choose_model(
+        options.model.as_deref().or(saved_model.as_deref()),
+        ollama.provider(),
+        &models,
+    )?;
     let review_model = if options.review {
         Some(choose_review_model(
             options.review_model.as_deref(),
@@ -250,6 +288,8 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             options.done_when.as_deref(),
             tools.workspace(),
             &model,
+            &model_source,
+            options.autonomy_level,
         ),
     )?;
     let mut journal = Journal::new(store, options.output.mode(options.verbose), options.stream);
@@ -258,6 +298,9 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         "goal": redact_text(&options.goal),
         "workspace": tools.workspace(),
         "model": &model,
+        "model_source": &model_source,
+        "coding": options.coding,
+        "autonomy_level": options.autonomy_level.label(),
         "authority": options.authority.label(),
         "max_steps": options.max_steps,
         "dry_run": options.dry_run
@@ -332,8 +375,13 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         options.dry_run,
         &contract.done_when,
         &options.verify,
+        options.coding,
+        options.autonomy_level,
     );
     let mut messages = vec![Message::system(system)];
+    if options.coding {
+        messages.push(Message::system("CODING MODE: optimize for correct code over narration. Inspect the smallest relevant surface, edit narrowly, run focused verification, repair failures, then run the broadest cheap check warranted by touched files. Do not finalize after a mutation until proof is current."));
+    }
     if !capsule.text.is_empty() {
         messages.push(Message::system(capsule.text.clone()));
     }
@@ -1238,8 +1286,8 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             None => Outcome::Aborted,
         }
     };
-    let receipt = Receipt {
-        schema_version: 6,
+    let mut receipt = Receipt {
+        schema_version: 7,
         id: run_id.clone(),
         created_at_unix_ms: started_at,
         finished_at_unix_ms: unix_ms(),
@@ -1266,7 +1314,18 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         outcome: outcome.label().into(),
         exit_code: outcome.exit_code(),
         completion: Some(completion),
+        model_source: Some(model_source),
+        autonomy_level: Some(options.autonomy_level.label().into()),
+        learning_candidates: Vec::new(),
+        user_corrections: Vec::new(),
+        failure_patterns: Vec::new(),
+        skill_draft_ref: None,
     };
+    if let Ok(Some(path)) =
+        crate::learning::record_from_receipt(&paths.runtime, &receipt, None, None)
+    {
+        receipt.learning_candidates.push(path.display().to_string());
+    }
     let path = guard.finalize(&receipt)?;
     // The receipt is embedded here as well as written to receipt.json so a
     // consumer following the event stream never has to open a second file.
@@ -1384,6 +1443,8 @@ fn system_prompt(
     dry_run: bool,
     done_when: &str,
     declared_verification: &[String],
+    coding: bool,
+    autonomy_level: AutonomyLevel,
 ) -> String {
     let declared_verification = if declared_verification.is_empty() {
         "none; choose and run an explicit verification tool".to_string()
@@ -1395,14 +1456,27 @@ fn system_prompt(
     } else {
         format!("Operator ceiling: {max_steps} tool steps.")
     };
+    let coding = if coding {
+        "Coding: inspect->edit->verify->repair->final. Target rg/read, narrow edits, focused tests. Correctness > prose."
+    } else {
+        "General: act directly; stay concise."
+    };
+    let autonomy = match autonomy_level {
+        AutonomyLevel::Approval => "Ask for sensitive/destructive/external actions.",
+        AutonomyLevel::LocalFull => {
+            "Local-full: inspect/edit/test/repair/commit. Ask before deletion. No push/publish/spend/message/secrets/access widening."
+        }
+    };
     format!(
         r#"You are HII. Finish the local goal with proof.
 Workspace: {workspace}
 {limit} Dry run: {dry_run}.
 Done when: {done_when}
 Checks: {declared_verification}
+{coding}
+{autonomy}
 
-Loop: inspect -> act -> verify -> final. Act on the smallest safe step; never narrate search plans.
+Loop: inspect -> act -> verify -> final. Smallest safe step; no plan narration.
 Edit with edit or write; workspace shell redirects are refused.
 Proof: one flat {{"type":"verify","command":"npm test"}} or http action; shell/read/list/search never count.
 One JSON action/turn. Types:
@@ -1410,7 +1484,7 @@ read,list,search,web_search,web_fetch,write,edit,shell,verify,http,hii_context,o
 Fields: path,query,command,content,old,new,replace_all,offset,limit,url.
 Finish: {{"type":"final","summary":"result","verification":["checks run"],"next":null}}
 
-Read AGENTS.md. Use minimal context. Preserve unclear work. Verify changes. Stay inside the workspace; never publish, push, spend, message, or read secrets. Deletion needs live approval; never hide it in a script. Never claim unrun proof."#,
+Read AGENTS.md. Preserve unclear work. Stay in workspace. Never claim unrun proof."#,
         workspace = workspace.display()
     )
 }
@@ -1542,9 +1616,11 @@ fn draft_receipt(
     done_when: Option<&str>,
     workspace: &Path,
     model: &str,
+    model_source: &str,
+    autonomy_level: AutonomyLevel,
 ) -> Receipt {
     Receipt {
-        schema_version: 5,
+        schema_version: 7,
         id: run_id.to_string(),
         created_at_unix_ms: started_at,
         finished_at_unix_ms: 0,
@@ -1571,6 +1647,12 @@ fn draft_receipt(
         outcome: Outcome::Running.label().into(),
         exit_code: Outcome::Running.exit_code(),
         completion: None,
+        model_source: Some(model_source.into()),
+        autonomy_level: Some(autonomy_level.label().into()),
+        learning_candidates: Vec::new(),
+        user_corrections: Vec::new(),
+        failure_patterns: Vec::new(),
+        skill_draft_ref: None,
     }
 }
 
@@ -2234,6 +2316,8 @@ mod tests {
             false,
             "the focused tests pass",
             &[],
+            false,
+            AutonomyLevel::LocalFull,
         );
         // The ceiling is not arbitrary: small local models lose action-emission
         // reliability as the system prompt grows, so additions must be paid for
@@ -2253,6 +2337,8 @@ mod tests {
             false,
             "verified",
             &[],
+            false,
+            AutonomyLevel::LocalFull,
         );
         assert!(prompt.contains("Proof: one flat"));
         assert!(prompt.contains("shell/read/list/search never count"));
@@ -2293,6 +2379,8 @@ mod tests {
             false,
             "verified",
             &[],
+            false,
+            AutonomyLevel::LocalFull,
         );
         assert!(prompt.contains("No tool-step ceiling"));
         assert!(!prompt.contains("Operator ceiling:"));
