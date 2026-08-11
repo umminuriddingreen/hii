@@ -66,6 +66,9 @@ pub struct LiveInput {
     buf: String,
     cursor: usize,
     keymap: Keymap,
+    stream_column: usize,
+    terminal_width: usize,
+    stream_active: bool,
 }
 
 impl LiveInput {
@@ -73,12 +76,20 @@ impl LiveInput {
         if !is_interactive() {
             return Ok(None);
         }
-        Ok(Some(Self {
+        let mut input = Self {
             _guard: RawModeGuard::enter()?,
             buf: String::new(),
             cursor: 0,
             keymap,
-        }))
+            stream_column: 0,
+            terminal_width: crossterm::terminal::size()
+                .map(|(columns, _)| usize::from(columns))
+                .unwrap_or(80)
+                .max(1),
+            stream_active: true,
+        };
+        input.begin_stream()?;
+        Ok(Some(input))
     }
 
     pub fn poll(&mut self) -> Result<Option<InputEvent>> {
@@ -95,12 +106,88 @@ impl LiveInput {
         if key.kind != event::KeyEventKind::Press {
             return Ok(None);
         }
-        Ok(
-            match apply_key(key, &mut self.buf, &mut self.cursor, &self.keymap) {
-                KeyOutcome::Emit(event) => Some(event),
-                KeyOutcome::Continue => None,
-            },
+        let outcome = match apply_key(key, &mut self.buf, &mut self.cursor, &self.keymap) {
+            KeyOutcome::Emit(event) => Some(event),
+            KeyOutcome::Continue => {
+                self.redraw_composer()?;
+                None
+            }
+        };
+        Ok(outcome)
+    }
+
+    fn begin_stream(&mut self) -> Result<()> {
+        let mut out = io::stdout();
+        write!(
+            out,
+            "{}\r\n{}\x1b[1A\r\x1b[L",
+            crate::tui::prompt_frame(0),
+            crate::tui::prompt_footer()
         )
+        .map_err(|e| format!("failed to draw active composer: {e}"))?;
+        out.flush()
+            .map_err(|e| format!("failed to flush active composer: {e}"))
+    }
+
+    pub fn write_stream(&mut self, delta: &str) -> Result<()> {
+        let mut out = io::stdout();
+        for ch in delta.chars() {
+            if ch == '\n' {
+                write!(out, "\r\n\x1b[L")
+                    .map_err(|e| format!("failed to advance model stream: {e}"))?;
+                self.stream_column = 0;
+                continue;
+            }
+            if self.stream_column >= self.terminal_width {
+                write!(out, "\r\n\x1b[L")
+                    .map_err(|e| format!("failed to wrap model stream: {e}"))?;
+                self.stream_column = 0;
+            }
+            write!(out, "{ch}").map_err(|e| format!("failed to write model stream: {e}"))?;
+            self.stream_column += 1;
+        }
+        out.flush()
+            .map_err(|e| format!("failed to flush model stream: {e}"))
+    }
+
+    fn redraw_composer(&self) -> Result<()> {
+        let mut out = io::stdout();
+        write!(
+            out,
+            "\x1b[s\x1b[2B\r\x1b[2K{}{}",
+            crate::tui::prompt_frame(0)
+                .rsplit_once("\r\n")
+                .map_or(crate::tui::prompt_frame(0), |(_, row)| row.to_string()),
+            self.buf
+        )
+        .map_err(|e| format!("failed to redraw active composer: {e}"))?;
+        let tail = self.buf[self.cursor..].chars().count();
+        if tail > 0 {
+            write!(out, "\x1b[{tail}D")
+                .map_err(|e| format!("failed to restore active composer cursor: {e}"))?;
+        }
+        write!(out, "\x1b[u").map_err(|e| format!("failed to restore model cursor: {e}"))?;
+        out.flush()
+            .map_err(|e| format!("failed to flush active composer: {e}"))
+    }
+
+    pub fn finish_stream(&mut self) {
+        if !self.stream_active {
+            return;
+        }
+        let mut out = io::stdout();
+        let _ = write!(
+            out,
+            "\r\n\x1b[2K\x1b[2B\r\x1b[2K\x1b[1A\r\x1b[2K\x1b[1A\r\x1b[2K"
+        );
+        let _ = out.flush();
+        self.stream_active = false;
+    }
+}
+
+impl Drop for LiveInput {
+    fn drop(&mut self) {
+        self.finish_stream();
     }
 }
 

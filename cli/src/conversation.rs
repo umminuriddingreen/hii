@@ -2242,15 +2242,17 @@ impl Conversation {
                     match event {
                         crate::keyboard::InputEvent::Submit(value) if !value.trim().is_empty() => {
                             self.steering = Some(value);
+                            input.finish_stream();
                             crate::tui::steered();
                             self.cancel.cancel(CancelReason::Client);
                             return Err(STEERING_RESTART.into());
                         }
                         crate::keyboard::InputEvent::Queue(value) if !value.trim().is_empty() => {
                             self.queued_inputs.push_back(value);
-                            crate::tui::queued();
+                            input.write_stream("\n  ◇ QUEUED  carried into the next intent\n")?;
                         }
                         crate::keyboard::InputEvent::Interrupt => {
+                            input.finish_stream();
                             if interactive {
                                 print!("\x1b[2K\r");
                             }
@@ -2258,26 +2260,24 @@ impl Conversation {
                             return Err("operator interrupted model activity".into());
                         }
                         crate::keyboard::InputEvent::TaskView => {
-                            crate::tui::system(&self.task_view());
+                            input.write_stream(&format!("\n{}\n", self.task_view()))?;
                         }
                         crate::keyboard::InputEvent::Background(value) => {
                             if value.trim().is_empty() {
-                                crate::tui::system(
-                                    "Type a task, then press Ctrl+B to run it after this turn.",
-                                );
+                                input.write_stream(
+                                    "\nType a task, then press Ctrl+B to run it after this turn.\n",
+                                )?;
                             } else if self.public_test {
-                                crate::tui::system(
-                                    "Background child processes are unavailable in the public test. Press Tab to queue steering.",
-                                );
+                                input.write_stream(
+                                    "\nBackground child processes are unavailable in the public test. Press Tab to queue steering.\n",
+                                )?;
                             } else {
                                 self.pending_backgrounds.push_back(value.clone());
                                 self.store.event(
                                     "conversation.background_requested",
                                     json!({ "phase": phase, "goal": redact_text(&value) }),
                                 )?;
-                                crate::tui::system(
-                                    "Background task queued; it starts when this turn returns control.",
-                                );
+                                input.write_stream("\nBackground task queued; it starts when this turn returns control.\n")?;
                             }
                         }
                         _ => {}
@@ -2297,7 +2297,11 @@ impl Conversation {
                     }
                     if interactive && matches!(self.thinking_mode, ThinkingMode::Raw) {
                         for line in reasoning.push(&delta) {
-                            crate::tui::model_text(&line);
+                            if let Some(input) = live_input.as_mut() {
+                                input.write_stream(&format!("{line}\n"))?;
+                            } else {
+                                crate::tui::model_text(&line);
+                            }
                             reasoning_started = true;
                         }
                     }
@@ -2306,19 +2310,29 @@ impl Conversation {
                     if interactive && show_content {
                         self.last_reply_streamed = true;
                         content_started = true;
-                        print!("{delta}");
-                        let _ = io::stdout().flush();
+                        if let Some(input) = live_input.as_mut() {
+                            input.write_stream(&delta)?;
+                        } else {
+                            print!("{delta}");
+                            let _ = io::stdout().flush();
+                        }
                     }
                 }
                 Ok(ChatStreamEvent::Done(result)) => {
                     if interactive {
                         if matches!(self.thinking_mode, ThinkingMode::Raw) {
                             if let Some(line) = reasoning.finish() {
-                                crate::tui::model_text(&line);
+                                if let Some(input) = live_input.as_mut() {
+                                    input.write_stream(&format!("{line}\n"))?;
+                                } else {
+                                    crate::tui::model_text(&line);
+                                }
                                 reasoning_started = true;
                             }
                         }
-                        if reasoning_started || content_started {
+                        if let Some(input) = live_input.as_mut() {
+                            input.finish_stream();
+                        } else if reasoning_started || content_started {
                             println!();
                         } else {
                             print!("\x1b[2K\r");
