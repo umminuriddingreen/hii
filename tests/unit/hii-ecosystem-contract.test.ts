@@ -10,8 +10,8 @@ const rust = readFileSync(resolve(root, 'src-tauri/src/lib.rs'), 'utf8');
 const api = readFileSync(resolve(root, 'app/api/ecosystem/route.ts'), 'utf8');
 
 describe('HII ecosystem surface contract', () => {
-  it('names the three user-facing modes Notch Browser and Create', () => {
-    expect(notch).toContain('<strong>Notch</strong>');
+  it('names the HII notch surface and the Browser and Create modes', () => {
+    expect(notch).toContain('<strong>HII</strong>');
     expect(browser).toContain('<h1>Browser</h1>');
     expect(create).toContain('<h1>Create</h1>');
   });

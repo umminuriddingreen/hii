@@ -394,11 +394,11 @@
   <title>Notch — HII</title>
 </svelte:head>
 
-<main class:expanded class="notch-shell" on:pointerenter={openFromNotchHover} on:pointerleave={collapseAfterHover}>
+<main class:expanded class="notch-shell" data-state={ambient.state.toLowerCase()} on:pointerenter={openFromNotchHover} on:pointerleave={collapseAfterHover}>
   {#if !expanded}
     <button class="collapsed" on:pointerenter={openFromNotchHover} on:click={() => void setExpanded(true)} aria-label="Open HII Notch">
-      <i class:active={Boolean(summary?.active)}></i>
-      <strong>hii</strong>
+      <i class:active={Boolean(summary?.active)}><span></span></i>
+      <strong>HII</strong>
       <span>{ambient.message}</span>
       <b>{ambient.state.toLowerCase().replace(/_/g, ' ')}</b>
     </button>
@@ -406,8 +406,8 @@
     <section class="expanded-panel">
       <header>
         <div>
-          <i class:active={Boolean(summary?.active)}></i>
-          <strong>Notch</strong>
+          <i class:active={Boolean(summary?.active)}><span></span></i>
+          <strong>HII</strong>
           <span>{ambient.state.toLowerCase().replace(/_/g, ' ')}</span>
         </div>
         <button on:click={() => void setExpanded(false)} aria-label="Collapse Notch">−</button>
@@ -415,7 +415,16 @@
 
       <!-- One sentence and one action. Everything else lives below, so the
            surface never asks the human to decide what it should have decided. -->
-      <p class="ambient-line" role="status" aria-live="polite">{ambient.message}</p>
+      <section class="live-card" aria-label="HII live activity">
+        <div class="orbital-status" aria-hidden="true">
+          <span></span>
+          <b></b>
+        </div>
+        <div class="live-copy">
+          <p class="ambient-line" role="status" aria-live="polite">{ambient.message}</p>
+          <small>{liveSelection?.selectedNodeIds.length || 0} selected · {voiceRuntime?.pendingApprovals ?? 0} approvals · {summary?.active ? 'working' : 'ready'}</small>
+        </div>
+      </section>
 
       <form on:submit|preventDefault={runText}>
         <input
@@ -429,7 +438,23 @@
         <button disabled={!intent.trim() || busy || speechBusy} type="submit">↵</button>
       </form>
 
-      <div class="voice-controls">
+      <div class="control-strip">
+        <button
+          class:armed={isListening}
+          class="voice-button"
+          on:pointerdown|preventDefault={startVoiceCapture}
+          on:pointerup|preventDefault={stopVoiceCapture}
+          on:pointerleave|preventDefault={stopVoiceCapture}
+          disabled={busy || !supportsSpeech}
+          title="Hold to speak"
+        >
+          <span>{isListening ? 'Listening' : 'Voice'}</span>
+          <b>{isListening ? 'release' : 'hold'}</b>
+        </button>
+        <span class="small-note">{message || liveTranscript || summary?.active?.summary || 'Grounded local context is ready.'}</span>
+      </div>
+
+      <div class="voice-controls" hidden>
         <button
           class:armed={isListening}
           on:pointerdown|preventDefault={startVoiceCapture}
@@ -452,13 +477,13 @@
       {/if}
 
       <nav>
-        <button on:click={() => void openMode('/browser')}>Browser</button>
-        <button on:click={() => void openMode('/create')}>Create</button>
-        <button on:click={() => void openMode('/workspace')}>Workspace</button>
+        <button on:click={() => void openMode('/browser')}><span>Browse</span><b>ground</b></button>
+        <button on:click={() => void openMode('/create')}><span>Create</span><b>make</b></button>
+        <button on:click={() => void openMode('/workspace')}><span>Space</span><b>objects</b></button>
       </nav>
 
       <div class="voice-meta">
-        <p>Voice runtime</p>
+        <p>Context shelf</p>
         <small>{voiceRuntime?.proposalCount ?? 0} proposals · {voiceRuntime?.pendingApprovals ?? 0} pending</small>
       </div>
 
@@ -517,87 +542,185 @@
     width: 100%;
     height: 100%;
     box-sizing: border-box;
-    padding: 0 8px 8px;
+    padding: 0 9px 9px;
     color: white;
-    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-family: Inter, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   }
 
   .collapsed {
     display: grid;
-    grid-template-columns: 8px auto minmax(0, 1fr) auto;
+    grid-template-columns: 18px auto minmax(0, 1fr) auto;
     align-items: center;
-    gap: 10px;
+    gap: 9px;
     width: 100%;
-    height: 44px;
+    height: 42px;
     border: 0;
-    border-radius: 0 0 18px 18px;
-    background: #090a0b;
+    border-radius: 0 0 21px 21px;
+    background:
+      linear-gradient(180deg, rgba(26, 28, 31, .96), rgba(6, 7, 9, .98)),
+      #090a0b;
     color: white;
-    padding: 0 15px;
-    box-shadow: 0 10px 32px rgba(0,0,0,.3);
+    padding: 0 14px;
+    box-shadow: 0 14px 34px rgba(0,0,0,.34), inset 0 -1px 0 rgba(255,255,255,.08);
     text-align: left;
+    transition: transform 180ms ease, box-shadow 180ms ease;
   }
+
+  .collapsed:hover { transform: translateY(1px); box-shadow: 0 18px 44px rgba(0,0,0,.42), inset 0 -1px 0 rgba(255,255,255,.1); }
 
   .collapsed i,
   header i,
   .activity i {
-    width: 7px;
-    height: 7px;
+    position: relative;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
-    background: #65686d;
+    background: #6f747d;
+  }
+
+  .collapsed i span,
+  header i span {
+    position: absolute;
+    inset: -4px;
+    border-radius: 999px;
+    border: 1px solid rgba(111, 116, 125, .45);
   }
 
   .collapsed i.active,
   header i.active,
   .activity i.running {
-    background: #58e47e;
-    box-shadow: 0 0 12px #58e47e;
+    background: #62f0a2;
+    box-shadow: 0 0 18px rgba(98, 240, 162, .7);
   }
 
-  .collapsed strong { font-size: 13px; letter-spacing: -0.04em; }
-  .collapsed span { overflow: hidden; color: #b4b7bc; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-  .collapsed b { color: #74787e; font: 8px ui-monospace, monospace; text-transform: uppercase; }
+  .collapsed i.active span,
+  header i.active span { border-color: rgba(98, 240, 162, .42); }
+
+  .collapsed strong { font-size: 12px; font-weight: 760; letter-spacing: .01em; }
+  .collapsed span { overflow: hidden; color: #c9ced6; font-size: 11px; font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
+  .collapsed b {
+    min-width: 62px;
+    border-radius: 999px;
+    background: rgba(255,255,255,.07);
+    color: #939aa5;
+    font: 700 7px/18px ui-monospace, SFMono-Regular, Menlo, monospace;
+    text-align: center;
+    text-transform: uppercase;
+  }
 
   /* The one sentence. Sized to be read at a glance from the edge of the screen. */
   .ambient-line {
     margin: 0;
-    padding: 10px 16px 0;
-    color: #e8e9eb;
-    font-size: 13px;
-    line-height: 1.35;
-    letter-spacing: -0.01em;
+    color: #f2f5f8;
+    font-size: 16px;
+    font-weight: 720;
+    line-height: 1.18;
+    letter-spacing: 0;
   }
 
   .expanded-panel {
     height: 100%;
     box-sizing: border-box;
     overflow: hidden;
-    border-radius: 0 0 24px 24px;
-    background: rgba(9, 10, 11, 0.97);
-    box-shadow: 0 18px 55px rgba(0,0,0,.38);
-    backdrop-filter: blur(24px);
+    border: 1px solid rgba(255,255,255,.08);
+    border-top: 0;
+    border-radius: 0 0 28px 28px;
+    background:
+      radial-gradient(circle at 20% 5%, rgba(68, 161, 255, .26), transparent 30%),
+      radial-gradient(circle at 82% 10%, rgba(98, 240, 162, .14), transparent 24%),
+      linear-gradient(180deg, rgba(19, 22, 27, .98), rgba(8, 9, 12, .985));
+    box-shadow: 0 28px 80px rgba(0,0,0,.48), inset 0 1px 0 rgba(255,255,255,.08);
+    backdrop-filter: blur(28px) saturate(1.18);
   }
 
   header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 17px 10px;
+    padding: 15px 18px 9px;
   }
 
   header > div { display: flex; align-items: center; gap: 9px; }
-  header strong { font-size: 14px; }
-  header span { color: #6f7379; font: 8px ui-monospace, monospace; text-transform: uppercase; }
-  header button { border: 0; background: transparent; color: #777; font-size: 16px; }
+  header strong { font-size: 13px; font-weight: 780; letter-spacing: .01em; }
+  header span { color: #89919d; font: 700 8px ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; }
+  header button {
+    width: 26px;
+    height: 24px;
+    border: 0;
+    border-radius: 999px;
+    background: rgba(255,255,255,.06);
+    color: #a9b0ba;
+    font-size: 16px;
+  }
+
+  .live-card {
+    display: grid;
+    grid-template-columns: 54px minmax(0, 1fr);
+    gap: 12px;
+    align-items: center;
+    margin: 0 14px 11px;
+    padding: 13px;
+    border: 1px solid rgba(255,255,255,.09);
+    border-radius: 20px;
+    background: rgba(255,255,255,.055);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+  }
+
+  .orbital-status {
+    position: relative;
+    display: grid;
+    width: 48px;
+    height: 48px;
+    place-items: center;
+    border-radius: 999px;
+    background: conic-gradient(from 210deg, #62f0a2, #44a1ff, #c6a7ff, #62f0a2);
+  }
+
+  .orbital-status::before {
+    position: absolute;
+    inset: 5px;
+    border-radius: inherit;
+    background: #0c0e12;
+    content: "";
+  }
+
+  .orbital-status span {
+    position: relative;
+    width: 16px;
+    height: 16px;
+    border-radius: inherit;
+    background: #62f0a2;
+    box-shadow: 0 0 22px rgba(98, 240, 162, .75);
+  }
+
+  .orbital-status b {
+    position: absolute;
+    inset: -3px;
+    border-radius: inherit;
+    border: 1px solid rgba(255,255,255,.12);
+  }
+
+  .live-copy { min-width: 0; }
+  .live-copy small {
+    display: block;
+    overflow: hidden;
+    margin-top: 5px;
+    color: #8f98a4;
+    font: 700 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
 
   form {
     display: flex;
     align-items: center;
     margin: 0 14px;
-    border: 1px solid #303238;
-    border-radius: 14px;
-    background: #15171a;
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 16px;
+    background: rgba(3, 4, 6, .64);
     padding: 4px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
   }
 
   form input {
@@ -607,20 +730,22 @@
     border: 0;
     background: transparent;
     color: white;
-    padding: 0 11px;
+    padding: 0 12px;
     outline: 0;
-    font-size: 14px;
+    font-size: 13px;
+    font-weight: 560;
   }
 
-  form input::placeholder { color: #686c72; }
+  form input::placeholder { color: #747d88; }
 
   form button {
     width: 36px;
     height: 34px;
     border: 0;
-    border-radius: 10px;
-    background: #176bff;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #44a1ff, #176bff);
     color: #fff;
+    box-shadow: 0 8px 20px rgba(23, 107, 255, .28);
   }
 
   .voice-controls {
@@ -641,9 +766,42 @@
   }
 
   .voice-controls button.armed { background: #1f2230; color: #fff; }
+
+  .voice-controls[hidden] { display: none; }
+
+  .control-strip {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 9px;
+    align-items: center;
+    padding: 9px 14px 8px;
+  }
+
+  .voice-button {
+    display: grid;
+    align-content: center;
+    height: 40px;
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 14px;
+    background: rgba(255,255,255,.07);
+    color: #e3e8ee;
+    text-align: left;
+    padding: 0 12px;
+  }
+
+  .voice-button span { font-size: 11px; font-weight: 760; }
+  .voice-button b { color: #8f98a4; font: 700 8px ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; }
+  .voice-button.armed {
+    border-color: rgba(98, 240, 162, .35);
+    background: rgba(98, 240, 162, .12);
+    color: #fff;
+  }
+
   .small-note {
-    color: #8f949a;
-    font: 10px ui-monospace, monospace;
+    display: block;
+    min-width: 0;
+    color: #9da6b2;
+    font: 700 9px ui-monospace, SFMono-Regular, Menlo, monospace;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -653,40 +811,50 @@
     margin: 0 14px;
     color: #fff;
     padding: 10px;
-    border-radius: 10px;
-    background: #11151a;
-    border: 1px solid #2b2f36;
+    border-radius: 14px;
+    background: rgba(0,0,0,.3);
+    border: 1px solid rgba(255,255,255,.1);
     min-height: 22px;
     font-size: 11px;
   }
 
   nav {
     display: flex;
-    gap: 7px;
-    padding: 10px 14px;
+    gap: 8px;
+    padding: 8px 14px 10px;
   }
 
   nav button {
     flex: 1;
-    height: 31px;
-    border: 1px solid #2b2e33;
-    border-radius: 9px;
-    background: #15171a;
-    color: #b9bcc1;
-    font: 8px ui-monospace, monospace;
+    display: grid;
+    align-content: center;
+    height: 42px;
+    border: 1px solid rgba(255,255,255,.09);
+    border-radius: 15px;
+    background: rgba(255,255,255,.06);
+    color: #e1e7ee;
+    text-align: left;
+    padding: 0 11px;
+  }
+
+  nav button span { font-size: 11px; font-weight: 760; }
+  nav button b {
+    margin-top: 2px;
+    color: #87909b;
+    font: 700 8px ui-monospace, SFMono-Regular, Menlo, monospace;
     text-transform: uppercase;
   }
 
   .proposal-list {
     margin: 0 14px 10px;
-    border-top: 1px solid #24262a;
-    padding-top: 8px;
+    border-top: 1px solid rgba(255,255,255,.08);
+    padding-top: 7px;
   }
 
   .proposal-list > p {
     margin: 0 0 5px;
-    color: #62666c;
-    font: 8px ui-monospace, monospace;
+    color: #78818c;
+    font: 700 8px ui-monospace, SFMono-Regular, Menlo, monospace;
     text-transform: uppercase;
   }
 
@@ -697,13 +865,14 @@
     align-items: center;
     margin: 5px 0;
     padding: 5px;
-    border-radius: 8px;
-    border: 1px solid #2b2e33;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,.08);
+    background: rgba(255,255,255,.04);
   }
 
   .proposal-list b {
-    color: #9aa0a6;
-    font: 8px ui-monospace, monospace;
+    color: #a8b0ba;
+    font: 700 8px ui-monospace, SFMono-Regular, Menlo, monospace;
     text-transform: uppercase;
   }
 
@@ -720,11 +889,11 @@
     height: 26px;
     padding: 0 9px;
     min-width: 58px;
-    border: 1px solid #2b2e33;
+    border: 1px solid rgba(255,255,255,.1);
     border-radius: 8px;
-    background: #15171a;
-    color: #b9bcc1;
-    font: 8px ui-monospace, monospace;
+    background: rgba(255,255,255,.07);
+    color: #d9dfe6;
+    font: 700 8px ui-monospace, SFMono-Regular, Menlo, monospace;
     text-transform: uppercase;
   }
 
@@ -736,23 +905,26 @@
 
   .voice-meta {
     margin: 0 14px;
-    padding-top: 6px;
-    border-top: 1px solid #24262a;
-    color: #7a7f84;
-    font: 8px ui-monospace, monospace;
+    padding: 8px 0 7px;
+    border-top: 1px solid rgba(255,255,255,.08);
+    color: #87909b;
+    font: 700 8px ui-monospace, SFMono-Regular, Menlo, monospace;
     text-transform: uppercase;
   }
+
+  .voice-meta p { margin: 0 0 3px; }
+  .voice-meta small { color: #a4acb6; }
 
   .activity {
     margin: 0 14px;
     padding-top: 8px;
-    border-top: 1px solid #24262a;
+    border-top: 1px solid rgba(255,255,255,.08);
   }
 
   .activity > p {
     margin: 0 0 5px;
-    color: #62666c;
-    font: 8px ui-monospace, monospace;
+    color: #78818c;
+    font: 700 8px ui-monospace, SFMono-Regular, Menlo, monospace;
     text-transform: uppercase;
   }
 
@@ -764,20 +936,36 @@
     padding: 5px 0;
   }
 
+  .activity i { width: 7px; height: 7px; }
+
   .activity span {
     overflow: hidden;
-    color: #c5c7ca;
+    color: #d1d6dc;
     font-size: 10px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .activity b {
-    color: #666a70;
-    font: 7px ui-monospace, monospace;
+    color: #77808b;
+    font: 700 7px ui-monospace, SFMono-Regular, Menlo, monospace;
     text-transform: uppercase;
   }
 
   .error { margin: 6px 14px; color: #ff7d72; font-size: 9px; }
   .message { margin: 6px 14px; color: #9aa0a6; font-size: 9px; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .orbital-status { animation: proof-ring 6s linear infinite; }
+    .orbital-status span { animation: proof-pulse 1800ms ease-in-out infinite; }
+  }
+
+  @keyframes proof-ring {
+    to { transform: rotate(360deg); }
+  }
+
+  @keyframes proof-pulse {
+    0%, 100% { transform: scale(.82); opacity: .72; }
+    50% { transform: scale(1); opacity: 1; }
+  }
 </style>
