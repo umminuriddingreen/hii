@@ -252,9 +252,10 @@ A user should be able to:
 10. Let an agent perform separately authorized work.
 11. Record decisions, files changed, verification, blockers, and next action.
 12. Resume later without reconstructing project understanding.
-13. Create and edit durable Markdown notes with folders, tags, wikilinks,
-    backlinks, graph navigation, daily notes, history, and local export.
-14. Let verified agent work become linked knowledge and reusable capability.
+13. Create and edit durable workspace memory as typed objects with folders or
+    collections, tags, links/backlinks, graph navigation, daily surfaces,
+    history, and local Markdown/JSON export.
+14. Let verified agent work become linked object memory and reusable capability.
 
 ### P0 capabilities
 
@@ -269,15 +270,17 @@ A user should be able to:
 - Activity receipts for reads, results, verification, failures, and next action.
 - Restart persistence and an installable macOS application.
 - Visible privacy and external-transmission boundaries.
-- Obsidian-class local note creation, Markdown editing, links/backlinks, tags,
-  FTS5 search, graph navigation, daily notes, history, trash/restore, and
+- Obsidian/Notion-class local knowledge work over object-native memory:
+  notes, decisions, tasks, receipts, skills, links/backlinks, tags, FTS5
+  search, graph navigation, daily surfaces, history, trash/restore, and
   Markdown/JSON import/export.
 
 ### Hard architecture decisions
 
 - Use `/Users/ummi/hii`; do not create a parallel product repository.
 - Use the existing HII/AII runtime; do not create another daemon.
-- Use the local HII instance and `~/.hii/hii.db` as authority for authored notes, typed knowledge, indexing, and the operational ledger.
+- Use the local HII instance and `~/.hii/hii.db` as authority for authored
+  memory objects, typed knowledge, indexing, and the operational ledger.
 - Import complete user-approved vaults through hash-locked, non-mutating batches and preserve portable Markdown export so HII authority never becomes data lock-in.
 - Do not revive obsolete parallel databases.
 - Use SQLite FTS5 and deterministic retrieval before embeddings.
@@ -290,7 +293,7 @@ A user should be able to:
 
 ### Context data model
 
-The canonical context entities are:
+The canonical context and memory entities are:
 
 - `context_projects`
 - `context_sources`
@@ -303,9 +306,18 @@ The canonical context entities are:
 - `context_decisions`
 - `context_receipts`
 - `context_scan_events`
+- `operational_objects`
+- `operational_relations`
+- `operational_operations`
+- `object_projections`
 
 Every important context item retains source, range, freshness, hash or Git
 revision, selection rationale, and pin/exclusion state.
+
+Markdown is a portable surface, not the canonical memory substrate. Durable HII
+memory is object-native: notes, decisions, tasks, receipts, skills, sources,
+questions, people, and projects are typed objects connected by versioned
+relations and append-only operations.
 
 ### Context pipeline
 
