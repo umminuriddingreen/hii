@@ -319,7 +319,10 @@ fn public_command(command: &str) -> bool {
     )
 }
 
-pub fn command_matches(input: &str, public_test: bool) -> Vec<(&'static str, &'static str)> {
+pub fn command_matches(input: &str, public_test: bool) -> Vec<(String, String)> {
+    if let Some(query) = model_query(input) {
+        return model_matches(query, public_test);
+    }
     if !input.starts_with('/') || input.chars().any(char::is_whitespace) {
         return Vec::new();
     }
@@ -329,9 +332,54 @@ pub fn command_matches(input: &str, public_test: bool) -> Vec<(&'static str, &'s
         .copied()
         .filter(|(command, _)| !public_test || public_command(command))
         .filter(|(command, _)| command[1..].contains(&query))
+        .map(|(command, description)| (command.to_string(), description.to_string()))
         .collect::<Vec<_>>();
     matches.sort_by_key(|(command, _)| !command[1..].starts_with(&query));
     matches
+}
+
+fn model_query(input: &str) -> Option<&str> {
+    input
+        .strip_prefix("/model")
+        .and_then(|tail| (tail.is_empty() || tail.starts_with(char::is_whitespace)).then_some(tail))
+        .map(str::trim)
+}
+
+fn model_matches(query: &str, public_test: bool) -> Vec<(String, String)> {
+    let query = query.to_ascii_lowercase();
+    let mut rows = crate::ollama::Ollama::discover()
+        .models()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|model| query.is_empty() || model.to_ascii_lowercase().contains(&query))
+        .map(|model| (format!("/model {model}"), "Local".to_string()))
+        .collect::<Vec<_>>();
+    if !public_test {
+        rows.extend(
+            crate::agents::AgentManager::hosted_model_choices()
+                .into_iter()
+                .filter(|(provider, model)| {
+                    query.is_empty()
+                        || provider.to_ascii_lowercase().contains(&query)
+                        || model.to_ascii_lowercase().contains(&query)
+                })
+                .map(|(provider, model)| {
+                    let command = match provider.as_str() {
+                        "Claude" => "/claude ".to_string(),
+                        "Codex" => "/codex ".to_string(),
+                        _ => format!("/model {model}"),
+                    };
+                    (command, format!("{provider} · {model}"))
+                }),
+        );
+    }
+    rows.sort_by(|left, right| {
+        left.1
+            .to_ascii_lowercase()
+            .cmp(&right.1.to_ascii_lowercase())
+            .then_with(|| left.0.cmp(&right.0))
+    });
+    rows
 }
 
 pub fn command_menu(input: &str, selected: usize, public_test: bool) -> Vec<String> {
@@ -355,15 +403,15 @@ pub fn command_menu(input: &str, selected: usize, public_test: bool) -> Vec<Stri
             let active = index == selected;
             let marker = if active { "›" } else { " " };
             let command = if active {
-                paint(command, &[BOLD, palette().primary])
+                paint(&command, &[BOLD, palette().primary])
             } else {
-                paint(command, &[palette().muted])
+                paint(&command, &[palette().muted])
             };
             format!(
                 "    {} {:<12} {}",
                 paint(marker, &[palette().primary]),
                 command,
-                paint(description, &[DIM, palette().muted])
+                paint(&description, &[DIM, palette().muted])
             )
         })
         .collect::<Vec<_>>();
@@ -523,9 +571,12 @@ mod tests {
     #[test]
     fn slash_palette_filters_commands() {
         let matches = command_matches("/sta", false);
-        assert_eq!(matches.first().map(|item| item.0), Some("/status"));
+        assert_eq!(matches.first().map(|item| item.0.as_str()), Some("/status"));
         assert!(command_matches("status", false).is_empty());
-        assert!(command_matches("/model qwen", false).is_empty());
+        let model_matches = command_matches("/model claude", false);
+        assert!(model_matches
+            .iter()
+            .any(|(command, description)| command == "/claude " && description.contains("Claude")));
     }
 
     #[test]
@@ -535,7 +586,7 @@ mod tests {
         let last = matches.len() - 1;
         let menu = command_menu("/", last, false);
         assert_eq!(menu.len(), 7);
-        assert!(menu.iter().any(|line| line.contains(matches[last].0)));
+        assert!(menu.iter().any(|line| line.contains(&matches[last].0)));
         assert!(menu.last().unwrap().contains("Tab/→ complete"));
         assert!(menu.last().unwrap().contains("Enter run"));
     }
@@ -543,21 +594,19 @@ mod tests {
     #[test]
     fn public_palette_only_lists_controls_that_can_run() {
         let matches = command_matches("/", true);
-        assert!(matches.iter().any(|(command, _)| *command == "/model"));
-        assert!(matches.iter().any(|(command, _)| *command == "/new"));
-        assert!(matches.iter().any(|(command, _)| *command == "/raw"));
-        assert!(matches.iter().any(|(command, _)| *command == "/theme"));
-        assert!(matches.iter().any(|(command, _)| *command == "/keymap"));
-        assert!(matches.iter().any(|(command, _)| *command == "/attach"));
-        assert!(matches
-            .iter()
-            .any(|(command, _)| *command == "/attachments"));
-        assert!(!matches.iter().any(|(command, _)| *command == "/providers"));
-        assert!(!matches.iter().any(|(command, _)| *command == "/copy"));
-        assert!(!matches.iter().any(|(command, _)| *command == "/rename"));
-        assert!(!matches.iter().any(|(command, _)| *command == "/background"));
-        assert!(!matches.iter().any(|(command, _)| *command == "/jobs"));
-        assert!(!matches.iter().any(|(command, _)| *command == "/mcp"));
+        assert!(matches.iter().any(|(command, _)| command == "/model"));
+        assert!(matches.iter().any(|(command, _)| command == "/new"));
+        assert!(matches.iter().any(|(command, _)| command == "/raw"));
+        assert!(matches.iter().any(|(command, _)| command == "/theme"));
+        assert!(matches.iter().any(|(command, _)| command == "/keymap"));
+        assert!(matches.iter().any(|(command, _)| command == "/attach"));
+        assert!(matches.iter().any(|(command, _)| command == "/attachments"));
+        assert!(!matches.iter().any(|(command, _)| command == "/providers"));
+        assert!(!matches.iter().any(|(command, _)| command == "/copy"));
+        assert!(!matches.iter().any(|(command, _)| command == "/rename"));
+        assert!(!matches.iter().any(|(command, _)| command == "/background"));
+        assert!(!matches.iter().any(|(command, _)| command == "/jobs"));
+        assert!(!matches.iter().any(|(command, _)| command == "/mcp"));
     }
 
     #[test]

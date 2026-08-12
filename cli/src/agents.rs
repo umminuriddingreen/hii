@@ -62,15 +62,36 @@ impl AgentManager {
     pub fn model_routes(&self) -> Vec<(String, String, String)> {
         let codex = provider_status("codex").unwrap_or_else(|_| "unavailable".into());
         let claude = provider_status("claude").unwrap_or_else(|_| "unavailable".into());
+        Self::hosted_model_routes()
+            .into_iter()
+            .map(|(provider, model)| {
+                let status = if provider == "Codex" {
+                    codex.as_str()
+                } else {
+                    claude.as_str()
+                };
+                (provider.into(), model.into(), status.into())
+            })
+            .collect()
+    }
+
+    pub fn hosted_model_choices() -> Vec<(String, String)> {
+        Self::hosted_model_routes()
+            .into_iter()
+            .map(|(provider, model)| (provider.into(), model.into()))
+            .collect()
+    }
+
+    /// Fast, no-auth-probe route list for keystroke-driven picker rendering.
+    fn hosted_model_routes() -> Vec<(&'static str, &'static str)> {
         [
-            ("Claude", "default", claude.as_str()),
-            ("Claude", "fable", claude.as_str()),
-            ("Claude", "opus", claude.as_str()),
-            ("Claude", "sonnet", claude.as_str()),
-            ("Codex", "default", codex.as_str()),
+            ("Claude", "default"),
+            ("Claude", "fable"),
+            ("Claude", "opus"),
+            ("Claude", "sonnet"),
+            ("Codex", "default"),
         ]
         .into_iter()
-        .map(|(provider, model, status)| (provider.into(), model.into(), status.into()))
         .collect()
     }
 

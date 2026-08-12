@@ -484,23 +484,19 @@ fn move_selection(selected: usize, length: usize, direction: i8) -> usize {
     }
 }
 
-fn selected_command(
-    buf: &str,
-    matches: &[(&'static str, &'static str)],
-    selected: usize,
-) -> String {
+fn selected_command(buf: &str, matches: &[(String, String)], selected: usize) -> String {
     matches
         .iter()
-        .find(|(command, _)| *command == buf)
+        .find(|(command, _)| command == buf)
         .or_else(|| matches.get(selected))
-        .map(|(command, _)| (*command).to_string())
+        .map(|(command, _)| command.clone())
         .unwrap_or_else(|| buf.to_string())
 }
 
 fn complete_selected_command(
     buf: &mut String,
     cursor: &mut usize,
-    matches: &[(&'static str, &'static str)],
+    matches: &[(String, String)],
     selected: usize,
 ) {
     let command = selected_command(buf, matches, selected);
