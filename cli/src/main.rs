@@ -28,6 +28,7 @@ mod ollama;
 mod receipt;
 mod runlog;
 mod schedule;
+mod skill_lifecycle;
 mod skills;
 #[cfg(feature = "preview")]
 mod system_monitor;
@@ -270,6 +271,11 @@ enum Commands {
         #[command(subcommand)]
         action: DiscoverCommand,
     },
+    #[command(about = "Skill lifecycle: proposed -> observed -> verified -> trusted")]
+    Skills {
+        #[command(subcommand)]
+        action: SkillsCommand,
+    },
     #[command(about = "Search every local capability HII already owns (skills, capabilities, drafts)")]
     Find {
         #[arg(help = "What you want to do, in plain words; omit to summarize the index")]
@@ -408,6 +414,29 @@ enum ScheduleCommand {
     Remove { id: String },
     #[command(hide = true)]
     Tick,
+}
+
+#[derive(Subcommand, Debug)]
+enum SkillsCommand {
+    #[command(about = "Show every tracked skill and the state its evidence supports")]
+    Lifecycle {
+        #[arg(long, help = "Emit the full lifecycle as JSON")]
+        json: bool,
+    },
+    #[command(
+        about = "Explicitly promote a skill, overriding its earned evidence (competence only, never authority)"
+    )]
+    Promote {
+        id: String,
+        #[arg(long, help = "Why this override is warranted")]
+        reason: Option<String>,
+    },
+    #[command(about = "Explicitly reject a skill regardless of how well it has performed")]
+    Reject {
+        id: String,
+        #[arg(long, help = "Why this skill is being rejected")]
+        reason: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -654,6 +683,20 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                         name.as_deref()
                     )?
                 ),
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Skills { action }) => {
+            match action {
+                SkillsCommand::Lifecycle { json } => {
+                    println!("{}", skill_lifecycle::status(&paths, json)?)
+                }
+                SkillsCommand::Promote { id, reason } => {
+                    println!("{}", skill_lifecycle::promote(&paths, &id, reason.as_deref())?)
+                }
+                SkillsCommand::Reject { id, reason } => {
+                    println!("{}", skill_lifecycle::reject(&paths, &id, reason.as_deref())?)
+                }
             }
             Ok(ExitCode::SUCCESS)
         }
@@ -1652,7 +1695,23 @@ fn public_test_slash_allowed(command: &SlashCommand) -> bool {
 
 fn delegate_legacy(repo: &std::path::Path, args: &[String]) -> Option<Result<i32, String>> {
     let command = first_command(args)?;
+    if claimed_from_legacy(args) {
+        return None;
+    }
     legacy::is_legacy(command).then(|| legacy::run(repo, args))
+}
+
+/// Subcommands of an otherwise-legacy family that the Rust CLI now owns.
+///
+/// `skills` still delegates to the Node surface for its existing behaviour;
+/// only the lifecycle verbs are handled natively, so this migrates one verb at
+/// a time instead of taking the whole family at once.
+fn claimed_from_legacy(args: &[String]) -> bool {
+    let mut words = args.iter().filter(|arg| !arg.starts_with('-'));
+    match (words.next().map(String::as_str), words.next().map(String::as_str)) {
+        (Some("skills"), Some("promote" | "reject" | "lifecycle")) => true,
+        _ => false,
+    }
 }
 
 fn is_native_command(command: &str) -> bool {
@@ -1670,6 +1729,7 @@ fn is_native_command(command: &str) -> bool {
             | "board"
             | "discover"
             | "find"
+            | "skills"
             | "legacy"
             | "help"
             | "tools-manifest"
@@ -1883,6 +1943,30 @@ mod tests {
         process,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    /// The `skills` family is split between two implementations, so the carve-out
+    /// has to be exact: the lifecycle verbs must reach the Rust CLI, and
+    /// everything else must keep reaching the Node surface that still owns it.
+    #[test]
+    fn only_lifecycle_verbs_are_claimed_from_the_legacy_skills_family() {
+        let words = |line: &str| -> Vec<String> {
+            line.split_whitespace().map(str::to_string).collect()
+        };
+        for claimed in ["skills promote foo", "skills reject foo", "skills lifecycle"] {
+            assert!(
+                claimed_from_legacy(&words(claimed)),
+                "`hii {claimed}` must be handled natively"
+            );
+        }
+        for delegated in ["skills", "skills list", "skill report", "knowledge search"] {
+            assert!(
+                !claimed_from_legacy(&words(delegated)),
+                "`hii {delegated}` must keep reaching the legacy surface"
+            );
+        }
+        // Flags must not shift which word is read as the subcommand.
+        assert!(claimed_from_legacy(&words("skills --json lifecycle")));
+    }
 
     /// Subcommands are registered in two places: the clap `Commands` enum and
     /// `is_native_command`. A command missing from the latter is silently

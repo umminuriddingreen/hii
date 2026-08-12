@@ -51,7 +51,50 @@ pub fn load_all(paths: &AppPaths) -> Vec<Entry> {
     entries.extend(load_skills(&runtime.join("skills")));
     entries.extend(load_capabilities(&runtime.join("capabilities.json")));
     entries.extend(load_drafts(&runtime.join("skills/proposed")));
+    apply_lifecycle(paths, &mut entries);
     entries
+}
+
+/// Fold the skill lifecycle over the raw registries.
+///
+/// The lifecycle is the authority on standing, so it does two things here: it
+/// stamps each entry with the state its evidence supports, and it drops
+/// rejected skills entirely — a skill a human rejected must stop being offered
+/// as an answer. Skills that reached `verified` or `trusted` without a registry
+/// file are added, so promotion alone is enough to make a skill findable.
+fn apply_lifecycle(paths: &AppPaths, entries: &mut Vec<Entry>) {
+    let lifecycle = crate::skill_lifecycle::load(paths);
+    if lifecycle.skills.is_empty() {
+        return;
+    }
+    entries.retain(|entry| {
+        lifecycle
+            .skills
+            .get(&entry.id)
+            .map(|record| record.state != crate::skill_lifecycle::SkillState::Rejected)
+            .unwrap_or(true)
+    });
+    for entry in entries.iter_mut() {
+        if let Some(record) = lifecycle.skills.get(&entry.id) {
+            entry.status = record.state.label().to_string();
+        }
+    }
+    for record in crate::skill_lifecycle::promoted(&lifecycle) {
+        if entries.iter().any(|entry| entry.id == record.id) {
+            continue;
+        }
+        entries.push(Entry {
+            id: record.id.clone(),
+            name: record.name.clone(),
+            description: record.description.clone(),
+            source: "skill",
+            category: "lifecycle".into(),
+            tags: Vec::new(),
+            invoke: Some(format!("hii skill run {}", record.id)),
+            status: record.state.label().to_string(),
+            examples: Vec::new(),
+        });
+    }
 }
 
 fn load_skills(dir: &Path) -> Vec<Entry> {
