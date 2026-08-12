@@ -36,7 +36,7 @@ pub(crate) fn context_for_request(request: &str, comfy_available: bool) -> Optio
         "If original visual media would materially improve the result, inspect the MCP catalog and local capabilities before substituting decoration or placeholders."
     };
     Some(format!(
-        "{DESIGN_CONTEXT_PREFIX}\nDesign is native HII work. Inspect the real subject, audience, content, constraints, precedents, and existing visual system. Make the primary object and one job obvious; use hierarchy, typography, spacing, line, tone, color, and motion to encode meaning. For architecture, pair concept with site, structure, enclosure, climate, light, comfort, material, construction, and human use; label diagrams, calculations, simulations, and measurements honestly. Use Python when it is the faster deterministic path for geometry, analysis, batch media, plots, or document export; use SVG/Three.js for interactive delivery and ComfyUI for generated media. Build complete responsive, accessible states. Critique with live screenshots or rendered output, repair overlap/clipping/weak hierarchy, and verify the actual workflow. {media}"
+        "{DESIGN_CONTEXT_PREFIX}\nDesign is native HII work. Inspect the real subject, audience, content, constraints, precedents, and existing visual system. Make the primary object and one job obvious; use hierarchy, typography, spacing, line, tone, color, and motion to encode meaning. For architecture, pair concept with site, structure, enclosure, climate, light, comfort, material, construction, and human use; label diagrams, calculations, simulations, and measurements honestly.\n\nClose the concept loop. Give every published concept a stable concept id and revision plus a QR code that resolves to its accessible review page; show the short URL beside it as a fallback. The review page must show the current concept, revision/date, assumptions, scope, total project budget, design/media/geometry creation cost, cost basis, contingency, exclusions, and uncertainty instead of presenting an estimate as a bid. Save each community response against the exact concept revision with response id, time, consent/privacy choice, source, structured priorities, rating, comment, and moderation/status fields. Keep raw responses immutable. Summarize themes and conflicts separately, preserve minority views, and require human approval before selected feedback becomes versioned design constraints. Carry those approved constraints, with source response ids, into the next AI media or geometry generation run so the resulting revision has traceable inputs, outputs, costs, and decisions. Never publish private contact data or feed unmoderated responses directly into generation.\n\nUse Python when it is the faster deterministic path for geometry, analysis, QR generation, cost rollups, batch media, plots, or document export; use SVG/Three.js for interactive delivery and ComfyUI for generated media. Build complete responsive, accessible states. Critique with live screenshots or rendered output, repair overlap/clipping/weak hierarchy, and verify the QR destination, persisted feedback, budget math, and regeneration provenance. {media}"
     ))
 }
 
@@ -67,6 +67,13 @@ mod tests {
         assert!(context.contains("Use Python when it is the faster deterministic path"));
         assert!(context.contains("call server_info first"));
         assert!(context.contains("Ask before downloads, installs, paid nodes"));
+        assert!(context.contains("QR code that resolves to its accessible review page"));
+        assert!(context.contains("total project budget"));
+        assert!(context.contains("design/media/geometry creation cost"));
+        assert!(context.contains("Keep raw responses immutable"));
+        assert!(context.contains("require human approval"));
+        assert!(context.contains("source response ids"));
+        assert!(context.contains("verify the QR destination"));
     }
 
     #[test]
