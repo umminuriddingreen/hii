@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "project_id": "channing-court-1601",
+  "skill": "hii-architect",
+  "intent": "Convert the Channing Court concept into a professionally bounded, machine-checkable architectural concept package.",
+  "inputs": ["../README.md", "../A101-wall-plan.svg", "../channing-court-wall-geometry.step.py", "../channing-court-wall-geometry.step", "../channing-court-wall-geometry.glb", "../channing-court-wall-geometry.stl"],
+  "assumptions": [
+    {"id": "asm-lot", "claim": "The site is represented as a 75 by 95 foot rectangle.", "evidence_class": "assumed"},
+    {"id": "asm-orientation", "claim": "North is up and the street is on the south edge.", "evidence_class": "assumed"},
+    {"id": "asm-existing", "claim": "Existing walls and footprint are diagrammatic, not measured conditions.", "evidence_class": "assumed"}
+  ],
+  "sources": [
+    {"id": "src-listing", "title": "1601 Channing Ave listing sources", "publisher": "Eichler For Sale / Zillow", "retrieved": "2026-08-11", "evidence_class": "sourced"},
+    {"id": "src-pa-eichler-guidelines", "title": "Palo Alto Eichler Neighborhood Design Guidelines", "publisher": "City of Palo Alto", "retrieved": "2026-08-11", "evidence_class": "sourced"},
+    {"id": "src-pa-sso", "title": "Palo Alto Single Story Overlay code", "publisher": "City of Palo Alto", "retrieved": "2026-08-11", "evidence_class": "sourced"},
+    {"id": "src-pa-trees", "title": "Palo Alto protected trees guidance", "publisher": "City of Palo Alto", "retrieved": "2026-08-11", "evidence_class": "sourced"},
+    {"id": "src-pa-adu", "title": "Palo Alto ADU code", "publisher": "City of Palo Alto", "retrieved": "2026-08-11", "evidence_class": "sourced"}
+  ],
+  "executor_calls": [
+    {"id": "cmd-wall-generator", "executor": "cadgen / build123d", "version": "unrecorded", "status": "completed", "outputs": ["../channing-court-wall-geometry.step", "../channing-court-wall-geometry.glb", "../channing-court-wall-geometry.stl"]}
+  ],
+  "outputs": ["project.json", "design-state.json", "issues.json", "evidence-receipt.json"],
+  "checks": [
+    {"id": "check-state-integrity", "status": "pass", "method": "validate_arch_project.py"},
+    {"id": "check-survey", "status": "unknown", "method": "No survey supplied"},
+    {"id": "check-zoning", "status": "unknown", "method": "General sources retrieved; parcel matrix not completed"},
+    {"id": "check-professional-review", "status": "unknown", "method": "No licensed review recorded"}
+  ],
+  "confidence": "low",
+  "unresolved": ["survey", "existing conditions", "parcel zoning matrix", "tree constraints", "structure and systems", "current cost basis", "legal structure for funding/leasing"],
+  "professional_review": ["architect", "surveyor", "planning reviewer", "structural engineer", "MEP consultants", "arborist", "cost estimator", "attorney/financial professional"],
+  "next_action": "Create a parcel-specific evidence package and coordinated A102/A201 concept drawings before further geometry refinement."
+}

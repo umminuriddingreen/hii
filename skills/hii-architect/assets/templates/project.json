@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "project_id": "replace-me",
+  "name": "Untitled Project",
+  "phase": "concept",
+  "location": {"address": null, "coordinates": null},
+  "jurisdiction": {"name": null, "sources": []},
+  "units": "ft",
+  "coordinate_frame": {"id": "project-local", "crs": null, "origin": [0, 0, 0], "north_degrees": 0},
+  "brief": {},
+  "criteria": [],
+  "current_option_id": null,
+  "version": 1
+}

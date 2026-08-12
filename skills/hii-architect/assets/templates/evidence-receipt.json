@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "project_id": "replace-me",
+  "skill": "hii-architect",
+  "intent": "",
+  "inputs": [],
+  "assumptions": [],
+  "sources": [],
+  "executor_calls": [],
+  "outputs": [],
+  "checks": [],
+  "confidence": "low",
+  "unresolved": [],
+  "professional_review": [],
+  "next_action": ""
+}

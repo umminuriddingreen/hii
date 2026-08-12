@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "project_id": "channing-court-1601",
+  "units": "ft",
+  "coordinate_frame": "project-local",
+  "objects": [
+    {"id": "site-001", "semantic_type": "site", "geometry": {"representation": "polygon2d", "data": {"points": [[-37.5,-47.5],[37.5,-47.5],[37.5,47.5],[-37.5,47.5]]}}, "properties": {"area_sf": 7125, "status": "diagrammatic"}, "provenance": ["src-listing"], "version": 1},
+    {"id": "level-01", "semantic_type": "level", "geometry": null, "properties": {"elevation": 0, "status": "assumed"}, "provenance": [], "version": 1},
+    {"id": "house-001", "semantic_type": "space", "geometry": {"representation": "external_geometry_ref", "data": {"step": "../channing-court-wall-geometry.step", "glb": "../channing-court-wall-geometry.glb"}}, "properties": {"footprint_width": 56, "footprint_depth": 34, "wall_height": 8.8, "status": "diagrammatic"}, "provenance": ["cmd-wall-generator"], "version": 1},
+    {"id": "atrium-001", "semantic_type": "space", "geometry": {"representation": "polygon2d", "data": {"width": 14, "depth": 12, "center": [0,-16]}}, "properties": {"open_to_sky": true, "status": "proposed-restoration"}, "provenance": ["cmd-wall-generator"], "version": 1},
+    {"id": "pavilion-001", "semantic_type": "space", "geometry": {"representation": "parametric_profile", "data": {"width": 28, "depth": 22, "center": [18,28], "height": 8.8}}, "properties": {"gross_area_sf": 616, "use": "garden room / ADU-ready concept", "status": "proposed"}, "provenance": ["cmd-wall-generator"], "version": 1},
+    {"id": "commons-001", "semantic_type": "zone", "geometry": {"representation": "polygon2d", "data": {"width": 20, "depth": 31, "center": [8,8]}}, "properties": {"use": "covered exterior commons", "status": "proposed"}, "provenance": ["cmd-wall-generator"], "version": 1},
+    {"id": "qr-node-001", "semantic_type": "equipment", "geometry": {"representation": "external_geometry_ref", "data": {"model": "../channing-court-wall-geometry.glb"}}, "properties": {"use": "public project interface", "status": "conceptual"}, "provenance": ["cmd-wall-generator"], "version": 1}
+  ],
+  "relations": [
+    {"type": "contains", "from": "site-001", "to": "house-001", "properties": {}},
+    {"type": "contains", "from": "site-001", "to": "pavilion-001", "properties": {}},
+    {"type": "contains", "from": "house-001", "to": "atrium-001", "properties": {}},
+    {"type": "connected_to", "from": "commons-001", "to": "house-001", "properties": {}},
+    {"type": "connected_to", "from": "commons-001", "to": "pavilion-001", "properties": {}},
+    {"type": "contained_by", "from": "qr-node-001", "to": "site-001", "properties": {}}
+  ],
+  "constraints": [
+    {"id": "constraint-single-story", "kind": "planning", "statement": "Maintain a one-story concept pending confirmation of overlay applicability.", "source_ids": ["src-pa-sso"], "status": "partially_sourced"},
+    {"id": "constraint-trees", "kind": "site", "statement": "Do not rely on placeholder tree locations; survey and arborist review are required.", "source_ids": ["src-pa-trees"], "status": "unknown"},
+    {"id": "constraint-setbacks", "kind": "zoning", "statement": "Pavilion placement requires parcel, setback, easement, and ADU review.", "source_ids": ["src-pa-adu"], "status": "unknown"}
+  ],
+  "options": [
+    {"id": "opt-a-preserve", "name": "Preservation Reset", "strategy": "Retain the existing footprint; restore atrium, thresholds, landscape, and electrification.", "hard_constraint_status": "unknown", "status": "active-alternative"},
+    {"id": "opt-b-garden-pavilion", "name": "Garden Pavilion", "strategy": "Preservation reset plus a detached/flexible rear pavilion and covered commons.", "hard_constraint_status": "unknown", "status": "recommended-for-study"},
+    {"id": "opt-c-service-yard", "name": "Compact Service Addition", "strategy": "Concentrate new area and utilities along the service edge, preserving more open rear garden.", "hard_constraint_status": "unknown", "status": "active-alternative"}
+  ],
+  "commands": [
+    {"id": "cmd-wall-generator", "op": "generate_wall_geometry", "inputs": ["site-001", "level-01"], "params": {"generator": "../channing-court-wall-geometry.step.py", "wall_height": 8.8, "units": "ft"}, "tolerance": 0.01, "expected": {"formats": ["STEP", "GLB", "STL"]}, "executor": {"id": "cadgen-build123d", "version": "unrecorded"}, "results": ["house-001", "pavilion-001", "commons-001", "qr-node-001"], "status": "completed"}
+  ],
+  "sources": [
+    {"id": "src-listing", "type": "secondary", "status": "retrieved-2026-08-11"},
+    {"id": "src-pa-eichler-guidelines", "type": "public-authority", "status": "retrieved-2026-08-11"},
+    {"id": "src-pa-sso", "type": "public-authority", "status": "retrieved-2026-08-11"},
+    {"id": "src-pa-trees", "type": "public-authority", "status": "retrieved-2026-08-11"},
+    {"id": "src-pa-adu", "type": "public-authority", "status": "retrieved-2026-08-11"}
+  ],
+  "version": 1
+}

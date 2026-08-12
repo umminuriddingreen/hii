@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "project_id": "channing-court-1601",
+  "name": "Channing Court",
+  "phase": "concept",
+  "location": {
+    "address": "1601 Channing Ave, Palo Alto, CA 94303",
+    "coordinates": null
+  },
+  "jurisdiction": {
+    "name": "City of Palo Alto, California",
+    "sources": ["src-pa-eichler-guidelines", "src-pa-sso", "src-pa-trees", "src-pa-adu"]
+  },
+  "units": "ft",
+  "coordinate_frame": {
+    "id": "project-local",
+    "crs": null,
+    "origin": [0, 0, 0],
+    "north_degrees": 0,
+    "status": "assumed"
+  },
+  "brief": {
+    "intent": "Preserve the low Eichler character while improving the main house and testing a rear garden pavilion, covered commons, and QR-backed public project interface.",
+    "known_program": ["retained family house", "restored atrium", "work-share room", "service spine", "garden pavilion", "covered commons"],
+    "community_layer": "Collect non-binding feedback, contractor interest, lease demand, and budget signals; financial or lease offerings require separate legal review.",
+    "budget_basis": "Owner concept allowance, August 2026 dollars, order-of-magnitude only",
+    "budget_range_usd": [900000, 1800000]
+  },
+  "criteria": [
+    {"id": "c-site", "name": "Site and entitlement fit", "weight": 0.18, "status": "unknown"},
+    {"id": "c-program", "name": "Program and circulation", "weight": 0.15, "status": "conceptual"},
+    {"id": "c-character", "name": "Eichler character preservation", "weight": 0.15, "status": "conceptual"},
+    {"id": "c-climate", "name": "Daylight and climate response", "weight": 0.10, "status": "unverified"},
+    {"id": "c-coordination", "name": "Structure, systems, and constructability", "weight": 0.12, "status": "unverified"},
+    {"id": "c-cost", "name": "Cost and phasing", "weight": 0.12, "status": "order-of-magnitude"},
+    {"id": "c-community", "name": "Community value and market signal", "weight": 0.10, "status": "untested"},
+    {"id": "c-adaptability", "name": "Adaptability and reversibility", "weight": 0.08, "status": "conceptual"}
+  ],
+  "current_option_id": "opt-b-garden-pavilion",
+  "version": 1
+}

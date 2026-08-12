@@ -26,6 +26,7 @@ Concept package for an actual Bay Area site:
 - `concept-slides.md`: eight-slide concept narrative.
 - `concept-board.html`: presentation board for visual review.
 - `visual-precedent-mining-skill.md`: HII skill draft for Pinterest/Cosmos/API/browser precedent mining.
+- `project-state/`: HII Architect canonical project record, design state, issue log, and evidence receipt.
 
 ## HII Intent
 

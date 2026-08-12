@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "project_id": "replace-me",
+  "units": "ft",
+  "coordinate_frame": "project-local",
+  "objects": [],
+  "relations": [],
+  "constraints": [],
+  "options": [],
+  "commands": [],
+  "sources": [],
+  "version": 1
+}

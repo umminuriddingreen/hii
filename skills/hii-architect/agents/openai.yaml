@@ -1,0 +1,4 @@
+interface:
+  display_name: "HII Architect"
+  short_description: "Evidence-backed architectural design workflows"
+  default_prompt: "Use $hii-architect to turn this project brief into a verified architectural design package."
