@@ -1870,18 +1870,32 @@ impl Conversation {
             ));
         }
         let Some(requested) = requested.filter(|value| !value.trim().is_empty()) else {
-            let rows = models
-                .iter()
-                .map(|model| {
+            let mut rows = crate::agents::AgentManager::new(&self.paths).model_routes();
+            rows.extend(models.iter().map(|model| {
+                (
+                    self.ollama.provider_label().to_string(),
+                    model.clone(),
                     if model == &self.model {
-                        format!("{model}  current")
+                        "current · /model <name>".into()
                     } else {
-                        model.clone()
-                    }
-                })
+                        "/model <name>".into()
+                    },
+                )
+            }));
+            rows.sort_by(|left, right| {
+                left.0
+                    .to_ascii_lowercase()
+                    .cmp(&right.0.to_ascii_lowercase())
+                    .then_with(|| left.1.cmp(&right.1))
+            });
+            let body = rows
+                .into_iter()
+                .map(|(provider, model, status)| format!("{provider:<12} {model:<28} {status}"))
                 .collect::<Vec<_>>()
                 .join("\n");
-            return Ok(rows);
+            return Ok(format!(
+                "Provider     Model                        Status / action\n{body}\n\n↑↓ choose in the / picker · Tab/→ complete · Enter run\nHosted routes use /codex <task> or /claude <task>."
+            ));
         };
         let selected = choose_model(Some(requested), self.ollama.provider(), &models)?;
         let previous = std::mem::replace(&mut self.model, selected.clone());

@@ -57,6 +57,23 @@ impl AgentManager {
         ))
     }
 
+    /// Return the hosted model routes HII can invoke without claiming a full
+    /// vendor catalog that the installed CLIs do not expose.
+    pub fn model_routes(&self) -> Vec<(String, String, String)> {
+        let codex = provider_status("codex").unwrap_or_else(|_| "unavailable".into());
+        let claude = provider_status("claude").unwrap_or_else(|_| "unavailable".into());
+        [
+            ("Claude", "default", claude.as_str()),
+            ("Claude", "fable", claude.as_str()),
+            ("Claude", "opus", claude.as_str()),
+            ("Claude", "sonnet", claude.as_str()),
+            ("Codex", "default", codex.as_str()),
+        ]
+        .into_iter()
+        .map(|(provider, model, status)| (provider.into(), model.into(), status.into()))
+        .collect()
+    }
+
     /// Hand the terminal directly to the provider's official login flow. HII
     /// never accepts, proxies, logs, or stores the resulting credential.
     pub fn login(&self, provider: &str) -> Result<String, String> {

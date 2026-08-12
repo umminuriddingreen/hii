@@ -497,6 +497,17 @@ fn selected_command(
         .unwrap_or_else(|| buf.to_string())
 }
 
+fn complete_selected_command(
+    buf: &mut String,
+    cursor: &mut usize,
+    matches: &[(&'static str, &'static str)],
+    selected: usize,
+) {
+    let command = selected_command(buf, matches, selected);
+    *buf = format!("{command} ");
+    *cursor = buf.len();
+}
+
 pub fn read_event(public_test: bool, history: &[String], keymap: &Keymap) -> Result<InputEvent> {
     let _guard = RawModeGuard::enter()?;
     let mut buf = String::new();
@@ -599,6 +610,19 @@ pub fn read_event(public_test: bool, history: &[String], keymap: &Keymap) -> Res
                 continue;
             }
             match key.code {
+                KeyCode::Tab | KeyCode::Right if !matches.is_empty() => {
+                    complete_selected_command(&mut buf, &mut cursor, &matches, selected);
+                    selected = 0;
+                    redraw(
+                        &crate::tui::prompt_frame(frame),
+                        &buf,
+                        cursor,
+                        selected,
+                        &mut menu_rows,
+                        public_test,
+                    )?;
+                    continue;
+                }
                 KeyCode::Enter if !matches.is_empty() => {
                     let choice = selected_command(&buf, &matches, selected);
                     let mut out = io::stdout();
@@ -698,6 +722,19 @@ mod tests {
         );
         // Buffer is drained on submit.
         assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn completing_a_picker_choice_keeps_the_command_open_for_arguments() {
+        let mut buf = String::from("/cl");
+        let mut cursor = buf.len();
+        let matches = crate::tui::command_matches(&buf, false);
+        assert_eq!(matches[0].0, "/claude");
+
+        complete_selected_command(&mut buf, &mut cursor, &matches, 0);
+
+        assert_eq!(buf, "/claude ");
+        assert_eq!(cursor, buf.len());
     }
 
     #[test]

@@ -71,8 +71,10 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/reasoning", "model effort"),
     ("/autonomy", "local action policy"),
     ("/raw", "raw model stream"),
-    ("/model", "choose available model"),
-    ("/models", "list available models"),
+    ("/model", "choose local model"),
+    ("/codex", "use Codex model for a task"),
+    ("/claude", "use Claude model for a task"),
+    ("/models", "list local models"),
     ("/providers", "accounts and plans"),
     ("/login", "connect an account"),
     ("/proof", "latest receipt"),
@@ -98,8 +100,6 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/undo", "drop last exchange"),
     ("/fork", "snapshot session"),
     ("/teach", "save as skill"),
-    ("/codex", "start Codex task"),
-    ("/claude", "start Claude task"),
     ("/agent", "manage one worker"),
     #[cfg(feature = "preview")]
     ("/resources", "machine resources"),
@@ -370,7 +370,7 @@ pub fn command_menu(input: &str, selected: usize, public_test: bool) -> Vec<Stri
             "    {}",
             paint(
                 &format!(
-                    "↑↓ navigate  Enter select  Esc close  ·  {}/{}",
+                    "↑↓ navigate  Tab/→ complete  Enter run  Esc close  ·  {}/{}",
                     selected + 1,
                     total
                 ),
@@ -534,7 +534,8 @@ mod tests {
         let menu = command_menu("/", last, false);
         assert_eq!(menu.len(), 7);
         assert!(menu.iter().any(|line| line.contains(matches[last].0)));
-        assert!(menu.last().unwrap().contains("Enter select"));
+        assert!(menu.last().unwrap().contains("Tab/→ complete"));
+        assert!(menu.last().unwrap().contains("Enter run"));
     }
 
     #[test]
