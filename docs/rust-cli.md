@@ -17,6 +17,7 @@ hii proof [id]      inspect a durable run receipt
 hii board [action]  local kanban/todo board (list/add/move/done/edit/dedupe)
 hii login local     create or update the local HII user identity
 hii pipe [intent]   compile intent into capability, authority, execution, and proof stages
+hii skills run      execute a reviewed skill with receipt attribution and grading
 ```
 
 The native surface stays deliberately small. Existing HII command families
@@ -29,6 +30,20 @@ ambiguous matches, distinguishes a ready declaration from a directly invocable
 adapter, checks the minimum authority envelope, and names required proof. Use
 `--json` when another HII surface or agent will consume the plan. A blocked pipe
 plan never executes a model or tool by itself.
+
+Use `hii pipe INTENT --capability ID --execute` to select a typed adapter and
+execute through the existing governed agent loop. The capability selector is
+separate from the intent: the ID chooses the mechanism while INTENT remains the
+actual goal. Execution fails closed for ambiguous, partial, unavailable,
+unauthorized, or adapter-less capabilities. The first native adapters are
+`hii.agent.workspace_run` and reviewed HII skills.
+
+Reviewed skills can also run directly with `hii skills run ID GOAL`. HII loads
+only bounded `SKILL.md` files from `~/.hii/skills/registered/`; drafts and
+rejected skills cannot execute. `hii run --skill ID GOAL` composes one or more
+reviewed procedures into an ordinary run. Each selected skill is attributed
+after the run ID is minted, then graded from the final receipt. Skill competence
+never widens the run's authority.
 
 ## Parity freeze
 

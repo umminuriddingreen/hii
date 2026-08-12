@@ -38,9 +38,14 @@ pub struct PipePlan {
     pub next: String,
 }
 
-pub fn compile(paths: &AppPaths, intent: &str, authority: Authority) -> PipePlan {
+pub fn compile_for(
+    paths: &AppPaths,
+    intent: &str,
+    capability_query: &str,
+    authority: Authority,
+) -> PipePlan {
     let intent = intent.trim();
-    let capability = capability_resolver::resolve(paths, intent, authority);
+    let capability = capability_resolver::resolve(paths, capability_query, authority);
     compile_resolution(intent, authority, capability)
 }
 
@@ -208,6 +213,8 @@ mod tests {
             capability_name: Some("Test".into()),
             availability: Some(availability),
             directly_invocable: invocable,
+            adapter: invocable
+                .then_some(crate::capability_resolver::InvocationAdapter::WorkspaceRun),
             invoke: invocable.then(|| "hii test".into()),
             required_authority: Some(Authority::Workspace),
             authority_decision: Some(authority_decision.into()),

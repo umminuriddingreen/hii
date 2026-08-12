@@ -49,10 +49,34 @@ pub fn load_all(paths: &AppPaths) -> Vec<Entry> {
     let runtime = &paths.runtime;
     let mut entries = Vec::new();
     entries.extend(load_skills(&runtime.join("skills")));
+    entries.extend(load_registered_skills(&runtime.join("skills/registered")));
     entries.extend(load_capabilities(&runtime.join("capabilities.json")));
     entries.extend(load_drafts(&runtime.join("skills/proposed")));
     apply_lifecycle(paths, &mut entries);
     entries
+}
+
+fn load_registered_skills(dir: &Path) -> Vec<Entry> {
+    let Ok(read) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    read.flatten()
+        .filter_map(|folder| {
+            let value = read_json(&folder.path().join("manifest.json"))?;
+            let id = str_field(&value, "id")?;
+            Some(Entry {
+                name: str_field(&value, "name").unwrap_or_else(|| id.clone()),
+                description: str_field(&value, "description").unwrap_or_default(),
+                source: "skill",
+                category: "registered".into(),
+                tags: str_array(&value, "capabilities"),
+                invoke: Some(format!("hii skills run {id}")),
+                status: "verified".into(),
+                examples: str_array(&value, "verification"),
+                id,
+            })
+        })
+        .collect()
 }
 
 /// Fold the skill lifecycle over the raw registries.
@@ -76,7 +100,12 @@ fn apply_lifecycle(paths: &AppPaths, entries: &mut Vec<Entry>) {
     });
     for entry in entries.iter_mut() {
         if let Some(record) = lifecycle.skills.get(&entry.id) {
-            entry.status = record.state.label().to_string();
+            // A reviewed registered bundle is an explicit human promotion.
+            // An older draft projection with the same id may not silently
+            // downgrade it back to proposed. Rejection still wins above.
+            if entry.category != "registered" || record.state.is_promoted() {
+                entry.status = record.state.label().to_string();
+            }
         }
     }
     for record in crate::skill_lifecycle::promoted(&lifecycle) {

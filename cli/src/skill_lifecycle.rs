@@ -530,12 +530,14 @@ pub fn record_invocation(
                 "invocation",
             )
         });
+    let origin = crate::run_context::origin();
     record.observe(Observation {
         receipt_id: receipt_id.clone(),
         outcome: Outcome::Inconclusive,
         note: format!(
-            "invoked under origin {}; awaiting receipt grade",
-            crate::run_context::origin().label()
+            "invoked under origin {}; auto-curatable={}; awaiting receipt grade",
+            origin.label(),
+            origin.is_auto_curatable()
         ),
     });
     record.recompute();

@@ -76,6 +76,7 @@ pub fn set_run_id(run_id: &str) {
     }
 }
 
+#[allow(dead_code)] // Reserved for the interactive conversation receipt bridge.
 pub fn set_conversation_id(conversation_id: &str) {
     if let Ok(mut context) = context().write() {
         context.conversation_id = Some(conversation_id.to_string());
@@ -89,7 +90,10 @@ pub fn set_origin(origin: WriteOrigin) {
 }
 
 pub fn run_id() -> Option<String> {
-    context().read().ok().and_then(|context| context.run_id.clone())
+    context()
+        .read()
+        .ok()
+        .and_then(|context| context.run_id.clone())
 }
 
 pub fn conversation_id() -> Option<String> {
@@ -129,7 +133,9 @@ mod tests {
     static SERIAL: Mutex<()> = Mutex::new(());
 
     fn serial() -> MutexGuard<'static, ()> {
-        SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        SERIAL
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     #[test]

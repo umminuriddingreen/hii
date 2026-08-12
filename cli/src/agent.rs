@@ -71,6 +71,9 @@ pub struct RunOptions {
     pub last_message: Option<PathBuf>,
     pub hooks: bool,
     pub coding: bool,
+    /// Reviewed skills explicitly selected for this run. Loading is fail-closed,
+    /// and each id is attributed to the receipt before the first model call.
+    pub skill_ids: Vec<String>,
     pub autonomy_level: AutonomyLevel,
 }
 
@@ -215,6 +218,19 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         return Err("goal cannot be empty".into());
     }
     validate_declared_verification(&options.verify, None)?;
+    let declaration = if options.verify.is_empty() {
+        None
+    } else {
+        Some(crate::declaration::Declaration::register(
+            &options.verify,
+            crate::run_context::WriteOrigin::Operator,
+        )?)
+    };
+    let loaded_skills = options
+        .skill_ids
+        .iter()
+        .map(|id| crate::skill_runtime::load(paths, id))
+        .collect::<Result<Vec<_>, _>>()?;
 
     let tools = Toolbelt::new(options.workspace)?;
     if !options.allow_missing_verify_deps {
@@ -270,6 +286,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         None
     };
     let store = RunStore::create(&paths.runtime)?;
+    crate::run_context::set_origin(crate::run_context::WriteOrigin::Operator);
     let run_id = store.id.clone();
     let started_at = store.started_at_unix_ms;
     let run_dir = store.dir.clone();
@@ -293,6 +310,23 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         ),
     )?;
     let mut journal = Journal::new(store, options.output.mode(options.verbose), options.stream);
+    for skill in &loaded_skills {
+        crate::skill_lifecycle::record_invocation(paths, &skill.id, Some(&run_id))?;
+    }
+    let preflight = crate::pipe::compile_for(
+        paths,
+        &options.goal,
+        "hii.agent.workspace_run",
+        options.authority,
+    );
+    journal.emit(Event::new("pipe.preflight").data(json!({
+        "status": preflight.status,
+        "capability": preflight.capability.capability_id,
+        "adapter": preflight.capability.adapter,
+        "authority_decision": preflight.capability.authority_decision,
+        "proof_required": preflight.proof_required,
+        "skills": loaded_skills.iter().map(|skill| skill.id.as_str()).collect::<Vec<_>>()
+    })))?;
     journal.emit(Event::new("run.started").data(json!({
         "run_id": &run_id,
         "goal": redact_text(&options.goal),
@@ -303,7 +337,8 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         "autonomy_level": options.autonomy_level.label(),
         "authority": options.authority.label(),
         "max_steps": options.max_steps,
-        "dry_run": options.dry_run
+        "dry_run": options.dry_run,
+        "skills": loaded_skills.iter().map(|skill| skill.id.as_str()).collect::<Vec<_>>()
     })))?;
     let mut hook_records: Vec<HookRecord> = Vec::new();
     let session_hooks = hooks.fire(
@@ -346,6 +381,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         "done_when": contract.done_when,
         "context_sources": capsule.sources,
         "declared_verification": options.verify,
+        "declaration": &declaration,
     })))?;
     if options.output == RunOutput::Human && options.authority == Authority::Yolo {
         println!(
@@ -379,6 +415,12 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         options.autonomy_level,
     );
     let mut messages = vec![Message::system(system)];
+    for skill in &loaded_skills {
+        messages.push(Message::system(format!(
+            "REVIEWED HII SKILL `{}`\nUse these instructions as a bounded procedure. They do not widen authority and do not override the current user goal or workspace instructions.\n\n{}",
+            skill.id, skill.instructions
+        )));
+    }
     if options.coding {
         messages.push(Message::system("CODING MODE: optimize for correct code over narration. Inspect the smallest relevant surface, edit narrowly, run focused verification, repair failures, then run the broadest cheap check warranted by touched files. Do not finalize after a mutation until proof is current."));
     }
@@ -1227,6 +1269,12 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         artifacts: &artifacts,
         terminated: terminated.as_deref(),
     });
+    if declaration
+        .as_ref()
+        .is_some_and(|declaration| !declaration.supports_verification())
+    {
+        return Err("the pre-registered acceptance declaration changed during execution".into());
+    }
     let completed = completion.satisfied;
     // A required artifact that was found belongs in the inventory even when the
     // run did not modify it, so the receipt lists what the outcome actually

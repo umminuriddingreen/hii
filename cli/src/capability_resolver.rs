@@ -30,6 +30,13 @@ pub enum ResolutionStatus {
     Unavailable,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum InvocationAdapter {
+    WorkspaceRun,
+    SkillRun { skill_id: String },
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Candidate {
     pub id: String,
@@ -49,6 +56,8 @@ pub struct CapabilityResolution {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub availability: Option<Availability>,
     pub directly_invocable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub adapter: Option<InvocationAdapter>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invoke: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -80,6 +89,7 @@ pub fn resolve_entries(
             capability_name: None,
             availability: None,
             directly_invocable: false,
+            adapter: None,
             invoke: None,
             required_authority: None,
             authority_decision: None,
@@ -97,6 +107,7 @@ pub fn resolve_entries(
             capability_name: None,
             availability: None,
             directly_invocable: false,
+            adapter: None,
             invoke: None,
             required_authority: None,
             authority_decision: None,
@@ -127,11 +138,8 @@ fn resolved(
             Authority::ExternalPreview | Authority::ExternalCommit
         ),
     );
-    let invoke = entry
-        .invoke
-        .as_deref()
-        .filter(|value| is_executable_invoke(value));
-    let directly_invocable = availability == Availability::Ready && invoke.is_some();
+    let adapter = invocation_adapter(entry);
+    let directly_invocable = availability == Availability::Ready && adapter.is_some();
     let status = if availability == Availability::Unavailable {
         ResolutionStatus::Unavailable
     } else {
@@ -159,7 +167,8 @@ fn resolved(
         capability_name: Some(entry.name.clone()),
         availability: Some(availability),
         directly_invocable,
-        invoke: invoke.map(str::to_string),
+        adapter,
+        invoke: entry.invoke.clone(),
         required_authority: Some(required_authority),
         authority_decision: Some(decision_label(decision).into()),
         reason,
@@ -224,12 +233,16 @@ fn is_affirmative_permission(permission: &str) -> bool {
         && !permission.contains("only after approval")
 }
 
-fn is_executable_invoke(value: &str) -> bool {
-    let value = value.trim();
-    value.starts_with("hii ")
-        || value.starts_with("./")
-        || value.starts_with('/')
-        || value.contains(" --")
+fn invocation_adapter(entry: &Entry) -> Option<InvocationAdapter> {
+    if entry.source == "skill" {
+        Some(InvocationAdapter::SkillRun {
+            skill_id: entry.id.clone(),
+        })
+    } else if entry.id == "hii.agent.workspace_run" {
+        Some(InvocationAdapter::WorkspaceRun)
+    } else {
+        None
+    }
 }
 
 fn contains_any(value: &str, needles: &[&str]) -> bool {
@@ -282,13 +295,14 @@ mod tests {
 
     #[test]
     fn resolves_ready_invocable_capability_and_authority() {
-        let entries = vec![entry(
+        let mut skill = entry(
             "messaging.imessage.send",
             "ready",
             Some("hii message send"),
             &["message known contacts"],
-        )];
-        let result = resolve_entries(&entries, "messaging.imessage.send", Authority::Workspace);
+        );
+        skill.source = "skill";
+        let result = resolve_entries(&[skill], "messaging.imessage.send", Authority::Workspace);
         assert_eq!(result.status, ResolutionStatus::Resolved);
         assert_eq!(result.availability, Some(Availability::Ready));
         assert!(result.directly_invocable);
@@ -306,16 +320,16 @@ mod tests {
     }
 
     #[test]
-    fn runtime_class_is_not_mistaken_for_an_invocation() {
+    fn workspace_run_uses_a_typed_adapter_not_its_runtime_class() {
         let entries = vec![entry(
-            "hii.workspace.run",
+            "hii.agent.workspace_run",
             "ready",
             Some("local-cli"),
             &["selected workspace only"],
         )];
-        let result = resolve_entries(&entries, "hii.workspace.run", Authority::Workspace);
-        assert!(!result.directly_invocable);
-        assert!(result.invoke.is_none());
+        let result = resolve_entries(&entries, "hii.agent.workspace_run", Authority::Workspace);
+        assert!(result.directly_invocable);
+        assert_eq!(result.adapter, Some(InvocationAdapter::WorkspaceRun));
     }
 
     #[test]

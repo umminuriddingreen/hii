@@ -33,6 +33,7 @@ mod run_context;
 mod runlog;
 mod schedule;
 mod skill_lifecycle;
+mod skill_runtime;
 mod skills;
 #[cfg(feature = "preview")]
 mod system_monitor;
@@ -61,7 +62,7 @@ use std::{
     version,
     about = "Fast, local-first workspace agent",
     long_about = "HII is the local home for human intent, bounded agent work, and inspectable proof.\n\nStart here:\n  hii                          open the interactive workspace\n  hii home                     show the compact current coordinate\n  hii \"fix the failing tests\"  run a bounded goal\n  hii proof                    inspect what completed",
-    after_help = legacy::help_footer()
+    after_help = legacy::help_footer_resolved()
 )]
 struct Cli {
     #[arg(
@@ -216,6 +217,12 @@ enum Commands {
         #[arg(long, help = "Use the stricter native coding agent loop")]
         coding: bool,
         #[arg(
+            long = "skill",
+            value_name = "ID",
+            help = "Run with a reviewed HII skill and attribute the receipt; repeatable"
+        )]
+        skills: Vec<String>,
+        #[arg(
             long,
             value_enum,
             default_value_t = AutonomyArg::LocalFull,
@@ -301,6 +308,21 @@ enum Commands {
             help = "Authority envelope: read-only | workspace | external-preview | external-commit"
         )]
         authority: Option<String>,
+        #[arg(
+            long,
+            value_name = "ID_OR_QUERY",
+            help = "Resolve this capability while preserving INTENT as the execution goal"
+        )]
+        capability: Option<String>,
+        #[arg(
+            long,
+            help = "Execute a ready typed adapter through the governed runner"
+        )]
+        execute: bool,
+        #[arg(long, value_name = "COMMAND", help = "Deterministic acceptance check")]
+        verify: Vec<String>,
+        #[arg(long, value_name = "CRITERIA", help = "Completion criterion")]
+        done_when: Option<String>,
         #[arg(long, help = "Emit the complete machine-readable pipe plan")]
         json: bool,
     },
@@ -456,8 +478,22 @@ enum SkillsCommand {
     )]
     RecordUse {
         id: String,
-        #[arg(long, value_name = "ID", help = "Receipt to attribute to, when outside a run")]
+        #[arg(
+            long,
+            value_name = "ID",
+            help = "Receipt to attribute to, when outside a run"
+        )]
         receipt: Option<String>,
+    },
+    #[command(about = "Execute a reviewed skill through the governed HII agent loop")]
+    Run {
+        id: String,
+        #[arg(required = true, num_args = 1.., help = "Goal to execute with the skill")]
+        goal: Vec<String>,
+        #[arg(long, value_name = "COMMAND", help = "Deterministic acceptance check")]
+        verify: Vec<String>,
+        #[arg(long, value_name = "CRITERIA", help = "Completion criterion")]
+        done_when: Option<String>,
     },
     #[command(about = "Explicitly reject a skill regardless of how well it has performed")]
     Reject {
@@ -567,6 +603,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             stream,
             allow_missing_verify_deps,
             coding,
+            skills,
             autonomy,
             last_message,
         }) => {
@@ -624,6 +661,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     last_message,
                     hooks: lifecycle_hooks_enabled(cli.no_hooks, cli.session_profile),
                     coding,
+                    skill_ids: skills,
                     autonomy_level: autonomy.into(),
                 },
             )?;
@@ -729,6 +767,52 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     "{}",
                     skill_lifecycle::record_invocation(&paths, &id, receipt.as_deref())?
                 ),
+                SkillsCommand::Run {
+                    id,
+                    goal,
+                    verify,
+                    done_when,
+                } => {
+                    let workspace = cli
+                        .cwd
+                        .clone()
+                        .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+                    let receipt = agent::run(
+                        &paths,
+                        RunOptions {
+                            goal: goal.join(" "),
+                            workspace,
+                            model: cli.model.clone(),
+                            review: false,
+                            review_model: None,
+                            max_steps: cli.max_steps,
+                            dry_run: false,
+                            verbose: false,
+                            authority: contract::Authority::Workspace,
+                            done_when,
+                            verify,
+                            outcome_requirements: None,
+                            use_context: true,
+                            output: RunOutput::Human,
+                            stream: StreamPolicy::Auto,
+                            allow_missing_verify_deps: false,
+                            budgets: Budgets {
+                                max_steps: cli.max_steps,
+                                wall_clock: match cli.deadline.as_deref() {
+                                    Some(value) => parse_duration(value)?,
+                                    None => Some(Duration::from_secs(DEFAULT_WALL_CLOCK_SECS)),
+                                },
+                                ..Budgets::default()
+                            },
+                            last_message: None,
+                            hooks: lifecycle_hooks_enabled(cli.no_hooks, cli.session_profile),
+                            coding: true,
+                            skill_ids: vec![id],
+                            autonomy_level: AutonomyLevel::LocalFull,
+                        },
+                    )?;
+                    return Ok(ExitCode::from(receipt.exit_code));
+                }
                 SkillsCommand::Reject { id, reason } => {
                     println!(
                         "{}",
@@ -750,12 +834,78 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         Some(Commands::Pipe {
             intent,
             authority,
+            capability,
+            execute,
+            verify,
+            done_when,
             json,
         }) => {
             let authority =
                 resolve_authority(false, authority.as_deref(), AuthorityContext::Operator)?;
-            let plan = pipe::compile(&paths, &intent.join(" "), authority);
+            let intent = intent.join(" ");
+            let plan = pipe::compile_for(
+                &paths,
+                &intent,
+                capability.as_deref().unwrap_or(&intent),
+                authority,
+            );
             println!("{}", pipe::render(&plan, json)?);
+            if execute {
+                use capability_resolver::InvocationAdapter;
+                if plan.status != pipe::PipeStatus::Ready {
+                    return Err(format!("pipe is {:?}: {}", plan.status, plan.next));
+                }
+                let skill_ids = match plan.capability.adapter.clone() {
+                    Some(InvocationAdapter::WorkspaceRun) => Vec::new(),
+                    Some(InvocationAdapter::SkillRun { skill_id }) => vec![skill_id],
+                    None => {
+                        return Err("resolved capability has no typed invocation adapter".into())
+                    }
+                };
+                let workspace = cli
+                    .cwd
+                    .clone()
+                    .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+                let receipt = agent::run(
+                    &paths,
+                    RunOptions {
+                        goal: intent,
+                        workspace,
+                        model: cli.model.clone(),
+                        review: false,
+                        review_model: None,
+                        max_steps: cli.max_steps,
+                        dry_run: false,
+                        verbose: false,
+                        authority,
+                        done_when,
+                        verify,
+                        outcome_requirements: None,
+                        use_context: true,
+                        output: if json {
+                            RunOutput::Json
+                        } else {
+                            RunOutput::Human
+                        },
+                        stream: StreamPolicy::Auto,
+                        allow_missing_verify_deps: false,
+                        budgets: Budgets {
+                            max_steps: cli.max_steps,
+                            wall_clock: match cli.deadline.as_deref() {
+                                Some(value) => parse_duration(value)?,
+                                None => Some(Duration::from_secs(DEFAULT_WALL_CLOCK_SECS)),
+                            },
+                            ..Budgets::default()
+                        },
+                        last_message: None,
+                        hooks: lifecycle_hooks_enabled(cli.no_hooks, cli.session_profile),
+                        coding: true,
+                        skill_ids,
+                        autonomy_level: AutonomyLevel::LocalFull,
+                    },
+                )?;
+                return Ok(ExitCode::from(receipt.exit_code));
+            }
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::ToolsManifest) => {
@@ -1762,7 +1912,10 @@ fn claimed_from_legacy(args: &[String]) -> bool {
             words.next().map(String::as_str),
             words.next().map(String::as_str),
         ),
-        (Some("skills"), Some("promote" | "reject" | "lifecycle" | "record-use"))
+        (
+            Some("skills"),
+            Some("promote" | "reject" | "lifecycle" | "record-use" | "run")
+        )
     )
 }
 
@@ -2283,7 +2436,47 @@ mod tests {
                 intent,
                 authority: Some(authority),
                 json: true,
+                ..
             }) if intent == ["send", "an", "iMessage"] && authority == "external-commit"
+        ));
+    }
+
+    #[test]
+    fn parses_reviewed_skill_run_and_direct_run_skill_selection() {
+        let skill = Cli::try_parse_from([
+            "hii",
+            "skills",
+            "run",
+            "build-hii-knowledge-slice",
+            "verify",
+            "the",
+            "knowledge",
+            "loop",
+            "--verify",
+            "npm run hii:knowledge:check",
+        ])
+        .expect("parse skill run");
+        assert!(matches!(
+            skill.command,
+            Some(Commands::Skills {
+                action: SkillsCommand::Run { id, goal, verify, .. }
+            }) if id == "build-hii-knowledge-slice"
+                && goal == ["verify", "the", "knowledge", "loop"]
+                && verify == ["npm run hii:knowledge:check"]
+        ));
+
+        let run = Cli::try_parse_from([
+            "hii",
+            "run",
+            "inspect",
+            "--skill",
+            "build-hii-knowledge-slice",
+        ])
+        .expect("parse run skill");
+        assert!(matches!(
+            run.command,
+            Some(Commands::Run { skills, .. })
+                if skills == ["build-hii-knowledge-slice"]
         ));
     }
 

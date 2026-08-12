@@ -37,7 +37,9 @@ use crate::run_context::WriteOrigin;
 /// This is a floor against the degenerate case, not a judge of whether a check
 /// is a *good* one — that is not decidable here. It rejects what is definitionally
 /// vacuous: builtins that always exit zero, and pure output statements.
-const VACUOUS: &[&str] = &["true", ":", "echo", "printf", "pwd", "cd", "exit 0", "return 0"];
+const VACUOUS: &[&str] = &[
+    "true", ":", "echo", "printf", "pwd", "cd", "exit 0", "return 0",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -201,14 +203,19 @@ mod tests {
         let operator =
             Declaration::register(&checks(&["make check"]), WriteOrigin::Operator).unwrap();
         assert_eq!(agent.fingerprint, operator.fingerprint);
-        assert_eq!(agent.supports_verification(), operator.supports_verification());
+        assert_eq!(
+            agent.supports_verification(),
+            operator.supports_verification()
+        );
         assert!(Declaration::register(&checks(&["true"]), WriteOrigin::Operator).is_err());
     }
 
     #[test]
     fn fingerprint_is_order_sensitive_and_stable() {
-        let one = Declaration::register(&checks(&["a-cmd", "b-cmd"]), WriteOrigin::Operator).unwrap();
-        let same = Declaration::register(&checks(&["a-cmd", "b-cmd"]), WriteOrigin::Operator).unwrap();
+        let one =
+            Declaration::register(&checks(&["a-cmd", "b-cmd"]), WriteOrigin::Operator).unwrap();
+        let same =
+            Declaration::register(&checks(&["a-cmd", "b-cmd"]), WriteOrigin::Operator).unwrap();
         let swapped =
             Declaration::register(&checks(&["b-cmd", "a-cmd"]), WriteOrigin::Operator).unwrap();
         assert_eq!(one.fingerprint, same.fingerprint);

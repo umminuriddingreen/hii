@@ -434,6 +434,7 @@ mod tests {
     #[test]
     fn recorded_event_kinds_are_frozen() {
         const FROZEN: &[&str] = &[
+            "pipe.preflight",
             "run.started",
             "run.blocked",
             "run.interrupted",
