@@ -10,16 +10,19 @@ export async function GET(request: Request) {
 
   const encoder = new TextEncoder();
   let timer: NodeJS.Timeout | null = null;
+  let closed = false;
 
   const stream = new ReadableStream({
     start(controller) {
       async function sendSnapshot() {
         try {
           const snapshot = await getTerminalSnapshot();
+          if (closed) return;
           controller.enqueue(
             encoder.encode(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`)
           );
         } catch (error) {
+          if (closed) return;
           controller.enqueue(
             encoder.encode(
               `event: error\ndata: ${JSON.stringify({
@@ -34,6 +37,7 @@ export async function GET(request: Request) {
       timer = setInterval(sendSnapshot, 3000);
 
       request.signal.addEventListener('abort', () => {
+        closed = true;
         if (timer) clearInterval(timer);
         try {
           controller.close();
@@ -43,6 +47,7 @@ export async function GET(request: Request) {
       });
     },
     cancel() {
+      closed = true;
       if (timer) clearInterval(timer);
     }
   });

@@ -119,7 +119,7 @@ fn apply_lifecycle(paths: &AppPaths, entries: &mut Vec<Entry>) {
             source: "skill",
             category: "lifecycle".into(),
             tags: Vec::new(),
-            invoke: Some(format!("hii skill run {}", record.id)),
+            invoke: Some(format!("hii skills run {}", record.id)),
             status: record.state.label().to_string(),
             examples: Vec::new(),
         });
@@ -154,7 +154,7 @@ fn load_skills(dir: &Path) -> Vec<Entry> {
             source: "skill",
             category: str_field(&value, "category").unwrap_or_default(),
             tags: str_array(&value, "tags"),
-            invoke: Some(format!("hii skill run {id}")),
+            invoke: Some(format!("hii skills run {id}")),
             status: "ready".into(),
             examples: str_array(&value, "examples"),
             id,

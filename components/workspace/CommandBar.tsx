@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { WorkspaceNodeType } from '../../lib/workspace/types';
+import type { CapabilityDefinition } from '../../lib/capabilities/types';
+import { surfaceForCapability } from '../../lib/capabilities/surfaces';
 
 type Surface = {
   id: string;
@@ -23,13 +25,14 @@ type Skill = {
 
 type Command = {
   id: string;
-  kind: 'create' | 'navigate' | 'surface' | 'skill' | 'view';
+  kind: 'capability' | 'create' | 'navigate' | 'surface' | 'skill' | 'view';
   label: string;
   hint: string;
   verb: string;
   detail?: string;
   surface?: Surface;
   skill?: Skill;
+  capability?: CapabilityDefinition;
   run?: () => void;
   surfaceAction?: 'toggle' | 'home';
 };
@@ -42,6 +45,7 @@ type CommandBarProps = {
 };
 
 function kindLabel(command: Command) {
+  if (command.kind === 'capability') return 'HII capability';
   if (command.kind === 'skill') return 'registered skill';
   if (command.kind === 'surface') return 'surface control';
   if (command.kind === 'navigate') return 'HII surface';
@@ -56,6 +60,7 @@ export function CommandBar({ spawn, resetView, getAnchor, onOpenChange }: Comman
   const [anchorX, setAnchorX] = useState(0);
   const [surfaces, setSurfaces] = useState<Surface[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [capabilities, setCapabilities] = useState<CapabilityDefinition[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
@@ -70,14 +75,16 @@ export function CommandBar({ spawn, resetView, getAnchor, onOpenChange }: Comman
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [configResponse, skillsResponse] = await Promise.all([
+      const [configResponse, skillsResponse, capabilitiesResponse] = await Promise.all([
         fetch('/api/config', { cache: 'no-store' }),
-        fetch('/api/skills', { cache: 'no-store' })
+        fetch('/api/skills', { cache: 'no-store' }),
+        fetch('/api/capabilities', { cache: 'no-store' })
       ]);
-      if (!configResponse.ok || !skillsResponse.ok) throw new Error('HII controls unavailable');
-      const [{ config }, { skills: nextSkills }] = await Promise.all([
+      if (!configResponse.ok || !skillsResponse.ok || !capabilitiesResponse.ok) throw new Error('HII controls unavailable');
+      const [{ config }, { skills: nextSkills }, { capabilities: nextCapabilities }] = await Promise.all([
         configResponse.json() as Promise<{ config: { defaults?: { homepage?: string }; surfaces?: Record<string, { enabled?: boolean }> } }>,
-        skillsResponse.json() as Promise<{ skills: Skill[] }>
+        skillsResponse.json() as Promise<{ skills: Skill[] }>,
+        capabilitiesResponse.json() as Promise<{ capabilities: CapabilityDefinition[] }>
       ]);
       const home = config.defaults?.homepage || 'workspace';
       setSurfaces(
@@ -88,6 +95,7 @@ export function CommandBar({ spawn, resetView, getAnchor, onOpenChange }: Comman
         }))
       );
       setSkills(Array.isArray(nextSkills) ? nextSkills : []);
+      setCapabilities(Array.isArray(nextCapabilities) ? nextCapabilities : []);
     } catch {
       setNotice('Live surface and skill controls could not be loaded.');
     } finally {
@@ -137,8 +145,21 @@ export function CommandBar({ spawn, resetView, getAnchor, onOpenChange }: Comman
       { id: 'sound-field', kind: 'create', label: 'Open South Berkeley sound field', hint: 'WebGL · modeled dBA', verb: 'create', run: () => spawn('sound-field') },
       { id: 'reset', kind: 'view', label: 'Reset workspace view', hint: '⌘0', verb: 'reset', run: resetView },
       { id: 'nav-boards', kind: 'navigate', label: 'Go to boards', hint: '/boards', verb: 'open', run: () => (location.href = '/boards') },
-      { id: 'nav-console', kind: 'navigate', label: 'Go to terminal', hint: '/console', verb: 'open', run: () => (location.href = '/console') },
-      { id: 'nav-feed', kind: 'navigate', label: 'Go to feed', hint: '/feed', verb: 'open', run: () => (location.href = '/feed') },
+      { id: 'nav-console', kind: 'navigate', label: 'Go to console', hint: '/console · live system feed', verb: 'open', run: () => (location.href = '/console') },
+      ...capabilities.flatMap<Command>((capability) => {
+        const target = surfaceForCapability(capability.id);
+        if (!target) return [];
+        return [{
+          id: `capability-${capability.id}`,
+          kind: 'capability',
+          label: capability.name,
+          hint: `${capability.status} · ${target.label} · ${capability.id}`,
+          verb: 'open',
+          detail: capability.summary,
+          capability,
+          run: () => (location.href = target.href)
+        }];
+      }),
       ...surfaces.flatMap<Command>((surface) => [
         {
           id: `surface-toggle-${surface.id}`,
@@ -180,7 +201,7 @@ export function CommandBar({ spawn, resetView, getAnchor, onOpenChange }: Comman
         .toLowerCase()
         .includes(normalized)
     );
-  }, [query, resetView, skills, spawn, surfaces]);
+  }, [capabilities, query, resetView, skills, spawn, surfaces]);
 
   const activeIndex = Math.max(0, Math.min(index, commands.length - 1));
   const active = commands[activeIndex];
@@ -310,7 +331,7 @@ export function CommandBar({ spawn, resetView, getAnchor, onOpenChange }: Comman
                     className={commandIndex === activeIndex ? 'is-active' : ''}
                   >
                     <span className="hii-omni-glyph" data-kind={command.kind}>
-                      {command.kind === 'skill' ? '✦' : command.kind === 'surface' ? '◐' : command.kind === 'navigate' ? '↗' : command.kind === 'view' ? '◎' : '+'}
+                      {command.kind === 'skill' ? '✦' : command.kind === 'capability' ? '◆' : command.kind === 'surface' ? '◐' : command.kind === 'navigate' ? '↗' : command.kind === 'view' ? '◎' : '+'}
                     </span>
                     <span className="hii-omni-command-copy">
                       <strong>{command.label}</strong>
@@ -340,6 +361,13 @@ export function CommandBar({ spawn, resetView, getAnchor, onOpenChange }: Comman
                       <div className="hii-omni-facts">
                         <span><b>{active.surface.enabled ? 'on' : 'off'}</b> availability</span>
                         <span><b>{active.surface.home ? 'yes' : 'no'}</b> home surface</span>
+                      </div>
+                    )}
+                    {active.capability && (
+                      <div className="hii-omni-facts">
+                        <span><b>{active.capability.status}</b> availability</span>
+                        <span><b>{active.capability.runtime}</b> runtime</span>
+                        <span><b>{active.capability.trustLevel}</b> trust</span>
                       </div>
                     )}
                     <div className="hii-omni-enter"><span>↵</span> {active.verb}</div>

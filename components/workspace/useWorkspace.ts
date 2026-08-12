@@ -21,6 +21,8 @@ export function useWorkspace(getViewport: () => WorkspaceViewport): WorkspaceApi
   const [initialViewport, setInitialViewport] = useState<WorkspaceViewport | null>(null);
   const nextZ = useRef(1);
   const nodesRef = useRef<WorkspaceNode[]>([]);
+  const revisionRef = useRef(0);
+  const linksRef = useRef<WorkspaceDoc['links']>([]);
   const syncedAt = useRef('');
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   nodesRef.current = nodes;
@@ -49,19 +51,23 @@ export function useWorkspace(getViewport: () => WorkspaceViewport): WorkspaceApi
       const nodesToWrite = [...merged.values()];
       const doc: WorkspaceDoc = {
         version: 1,
+        revision: revisionRef.current,
         updatedAt: new Date().toISOString(),
         viewport: getViewport(),
         nextZ: nextZ.current,
-        nodes: nodesToWrite
+        nodes: nodesToWrite,
+        links: linksRef.current
       };
       const response = await fetch('/api/workspace', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(doc)
+        body: JSON.stringify({ workspace: doc, expectedRevision: doc.revision })
       });
       if (response.ok) {
-        const result = (await response.json()) as { updatedAt?: string };
-        syncedAt.current = result.updatedAt || doc.updatedAt;
+        const result = (await response.json()) as { workspace?: WorkspaceDoc; updatedAt?: string };
+        revisionRef.current = result.workspace?.revision ?? doc.revision;
+        linksRef.current = result.workspace?.links ?? doc.links;
+        syncedAt.current = result.workspace?.updatedAt || result.updatedAt || doc.updatedAt;
         setNodes(nodesToWrite);
       }
     } catch {
@@ -80,6 +86,8 @@ export function useWorkspace(getViewport: () => WorkspaceViewport): WorkspaceApi
       if (!res.ok) return;
       const doc = normalizeWorkspace(await res.json());
       syncedAt.current = doc.updatedAt;
+      revisionRef.current = doc.revision;
+      linksRef.current = doc.links;
       nextZ.current = Math.max(nextZ.current, doc.nextZ);
       if (initial) {
         setNodes(doc.nodes);

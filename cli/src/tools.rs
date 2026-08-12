@@ -1422,6 +1422,26 @@ mod tests {
     }
 
     #[test]
+    fn git_snapshot_is_scoped_to_workspace_path() {
+        let repo = workspace();
+        let nested = repo.join("nested").join("task");
+        fs::create_dir_all(&nested).unwrap();
+        Command::new("git")
+            .args(["init"])
+            .current_dir(&repo)
+            .output()
+            .expect("git init");
+        fs::write(repo.join("outside.txt"), "outside").unwrap();
+
+        let tools = Toolbelt::new(nested.clone()).unwrap();
+        assert_eq!(tools.git_snapshot(), "clean");
+
+        fs::write(nested.join("inside.txt"), "inside").unwrap();
+        assert!(tools.git_snapshot().contains("inside.txt"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
     fn secret_files_are_blocked() {
         let path = workspace();
         fs::write(path.join(".env"), "TOKEN=nope").unwrap();

@@ -234,7 +234,7 @@ fn is_affirmative_permission(permission: &str) -> bool {
 }
 
 fn invocation_adapter(entry: &Entry) -> Option<InvocationAdapter> {
-    if entry.source == "skill" {
+    if entry.source == "skill" && entry.category == "registered" {
         Some(InvocationAdapter::SkillRun {
             skill_id: entry.id.clone(),
         })
@@ -302,12 +302,30 @@ mod tests {
             &["message known contacts"],
         );
         skill.source = "skill";
+        skill.category = "registered".into();
         let result = resolve_entries(&[skill], "messaging.imessage.send", Authority::Workspace);
         assert_eq!(result.status, ResolutionStatus::Resolved);
         assert_eq!(result.availability, Some(Availability::Ready));
         assert!(result.directly_invocable);
         assert_eq!(result.required_authority, Some(Authority::ExternalCommit));
         assert_eq!(result.authority_decision.as_deref(), Some("deny"));
+    }
+
+    #[test]
+    fn unregistered_skill_entries_are_not_direct_execution_adapters() {
+        let mut skill = entry(
+            "draft.skill",
+            "ready",
+            Some("hii skills run draft.skill"),
+            &["workspace"],
+        );
+        skill.source = "skill";
+        skill.category = "draft".into();
+
+        let result = resolve_entries(&[skill], "draft.skill", Authority::Workspace);
+        assert_eq!(result.status, ResolutionStatus::Resolved);
+        assert!(!result.directly_invocable);
+        assert!(result.adapter.is_none());
     }
 
     #[test]

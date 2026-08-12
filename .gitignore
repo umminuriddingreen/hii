@@ -30,3 +30,9 @@ life/
 
 # Playwright CLI debug captures (local diagnostic output)
 .playwright-cli/
+
+# Local research/vendor/artifact workspaces. Keep them on disk, not in this repo.
+/browser/
+/external/
+/social/
+/install_ssh_mac.sh

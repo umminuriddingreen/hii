@@ -64,7 +64,7 @@ export async function POST(request: Request) {
   if (!actor.actorId) {
     return NextResponse.json({ error: 'An actor is required.' }, { status: 400 });
   }
-  const payload = (input.input ?? {}) as Record<string, never>;
+  const payload = (input.input ?? {}) as Record<string, unknown>;
   let scope: ObjectAccessScope;
   try {
     ({ scope } = await scopeForGrant(grantId));
@@ -81,17 +81,17 @@ export async function POST(request: Request) {
       case 'read':
         return NextResponse.json(readApprovedObject(scope, String(input.objectId ?? '')));
       case 'create':
-        return NextResponse.json(createApprovedObject(scope, actor as never, payload));
+        return NextResponse.json(createApprovedObject(scope, actor as never, payload as Parameters<typeof createApprovedObject>[2]));
       case 'patch':
-        return NextResponse.json(patchApprovedObject(scope, actor as never, payload));
+        return NextResponse.json(patchApprovedObject(scope, actor as never, payload as Parameters<typeof patchApprovedObject>[2]));
       case 'annotate':
-        return NextResponse.json(annotateApprovedObject(scope, actor as never, payload));
+        return NextResponse.json(annotateApprovedObject(scope, actor as never, payload as Parameters<typeof annotateApprovedObject>[2]));
       case 'project':
-        return NextResponse.json(patchApprovedProjection(scope, actor as never, payload));
+        return NextResponse.json(patchApprovedProjection(scope, actor as never, payload as Parameters<typeof patchApprovedProjection>[2]));
       case 'relate':
-        return NextResponse.json(createApprovedRelation(scope, actor as never, payload));
+        return NextResponse.json(createApprovedRelation(scope, actor as never, payload as Parameters<typeof createApprovedRelation>[2]));
       case 'tombstone':
-        return NextResponse.json(tombstoneApprovedObject(scope, actor as never, payload));
+        return NextResponse.json(tombstoneApprovedObject(scope, actor as never, payload as Parameters<typeof tombstoneApprovedObject>[2]));
       default:
         return NextResponse.json({ error: `Unknown object operation "${String(input.operation)}".` }, { status: 400 });
     }
