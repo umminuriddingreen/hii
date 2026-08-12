@@ -486,7 +486,7 @@ impl Toolbelt {
 
     pub fn git_snapshot(&self) -> String {
         let output = Command::new("git")
-            .args(["status", "--short"])
+            .args(["status", "--short", "--untracked-files=all", "--", "."])
             .current_dir(&self.workspace)
             .output();
         match output {

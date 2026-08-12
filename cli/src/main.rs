@@ -16,6 +16,7 @@ mod file_explorer;
 mod governance;
 mod hii_tools;
 mod hooks;
+mod identity;
 mod keyboard;
 mod keymap;
 mod learning;
@@ -235,8 +236,19 @@ enum Commands {
     Providers,
     #[command(about = "Connect an existing Codex or Claude plan")]
     Login {
-        #[arg(value_name = "PROVIDER", help = "codex | claude")]
+        #[arg(
+            value_name = "PROVIDER",
+            help = "local | status | clear | codex | claude"
+        )]
         provider: String,
+        #[arg(long, value_name = "NAME", help = "Display name for `hii login local`")]
+        name: Option<String>,
+        #[arg(
+            long,
+            value_name = "EMAIL",
+            help = "Optional local profile email label"
+        )]
+        email: Option<String>,
     },
     #[command(
         alias = "receipt",
@@ -584,8 +596,15 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             println!("{}", agents::AgentManager::new(&paths).providers()?);
             Ok(ExitCode::SUCCESS)
         }
-        Some(Commands::Login { provider }) => {
-            println!("{}", agents::AgentManager::new(&paths).login(&provider)?);
+        Some(Commands::Login {
+            provider,
+            name,
+            email,
+        }) => {
+            println!(
+                "{}",
+                login_command(&paths, &provider, name.as_deref(), email.as_deref())?
+            );
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Proof { id, json }) => {
@@ -1639,6 +1658,48 @@ fn is_native_command(command: &str) -> bool {
     ) || command == "schedule"
 }
 
+fn login_command(
+    paths: &AppPaths,
+    provider: &str,
+    name: Option<&str>,
+    email: Option<&str>,
+) -> Result<String, String> {
+    let provider = provider.trim().to_ascii_lowercase();
+    let store = identity::IdentityStore::open(paths);
+    match provider.as_str() {
+        "local" | "hii" => {
+            let fallback_name = env::var("USER").unwrap_or_else(|_| "local operator".into());
+            let identity = store.create_or_update(name.unwrap_or(&fallback_name), email)?;
+            Ok(format!(
+                "Local HII login ready\nuser: {}\nid: {}\nstate: {}",
+                identity.name,
+                identity.id,
+                store.path().display()
+            ))
+        }
+        "status" => match store.current()? {
+            Some(identity) => Ok(format!(
+                "Local HII user\nuser: {}\nid: {}\nstate: {}",
+                identity.name,
+                identity.id,
+                store.path().display()
+            )),
+            None => Ok("No local HII user yet. Run `hii login local --name <name>`.".into()),
+        },
+        "clear" | "logout" => {
+            if store.clear()? {
+                Ok("Cleared the local HII login. Provider logins were not changed.".into())
+            } else {
+                Ok("No local HII login was present.".into())
+            }
+        }
+        "codex" | "openai" | "claude" | "anthropic" => {
+            agents::AgentManager::new(paths).login(&provider)
+        }
+        _ => Err("login provider must be local, status, clear, codex, or claude".into()),
+    }
+}
+
 fn command_suggestion(args: &[String]) -> Option<(String, &'static str)> {
     let typed = first_command(args)?;
     if is_native_command(typed) || legacy::is_legacy(typed) || typed.len() < 3 {
@@ -2010,6 +2071,20 @@ mod tests {
     fn run_structured_output_modes_conflict() {
         assert!(Cli::try_parse_from(["hii", "run", "--json", "--jsonl", "inspect"]).is_err());
         assert!(Cli::try_parse_from(["hii", "run", "--json", "--verbose", "inspect"]).is_err());
+    }
+
+    #[test]
+    fn parses_local_hii_login() {
+        let cli = Cli::try_parse_from(["hii", "login", "local", "--name", "Ummi"])
+            .expect("parse local login");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Login {
+                provider,
+                name: Some(name),
+                email: None,
+            }) if provider == "local" && name == "Ummi"
+        ));
     }
 
     #[test]

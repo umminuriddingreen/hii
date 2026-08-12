@@ -15,6 +15,7 @@ hii doctor          check the local execution prerequisites
 hii models          show installed local model roles
 hii proof [id]      inspect a durable run receipt
 hii board [action]  local kanban/todo board (list/add/move/done/edit/dedupe)
+hii login local     create or update the local HII user identity
 ```
 
 The native surface stays deliberately small. Existing HII command families

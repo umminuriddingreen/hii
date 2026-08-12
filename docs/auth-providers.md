@@ -1,35 +1,65 @@
-# HII social account providers
+# HII local login and account providers
 
-HII uses one Supabase Auth identity across passwordless email, Google, and Apple. The browser starts a PKCE OAuth flow and returns to `/auth/callback`, where HII exchanges the code for its existing cookie-backed session.
+HII is local-first and does not require Supabase or any hosted identity service
+for core use. The canonical HII user is a local profile and device/session
+boundary stored under the user's own `~/.hii` runtime.
 
-The login page reads the connected project's public Auth settings. A provider remains visibly pending and cannot be clicked until its Supabase configuration is enabled.
+Use:
 
-## Redirect configuration
+```sh
+hii login local --name "Ummi"
+hii login status
+hii login clear
+```
 
-Add these application URLs to Supabase Auth's redirect allow list:
+`hii login local` writes a private local identity file. It does not create a
+cloud account, enable sync, read email, read browser history, or grant any model
+new source permissions.
 
-- `https://humaninformationinterface.com/auth/callback`
-- `https://www.humaninformationinterface.com/auth/callback`
-- `http://127.0.0.1:5176/auth/callback` for the current local production preview
+## Identity model
 
-The provider console callback is the Supabase project callback shown on each provider's dashboard page, normally `https://<project-ref>.supabase.co/auth/v1/callback`. Google and Apple receive that Supabase URL, not HII's application callback.
+HII separates three things:
+
+- **Local HII login**: who owns this local workspace, receipts, device grants,
+  and profile.
+- **Provider login**: an existing account such as Codex, Claude, Google,
+  Gmail, Calendar, Chrome, GitHub, or another connector.
+- **Capability/source grant**: the exact browser tab, email thread, calendar
+  window, file, or tool boundary approved for a task.
+
+Provider login is not source permission. Google login must not imply Gmail
+access. Chrome presence must not imply full browser-history ingestion. Each
+source enters HII through an explicit context selection, provenance record, and
+receipt.
+
+## Provider connectors
+
+Provider connectors remain optional. HII may hand off to the official provider
+login flow when the user asks, for example:
+
+```sh
+hii login codex
+hii login claude
+```
+
+Future browser, email, and calendar connectors should follow the same local
+contract: authenticate only when needed, store the minimum local grant state,
+and require a separate source selection before model use.
 
 ## Google
 
-1. Create a Web OAuth client in Google Auth Platform.
-2. Add HII's production origin and the local origin while testing.
-3. Add the Supabase project callback as an authorized redirect URI.
-4. Enable Google in Supabase Auth and add the client ID and secret.
-5. Keep scopes to `openid`, email, and profile unless HII intentionally adds a separate Gmail-data capability.
+Google identity, Gmail, Calendar, and Drive are separate capabilities:
 
-Google login authenticates a Google account. It does not grant HII access to Gmail messages.
+- Google identity can label a provider account.
+- Gmail access is approved per search, thread, label, or time window.
+- Calendar access is approved per calendar window or scheduled-work sync.
+- Drive access is approved per selected file/folder.
 
-## Apple
+Do not request broad scopes for local HII login. Add provider scopes only when a
+specific connector needs them, and record the source grant in HII state.
 
-1. Create an Apple App ID with Sign in with Apple enabled.
-2. Create a Services ID for the website and associate HII's domain.
-3. Configure the Supabase project callback as the Services ID return URL.
-4. Create and securely retain the Apple signing key, then generate the client secret.
-5. Enable Apple in Supabase Auth. Put the web Services ID first if multiple client IDs are configured.
+## Apple and macOS
 
-Apple's web OAuth client secret expires every six months. Record a private operational reminder to rotate it before expiry; never commit the `.p8` signing key or generated secret.
+On macOS, the local HII login should eventually be unlockable through the user's
+macOS account, Touch ID, and Keychain-stored device keys. That is still a local
+identity boundary, not a hosted account requirement.
