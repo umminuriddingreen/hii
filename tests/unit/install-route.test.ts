@@ -1,8 +1,16 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { GET, HEAD } from '../../src/routes/install/+server';
 
 describe('public CLI installer route', () => {
+  it('is admitted through the fail-closed Cloudflare launch boundary', () => {
+    const hooks = readFileSync(path.join(process.cwd(), 'src/hooks.server.ts'), 'utf8');
+
+    expect(hooks).toContain("'/install'");
+  });
+
   it('serves the reviewed installer as shell source', async () => {
     const response = GET({} as never) as Response;
     const body = await response.text();
