@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "HII Helium Sync",
+  "version": "0.1.0",
+  "description": "Local-first web data sync and encrypted password vault for Helium and Chrome.",
+  "permissions": ["bookmarks", "history", "storage", "tabs", "alarms"],
+  "host_permissions": ["http://127.0.0.1:3000/*", "http://localhost:3000/*", "http://*/*", "https://*/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "HII Helium Sync", "default_popup": "popup.html" },
+  "options_page": "options.html",
+  "content_scripts": [{ "matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "run_at": "document_idle" }]
+}

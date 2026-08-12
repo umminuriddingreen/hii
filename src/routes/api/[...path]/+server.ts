@@ -2,6 +2,7 @@ import type { RequestHandler } from './$types';
 import * as boardTasks from '@/app/api/board/tasks/route';
 import * as browseCheck from '@/app/api/browse/check/route';
 import * as browserSession from '@/app/api/browser/session/route';
+import * as browserSync from '@/app/api/browser-sync/route';
 import * as capabilities from '@/app/api/capabilities/route';
 import * as config from '@/app/api/config/route';
 import * as context from '@/app/api/context/route';
@@ -38,6 +39,7 @@ const routes: Array<{ pattern: RegExp; module: LegacyModule; keys?: string[] }> 
   { pattern: /^board\/tasks$/, module: boardTasks },
   { pattern: /^browse\/check$/, module: browseCheck },
   { pattern: /^browser\/session$/, module: browserSession },
+  { pattern: /^browser-sync$/, module: browserSync },
   { pattern: /^capabilities$/, module: capabilities },
   { pattern: /^config$/, module: config },
   { pattern: /^context$/, module: context },
