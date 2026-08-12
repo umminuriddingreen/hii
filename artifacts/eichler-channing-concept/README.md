@@ -17,6 +17,11 @@ Concept package for an actual Bay Area site:
 - `channing-court-cad.step`: detailed STEP CAD assembly.
 - `channing-court-cad.glb`: browser-viewable 3D model.
 - `channing-court-cad.stl`: mesh export for quick 3D inspection.
+- `channing-court-wall-geometry.step.py`: wall/opening CAD generator with exterior walls, interior partitions, jambs, headers, glazing, doors, and roof plates.
+- `channing-court-wall-geometry.step`: detailed wall-geometry STEP export.
+- `channing-court-wall-geometry.glb`: browser-viewable wall-geometry model.
+- `channing-court-wall-geometry.stl`: wall-geometry mesh export.
+- `A101-wall-plan.svg`: architectural concept sheet with title block, wall legend, plan labels, and sheet index.
 - `cad-viewer.html`: browser CAD viewer for the GLB model.
 - `concept-slides.md`: eight-slide concept narrative.
 - `concept-board.html`: presentation board for visual review.
