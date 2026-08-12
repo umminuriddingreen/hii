@@ -220,6 +220,10 @@ impl RunStore {
         let id = format!("{now:x}-{:x}", std::process::id());
         let dir = runtime.join("runs").join("cli").join(&id);
         fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+        // Bind the ambient run identity at the moment it exists, so model-call
+        // traces and skill attribution can name the receipt they belong to
+        // without threading the id through every call site.
+        crate::run_context::set_run_id(&id);
         Ok(Self {
             id,
             started_at_unix_ms: now,

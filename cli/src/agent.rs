@@ -1331,6 +1331,11 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     {
         receipt.learning_candidates.push(path.display().to_string());
     }
+    // Close the competence loop: any skill attributed to this run has been
+    // waiting on an outcome since it was invoked. Grading here is what lets a
+    // skill ever move past `proposed`. Best-effort — a lifecycle write must
+    // never fail a run that already did its work.
+    let _ = crate::skill_lifecycle::grade_receipt(paths, &receipt);
     let path = guard.finalize(&receipt)?;
     // The receipt is embedded here as well as written to receipt.json so a
     // consumer following the event stream never has to open a second file.
@@ -1462,34 +1467,28 @@ fn system_prompt(
         format!("Operator ceiling: {max_steps} tool steps.")
     };
     let coding = if coding {
-        "Coding: inspect->edit->verify->repair->final. Target rg/read, narrow edits, focused tests. Correctness > prose."
+        "Coding: rg/read->edit->test->repair->final. Correctness>prose."
     } else {
-        "General: act directly; stay concise."
+        "General: act; create artifact; verify."
     };
     let autonomy = match autonomy_level {
         AutonomyLevel::Approval => "Ask for sensitive/destructive/external actions.",
         AutonomyLevel::LocalFull => {
-            "Local-full: inspect/edit/test/repair/commit. Ask before deletion. No push/publish/spend/message/secrets/access widening."
+            "Local-full: act/test/commit. Ask: delete/push/publish/spend/message/secrets/access."
         }
     };
     format!(
-        r#"You are HII. Finish the local goal with proof.
-Workspace: {workspace}
-{limit} Dry run: {dry_run}.
-Done when: {done_when}
-Checks: {declared_verification}
-{coding}
-{autonomy}
-
-Loop: inspect -> act -> verify -> final. Smallest safe step; no plan narration.
-Edit with edit or write; workspace shell redirects are refused.
-Proof: one flat {{"type":"verify","command":"npm test"}} or http action; shell/read/list/search never count.
-One JSON action/turn. Types:
-read,list,search,web_search,web_fetch,write,edit,shell,verify,http,hii_context,og_next,caps_check,board_read,board_write,skill_search,schedule_read,schedule_write,bridge_send,bridge_read.
-Fields: path,query,command,content,old,new,replace_all,offset,limit,url.
+        r#"You are HII, the work system. Own the bounded loop; other agents are only references/backends.
+Workspace:{workspace}
+{limit} Dry:{dry_run}. Done:{done_when}. Checks:{declared_verification}
+{coding} {autonomy}
+Loop: intent -> context -> bounded work -> verify -> receipt. No plan narration.
+Habits: inspect real files, preserve unclear work, patch narrowly, persist artifacts, repair failed checks.
+Proof: one flat {{"type":"verify","command":"npm test"}} or http; shell/read/list/search never count.
+One JSON action/turn. Types: read,list,search,web_search,web_fetch,write,edit,shell,verify,http,hii_context,og_next,caps_check,board_read,board_write,skill_search,schedule_read,schedule_write,bridge_send,bridge_read. Fields: path,query,command,content,old,new,replace_all,offset,limit,url.
+For write, emit exactly {{"type":"write","path":"relative-file.md","content":"complete file text"}}; no verification, url, or shell syntax inside write.
 Finish: {{"type":"final","summary":"result","verification":["checks run"],"next":null}}
-
-Read AGENTS.md. Preserve unclear work. Stay in workspace. Never claim unrun proof."#,
+Read AGENTS.md. Stay in workspace. Never claim unrun proof."#,
         workspace = workspace.display()
     )
 }
@@ -2328,7 +2327,7 @@ mod tests {
         // reliability as the system prompt grows, so additions must be paid for
         // deliberately rather than accumulating.
         assert!(
-            prompt.len() <= 1_100,
+            prompt.len() <= 1_250,
             "agent prompt grew to {} bytes",
             prompt.len()
         );
@@ -2347,7 +2346,30 @@ mod tests {
         );
         assert!(prompt.contains("Proof: one flat"));
         assert!(prompt.contains("shell/read/list/search never count"));
+        assert!(prompt.contains(
+            r#"{"type":"write","path":"relative-file.md","content":"complete file text"}"#
+        ));
         assert!(prompt.contains(r#"{"type":"verify","command":"npm test"}"#));
+    }
+
+    #[test]
+    fn agent_prompt_makes_hii_own_bounded_work() {
+        let prompt = system_prompt(
+            std::path::Path::new("/workspace"),
+            8,
+            false,
+            "verified",
+            &[],
+            false,
+            AutonomyLevel::LocalFull,
+        );
+        assert!(prompt.contains("You are HII, the work system"));
+        assert!(prompt.contains("Own the bounded loop"));
+        assert!(prompt.contains("other agents are only references/backends"));
+        assert!(prompt.contains("intent -> context -> bounded work -> verify -> receipt"));
+        assert!(prompt.contains("inspect real files"));
+        assert!(prompt.contains("patch narrowly"));
+        assert!(prompt.contains("repair failed checks"));
     }
 
     #[test]

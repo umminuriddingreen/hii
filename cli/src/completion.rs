@@ -207,7 +207,16 @@ pub fn assess(input: CompletionInput<'_>) -> CompletionAssessment {
     }
 
     // Proof strength describes the evidence, not the verdict.
-    let proof_strength = if requirements.is_some() || !input.declared_checks.is_empty() {
+    //
+    // A declared check only counts if it could have failed. Without this floor,
+    // `--verify true` mints a declared proof, and since declared proof is what
+    // promotes a skill to verified, the entire competence standard becomes
+    // satisfiable by typing a word that does nothing.
+    let substantive_checks = input
+        .declared_checks
+        .iter()
+        .any(|check| !crate::declaration::is_vacuous(check));
+    let proof_strength = if requirements.is_some() || substantive_checks {
         ProofStrength::Declared
     } else if input.verification.iter().any(|entry| entry.ok) {
         ProofStrength::Incidental
@@ -221,6 +230,13 @@ pub fn assess(input: CompletionInput<'_>) -> CompletionAssessment {
              that exited zero, which is not proof the goal was met."
                 .into(),
         );
+        if !input.declared_checks.is_empty() {
+            warnings.push(
+                "Every declared check was a command that cannot fail, so nothing was actually \
+                 claimed. Declare a check that would fail if the goal were not met."
+                    .into(),
+            );
+        }
     }
 
     // Legacy floor: a contract that declared nothing still needs some passing
@@ -705,6 +721,42 @@ mod tests {
         assert!(!assessment.satisfied);
         assert_eq!(assessment.proof_strength, ProofStrength::None);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    /// The gate that keeps the promotion standard from being free.
+    #[test]
+    fn a_check_that_cannot_fail_does_not_confer_declared_proof() {
+        let declared = vec!["true".to_string()];
+        let assessment = assess(CompletionInput {
+            workspace: Path::new("."),
+            requirements: None,
+            final_summary: Some("done"),
+            declared_checks: &declared,
+            verification: &[check("true", true)],
+            artifacts: &[],
+            terminated: None,
+        });
+        assert_ne!(
+            assessment.proof_strength,
+            ProofStrength::Declared,
+            "`--verify true` must not mint a declared proof"
+        );
+        assert!(!assessment.qualifies_for_high_trust());
+    }
+
+    #[test]
+    fn a_real_check_still_confers_declared_proof() {
+        let declared = vec!["cargo test".to_string()];
+        let assessment = assess(CompletionInput {
+            workspace: Path::new("."),
+            requirements: None,
+            final_summary: Some("done"),
+            declared_checks: &declared,
+            verification: &[check("cargo test", true)],
+            artifacts: &[],
+            terminated: None,
+        });
+        assert_eq!(assessment.proof_strength, ProofStrength::Declared);
     }
 
     #[test]

@@ -286,7 +286,20 @@ pub fn migrate(paths: &AppPaths) -> Lifecycle {
     project_drafts(paths, &mut lifecycle, &runtime.join("skills/proposed"));
     project_learning(&mut lifecycle, &runtime.join("learning/records.jsonl"));
 
+    // Re-grade anything still pending. An observation is recorded as
+    // inconclusive when the skill is invoked and upgraded when the run ends, so
+    // a run that crashed before grading would otherwise strand its skills at
+    // `proposed` forever. Reconciling here makes the lifecycle converge on what
+    // the receipts actually say instead of depending on a clean shutdown.
     for record in lifecycle.skills.values_mut() {
+        for observation in record.observations.iter_mut() {
+            if observation.outcome == Outcome::Inconclusive {
+                let regraded = observe_receipt(paths, &observation.receipt_id);
+                if regraded.outcome != Outcome::Inconclusive {
+                    *observation = regraded;
+                }
+            }
+        }
         record.recompute();
     }
     lifecycle
@@ -479,6 +492,85 @@ pub fn record_execution(
     let state = record.state;
     save(paths, &lifecycle)?;
     Ok(state)
+}
+
+/// Attribute an invocation of `skill_id` to the run happening right now.
+///
+/// This is the instrumentation point the lifecycle was missing. Attribution is
+/// recorded where the skill is actually invoked rather than inferred afterwards
+/// from run history: the invoker is the only party that knows for certain which
+/// skill ran, and reconstructing it later from a receipt is guesswork.
+///
+/// The outcome is deliberately *not* decided here. At invocation time the run
+/// has not finished, so nothing is yet known about whether it worked; the
+/// observation is recorded as inconclusive and upgraded when the receipt is
+/// graded. Recording a success here would be exactly the self-certification the
+/// lifecycle exists to prevent.
+pub fn record_invocation(
+    paths: &AppPaths,
+    skill_id: &str,
+    receipt_id: Option<&str>,
+) -> Result<String, String> {
+    let receipt_id = receipt_id
+        .map(str::to_string)
+        .or_else(crate::run_context::run_id)
+        .ok_or_else(|| {
+            "no run to attribute this invocation to; pass --receipt <id> when recording outside a run"
+                .to_string()
+        })?;
+    let mut lifecycle = load(paths);
+    let record = lifecycle
+        .skills
+        .entry(skill_id.to_string())
+        .or_insert_with(|| {
+            SkillRecord::new(
+                skill_id.to_string(),
+                skill_id.to_string(),
+                String::new(),
+                "invocation",
+            )
+        });
+    record.observe(Observation {
+        receipt_id: receipt_id.clone(),
+        outcome: Outcome::Inconclusive,
+        note: format!(
+            "invoked under origin {}; awaiting receipt grade",
+            crate::run_context::origin().label()
+        ),
+    });
+    record.recompute();
+    save(paths, &lifecycle)?;
+    Ok(format!(
+        "recorded invocation of {skill_id} under receipt {receipt_id}; \
+         standing is unchanged until the receipt is graded"
+    ))
+}
+
+/// Grade every skill attributed to this receipt, once the run has finished.
+///
+/// Invocation and outcome are separate events, so this replaces the pending
+/// inconclusive observation rather than adding a second one — otherwise a single
+/// use would be counted twice, once as unknown and once as graded.
+pub fn grade_receipt(paths: &AppPaths, receipt: &Receipt) -> Result<Vec<String>, String> {
+    let mut lifecycle = load(paths);
+    let graded = observation_from_receipt(receipt);
+    let mut touched = Vec::new();
+    for record in lifecycle.skills.values_mut() {
+        let Some(slot) = record
+            .observations
+            .iter_mut()
+            .find(|observation| observation.receipt_id == receipt.id)
+        else {
+            continue;
+        };
+        *slot = graded.clone();
+        record.recompute();
+        touched.push(record.id.clone());
+    }
+    if !touched.is_empty() {
+        save(paths, &lifecycle)?;
+    }
+    Ok(touched)
 }
 
 pub fn promote(paths: &AppPaths, id: &str, reason: Option<&str>) -> Result<String, String> {
@@ -802,6 +894,40 @@ mod tests {
         let record = record_with(vec![observation]);
         assert_eq!(record.failure_count, 0);
         assert_eq!(record.state, SkillState::Proposed);
+    }
+
+    /// Invocation and outcome are separate events. Recording the invocation
+    /// must not move the skill, and grading must replace that pending
+    /// observation rather than adding a second one for the same run.
+    #[test]
+    fn invocation_is_pending_until_the_receipt_is_graded() {
+        let mut record = SkillRecord::new("s".into(), "S".into(), String::new(), "invocation");
+        record.observe(observation("run-1", Outcome::Inconclusive));
+        record.recompute();
+        assert_eq!(record.state, SkillState::Proposed);
+        assert_eq!(record.verified_count, 0);
+
+        // Grading the run replaces the pending slot in place.
+        let slot = record
+            .observations
+            .iter_mut()
+            .find(|observation| observation.receipt_id == "run-1")
+            .expect("pending observation");
+        *slot = observation("run-1", Outcome::Verified);
+        record.recompute();
+
+        assert_eq!(record.observations.len(), 1, "one run must count once");
+        assert_eq!(record.verified_count, 1);
+        assert_eq!(record.state, SkillState::Verified);
+    }
+
+    #[test]
+    fn re_recording_the_same_invocation_is_idempotent() {
+        let mut record = SkillRecord::new("s".into(), "S".into(), String::new(), "invocation");
+        record.observe(observation("run-1", Outcome::Inconclusive));
+        record.observe(observation("run-1", Outcome::Inconclusive));
+        record.recompute();
+        assert_eq!(record.observations.len(), 1);
     }
 
     #[test]

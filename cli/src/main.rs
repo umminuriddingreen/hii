@@ -13,6 +13,7 @@ mod config;
 mod context;
 mod contract;
 mod conversation;
+mod declaration;
 mod design;
 mod file_explorer;
 mod governance;
@@ -28,6 +29,7 @@ mod mcp_client;
 mod ollama;
 mod pipe;
 mod receipt;
+mod run_context;
 mod runlog;
 mod schedule;
 mod skill_lifecycle;
@@ -448,6 +450,15 @@ enum SkillsCommand {
         #[arg(long, help = "Why this override is warranted")]
         reason: Option<String>,
     },
+    #[command(
+        name = "record-use",
+        about = "Attribute a skill invocation to the current run; call this where the skill is invoked"
+    )]
+    RecordUse {
+        id: String,
+        #[arg(long, value_name = "ID", help = "Receipt to attribute to, when outside a run")]
+        receipt: Option<String>,
+    },
     #[command(about = "Explicitly reject a skill regardless of how well it has performed")]
     Reject {
         id: String,
@@ -714,6 +725,10 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                         skill_lifecycle::promote(&paths, &id, reason.as_deref())?
                     )
                 }
+                SkillsCommand::RecordUse { id, receipt } => println!(
+                    "{}",
+                    skill_lifecycle::record_invocation(&paths, &id, receipt.as_deref())?
+                ),
                 SkillsCommand::Reject { id, reason } => {
                     println!(
                         "{}",
@@ -1747,7 +1762,7 @@ fn claimed_from_legacy(args: &[String]) -> bool {
             words.next().map(String::as_str),
             words.next().map(String::as_str),
         ),
-        (Some("skills"), Some("promote" | "reject" | "lifecycle"))
+        (Some("skills"), Some("promote" | "reject" | "lifecycle" | "record-use"))
     )
 }
 

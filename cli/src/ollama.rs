@@ -813,7 +813,7 @@ fn log_llm_request(model: &str, provider: ModelProvider, usage: &ChatUsage) {
         ModelProvider::LmStudio => "lmstudio",
         ModelProvider::Native => "native",
     };
-    let entry = json!({
+    let mut entry = json!({
         "ts": chrono_now(),
         "source": "hii-cli",
         "provider": provider,
@@ -821,7 +821,17 @@ fn log_llm_request(model: &str, provider: ModelProvider, usage: &ChatUsage) {
         "prompt_tokens": usage.prompt_tokens,
         "completion_tokens": usage.completion_tokens,
         "total_duration_ms": usage.total_duration_ms,
+        "origin": crate::run_context::origin().label(),
     });
+    // Without this the trace is unattributable: cost and latency are recorded,
+    // but nothing says which run spent it. Absent outside a run (`hii find`,
+    // `hii proof`), where there is no receipt to point at.
+    if let Some(run_id) = crate::run_context::run_id() {
+        entry["receipt_id"] = json!(run_id);
+    }
+    if let Some(conversation_id) = crate::run_context::conversation_id() {
+        entry["conversation_id"] = json!(conversation_id);
+    }
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
