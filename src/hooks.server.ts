@@ -21,7 +21,8 @@ const cloudflareLaunchRoutes = new Set([
 export const handle: Handle = async ({ event, resolve }) => {
   if (
     __HII_DEPLOY_TARGET__ === 'cloudflare' &&
-    !cloudflareLaunchRoutes.has(event.url.pathname)
+    !cloudflareLaunchRoutes.has(event.url.pathname) &&
+    !event.url.pathname.startsWith('/cli/releases/latest/')
   ) {
     return new Response('Not found', { status: 404 });
   }

@@ -74,7 +74,7 @@ archive="hii-${target}.tar.gz"
 if [ -n "${HII_INSTALL_BASE_URL:-}" ]; then
     base="${HII_INSTALL_BASE_URL%/}"
 elif [ "$TAG" = "latest" ]; then
-    base="https://github.com/${REPO}/releases/latest/download"
+    base="https://humaninformationinterface.com/cli/releases/latest"
 else
     base="https://github.com/${REPO}/releases/download/${TAG}"
 fi
