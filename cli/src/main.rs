@@ -6,6 +6,7 @@ mod background;
 mod board;
 mod budget;
 mod capability_discovery;
+mod capability_index;
 mod completion;
 mod config;
 mod context;
@@ -268,6 +269,15 @@ enum Commands {
     Discover {
         #[command(subcommand)]
         action: DiscoverCommand,
+    },
+    #[command(about = "Search every local capability HII already owns (skills, capabilities, drafts)")]
+    Find {
+        #[arg(help = "What you want to do, in plain words; omit to summarize the index")]
+        query: Vec<String>,
+        #[arg(long, help = "Maximum matches to return")]
+        limit: Option<usize>,
+        #[arg(long, help = "Emit results as JSON")]
+        json: bool,
     },
     #[command(about = "Manage local recurring HII work through cron")]
     Schedule {
@@ -644,6 +654,15 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                         name.as_deref()
                     )?
                 ),
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Find { query, limit, json }) => {
+            let query = query.join(" ");
+            if query.trim().is_empty() {
+                capability_index::summary(&paths, json)?;
+            } else {
+                capability_index::find(&paths, &query, limit, json)?;
             }
             Ok(ExitCode::SUCCESS)
         }
@@ -1650,6 +1669,7 @@ fn is_native_command(command: &str) -> bool {
             | "receipt"
             | "board"
             | "discover"
+            | "find"
             | "legacy"
             | "help"
             | "tools-manifest"
@@ -1863,6 +1883,22 @@ mod tests {
         process,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    /// Subcommands are registered in two places: the clap `Commands` enum and
+    /// `is_native_command`. A command missing from the latter is silently
+    /// rewritten into `hii run <command>`, which launches a real agent goal
+    /// loop instead of the subcommand. This asserts the two stay in sync.
+    #[test]
+    fn every_clap_subcommand_is_a_native_command() {
+        use clap::CommandFactory;
+        for subcommand in Cli::command().get_subcommands() {
+            let name = subcommand.get_name();
+            assert!(
+                is_native_command(name),
+                "`{name}` is a clap subcommand but is_native_command() does not know it, so `hii {name}` would be rewritten into `hii run {name}`"
+            );
+        }
+    }
 
     const FROZEN_LEGACY_FAMILIES: &[&str] = &[
         "ship", "bridge", "og", "caps", "context", "health", "task", "work", "skill", "codex",
