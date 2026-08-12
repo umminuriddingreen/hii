@@ -1,0 +1,129 @@
+name: cli release
+
+# Publishes prebuilt `hii` binaries so a stranger can install HII without a Rust
+# toolchain or a checkout.
+#
+# Deliberately unsigned and un-notarized. These are CLI binaries fetched by the
+# install script over curl, and curl does not set the macOS quarantine attribute
+# that triggers Gatekeeper — so they run as-is. That is what keeps this path free
+# of an Apple Developer enrollment. It only holds for script-driven installs: a
+# binary a user downloads through a browser *is* quarantined, so the release
+# notes must point at the install script rather than the raw asset.
+
+on:
+  push:
+    tags:
+      - 'cli-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build and publish (e.g. cli-v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cli-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-14
+          - target: x86_64-apple-darwin
+            runner: macos-14
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup target add ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} --bin hii
+
+      # A binary that cannot answer --version is not worth publishing, and this
+      # is the cheapest possible proof the artifact actually executes on the
+      # platform it claims. Cross-built arm64-on-x86 would skip this; both macOS
+      # targets run on Apple silicon, which executes x86_64 under Rosetta.
+      - name: Smoke test
+        if: matrix.target != 'x86_64-apple-darwin'
+        run: ./target/${{ matrix.target }}/release/hii --version
+
+      - name: Package
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="hii-${{ matrix.target }}.tar.gz"
+          tar -czf "$archive" -C "target/${{ matrix.target }}/release" hii
+          shasum -a 256 "$archive" > "$archive.sha256"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hii-${{ matrix.target }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.archive }}.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # One checksum file the install script can fetch in a single request,
+      # rather than one request per target.
+      - name: Collect checksums
+        run: |
+          set -euo pipefail
+          cd artifacts
+          cat *.sha256 > SHA256SUMS
+          rm -f *.sha256
+          ls -la
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: artifacts/*
+          fail_on_unmatched_files: true
+          body: |
+            ## Install
+
+            ```sh
+            curl -fsSL https://humaninformationinterface.com/install | sh
+            ```
+
+            Install through the script rather than downloading an archive in a
+            browser: browser downloads are quarantined by macOS and will be
+            blocked by Gatekeeper, while `curl` fetches are not.
+
+            This ships HII's native command set. The extended surface needs a
+            HII checkout; see the README.
