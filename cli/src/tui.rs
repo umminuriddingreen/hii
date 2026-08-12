@@ -72,6 +72,8 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/autonomy", "local action policy"),
     ("/raw", "raw model stream"),
     ("/model", "choose local model"),
+    ("/files", "ranger-style explorer"),
+    ("/explore", "ranger-style explorer"),
     ("/codex", "use Codex model for a task"),
     ("/claude", "use Claude model for a task"),
     ("/models", "list local models"),
