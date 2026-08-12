@@ -786,7 +786,9 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 }
                 if result.ok && matches!(tool.as_str(), "write" | "edit") {
                     if let Some(path) = path.as_deref() {
-                        touched_artifacts.insert(path.to_string());
+                        if let Some(path) = canonical_artifact_path(tools.workspace(), path) {
+                            touched_artifacts.insert(path);
+                        }
                     }
                 }
                 if result.verification {
@@ -1206,17 +1208,38 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         )?;
     }
     let git_status = tools.git_snapshot();
+    let artifacts = artifact_inventory(&git_before, &git_status)
+        .into_iter()
+        .chain(touched_artifacts)
+        .filter_map(|path| canonical_artifact_path(tools.workspace(), &path))
+        .collect::<BTreeSet<_>>();
+    let preexisting_changes = artifact_inventory("clean", &git_before);
     let review = match review_model.as_deref() {
         Some(reviewer) => {
             if journal.verbose() {
                 println!("review     {reviewer}");
             }
+            let review_paths = artifacts.iter().cloned().collect::<Vec<_>>();
+            let diff = redact_text(&tools.git_diff_snapshot(&review_paths));
+            let review_verification = verification
+                .iter()
+                .map(|record| {
+                    json!({
+                        "command": record.command,
+                        "ok": record.ok,
+                        "output": record.output.chars().take(2_000).collect::<String>()
+                    })
+                })
+                .collect::<Vec<_>>();
             let prompt = format!(
-                "Review this bounded local agent result. Identify only concrete proof gaps or risks in at most 120 words.\n\nGoal: {}\nSummary: {}\nVerification: {}\nGit status:\n{}",
+                "Review this bounded local agent result. Identify only concrete defects, proof gaps, or risks in at most 120 words. Use the supplied diff as source truth; do not invent behavior beyond the code and evidence. If there is no concrete finding, say so plainly.\n\nGoal: {}\nSummary: {}\nVerification: {}\nBaseline Git status:\n{}\nFinal Git status:\n{}\nArtifacts: {}\nWorkspace diff:\n{}",
                 options.goal,
                 summary,
-                serde_json::to_string(&verification).unwrap_or_default(),
-                git_status
+                serde_json::to_string(&review_verification).unwrap_or_default(),
+                git_before,
+                git_status,
+                serde_json::to_string(&artifacts).unwrap_or_default(),
+                if diff.is_empty() { "(no tracked diff)" } else { &diff }
             );
             Some(
                 match ollama.chat_text(
@@ -1238,12 +1261,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         }
         None => None,
     };
-    let mut artifacts = artifact_inventory(&git_before, &git_status)
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-    artifacts.extend(touched_artifacts);
-    let artifacts = artifacts.into_iter().collect::<Vec<_>>();
-    let preexisting_changes = artifact_inventory("clean", &git_before);
+    let artifacts = artifacts.iter().cloned().collect::<Vec<_>>();
     let reversible = Some(git_status != "not a git workspace");
 
     // One assessment decides completion for every surface. The receipt carries
@@ -1281,11 +1299,14 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     // rests on rather than only what changed.
     let mut artifacts = artifacts;
     for evidence in &completion.evidence {
-        if evidence.exists && evidence.is_file && !artifacts.contains(&evidence.path) {
-            artifacts.push(evidence.path.clone());
+        if evidence.exists && evidence.is_file {
+            if let Some(path) = canonical_artifact_path(tools.workspace(), &evidence.path) {
+                artifacts.push(path);
+            }
         }
     }
     artifacts.sort();
+    artifacts.dedup();
     if !completed && !completion.unmet_requirements.is_empty() {
         journal.emit(Event::new("completion.unsatisfied").data(json!({
             "unmetRequirements": &completion.unmet_requirements,
@@ -2153,11 +2174,41 @@ fn artifact_inventory(before: &str, after: &str) -> Vec<String> {
         }
         snapshot
             .lines()
-            .filter_map(|line| line.get(3..).map(str::to_string))
+            .filter_map(|line| {
+                let path = line.get(3..)?;
+                Some(
+                    path.rsplit_once(" -> ")
+                        .map(|(_, destination)| destination)
+                        .unwrap_or(path)
+                        .to_string(),
+                )
+            })
             .collect::<BTreeSet<_>>()
     };
     let before = paths(before);
     paths(after).difference(&before).cloned().collect()
+}
+
+fn canonical_artifact_path(workspace: &Path, raw: &str) -> Option<String> {
+    let raw = Path::new(raw.trim());
+    if raw.as_os_str().is_empty()
+        || raw
+            .components()
+            .any(|component| matches!(component, Component::ParentDir))
+    {
+        return None;
+    }
+    let candidate = if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        workspace.join(raw)
+    };
+    let resolved = candidate.canonicalize().unwrap_or(candidate);
+    let relative = resolved.strip_prefix(workspace).ok()?;
+    if relative.as_os_str().is_empty() {
+        return None;
+    }
+    Some(relative.display().to_string())
 }
 
 /// Apply an authority [`Decision`] to a pending tool action. Returns `Some(msg)`
@@ -2232,8 +2283,19 @@ fn print_receipt(receipt: &Receipt, path: &std::path::Path) {
     if let Some(authority) = receipt.authority.as_deref() {
         println!("Authority: {authority}");
     }
+    if let Some(completion) = receipt.completion.as_ref() {
+        println!(
+            "Proof Strength: {} ({})",
+            completion.proof_strength.label(),
+            if completion.satisfied {
+                "satisfied"
+            } else {
+                "not satisfied"
+            }
+        );
+    }
     if !receipt.artifacts.is_empty() {
-        println!("Changed: {} file(s)", receipt.artifacts.len());
+        println!("Artifacts: {} file(s)", receipt.artifacts.len());
         for artifact in receipt.artifacts.iter().take(10) {
             println!("  {artifact}");
         }
@@ -2246,6 +2308,9 @@ fn print_receipt(receipt: &Receipt, path: &std::path::Path) {
     }
     if !receipt.approvals.is_empty() {
         println!("Approvals: {}", receipt.approvals.join(", "));
+    }
+    if let Some(review) = receipt.review.as_deref() {
+        println!("Review: {review}");
     }
     println!("Proof: {}", path.display());
     println!("Risk: {}", receipt.risk);
@@ -2589,6 +2654,37 @@ mod tests {
         let before = " M existing.rs\n?? old.txt";
         let after = " M existing.rs\n?? old.txt\n?? new.txt";
         assert_eq!(artifact_inventory(before, after), vec!["new.txt"]);
+    }
+
+    #[test]
+    fn artifacts_parse_unstaged_and_renamed_porcelain_paths() {
+        assert_eq!(
+            artifact_inventory("clean", " M src/label.rs"),
+            vec!["src/label.rs"]
+        );
+        assert_eq!(
+            artifact_inventory("clean", "R  src/old.rs -> src/new.rs"),
+            vec!["src/new.rs"]
+        );
+    }
+
+    #[test]
+    fn artifact_paths_are_canonical_workspace_relative() {
+        let workspace = temp_workspace().canonicalize().unwrap();
+        let nested = workspace.join("src");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("label.rs"), "content").unwrap();
+
+        assert_eq!(
+            canonical_artifact_path(&workspace, "src/label.rs"),
+            Some("src/label.rs".into())
+        );
+        assert_eq!(
+            canonical_artifact_path(&workspace, &nested.join("label.rs").display().to_string()),
+            Some("src/label.rs".into())
+        );
+        assert_eq!(canonical_artifact_path(&workspace, "../outside.rs"), None);
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 
     #[test]

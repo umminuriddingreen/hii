@@ -1644,6 +1644,51 @@ fn proof(
             check.command
         );
     }
+    if let Some(completion) = receipt.completion.as_ref() {
+        println!(
+            "proof      {} ({})",
+            completion.proof_strength.label(),
+            if completion.satisfied {
+                "satisfied"
+            } else {
+                "not satisfied"
+            }
+        );
+        for evidence in &completion.evidence {
+            let state = if evidence.exists && evidence.is_file {
+                "ok"
+            } else if evidence.exists {
+                "invalid"
+            } else {
+                "missing"
+            };
+            println!(
+                "  {state}  {} ({} bytes{})",
+                evidence.path,
+                evidence.bytes,
+                evidence
+                    .sha256
+                    .as_deref()
+                    .map(|hash| format!(", sha256 {hash}"))
+                    .unwrap_or_default()
+            );
+        }
+        for requirement in &completion.unmet_requirements {
+            println!("  !!  {requirement}");
+        }
+        for warning in &completion.warnings {
+            println!("  --  {warning}");
+        }
+    } else {
+        println!("proof      legacy");
+    }
+    println!("artifacts  {} file(s)", receipt.artifacts.len());
+    for artifact in &receipt.artifacts {
+        println!("  ->  {artifact}");
+    }
+    if let Some(review) = receipt.review.as_deref() {
+        println!("review     {}", review.replace('\n', "\n           "));
+    }
     println!("risk       {}", receipt.risk);
     println!("receipt    {}", path.display());
     Ok(())

@@ -491,7 +491,12 @@ impl Toolbelt {
             .output();
         match output {
             Ok(output) if output.status.success() => {
-                let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                // Preserve porcelain's leading status columns. Trimming the whole
+                // value turns ` M file` into `M file`, so downstream path parsing
+                // drops the first character of the filename.
+                let value = String::from_utf8_lossy(&output.stdout)
+                    .trim_end_matches(['\r', '\n'])
+                    .to_string();
                 if value.is_empty() {
                     "clean".into()
                 } else {
@@ -500,6 +505,55 @@ impl Toolbelt {
             }
             _ => "not a git workspace".into(),
         }
+    }
+
+    pub fn git_diff_snapshot(&self, paths: &[String]) -> String {
+        if paths.is_empty() {
+            return String::new();
+        }
+        let read = |arguments: &[&str]| {
+            let output = Command::new("git")
+                .args(arguments)
+                .arg("--")
+                .args(paths)
+                .current_dir(&self.workspace)
+                .output()
+                .ok()?;
+            output.status.success().then(|| {
+                String::from_utf8_lossy(&output.stdout)
+                    .chars()
+                    .take(40_000)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+        };
+        let mut snapshot = read(&["diff", "--no-ext-diff", "HEAD"])
+            .or_else(|| read(&["diff", "--no-ext-diff"]))
+            .unwrap_or_default();
+        for path in paths {
+            let tracked = Command::new("git")
+                .args(["ls-files", "--error-unmatch", "--"])
+                .arg(path)
+                .current_dir(&self.workspace)
+                .output()
+                .is_ok_and(|output| output.status.success());
+            if tracked {
+                continue;
+            }
+            let Ok(file) = fs::File::open(self.workspace.join(path)) else {
+                continue;
+            };
+            let mut bytes = Vec::new();
+            if file.take(10_000).read_to_end(&mut bytes).is_err() {
+                continue;
+            }
+            let Ok(content) = String::from_utf8(bytes) else {
+                continue;
+            };
+            snapshot.push_str(&format!("\n--- /dev/null\n+++ b/{path}\n{content}"));
+        }
+        snapshot.chars().take(40_000).collect()
     }
 
     fn run_command(
@@ -1438,6 +1492,60 @@ mod tests {
 
         fs::write(nested.join("inside.txt"), "inside").unwrap();
         assert!(tools.git_snapshot().contains("inside.txt"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn git_snapshot_preserves_porcelain_status_columns() {
+        let repo = workspace();
+        Command::new("git")
+            .args(["init"])
+            .current_dir(&repo)
+            .output()
+            .expect("git init");
+        fs::write(repo.join("tracked.txt"), "before\n").unwrap();
+        Command::new("git")
+            .args(["add", "tracked.txt"])
+            .current_dir(&repo)
+            .output()
+            .expect("git add");
+        Command::new("git")
+            .args([
+                "-c",
+                "user.name=HII Test",
+                "-c",
+                "user.email=hii@example.invalid",
+                "commit",
+                "-m",
+                "fixture",
+            ])
+            .current_dir(&repo)
+            .output()
+            .expect("git commit");
+        fs::write(repo.join("tracked.txt"), "after\n").unwrap();
+
+        let tools = Toolbelt::new(repo.clone()).unwrap();
+        assert_eq!(tools.git_snapshot(), " M tracked.txt");
+        assert!(tools
+            .git_diff_snapshot(&["tracked.txt".into()])
+            .contains("+after"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn git_diff_snapshot_includes_untracked_artifact_content() {
+        let repo = workspace();
+        Command::new("git")
+            .args(["init"])
+            .current_dir(&repo)
+            .output()
+            .expect("git init");
+        fs::write(repo.join("created.txt"), "review this content\n").unwrap();
+
+        let tools = Toolbelt::new(repo.clone()).unwrap();
+        let snapshot = tools.git_diff_snapshot(&["created.txt".into()]);
+        assert!(snapshot.contains("+++ b/created.txt"));
+        assert!(snapshot.contains("review this content"));
         let _ = fs::remove_dir_all(repo);
     }
 
