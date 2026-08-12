@@ -287,12 +287,17 @@ fn evaluate_artifact(
     }
 
     let mut satisfying = 0usize;
+    // Candidates that were found but failed a specific check. Each one already
+    // records a concrete reason in `missing`/`invalid`, so the shortfall it
+    // causes must not be re-reported as a bare count below.
+    let mut explained = 0usize;
     for relative in &matches {
         let absolute = workspace.join(relative);
         if !inside(workspace, &absolute) {
             invalid.push(format!(
                 "{relative} resolves outside the approved workspace root"
             ));
+            explained += 1;
             continue;
         }
         let metadata = fs::metadata(&absolute).ok();
@@ -313,16 +318,19 @@ fn evaluate_artifact(
 
         if requirement.must_exist && !exists {
             missing.push(relative.clone());
+            explained += 1;
             continue;
         }
         // A directory never satisfies a file requirement unless the contract
         // explicitly relaxed `must_be_file`.
         if requirement.must_be_file && !is_file {
             invalid.push(format!("{relative} is not a regular file"));
+            explained += 1;
             continue;
         }
         if requirement.must_be_non_empty && bytes == 0 {
             invalid.push(format!("{relative} is empty"));
+            explained += 1;
             continue;
         }
         if let Some(expected) = &requirement.extension {
@@ -334,6 +342,7 @@ fn evaluate_artifact(
                 invalid.push(format!(
                     "{relative} has extension '{actual}', not '{expected}'"
                 ));
+                explained += 1;
                 continue;
             }
         }
@@ -342,10 +351,12 @@ fn evaluate_artifact(
                 Some(actual) if actual == expected => {}
                 Some(actual) => {
                     invalid.push(format!("{relative} hashes to {actual}, not {expected}"));
+                    explained += 1;
                     continue;
                 }
                 None => {
                     invalid.push(format!("{relative} could not be hashed"));
+                    explained += 1;
                     continue;
                 }
             }
@@ -353,7 +364,12 @@ fn evaluate_artifact(
         satisfying += 1;
     }
 
-    if satisfying < requirement.min_count {
+    // Only report a bare shortfall for candidates that never showed up at all.
+    // A candidate that was found and then rejected is already reported with its
+    // real reason, and calling it "missing" would claim a file that was just
+    // hashed does not exist.
+    let shortfall = requirement.min_count.saturating_sub(satisfying);
+    if shortfall > explained {
         missing.push(format!(
             "{} (needed {}, found {satisfying})",
             requirement.path, requirement.min_count
@@ -498,6 +514,67 @@ mod tests {
         ));
         assert!(assessment.satisfied, "{assessment:?}");
         assert_eq!(assessment.proof_strength, ProofStrength::Declared);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// A hash mismatch has one cause and must be reported once, with its real
+    /// reason. Reporting it again as a bare shortfall told the operator the file
+    /// was "missing" immediately after the same pass hashed it.
+    #[test]
+    fn rejected_artifact_is_not_also_reported_as_missing() {
+        let dir = workspace();
+        fs::write(dir.join("notes.md"), "hello\n").unwrap();
+        let wrong = "0".repeat(64);
+        let declared = vec!["test -f notes.md".to_string()];
+        let verification = vec![check("test -f notes.md", true)];
+        let requirements = file_outcome(&[&format!("notes.md@{wrong}")]);
+        let artifacts = vec!["notes.md".to_string()];
+        let assessment = assess(input(
+            &dir,
+            Some(&requirements),
+            &declared,
+            &verification,
+            &artifacts,
+        ));
+
+        assert!(!assessment.satisfied, "{assessment:?}");
+        assert!(
+            assessment.missing_artifacts.is_empty(),
+            "a hashed file must never be called missing: {assessment:?}"
+        );
+        assert_eq!(assessment.invalid_artifacts.len(), 1, "{assessment:?}");
+        assert!(assessment.invalid_artifacts[0].contains("hashes to"));
+        // The evidence still proves what was actually on disk.
+        assert!(assessment.evidence[0].exists);
+        assert!(assessment.evidence[0].sha256.is_some());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// The suppression above is scoped to the shortfall a rejection explains. A
+    /// requirement asking for two files that gets one rejected and one absent is
+    /// still short by an unexplained file, so the count is still reported.
+    #[test]
+    fn unexplained_shortfall_is_still_reported() {
+        let dir = workspace();
+        fs::create_dir_all(dir.join("out")).unwrap();
+        fs::write(dir.join("out/a.md"), "").unwrap();
+        let declared = vec!["cargo test".to_string()];
+        let verification = vec![check("cargo test", true)];
+        let requirements = file_outcome(&["out/a.md x2"]);
+        let artifacts = vec!["out/a.md".to_string()];
+        let assessment = assess(input(
+            &dir,
+            Some(&requirements),
+            &declared,
+            &verification,
+            &artifacts,
+        ));
+
+        assert!(!assessment.satisfied, "{assessment:?}");
+        // One candidate was found and rejected as empty; the second never
+        // appeared at all, so the shortfall is real and must be stated.
+        assert_eq!(assessment.invalid_artifacts.len(), 1, "{assessment:?}");
+        assert_eq!(assessment.missing_artifacts.len(), 1, "{assessment:?}");
         let _ = fs::remove_dir_all(dir);
     }
 

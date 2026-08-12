@@ -1601,7 +1601,13 @@ fn stream_model_json(
     let mut content_started = false;
     let mut reasoning_chars = 0usize;
     let call_started = Instant::now();
-    let mut last_delta = Instant::now();
+    // Stays `None` until the first delta arrives. The stream-idle budget measures
+    // the gap *between* two pieces of streamed output, so it must not police
+    // time-to-first-token: a large local model can spend longer than the idle
+    // budget on prompt eval before emitting anything, and cancelling there
+    // aborts a healthy run. Until the stream opens, the model-call budget is the
+    // governor.
+    let mut last_delta: Option<Instant> = None;
     let call_budget = deadline.model_call_budget();
     let idle_budget = deadline.stream_idle();
     loop {
@@ -1621,7 +1627,7 @@ fn stream_model_json(
                     print!("  ");
                     thinking_started = true;
                 }
-                last_delta = Instant::now();
+                last_delta = Some(Instant::now());
                 journal.delta(Delta::Thinking(indent_for(human, delta)));
             }
             Ok(ChatStreamEvent::Content(delta)) => {
@@ -1633,7 +1639,7 @@ fn stream_model_json(
                     print!("  ");
                     content_started = true;
                 }
-                last_delta = Instant::now();
+                last_delta = Some(Instant::now());
                 journal.delta(Delta::Content(indent_for(human, delta)));
             }
             Ok(ChatStreamEvent::Done(result)) => {
@@ -1652,7 +1658,8 @@ fn stream_model_json(
                     .map(|_| BudgetKind::ModelCall)
                     .or_else(|| {
                         idle_budget
-                            .filter(|limit| last_delta.elapsed() >= *limit)
+                            .zip(last_delta)
+                            .filter(|(limit, since)| since.elapsed() >= *limit)
                             .map(|_| BudgetKind::StreamIdle)
                     })
                 {
