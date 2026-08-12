@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import { fileURLToPath } from 'node:url';
 
 export type ContextProject = {
   id: string;
@@ -21,7 +22,7 @@ export type ContextProject = {
 export type ContextInventoryItem = {
   sourcePath: string;
   absolutePath: string;
-  kind: 'markdown' | 'text' | 'code' | 'config';
+  kind: 'markdown' | 'text' | 'code' | 'config' | 'pdf';
   format: string;
   sizeBytes: number;
   freshnessAt: string;
@@ -298,6 +299,7 @@ function sourceDescriptor(filePath: string): Pick<ContextInventoryItem, 'kind' |
   const base = path.basename(filePath).toLowerCase();
   if (secretFileNames.test(base)) return null;
   const extension = path.extname(base).toLowerCase();
+  if (extension === '.pdf') return { kind: 'pdf', format: 'pdf' };
   if (extension === '.md' || extension === '.mdx') return { kind: 'markdown', format: extension.slice(1) };
   if (textExtensions.has(extension)) return { kind: 'text', format: extension.slice(1) };
   if (codeExtensions.has(extension)) return { kind: 'code', format: extension.slice(1) };
@@ -372,14 +374,109 @@ function gitRevision(rootPath: string) {
   }
 }
 
-function readExtractableFile(filePath: string) {
+type ExtractedPage = { page: number; text: string };
+type ExtractedFile = { content: string; contentHash: string; pages: ExtractedPage[] | null };
+export type ContextExtractionIssue = {
+  sourcePath: string;
+  status: 'unavailable' | 'error';
+  code: string;
+  message: string;
+  capability: string | null;
+};
+type PdfExtractionResult =
+  | { status: 'ok'; pages: ExtractedPage[] }
+  | Omit<ContextExtractionIssue, 'sourcePath'>;
+
+function extractPdf(filePath: string): PdfExtractionResult {
+  const workerPath = contextExtractorWorkerPath();
+  const python = process.env.HII_PYTHON || 'python3';
+  try {
+    const output = execFileSync(python, [workerPath], {
+      encoding: 'utf8',
+      input: JSON.stringify({ protocolVersion: 1, operation: 'extract_pdf', path: filePath }),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 35_000,
+      maxBuffer: 21_000_000
+    });
+    const result = JSON.parse(output) as {
+      protocolVersion?: number;
+      status?: string;
+      code?: unknown;
+      message?: unknown;
+      capability?: unknown;
+      pages?: Array<{ page?: unknown; text?: unknown }>;
+    };
+    if (result.protocolVersion !== 1) {
+      return { status: 'error', code: 'invalid_worker_response', message: 'Extractor returned an unsupported protocol version.', capability: 'pdf_text' };
+    }
+    if ((result.status === 'unavailable' || result.status === 'error') && typeof result.code === 'string') {
+      return {
+        status: result.status,
+        code: cleanText(result.code, 120),
+        message: cleanText(result.message, 500) || 'PDF extraction did not complete.',
+        capability: typeof result.capability === 'string' ? cleanText(result.capability, 120) : null
+      };
+    }
+    if (result.status !== 'ok' || !Array.isArray(result.pages)) {
+      return { status: 'error', code: 'invalid_worker_response', message: 'Extractor returned an invalid response.', capability: 'pdf_text' };
+    }
+    return {
+      status: 'ok',
+      pages: result.pages
+        .filter((page) => Number.isInteger(page.page) && Number(page.page) > 0 && typeof page.text === 'string')
+        .map((page) => ({ page: Number(page.page), text: cleanText(page.text) }))
+    };
+  } catch (error) {
+    return {
+      status: 'error',
+      code: 'worker_failed',
+      message: cleanText(error instanceof Error ? error.message : error, 500),
+      capability: 'pdf_text'
+    };
+  }
+}
+
+export function contextExtractorWorkerPath(moduleUrl = import.meta.url) {
+  if (process.env.HII_CONTEXT_EXTRACTOR_WORKER) {
+    return path.resolve(process.env.HII_CONTEXT_EXTRACTOR_WORKER);
+  }
+  const roots: string[] = [];
+  if (process.env.HII_ROOT) roots.push(path.resolve(process.env.HII_ROOT));
+  let ancestor = path.dirname(fileURLToPath(moduleUrl));
+  while (true) {
+    roots.push(ancestor);
+    const parent = path.dirname(ancestor);
+    if (parent === ancestor) break;
+    ancestor = parent;
+  }
+  roots.push(path.resolve(process.cwd()), path.join(os.homedir(), 'hii'));
+  for (const root of [...new Set(roots)]) {
+    const candidate = path.join(root, 'scripts', 'hii-context-extractor.py');
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+  }
+  const fallbackRoot = process.env.HII_ROOT ? path.resolve(process.env.HII_ROOT) : path.resolve(process.cwd());
+  return path.join(fallbackRoot, 'scripts', 'hii-context-extractor.py');
+}
+
+function readExtractableFile(filePath: string, kind: ContextInventoryItem['kind']): {
+  extracted: ExtractedFile | null;
+  issue: Omit<ContextExtractionIssue, 'sourcePath'> | null;
+  sourceHash: string;
+} {
   const bytes = fs.readFileSync(filePath);
-  if (bytes.includes(0)) return null;
+  const sourceHash = hash(bytes);
+  if (kind === 'pdf') {
+    const result = extractPdf(filePath);
+    if (result.status !== 'ok') return { extracted: null, issue: result, sourceHash };
+    return {
+      extracted: { content: result.pages.map((page) => page.text).join('\n\f\n'), contentHash: sourceHash, pages: result.pages },
+      issue: null,
+      sourceHash
+    };
+  }
+  if (bytes.includes(0)) return { extracted: null, issue: null, sourceHash };
   const raw = bytes.toString('utf8').replace(/\r\n?/g, '\n');
-  return {
-    content: cleanText(raw),
-    contentHash: hash(bytes)
-  };
+  return { extracted: { content: cleanText(raw), contentHash: sourceHash, pages: null }, issue: null, sourceHash };
 }
 
 function chunkDocument(content: string, maxLines = 80, maxCharacters = 8_000) {
@@ -518,7 +615,9 @@ export function scanContextProject(projectId: string, options: {
     const seen = new Set<string>();
     let filesIndexed = 0;
     let filesExcluded = 0;
+    let filesSkipped = 0;
     let chunksIndexed = 0;
+    const extractionIssues: ContextExtractionIssue[] = [];
 
     for (const item of inventory) {
       const sourceId = stableId('source', project.id, item.sourcePath);
@@ -528,7 +627,11 @@ export function scanContextProject(projectId: string, options: {
       const explicitlyExcluded = isExplicitlyExcluded(item.sourcePath, options.exclusions ?? []);
       const excluded = explicitlyExcluded || Boolean(existing?.excluded);
       const pinned = Boolean(existing?.pinned);
-      const extracted = excluded ? null : readExtractableFile(item.absolutePath);
+      const extraction = excluded
+        ? { extracted: null, issue: null, sourceHash: null }
+        : readExtractableFile(item.absolutePath, item.kind);
+      const extracted = extraction.extracted;
+      if (extraction.issue) extractionIssues.push({ sourcePath: item.sourcePath, ...extraction.issue });
       const now = timestamp();
 
       database.exec('BEGIN IMMEDIATE');
@@ -553,11 +656,11 @@ export function scanContextProject(projectId: string, options: {
             updated_at = excluded.updated_at
         `).run(
           sourceId, project.id, item.sourcePath, item.absolutePath, item.kind, item.format,
-          item.sizeBytes, item.freshnessAt, extracted?.contentHash ?? null, revision, pinned ? 1 : 0,
+          item.sizeBytes, item.freshnessAt, extraction.sourceHash, revision, pinned ? 1 : 0,
           excluded ? 1 : 0, now, now
         );
 
-        if (excluded || !extracted) {
+        if (excluded) {
           deleteSourceIndex(database, sourceId);
           database.prepare('UPDATE context_documents SET excluded = 1, pinned = ? WHERE source_id = ?')
             .run(pinned ? 1 : 0, sourceId);
@@ -567,22 +670,31 @@ export function scanContextProject(projectId: string, options: {
           database.exec('COMMIT');
           continue;
         }
+        if (!extracted) {
+          deleteSourceIndex(database, sourceId);
+          database.prepare('DELETE FROM context_documents WHERE source_id = ?').run(sourceId);
+          filesSkipped += 1;
+          database.exec('COMMIT');
+          continue;
+        }
 
         const documentId = stableId('document', sourceId);
         const lineEnd = Math.max(extracted.content.split('\n').length, 1);
+        const pageStart = extracted.pages?.length ? extracted.pages[0].page : null;
+        const pageEnd = extracted.pages?.length ? extracted.pages[extracted.pages.length - 1].page : null;
         database.prepare(`
           INSERT INTO context_documents(
             id, project_id, source_id, source_path, content, line_start, line_end,
             page_start, page_end, freshness_at, content_hash, git_revision,
             approved_root, pinned, excluded, extracted_at
-          ) VALUES (?, ?, ?, ?, ?, 1, ?, NULL, NULL, ?, ?, ?, 1, ?, 0, ?)
+          ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 1, ?, 0, ?)
           ON CONFLICT(source_id) DO UPDATE SET
             source_path = excluded.source_path,
             content = excluded.content,
             line_start = 1,
             line_end = excluded.line_end,
-            page_start = NULL,
-            page_end = NULL,
+            page_start = excluded.page_start,
+            page_end = excluded.page_end,
             freshness_at = excluded.freshness_at,
             content_hash = excluded.content_hash,
             git_revision = excluded.git_revision,
@@ -591,13 +703,15 @@ export function scanContextProject(projectId: string, options: {
             excluded = 0,
             extracted_at = excluded.extracted_at
         `).run(
-          documentId, project.id, sourceId, item.sourcePath, extracted.content, lineEnd,
+          documentId, project.id, sourceId, item.sourcePath, extracted.content, lineEnd, pageStart, pageEnd,
           item.freshnessAt, extracted.contentHash, revision, pinned ? 1 : 0, now
         );
 
         deleteSourceIndex(database, sourceId);
         database.prepare('DELETE FROM context_chunks WHERE source_id = ?').run(sourceId);
-        const chunks = chunkDocument(extracted.content);
+        const chunks = extracted.pages
+          ? extracted.pages.flatMap((page) => chunkDocument(page.text).map((chunk) => ({ ...chunk, pageStart: page.page, pageEnd: page.page })))
+          : chunkDocument(extracted.content).map((chunk) => ({ ...chunk, pageStart: null, pageEnd: null }));
         chunks.forEach((chunk, ordinal) => {
           const chunkId = stableId('chunk', documentId, String(ordinal), hash(chunk.content));
           const chunkHash = hash(chunk.content);
@@ -606,10 +720,11 @@ export function scanContextProject(projectId: string, options: {
               id, project_id, source_id, document_id, ordinal, source_path, content,
               line_start, line_end, page_start, page_end, freshness_at, content_hash,
               git_revision, approved_root, pinned, excluded, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, 1, ?, 0, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0, ?)
           `).run(
             chunkId, project.id, sourceId, documentId, ordinal, item.sourcePath, chunk.content,
-            chunk.lineStart, chunk.lineEnd, item.freshnessAt, chunkHash, revision, pinned ? 1 : 0, now
+            chunk.lineStart, chunk.lineEnd, chunk.pageStart, chunk.pageEnd,
+            item.freshnessAt, chunkHash, revision, pinned ? 1 : 0, now
           );
           database.prepare('INSERT INTO context_chunks_fts(chunk_id, project_id, source_path, content) VALUES (?, ?, ?, ?)')
             .run(chunkId, project.id, item.sourcePath, chunk.content);
@@ -640,8 +755,11 @@ export function scanContextProject(projectId: string, options: {
       database.prepare(`
         UPDATE context_scan_events
         SET status = 'completed', files_discovered = ?, files_indexed = ?, files_excluded = ?,
-          chunks_indexed = ?, completed_at = ? WHERE id = ?
-      `).run(inventory.length, filesIndexed, filesExcluded, chunksIndexed, completedAt, eventId);
+          chunks_indexed = ?, metadata_json = ?, completed_at = ? WHERE id = ?
+      `).run(
+        inventory.length, filesIndexed, filesExcluded, chunksIndexed,
+        JSON.stringify({ filesSkipped, extractionIssues }), completedAt, eventId
+      );
       database.exec('COMMIT');
       return {
         eventId,
@@ -651,7 +769,9 @@ export function scanContextProject(projectId: string, options: {
         filesDiscovered: inventory.length,
         filesIndexed,
         filesExcluded,
+        filesSkipped,
         chunksIndexed,
+        extractionIssues,
         completedAt,
         localOnly: true as const
       };

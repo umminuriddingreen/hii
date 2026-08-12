@@ -18,6 +18,8 @@ await mkdir(server,{recursive:true});
 await cp(output,path.join(server,'build'),{recursive:true,force:true,verbatimSymlinks:true});
 await cp(path.join(root,'server.mjs'),path.join(server,'server.mjs'),{force:true});
 await cp(path.join(root,'server'),path.join(server,'server'),{recursive:true,force:true});
+await mkdir(path.join(server,'scripts'),{recursive:true});
+await cp(path.join(root,'scripts','hii-context-extractor.py'),path.join(server,'scripts','hii-context-extractor.py'),{force:true});
 await mkdir(path.join(server,'node_modules'),{recursive:true});
 for(const dependency of ['ws','node-pty','yaml']) await cp(path.join(root,'node_modules',dependency),path.join(server,'node_modules',dependency),{recursive:true,force:true,verbatimSymlinks:true});
 await mkdir(path.join(server,'aii','capabilities'),{recursive:true});

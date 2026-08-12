@@ -30,7 +30,7 @@ For `ollama`, `detail` lists locally available models when installed.
 
 ### `inventory` (preview before approval — creates no rows)
 Request: `{ "action": "inventory", "rootPath": string, "exclusions": string[]? }`
-Response: `{ "rootPath": string /* resolved real path */, "items": [ { "sourcePath": string, "kind": "markdown" | "text" | "code" | "config", "format": string, "sizeBytes": number, "freshnessAt": string } ], "count": number, "totalBytes": number }`
+Response: `{ "rootPath": string /* resolved real path */, "items": [ { "sourcePath": string, "kind": "markdown" | "text" | "code" | "config" | "pdf", "format": string, "sizeBytes": number, "freshnessAt": string } ], "count": number, "totalBytes": number }`
 Server passes `approved: true` to `inventoryContextRoot` internally; the human
 approval gate is the `create` action, which the UI only calls after the
 explicit approve checkbox.
@@ -41,6 +41,13 @@ Response: `{ "project": ContextProject, "scan": ScanSummary }`
 Calls `createContextProject({ rootPath, approved: true })` then
 `scanContextProject(projectId, { exclusions })`. `ContextProject` and the scan
 summary are the shapes exported by `lib/server/hii-context-dock.ts`.
+
+`ScanSummary` includes the existing discovery/index/exclusion/chunk counts plus
+`filesSkipped: number` and `extractionIssues: Array<{ sourcePath: string,
+status: "unavailable" | "error", code: string, message: string, capability:
+string | null }>`. Extraction capability failures are skipped, not treated as
+user exclusions. A skipped source remains visible and unexcluded while stale
+derived search content is removed until a later successful scan.
 
 ### `state`
 Request: `{ "action": "state", "projectId": string }`
