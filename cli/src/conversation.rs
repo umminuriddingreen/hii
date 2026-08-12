@@ -396,6 +396,14 @@ impl Conversation {
             }),
         )?;
         let model_input = format!("{input}{}", attachment_payload.text_context);
+        self.messages.retain(|message| {
+            message.role != "system" || !crate::design::is_design_context(&message.content)
+        });
+        if let Some(context) =
+            crate::design::context_for_request(input, self.mcp_clients.has_enabled_server("comfy"))
+        {
+            self.messages.push(Message::system(context));
+        }
         self.messages.push(Message::user_with_images(
             model_input,
             attachment_payload.images,

@@ -11,6 +11,7 @@ mod config;
 mod context;
 mod contract;
 mod conversation;
+mod design;
 mod governance;
 mod hii_tools;
 mod hooks;

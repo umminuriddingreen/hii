@@ -264,6 +264,13 @@ impl McpClients {
             .count()
     }
 
+    pub fn has_enabled_server(&self, name: &str) -> bool {
+        self.config
+            .servers
+            .get(name)
+            .is_some_and(|server| server.enabled)
+    }
+
     pub fn command(&mut self, requested: &str) -> Result<String, String> {
         let requested = requested.trim();
         if requested.is_empty() {

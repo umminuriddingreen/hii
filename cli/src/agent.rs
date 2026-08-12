@@ -389,6 +389,11 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     if !mcp_context.is_empty() {
         messages.push(Message::system(mcp_context));
     }
+    if let Some(context) =
+        crate::design::context_for_request(&options.goal, mcp_clients.has_enabled_server("comfy"))
+    {
+        messages.push(Message::system(context));
+    }
     messages.push(Message::user(options.goal.clone()));
     let mut verification: Vec<VerificationRecord> = Vec::new();
     let mut touched_artifacts = BTreeSet::new();
