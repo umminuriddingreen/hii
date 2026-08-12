@@ -10,6 +10,7 @@ export type PtyServerMessage = {
   alive?: boolean;
   message?: string;
   items?: unknown[];
+  program?: 'shell' | 'hii';
 };
 
 export type PtyClientMessage = {
@@ -19,6 +20,7 @@ export type PtyClientMessage = {
   cols?: number;
   rows?: number;
   data?: string;
+  program?: 'hii';
 };
 
 type Handler = (msg: PtyServerMessage) => void;

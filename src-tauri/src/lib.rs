@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Mutex,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
@@ -20,7 +20,10 @@ const DEFAULT_HII_PORT: u16 = 3042;
 const NOTCH_WIDTH: f64 = 460.0;
 const NOTCH_COLLAPSED_HEIGHT: f64 = 52.0;
 const NOTCH_EXPANDED_HEIGHT: f64 = 320.0;
+const HUD_WIDTH: f64 = 760.0;
+const HUD_HEIGHT: f64 = 480.0;
 const MENU_FOCUS_WORKSPACE: &str = "hii.focus-workspace";
+const MENU_OPEN_HUD: &str = "hii.open-hud";
 const MENU_COMMAND_PALETTE: &str = "hii.command-palette";
 const MENU_OPEN_BROWSER: &str = "hii.open-browser";
 const MENU_FIT_ALL: &str = "hii.fit-all";
@@ -28,10 +31,23 @@ const MENU_REFRESH_SPACE: &str = "hii.refresh-space";
 const MENU_DEVELOP_HII: &str = "hii.develop-hii";
 
 struct HiiServer(Mutex<ServerState>);
+struct AmbientScreenContext(Mutex<Option<ScreenContext>>);
 
 struct ServerState {
     child: Option<Child>,
     url: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScreenContext {
+    status: String,
+    captured_at: String,
+    relative_path: Option<String>,
+    application: Option<String>,
+    width: u32,
+    height: u32,
+    message: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -52,6 +68,123 @@ fn desktop_surface(server: tauri::State<'_, HiiServer>) -> DesktopSurface {
             .map(|state| state.url.clone())
             .unwrap_or_default(),
     }
+}
+
+fn frontmost_application() -> Option<String> {
+    let output = Command::new("/usr/bin/osascript")
+        .args([
+            "-e",
+            "tell application \"System Events\" to get name of first application process whose frontmost is true",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!name.is_empty()).then_some(name)
+}
+
+fn unavailable_screen_context(message: impl Into<String>) -> ScreenContext {
+    ScreenContext {
+        status: "unavailable".to_string(),
+        captured_at: format!(
+            "{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        ),
+        relative_path: None,
+        application: frontmost_application(),
+        width: 0,
+        height: 0,
+        message: Some(message.into()),
+    }
+}
+
+/// Captures only the cursor's surrounding work area before the HUD is shown.
+///
+/// The raw pixels rotate through one HII-owned file rather than accumulating a
+/// screen history. The relative path can be attached by the interactive CLI,
+/// whose normal vision/provider checks remain the transmission boundary.
+fn capture_screen_context(app: &tauri::AppHandle) -> ScreenContext {
+    let application = frontmost_application();
+    let Ok(cursor) = app.cursor_position() else {
+        return unavailable_screen_context("HII could not locate the cursor.");
+    };
+    let Ok(Some(monitor)) = app.monitor_from_point(cursor.x, cursor.y) else {
+        return unavailable_screen_context("HII could not identify the cursor's display.");
+    };
+    let scale = monitor.scale_factor();
+    let cursor = cursor.to_logical::<f64>(scale);
+    let area = monitor.work_area();
+    let area_position = area.position.to_logical::<f64>(scale);
+    let area_size = area.size.to_logical::<f64>(scale);
+    let width = area_size.width.min(1200.0).max(1.0).floor() as u32;
+    let height = area_size.height.min(760.0).max(1.0).floor() as u32;
+    let max_x = area_position.x + area_size.width - f64::from(width);
+    let max_y = area_position.y + area_size.height - f64::from(height);
+    let x = (cursor.x - f64::from(width) * 0.42)
+        .clamp(area_position.x, max_x.max(area_position.x))
+        .round() as i32;
+    let y = (cursor.y - f64::from(height) * 0.30)
+        .clamp(area_position.y, max_y.max(area_position.y))
+        .round() as i32;
+    let Ok(root) = runtime_root() else {
+        return unavailable_screen_context("HII's local runtime is unavailable.");
+    };
+    let capture_dir = root.join("ambient");
+    if let Err(error) = create_dir_all(&capture_dir) {
+        return unavailable_screen_context(format!(
+            "HII could not prepare screen context: {error}"
+        ));
+    }
+    let capture_path = capture_dir.join("latest-screen.png");
+    let _ = std::fs::remove_file(&capture_path);
+    let region = format!("-R{x},{y},{width},{height}");
+    let result = Command::new("/usr/sbin/screencapture")
+        .args(["-x", &region])
+        .arg(&capture_path)
+        .status();
+    let captured_at = format!(
+        "{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    );
+    match result {
+        Ok(status) if status.success() && capture_path.is_file() => ScreenContext {
+            status: "captured".to_string(),
+            captured_at,
+            relative_path: Some(".hii/ambient/latest-screen.png".to_string()),
+            application,
+            width,
+            height,
+            message: None,
+        },
+        Ok(status) => unavailable_screen_context(format!(
+            "Screen capture did not complete (exit {}). Check Screen Recording permission.",
+            status.code().unwrap_or(1)
+        )),
+        Err(error) => {
+            unavailable_screen_context(format!("HII could not start screen capture: {error}"))
+        }
+    }
+}
+
+fn remember_screen_context(app: &tauri::AppHandle) -> ScreenContext {
+    let context = capture_screen_context(app);
+    if let Ok(mut latest) = app.state::<AmbientScreenContext>().0.lock() {
+        *latest = Some(context.clone());
+    }
+    context
+}
+
+#[tauri::command]
+fn latest_screen_context(context: tauri::State<'_, AmbientScreenContext>) -> Option<ScreenContext> {
+    context.0.lock().ok().and_then(|latest| latest.clone())
 }
 
 fn ensure_cursor_bar(app: &tauri::AppHandle, server_url: &str) -> Result<(), String> {
@@ -99,6 +232,116 @@ fn show_cursor_bar(app: &tauri::AppHandle) -> Result<(), String> {
     window
         .emit("hii://notch-opened", ())
         .map_err(|error| error.to_string())
+}
+
+fn ensure_hii_hud(app: &tauri::AppHandle, server_url: &str) -> Result<(), String> {
+    if app.get_webview_window("hii-hud").is_some() {
+        return Ok(());
+    }
+    let url = Url::parse(&format!("{}/hud", server_url.trim_end_matches('/')))
+        .map_err(|error| error.to_string())?;
+    WebviewWindowBuilder::new(app, "hii-hud", WebviewUrl::External(url))
+        .title("HII HUD")
+        .inner_size(HUD_WIDTH, HUD_HEIGHT)
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
+        .closable(false)
+        .decorations(false)
+        .always_on_top(true)
+        .visible_on_all_workspaces(true)
+        .skip_taskbar(true)
+        .shadow(true)
+        .focused(false)
+        .visible(false)
+        .build()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+fn position_hii_hud(app: &tauri::AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("hii-hud")
+        .ok_or_else(|| "HII HUD is unavailable.".to_string())?;
+    let cursor = app.cursor_position().map_err(|error| error.to_string())?;
+    let monitor = app
+        .monitor_from_point(cursor.x, cursor.y)
+        .map_err(|error| error.to_string())?
+        .or_else(|| app.primary_monitor().ok().flatten())
+        .ok_or_else(|| "No display is available for HII HUD.".to_string())?;
+    let area = monitor.work_area();
+    let scale = monitor.scale_factor();
+    let width = HUD_WIDTH * scale;
+    let height = HUD_HEIGHT * scale;
+    let gap = 18.0 * scale;
+    let min_x = f64::from(area.position.x);
+    let min_y = f64::from(area.position.y);
+    let max_x = min_x + f64::from(area.size.width) - width;
+    let max_y = min_y + f64::from(area.size.height) - height;
+    let preferred_x = if cursor.x + gap + width <= min_x + f64::from(area.size.width) {
+        cursor.x + gap
+    } else {
+        cursor.x - gap - width
+    };
+    let preferred_y = if cursor.y + gap + height <= min_y + f64::from(area.size.height) {
+        cursor.y + gap
+    } else {
+        cursor.y - gap - height
+    };
+    let x = preferred_x.clamp(min_x, max_x.max(min_x)).round() as i32;
+    let y = preferred_y.clamp(min_y, max_y.max(min_y)).round() as i32;
+    window
+        .set_position(PhysicalPosition::new(x, y))
+        .map_err(|error| error.to_string())
+}
+
+fn show_hii_hud(app: &tauri::AppHandle) -> Result<(), String> {
+    let server_url = app
+        .state::<HiiServer>()
+        .0
+        .lock()
+        .map_err(|error| error.to_string())?
+        .url
+        .clone();
+    if server_url.is_empty() {
+        return Err("HII is still starting.".to_string());
+    }
+    let context = remember_screen_context(app);
+    ensure_hii_hud(app, &server_url)?;
+    position_hii_hud(app)?;
+    let window = app
+        .get_webview_window("hii-hud")
+        .ok_or_else(|| "HII HUD is unavailable.".to_string())?;
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())?;
+    let _ = window.emit("hii://screen-context", context);
+    window
+        .emit("hii://hud-opened", ())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn refresh_hii_hud_context(app: tauri::AppHandle) -> Result<ScreenContext, String> {
+    if let Some(window) = app.get_webview_window("hii-hud") {
+        window.hide().map_err(|error| error.to_string())?;
+    }
+    let context = remember_screen_context(&app);
+    position_hii_hud(&app)?;
+    let window = app
+        .get_webview_window("hii-hud")
+        .ok_or_else(|| "HII HUD is unavailable.".to_string())?;
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())?;
+    let _ = window.emit("hii://screen-context", context.clone());
+    Ok(context)
+}
+
+#[tauri::command]
+fn hide_hii_hud(app: tauri::AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("hii-hud")
+        .ok_or_else(|| "HII HUD is unavailable.".to_string())?;
+    window.hide().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -363,6 +606,7 @@ fn hii_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         true,
         Some("CmdOrCtrl+Shift+H"),
     )?;
+    let hud = MenuItem::with_id(app, MENU_OPEN_HUD, "Summon HII", true, Some("Alt+H"))?;
     let palette = MenuItem::with_id(
         app,
         MENU_COMMAND_PALETTE,
@@ -405,6 +649,7 @@ fn hii_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         true,
         &[
             &focus,
+            &hud,
             &palette,
             &browser,
             &fit,
@@ -424,11 +669,17 @@ pub fn run() {
             child: None,
             url: String::new(),
         })))
+        .manage(AmbientScreenContext(Mutex::new(None)))
         .menu(hii_menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             MENU_FOCUS_WORKSPACE => {
                 if let Err(error) = focus_workspace(app) {
                     eprintln!("HII could not focus the workspace: {error}");
+                }
+            }
+            MENU_OPEN_HUD => {
+                if let Err(error) = show_hii_hud(app) {
+                    eprintln!("HII could not show the HUD: {error}");
                 }
             }
             MENU_COMMAND_PALETTE => emit_workspace_command(app, "hii://command-palette"),
@@ -449,26 +700,37 @@ pub fn run() {
                     tauri_plugin_global_shortcut::Builder::new()
                         .with_handler(|app, shortcut, event| {
                             #[cfg(target_os = "macos")]
-                            let matches =
+                            let notch_matches =
                                 shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::Space);
                             #[cfg(not(target_os = "macos"))]
-                            let matches = shortcut
+                            let notch_matches = shortcut
                                 .matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::Space);
-                            if event.state != ShortcutState::Pressed || !matches {
+                            let hud_matches = shortcut.matches(Modifiers::ALT, Code::KeyH);
+                            if event.state != ShortcutState::Pressed {
                                 return;
                             }
-                            if let Err(error) = show_cursor_bar(app) {
-                                eprintln!("HII could not show the cursor bar: {error}");
+                            if notch_matches {
+                                if let Err(error) = show_cursor_bar(app) {
+                                    eprintln!("HII could not show the cursor bar: {error}");
+                                }
+                            } else if hud_matches {
+                                if let Err(error) = show_hii_hud(app) {
+                                    eprintln!("HII could not show the HUD: {error}");
+                                }
                             }
                         })
                         .build(),
                 )?;
                 #[cfg(target_os = "macos")]
-                let shortcut = "super+shift+space";
+                let notch_shortcut = "super+shift+space";
                 #[cfg(not(target_os = "macos"))]
-                let shortcut = "ctrl+shift+space";
-                if let Err(error) = app.global_shortcut().register(shortcut) {
-                    eprintln!("HII could not register {shortcut}: {error}");
+                let notch_shortcut = "ctrl+shift+space";
+                if let Err(error) = app.global_shortcut().register(notch_shortcut) {
+                    eprintln!("HII could not register {notch_shortcut}: {error}");
+                }
+                let hud_shortcut = "alt+h";
+                if let Err(error) = app.global_shortcut().register(hud_shortcut) {
+                    eprintln!("HII could not register {hud_shortcut}: {error}");
                 }
             }
 
@@ -499,6 +761,9 @@ pub fn run() {
                 }
                 if let Err(error) = set_notch_expanded(app.handle().clone(), false) {
                     eprintln!("HII could not position Notch: {error}");
+                }
+                if let Err(error) = ensure_hii_hud(app.handle(), &hii_url) {
+                    eprintln!("HII could not prepare the HUD: {error}");
                 }
             }
 
@@ -539,6 +804,9 @@ pub fn run() {
             desktop_surface,
             browser::browser_navigate,
             hide_cursor_bar,
+            hide_hii_hud,
+            latest_screen_context,
+            refresh_hii_hud_context,
             set_notch_expanded,
             open_hii_mode,
             run_cursor_intent

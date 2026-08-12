@@ -1,4 +1,5 @@
 import { spawn } from 'node-pty';
+import { existsSync } from 'node:fs';
 import path from 'path';
 import os from 'os';
 
@@ -20,6 +21,7 @@ const sessions = new Map();
  * @property {number} rows
  * @property {string} createdAt
  * @property {number | null} exitCode
+ * @property {'shell' | 'hii'} program
  */
 
 // Server-process secrets (Stripe, Supabase service role, R2, …) must not leak
@@ -54,18 +56,30 @@ function broadcast(session, message) {
   }
 }
 
-export function createSession(sessionId, { cwd, cols, rows }) {
+export function createSession(sessionId, { cwd, cols, rows, program }) {
   if (sessions.has(sessionId)) return sessions.get(sessionId);
   const safeCwd = cwd && isInside(cwd) ? path.resolve(cwd) : ALLOWED_ROOT;
   const windows = process.platform === 'win32';
   const shell = windows ? (process.env.ComSpec || 'powershell.exe') : (process.env.SHELL || '/bin/zsh');
   const shellArgs = windows && /powershell/i.test(shell) ? ['-NoLogo'] : windows ? [] : ['-l'];
-  const pty = spawn(shell, shellArgs, {
+  const hiiCandidate = process.env.HII_BIN
+    || (windows ? path.join(os.homedir(), 'AppData', 'Roaming', 'npm', 'hii.cmd') : path.join(os.homedir(), 'bin', 'hii'));
+  const requestedProgram = program === 'hii' ? 'hii' : 'shell';
+  const executable = requestedProgram === 'hii' ? (existsSync(hiiCandidate) ? hiiCandidate : 'hii') : shell;
+  const args = requestedProgram === 'hii' ? [] : shellArgs;
+  const env = ptyEnv();
+  if (requestedProgram === 'hii') {
+    // The HUD owns editing and submission. Keep the CLI in its line protocol so
+    // a request written while the process is starting remains in the PTY input
+    // queue instead of being consumed before crossterm enters raw mode.
+    env.HII_UI_LINE_MODE = '1';
+  }
+  const pty = spawn(executable, args, {
     name: 'xterm-256color',
     cwd: safeCwd,
     cols: Math.max(20, Math.min(500, cols || 80)),
     rows: Math.max(5, Math.min(200, rows || 24)),
-    env: ptyEnv()
+    env
   });
   /** @type {Session} */
   const session = {
@@ -77,7 +91,8 @@ export function createSession(sessionId, { cwd, cols, rows }) {
     cols: cols || 80,
     rows: rows || 24,
     createdAt: new Date().toISOString(),
-    exitCode: null
+    exitCode: null,
+    program: requestedProgram
   };
   sessions.set(sessionId, session);
 
@@ -155,6 +170,7 @@ export function listSessions() {
     createdAt: session.createdAt,
     alive: session.pty !== null,
     exitCode: session.exitCode,
-    subscribers: session.subscribers.size
+    subscribers: session.subscribers.size,
+    program: session.program
   }));
 }

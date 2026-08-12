@@ -40,9 +40,10 @@ export function attachPtyGateway(wss) {
       try {
         if (t === 'create') {
           if (typeof sessionId !== 'string' || !sessionId) return send(ws, { t: 'error', message: 'sessionId required' });
-          const session = createSession(sessionId, { cwd: msg.cwd, cols: msg.cols, rows: msg.rows });
+          if (msg.program && msg.program !== 'hii') return send(ws, { t: 'error', sessionId, message: 'unsupported PTY program' });
+          const session = createSession(sessionId, { cwd: msg.cwd, cols: msg.cols, rows: msg.rows, program: msg.program });
           session.subscribers.add(ws);
-          send(ws, { t: 'created', sessionId });
+          send(ws, { t: 'created', sessionId, program: session.program });
           const buffered = scrollbackText(session);
           if (buffered) send(ws, { t: 'scrollback', sessionId, data: buffered });
         } else if (t === 'attach') {

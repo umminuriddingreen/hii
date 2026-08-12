@@ -12,6 +12,7 @@
 //! which never touches raw mode.
 
 use std::{
+    env,
     io::{self, IsTerminal, Write},
     time::Duration,
 };
@@ -44,7 +45,9 @@ pub enum InputEvent {
 /// The REPL gates on this and calls [`read_line_fallback`] otherwise, so piped
 /// or non-interactive invocations keep working.
 pub fn is_interactive() -> bool {
-    io::stdin().is_terminal() && io::stdout().is_terminal()
+    env::var_os("HII_UI_LINE_MODE").is_none()
+        && io::stdin().is_terminal()
+        && io::stdout().is_terminal()
 }
 
 /// RAII wrapper that enables raw mode on construction and always restores the
