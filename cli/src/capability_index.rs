@@ -287,7 +287,11 @@ pub fn search(entries: &[Entry], query: &str, limit: usize) -> Vec<Match> {
         })
         .collect();
 
-    matches.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.entry.id.cmp(&b.entry.id)));
+    matches.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then_with(|| a.entry.id.cmp(&b.entry.id))
+    });
     matches.truncate(limit);
     matches
 }
@@ -427,7 +431,12 @@ mod tests {
     fn ranks_id_match_above_description_match() {
         let entries = vec![
             entry("daemon-status", "Daemon Status", "check things", &[]),
-            entry("unrelated", "Unrelated", "reports daemon-status somewhere", &[]),
+            entry(
+                "unrelated",
+                "Unrelated",
+                "reports daemon-status somewhere",
+                &[],
+            ),
         ];
         let matches = search(&entries, "daemon-status", 10);
         assert_eq!(matches[0].entry.id, "daemon-status");
@@ -457,13 +466,23 @@ mod tests {
 
     #[test]
     fn wholly_unrelated_queries_match_nothing() {
-        let entries = vec![entry("apple-context", "Apple Context", "reads Messages", &["apple"])];
+        let entries = vec![entry(
+            "apple-context",
+            "Apple Context",
+            "reads Messages",
+            &["apple"],
+        )];
         assert!(search(&entries, "kubernetes", 10).is_empty());
     }
 
     #[test]
     fn matches_on_tags() {
-        let entries = vec![entry("apple-context", "Reader", "compact records", &["imessage"])];
+        let entries = vec![entry(
+            "apple-context",
+            "Reader",
+            "compact records",
+            &["imessage"],
+        )];
         assert_eq!(search(&entries, "imessage", 10).len(), 1);
     }
 

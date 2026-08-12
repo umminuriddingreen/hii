@@ -7,6 +7,7 @@ mod board;
 mod budget;
 mod capability_discovery;
 mod capability_index;
+mod capability_resolver;
 mod completion;
 mod config;
 mod context;
@@ -25,6 +26,7 @@ mod legacy;
 mod mcp;
 mod mcp_client;
 mod ollama;
+mod pipe;
 mod receipt;
 mod runlog;
 mod schedule;
@@ -276,13 +278,28 @@ enum Commands {
         #[command(subcommand)]
         action: SkillsCommand,
     },
-    #[command(about = "Search every local capability HII already owns (skills, capabilities, drafts)")]
+    #[command(
+        about = "Search every local capability HII already owns (skills, capabilities, drafts)"
+    )]
     Find {
         #[arg(help = "What you want to do, in plain words; omit to summarize the index")]
         query: Vec<String>,
         #[arg(long, help = "Maximum matches to return")]
         limit: Option<usize>,
         #[arg(long, help = "Emit results as JSON")]
+        json: bool,
+    },
+    #[command(about = "Compile intent into a capability, authority, execution, and proof plan")]
+    Pipe {
+        #[arg(required = true, num_args = 1.., help = "Human intent to compile")]
+        intent: Vec<String>,
+        #[arg(
+            long,
+            value_name = "LEVEL",
+            help = "Authority envelope: read-only | workspace | external-preview | external-commit"
+        )]
+        authority: Option<String>,
+        #[arg(long, help = "Emit the complete machine-readable pipe plan")]
         json: bool,
     },
     #[command(about = "Manage local recurring HII work through cron")]
@@ -692,10 +709,16 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     println!("{}", skill_lifecycle::status(&paths, json)?)
                 }
                 SkillsCommand::Promote { id, reason } => {
-                    println!("{}", skill_lifecycle::promote(&paths, &id, reason.as_deref())?)
+                    println!(
+                        "{}",
+                        skill_lifecycle::promote(&paths, &id, reason.as_deref())?
+                    )
                 }
                 SkillsCommand::Reject { id, reason } => {
-                    println!("{}", skill_lifecycle::reject(&paths, &id, reason.as_deref())?)
+                    println!(
+                        "{}",
+                        skill_lifecycle::reject(&paths, &id, reason.as_deref())?
+                    )
                 }
             }
             Ok(ExitCode::SUCCESS)
@@ -707,6 +730,17 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             } else {
                 capability_index::find(&paths, &query, limit, json)?;
             }
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Pipe {
+            intent,
+            authority,
+            json,
+        }) => {
+            let authority =
+                resolve_authority(false, authority.as_deref(), AuthorityContext::Operator)?;
+            let plan = pipe::compile(&paths, &intent.join(" "), authority);
+            println!("{}", pipe::render(&plan, json)?);
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::ToolsManifest) => {
@@ -1708,10 +1742,13 @@ fn delegate_legacy(repo: &std::path::Path, args: &[String]) -> Option<Result<i32
 /// a time instead of taking the whole family at once.
 fn claimed_from_legacy(args: &[String]) -> bool {
     let mut words = args.iter().filter(|arg| !arg.starts_with('-'));
-    match (words.next().map(String::as_str), words.next().map(String::as_str)) {
-        (Some("skills"), Some("promote" | "reject" | "lifecycle")) => true,
-        _ => false,
-    }
+    matches!(
+        (
+            words.next().map(String::as_str),
+            words.next().map(String::as_str),
+        ),
+        (Some("skills"), Some("promote" | "reject" | "lifecycle"))
+    )
 }
 
 fn is_native_command(command: &str) -> bool {
@@ -1729,6 +1766,7 @@ fn is_native_command(command: &str) -> bool {
             | "board"
             | "discover"
             | "find"
+            | "pipe"
             | "skills"
             | "legacy"
             | "help"
@@ -1795,6 +1833,7 @@ fn command_suggestion(args: &[String]) -> Option<(String, &'static str)> {
         "proof",
         "board",
         "discover",
+        "pipe",
         "help",
         "home",
         "agents",
@@ -1949,10 +1988,13 @@ mod tests {
     /// everything else must keep reaching the Node surface that still owns it.
     #[test]
     fn only_lifecycle_verbs_are_claimed_from_the_legacy_skills_family() {
-        let words = |line: &str| -> Vec<String> {
-            line.split_whitespace().map(str::to_string).collect()
-        };
-        for claimed in ["skills promote foo", "skills reject foo", "skills lifecycle"] {
+        let words =
+            |line: &str| -> Vec<String> { line.split_whitespace().map(str::to_string).collect() };
+        for claimed in [
+            "skills promote foo",
+            "skills reject foo",
+            "skills lifecycle",
+        ] {
             assert!(
                 claimed_from_legacy(&words(claimed)),
                 "`hii {claimed}` must be handled natively"
@@ -2204,6 +2246,29 @@ mod tests {
                 name: Some(name),
                 email: None,
             }) if provider == "local" && name == "Ummi"
+        ));
+    }
+
+    #[test]
+    fn parses_pipe_intent_with_explicit_authority() {
+        let cli = Cli::try_parse_from([
+            "hii",
+            "pipe",
+            "send",
+            "an",
+            "iMessage",
+            "--authority",
+            "external-commit",
+            "--json",
+        ])
+        .expect("parse pipe");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Pipe {
+                intent,
+                authority: Some(authority),
+                json: true,
+            }) if intent == ["send", "an", "iMessage"] && authority == "external-commit"
         ));
     }
 

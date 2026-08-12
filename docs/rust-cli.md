@@ -16,11 +16,19 @@ hii models          show installed local model roles
 hii proof [id]      inspect a durable run receipt
 hii board [action]  local kanban/todo board (list/add/move/done/edit/dedupe)
 hii login local     create or update the local HII user identity
+hii pipe [intent]   compile intent into capability, authority, execution, and proof stages
 ```
 
 The native surface stays deliberately small. Existing HII command families
 are delegated to `scripts/hii-cli.mjs` with inherited standard I/O and
 environment until their schemas and exit behavior have Rust parity tests.
+
+`hii pipe` is the deterministic preflight before model or tool execution. It
+resolves the intent against HII's local capability and skill registries, refuses
+ambiguous matches, distinguishes a ready declaration from a directly invocable
+adapter, checks the minimum authority envelope, and names required proof. Use
+`--json` when another HII surface or agent will consume the plan. A blocked pipe
+plan never executes a model or tool by itself.
 
 ## Parity freeze
 

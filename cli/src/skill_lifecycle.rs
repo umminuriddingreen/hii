@@ -16,7 +16,7 @@
 //!
 //! - `Proposed`  — something suggested this workflow is reusable. No evidence.
 //! - `Observed`  — it ran and succeeded, but nothing was declared up front, so
-//!                 there is no satisfied claim behind the success.
+//!   there is no satisfied claim behind the success.
 //! - `Verified`  — at least one run declared an outcome and met it.
 //! - `Trusted`   — repeatedly verified, with no recent failures.
 //! - `Rejected`  — a human said no. Only a human clears this.
@@ -456,6 +456,7 @@ pub fn observation_from_receipt(receipt: &Receipt) -> Observation {
 }
 
 /// Record a live execution against a skill and persist the new standing.
+#[allow(dead_code)] // Public lifecycle adapter; direct skill execution is not wired yet.
 pub fn record_execution(
     paths: &AppPaths,
     skill_id: &str,
@@ -466,7 +467,12 @@ pub fn record_execution(
         .skills
         .entry(skill_id.to_string())
         .or_insert_with(|| {
-            SkillRecord::new(skill_id.to_string(), skill_id.to_string(), String::new(), "execution")
+            SkillRecord::new(
+                skill_id.to_string(),
+                skill_id.to_string(),
+                String::new(),
+                "execution",
+            )
         });
     record.observe(observation_from_receipt(receipt));
     record.recompute();
@@ -493,12 +499,7 @@ pub fn reject(paths: &AppPaths, id: &str, reason: Option<&str>) -> Result<String
     )
 }
 
-fn decide(
-    paths: &AppPaths,
-    id: &str,
-    kind: OverrideKind,
-    reason: &str,
-) -> Result<String, String> {
+fn decide(paths: &AppPaths, id: &str, kind: OverrideKind, reason: &str) -> Result<String, String> {
     let mut lifecycle = migrate(paths);
     let record = lifecycle.skills.get_mut(id).ok_or_else(|| {
         format!("no skill `{id}` in the lifecycle; run `hii skills` to see what is tracked")
@@ -645,7 +646,10 @@ mod tests {
 
     #[test]
     fn one_verified_execution_promotes_to_verified() {
-        assert_eq!(record_with(vec![verified("r1")]).state, SkillState::Verified);
+        assert_eq!(
+            record_with(vec![verified("r1")]).state,
+            SkillState::Verified
+        );
     }
 
     #[test]
@@ -809,7 +813,9 @@ mod tests {
         lifecycle
             .skills
             .insert("b".into(), record_named("b", vec![plain_success("r2")]));
-        lifecycle.skills.insert("c".into(), record_named("c", vec![]));
+        lifecycle
+            .skills
+            .insert("c".into(), record_named("c", vec![]));
         let promoted = promoted(&lifecycle);
         assert_eq!(promoted.len(), 1);
         assert_eq!(promoted[0].id, "a");
