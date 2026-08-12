@@ -71,6 +71,7 @@ export default async function HomePage() {
           <a href="/workspace">Workspace</a>
           <a href="/knowledge">Knowledge</a>
           <a href="/console">Console</a>
+          <a href="/browser-sync">Browser Sync</a>
         </nav>
       </header>
 
