@@ -13,6 +13,11 @@ Concept package for an actual Bay Area site:
 - `site-plan.svg`: readable diagrammatic site plan.
 - `massing.step.py`: local CAD generator script.
 - `massing.step`: generated STEP massing model.
+- `channing-court-cad.step.py`: detailed architectural CAD generator.
+- `channing-court-cad.step`: detailed STEP CAD assembly.
+- `channing-court-cad.glb`: browser-viewable 3D model.
+- `channing-court-cad.stl`: mesh export for quick 3D inspection.
+- `cad-viewer.html`: browser CAD viewer for the GLB model.
 - `concept-slides.md`: eight-slide concept narrative.
 - `concept-board.html`: presentation board for visual review.
 - `visual-precedent-mining-skill.md`: HII skill draft for Pinterest/Cosmos/API/browser precedent mining.

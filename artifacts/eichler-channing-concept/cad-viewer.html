@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Channing Court CAD Viewer</title>
+  <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+  <style>
+    :root {
+      --ink: #17211e;
+      --paper: #f5efe4;
+      --panel: #fffaf1;
+      --line: #26322f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+    header {
+      padding: 18px 22px;
+      border-bottom: 2px solid var(--line);
+      background: var(--panel);
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(26px, 4vw, 48px);
+      line-height: 1;
+      letter-spacing: 0;
+    }
+    p {
+      margin: 0;
+      color: #56645f;
+      line-height: 1.4;
+      max-width: 760px;
+    }
+    model-viewer {
+      width: 100%;
+      height: calc(100vh - 92px);
+      min-height: 620px;
+      background: radial-gradient(circle at 50% 15%, #fffaf1 0%, #efe2cf 55%, #d5c8b5 100%);
+    }
+    .links {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      font-size: 14px;
+    }
+    a {
+      color: var(--ink);
+      text-decoration: none;
+      border: 1px solid var(--line);
+      padding: 7px 9px;
+      background: #fff;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Channing Court CAD</h1>
+      <p>Orbit the detailed Eichler concept: lot slab, atrium house, low roof planes, service spine, rear ADU-ready pavilion, trellis, landscape, and QR project sign.</p>
+    </div>
+    <nav class="links" aria-label="CAD downloads">
+      <a href="channing-court-cad.step">STEP</a>
+      <a href="channing-court-cad.glb">GLB</a>
+      <a href="channing-court-cad.stl">STL</a>
+      <a href="site-plan.svg">Plan</a>
+    </nav>
+  </header>
+  <model-viewer
+    src="channing-court-cad.glb"
+    camera-controls
+    auto-rotate
+    shadow-intensity="0.75"
+    exposure="1"
+    camera-orbit="35deg 62deg 130m"
+    field-of-view="28deg"
+    alt="Detailed 3D CAD model of the Channing Court Eichler retrofit concept">
+  </model-viewer>
+</body>
+</html>
