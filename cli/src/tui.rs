@@ -307,7 +307,7 @@ pub fn overview(
         "├─ PROOF ───────────────────────────────────────────────────────┤".to_string(),
         format!("│ latest     {proof}"),
         "└─ CONTROL ─────────────────────────────────────────────────────┘".to_string(),
-        "  describe intent · /overview refresh · /proof inspect · /jobs watch".to_string(),
+        "  describe intent · ⇧Tab advisor · /overview refresh · /proof inspect".to_string(),
     ]);
     lines.join("\n")
 }

@@ -1063,6 +1063,25 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     tui::system(&conversation.task_view());
                     continue;
                 }
+                keyboard::InputEvent::AutoAdvisor => match conversation.auto_advisor_suggestion() {
+                    Ok((route, action, reason)) => {
+                        tui::system(&format!(
+                                "AUTO ADVISOR · {route}\n{action}\nWhy: {reason}\n\nRun this suggestion? [y/N]"
+                            ));
+                        if keyboard::confirm_suggestion()? {
+                            println!("y");
+                            action
+                        } else {
+                            println!("n");
+                            tui::system("Suggestion dismissed. Auto Advisor made no changes.");
+                            continue;
+                        }
+                    }
+                    Err(error) => {
+                        tui::error(&error);
+                        continue;
+                    }
+                },
                 keyboard::InputEvent::Interrupt => break,
                 keyboard::InputEvent::Background(goal) => {
                     if goal.trim().is_empty() {

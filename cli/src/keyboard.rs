@@ -38,6 +38,8 @@ pub enum InputEvent {
     Background(String),
     /// Ctrl+T — show the task/status view.
     TaskView,
+    /// Shift+Tab — ask the heavy local advisor for one governed next action.
+    AutoAdvisor,
 }
 
 /// Whether the interactive raw-mode loop is usable (both stdin and stdout TTY).
@@ -233,6 +235,11 @@ fn next_boundary(buf: &str, cursor: usize) -> usize {
 fn apply_key(key: KeyEvent, buf: &mut String, cursor: &mut usize, keymap: &Keymap) -> KeyOutcome {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let alt = key.modifiers.contains(KeyModifiers::ALT);
+    if key.code == KeyCode::BackTab
+        || (key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::SHIFT))
+    {
+        return KeyOutcome::Emit(InputEvent::AutoAdvisor);
+    }
     if matches!(key.code, KeyCode::Esc)
         || matches!(key.code, KeyCode::Char('c')) && ctrl
         || keymap.matches(KeyAction::Interrupt, key)
@@ -683,6 +690,18 @@ pub fn read_line_fallback() -> Result<Option<InputEvent>> {
     Ok(Some(InputEvent::Submit(trimmed)))
 }
 
+pub fn confirm_suggestion() -> Result<bool> {
+    let _guard = RawModeGuard::enter()?;
+    loop {
+        if let Event::Key(key) = event::read().map_err(|error| error.to_string())? {
+            if key.kind != event::KeyEventKind::Press {
+                continue;
+            }
+            return Ok(matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y')));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -766,6 +785,16 @@ mod tests {
         assert_eq!(
             emit(ctrl(KeyCode::Char('t')), &mut buf, &mut cursor),
             Some(InputEvent::TaskView)
+        );
+    }
+
+    #[test]
+    fn shift_tab_opens_auto_advisor() {
+        let mut buf = String::new();
+        let mut cursor = 0;
+        assert_eq!(
+            emit(key(KeyCode::BackTab), &mut buf, &mut cursor),
+            Some(InputEvent::AutoAdvisor)
         );
     }
 

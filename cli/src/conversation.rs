@@ -7,15 +7,15 @@ use crate::{
     background::BackgroundJobs,
     board::Board,
     budget::{Cancel, CancelReason},
-    config::AppPaths,
+    config::{AppPaths, DEFAULT_MODEL},
     contract::{deletion_shell, sensitive_shell, Authority, Decision},
     hooks::{HookBatch, HookEvent, HookRunner},
     keymap::Keymap,
     mcp_client::McpClients,
     ollama::{ChatResult, ChatStreamEvent, ChatUsage, Message, Ollama},
     receipt::{
-        find_receipt, receipts_for_workspace, redact_text, unix_ms, ConversationStore, HookRecord,
-        Outcome, Receipt, RunGuard, RunStore, VerificationRecord,
+        find_receipt, redact_text, unix_ms, ConversationStore, HookRecord, Outcome, Receipt,
+        RunGuard, RunStore, VerificationRecord,
     },
     skills,
     tools::Toolbelt,
@@ -246,6 +246,7 @@ pub struct Conversation {
     keymap: Keymap,
     mcp_clients: McpClients,
     last_reply_streamed: bool,
+    context_source_count: usize,
 }
 
 impl Conversation {
@@ -291,6 +292,7 @@ impl Conversation {
         } else {
             crate::context::ContextCapsule::build(&paths.runtime, tools.workspace())
         };
+        let context_source_count = capsule.sources.len();
         let lessons = crate::learning::write_verified_lessons(&paths.runtime)
             .ok()
             .flatten()
@@ -345,6 +347,7 @@ impl Conversation {
             keymap,
             mcp_clients,
             last_reply_streamed: false,
+            context_source_count,
         };
         conversation.sync_authority_context();
         conversation.sync_mcp_context();
@@ -1743,10 +1746,11 @@ impl Conversation {
             .into_iter()
             .map(|task| (task.lane, task.title, task.coordinate))
             .collect::<Vec<_>>();
-        let capsule =
-            crate::context::ContextCapsule::build(&self.paths.runtime, self.tools.workspace());
-        let receipts = receipts_for_workspace(&self.paths.runtime, self.tools.workspace());
-        let latest = receipts.first().map(|(_, receipt)| {
+        let latest = find_receipt(&self.paths.runtime, None, self.tools.workspace())
+            .ok()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|raw| serde_json::from_str::<Receipt>(&raw).ok());
+        let latest = latest.as_ref().map(|receipt| {
             (
                 receipt.status.as_str(),
                 receipt.id.as_str(),
@@ -1757,10 +1761,64 @@ impl Conversation {
             self.tools.workspace(),
             &self.model,
             &self.tools.git_snapshot(),
-            capsule.sources.len(),
+            self.context_source_count,
             &tasks,
             latest,
         )
+    }
+
+    pub fn auto_advisor_suggestion(&mut self) -> Result<(String, String, String), String> {
+        if self.public_test {
+            return Err("Auto Advisor is unavailable in the isolated public test.".into());
+        }
+        let models = self.ollama.models()?;
+        let configured = std::env::var("HII_ADVISOR_MODEL").ok();
+        let advisor_model = configured
+            .as_deref()
+            .filter(|requested| models.iter().any(|model| model == requested))
+            .or_else(|| {
+                models
+                    .iter()
+                    .any(|model| model == DEFAULT_MODEL)
+                    .then_some(DEFAULT_MODEL)
+            })
+            .unwrap_or(&self.model)
+            .to_string();
+        let messages = vec![
+            Message::system(
+                "You are HII Auto Advisor. Inspect the supplied contextual state map and suggest exactly one useful next action. Route deep coding or research to /codex <task> or /claude <task> when those agents are materially better; otherwise return a precise local HII intent. Never suggest deletion, publishing, spending, messaging, secret access, or permission widening. Return only JSON: {\"route\":\"local|codex|claude\",\"action\":\"...\",\"reason\":\"...\"}.",
+            ),
+            Message::user(self.overview()),
+        ];
+        let raw = self.ollama.chat_text(&advisor_model, &messages)?;
+        let start = raw
+            .find('{')
+            .ok_or_else(|| "advisor returned no JSON".to_string())?;
+        let end = raw
+            .rfind('}')
+            .ok_or_else(|| "advisor returned incomplete JSON".to_string())?;
+        let value: serde_json::Value = serde_json::from_str(&raw[start..=end])
+            .map_err(|error| format!("advisor returned invalid JSON: {error}"))?;
+        let route = value["route"].as_str().unwrap_or("local");
+        let action = value["action"]
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "advisor returned no action".to_string())?;
+        let reason = value["reason"].as_str().unwrap_or("Contextual next action");
+        if action.chars().count() > 500 {
+            return Err("advisor action exceeded 500 characters".into());
+        }
+        let command = match route {
+            "codex" => format!("/codex {action}"),
+            "claude" => format!("/claude {action}"),
+            _ => action.to_string(),
+        };
+        self.store.event(
+            "conversation.auto_advisor_suggested",
+            json!({"model": advisor_model, "route": route, "action": redact_text(action)}),
+        )?;
+        Ok((route.to_string(), command, redact_text(reason)))
     }
 
     pub fn paths(&self) -> &AppPaths {
@@ -2406,6 +2464,11 @@ impl Conversation {
                         }
                         crate::keyboard::InputEvent::TaskView => {
                             input.write_stream(&format!("\n{}\n", self.task_view()))?;
+                        }
+                        crate::keyboard::InputEvent::AutoAdvisor => {
+                            input.write_stream(
+                                "\nAuto Advisor is available at the idle context map.\n",
+                            )?;
                         }
                         crate::keyboard::InputEvent::Background(value) => {
                             if value.trim().is_empty() {
