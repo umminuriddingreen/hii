@@ -43,9 +43,15 @@ function selfTest() {
 
 selfTest();
 
+// This scanner defines the detection patterns and asserts them against literal
+// fixtures in selfTest, so it always matches itself. Skip it; selfTest is what
+// proves the patterns still work.
+const SELF_PATH = 'scripts/hii-secret-scan.mjs';
+
 const tracked = execFileSync('git', ['ls-files', '-z'], { encoding: 'utf8' })
   .split('\0')
-  .filter(Boolean);
+  .filter(Boolean)
+  .filter((file) => file !== SELF_PATH);
 const findings = [];
 
 for (const file of tracked) {
