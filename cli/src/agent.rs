@@ -7,7 +7,7 @@ use crate::{
     ollama::{ChatResult, ChatStreamEvent, Message, Ollama},
     receipt::{
         classify_error, record_verification, redact_text, unix_ms, HookRecord, Outcome, Receipt,
-        RunGuard, RunStore, VerificationRecord,
+        RunGuard, RunStore, TokenUsageRecord, VerificationRecord,
     },
     runlog::{Delta, Event, Feedback, Human, Journal, OutputMode, StreamPolicy},
     tools::{ToolResult, Toolbelt},
@@ -449,13 +449,18 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let mut rejected_actions = RejectedActionGuard::default();
     let mut model_loop_detected = false;
     let mut action_failures = 0usize;
+    let mut prompt_tokens = 0u64;
+    let mut completion_tokens = 0u64;
 
     loop {
-        if let Some(kind) = deadline.exceeded(steps) {
+        let used_tokens = prompt_tokens.saturating_add(completion_tokens);
+        if let Some(kind) = deadline.exceeded(steps, used_tokens) {
             budget_exceeded = Some(kind);
             journal.emit(Event::new("budget.exceeded").data(json!({
                 "step": steps,
                 "budget": kind.label(),
+                "tokens_used": used_tokens,
+                "token_budget": options.budgets.max_tokens,
                 "elapsed_ms": deadline.elapsed().as_millis()
             })))?;
             break;
@@ -479,7 +484,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             "requested": request_reasoning,
             "bounded": request_reasoning
         })))?;
-        let raw = match stream_model_json(
+        let result = match stream_model_json(
             &ollama,
             &model,
             &messages,
@@ -491,7 +496,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             &deadline,
             &cancel,
         ) {
-            Ok(result) => result.content,
+            Ok(result) => result,
             Err(error) if error == ADAPTIVE_REASONING_BUDGET_RETRY => {
                 cancel.reset();
                 action_failures = 0;
@@ -539,6 +544,18 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 return Err(error);
             }
         };
+        prompt_tokens = prompt_tokens.saturating_add(result.usage.prompt_tokens);
+        completion_tokens = completion_tokens.saturating_add(result.usage.completion_tokens);
+        journal.emit(Event::new("model.usage").data(json!({
+            "step": steps,
+            "prompt_tokens": result.usage.prompt_tokens,
+            "completion_tokens": result.usage.completion_tokens,
+            "total_prompt_tokens": prompt_tokens,
+            "total_completion_tokens": completion_tokens,
+            "token_budget": options.budgets.max_tokens,
+            "remaining_tokens": (options.budgets.max_tokens > 0).then(|| options.budgets.max_tokens.saturating_sub(prompt_tokens.saturating_add(completion_tokens)))
+        })))?;
+        let raw = result.content;
         journal.emit(
             Event::new("model.response")
                 .data(json!({ "step": steps, "content": redact_text(&raw) })),
@@ -1353,6 +1370,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     } else {
         match budget_exceeded {
             Some(BudgetKind::Steps) => Outcome::StepCeiling,
+            Some(BudgetKind::Tokens) => Outcome::TokenBudget,
             Some(_) => Outcome::Deadline,
             // Say why the run could not prove anything, rather than leaving the
             // operator to infer it from a generic abort.
@@ -1361,7 +1379,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         }
     };
     let mut receipt = Receipt {
-        schema_version: 7,
+        schema_version: 8,
         id: run_id.clone(),
         created_at_unix_ms: started_at,
         finished_at_unix_ms: unix_ms(),
@@ -1394,6 +1412,11 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         user_corrections: Vec::new(),
         failure_patterns: Vec::new(),
         skill_draft_ref: None,
+        token_usage: Some(TokenUsageRecord {
+            prompt_tokens,
+            completion_tokens,
+            budget: options.budgets.max_tokens,
+        }),
     };
     if let Ok(Some(path)) =
         crate::learning::record_from_receipt(&paths.runtime, &receipt, None, None)
@@ -1700,7 +1723,7 @@ fn draft_receipt(
     autonomy_level: AutonomyLevel,
 ) -> Receipt {
     Receipt {
-        schema_version: 7,
+        schema_version: 8,
         id: run_id.to_string(),
         created_at_unix_ms: started_at,
         finished_at_unix_ms: 0,
@@ -1733,6 +1756,7 @@ fn draft_receipt(
         user_corrections: Vec::new(),
         failure_patterns: Vec::new(),
         skill_draft_ref: None,
+        token_usage: None,
     }
 }
 

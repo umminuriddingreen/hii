@@ -8,6 +8,7 @@
 use crate::{
     board::Board,
     receipt::{receipts_for_workspace, redact_text, Receipt},
+    timeline,
 };
 use serde_json::Value;
 use std::{fs, path::Path, process::Command};
@@ -50,9 +51,14 @@ impl ContextCapsule {
             sources.push(instructions.display().to_string());
         }
 
-        if let Some(git) = git_context(workspace) {
+        if let Some(git) = git_context(runtime, workspace) {
             sections.push(git);
             sources.push(format!("git:{}", workspace.display()));
+        }
+
+        if let Some((timeline, source)) = timeline::projection(runtime, workspace) {
+            sections.push(timeline);
+            sources.push(source);
         }
 
         let receipts = recent_receipts(runtime, workspace);
@@ -242,11 +248,14 @@ fn collect_skill_names(root: &Path, names: &mut Vec<String>) {
     }
 }
 
-fn git_context(workspace: &Path) -> Option<String> {
+fn git_context(runtime: &Path, workspace: &Path) -> Option<String> {
     let branch = command(workspace, &["branch", "--show-current"])?;
     let status = command(workspace, &["status", "--short"]).unwrap_or_else(|| "clean".into());
     let recent = command(workspace, &["log", "-5", "--pretty=format:%h %s"])
         .unwrap_or_else(|| "none".into());
+    // The persistent timeline stores only state transitions, not terminal
+    // keystrokes or raw command output.
+    timeline::observe_git(runtime, workspace, &branch, &status, &recent);
     let body = format!(
         "GIT STATE\nsource: {}\nbranch: {}\nchanges:\n{}\nrecent commits:\n{}",
         workspace.display(),
@@ -390,6 +399,7 @@ mod tests {
             user_corrections: Vec::new(),
             failure_patterns: Vec::new(),
             skill_draft_ref: None,
+            token_usage: None,
         };
         let run_dir = runtime.0.join("runs/cli/prior-run");
         fs::create_dir_all(&run_dir).expect("create run");

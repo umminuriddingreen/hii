@@ -1,6 +1,6 @@
 <script lang="ts">
   import LandingPage from './(app)/landing/+page.svelte';
-  import WorkspacePage from '$lib/components/workspace/WorkspacePage.svelte';
+  import HiiPresence from '$lib/components/HiiPresence.svelte';
   import type { PageData } from './$types';
 
   export let data: PageData;
@@ -9,5 +9,5 @@
 {#if __HII_TARGET__ === 'web'}
   <LandingPage />
 {:else}
-  <WorkspacePage {data} />
+  <HiiPresence {data} />
 {/if}

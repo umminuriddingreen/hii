@@ -35,8 +35,10 @@ mod schedule;
 mod skill_lifecycle;
 mod skill_runtime;
 mod skills;
+mod stream;
 #[cfg(feature = "preview")]
 mod system_monitor;
+mod timeline;
 mod tools;
 mod tui;
 
@@ -96,6 +98,15 @@ struct Cli {
         help = "Wall-clock ceiling for a run, e.g. 90s, 15m, 1h; 0 means unlimited"
     )]
     deadline: Option<String>,
+
+    #[arg(
+        long,
+        global = true,
+        default_value_t = 0,
+        value_name = "TOKENS",
+        help = "Cumulative prompt plus completion token budget; 0 means unlimited"
+    )]
+    token_budget: u64,
 
     #[arg(
         long,
@@ -271,6 +282,19 @@ enum Commands {
         id: Option<String>,
         #[arg(long)]
         json: bool,
+    },
+    #[command(about = "Watch the continuously legible HII run stream")]
+    Stream {
+        #[arg(
+            long,
+            value_name = "ID",
+            help = "Follow one run instead of the latest workspace run"
+        )]
+        run: Option<String>,
+        #[arg(long, help = "Render existing events and exit instead of following")]
+        snapshot: bool,
+        #[arg(long, help = "Emit normalized agent-readable JSONL")]
+        jsonl: bool,
     },
     #[command(about = "Local kanban/todo board")]
     Board {
@@ -652,6 +676,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     allow_missing_verify_deps,
                     budgets: Budgets {
                         max_steps: cli.max_steps,
+                        max_tokens: cli.token_budget,
                         wall_clock: match cli.deadline.as_deref() {
                             Some(value) => parse_duration(value)?,
                             None => Some(Duration::from_secs(DEFAULT_WALL_CLOCK_SECS)),
@@ -717,6 +742,17 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 .cwd
                 .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
             proof(&paths, &workspace, id.as_deref(), json)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Stream {
+            run,
+            snapshot,
+            jsonl,
+        }) => {
+            let workspace = cli
+                .cwd
+                .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+            stream::watch(&paths.runtime, &workspace, run.as_deref(), !snapshot, jsonl)?;
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Board { action }) => board_command(&paths, cli.cwd, action),
@@ -798,6 +834,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                             allow_missing_verify_deps: false,
                             budgets: Budgets {
                                 max_steps: cli.max_steps,
+                                max_tokens: cli.token_budget,
                                 wall_clock: match cli.deadline.as_deref() {
                                     Some(value) => parse_duration(value)?,
                                     None => Some(Duration::from_secs(DEFAULT_WALL_CLOCK_SECS)),
@@ -891,6 +928,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                         allow_missing_verify_deps: false,
                         budgets: Budgets {
                             max_steps: cli.max_steps,
+                            max_tokens: cli.token_budget,
                             wall_clock: match cli.deadline.as_deref() {
                                 Some(value) => parse_duration(value)?,
                                 None => Some(Duration::from_secs(DEFAULT_WALL_CLOCK_SECS)),
@@ -1980,6 +2018,7 @@ fn is_native_command(command: &str) -> bool {
             | "login"
             | "proof"
             | "receipt"
+            | "stream"
             | "board"
             | "discover"
             | "find"

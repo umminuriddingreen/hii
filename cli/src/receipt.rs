@@ -28,6 +28,14 @@ pub struct HookRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenUsageRecord {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    /// Zero means the operator did not set a cumulative token ceiling.
+    pub budget: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Receipt {
     pub schema_version: u8,
     pub id: String,
@@ -88,6 +96,9 @@ pub struct Receipt {
     pub failure_patterns: Vec<String>,
     #[serde(default)]
     pub skill_draft_ref: Option<String>,
+    // --- schema v8: objective-bound inference usage ---
+    #[serde(default)]
+    pub token_usage: Option<TokenUsageRecord>,
 }
 
 /// Why a run ended, at the granularity the exit code reports.
@@ -102,6 +113,7 @@ pub enum Outcome {
     Completed,
     VerifyFailed,
     StepCeiling,
+    TokenBudget,
     Deadline,
     LoopAbort,
     Interrupted,
@@ -118,6 +130,7 @@ impl Outcome {
             Outcome::Completed => "completed",
             Outcome::VerifyFailed => "verify-failed",
             Outcome::StepCeiling => "step-ceiling",
+            Outcome::TokenBudget => "token-budget",
             Outcome::Deadline => "deadline",
             Outcome::LoopAbort => "loop-abort",
             Outcome::Interrupted => "interrupted",
@@ -138,6 +151,7 @@ impl Outcome {
             Outcome::Running | Outcome::EnvironmentBlocked => 2,
             Outcome::VerifyFailed => 3,
             Outcome::StepCeiling => 4,
+            Outcome::TokenBudget => 8,
             Outcome::Deadline => 5,
             Outcome::LoopAbort => 6,
             Outcome::Interrupted => 7,
@@ -600,6 +614,7 @@ mod tests {
             user_corrections: Vec::new(),
             failure_patterns: Vec::new(),
             skill_draft_ref: None,
+            token_usage: None,
         }
     }
 

@@ -340,6 +340,7 @@ mod tests {
             user_corrections: Vec::new(),
             failure_patterns: Vec::new(),
             skill_draft_ref: None,
+            token_usage: None,
         }
     }
 

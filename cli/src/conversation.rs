@@ -192,6 +192,7 @@ fn conversation_draft_receipt(
         user_corrections: Vec::new(),
         failure_patterns: Vec::new(),
         skill_draft_ref: None,
+        token_usage: None,
     }
 }
 
@@ -2610,6 +2611,7 @@ impl Conversation {
             user_corrections: Vec::new(),
             failure_patterns: Vec::new(),
             skill_draft_ref: self.last_skill_draft.clone(),
+            token_usage: None,
         };
         run.event(
             "run.finished",

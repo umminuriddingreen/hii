@@ -29,6 +29,9 @@ pub const DEFAULT_STREAM_IDLE_SECS: u64 = 60;
 pub struct Budgets {
     /// 0 means unlimited, preserving the historical meaning of `--max-steps 0`.
     pub max_steps: usize,
+    /// 0 means unlimited. Provider usage is accounted after each model call,
+    /// so this is enforced at the next action checkpoint rather than mid-token.
+    pub max_tokens: u64,
     pub wall_clock: Option<Duration>,
     pub model_call: Option<Duration>,
     pub stream_idle: Option<Duration>,
@@ -38,6 +41,7 @@ impl Default for Budgets {
     fn default() -> Self {
         Self {
             max_steps: 0,
+            max_tokens: 0,
             wall_clock: Some(Duration::from_secs(DEFAULT_WALL_CLOCK_SECS)),
             model_call: Some(Duration::from_secs(DEFAULT_MODEL_CALL_SECS)),
             stream_idle: Some(Duration::from_secs(DEFAULT_STREAM_IDLE_SECS)),
@@ -48,6 +52,7 @@ impl Default for Budgets {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BudgetKind {
     Steps,
+    Tokens,
     WallClock,
     ModelCall,
     StreamIdle,
@@ -57,6 +62,7 @@ impl BudgetKind {
     pub fn label(self) -> &'static str {
         match self {
             BudgetKind::Steps => "step ceiling",
+            BudgetKind::Tokens => "token budget",
             BudgetKind::WallClock => "wall-clock budget",
             BudgetKind::ModelCall => "model-call budget",
             BudgetKind::StreamIdle => "stream-idle budget",
@@ -84,9 +90,12 @@ impl Deadline {
     }
 
     /// Which budget, if any, has been exhausted.
-    pub fn exceeded(&self, steps: usize) -> Option<BudgetKind> {
+    pub fn exceeded(&self, steps: usize, tokens: u64) -> Option<BudgetKind> {
         if self.budgets.max_steps > 0 && steps >= self.budgets.max_steps {
             return Some(BudgetKind::Steps);
+        }
+        if self.budgets.max_tokens > 0 && tokens >= self.budgets.max_tokens {
+            return Some(BudgetKind::Tokens);
         }
         match self.budgets.wall_clock {
             Some(limit) if self.started.elapsed() >= limit => Some(BudgetKind::WallClock),
@@ -139,15 +148,17 @@ const REASON_NONE: u8 = 0;
 const REASON_INTERRUPT: u8 = 1;
 const REASON_CLIENT: u8 = 2;
 const REASON_STEPS: u8 = 3;
-const REASON_WALL: u8 = 4;
-const REASON_MODEL_CALL: u8 = 5;
-const REASON_STREAM_IDLE: u8 = 6;
+const REASON_TOKENS: u8 = 4;
+const REASON_WALL: u8 = 5;
+const REASON_MODEL_CALL: u8 = 6;
+const REASON_STREAM_IDLE: u8 = 7;
 
 fn encode(reason: CancelReason) -> u8 {
     match reason {
         CancelReason::Interrupt => REASON_INTERRUPT,
         CancelReason::Client => REASON_CLIENT,
         CancelReason::Budget(BudgetKind::Steps) => REASON_STEPS,
+        CancelReason::Budget(BudgetKind::Tokens) => REASON_TOKENS,
         CancelReason::Budget(BudgetKind::WallClock) => REASON_WALL,
         CancelReason::Budget(BudgetKind::ModelCall) => REASON_MODEL_CALL,
         CancelReason::Budget(BudgetKind::StreamIdle) => REASON_STREAM_IDLE,
@@ -159,6 +170,7 @@ fn decode(raw: u8) -> Option<CancelReason> {
         REASON_INTERRUPT => Some(CancelReason::Interrupt),
         REASON_CLIENT => Some(CancelReason::Client),
         REASON_STEPS => Some(CancelReason::Budget(BudgetKind::Steps)),
+        REASON_TOKENS => Some(CancelReason::Budget(BudgetKind::Tokens)),
         REASON_WALL => Some(CancelReason::Budget(BudgetKind::WallClock)),
         REASON_MODEL_CALL => Some(CancelReason::Budget(BudgetKind::ModelCall)),
         REASON_STREAM_IDLE => Some(CancelReason::Budget(BudgetKind::StreamIdle)),
@@ -214,8 +226,8 @@ mod tests {
             wall_clock: None,
             ..Budgets::default()
         });
-        assert_eq!(deadline.exceeded(2), None);
-        assert_eq!(deadline.exceeded(3), Some(BudgetKind::Steps));
+        assert_eq!(deadline.exceeded(2, 0), None);
+        assert_eq!(deadline.exceeded(3, 0), Some(BudgetKind::Steps));
     }
 
     #[test]
@@ -225,7 +237,7 @@ mod tests {
             wall_clock: None,
             ..Budgets::default()
         });
-        assert_eq!(deadline.exceeded(10_000), None);
+        assert_eq!(deadline.exceeded(10_000, 0), None);
     }
 
     #[test]
@@ -235,7 +247,18 @@ mod tests {
             wall_clock: Some(Duration::ZERO),
             ..Budgets::default()
         });
-        assert_eq!(deadline.exceeded(1), Some(BudgetKind::WallClock));
+        assert_eq!(deadline.exceeded(1, 0), Some(BudgetKind::WallClock));
+    }
+
+    #[test]
+    fn token_budget_is_checked_at_action_boundaries() {
+        let deadline = Deadline::new(Budgets {
+            max_tokens: 1_000,
+            wall_clock: None,
+            ..Budgets::default()
+        });
+        assert_eq!(deadline.exceeded(1, 999), None);
+        assert_eq!(deadline.exceeded(1, 1_000), Some(BudgetKind::Tokens));
     }
 
     /// A model call may not outlive the run it belongs to.
@@ -243,6 +266,7 @@ mod tests {
     fn model_call_budget_is_clamped_by_remaining_wall_clock() {
         let deadline = Deadline::new(Budgets {
             max_steps: 0,
+            max_tokens: 0,
             wall_clock: Some(Duration::from_secs(5)),
             model_call: Some(Duration::from_secs(600)),
             stream_idle: None,
