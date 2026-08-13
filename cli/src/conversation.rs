@@ -1804,29 +1804,9 @@ impl Conversation {
             Message::user(self.overview()),
         ];
         let raw = self.ollama.chat_text(&advisor_model, &messages)?;
-        let start = raw
-            .find('{')
-            .ok_or_else(|| "advisor returned no JSON".to_string())?;
-        let end = raw
-            .rfind('}')
-            .ok_or_else(|| "advisor returned incomplete JSON".to_string())?;
-        let value: serde_json::Value = serde_json::from_str(&raw[start..=end])
-            .map_err(|error| format!("advisor returned invalid JSON: {error}"))?;
-        let route = value["route"].as_str().unwrap_or("local");
-        let action = value["action"]
-            .as_str()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| "advisor returned no action".to_string())?;
-        let reason = value["reason"].as_str().unwrap_or("Contextual next action");
-        if action.chars().count() > 500 {
-            return Err("advisor action exceeded 500 characters".into());
-        }
-        let command = match route {
-            "codex" => format!("/codex {action}"),
-            "claude" => format!("/claude {action}"),
-            _ => action.to_string(),
-        };
+        let (route, action, command, reason) = advisor_suggestion(&raw)?;
+        let (route, action) = (route.as_str(), action.as_str());
+        let reason = reason.as_str();
         self.store.event(
             "conversation.auto_advisor_suggested",
             json!({"model": advisor_model, "route": route, "action": redact_text(action)}),
@@ -2988,6 +2968,59 @@ fn render_permissions(authority: Authority) -> String {
     )
 }
 
+/// Parse one advisor reply into `(route, action, command, reason)`.
+///
+/// Split out from the advisor so the property that matters can be tested
+/// without a model call: a hosted route can only ever produce a command the
+/// operator must run through `/codex` or `/claude`. Nothing here reaches a
+/// hosted model — it writes the text of a request the operator still has to
+/// confirm, which is what `hostedTransmission: explicit-only` means in
+/// `config/native-model-profiles.json`.
+fn advisor_suggestion(raw: &str) -> Result<(String, String, String, String), String> {
+    let start = raw
+        .find('{')
+        .ok_or_else(|| "advisor returned no JSON".to_string())?;
+    let end = raw
+        .rfind('}')
+        .ok_or_else(|| "advisor returned incomplete JSON".to_string())?;
+    if end < start {
+        return Err("advisor returned incomplete JSON".into());
+    }
+    let value: serde_json::Value = serde_json::from_str(&raw[start..=end])
+        .map_err(|error| format!("advisor returned invalid JSON: {error}"))?;
+    let action = value["action"]
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "advisor returned no action".to_string())?;
+    if action.chars().count() > 500 {
+        return Err("advisor action exceeded 500 characters".into());
+    }
+    // An unrecognised route is local: the failure mode of guessing wrong must
+    // be staying on this machine, never leaving it.
+    let route = match value["route"].as_str() {
+        Some("codex") => "codex",
+        Some("claude") => "claude",
+        _ => "local",
+    };
+    let command = match route {
+        "codex" => format!("/codex {action}"),
+        "claude" => format!("/claude {action}"),
+        _ => action.to_string(),
+    };
+    let reason = value["reason"]
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Contextual next action");
+    Ok((
+        route.to_string(),
+        action.to_string(),
+        command,
+        reason.to_string(),
+    ))
+}
+
 const THINKING_MODES: &[(&str, &str)] = &[
     ("off", "no thought stream"),
     ("compact", "one-line summaries of the model's thinking"),
@@ -3406,7 +3439,7 @@ mod tests {
         render_permissions, resumable_messages, session_authority, session_goal, session_plan_mode,
         session_title, shell_command_is_observation_only, shell_command_is_preview,
         shell_command_is_read_only, side_context, verification_required_message, Conversation,
-        ReasoningMode, mode_choices, REASONING_MODES, THINKING_MODES,
+        ReasoningMode, advisor_suggestion, mode_choices, REASONING_MODES, THINKING_MODES,
     };
     use crate::contract::{Authority, Decision};
     use std::path::Path;
@@ -3478,6 +3511,49 @@ mod tests {
         let models = vec!["qwen3.6:35b-mlx".to_string()];
         let choices = super::model_choices(&models, "ollama", "");
         assert!(choices.iter().all(|choice| !choice.current));
+    }
+
+    #[test]
+    fn a_hosted_advisor_route_can_only_produce_a_slash_command() {
+        for (route, prefix) in [("codex", "/codex "), ("claude", "/claude ")] {
+            let raw = format!(r#"{{"route":"{route}","action":"port the picker","reason":"deep"}}"#);
+            let (parsed, action, command, _) = advisor_suggestion(&raw).expect("advisor parses");
+            assert_eq!(parsed, route);
+            assert_eq!(command, format!("{prefix}{action}"));
+        }
+    }
+
+    #[test]
+    fn an_unknown_advisor_route_stays_local() {
+        for route in ["gpt-5.5", "openai", "", "LOCAL"] {
+            let raw = format!(r#"{{"route":"{route}","action":"run hii health"}}"#);
+            let (parsed, _, command, reason) = advisor_suggestion(&raw).expect("advisor parses");
+            assert_eq!(parsed, "local");
+            assert_eq!(command, "run hii health");
+            assert_eq!(reason, "Contextual next action");
+        }
+        let (parsed, _, command, _) =
+            advisor_suggestion(r#"{"action":"run hii health"}"#).expect("advisor parses");
+        assert_eq!(parsed, "local");
+        assert!(!command.starts_with('/'));
+    }
+
+    #[test]
+    fn advisor_rejects_replies_it_cannot_act_on() {
+        assert!(advisor_suggestion("no json here").is_err());
+        assert!(advisor_suggestion(r#"{"route":"codex"}"#).is_err());
+        assert!(advisor_suggestion(r#"{"route":"codex","action":"   "}"#).is_err());
+        assert!(advisor_suggestion(r#"{"route":"codex","action":"x"#).is_err());
+        let long = "x".repeat(501);
+        assert!(advisor_suggestion(&format!(r#"{{"action":"{long}"}}"#)).is_err());
+    }
+
+    #[test]
+    fn advisor_reads_json_wrapped_in_model_chatter() {
+        let raw = "Sure! Here is the plan:\n{\"route\":\"local\",\"action\":\"open /proof\",\"reason\":\"verify\"}\nHope that helps.";
+        let (route, action, command, reason) = advisor_suggestion(raw).expect("advisor parses");
+        assert_eq!((route.as_str(), action.as_str()), ("local", "open /proof"));
+        assert_eq!((command.as_str(), reason.as_str()), ("open /proof", "verify"));
     }
 
     #[test]

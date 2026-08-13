@@ -90,6 +90,22 @@ is `target/debug/hii` at the repo root, not `cli/target/debug/hii`.
   escape sequences. Do not drive the CLI through a pty to "see" it; that burns
   minutes and tokens for a weaker result.
 
+## Model Routing
+
+`config/native-model-profiles.json` is the only source of truth. It holds two
+vocabularies that must never be merged: `tiers` is hardware sizing, selected
+first-match by ascending `memoryGiBMax`, and `taskTiers` is task difficulty.
+Giving a task tier a `memoryGiBMax` puts an unconditional `null` match ahead of
+every size and silently resolves the whole machine to `noop`.
+
+- Do not hardcode a routing table in Rust. A future router reads the config.
+- The auto advisor (`conversation.rs::auto_advisor_suggestion`, Shift+Tab) is
+  the only automatic routing surface, and it only ever suggests: it renders the
+  route, waits for `y`, and turns a hosted route into literal `/codex …` or
+  `/claude …` text the operator runs. An unrecognised route resolves to local.
+- Nothing may escalate to a hosted model on its own. `hostedTransmission` is
+  `explicit-only`, and `/mode` promises that to the operator on every switch.
+
 ## Cost Discipline
 
 Claude quota is the scarcest resource on this machine. Spend it on judgment,
