@@ -57,6 +57,7 @@ static ACTIVE_THEME: AtomicU8 = AtomicU8::new(Theme::Heritage as u8);
 
 const COMMANDS: &[(&str, &str)] = &[
     ("/help", "all controls"),
+    ("/overview", "context state map"),
     ("/status", "session state"),
     ("/attach", "add file or image"),
     ("/attachments", "pending context"),
@@ -257,21 +258,64 @@ fn workspace_state(git: &str) -> String {
     }
 }
 
-pub fn welcome(workspace: &Path, model: &str, max_steps: usize, git: &str, public_test: bool) {
-    let _ = (model, max_steps);
-    let workspace = if public_test {
-        "shared workspace".to_string()
-    } else {
-        short_path(workspace)
-    };
+pub fn overview(
+    workspace: &Path,
+    model: &str,
+    git: &str,
+    context_sources: usize,
+    tasks: &[(String, String, String)],
+    latest_proof: Option<(&str, &str, usize)>,
+) -> String {
+    let workspace = short_path(workspace);
     let git = workspace_state(git);
-    let workspace = if public_test || git == "clean" || git == "not a Git workspace" {
-        workspace
-    } else {
-        format!("{workspace} · {git}")
-    };
+    let mut lanes = std::collections::BTreeMap::new();
+    for (lane, _, _) in tasks {
+        *lanes.entry(lane.as_str()).or_insert(0usize) += 1;
+    }
+    let work = ["doing", "next", "blocked", "backlog"]
+        .into_iter()
+        .filter_map(|lane| lanes.get(lane).map(|count| format!("{lane}:{count}")))
+        .collect::<Vec<_>>()
+        .join("  ");
+    let proof = latest_proof.map_or_else(
+        || "none recorded for this workspace".to_string(),
+        |(status, id, checks)| format!("{status} · {checks} checks · {id}"),
+    );
+    let mut lines = vec![
+        "HII // CONTEXT MAP v1".to_string(),
+        "┌─ NOW ─────────────────────────────────────────────────────────┐".to_string(),
+        format!("│ workspace  {workspace}"),
+        format!("│ state      {git}"),
+        format!("│ model      {model}"),
+        "├─ CONTEXT ─────────────────────────────────────────────────────┤".to_string(),
+        format!("│ sources    {context_sources} local, source-labelled"),
+        "├─ WORK ────────────────────────────────────────────────────────┤".to_string(),
+        format!(
+            "│ lanes      {}",
+            if work.is_empty() { "none" } else { &work }
+        ),
+    ];
+    for (lane, title, coordinate) in tasks.iter().take(3) {
+        lines.push(format!(
+            "│ {:<9} {}  @ {}",
+            lane,
+            truncate(title, 34),
+            truncate(coordinate, 28)
+        ));
+    }
+    lines.extend([
+        "├─ PROOF ───────────────────────────────────────────────────────┤".to_string(),
+        format!("│ latest     {proof}"),
+        "└─ CONTROL ─────────────────────────────────────────────────────┘".to_string(),
+        "  describe intent · /overview refresh · /proof inspect · /jobs watch".to_string(),
+    ]);
+    lines.join("\n")
+}
 
-    println!("{}", paint(&workspace, &[DIM, palette().muted]));
+pub fn welcome(map: &str) {
+    for line in map.lines() {
+        println!("{}", paint(line, &[palette().muted]));
+    }
 }
 
 pub fn prompt_frame(_frame: usize) -> String {
@@ -297,6 +341,7 @@ fn public_command(command: &str) -> bool {
     matches!(
         command,
         "/help"
+            | "/overview"
             | "/compact"
             | "/clear"
             | "/status"
@@ -539,7 +584,8 @@ pub fn error(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        command_matches, command_menu, prompt_frame, short_path, truncate, workspace_state, Theme,
+        command_matches, command_menu, overview, prompt_frame, short_path, truncate,
+        workspace_state, Theme,
     };
     use std::path::Path;
 
@@ -558,6 +604,23 @@ mod tests {
     fn workspace_state_counts_porcelain_lines() {
         assert_eq!(workspace_state("clean"), "clean");
         assert_eq!(workspace_state(" M one.rs\n?? two.rs"), "2 changes");
+    }
+
+    #[test]
+    fn overview_is_a_stable_agent_readable_context_map() {
+        let rendered = overview(
+            Path::new("/tmp/work"),
+            "local-model",
+            " M src/main.rs",
+            4,
+            &[("doing".into(), "Build state map".into(), "cli/src".into())],
+            Some(("completed", "run-123", 2)),
+        );
+        assert!(rendered.contains("HII // CONTEXT MAP v1"));
+        assert!(rendered.contains("│ sources    4 local, source-labelled"));
+        assert!(rendered.contains("doing:1"));
+        assert!(rendered.contains("completed · 2 checks · run-123"));
+        assert!(rendered.contains("/overview refresh"));
     }
 
     #[test]

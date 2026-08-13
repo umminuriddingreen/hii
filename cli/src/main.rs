@@ -1085,6 +1085,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             }),
             Some(SlashCommand::Compact) => conversation.compact(),
             Some(SlashCommand::Clear) => conversation.clear(),
+            Some(SlashCommand::Overview) => Ok(conversation.overview()),
             Some(SlashCommand::Status) => Ok(conversation.status()),
             Some(SlashCommand::Attach(path)) => conversation.attach(&path),
             Some(SlashCommand::Attachments) => Ok(conversation.attachments()),
@@ -1212,6 +1213,7 @@ enum SlashCommand {
     Help,
     Compact,
     Clear,
+    Overview,
     Status,
     Attach(String),
     Attachments,
@@ -1290,6 +1292,7 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         "/help" if argument.is_none() => SlashCommand::Help,
         "/compact" if argument.is_none() => SlashCommand::Compact,
         "/clear" if argument.is_none() => SlashCommand::Clear,
+        "/overview" if argument.is_none() => SlashCommand::Overview,
         "/status" if argument.is_none() => SlashCommand::Status,
         "/attach" if argument.is_some() => SlashCommand::Attach(rest.to_string()),
         "/attachments" if argument.is_none() => SlashCommand::Attachments,
@@ -1399,7 +1402,7 @@ fn slash_help() -> String {
     )
     .replace(
         "/status                       show session, workspace, model, and usage\n",
-        "/status                       show session, workspace, model, and usage\n/attach <path>                add workspace text/image context\n/attachments                  show pending context and size\n/detach [number|all]          remove pending context\n",
+        "/overview                     render the contextual state map\n/status                       show session, workspace, model, and usage\n/attach <path>                add workspace text/image context\n/attachments                  show pending context and size\n/detach [number|all]          remove pending context\n",
     )
     .replace(
         "/theme [name]                 switch the persistent visual signature\n",
@@ -1919,6 +1922,7 @@ fn public_test_slash_allowed(command: &SlashCommand) -> bool {
         SlashCommand::Help
             | SlashCommand::Compact
             | SlashCommand::Clear
+            | SlashCommand::Overview
             | SlashCommand::Status
             | SlashCommand::Attach(_)
             | SlashCommand::Attachments
@@ -2548,6 +2552,10 @@ mod tests {
 
     #[test]
     fn parses_conversational_controls() {
+        assert_eq!(
+            parse_slash_command("/overview"),
+            Some(SlashCommand::Overview)
+        );
         assert_eq!(
             parse_slash_command("/model qwen3.6:35b-mlx"),
             Some(SlashCommand::Model(Some("qwen3.6:35b-mlx".into())))

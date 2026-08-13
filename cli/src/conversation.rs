@@ -5,6 +5,7 @@ use crate::{
     },
     attachments::AttachmentQueue,
     background::BackgroundJobs,
+    board::Board,
     budget::{Cancel, CancelReason},
     config::AppPaths,
     contract::{deletion_shell, sensitive_shell, Authority, Decision},
@@ -13,8 +14,8 @@ use crate::{
     mcp_client::McpClients,
     ollama::{ChatResult, ChatStreamEvent, ChatUsage, Message, Ollama},
     receipt::{
-        find_receipt, redact_text, unix_ms, ConversationStore, HookRecord, Outcome, Receipt,
-        RunGuard, RunStore, VerificationRecord,
+        find_receipt, receipts_for_workspace, redact_text, unix_ms, ConversationStore, HookRecord,
+        Outcome, Receipt, RunGuard, RunStore, VerificationRecord,
     },
     skills,
     tools::Toolbelt,
@@ -1731,13 +1732,34 @@ impl Conversation {
             crate::tui::cue("What do you want to create?");
             return;
         }
-        crate::tui::welcome(
+        crate::tui::welcome(&self.overview());
+    }
+
+    pub fn overview(&self) -> String {
+        let tasks = Board::open(&self.paths.runtime)
+            .tasks(false)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|task| (task.lane, task.title, task.coordinate))
+            .collect::<Vec<_>>();
+        let capsule =
+            crate::context::ContextCapsule::build(&self.paths.runtime, self.tools.workspace());
+        let receipts = receipts_for_workspace(&self.paths.runtime, self.tools.workspace());
+        let latest = receipts.first().map(|(_, receipt)| {
+            (
+                receipt.status.as_str(),
+                receipt.id.as_str(),
+                receipt.verification.iter().filter(|check| check.ok).count(),
+            )
+        });
+        crate::tui::overview(
             self.tools.workspace(),
             &self.model,
-            self.max_steps,
             &self.tools.git_snapshot(),
-            self.public_test,
-        );
+            capsule.sources.len(),
+            &tasks,
+            latest,
+        )
     }
 
     pub fn paths(&self) -> &AppPaths {
