@@ -64,10 +64,52 @@ Human intent -> bounded agent/tool work -> logs/proof -> verification -> receipt
   knowledge loop is reliable.
 - Local terminal execution remains operator-controlled and local-only until a hardened remote runner exists.
 
+## CLI Interaction Surfaces
+
+The Rust CLI lives in `cli/` but builds into the workspace target, so the binary
+is `target/debug/hii` at the repo root, not `cli/target/debug/hii`.
+
+- Anything that ends in "choose one of these" uses `cli/src/picker.rs`
+  (`picker::select`) rather than printing a table the operator has to retype
+  from. Ollama's shipped picker is the parity bar.
+- Interactive widgets draw **inline**, never `EnterAlternateScreen`, so terminal
+  scrollback stays the record of what happened. `cli/src/file_explorer.rs` is the
+  deliberate exception.
+- Move the cursor with relative `\x1b[{n}A` plus per-row `\r\x1b[2K`, never
+  save/restore: saved coordinates break once drawing scrolls at the viewport
+  bottom. `cli/src/keyboard.rs::redraw` is the reference.
+- Pad plain strings to width *before* painting them. Escape bytes occupy no
+  columns, so a width applied to an already-painted string misaligns.
+- Gate every interactive path on `picker::is_available()` (`HII_UI_LINE_MODE`
+  unset plus stdin/stdout both TTYs) and keep the printed fallback so piped and
+  scripted use is unchanged.
+- Interactive selection is still proof-bearing work: a model switch through the
+  picker emits `conversation.model_changed` with its source, because a run that
+  quietly changed models is a run whose proof record lies.
+- Prove TUI behavior with unit tests over the rendered frame and the emitted
+  escape sequences. Do not drive the CLI through a pty to "see" it; that burns
+  minutes and tokens for a weaker result.
+
+## Cost Discipline
+
+Claude quota is the scarcest resource on this machine. Spend it on judgment,
+synthesis, and code that ships.
+
+- Cache aggressively: keep the conversation prefix stable, batch independent
+  reads, and never re-read a file to verify an edit that already succeeded.
+- Push bulk work down the stack in this order: shell/`rg`/`jq`, then a local
+  model, then a background agent, then a foreground Claude turn. Anything over
+  about a minute of tool time belongs to a background agent.
+- Delegate bounded, independent work only. Synthesis, final validation,
+  approvals, and every external action stay in the main thread.
+- Orient with `hii home --brief` (~600 bytes) and escalate to `--json` (~7800)
+  only when brief is genuinely not enough.
+
 ## Verification
 
 - Use `hii health --text` and `hii caps show` as compatibility-safe agent
   entrypoints.
+- For CLI work, run `cargo build` and `cargo test` from `cli/`.
 - Use `npm run build` for app validation.
 - Use `hii ship` only for local typecheck + commit. Use `hii ship --push` only
   after explicit user approval to publish externally.

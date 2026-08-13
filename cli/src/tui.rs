@@ -138,7 +138,17 @@ impl Theme {
             Theme::Mono => "mono",
         }
     }
+
+    fn description(self) -> &'static str {
+        match self {
+            Theme::Heritage => "HII signature · warm gold, violet, and signal green.",
+            Theme::Midnight => "Cool cyan and blue for low-light terminals.",
+            Theme::Mono => "High-clarity monochrome for constrained terminals.",
+        }
+    }
 }
+
+const THEMES: [Theme; 3] = [Theme::Heritage, Theme::Midnight, Theme::Mono];
 
 fn active_theme() -> Theme {
     match ACTIVE_THEME.load(Ordering::Relaxed) {
@@ -177,26 +187,49 @@ pub fn load_theme(runtime: &Path) {
 }
 
 pub fn set_theme(runtime: &Path, requested: Option<&str>) -> Result<String, String> {
-    if let Some(requested) = requested {
-        let theme = Theme::parse(requested)?;
-        let file = theme_file(runtime);
-        if let Some(parent) = file.parent() {
-            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    match requested {
+        Some(requested) => apply_theme(runtime, Theme::parse(requested)?)?,
+        // Bare `/theme` at a terminal is a choice, not a report: paint each row
+        // in its own palette so the operator sees the theme before taking it.
+        None if crate::picker::is_available() => {
+            let current = active_theme();
+            if let Some(selected) = crate::picker::select("Select theme", &theme_choices(current))?
+            {
+                apply_theme(runtime, Theme::parse(&selected)?)?;
+            }
         }
-        fs::write(&file, format!("{}\n", theme.name())).map_err(|error| error.to_string())?;
-        ACTIVE_THEME.store(theme as u8, Ordering::Relaxed);
+        None => {}
     }
     let theme = active_theme();
-    let description = match theme {
-        Theme::Heritage => "HII signature · warm gold, violet, and signal green.",
-        Theme::Midnight => "Cool cyan and blue for low-light terminals.",
-        Theme::Mono => "High-clarity monochrome for constrained terminals.",
-    };
     Ok(format!(
         "THEME  {}\n{}\nSwitch: /theme heritage | midnight | mono",
         theme.name(),
-        description
+        theme.description()
     ))
+}
+
+fn apply_theme(runtime: &Path, theme: Theme) -> Result<(), String> {
+    let file = theme_file(runtime);
+    if let Some(parent) = file.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::write(&file, format!("{}\n", theme.name())).map_err(|error| error.to_string())?;
+    ACTIVE_THEME.store(theme as u8, Ordering::Relaxed);
+    Ok(())
+}
+
+fn theme_choices(current: Theme) -> Vec<crate::picker::Choice> {
+    THEMES
+        .iter()
+        .map(|theme| {
+            let detail = if *theme == current {
+                format!("{} · current", theme.description())
+            } else {
+                theme.description().to_string()
+            };
+            crate::picker::Choice::new(theme.name(), detail).current(*theme == current)
+        })
+        .collect()
 }
 
 fn color_enabled() -> bool {
@@ -212,7 +245,27 @@ fn paint(text: &str, codes: &[&str]) -> String {
     format!("{}{text}{RESET}", codes.concat())
 }
 
-fn terminal_width() -> usize {
+pub(crate) fn style_bold(text: &str) -> String {
+    paint(text, &[BOLD])
+}
+
+pub(crate) fn style_active(text: &str) -> String {
+    paint(text, &[BOLD, palette().primary])
+}
+
+pub(crate) fn style_accent(text: &str) -> String {
+    paint(text, &[palette().primary])
+}
+
+pub(crate) fn style_muted(text: &str) -> String {
+    paint(text, &[palette().muted])
+}
+
+pub(crate) fn style_dim(text: &str) -> String {
+    paint(text, &[DIM, palette().muted])
+}
+
+pub(crate) fn terminal_width() -> usize {
     crossterm::terminal::size()
         .map(|(columns, _)| usize::from(columns))
         .unwrap_or(80)
@@ -584,10 +637,25 @@ pub fn error(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        command_matches, command_menu, overview, prompt_frame, short_path, truncate,
+        command_matches, command_menu, overview, prompt_frame, short_path, theme_choices, truncate,
         workspace_state, Theme,
     };
     use std::path::Path;
+
+    #[test]
+    fn theme_choices_offer_every_theme_and_mark_the_active_one() {
+        let choices = theme_choices(Theme::Midnight);
+        let names: Vec<_> = choices.iter().map(|choice| choice.value.as_str()).collect();
+        assert_eq!(names, vec!["heritage", "midnight", "mono"]);
+        let current: Vec<_> = choices
+            .iter()
+            .filter(|choice| choice.current)
+            .map(|choice| choice.value.as_str())
+            .collect();
+        assert_eq!(current, vec!["midnight"]);
+        assert!(choices[1].detail.ends_with("· current"));
+        assert!(choices[0].detail.contains("warm gold"));
+    }
 
     #[test]
     fn truncates_long_activity_targets() {

@@ -268,11 +268,24 @@ impl Conversation {
         } else {
             None
         };
-        let model = choose_model(
-            requested_model.as_deref().or(saved_model.as_deref()),
-            ollama.provider(),
-            &ollama.models()?,
-        )?;
+        let installed = ollama.models()?;
+        let requested = requested_model.as_deref().or(saved_model.as_deref());
+        // Nothing was asked for and the default is not installed: an operator
+        // sitting at a terminal can just choose, the way `ollama` does, rather
+        // than read an error and retype a name from `hii models`.
+        let model = match choose_model(requested, ollama.provider(), &installed) {
+            Ok(model) => model,
+            Err(error)
+                if requested.is_none()
+                    && std::env::var_os("HII_MODEL").is_none()
+                    && !installed.is_empty()
+                    && crate::picker::is_available() =>
+            {
+                let choices = model_choices(&installed, ollama.provider_label(), "");
+                crate::picker::select("Select model", &choices)?.ok_or(error)?
+            }
+            Err(error) => return Err(error),
+        };
         let store = ConversationStore::create(&paths.runtime)?;
         let hooks = HookRunner::load(
             &paths.runtime,
@@ -1895,6 +1908,16 @@ impl Conversation {
                 ThinkingMode::Compact => "compact",
                 ThinkingMode::Raw => "raw",
             };
+            if crate::picker::is_available() {
+                let choices = mode_choices(THINKING_MODES, current);
+                let Some(selected) = crate::picker::select("Select thinking activity", &choices)?
+                else {
+                    return Ok(format!("Thinking: {current}"));
+                };
+                // Re-enter with the choice so validation and the store event stay
+                // single-sourced in the argument path.
+                return self.thinking(Some(&selected));
+            }
             return Ok(format!("Thinking: {current}\nModes: off | compact | raw"));
         };
         self.thinking_mode = match requested {
@@ -1915,6 +1938,14 @@ impl Conversation {
                 ReasoningMode::Off => "off",
                 ReasoningMode::Deep => "deep",
             };
+            if crate::picker::is_available() {
+                let choices = mode_choices(REASONING_MODES, current);
+                let Some(selected) = crate::picker::select("Select reasoning effort", &choices)?
+                else {
+                    return Ok(format!("Reasoning: {current}"));
+                };
+                return self.reasoning(Some(&selected));
+            }
             return Ok(format!("Reasoning: {current}\nModes: auto | off | deep"));
         };
         self.reasoning_mode = match requested {
@@ -1951,6 +1982,9 @@ impl Conversation {
             ));
         }
         let Some(requested) = requested.filter(|value| !value.trim().is_empty()) else {
+            if crate::picker::is_available() && !models.is_empty() {
+                return self.pick_model(&models);
+            }
             let mut rows = crate::agents::AgentManager::new(&self.paths).model_routes();
             rows.extend(models.iter().map(|model| {
                 (
@@ -1983,6 +2017,24 @@ impl Conversation {
         self.store.event(
             "conversation.model_changed",
             json!({ "from": previous, "to": selected }),
+        )?;
+        Ok(format!("Switched to {selected}."))
+    }
+
+    /// Interactive counterpart to `/model <name>`: choose from the installed
+    /// models without having to retype one off a printed table.
+    fn pick_model(&mut self, models: &[String]) -> Result<String, String> {
+        let choices = model_choices(models, self.ollama.provider_label(), &self.model);
+        let Some(selected) = crate::picker::select("Select model", &choices)? else {
+            return Ok(format!("Kept {}.", self.model));
+        };
+        if selected == self.model {
+            return Ok(format!("Kept {}.", self.model));
+        }
+        let previous = std::mem::replace(&mut self.model, selected.clone());
+        self.store.event(
+            "conversation.model_changed",
+            json!({ "from": previous, "to": selected, "source": "picker" }),
         )?;
         Ok(format!("Switched to {selected}."))
     }
@@ -2936,6 +2988,48 @@ fn render_permissions(authority: Authority) -> String {
     )
 }
 
+const THINKING_MODES: &[(&str, &str)] = &[
+    ("off", "no thought stream"),
+    ("compact", "one-line summaries of the model's thinking"),
+    ("raw", "the thinking stream as the model emits it"),
+];
+
+const REASONING_MODES: &[(&str, &str)] = &[
+    ("auto", "let HII pick effort per turn"),
+    ("off", "answer without extra deliberation"),
+    ("deep", "deliberate hard before acting"),
+];
+
+/// Fixed-vocabulary settings (`/thinking`, `/reasoning`) get the same picker as
+/// `/model` rather than a printed list of words to retype.
+fn mode_choices(modes: &[(&str, &str)], current: &str) -> Vec<crate::picker::Choice> {
+    modes
+        .iter()
+        .map(|(name, detail)| {
+            let detail = if *name == current {
+                format!("{detail} · current")
+            } else {
+                (*detail).to_string()
+            };
+            crate::picker::Choice::new(*name, detail).current(*name == current)
+        })
+        .collect()
+}
+
+fn model_choices(models: &[String], provider: &str, current: &str) -> Vec<crate::picker::Choice> {
+    models
+        .iter()
+        .map(|model| {
+            let detail = if model == current {
+                format!("{provider} · current")
+            } else {
+                provider.to_string()
+            };
+            crate::picker::Choice::new(model.clone(), detail).current(model == current)
+        })
+        .collect()
+}
+
 fn side_context(messages: &[Message], prompt: &str) -> Vec<Message> {
     let mut context = messages
         .iter()
@@ -3312,7 +3406,7 @@ mod tests {
         render_permissions, resumable_messages, session_authority, session_goal, session_plan_mode,
         session_title, shell_command_is_observation_only, shell_command_is_preview,
         shell_command_is_read_only, side_context, verification_required_message, Conversation,
-        ReasoningMode,
+        ReasoningMode, mode_choices, REASONING_MODES, THINKING_MODES,
     };
     use crate::contract::{Authority, Decision};
     use std::path::Path;
@@ -3367,6 +3461,50 @@ mod tests {
         ));
         assert!(super::explicit_skill_signal("Make this a skill"));
         assert!(!super::explicit_skill_signal("hello there"));
+    }
+
+    #[test]
+    fn model_choices_mark_the_running_model() {
+        let models = vec!["qwen3.6:35b-mlx".to_string(), "gpt-oss:20b".to_string()];
+        let choices = super::model_choices(&models, "ollama", "gpt-oss:20b");
+        assert_eq!(choices[0].detail, "ollama");
+        assert!(!choices[0].current);
+        assert_eq!(choices[1].detail, "ollama · current");
+        assert!(choices[1].current);
+    }
+
+    #[test]
+    fn model_choices_mark_nothing_when_no_model_is_running_yet() {
+        let models = vec!["qwen3.6:35b-mlx".to_string()];
+        let choices = super::model_choices(&models, "ollama", "");
+        assert!(choices.iter().all(|choice| !choice.current));
+    }
+
+    #[test]
+    fn mode_choices_mark_the_active_setting() {
+        let choices = mode_choices(THINKING_MODES, "compact");
+        let current: Vec<_> = choices
+            .iter()
+            .filter(|choice| choice.current)
+            .map(|choice| choice.value.as_str())
+            .collect();
+        assert_eq!(current, vec!["compact"]);
+        assert!(choices[1].detail.ends_with("· current"));
+        assert!(!choices[0].detail.contains("current"));
+    }
+
+    #[test]
+    fn mode_choices_keep_every_documented_setting() {
+        let thinking: Vec<_> = mode_choices(THINKING_MODES, "off")
+            .into_iter()
+            .map(|choice| choice.value)
+            .collect();
+        assert_eq!(thinking, vec!["off", "compact", "raw"]);
+        let reasoning: Vec<_> = mode_choices(REASONING_MODES, "auto")
+            .into_iter()
+            .map(|choice| choice.value)
+            .collect();
+        assert_eq!(reasoning, vec!["auto", "off", "deep"]);
     }
 
     #[test]

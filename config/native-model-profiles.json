@@ -1,46 +1,74 @@
 {
-  "schemaVersion": 1,
-  "objective": "utility-per-wait",
-  "tiers": [
-    {
-      "memoryGiBMax": 8,
-      "name": "8gb",
-      "localClass": "3-4B",
-      "model": "Qwen/Qwen3-4B",
-      "quantization": "4"
-    },
-    {
-      "memoryGiBMax": 18,
-      "name": "16gb",
-      "localClass": "8B",
-      "model": "Qwen/Qwen3-8B",
-      "quantization": "4"
-    },
-    {
-      "memoryGiBMax": 36,
-      "name": "24-32gb",
-      "localClass": "14B",
-      "model": "Qwen/Qwen3-14B",
-      "quantization": "4"
-    },
-    {
-      "memoryGiBMax": null,
-      "name": "48gb+",
-      "localClass": "30-35B MoE",
-      "model": "Qwen/Qwen3.5-35B-A3B",
-      "quantization": "4"
-    }
-  ],
-  "routing": {
-    "auto": ["hii-native", "ollama", "approved-hosted"],
-    "local": ["hii-native", "ollama"],
-    "private": ["hii-native", "ollama"],
-    "best": ["strongest-local", "approved-hosted"]
-  },
-  "performanceGate": {
-    "maxWallMs": 120000,
-    "minCompletionTokensPerSecond": 8,
-    "requiresCompletion": true
-  },
-  "hostedTransmission": "explicit-only"
+   "schemaVersion": 2,
+   "objective": "utility-per-wait",
+   "tiers": [
+     {
+       "memoryGiBMax": null,
+       "name": "tier-0-no-llm",
+       "localClass": "Deterministic (no LLM)",
+       "model": "noop",
+       "quantization": "",
+       "description": "Tool routing: grep, search, filesystem metadata, git status, calculations. Never sends a prompt payload to any model."
+     },
+     {
+       "memoryGiBMax": 36,
+       "name": "subconscious-35b-a3b",
+       "localClass": "30-35B MoE — Default Worker / Subconscious",
+       "model": "Qwen/Qwen3.6:35b-a3b",
+       "quantization": "4"
+     },
+     {
+       "memoryGiBMax": 24,
+       "name": "deliberate-27b-dense",
+       "localClass": "27B Dense — Deliberate Reasoning Brain",
+       "model": "Qwen/Qwen3.6:27b",
+       "quantization": "4"
+     },
+     {
+       "memoryGiBMax": 8,
+       "name": "8gb",
+       "localClass": "3-4B",
+       "model": "Qwen/Qwen3-4B",
+       "quantization": "4"
+     },
+     {
+       "memoryGiBMax": 18,
+       "name": "16gb",
+       "localClass": "8B",
+       "model": "Qwen/Qwen3-8B",
+       "quantization": "4"
+     },
+     {
+       "memoryGiBMax": 36,
+       "name": "24-32gb",
+       "localClass": "14B",
+       "model": "Qwen/Qwen3-14B",
+       "quantization": "4"
+     },
+     {
+       "memoryGiBMax": null,
+       "name": "48gb+",
+       "localClass": "30-35B MoE (native)",
+       "model": "Qwen/Qwen3.5-35B-A3B",
+       "quantization": "4"
+     }
+   ],
+   "routing": {
+     "auto":        ["hii-native", "ollama", "approved-hosted"],
+     "local":       ["subconscious-35b-a3b", "deliberate-27b-dense", "hii-native", "ollama"],
+     "private":     ["subconscious-35b-a3b", "deliberate-27b-dense", "hii-native", "ollama"],
+     "best":        ["strongest-local", "approved-hosted"],
+     "tiers":       {
+       "0":      "Deterministic — no LLM, tool routing only",
+       "1":      "qwen3.6:35b-a3b (subconscious/default worker — 80–90% of agent work)",
+       "2":      "qwen3.6:27b-dense (deliberate reasoning brain — difficult reasoning when tier-1 fails or reports low confidence)",
+       "3":      "cloud only — when local models fail, task is extremely consequential, or explicitly requested"
+     }
+   },
+   "performanceGate": {
+     "maxWallMs": 120000,
+     "minCompletionTokensPerSecond": 8,
+     "requiresCompletion": true
+   },
+   "hostedTransmission": "explicit-only"
 }

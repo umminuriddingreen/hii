@@ -27,6 +27,7 @@ mod legacy;
 mod mcp;
 mod mcp_client;
 mod ollama;
+mod picker;
 mod pipe;
 mod receipt;
 mod run_context;
