@@ -761,16 +761,14 @@ impl RepetitionGuard {
 }
 
 fn action_schema() -> Value {
+    let mut action_types = crate::acp::action_tool_names(true);
+    action_types.extend(["mcp_call", "final", "message"]);
     json!({
         "type": "object",
         "required": ["type"],
         "properties": {
             "type": {
-                "enum": [
-                    "read", "list", "search", "web_search", "web_fetch", "write", "edit", "shell", "verify", "http", "mcp_call",
-                    "hii_context", "og_next", "caps_check", "board_read", "board_write",
-                    "skill_search", "bridge_send", "bridge_read", "final", "message"
-                ]
+                "enum": action_types
             },
             "path": { "type": "string" },
             "query": { "type": "string" },

@@ -211,51 +211,18 @@ fn tool_specs() -> Vec<Value> {
         .filter(|tool| acp::is_directly_executable(tool["name"].as_str().unwrap_or_default()))
         .map(|tool| {
             let name = tool["name"].as_str().unwrap_or_default();
-            json!({
+            let mut spec = json!({
                 "name": name,
                 "description": tool["description"],
-                "inputSchema": input_schema(name),
-                // Non-standard hint clients may use for approval UX.
-                "annotations": { "mutates": tool["mutates"] },
-            })
+                "inputSchema": tool["inputSchema"],
+                "annotations": tool["annotations"],
+            });
+            if !tool["outputSchema"].is_null() {
+                spec["outputSchema"] = tool["outputSchema"].clone();
+            }
+            spec
         })
         .collect()
-}
-
-/// JSON-schema for a tool's `arguments` object, keyed by tool name. HII operating
-/// tools take a single free-text `query`; the filesystem toolbelt takes the
-/// argument set its `ToolCall` understands.
-fn input_schema(name: &str) -> Value {
-    let object = |properties: Value, required: Value| json!({ "type": "object", "properties": properties, "required": required });
-    let string = json!({ "type": "string" });
-    let integer = json!({ "type": "integer" });
-    match name {
-        "read" => object(
-            json!({ "path": string, "offset": integer, "limit": integer }),
-            json!(["path"]),
-        ),
-        "list" => object(json!({ "path": string }), json!([])),
-        "search" => object(json!({ "query": string, "path": string }), json!(["query"])),
-        "web_search" => object(json!({ "query": string }), json!(["query"])),
-        "web_fetch" => object(json!({ "url": string }), json!(["url"])),
-        "write" => object(
-            json!({ "path": string, "content": string }),
-            json!(["path", "content"]),
-        ),
-        "edit" => object(
-            json!({
-                "path": string,
-                "old": string,
-                "new": string,
-                "replace_all": { "type": "boolean" },
-            }),
-            json!(["path", "old", "new"]),
-        ),
-        "shell" | "verify" => object(json!({ "command": string }), json!(["command"])),
-        "http" => object(json!({ "url": string }), json!(["url"])),
-        // Every HII operating tool carries its argument in a single `query`.
-        _ => object(json!({ "query": string }), json!([])),
-    }
 }
 
 /// Handle `tools/call`: gate at the authority envelope, then dispatch to the
@@ -317,7 +284,7 @@ fn tools_call(
     let is_hii = hii_tools::is_hii_tool(name);
 
     let result = if is_hii {
-        hii_tools::execute(repo, name, args["query"].as_str())
+        hii_tools::execute(repo, name, Some(args))
     } else if acp::is_directly_executable(name) {
         execute_tool(
             tools,
@@ -345,8 +312,11 @@ fn tools_call(
 
 /// Convert a [`ToolResult`] into the MCP `tools/call` content shape.
 fn call_result(result: &ToolResult) -> Value {
+    let structured = serde_json::from_str::<Value>(&result.output).ok();
     json!({
         "content": [{ "type": "text", "text": result.output }],
+        "structuredContent": structured,
+        "resultType": "complete",
         "isError": !result.ok,
     })
 }

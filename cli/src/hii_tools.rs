@@ -24,6 +24,8 @@ pub const HII_TOOLS: &[&str] = &[
     "skill_search",
     "schedule_read",
     "schedule_write",
+    "system_status",
+    "system_observe",
     "bridge_send",
     "bridge_read",
     "object_list",
@@ -41,8 +43,9 @@ pub fn is_mutating(tool: &str) -> bool {
 
 /// Dispatch an HII tool. `repo` is the HII repository root; `query` carries the
 /// tool's single free-text argument (a task title, search term, or message).
-pub fn execute(repo: &Path, tool: &str, query: Option<&str>) -> ToolResult {
-    let arg = query.unwrap_or("").trim();
+pub fn execute(repo: &Path, tool: &str, arguments: Option<&Value>) -> ToolResult {
+    let arg = argument_text(arguments).unwrap_or_default();
+    let arg = arg.trim();
     let result = match tool {
         "hii_context" => hii(repo, &["context", "--json"]).and_then(compact_context),
         "og_next" => hii(repo, &["og", "status"]),
@@ -58,13 +61,21 @@ pub fn execute(repo: &Path, tool: &str, query: Option<&str>) -> ToolResult {
         "skill_search" => skill_search(repo, arg),
         "schedule_read" => hii(repo, &["schedule", "list"]),
         "schedule_write" => {
-            let (cron, task) = arg.split_once("::").unwrap_or(("", ""));
+            let cron = argument_field(arguments, "cron").unwrap_or_default();
+            let task = argument_field(arguments, "task").unwrap_or_default();
+            let (cron, task) = if cron.trim().is_empty() || task.trim().is_empty() {
+                arg.split_once("::").unwrap_or(("", ""))
+            } else {
+                (cron.as_str(), task.as_str())
+            };
             if cron.trim().is_empty() || task.trim().is_empty() {
                 Err("schedule_write needs `<five-field cron>::<task>` in `query`".to_string())
             } else {
                 hii(repo, &["schedule", "add", cron.trim(), task.trim()])
             }
         }
+        "system_status" => system_status(repo, arguments),
+        "system_observe" => system_observe(repo, arguments),
         "bridge_send" => {
             if arg.is_empty() {
                 Err("bridge_send needs a message in `query`".to_string())
@@ -80,14 +91,21 @@ pub fn execute(repo: &Path, tool: &str, query: Option<&str>) -> ToolResult {
         // `query` names the approved grant, never the scope itself: a caller that
         // describes its own authority does not have any.
         "object_list" => {
-            if arg.is_empty() {
+            let grant = argument_field(arguments, "grant").unwrap_or_else(|| arg.to_string());
+            if grant.trim().is_empty() {
                 Err("object_list needs the approved grant id in `query`".to_string())
             } else {
-                hii(repo, &["object", "list", "--json", "--grant", arg])
+                hii(repo, &["object", "list", "--json", "--grant", grant.trim()])
             }
         }
         "object_read" => {
-            let (grant, id) = arg.split_once("::").unwrap_or(("", ""));
+            let grant = argument_field(arguments, "grant").unwrap_or_default();
+            let object = argument_field(arguments, "object").unwrap_or_default();
+            let (grant, id) = if grant.trim().is_empty() || object.trim().is_empty() {
+                arg.split_once("::").unwrap_or(("", ""))
+            } else {
+                (grant.as_str(), object.as_str())
+            };
             if grant.trim().is_empty() || id.trim().is_empty() {
                 Err("object_read needs `<grant id>::<object id>` in `query`".to_string())
             } else {
@@ -110,6 +128,67 @@ pub fn execute(repo: &Path, tool: &str, query: Option<&str>) -> ToolResult {
             output,
             verification: false,
         },
+    }
+}
+
+fn argument_text(arguments: Option<&Value>) -> Option<String> {
+    let value = arguments?;
+    if let Some(query) = value.get("query").and_then(Value::as_str) {
+        return Some(query.to_string());
+    }
+    if let Some(text) = value.as_str() {
+        return Some(text.to_string());
+    }
+    None
+}
+
+fn argument_field(arguments: Option<&Value>, field: &str) -> Option<String> {
+    arguments?
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn system_status(repo: &Path, arguments: Option<&Value>) -> Result<String, String> {
+    let system = argument_field(arguments, "system");
+    let mut args = vec!["systems", "status"];
+    if let Some(system) = system.as_deref().filter(|value| !value.trim().is_empty()) {
+        args.push(system.trim());
+    }
+    args.push("--json");
+    hii(repo, &args)
+}
+
+fn system_observe(repo: &Path, arguments: Option<&Value>) -> Result<String, String> {
+    let system = argument_field(arguments, "system")
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "system_observe needs `system`".to_string())?;
+    let kind = argument_field(arguments, "kind")
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "status".into());
+    match kind.as_str() {
+        "status" => hii(repo, &["systems", "status", system.trim(), "--json"]),
+        "apps" => hii(repo, &["on", system.trim(), "apps", "list", "--json"]),
+        "files" => {
+            let path = argument_field(arguments, "path").unwrap_or_else(|| ".".into());
+            hii(
+                repo,
+                &["on", system.trim(), "files", "ls", path.trim(), "--json"],
+            )
+        }
+        "proof" => {
+            if let Some(receipt) = argument_field(arguments, "receipt") {
+                hii(
+                    repo,
+                    &["on", system.trim(), "proof", receipt.trim(), "--json"],
+                )
+            } else {
+                hii(repo, &["on", system.trim(), "proof", "--json"])
+            }
+        }
+        other => Err(format!(
+            "system_observe kind must be status, apps, files, or proof; got {other}"
+        )),
     }
 }
 

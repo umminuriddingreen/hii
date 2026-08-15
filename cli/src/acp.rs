@@ -33,7 +33,7 @@ pub enum Reach {
 }
 
 impl Reach {
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Reach::Local => "local",
             Reach::Network => "network",
@@ -186,6 +186,48 @@ const TOOLS: &[ToolSpec] = &[
         "find a registered skill",
     ),
     tool(
+        "schedule_read",
+        "hii",
+        Reach::Hii,
+        false,
+        "read local recurring HII work",
+    ),
+    tool(
+        "schedule_write",
+        "hii",
+        Reach::Hii,
+        true,
+        "create local recurring HII work",
+    ),
+    tool(
+        "system_status",
+        "hii",
+        Reach::Hii,
+        false,
+        "read enrolled Mac and PC executor status",
+    ),
+    tool(
+        "system_observe",
+        "hii",
+        Reach::Hii,
+        false,
+        "request a read-only observation from an enrolled executor",
+    ),
+    tool(
+        "object_list",
+        "hii",
+        Reach::Hii,
+        false,
+        "list objects through an approved HII grant",
+    ),
+    tool(
+        "object_read",
+        "hii",
+        Reach::Hii,
+        false,
+        "read one object through an approved HII grant",
+    ),
+    tool(
         "bridge_send",
         "hii",
         Reach::Hii,
@@ -201,6 +243,103 @@ const TOOLS: &[ToolSpec] = &[
     ),
 ];
 
+pub fn tools() -> &'static [ToolSpec] {
+    TOOLS
+}
+
+pub fn action_tool_names(include_hii: bool) -> Vec<&'static str> {
+    TOOLS
+        .iter()
+        .filter(|spec| spec.reach != Reach::Mcp)
+        .filter(|spec| include_hii || spec.reach != Reach::Hii)
+        .map(|spec| spec.name)
+        .collect()
+}
+
+pub fn input_schema(name: &str) -> Value {
+    let object = |properties: Value, required: Value| json!({ "type": "object", "properties": properties, "required": required });
+    let string = json!({ "type": "string" });
+    let integer = json!({ "type": "integer" });
+    match name {
+        "read" => object(
+            json!({ "path": string, "offset": integer, "limit": integer }),
+            json!(["path"]),
+        ),
+        "list" => object(json!({ "path": string }), json!([])),
+        "search" => object(json!({ "query": string, "path": string }), json!(["query"])),
+        "web_search" => object(json!({ "query": string }), json!(["query"])),
+        "web_fetch" => object(json!({ "url": string }), json!(["url"])),
+        "write" => object(
+            json!({ "path": string, "content": string }),
+            json!(["path", "content"]),
+        ),
+        "edit" => object(
+            json!({
+                "path": string,
+                "old": string,
+                "new": string,
+                "replace_all": { "type": "boolean" },
+            }),
+            json!(["path", "old", "new"]),
+        ),
+        "shell" | "verify" => object(json!({ "command": string }), json!(["command"])),
+        "http" => object(json!({ "url": string }), json!(["url"])),
+        "system_status" => object(json!({ "system": string }), json!([])),
+        "system_observe" => object(
+            json!({
+                "system": string,
+                "kind": { "type": "string", "enum": ["status", "apps", "files", "proof"] },
+                "path": string,
+                "receipt": string,
+            }),
+            json!(["system", "kind"]),
+        ),
+        "object_read" => object(
+            json!({ "grant": string, "object": string }),
+            json!(["grant", "object"]),
+        ),
+        "object_list" => object(json!({ "grant": string }), json!(["grant"])),
+        "schedule_write" => object(
+            json!({ "cron": string, "task": string, "query": string }),
+            json!([]),
+        ),
+        _ => object(json!({ "query": string }), json!([])),
+    }
+}
+
+pub fn output_schema(name: &str) -> Option<Value> {
+    match name {
+        "system_status" | "system_observe" => Some(json!({
+            "type": "object",
+            "properties": {
+                "system": { "type": "string" },
+                "status": { "type": "string" },
+                "next": { "type": "string" },
+                "receipt": { "type": "object" }
+            }
+        })),
+        _ => None,
+    }
+}
+
+pub fn annotations(spec: &ToolSpec) -> Value {
+    let read_only = !spec.mutates;
+    let open_world = matches!(spec.reach, Reach::Network | Reach::Mcp)
+        || matches!(
+            spec.name,
+            "system_status" | "system_observe" | "bridge_send" | "bridge_read"
+        );
+    let destructive = matches!(spec.name, "write" | "edit" | "shell");
+    json!({
+        "readOnlyHint": read_only,
+        "destructiveHint": destructive,
+        "idempotentHint": read_only,
+        "openWorldHint": open_world,
+        "mutates": spec.mutates,
+        "reach": spec.reach.label(),
+    })
+}
+
 /// The capability manifest as a JSON value.
 pub fn manifest() -> Value {
     let tools: Vec<Value> = TOOLS
@@ -212,6 +351,9 @@ pub fn manifest() -> Value {
                 "reach": spec.reach.label(),
                 "mutates": spec.mutates,
                 "description": spec.description,
+                "inputSchema": input_schema(spec.name),
+                "outputSchema": output_schema(spec.name),
+                "annotations": annotations(spec),
             })
         })
         .collect();

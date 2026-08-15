@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LicenseRef-BSL-1.1
 mod acp;
 mod agent;
 mod agents;
@@ -51,12 +52,13 @@ use conversation::Conversation;
 use ollama::Ollama;
 use receipt::{find_receipt, Receipt};
 use runlog::StreamPolicy;
+use serde::{Deserialize, Serialize};
 use std::{
     env, fs,
     io::{self, IsTerminal, Write},
     path::PathBuf,
     process::{Command, ExitCode},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Parser, Debug)]
@@ -297,6 +299,18 @@ enum Commands {
         #[arg(long, help = "Emit normalized agent-readable JSONL")]
         jsonl: bool,
     },
+    #[command(about = "Manage enrolled Macs and PCs controlled by this HII")]
+    Systems {
+        #[command(subcommand)]
+        action: Option<SystemsCommand>,
+    },
+    #[command(about = "Run a bounded command against an enrolled system")]
+    On {
+        #[arg(value_name = "SYSTEM")]
+        system: String,
+        #[command(subcommand)]
+        action: OnCommand,
+    },
     #[command(about = "Local kanban/todo board")]
     Board {
         #[command(subcommand)]
@@ -361,6 +375,11 @@ enum Commands {
         about = "Print the agent tool capability manifest (ACP/MCP boundary) as JSON"
     )]
     ToolsManifest,
+    #[command(about = "Inspect and guide autonomous HII tool creation")]
+    Tools {
+        #[command(subcommand)]
+        action: ToolsCommand,
+    },
     #[command(
         name = "mcp-serve",
         about = "Serve the tool surface as an MCP server over stdio (JSON-RPC 2.0, line-delimited)"
@@ -395,6 +414,143 @@ enum Commands {
     Legacy {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum SystemsCommand {
+    #[command(about = "Register a machine as a bounded HII executor")]
+    Enroll {
+        #[arg(value_name = "ID")]
+        id: String,
+        #[arg(long, value_name = "HOST")]
+        host: Option<String>,
+        #[arg(long, value_name = "OS", help = "macos | windows | linux | unknown")]
+        os: Option<String>,
+        #[arg(
+            long,
+            value_name = "TRANSPORT",
+            default_value = "tailscale-ssh",
+            help = "tailscale-ssh | ssh | local | manual"
+        )]
+        transport: String,
+        #[arg(
+            long = "cap",
+            value_name = "CAPABILITY",
+            help = "Capability this executor advertises; repeatable"
+        )]
+        capabilities: Vec<String>,
+        #[arg(long, help = "Mark this executor as the local machine")]
+        local: bool,
+        #[arg(long, help = "Emit the enrolled machine as JSON")]
+        json: bool,
+    },
+    #[command(alias = "ls", about = "List enrolled machines")]
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Show executor readiness for enrolled machines")]
+    Status {
+        #[arg(value_name = "SYSTEM")]
+        system: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum OnCommand {
+    #[command(about = "Run a shell command on an enrolled executor")]
+    Run {
+        #[arg(required = true, num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+        #[arg(long, value_name = "PATH")]
+        cwd: Option<String>,
+        #[arg(long, help = "Emit the dispatch plan as JSON")]
+        json: bool,
+    },
+    #[command(about = "Inspect files on an enrolled executor")]
+    Files {
+        #[command(subcommand)]
+        action: OnFilesCommand,
+    },
+    #[command(about = "Inspect visible apps on an enrolled executor")]
+    Apps {
+        #[command(subcommand)]
+        action: OnAppsCommand,
+    },
+    #[command(about = "Inspect receipts produced by an enrolled executor")]
+    Proof {
+        #[arg(value_name = "ID")]
+        id: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum OnFilesCommand {
+    #[command(alias = "list", about = "List a directory on an enrolled executor")]
+    Ls {
+        #[arg(value_name = "PATH", default_value = ".")]
+        path: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum OnAppsCommand {
+    #[command(alias = "ls", about = "List foreground applications or windows")]
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ToolsCommand {
+    #[command(about = "Show recent autonomous tool activity")]
+    Activity {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Show current canonical tool registry")]
+    Registry {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Show draft tool proposals")]
+    Drafts {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Create a draft tool proposal from observed need")]
+    Propose {
+        #[arg(required = true, num_args = 1..)]
+        intent: Vec<String>,
+        #[arg(long)]
+        read_only: bool,
+        #[arg(long)]
+        authority: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Record scaffold readiness for a draft tool")]
+    Scaffold { id: String },
+    #[command(about = "Record test proof for a draft tool")]
+    Test { id: String },
+    #[command(about = "Promote a proven draft within current authority")]
+    Promote {
+        id: String,
+        #[arg(long, help = "Required for tools that expand authority")]
+        approved: bool,
+    },
+    #[command(about = "Summarize observed tool needs")]
+    Observe {
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -756,6 +912,8 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             stream::watch(&paths.runtime, &workspace, run.as_deref(), !snapshot, jsonl)?;
             Ok(ExitCode::SUCCESS)
         }
+        Some(Commands::Systems { action }) => systems_command(&paths, action),
+        Some(Commands::On { system, action }) => on_command(&paths, &system, action),
         Some(Commands::Board { action }) => board_command(&paths, cli.cwd, action),
         Some(Commands::Discover { action }) => {
             match action {
@@ -951,6 +1109,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             println!("{}", acp::render());
             Ok(ExitCode::SUCCESS)
         }
+        Some(Commands::Tools { action }) => tools_command(&paths, action),
         Some(Commands::McpServe {
             authority,
             client_identity,
@@ -1755,6 +1914,572 @@ fn proof(
     Ok(())
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SystemRecord {
+    id: String,
+    host: String,
+    os: String,
+    transport: String,
+    capabilities: Vec<String>,
+    local: bool,
+    status: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SystemsRegistry {
+    systems: Vec<SystemRecord>,
+}
+
+fn systems_path(paths: &AppPaths) -> PathBuf {
+    paths.runtime.join("systems.json")
+}
+
+fn load_systems(paths: &AppPaths) -> Result<SystemsRegistry, String> {
+    let path = systems_path(paths);
+    if !path.exists() {
+        return Ok(SystemsRegistry::default());
+    }
+    let raw = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    serde_json::from_str(&raw)
+        .map_err(|error| format!("failed to parse {}: {error}", path.display()))
+}
+
+fn save_systems(paths: &AppPaths, registry: &SystemsRegistry) -> Result<(), String> {
+    fs::create_dir_all(&paths.runtime).map_err(|error| error.to_string())?;
+    let path = systems_path(paths);
+    let raw = serde_json::to_string_pretty(registry).map_err(|error| error.to_string())?;
+    fs::write(&path, format!("{raw}\n"))
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+fn systems_command(paths: &AppPaths, action: Option<SystemsCommand>) -> Result<ExitCode, String> {
+    match action.unwrap_or(SystemsCommand::List { json: false }) {
+        SystemsCommand::Enroll {
+            id,
+            host,
+            os,
+            transport,
+            capabilities,
+            local,
+            json,
+        } => {
+            let mut registry = load_systems(paths)?;
+            let host = host.unwrap_or_else(|| {
+                if local {
+                    "localhost".into()
+                } else {
+                    id.clone()
+                }
+            });
+            let os = os.unwrap_or_else(|| {
+                if local {
+                    env::consts::OS.into()
+                } else {
+                    "unknown".into()
+                }
+            });
+            let capabilities = if capabilities.is_empty() {
+                default_system_capabilities(&os, local)
+            } else {
+                capabilities
+            };
+            let status = if local { "ready" } else { "pending-agent" }.to_string();
+            let record = SystemRecord {
+                id: id.clone(),
+                host,
+                os,
+                transport,
+                capabilities,
+                local,
+                status,
+            };
+            registry.systems.retain(|existing| existing.id != id);
+            registry.systems.push(record.clone());
+            registry.systems.sort_by(|a, b| a.id.cmp(&b.id));
+            save_systems(paths, &registry)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&record).map_err(|error| error.to_string())?
+                );
+            } else {
+                println!(
+                    "enrolled {} ({}, {}) · {}",
+                    record.id, record.os, record.transport, record.status
+                );
+                println!("registry  {}", systems_path(paths).display());
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        SystemsCommand::List { json } => {
+            let registry = load_systems(paths)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&registry).map_err(|error| error.to_string())?
+                );
+            } else if registry.systems.is_empty() {
+                println!("No enrolled systems yet.");
+                println!("start      hii systems enroll <id> --host <host> --os windows|macos");
+            } else {
+                for system in registry.systems {
+                    println!(
+                        "{:<18} {:<10} {:<14} {}",
+                        system.id, system.os, system.status, system.host
+                    );
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        SystemsCommand::Status { system, json } => {
+            let registry = load_systems(paths)?;
+            let systems: Vec<SystemRecord> = match system {
+                Some(id) => vec![find_system(&registry, &id)?],
+                None => registry.systems,
+            };
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({ "systems": systems }))
+                        .map_err(|error| error.to_string())?
+                );
+            } else if systems.is_empty() {
+                println!("No enrolled systems yet.");
+            } else {
+                for system in systems {
+                    let caps = system.capabilities.join(",");
+                    println!(
+                        "{}\n  host       {}\n  os         {}\n  transport  {}\n  status     {}\n  caps       {}",
+                        system.id, system.host, system.os, system.transport, system.status, caps
+                    );
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+    }
+}
+
+fn on_command(paths: &AppPaths, system: &str, action: OnCommand) -> Result<ExitCode, String> {
+    let registry = load_systems(paths)?;
+    let record = find_system(&registry, system)?;
+    match action {
+        OnCommand::Run { command, cwd, json } => {
+            render_system_dispatch(&record, "run", Some(command.join(" ")), cwd, json)?;
+        }
+        OnCommand::Files { action } => match action {
+            OnFilesCommand::Ls { path, json } => {
+                render_system_dispatch(&record, "files.ls", Some(path), None, json)?;
+            }
+        },
+        OnCommand::Apps { action } => match action {
+            OnAppsCommand::List { json } => {
+                render_system_dispatch(&record, "apps.list", None, None, json)?;
+            }
+        },
+        OnCommand::Proof { id, json } => {
+            render_system_dispatch(&record, "proof", id, None, json)?;
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn find_system(registry: &SystemsRegistry, id: &str) -> Result<SystemRecord, String> {
+    registry
+        .systems
+        .iter()
+        .find(|system| system.id == id)
+        .cloned()
+        .ok_or_else(|| format!("unknown system `{id}`; run `hii systems list`"))
+}
+
+fn render_system_dispatch(
+    system: &SystemRecord,
+    action: &str,
+    payload: Option<String>,
+    cwd: Option<String>,
+    json: bool,
+) -> Result<(), String> {
+    let ready = system.status == "ready";
+    let status = if ready { "ready" } else { "pending-agent" };
+    let value = serde_json::json!({
+        "system": system.id,
+        "host": system.host,
+        "os": system.os,
+        "transport": system.transport,
+        "action": action,
+        "payload": payload,
+        "cwd": cwd,
+        "status": status,
+        "next": if ready {
+            "local executor transport is not wired in this binding yet"
+        } else {
+            "install and start hii-agent on this system, then rerun the command"
+        },
+        "receipt": {
+            "required": true,
+            "scope": "system"
+        }
+    });
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?
+        );
+    } else {
+        println!("system    {} ({})", system.id, system.os);
+        println!("action    {action}");
+        if let Some(payload) = value["payload"].as_str() {
+            println!("payload   {payload}");
+        }
+        if let Some(cwd) = value["cwd"].as_str() {
+            println!("cwd       {cwd}");
+        }
+        println!("status    {status}");
+        println!("next      {}", value["next"].as_str().unwrap_or(""));
+        println!("receipt   required");
+    }
+    Ok(())
+}
+
+fn default_system_capabilities(os: &str, local: bool) -> Vec<String> {
+    let mut caps = vec![
+        "shell".to_string(),
+        "files".to_string(),
+        "proof".to_string(),
+    ];
+    let normalized = os.to_ascii_lowercase();
+    if normalized.contains("mac") || (local && env::consts::OS == "macos") {
+        caps.extend(["apps", "windows", "applescript"].map(str::to_string));
+    } else if normalized.contains("win") {
+        caps.extend(["apps", "windows", "powershell"].map(str::to_string));
+    } else {
+        caps.push("apps".into());
+    }
+    caps.sort();
+    caps.dedup();
+    caps
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolDraft {
+    id: String,
+    intent: String,
+    authority: String,
+    read_only: bool,
+    status: String,
+    proof: Vec<String>,
+    created_at_unix_ms: u128,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolActivity {
+    event: String,
+    tool: String,
+    why: String,
+    authority: String,
+    effect: Vec<String>,
+    proof: Vec<String>,
+    next: String,
+    created_at_unix_ms: u128,
+}
+
+fn tools_command(paths: &AppPaths, action: ToolsCommand) -> Result<ExitCode, String> {
+    match action {
+        ToolsCommand::Activity { json } => {
+            let events = read_jsonl::<ToolActivity>(&tool_activity_path(paths))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&events).map_err(|error| error.to_string())?
+                );
+            } else if events.is_empty() {
+                println!("No autonomous tool activity yet.");
+            } else {
+                for event in events.iter().rev().take(12).rev() {
+                    println!(
+                        "{}  {} · {}\n  why       {}\n  authority {}\n  proof     {}\n  next      {}",
+                        event.created_at_unix_ms,
+                        event.event,
+                        event.tool,
+                        event.why,
+                        event.authority,
+                        if event.proof.is_empty() {
+                            "pending".into()
+                        } else {
+                            event.proof.join(", ")
+                        },
+                        event.next
+                    );
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        ToolsCommand::Registry { json } => {
+            if json {
+                println!("{}", acp::render());
+            } else {
+                for spec in acp::tools() {
+                    let annotations = acp::annotations(spec);
+                    println!(
+                        "{:<18} {:<4} {:<7} {}",
+                        spec.name,
+                        if spec.mutates { "mut" } else { "read" },
+                        spec.reach.label(),
+                        spec.description
+                    );
+                    println!(
+                        "  hints readOnly={} destructive={} openWorld={}",
+                        annotations["readOnlyHint"].as_bool().unwrap_or(false),
+                        annotations["destructiveHint"].as_bool().unwrap_or(false),
+                        annotations["openWorldHint"].as_bool().unwrap_or(false)
+                    );
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        ToolsCommand::Drafts { json } => {
+            let drafts = read_tool_drafts(paths)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&drafts).map_err(|error| error.to_string())?
+                );
+            } else if drafts.is_empty() {
+                println!("No draft tools yet.");
+            } else {
+                for draft in drafts {
+                    println!(
+                        "{}  {} · {} · proof:{}\n  {}",
+                        draft.id,
+                        draft.status,
+                        draft.authority,
+                        if draft.proof.is_empty() {
+                            "pending".into()
+                        } else {
+                            draft.proof.join(", ")
+                        },
+                        draft.intent
+                    );
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        ToolsCommand::Propose {
+            intent,
+            read_only,
+            authority,
+            json,
+        } => {
+            let intent = intent.join(" ");
+            let id = format!("tool-{}", now_unix_ms());
+            let authority = authority.unwrap_or_else(|| {
+                if read_only {
+                    "read-only".into()
+                } else {
+                    "workspace".into()
+                }
+            });
+            let draft = ToolDraft {
+                id: id.clone(),
+                intent: intent.clone(),
+                authority: authority.clone(),
+                read_only,
+                status: "draft".into(),
+                proof: Vec::new(),
+                created_at_unix_ms: now_unix_ms(),
+            };
+            write_tool_draft(paths, &draft)?;
+            append_tool_activity(
+                paths,
+                ToolActivity {
+                    event: "tool.proposed".into(),
+                    tool: id.clone(),
+                    why: intent,
+                    authority,
+                    effect: vec![tool_draft_path(paths, &id).display().to_string()],
+                    proof: Vec::new(),
+                    next: "scaffold and test the draft before promotion".into(),
+                    created_at_unix_ms: now_unix_ms(),
+                },
+            )?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&draft).map_err(|error| error.to_string())?
+                );
+            } else {
+                println!("proposed  {}", draft.id);
+                println!("status    {}", draft.status);
+                println!("authority {}", draft.authority);
+                println!("next      hii tools scaffold {}", draft.id);
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        ToolsCommand::Scaffold { id } => update_tool_draft(paths, &id, "scaffolded", None),
+        ToolsCommand::Test { id } => update_tool_draft(
+            paths,
+            &id,
+            "tested",
+            Some("manual scaffold/test marker; replace with deterministic command proof".into()),
+        ),
+        ToolsCommand::Promote { id, approved } => {
+            let draft = read_tool_draft(paths, &id)?;
+            if !draft.read_only && !approved {
+                return Err(format!(
+                    "{id} expands authority; rerun with --approved after human review"
+                ));
+            }
+            update_tool_draft(
+                paths,
+                &id,
+                "promoted",
+                Some("human-visible promotion".into()),
+            )
+        }
+        ToolsCommand::Observe { json } => {
+            let observations = read_jsonl::<serde_json::Value>(&tool_observations_path(paths))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&observations)
+                        .map_err(|error| error.to_string())?
+                );
+            } else if observations.is_empty() {
+                println!("No recorded tool observations yet.");
+            } else {
+                for observation in observations.iter().rev().take(12).rev() {
+                    println!("{}", observation);
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+    }
+}
+
+fn update_tool_draft(
+    paths: &AppPaths,
+    id: &str,
+    status: &str,
+    proof: Option<String>,
+) -> Result<ExitCode, String> {
+    let mut draft = read_tool_draft(paths, id)?;
+    draft.status = status.into();
+    if let Some(proof) = proof {
+        if !draft.proof.contains(&proof) {
+            draft.proof.push(proof);
+        }
+    }
+    write_tool_draft(paths, &draft)?;
+    append_tool_activity(
+        paths,
+        ToolActivity {
+            event: format!("tool.{status}"),
+            tool: draft.id.clone(),
+            why: draft.intent.clone(),
+            authority: draft.authority.clone(),
+            effect: vec![tool_draft_path(paths, &draft.id).display().to_string()],
+            proof: draft.proof.clone(),
+            next: match status {
+                "scaffolded" => format!("hii tools test {}", draft.id),
+                "tested" => format!("hii tools promote {}", draft.id),
+                "promoted" => {
+                    "registry projection can include this after code adapter lands".into()
+                }
+                _ => "inspect activity and continue".into(),
+            },
+            created_at_unix_ms: now_unix_ms(),
+        },
+    )?;
+    println!("{}  {}", status, draft.id);
+    Ok(ExitCode::SUCCESS)
+}
+
+fn tool_activity_path(paths: &AppPaths) -> PathBuf {
+    paths.runtime.join("tool-activity.jsonl")
+}
+
+fn tool_observations_path(paths: &AppPaths) -> PathBuf {
+    paths.runtime.join("tool-observations.jsonl")
+}
+
+fn tool_drafts_dir(paths: &AppPaths) -> PathBuf {
+    paths.runtime.join("tool-drafts")
+}
+
+fn tool_draft_path(paths: &AppPaths, id: &str) -> PathBuf {
+    tool_drafts_dir(paths).join(format!("{id}.json"))
+}
+
+fn read_tool_draft(paths: &AppPaths, id: &str) -> Result<ToolDraft, String> {
+    let path = tool_draft_path(paths, id);
+    let raw = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    serde_json::from_str(&raw)
+        .map_err(|error| format!("failed to parse {}: {error}", path.display()))
+}
+
+fn read_tool_drafts(paths: &AppPaths) -> Result<Vec<ToolDraft>, String> {
+    let dir = tool_drafts_dir(paths);
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Ok(Vec::new());
+    };
+    let mut drafts = Vec::new();
+    for entry in entries.flatten() {
+        if entry.path().extension().and_then(|value| value.to_str()) == Some("json") {
+            let raw = fs::read_to_string(entry.path()).map_err(|error| error.to_string())?;
+            drafts.push(serde_json::from_str(&raw).map_err(|error| error.to_string())?);
+        }
+    }
+    drafts.sort_by(|a: &ToolDraft, b| a.id.cmp(&b.id));
+    Ok(drafts)
+}
+
+fn write_tool_draft(paths: &AppPaths, draft: &ToolDraft) -> Result<(), String> {
+    fs::create_dir_all(tool_drafts_dir(paths)).map_err(|error| error.to_string())?;
+    let raw = serde_json::to_string_pretty(draft).map_err(|error| error.to_string())?;
+    fs::write(tool_draft_path(paths, &draft.id), format!("{raw}\n"))
+        .map_err(|error| error.to_string())
+}
+
+fn append_tool_activity(paths: &AppPaths, event: ToolActivity) -> Result<(), String> {
+    append_jsonl(&tool_activity_path(paths), &event)
+}
+
+fn append_jsonl<T: Serialize>(path: &PathBuf, value: &T) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
+    let raw = serde_json::to_string(value).map_err(|error| error.to_string())?;
+    writeln!(file, "{raw}").map_err(|error| error.to_string())
+}
+
+fn read_jsonl<T: for<'de> Deserialize<'de>>(path: &PathBuf) -> Result<Vec<T>, String> {
+    let Ok(raw) = fs::read_to_string(path) else {
+        return Ok(Vec::new());
+    };
+    raw.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).map_err(|error| error.to_string()))
+        .collect()
+}
+
+fn now_unix_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
+}
+
 fn board_command(
     paths: &AppPaths,
     cwd: Option<PathBuf>,
@@ -2039,11 +2764,14 @@ fn is_native_command(command: &str) -> bool {
             | "proof"
             | "receipt"
             | "stream"
+            | "systems"
+            | "on"
             | "board"
             | "discover"
             | "find"
             | "pipe"
             | "skills"
+            | "tools"
             | "legacy"
             | "help"
             | "tools-manifest"
@@ -2107,6 +2835,9 @@ fn command_suggestion(args: &[String]) -> Option<(String, &'static str)> {
         "providers",
         "login",
         "proof",
+        "systems",
+        "on",
+        "tools",
         "board",
         "discover",
         "pipe",
@@ -2300,6 +3031,23 @@ mod tests {
                 "`{name}` is a clap subcommand but is_native_command() does not know it, so `hii {name}` would be rewritten into `hii run {name}`"
             );
         }
+    }
+
+    #[test]
+    fn multi_system_commands_are_native_bindings() {
+        assert!(is_native_command("systems"));
+        assert!(is_native_command("on"));
+    }
+
+    #[test]
+    fn default_system_capabilities_are_os_specific() {
+        let windows = default_system_capabilities("windows", false);
+        assert!(windows.contains(&"powershell".to_string()));
+        assert!(windows.contains(&"windows".to_string()));
+
+        let mac = default_system_capabilities("macos", false);
+        assert!(mac.contains(&"applescript".to_string()));
+        assert!(mac.contains(&"windows".to_string()));
     }
 
     const FROZEN_LEGACY_FAMILIES: &[&str] = &[

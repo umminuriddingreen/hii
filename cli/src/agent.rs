@@ -763,7 +763,8 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 }
                 rejected_actions.reset();
                 let result = if is_hii {
-                    crate::hii_tools::execute(&paths.repo, &tool, query.as_deref())
+                    let args = json!({ "query": query.as_deref().unwrap_or("") });
+                    crate::hii_tools::execute(&paths.repo, &tool, Some(&args))
                 } else {
                     execute_tool(
                         &tools,
@@ -1575,13 +1576,14 @@ Workspace:{workspace}
 {limit} Dry:{dry_run}. Done:{done_when}. Checks:{declared_verification}
 {coding} {autonomy}
 Loop: intent -> context -> bounded work -> verify -> receipt. No plan narration.
-Habits: inspect real files, preserve unclear work, patch narrowly, persist artifacts, repair failed checks.
+Habits: inspect real files, preserve unclear work, patch narrowly, repair failed checks.
 Proof: one flat {{"type":"verify","command":"npm test"}} or http; shell/read/list/search never count.
-One JSON action/turn. Types: read,list,search,web_search,web_fetch,write,edit,shell,verify,http,hii_context,og_next,caps_check,board_read,board_write,skill_search,schedule_read,schedule_write,bridge_send,bridge_read. Fields: path,query,command,content,old,new,replace_all,offset,limit,url.
-For write, emit exactly {{"type":"write","path":"relative-file.md","content":"complete file text"}}; no verification, url, or shell syntax inside write.
+JSON/turn. T:{tool_names}. F:path,query,command,content,old,new,replace_all,offset,limit,url.
+Write: {{"type":"write","path":"relative-file.md","content":"complete file text"}}; no verification/url/shell syntax inside write.
 Finish: {{"type":"final","summary":"result","verification":["checks run"],"next":null}}
 Read AGENTS.md. Stay in workspace. Never claim unrun proof."#,
-        workspace = workspace.display()
+        workspace = workspace.display(),
+        tool_names = crate::acp::action_tool_names(true).join(",")
     )
 }
 
