@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hello World</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f0f0f0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        .canvas-container {
+            width: 80%;
+            max-width: 800px;
+            text-align: center;
+        }
+
+        canvas {
+            border: 1px solid #ccc;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            background-color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="canvas-container">
+        <canvas id="myCanvas" width="800" height="200"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('myCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Set styles for the text
+        ctx.font = 'bold 50px sans-serif';
+        ctx.fillStyle = '#333';
+
+        // Center the text horizontally and vertically
+        const text = 'Hello World';
+        const metrics = ctx.measureText(text);
+        const textWidth = metrics.width;
+        const x = (canvas.width - textWidth) / 2;
+        const y = (canvas.height + 50) / 2; // Approximate vertical centering adjustment
+
+        // Draw the text
+        ctx.fillText(text, x, y);
+    </script>
+</body>
+</html>

@@ -57,6 +57,7 @@ export type SpatialObjectStatus =
   | 'running'
   | 'waiting_approval'
   | 'blocked'
+  | 'cancelled'
   | 'failed'
   | 'completed'
   | 'approved'
@@ -235,6 +236,7 @@ export function normalizeSpatialObject(raw: unknown): SpatialObjectMetadata | un
     'running',
     'waiting_approval',
     'blocked',
+    'cancelled',
     'failed',
     'completed',
     'approved',

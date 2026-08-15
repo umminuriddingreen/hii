@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: LicenseRef-BSL-1.1
 // hiid — HII's local-first persistent runtime supervisor.
 import { execFile, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";

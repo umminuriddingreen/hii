@@ -1,0 +1,12 @@
+[package]
+name = "hii-core"
+version = "0.1.0"
+edition = "2021"
+license-file = "../../LICENSE"
+description = "Shared local state and contracts for the HII CLI and desktop"
+
+[dependencies]
+dirs = "5.0.1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+uuid = { version = "1.11.0", features = ["v4"] }

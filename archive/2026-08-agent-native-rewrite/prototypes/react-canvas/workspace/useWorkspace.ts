@@ -1,0 +1,173 @@
+'use client';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { normalizeWorkspace, type WorkspaceNode, type WorkspaceDoc, type WorkspaceViewport } from '../../lib/workspace/types';
+
+export type WorkspaceApi = {
+  ready: boolean;
+  nodes: WorkspaceNode[];
+  addNode: (node: WorkspaceNode) => void;
+  patchNode: (id: string, patch: Partial<WorkspaceNode>) => void;
+  removeNode: (id: string) => void;
+  bringToFront: (id: string) => void;
+  takeZ: () => number;
+  initialViewport: WorkspaceViewport | null;
+  scheduleSave: () => void;
+};
+
+export function useWorkspace(getViewport: () => WorkspaceViewport): WorkspaceApi {
+  const [nodes, setNodes] = useState<WorkspaceNode[]>([]);
+  const [ready, setReady] = useState(false);
+  const [initialViewport, setInitialViewport] = useState<WorkspaceViewport | null>(null);
+  const nextZ = useRef(1);
+  const nodesRef = useRef<WorkspaceNode[]>([]);
+  const revisionRef = useRef(0);
+  const linksRef = useRef<WorkspaceDoc['links']>([]);
+  const syncedAt = useRef('');
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  nodesRef.current = nodes;
+
+  const persist = useCallback(async () => {
+    try {
+      const localNodes = nodesRef.current.filter((node) => !node.payload.ephemeral || node.type !== 'image');
+      const remoteResponse = await fetch('/api/workspace', { cache: 'no-store' });
+      const remote = remoteResponse.ok ? normalizeWorkspace(await remoteResponse.json()) : null;
+      const merged = new Map(localNodes.map((node) => [node.id, node]));
+
+      if (remote) {
+        for (const incoming of remote.nodes) {
+          const local = merged.get(incoming.id);
+          if (local) {
+            if (incoming.updatedAt > local.updatedAt) merged.set(incoming.id, incoming);
+          } else if (incoming.updatedAt > syncedAt.current) {
+            // Preserve objects created by another HII window after this client
+            // last synchronized. Older missing objects may have been deleted here.
+            merged.set(incoming.id, incoming);
+          }
+        }
+        nextZ.current = Math.max(nextZ.current, remote.nextZ);
+      }
+
+      const nodesToWrite = [...merged.values()];
+      const doc: WorkspaceDoc = {
+        version: 1,
+        revision: revisionRef.current,
+        updatedAt: new Date().toISOString(),
+        viewport: getViewport(),
+        nextZ: nextZ.current,
+        nodes: nodesToWrite,
+        links: linksRef.current
+      };
+      const response = await fetch('/api/workspace', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspace: doc, expectedRevision: doc.revision })
+      });
+      if (response.ok) {
+        const result = (await response.json()) as { workspace?: WorkspaceDoc; updatedAt?: string };
+        revisionRef.current = result.workspace?.revision ?? doc.revision;
+        linksRef.current = result.workspace?.links ?? doc.links;
+        syncedAt.current = result.workspace?.updatedAt || result.updatedAt || doc.updatedAt;
+        setNodes(nodesToWrite);
+      }
+    } catch {
+      /* local-only surface; retry on next mutation */
+    }
+  }, [getViewport]);
+
+  const scheduleSave = useCallback(() => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(persist, 750);
+  }, [persist]);
+
+  const load = useCallback(async (initial: boolean) => {
+    try {
+      const res = await fetch('/api/workspace', { cache: 'no-store' });
+      if (!res.ok) return;
+      const doc = normalizeWorkspace(await res.json());
+      syncedAt.current = doc.updatedAt;
+      revisionRef.current = doc.revision;
+      linksRef.current = doc.links;
+      nextZ.current = Math.max(nextZ.current, doc.nextZ);
+      if (initial) {
+        setNodes(doc.nodes);
+        setInitialViewport(doc.viewport);
+      } else {
+        // merge externally edited nodes (agents writing workspace.json) by updatedAt
+        setNodes((current) => {
+          const byId = new Map(current.map((node) => [node.id, node]));
+          const merged = doc.nodes.map((incoming) => {
+            const mine = byId.get(incoming.id);
+            byId.delete(incoming.id);
+            return mine && mine.updatedAt >= incoming.updatedAt ? mine : incoming;
+          });
+          // keep local nodes created since the file was last written
+          for (const leftover of byId.values()) {
+            if (leftover.updatedAt > doc.updatedAt || leftover.payload.ephemeral) merged.push(leftover);
+          }
+          return merged;
+        });
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      if (initial) setReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    load(true);
+  }, [load]);
+
+  useEffect(() => {
+    const onFocus = () => load(false);
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [load]);
+
+  const addNode = useCallback(
+    (node: WorkspaceNode) => {
+      setNodes((current) => [...current, node]);
+      scheduleSave();
+    },
+    [scheduleSave]
+  );
+
+  const patchNode = useCallback(
+    (id: string, patch: Partial<WorkspaceNode>) => {
+      setNodes((current) =>
+        current.map((node) =>
+          node.id === id ? { ...node, ...patch, updatedAt: new Date().toISOString() } : node
+        )
+      );
+      scheduleSave();
+    },
+    [scheduleSave]
+  );
+
+  const removeNode = useCallback(
+    (id: string) => {
+      setNodes((current) => {
+        const node = current.find((n) => n.id === id);
+        const url = node?.payload.url;
+        if (typeof url === 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url);
+        return current.filter((n) => n.id !== id);
+      });
+      scheduleSave();
+    },
+    [scheduleSave]
+  );
+
+  const takeZ = useCallback(() => ++nextZ.current, []);
+
+  const bringToFront = useCallback(
+    (id: string) => {
+      const node = nodesRef.current.find((n) => n.id === id);
+      if (!node || node.z >= nextZ.current) return;
+      patchNode(id, { z: ++nextZ.current });
+    },
+    [patchNode]
+  );
+
+  return { ready, nodes, addNode, patchNode, removeNode, bringToFront, takeZ, initialViewport, scheduleSave };
+}

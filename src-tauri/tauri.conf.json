@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "identifier": "com.ummi.hii",
   "build": {
-    "beforeDevCommand": "npm run dev:web:tauri",
+    "beforeDevCommand": "npm run dev:desktop",
     "devUrl": "http://127.0.0.1:3042",
-    "beforeBuildCommand": "npm run build:web:tauri",
-    "frontendDist": "fallback"
+    "beforeBuildCommand": "npm run build:desktop",
+    "frontendDist": "../out"
   },
   "app": {
     "withGlobalTauri": false,
@@ -24,15 +24,16 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$HOME/.hii/workspace/assets/**"]
+      }
     }
   },
   "bundle": {
     "active": true,
     "targets": ["app"],
-    "resources": {
-      "../.hii-app/": "hii-app/"
-    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

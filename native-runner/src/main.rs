@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LicenseRef-BSL-1.1
 use std::{
     fs,
     net::{IpAddr, Ipv4Addr, SocketAddr},

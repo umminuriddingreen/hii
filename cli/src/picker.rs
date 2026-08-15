@@ -61,7 +61,10 @@ pub fn select(title: &str, choices: &[Choice]) -> Result<Option<String>> {
     }
     let _guard = PickerGuard::enter()?;
     let mut query = String::new();
-    let mut selected = choices.iter().position(|choice| choice.current).unwrap_or(0);
+    let mut selected = choices
+        .iter()
+        .position(|choice| choice.current)
+        .unwrap_or(0);
     let mut rendered = 0usize;
     let mut out = io::stdout();
 
@@ -235,7 +238,10 @@ fn truncate(value: &str, max: usize) -> String {
     if value.chars().count() <= max {
         return value.to_string();
     }
-    let kept = value.chars().take(max.saturating_sub(1)).collect::<String>();
+    let kept = value
+        .chars()
+        .take(max.saturating_sub(1))
+        .collect::<String>();
     format!("{kept}…")
 }
 
@@ -275,7 +281,8 @@ struct PickerGuard;
 
 impl PickerGuard {
     fn enter() -> Result<Self> {
-        enable_raw_mode().map_err(|error| format!("failed to enable raw terminal mode: {error}"))?;
+        enable_raw_mode()
+            .map_err(|error| format!("failed to enable raw terminal mode: {error}"))?;
         let _ = execute!(io::stdout(), cursor::Hide);
         Ok(Self)
     }

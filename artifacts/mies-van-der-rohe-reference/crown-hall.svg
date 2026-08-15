@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
+   <rect width="800" height="600" fill="#f0efe8"/>
+
+   <!-- Sky -->
+   <defs>
+      <linearGradient id="skyGrad2" x1="0%" y1="0%" x2="0%" y2="100%">
+         <stop offset="0%" style="stop-color:#b8c8d8;stop-opacity:1" />
+         <stop offset="100%" style="stop-color:#d8e4f0;stop-opacity:1" />
+      </linearGradient>
+   </defs>
+   <rect width="800" height="250" fill="url(#skyGrad2)"/>
+
+   <!-- Ground plane -->
+   <rect x="0" y="250" width="800" height="350" fill="#d4d0c8"/>
+
+   <!-- Main building mass - low, horizontal -->
+   <rect x="100" y="180" width="600" height="70" fill="#c8c8c0" stroke="#999" stroke-width="1"/>
+
+   <!-- Exposed steel truss system (top) -->
+   <g stroke="#8a8a80" stroke-width="2" fill="none">
+      <!-- Top chord -->
+      <line x1="100" y1="180" x2="700" y2="180"/>
+      <!-- Bottom chord -->
+      <line x1="100" y1="250" x2="700" y2="250"/>
+      <!-- Verticals -->
+      <line x1="150" y1="180" x2="150" y2="250"/>
+      <line x1="200" y1="180" x2="200" y2="250"/>
+      <line x1="250" y1="180" x2="250" y2="250"/>
+      <line x1="300" y1="180" x2="300" y2="250"/>
+      <line x1="350" y1="180" x2="350" y2="250"/>
+      <line x1="400" y1="180" x2="400" y2="250"/>
+      <line x1="450" y1="180" x2="450" y2="250"/>
+      <line x1="500" y1="180" x2="500" y2="250"/>
+      <line x1="550" y1="180" x2="550" y2="250"/>
+      <line x1="600" y1="180" x2="600" y2="250"/>
+      <line x1="650" y1="180" x2="650" y2="250"/>
+      <!-- Diagonals (W-truss pattern) -->
+      <path d="M150,180 L200,250 M200,180 L150,250"/>
+      <path d="M250,180 L300,250 M300,180 L250,250"/>
+      <path d="M350,180 L400,250 M400,180 L350,250"/>
+      <path d="M450,180 L500,250 M500,180 L450,250"/>
+      <path d="M550,180 L600,250 M600,180 L550,250"/>
+   </g>
+
+   <!-- Glass curtain wall facade -->
+   <rect x="120" y="190" width="560" height="50" fill="#e8f4ff" opacity="0.3" stroke="#ccc" stroke-width="0.5"/>
+
+   <!-- Steel columns supporting structure -->
+   <g fill="#b8b8b0" stroke="#999" stroke-width="0.5">
+      <rect x="130" y="250" width="8" height="100"/>
+      <rect x="230" y="250" width="8" height="100"/>
+      <rect x="330" y="250" width="8" height="100"/>
+      <rect x="430" y="250" width="8" height="100"/>
+      <rect x="530" y="250" width="8" height="100"/>
+      <rect x="630" y="250" width="8" height="100"/>
+   </g>
+
+   <!-- Entrance canopy -->
+   <rect x="350" y="340" width="100" height="8" fill="#c8c8c0" stroke="#999" stroke-width="1"/>
+   <line x1="370" y1="348" x2="370" y2="380" stroke="#b8b8b0" stroke-width="3"/>
+   <line x1="430" y1="348" x2="430" y2="380" stroke="#b8b8b0" stroke-width="3"/>
+
+   <!-- Plaza and landscaping -->
+   <rect x="50" y="380" width="700" height="80" fill="#d8d4cc"/>
+
+   <!-- Reflecting pool in front -->
+   <rect x="100" y="400" width="600" height="30" fill="#a8d0e6" opacity="0.6"/>
+   <g opacity="0.3">
+      <line x1="120" y1="410" x2="680" y2="410" stroke="#fff" stroke-width="1"/>
+      <line x1="120" y1="420" x2="680" y2="420" stroke="#fff" stroke-width="1"/>
+   </g>
+
+   <!-- Trees (symmetrical arrangement) -->
+   <circle cx="150" cy="450" r="25" fill="#7a9a6d" opacity="0.7"/>
+   <circle cx="650" cy="450" r="25" fill="#7a9a6d" opacity="0.7"/>
+   <line x1="150" y1="475" x2="150" y2="500" stroke="#5a3a2a" stroke-width="4"/>
+   <line x1="650" y1="475" x2="650" y2="500" stroke="#5a3a2a" stroke-width="4"/>
+
+   <!-- Label -->
+   <text x="400" y="540" text-anchor="middle" font-family="Helvetica, Arial" font-size="14" fill="#333">Crown Hall (1974) - Mies van der Rohe</text>
+   <text x="400" y="560" text-anchor="middle" font-family="Helvetica, Arial" font-size="11" fill="#666">Exposed steel truss • Glass box • IIT Campus, Chicago</text>
+   <text x="400" y="580" text-anchor="middle" font-family="Helvetica, Arial" font-size="11" fill="#666">Universal space • Structural honesty • Platform architecture</text>
+</svg>

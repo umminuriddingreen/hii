@@ -81,7 +81,7 @@ chmodSync(binaryPath, 0o755);
     encoding: 'utf8',
     env: environment
   });
-  assert.equal(readFileSync(buildCount, 'utf8'), '2', 'dirty Rust source must rebuild live');
+  assert.equal(readFileSync(buildCount, 'utf8'), '1', 'source scans must never delay normal startup');
 
   git('add', 'cli/src/main.rs');
   git('commit', '-qm', 'change CLI source');
@@ -89,17 +89,17 @@ chmodSync(binaryPath, 0o755);
     encoding: 'utf8',
     env: environment
   });
-  assert.equal(readFileSync(buildCount, 'utf8'), '2', 'committing unchanged source must not rebuild again');
+  assert.equal(readFileSync(buildCount, 'utf8'), '1', 'commits must not affect normal startup');
 
   utimesSync(fakeBinary, old, old);
   rmSync(removedSource);
   execFileSync(canonicalLauncher, ['health'], { encoding: 'utf8', env: environment });
-  assert.equal(readFileSync(buildCount, 'utf8'), '3', 'dirty source deletion must rebuild live');
+  assert.equal(readFileSync(buildCount, 'utf8'), '1', 'source deletion must not trigger startup work');
 
   git('add', 'cli/src/removed.rs');
   git('commit', '-qm', 'remove CLI source');
   execFileSync(canonicalLauncher, ['health'], { encoding: 'utf8', env: environment });
-  assert.equal(readFileSync(buildCount, 'utf8'), '3', 'committing a live deletion must not rebuild again');
+  assert.equal(readFileSync(buildCount, 'utf8'), '1', 'committed deletion must not trigger startup work');
 
   installLauncher({ source: canonicalLauncher, destination: installedLauncher });
   assert.equal(readFileSync(installedLauncher, 'utf8'), readFileSync(canonicalLauncher, 'utf8'));
@@ -110,9 +110,8 @@ chmodSync(binaryPath, 0o755);
   console.log('status:       ok');
   console.log('missing:      release CLI built on first use');
   console.log('fresh:        unchanged release CLI reused');
-  console.log('dirty:        in-progress Rust source rebuilt live');
-  console.log('committed:    unchanged committed source reused live build');
-  console.log('deleted:      in-progress Rust source deletion rebuilt live');
+  console.log('changed:      source changes do not enter the startup path');
+  console.log('deleted:      source scans do not enter the startup path');
   console.log('install:      canonical launcher installed atomically');
 } finally {
   rmSync(scratch, { recursive: true, force: true });

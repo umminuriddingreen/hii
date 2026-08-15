@@ -3,7 +3,7 @@ name = "hii-native-runner"
 version = "0.1.0"
 edition = "2021"
 description = "HII-owned native Apple-Silicon model runtime"
-license = "UNLICENSED"
+license-file = "../LICENSE"
 
 [[bin]]
 name = "hii-native-runner"

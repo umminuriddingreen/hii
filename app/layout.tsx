@@ -1,9 +1,16 @@
+// SPDX-License-Identifier: LicenseRef-BSL-1.1
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
-import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'hii - verified agent work',
-  description: 'Local-first control plane for capabilities, approvals, jobs, proof, and receipts.'
+  title: 'HII',
+  description: 'A human information interface for working with agents.'
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  colorScheme: 'light dark'
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

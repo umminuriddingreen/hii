@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "HII local-first visual interface"
 authors = ["Ummi"]
 edition = "2021"
+license-file = "../LICENSE"
 
 [lib]
 name = "hii_lib"
@@ -13,7 +14,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["unstable"] }
-tauri-plugin-global-shortcut = "2"
+tauri = { version = "2", features = ["unstable", "protocol-asset"] }
+hii-core = { path = "../crates/hii-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+dirs = "5"

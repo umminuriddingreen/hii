@@ -1,5 +1,4 @@
 {
-  "extends": "./.svelte-kit/tsconfig.json",
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["dom", "dom.iterable", "ES2022"],
@@ -15,8 +14,33 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": false,
     "jsx": "preserve",
-    "incremental": true
+    "incremental": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
   },
-  "include": ["src/**/*.d.ts", "src/**/*.ts", "src/**/*.svelte", "lib/**/*.ts"],
-  "exclude": ["node_modules", "extensions/**", "aii/**", "app/**", "components/**"]
+  "include": [
+    "next-env.d.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "components/**/*.ts",
+    "components/**/*.tsx",
+    "lib/**/*.ts",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "archive/**",
+    "extensions/**",
+    "aii/**",
+    "src/**"
+  ]
 }

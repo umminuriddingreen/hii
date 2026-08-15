@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
+   <rect width="800" height="600" fill="#e8f0e8"/>
+
+   <!-- Natural landscape background -->
+   <defs>
+      <linearGradient id="meadowGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+         <stop offset="0%" style="stop-color:#c8dcc8;stop-opacity:1" />
+         <stop offset="100%" style="stop-color:#a8c4a8;stop-opacity:1" />
+      </linearGradient>
+   </defs>
+   <rect x="0" y="350" width="800" height="250" fill="url(#meadowGrad)"/>
+
+   <!-- House platform (raised concrete slab) -->
+   <rect x="150" y="370" width="500" height="15" fill="#b8b8b0" stroke="#999" stroke-width="1"/>
+
+   <!-- Steel columns (pink/white metal) -->
+   <g fill="#d8d8d0" stroke="#aaa" stroke-width="0.5">
+      <rect x="180" y="180" width="6" height="190"/>
+      <rect x="260" y="180" width="6" height="190"/>
+      <rect x="340" y="180" width="6" height="190"/>
+      <rect x="420" y="180" width="6" height="190"/>
+      <rect x="500" y="180" width="6" height="190"/>
+      <rect x="580" y="180" width="6" height="190"/>
+   </g>
+
+   <!-- Roof slab (floating, overhanging) -->
+   <rect x="140" y="170" width="520" height="10" fill="#c8c8c0" stroke="#999" stroke-width="1"/>
+
+   <!-- Glass walls (transparent panels) -->
+   <g opacity="0.25">
+      <rect x="186" y="180" width="74" height="190" fill="#e8f4ff" stroke="#ccc" stroke-width="0.5"/>
+      <rect x="266" y="180" width="74" height="190" fill="#e8f4ff" stroke="#ccc" stroke-width="0.5"/>
+      <rect x="346" y="180" width="74" height="190" fill="#e8f4ff" stroke="#ccc" stroke-width="0.5"/>
+      <rect x="426" y="180" width="74" height="190" fill="#e8f4ff" stroke="#ccc" stroke-width="0.5"/>
+      <rect x="506" y="180" width="74" height="190" fill="#e8f4ff" stroke="#ccc" stroke-width="0.5"/>
+   </g>
+
+   <!-- Core block (service area - stone/wood) -->
+   <rect x="350" y="220" width="80" height="140" fill="#a89880" stroke="#8b7355" stroke-width="1"/>
+   <rect x="360" y="240" width="25" height="30" fill="#d8c8b0" opacity="0.6"/>
+   <rect x="395" y="240" width="25" height="30" fill="#d8c8b0" opacity="0.6"/>
+   <rect x="360" y="290" width="60" height="40" fill="#8b7355"/>
+
+   <!-- Interior furniture hints -->
+   <rect x="200" y="320" width="60" height="8" fill="#8b4513" rx="2"/>
+   <line x1="210" y1="328" x2="210" y2="360" stroke="#8b4513" stroke-width="2"/>
+   <line x1="250" y1="328" x2="250" y2="360" stroke="#8b4513" stroke-width="2"/>
+
+   <!-- Landscape elements - trees and meadow -->
+   <circle cx="120" cy="380" r="30" fill="#7a9a6d" opacity="0.7"/>
+   <circle cx="680" cy="370" r="35" fill="#7a9a6d" opacity="0.7"/>
+   <circle cx="720" cy="400" r="25" fill="#6a8a5d" opacity="0.6"/>
+   <line x1="120" y1="410" x2="120" y2="450" stroke="#5a3a2a" stroke-width="5"/>
+   <line x1="680" y1="405" x2="680" y2="450" stroke="#5a3a2a" stroke-width="5"/>
+   <line x1="720" y1="425" x2="720" y2="450" stroke="#5a3a2a" stroke-width="4"/>
+
+   <!-- Grass texture -->
+   <g stroke="#8aaa7a" stroke-width="1" opacity="0.5">
+      <line x1="100" y1="480" x2="105" y2="470"/>
+      <line x1="150" y1="490" x2="155" y2="480"/>
+      <line x1="200" y1="485" x2="205" y2="475"/>
+      <line x1="600" y1="490" x2="605" y2="480"/>
+      <line x1="650" y1="485" x2="655" y2="475"/>
+      <line x1="700" y1="490" x2="705" y2="480"/>
+   </g>
+
+   <!-- Label -->
+   <text x="400" y="530" text-anchor="middle" font-family="Helvetica, Arial" font-size="14" fill="#333">Farnsworth House (1951) - Mies van der Rohe</text>
+   <text x="400" y="550" text-anchor="middle" font-family="Helvetica, Arial" font-size="11" fill="#666">Glass pavilion • Steel structure • Universal space in nature</text>
+   <text x="400" y="570" text-anchor="middle" font-family="Helvetica, Arial" font-size="11" fill="#666">Platform house • Minimal material palette • Blurred interior/exterior boundary</text>
+</svg>

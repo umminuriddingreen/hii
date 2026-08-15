@@ -232,6 +232,15 @@ export type StoredWorkspaceAsset = {
 
 export async function storeWorkspaceAsset(file: File): Promise<StoredWorkspaceAsset | null> {
   try {
+    if ('__TAURI_INTERNALS__' in window) {
+      const { convertFileSrc, invoke } = await import('@tauri-apps/api/core');
+      const asset = await invoke<Omit<StoredWorkspaceAsset, 'url'>>('workspace_asset_store', {
+        name: file.name || 'pasted-media',
+        mime: file.type,
+        bytes: [...new Uint8Array(await file.arrayBuffer())]
+      });
+      return { ...asset, url: convertFileSrc(asset.path) };
+    }
     const form = new FormData();
     form.set('file', file, file.name || 'pasted-media');
     const response = await fetch('/api/workspace/assets', { method: 'POST', body: form });

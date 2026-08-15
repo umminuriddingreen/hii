@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
+  <rect width="800" height="600" fill="#f5f5f0"/>
+
+  <!-- Ground plane -->
+  <rect x="0" y="450" width="800" height="150" fill="#d4cfc7"/>
+
+  <!-- Main pavilion roof - flat, floating -->
+  <rect x="100" y="180" width="600" height="15" fill="#2a2a2a"/>
+
+  <!-- Chrome steel columns (thin, vertical) -->
+  <rect x="150" y="195" width="8" height="255" fill="#c0c0c0" stroke="#999" stroke-width="0.5"/>
+  <rect x="300" y="195" width="8" height="255" fill="#c0c0c0" stroke="#999" stroke-width="0.5"/>
+  <rect x="450" y="195" width="8" height="250" fill="#c0c0c0" stroke="#999" stroke-width="0.5"/>
+  <rect x="600" y="195" width="8" height="255" fill="#c0c0c0" stroke="#999" stroke-width="0.5"/>
+
+  <!-- Travertine walls - partial, floating planes -->
+  <rect x="180" y="220" width="12" height="180" fill="#b8a88a" opacity="0.9"/>
+  <rect x="350" y="250" width="150" height="12" fill="#b8a88a" opacity="0.9"/>
+  <rect x="375" y="250" width="12" height="120" fill="#b8a88a" opacity="0.9"/>
+
+  <!-- Glass panels (transparent effect) -->
+  <rect x="200" y="200" width="140" height="200" fill="#e8f4f8" opacity="0.3" stroke="#ccc" stroke-width="0.5"/>
+  <rect x="480" y="200" width="100" height="200" fill="#e8f4f8" opacity="0.3" stroke="#ccc" stroke-width="0.5"/>
+
+  <!-- Reflecting pool foreground -->
+  <rect x="50" y="460" width="700" height="40" fill="#a8d0e6" opacity="0.6"/>
+  <line x1="50" y1="470" x2="750" y2="470" stroke="#fff" stroke-width="1" opacity="0.5"/>
+  <line x1="50" y1="485" x2="750" y2="485" stroke="#fff" stroke-width="1" opacity="0.3"/>
+
+  <!-- Barcelona Chair (simplified) -->
+  <rect x="320" y="380" width="80" height="10" fill="#1a1a1a" rx="2"/>
+  <rect x="330" y="390" width="60" height="30" fill="#1a1a1a" rx="2"/>
+  <path d="M330,390 L330,420 M390,390 L390,420" stroke="#c0c0c0" stroke-width="3" fill="none"/>
+
+  <!-- Landscaping - minimal trees -->
+  <circle cx="120" cy="430" r="25" fill="#7a9a6d" opacity="0.7"/>
+  <circle cx="680" cy="425" r="30" fill="#7a9a6d" opacity="0.7"/>
+  <line x1="120" y1="455" x2="120" y2="480" stroke="#5a3a2a" stroke-width="4"/>
+  <line x1="680" y1="455" x2="680" y2="480" stroke="#5a3a2a" stroke-width="4"/>
+
+  <!-- Label -->
+  <text x="400" y="550" text-anchor="middle" font-family="Helvetica, Arial" font-size="14" fill="#333">Barcelona Pavilion (1929) - Mies van der Rohe</text>
+  <text x="400" y="570" text-anchor="middle" font-family="Helvetica, Arial" font-size="11" fill="#666">Free plan • Glass/travertine/chrome • Universal space</text>
+</svg>

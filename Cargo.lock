@@ -2172,6 +2172,7 @@ dependencies = [
  "crossterm 0.28.1",
  "ctrlc",
  "dirs 5.0.1",
+ "hii-core",
  "ignore",
  "libc",
  "regex",
@@ -2180,6 +2181,16 @@ dependencies = [
  "serde_json",
  "ureq",
  "url",
+ "uuid 1.24.0",
+]
+
+[[package]]
+name = "hii-core"
+version = "0.1.0"
+dependencies = [
+ "dirs 5.0.1",
+ "serde",
+ "serde_json",
  "uuid 1.24.0",
 ]
 

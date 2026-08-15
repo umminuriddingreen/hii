@@ -11,7 +11,7 @@
  */
 
 export type InkStroke = {
-  /** Flat [x, y, …] pairs, relative to the node origin. */
+   /** Flat [x, y, …] pairs, relative to the node origin. */
   points: number[];
   color: string;
   width: number;
@@ -45,12 +45,12 @@ export function decimateStroke(points: number[], maxPoints = INK_MAX_POINTS): nu
   const thinned: number[] = [];
   for (let index = 0; index < count; index += stride) {
     thinned.push(points[index * 2], points[index * 2 + 1]);
-  }
+   }
   const lastX = points[(count - 1) * 2];
   const lastY = points[(count - 1) * 2 + 1];
   if (thinned[thinned.length - 2] !== lastX || thinned[thinned.length - 1] !== lastY) {
     thinned.push(lastX, lastY);
-  }
+   }
   return thinned;
 }
 
@@ -69,9 +69,17 @@ function perpendicularDistance(px: number, py: number, ax: number, ay: number, b
  * stack.
  */
 export function simplifyStroke(points: number[], tolerance = INK_SIMPLIFY_TOLERANCE): number[] {
-  points = decimateStroke(points, INK_MAX_POINTS);
-  const count = Math.floor(points.length / 2);
-  if (count < 3 || tolerance <= 0) return [...points];
+     // Aggressively cap before D-P to prevent O(n^2) on pathological inputs like pure zigzags.
+  let cappedPoints = decimateStroke(points, Math.min(INK_MAX_POINTS, 5_000));
+
+     // If still too large after initial decimation, downsample further.
+  const maxDPPoints = 2_000;
+  if (Math.floor(cappedPoints.length / 2) > maxDPPoints) {
+    cappedPoints = decimateStroke(cappedPoints, maxDPPoints);
+   }
+
+  const count = Math.floor(cappedPoints.length / 2);
+  if (count < 3 || tolerance <= 0) return [...cappedPoints];
 
   const keep = new Uint8Array(count);
   keep[0] = 1;
@@ -85,26 +93,26 @@ export function simplifyStroke(points: number[], tolerance = INK_SIMPLIFY_TOLERA
     let worstIndex = -1;
     for (let index = first + 1; index < last; index += 1) {
       const distance = perpendicularDistance(
-        points[index * 2], points[index * 2 + 1],
-        points[first * 2], points[first * 2 + 1],
-        points[last * 2], points[last * 2 + 1]
-      );
+        cappedPoints[index * 2], cappedPoints[index * 2 + 1],
+        cappedPoints[first * 2], cappedPoints[first * 2 + 1],
+        cappedPoints[last * 2], cappedPoints[last * 2 + 1]
+         );
       if (distance > worst) {
         worst = distance;
         worstIndex = index;
-      }
-    }
+       }
+     }
     if (worstIndex >= 0 && worst > tolerance) {
       keep[worstIndex] = 1;
       stack.push([first, worstIndex], [worstIndex, last]);
-    }
-  }
+     }
+   }
 
   const simplified: number[] = [];
   for (let index = 0; index < count; index += 1) {
     if (!keep[index]) continue;
-    simplified.push(points[index * 2], points[index * 2 + 1]);
-  }
+    simplified.push(cappedPoints[index * 2], cappedPoints[index * 2 + 1]);
+   }
   return simplified;
 }
 
@@ -124,24 +132,24 @@ export function strokeBounds(strokes: InkStroke[], padding = INK_PADDING): InkBo
       if (x > maxX) maxX = x;
       if (y < minY) minY = y;
       if (y > maxY) maxY = y;
-    }
-  }
+     }
+   }
   if (!Number.isFinite(minX)) return null;
   return {
     x: minX - padding,
     y: minY - padding,
     w: maxX - minX + padding * 2,
     h: maxY - minY + padding * 2
-  };
+   };
 }
 
 /** Shift every stroke by a delta — used to keep points relative after a re-fit. */
 export function translateStrokes(strokes: InkStroke[], dx: number, dy: number): InkStroke[] {
   if (dx === 0 && dy === 0) return strokes;
   return strokes.map((stroke) => ({
-    ...stroke,
+     ...stroke,
     points: stroke.points.map((value, index) => index % 2 === 0 ? value + dx : value + dy)
-  }));
+   }));
 }
 
 /**
@@ -158,13 +166,13 @@ export function readLegacyStroke(payload: Record<string, unknown>): InkStroke | 
     const { x, y } = point as { x?: unknown; y?: unknown };
     if (typeof x !== 'number' || typeof y !== 'number') continue;
     flat.push(x, y);
-  }
+   }
   if (flat.length < 4) return null;
   return {
     points: flat,
     color: typeof payload.color === 'string' ? payload.color : INK_DEFAULT_COLOR,
     width: typeof payload.width === 'number' && payload.width > 0 ? payload.width : INK_DEFAULT_WIDTH
-  };
+   };
 }
 
 /** Read strokes off a node payload, discarding anything malformed. */
@@ -175,17 +183,17 @@ export function readStrokes(raw: unknown): InkStroke[] {
     if (!entry || typeof entry !== 'object') continue;
     const stroke = entry as Record<string, unknown>;
     const points = Array.isArray(stroke.points)
-      ? stroke.points.filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
-      : [];
-    // An odd count means a truncated pair; drop the orphan rather than reading
-    // the next stroke's x as this one's y.
+       ? stroke.points.filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+       : [];
+     // An odd count means a truncated pair; drop the orphan rather than reading
+     // the next stroke's x as this one's y.
     if (points.length < 4) continue;
     strokes.push({
       points: points.length % 2 === 0 ? points : points.slice(0, -1),
       color: typeof stroke.color === 'string' ? stroke.color.slice(0, 32) : INK_DEFAULT_COLOR,
       width: typeof stroke.width === 'number' && stroke.width > 0 ? Math.min(64, stroke.width) : INK_DEFAULT_WIDTH
-    });
-  }
+     });
+   }
   return strokes;
 }
 
@@ -199,14 +207,14 @@ export function paintStrokes(context: CanvasRenderingContext2D, strokes: InkStro
     context.strokeStyle = stroke.color;
     context.lineWidth = stroke.width;
     context.moveTo(stroke.points[0], stroke.points[1]);
-    // Quadratic midpoints turn a sampled polyline into a smooth curve without
-    // needing to store control points.
+     // Quadratic midpoints turn a sampled polyline into a smooth curve without
+     // needing to store control points.
     for (let index = 2; index < stroke.points.length - 2; index += 2) {
       const midX = (stroke.points[index] + stroke.points[index + 2]) / 2;
       const midY = (stroke.points[index + 1] + stroke.points[index + 3]) / 2;
       context.quadraticCurveTo(stroke.points[index], stroke.points[index + 1], midX, midY);
-    }
+     }
     context.lineTo(stroke.points[stroke.points.length - 2], stroke.points[stroke.points.length - 1]);
     context.stroke();
-  }
+   }
 }

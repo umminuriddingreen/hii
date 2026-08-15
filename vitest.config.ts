@@ -1,17 +1,25 @@
 import { fileURLToPath } from 'node:url';
-import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
-  plugins: [svelte()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./', import.meta.url)) },
     conditions: ['browser']
   },
   test: {
     environment: 'jsdom',
-    include: ['tests/unit/**/*.test.ts', 'src/**/*.test.{ts,js}'],
-    setupFiles: ['./src/test/setup.ts'],
+    include: [
+      'tests/unit/workspace-connections.test.ts',
+      'tests/unit/workspace-history-frames.test.ts',
+      'tests/unit/workspace-layout.test.ts',
+      'tests/unit/workspace-persistence.test.ts',
+      'tests/unit/workspace-rebase.test.ts',
+      'tests/unit/workspace-scenes.test.ts',
+      'tests/unit/workspace-selection.test.ts',
+      'tests/unit/workspace-snap.test.ts',
+      'tests/unit/workspace-tidy.test.ts',
+      'tests/unit/workspace-viewport.test.ts'
+    ],
     passWithNoTests: false,
     restoreMocks: true
   }

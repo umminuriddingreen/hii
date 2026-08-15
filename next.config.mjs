@@ -1,9 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  output: 'standalone',
+  output: 'export',
+  images: { unoptimized: true },
   typescript: {
-    tsconfigPath: './tsconfig.next.json'
+    tsconfigPath: './tsconfig.json'
   }
 };
 

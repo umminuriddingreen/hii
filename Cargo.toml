@@ -1,6 +1,6 @@
 [workspace]
-members = ["cli", "native-runner"]
-exclude = ["src-tauri", "aii/workstation/src-tauri"]
+members = ["crates/hii-core", "cli", "native-runner"]
+exclude = ["src-tauri"]
 resolver = "2"
 
 [profile.release]

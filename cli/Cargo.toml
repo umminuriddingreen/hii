@@ -3,7 +3,7 @@ name = "hii-cli"
 version = "0.1.0"
 edition = "2021"
 description = "Fast, local-first workspace agent for HII"
-license = "UNLICENSED"
+license-file = "../LICENSE"
 
 [[bin]]
 name = "hii"
@@ -21,6 +21,7 @@ crossterm = "0.28.1"
 ctrlc = "3.4.5"
 dirs = "5.0.1"
 ignore = "0.4.23"
+hii-core = { path = "../crates/hii-core" }
 libc = "0.2.177"
 regex = "1.11.1"
 ring = "0.17.14"

@@ -84,14 +84,9 @@ pub struct UserModelPreference {
 
 impl AppPaths {
     pub fn discover() -> Result<Self, String> {
-        let home = home_dir()?;
         Ok(Self {
-            repo: env::var_os("HII_ROOT")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| home.join("hii")),
-            runtime: env::var_os("HII_RUNTIME_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| home.join(".hii")),
+            repo: hii_core::default_workspace_root()?,
+            runtime: hii_core::runtime_root()?,
         })
     }
 

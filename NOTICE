@@ -1,0 +1,95 @@
+HII
+Copyright © 2026 Ummi Nuriddin Green. All rights reserved.
+
+HII™ and Human Information Interface™ are trademarks of the copyright holder.
+See TRADEMARK.md.
+
+════════════════════════════════════════════════════════════════════════════
+  1. SCOPE — what the root LICENSE covers
+════════════════════════════════════════════════════════════════════════════
+
+The root LICENSE (Business Source License 1.1) governs the first-party HII
+source in this repository ONLY. It does NOT relicense, and makes no claim
+over, either:
+
+  (a) anything under `external/` (see section 3), or
+  (b) the directories listed in section 2 as Apache-2.0.
+
+Open the interfaces. Control the implementation.
+
+════════════════════════════════════════════════════════════════════════════
+  2. FIRST-PARTY LICENSE MAP
+════════════════════════════════════════════════════════════════════════════
+
+Business Source License 1.1  →  Apache-2.0 on the Change Date
+  Full text: ./LICENSE
+
+    aii/daemon/            HII daemon (hiid)
+    aii/admin-agent/       administrative agent runtime
+    aii/model-runtime/     model routing and execution
+    aii/capabilities/      capability registry implementation
+    aii/codex/             Codex substrate integration
+    aii/workstation/       AII workstation control plane
+    cli/                   hii command-line interface (Rust)
+    native-runner/         native execution runner (Rust)
+    src-tauri/             desktop shell (Tauri)
+    src/                   SvelteKit web + control surfaces
+    app/                   Next.js surfaces
+    lib/                   shared runtime libraries (incl. lib/server)
+    server/                PTY gateway and local services
+    scripts/               operational tooling
+
+Apache License, Version 2.0
+  Full text: ./LICENSES/Apache-2.0.txt (and a copy in each directory below)
+
+    protocol/                  HII protocol, object schemas, receipt format,
+                               Operational Graph schema, agent and plugin
+                               interfaces
+    extensions/hii-stream-mcp/ MCP extension
+    skills/                    skill definitions
+    aii/skills/                skill definitions
+
+  The Apache-2.0 tier is the integration surface, and it is meant to be
+  genuinely open. Anyone — Codex, Claude, Hermes, local models, third-party
+  tools — may implement against it, in any product, commercial or not, with
+  the patent grant Apache-2.0 provides. That tier is deliberately the Change
+  License of the BSL core as well, so a converted core lands in the same
+  ecosystem as the protocol.
+
+Proprietary — not in this repository
+
+    Hosted HII infrastructure, managed services, and the HII network.
+
+════════════════════════════════════════════════════════════════════════════
+  3. THIRD-PARTY WORKS UNDER external/
+════════════════════════════════════════════════════════════════════════════
+
+`external/`, `browser/`, and `social/` are local research and vendor
+workspaces. They are **gitignored and not tracked by this repository** — see
+.gitignore — so they are neither distributed with nor part of the Licensed
+Work, and the root LICENSE makes no claim over them.
+
+For anyone working from a full local checkout: `external/` holds unmodified or
+lightly-patched third-party repositories, each governed exclusively by its own
+license, retained alongside it:
+
+    external/ECC/                 MIT      © 2026 Affaan Mustafa
+    external/JobSpy/              MIT      © 2023 Cullen Watson
+    external/editor/              MIT      © 2026 Pascal Group Inc.
+    external/marketingskills/     MIT      © 2025 Corey Haines
+    external/prime-agent/         MIT      © 2025 Mario Zechner
+    external/scenesmith/          MIT      © 2026 Nicholas Pfaff
+    external/text-to-cad/         MIT      © 2026 Thompson Labs LLC
+    external/helium-macos/        GPL-3.0  + LICENSE.ungoogled_chromium
+    external/hii-browser/         GPL-3.0  + LICENSE.ungoogled_chromium
+    external/agent-harness-benchmark/   no license file present locally
+    external/mac_computer_use/          no license file present locally
+
+The GPL-3.0 entries are separate programs, not linked into or distributed as
+part of the Licensed Work; their presence on disk does not subject the Licensed
+Work to GPL terms. The two entries with no license file must have their
+provenance and terms established before any of their code is copied into the
+first-party tree — see docs/public-release-checklist.md.
+
+Runtime dependencies installed via npm, cargo, and pip retain their own
+licenses; see package-lock.json and Cargo.lock.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LicenseRef-BSL-1.1
 import { createServer } from 'node:http';
 import { handler } from './build/handler.js';
 import { WebSocketServer } from 'ws';
