@@ -13,7 +13,6 @@ import {
 import { makeNode, seedFor, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
 import type { WorkspaceNode } from '@/lib/workspace/types';
 import { NodeFrame } from './NodeFrame';
-import { SpatialActivityLayer } from './SpatialActivityLayer';
 import { useCamera } from './useCamera';
 import { useWorkspace } from './useWorkspace';
 
@@ -484,7 +483,6 @@ export function HiiRoot() {
         seedsFromDataTransfer(event.dataTransfer).then((seeds) => spawnSeeds(seeds, at));
       }}
     >
-      {workspace.nodes.length > 0 && <SpatialActivityLayer nodes={workspace.nodes} selectedIds={selected} />}
       <div ref={camera.worldRef} className="hii-world">
         {workspace.nodes.map((node) => (
           <NodeFrame
