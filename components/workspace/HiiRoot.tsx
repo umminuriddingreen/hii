@@ -223,23 +223,36 @@ function NodeBody({ node, onPayload }: { node: WorkspaceNode; onPayload: (patch:
 function Prompt({
   anchor,
   initialValue,
+  response,
+  status,
   onDismiss,
   onSubmit
 }: {
   anchor: Point;
   initialValue: string;
+  response: string;
+  status: 'idle' | 'running' | 'completed' | 'failed';
   onDismiss: () => void;
   onSubmit: (value: string) => void;
 }) {
   const [value, setValue] = useState(initialValue);
   const input = useRef<HTMLInputElement | null>(null);
+  const commands = value.startsWith('/')
+    ? [
+        ['/codex <task>', 'run with Codex'],
+        ['/claude <task>', 'run with Claude'],
+        ['/model [name]', 'choose a local model'],
+        ['/proof', 'inspect the latest receipt'],
+        ['/status', 'show HII state']
+      ].filter(([command]) => command.startsWith(value.trim().toLowerCase()) || value.trim() === '/')
+    : [];
   useEffect(() => { input.current?.focus(); }, []);
   return (
     <div
       className="hii-prompt-shell"
       style={{ left: Math.min(anchor.x, window.innerWidth - 24), top: Math.min(anchor.y, window.innerHeight - 90) }}
     >
-      <form className="hii-prompt" onSubmit={(event) => { event.preventDefault(); if (value.trim()) onSubmit(value.trim()); }}>
+      <form className="hii-prompt" data-status={status} onSubmit={(event) => { event.preventDefault(); if (value.trim() && status !== 'running') onSubmit(value.trim()); }}>
         <div className="hii-prompt-line">
           <input
             ref={input}
@@ -252,12 +265,14 @@ function Prompt({
                 onDismiss();
               }
             }}
-            placeholder="Start with what you have…"
+            placeholder={response ? 'Continue the conversation…' : 'Start with what you have…'}
             aria-label="Tell HII what should happen"
             autoComplete="off"
             spellCheck
           />
         </div>
+        {response && <output className="hii-prompt-response" aria-live="polite">{response}</output>}
+        {commands.length > 0 && <div className="hii-prompt-commands" aria-label="HII commands">{commands.map(([command, description]) => <span key={command}><b>{command}</b>{description}</span>)}</div>}
       </form>
     </div>
   );
@@ -268,7 +283,7 @@ export function HiiRoot() {
   const camera = useCamera(() => save.current());
   const workspace = useWorkspace(camera.getViewport);
   const [selected, setSelected] = useState<string[]>([]);
-  const [prompt, setPrompt] = useState<{ anchor: Point; initialValue: string } | null>(null);
+  const [prompt, setPrompt] = useState<{ anchor: Point; initialValue: string; response: string; status: 'idle' | 'running' | 'completed' | 'failed' } | null>(null);
   const mouse = useRef<Point>({ x: 400, y: 280 });
   const runs = useRef(new Map<string, string>());
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -337,7 +352,7 @@ export function HiiRoot() {
   const selectedNodes = useMemo(() => workspace.nodes.filter((node) => selected.includes(node.id)), [selected, workspace.nodes]);
 
   const submit = useCallback(async (intent: string, anchor: Point) => {
-    setPrompt(null);
+    setPrompt((current) => current ? { ...current, initialValue: intent, response: 'Thinking…', status: 'running' } : current);
     const at = camera.toWorld(anchor.x, anchor.y);
     const [intentId] = spawnSeeds([seedFor('intent', {
       text: intent,
@@ -388,6 +403,7 @@ export function HiiRoot() {
         payload: { text: intent, title: intent, status: 'running', output: 'Working…', contextCount: selectedNodes.length, contextIds: selected }
       });
     } catch (error) {
+      setPrompt((current) => current ? { ...current, response: error instanceof Error ? error.message : 'HII could not start the model.', status: 'failed' } : current);
       workspace.patchNode(intentId, {
         object: { kind: 'intent', owner: 'human', status: 'failed' },
         payload: { text: intent, title: intent, status: 'failed', output: error instanceof Error ? error.message : 'HII could not start the agent.', contextCount: selectedNodes.length, contextIds: selected }
@@ -403,6 +419,22 @@ export function HiiRoot() {
       const node = workspace.nodes.find((entry) => entry.id === nodeId);
       const previous = text(node?.payload.output);
       const output = event.text ? `${previous}${previous ? '\n' : ''}${event.text}` : previous;
+      setPrompt((current) => {
+        if (!current || current.status !== 'running') return current;
+        const prior = current.response === 'Thinking…' ? '' : current.response;
+        const response = event.text ? `${prior}${prior ? '\n' : ''}${event.text}` : prior || 'Thinking…';
+        return { ...current, response, status: event.status === 'failed' ? 'failed' : event.status === 'completed' ? 'completed' : 'running' };
+      });
+      setPrompt((current) => {
+        if (!current || current.status !== 'running') return current;
+        const prior = current.response === 'Thinking…' ? '' : current.response;
+        const response = event.text ? `${prior}${prior ? '\n' : ''}${event.text}` : prior || 'Thinking…';
+        return {
+          ...current,
+          response,
+          status: event.status === 'failed' ? 'failed' : event.status === 'completed' ? 'completed' : 'running'
+        };
+      });
       workspace.patchNode(nodeId, {
         object: { ...node?.object, kind: 'intent', owner: 'human', status: event.status === 'progress' || event.status === 'started' ? 'running' : event.status, runId: event.runId, proofRefs: event.receiptPath ? [event.receiptPath] : node?.object?.proofRefs },
         payload: { ...(node?.payload || {}), status: event.status, output, receiptPath: event.receiptPath || '' }
@@ -418,7 +450,7 @@ export function HiiRoot() {
       if (inField(event.target)) return;
       if (event.key === 'Escape') { setPrompt(null); setSelected([]); return; }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? workspace.redo() : workspace.undo(); return; }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setPrompt({ anchor: mouse.current, initialValue: '' }); return; }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setPrompt({ anchor: mouse.current, initialValue: '', response: '', status: 'idle' }); return; }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'u') { event.preventDefault(); fileInput.current?.click(); return; }
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 't') {
         event.preventDefault();
@@ -436,7 +468,7 @@ export function HiiRoot() {
       }
       if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.length === 1) {
         event.preventDefault();
-        setPrompt({ anchor: mouse.current, initialValue: event.key });
+        setPrompt({ anchor: mouse.current, initialValue: event.key, response: '', status: 'idle' });
       }
     };
     const pointermove = (event: PointerEvent) => { mouse.current = { x: event.clientX, y: event.clientY }; };
@@ -500,6 +532,8 @@ export function HiiRoot() {
           key={`${prompt.anchor.x}:${prompt.anchor.y}:${prompt.initialValue}`}
           anchor={prompt.anchor}
           initialValue={prompt.initialValue}
+          response={prompt.response}
+          status={prompt.status}
           onDismiss={() => setPrompt(null)}
           onSubmit={(value) => void submit(value, prompt.anchor)}
         />

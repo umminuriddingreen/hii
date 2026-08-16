@@ -138,6 +138,40 @@ button, input, textarea { font: inherit; }
   font: 16px/1.25 Helvetica, Arial, sans-serif;
 }
 
+.hii-prompt-response {
+  display: block;
+  max-height: min(42vh, 420px);
+  overflow: auto;
+  padding: 14px 18px 18px;
+  border-top: 1px solid var(--faint);
+  color: var(--ink);
+  font: 14px/1.5 Helvetica, Arial, sans-serif;
+  white-space: pre-wrap;
+}
+
+.hii-prompt[data-status="running"] .hii-prompt-response::after {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  margin-left: 4px;
+  vertical-align: -2px;
+  background: var(--ink);
+  animation: hii-cursor 1s steps(1) infinite;
+}
+
+.hii-prompt-commands {
+  display: grid;
+  gap: 7px;
+  padding: 12px 18px 14px;
+  border-top: 1px solid var(--faint);
+  color: var(--muted);
+  font: 12px/1.3 Helvetica, Arial, sans-serif;
+}
+
+.hii-prompt-commands span { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; }
+.hii-prompt-commands b { color: var(--ink); font-weight: 400; }
+
 
 
 .hii-job-terminal {
