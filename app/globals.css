@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --field: #ffffff;
   --ink: #000000;
   --muted: rgba(0, 0, 0, 0.48);
@@ -10,18 +10,6 @@
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
   background: var(--field);
   color: var(--ink);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --field: #000000;
-    --ink: #ffffff;
-    --muted: rgba(255, 255, 255, 0.5);
-    --faint: rgba(255, 255, 255, 0.14);
-    --surface: rgba(0, 0, 0, 0.94);
-    --selection: #78a7ff;
-    --danger: #ff8177;
-  }
 }
 
 * { box-sizing: border-box; }
@@ -51,25 +39,6 @@ button, input, textarea { font: inherit; }
   background: var(--field);
   color: var(--ink);
   outline: none;
-}
-
-.hii-spatial-activity {
-  position: fixed;
-  z-index: 0;
-  inset: 0;
-  overflow: hidden;
-  opacity: .72;
-  pointer-events: none;
-  background:
-    radial-gradient(ellipse at 50% 52%, color-mix(in srgb, var(--selection) 5%, transparent), transparent 52%),
-    linear-gradient(to bottom, transparent 72%, color-mix(in srgb, var(--ink) 2%, transparent));
-}
-
-.hii-spatial-activity::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, var(--field), transparent 18%, transparent 82%, var(--field));
 }
 
 .hii-world {
