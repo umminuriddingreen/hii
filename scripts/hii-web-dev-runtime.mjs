@@ -24,7 +24,7 @@ function headers(status = 200) {
     status,
     headers: {
       'content-type': 'application/json; charset=utf-8',
-      'access-control-allow-origin': 'http://127.0.0.1:3042',
+      'access-control-allow-origin': `http://127.0.0.1:${port - 1}`,
       'access-control-allow-methods': 'GET,POST,OPTIONS',
       'access-control-allow-headers': 'content-type',
       'cache-control': 'no-store'
@@ -66,7 +66,7 @@ function cli(args) {
 
 function startAgent(input) {
   const id = `web-${randomUUID()}`;
-  const state = { version: 1, runId: id, status: 'started', text: `Working in ${input.workspaceRoot || repo}`, receiptPath: undefined };
+  const state = { version: 1, runId: id, status: 'started', text: '', receiptPath: undefined };
   runs.set(id, state);
   const args = [
     '--cwd', String(input.workspaceRoot || repo),
@@ -83,13 +83,7 @@ function startAgent(input) {
       try {
         const event = JSON.parse(line);
         const data = event.data || {};
-        if (event.event === 'model.delta' && data.channel === 'content' && data.text) {
-          state.text = `${state.text || ''}${state.text ? '\n' : ''}${data.text}`;
-          state.status = 'progress';
-        } else if (event.event === 'tool.started') {
-          state.text = `${state.text || ''}${state.text ? '\n' : ''}${data.tool || 'tool'} · ${data.target || 'working'}`;
-          state.status = 'progress';
-        } else if (event.event === 'run.finished') {
+        if (event.event === 'run.finished') {
           state.text = data.summary || state.text;
           state.receiptPath = data.proof;
         }

@@ -62,14 +62,26 @@ export type InformationSearchResult = {
   capturedAt?: string;
 };
 
-const DEV_RUNTIME = 'http://127.0.0.1:3043';
+function developmentRuntime() {
+  if (typeof window === 'undefined') return 'http://127.0.0.1:3043';
+  const port = Number(window.location.port);
+  if (Number.isFinite(port) && port > 0) {
+    return `${window.location.protocol}//${window.location.hostname}:${port + 1}`;
+  }
+  return 'http://127.0.0.1:3043';
+}
 const webAgentListeners = new Set<(event: AgentEventV1) => void>();
 
 async function developmentRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${DEV_RUNTIME}${path}`, {
+  let response: Response;
+  try {
+    response = await fetch(`${developmentRuntime()}${path}`, {
     ...init,
     headers: { 'content-type': 'application/json', ...(init?.headers || {}) }
-  });
+    });
+  } catch {
+    throw new Error('HII’s local inference service is unavailable. Start the current workspace preview and try again.');
+  }
   const value = await response.json() as T & { error?: string };
   if (!response.ok) throw new Error(value.error || `HII development runtime returned ${response.status}.`);
   return value;
