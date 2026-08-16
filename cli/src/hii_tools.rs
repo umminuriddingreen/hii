@@ -17,6 +17,8 @@ use std::{
 /// toolbelt. Kept in one place so the schema, dispatcher, and docs agree.
 pub const HII_TOOLS: &[&str] = &[
     "hii_context",
+    "info_find",
+    "info_capture",
     "og_next",
     "caps_check",
     "board_read",
@@ -38,7 +40,10 @@ pub fn is_hii_tool(tool: &str) -> bool {
 
 /// Does this HII tool change state (and so count as a mutation for authority)?
 pub fn is_mutating(tool: &str) -> bool {
-    matches!(tool, "board_write" | "schedule_write" | "bridge_send")
+    matches!(
+        tool,
+        "info_capture" | "board_write" | "schedule_write" | "bridge_send"
+    )
 }
 
 /// Dispatch an HII tool. `repo` is the HII repository root; `query` carries the
@@ -48,6 +53,29 @@ pub fn execute(repo: &Path, tool: &str, arguments: Option<&Value>) -> ToolResult
     let arg = arg.trim();
     let result = match tool {
         "hii_context" => hii(repo, &["context", "--json"]).and_then(compact_context),
+        "info_find" => {
+            if arg.is_empty() {
+                Err("info_find needs a search query".to_string())
+            } else {
+                let web = arguments
+                    .and_then(|value| value.get("web"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                if web {
+                    hii(repo, &["info", "find", arg, "--web", "--json"])
+                } else {
+                    hii(repo, &["info", "find", arg, "--json"])
+                }
+            }
+        }
+        "info_capture" => {
+            let url = argument_field(arguments, "url").unwrap_or_else(|| arg.to_string());
+            if url.trim().is_empty() {
+                Err("info_capture needs a http or https URL".to_string())
+            } else {
+                hii(repo, &["info", "capture", url.trim(), "--json"])
+            }
+        }
         "og_next" => hii(repo, &["og", "status"]),
         "caps_check" => hii(repo, &["caps", "show"]),
         "board_read" => hii(repo, &["board"]),
@@ -390,12 +418,16 @@ mod tests {
     #[test]
     fn classifies_hii_tools() {
         assert!(is_hii_tool("og_next"));
+        assert!(is_hii_tool("info_find"));
+        assert!(is_hii_tool("info_capture"));
         assert!(is_hii_tool("board_write"));
         assert!(!is_hii_tool("write"));
     }
 
     #[test]
     fn marks_mutating_hii_tools() {
+        assert!(is_mutating("info_capture"));
+        assert!(!is_mutating("info_find"));
         assert!(is_mutating("board_write"));
         assert!(is_mutating("bridge_send"));
         assert!(!is_mutating("board_read"));

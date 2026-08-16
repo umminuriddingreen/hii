@@ -337,6 +337,11 @@ enum Commands {
         #[arg(long, help = "Emit results as JSON")]
         json: bool,
     },
+    #[command(about = "Find, capture, inspect, and export durable information objects")]
+    Info {
+        #[command(subcommand)]
+        action: InfoCommand,
+    },
     #[command(about = "Compile intent into a capability, authority, execution, and proof plan")]
     Pipe {
         #[arg(required = true, num_args = 1.., help = "Human intent to compile")]
@@ -414,6 +419,50 @@ enum Commands {
     Legacy {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum InfoCommand {
+    #[command(about = "Capture a web source with content, images, lineage, and a receipt")]
+    Capture {
+        url: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Search captured information or discover sources on the web")]
+    Find {
+        #[arg(required = true, num_args = 1..)]
+        query: Vec<String>,
+        #[arg(
+            long,
+            help = "Discover uncaptured web sources instead of searching local state"
+        )]
+        web: bool,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Inspect one source and its linked image objects")]
+    Inspect {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "List immutable captured versions of one source")]
+    Changes {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Export a source-backed Markdown artifact with a receipt")]
+    Export {
+        id: String,
+        #[arg(long, value_name = "PATH")]
+        output: PathBuf,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1025,6 +1074,13 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             } else {
                 capability_index::find(&paths, &query, limit, json)?;
             }
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Info { action }) => {
+            let workspace = cli
+                .cwd
+                .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+            information_command(&paths, &workspace, action)?;
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Pipe {
@@ -1818,6 +1874,114 @@ fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
     }
     println!("\n{}", if ok { "ready" } else { "not ready" });
     Ok(ok)
+}
+
+fn information_command(
+    paths: &AppPaths,
+    workspace: &std::path::Path,
+    action: InfoCommand,
+) -> Result<(), String> {
+    use hii_core::information;
+    match action {
+        InfoCommand::Capture { url, json } => {
+            let result = information::capture(&paths.runtime, workspace, &url)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&result).map_err(|error| error.to_string())?
+                );
+            } else {
+                println!("captured   {}", result.source.title);
+                println!("source     {}", result.source.id);
+                println!("url        {}", result.source.url);
+                println!("images     {}", result.images.len());
+                println!("changed    {}", if result.changed { "yes" } else { "no" });
+                println!("hash       {}", result.source.content_hash);
+                println!("proof      hii proof {}", result.receipt_id);
+            }
+        }
+        InfoCommand::Find {
+            query,
+            web,
+            limit,
+            json,
+        } => {
+            let query = query.join(" ");
+            let results = if web {
+                information::discover_web(&query, limit)?
+            } else {
+                information::search(&paths.runtime, &query, limit)?
+            };
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "query": query,
+                        "scope": if web { "web" } else { "captured" },
+                        "results": results
+                    }))
+                    .map_err(|error| error.to_string())?
+                );
+            } else if results.is_empty() {
+                println!("no information matched {query:?}");
+            } else {
+                for result in results {
+                    println!("{}\n  {}\n  {}", result.title, result.url, result.excerpt);
+                }
+            }
+        }
+        InfoCommand::Inspect { id, json } => {
+            let (source, images) = information::inspect(&paths.runtime, &id)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({ "source": source, "images": images })
+                    )
+                    .map_err(|error| error.to_string())?
+                );
+            } else {
+                println!("{}\n{}\n", source.title, source.url);
+                println!("{}", source.excerpt);
+                println!("\nimages  {}", images.len());
+                println!("hash    {}", source.content_hash);
+            }
+        }
+        InfoCommand::Changes { id, json } => {
+            let versions = information::versions(&paths.runtime, &id)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&versions).map_err(|error| error.to_string())?
+                );
+            } else if versions.is_empty() {
+                println!("no captured versions for {id}");
+            } else {
+                for version in versions {
+                    println!("{}  {}", version.captured_at, version.content_hash);
+                }
+            }
+        }
+        InfoCommand::Export { id, output, json } => {
+            let output = if output.is_absolute() {
+                output
+            } else {
+                workspace.join(output)
+            };
+            let result = information::export_markdown(&paths.runtime, workspace, &id, &output)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&result).map_err(|error| error.to_string())?
+                );
+            } else {
+                println!("exported   {}", result.output_path);
+                println!("hash       {}", result.content_hash);
+                println!("proof      hii proof {}", result.receipt_id);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn proof(
@@ -2769,6 +2933,7 @@ fn is_native_command(command: &str) -> bool {
             | "board"
             | "discover"
             | "find"
+            | "info"
             | "pipe"
             | "skills"
             | "tools"

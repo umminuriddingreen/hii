@@ -19,6 +19,62 @@ export type AgentEventV1 = {
   receiptPath?: string;
 };
 
+export type InformationImage = {
+  id: string;
+  sourceId: string;
+  url: string;
+  alt: string;
+  context: string;
+  position: number;
+};
+
+export type InformationSource = {
+  id: string;
+  url: string;
+  title: string;
+  author: string;
+  siteName: string;
+  publishedAt?: string;
+  excerpt: string;
+  content: string;
+  contentHash: string;
+  rawHash: string;
+  contentType: string;
+  capturedAt: string;
+};
+
+export type InformationCaptureResult = {
+  source: InformationSource;
+  images: InformationImage[];
+  changed: boolean;
+  previousContentHash?: string;
+  receiptId: string;
+  receiptPath: string;
+};
+
+export type InformationSearchResult = {
+  id?: string;
+  url: string;
+  title: string;
+  excerpt: string;
+  siteName: string;
+  contentHash?: string;
+  capturedAt?: string;
+};
+
+const DEV_RUNTIME = 'http://127.0.0.1:3043';
+const webAgentListeners = new Set<(event: AgentEventV1) => void>();
+
+async function developmentRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${DEV_RUNTIME}${path}`, {
+    ...init,
+    headers: { 'content-type': 'application/json', ...(init?.headers || {}) }
+  });
+  const value = await response.json() as T & { error?: string };
+  if (!response.ok) throw new Error(value.error || `HII development runtime returned ${response.status}.`);
+  return value;
+}
+
 function isTauri() {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
@@ -45,9 +101,35 @@ export async function writeWorkspace(document: WorkspaceDoc): Promise<WorkspaceD
 }
 
 export async function startAgent(request: AgentRequestV1): Promise<AgentStartResult> {
-  if (!isTauri()) throw new Error('Agent execution is available in the HII desktop app.');
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<AgentStartResult>('agent_start', { request });
+  if (isTauri()) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<AgentStartResult>('agent_start', { request });
+  }
+  const started = await developmentRequest<AgentStartResult & AgentEventV1>('/agent', {
+    method: 'POST',
+    body: JSON.stringify(request)
+  });
+  let previousText = '';
+  let previousStatus = 'started';
+  const poll = async () => {
+    try {
+      const state = await developmentRequest<AgentEventV1>(`/agent/${started.runId}`);
+      const nextText = state.text || '';
+      const delta = nextText.startsWith(previousText) ? nextText.slice(previousText.length).trimStart() : nextText;
+      if (delta || state.status !== previousStatus || state.receiptPath) {
+        for (const listener of webAgentListeners) listener({ ...state, text: delta || undefined });
+      }
+      previousText = nextText;
+      previousStatus = state.status;
+      if (!['completed', 'failed', 'cancelled'].includes(state.status)) window.setTimeout(poll, 400);
+    } catch (error) {
+      for (const listener of webAgentListeners) {
+        listener({ version: 1, runId: started.runId, status: 'failed', text: error instanceof Error ? error.message : String(error) });
+      }
+    }
+  };
+  window.setTimeout(poll, 100);
+  return { runId: started.runId };
 }
 
 export async function cancelAgent(runId: string): Promise<void> {
@@ -57,7 +139,37 @@ export async function cancelAgent(runId: string): Promise<void> {
 }
 
 export async function listenAgentEvents(handler: (event: AgentEventV1) => void) {
-  if (!isTauri()) return () => {};
+  if (!isTauri()) {
+    webAgentListeners.add(handler);
+    return () => { webAgentListeners.delete(handler); };
+  }
   const { listen } = await import('@tauri-apps/api/event');
   return listen<AgentEventV1>('hii://agent-event', (event) => handler(event.payload));
+}
+
+export async function captureInformation(url: string, workspaceRoot?: string): Promise<InformationCaptureResult> {
+  if (isTauri()) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<InformationCaptureResult>('information_capture', { url, workspaceRoot });
+  }
+  return developmentRequest<InformationCaptureResult>('/information/capture', {
+    method: 'POST',
+    body: JSON.stringify({ url, workspaceRoot })
+  });
+}
+
+export async function findInformation(query: string, options: { web?: boolean; limit?: number } = {}) {
+  if (isTauri()) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<InformationSearchResult[]>('information_find', {
+      query,
+      web: Boolean(options.web),
+      limit: options.limit || 10
+    });
+  }
+  const value = await developmentRequest<{ results: InformationSearchResult[] }>('/information/find', {
+    method: 'POST',
+    body: JSON.stringify({ query, web: Boolean(options.web), limit: options.limit || 10 })
+  });
+  return value.results;
 }

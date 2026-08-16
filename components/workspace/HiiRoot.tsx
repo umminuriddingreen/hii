@@ -1,7 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { listenAgentEvents, startAgent, type AgentEventV1 } from '@/lib/client/hii-bridge';
+import {
+  captureInformation,
+  findInformation,
+  listenAgentEvents,
+  startAgent,
+  type AgentEventV1,
+  type InformationCaptureResult,
+  type InformationSearchResult
+} from '@/lib/client/hii-bridge';
 import { makeNode, seedFor, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
 import type { WorkspaceNode } from '@/lib/workspace/types';
 import { NodeFrame } from './NodeFrame';
@@ -19,29 +27,123 @@ function titleFor(node: WorkspaceNode) {
   return text(node.payload.title) || text(node.payload.name) || node.object?.kind || node.type;
 }
 
-function normalizeBrowserUrl(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return 'about:blank';
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  if (/^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(trimmed)) return `https://${trimmed}`;
-  return `https://www.google.com/search?igu=1&q=${encodeURIComponent(trimmed)}`;
+function hostFor(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
 }
 
-function BrowserBody({ node, onPayload }: { node: WorkspaceNode; onPayload: (patch: Record<string, unknown>) => void }) {
-  const url = text(node.payload.url) || 'https://www.google.com/webhp?igu=1';
-  const [address, setAddress] = useState(url);
+function capturedInformationSeeds(result: InformationCaptureResult): NodeSeed[] {
+  const source = result.source;
+  const sourceSeed: NodeSeed = {
+    type: 'link',
+    w: 480,
+    h: 260,
+    object: {
+      kind: 'source',
+      owner: 'hii',
+      status: 'ready',
+      source: source.url,
+      capabilityId: 'hii.information.capture',
+      proofRefs: [result.receiptPath, `sha256:${source.contentHash}`],
+      audit: [{ ts: source.capturedAt, actor: 'hii', action: 'captured source as durable information' }]
+    },
+    payload: {
+      infoId: source.id,
+      title: source.title,
+      url: source.url,
+      excerpt: source.excerpt,
+      author: source.author,
+      siteName: source.siteName,
+      capturedAt: source.capturedAt,
+      contentHash: source.contentHash,
+      changed: result.changed,
+      receiptId: result.receiptId
+    }
+  };
+  const imageSeeds = result.images.slice(0, 8).map<NodeSeed>((image) => ({
+    type: 'image',
+    w: 360,
+    h: 280,
+    object: {
+      kind: 'source',
+      owner: 'hii',
+      status: 'ready',
+      source: image.url,
+      capabilityId: 'hii.information.capture',
+      parentId: source.id,
+      proofRefs: [result.receiptPath],
+      audit: [{ ts: source.capturedAt, actor: 'hii', action: 'linked image to captured source' }]
+    },
+    payload: {
+      infoId: image.id,
+      sourceId: source.id,
+      title: image.alt || source.title,
+      name: image.alt || 'source image',
+      url: image.url,
+      context: image.context,
+      capturedAt: source.capturedAt
+    }
+  }));
+  return [sourceSeed, ...imageSeeds];
+}
+
+function discoveredInformationSeed(result: InformationSearchResult): NodeSeed {
+  return {
+    type: 'link',
+    w: 420,
+    h: 220,
+    object: {
+      kind: 'source',
+      owner: 'hii',
+      status: result.id ? 'ready' : 'proposed',
+      source: result.url,
+      capabilityId: 'hii.information.find',
+      proofRefs: result.contentHash ? [`sha256:${result.contentHash}`] : undefined,
+      audit: [{ ts: result.capturedAt || new Date().toISOString(), actor: 'hii', action: result.id ? 'retrieved captured information' : 'discovered source candidate' }]
+    },
+    payload: {
+      infoId: result.id,
+      title: result.title,
+      url: result.url,
+      excerpt: result.excerpt,
+      siteName: result.siteName,
+      capturedAt: result.capturedAt,
+      contentHash: result.contentHash
+    }
+  };
+}
+
+/**
+ * Browser nodes existed before HII moved to information-first interaction.
+ * Keep their source data intact, but project them as durable information
+ * objects instead of asking the user to operate an embedded browser.
+ */
+function SourceBody({ node }: { node: WorkspaceNode }) {
+  const payload = node.payload;
+  const url = text(payload.url);
+  const title = text(payload.title) || text(payload.name) || hostFor(url) || 'Web source';
+  const excerpt = text(payload.excerpt) || text(payload.summary) || text(payload.content) || text(payload.selection);
+  const capturedAt = text(payload.capturedAt) || text(payload.captured_at);
+  const provenance = text(payload.source) || text(node.object?.source) || hostFor(url) || 'saved web source';
+  const legacy = node.type === 'browser';
   return (
-    <section className="hii-browser">
-      <form onSubmit={(event) => {
-        event.preventDefault();
-        const next = normalizeBrowserUrl(address);
-        setAddress(next);
-        onPayload({ url: next, title: next });
-      }}>
-        <input value={address} onChange={(event) => setAddress(event.target.value)} aria-label="Browser address or search" autoFocus />
-      </form>
-      <iframe src={url} title={text(node.payload.title) || 'HII browser'} sandbox="allow-forms allow-scripts allow-same-origin allow-popups" />
-    </section>
+    <article className="hii-source" data-legacy={legacy || undefined}>
+      <header>
+        <span>{legacy ? 'saved web source' : 'source'}</span>
+        <small>{capturedAt ? `captured ${capturedAt}` : 'provenance preserved'}</small>
+      </header>
+      <div>
+        <strong>{title}</strong>
+        {excerpt && <p>{excerpt}</p>}
+      </div>
+      <footer>
+        <span>{provenance}</span>
+        {/^https?:\/\//i.test(url) && <a href={url} target="_blank" rel="noreferrer">Open source ↗</a>}
+      </footer>
+    </article>
   );
 }
 
@@ -49,20 +151,20 @@ function RequestBody({ node }: { node: WorkspaceNode }) {
   const prompt = text(node.payload.text) || text(node.payload.title);
   const output = text(node.payload.output);
   const status = text(node.payload.status);
+  const contextCount = Number(node.payload.contextCount) || 0;
+  const state = output.length > 360 ? `…${output.slice(-359)}` : output;
   return (
-    <article className="hii-request hii-job-terminal" data-status={status || 'ready'}>
+    <article className="hii-intent-object" data-status={status || 'ready'}>
       <header>
-        <span className="hii-terminal-lamp" aria-hidden="true" />
-        <strong>intent</strong>
-        <small>{status || 'ready'}</small>
+        <span>intent</span>
+        <small>{status || 'active'}</small>
       </header>
-      <pre>
-        <span className="hii-terminal-path">hii://workspace/intent</span>
-        <span><b className="hii-command-mark">›</b> {prompt}</span>
-        {(output || status === 'running') && <span className="hii-request-output">{output || 'Working…'}</span>}
-        {status === 'running' && <span className="hii-terminal-prompt"><b>›</b> <i aria-hidden="true" /></span>}
-      </pre>
-      <footer><span>proof</span><code>{text(node.payload.receiptPath) || 'pending verified result'}</code></footer>
+      <p>{prompt}</p>
+      {(state || status === 'running') && <div className="hii-intent-state">{state || 'Observing and acting…'}</div>}
+      <footer>
+        <span>{contextCount ? `${contextCount} world object${contextCount === 1 ? '' : 's'} in scope` : 'world scope open'}</span>
+        <code>{text(node.payload.receiptPath) || (status === 'running' ? 'proof pending' : 'persistent')}</code>
+      </footer>
     </article>
   );
 }
@@ -96,7 +198,7 @@ function NodeBody({ node, onPayload }: { node: WorkspaceNode; onPayload: (patch:
   const url = text(payload.url);
   const name = text(payload.name) || text(payload.title) || node.type;
 
-  if (node.type === 'browser') return <BrowserBody node={node} onPayload={onPayload} />;
+  if (node.type === 'browser' || node.type === 'link') return <SourceBody node={node} />;
   if (node.type === 'terminal') return <TerminalBody node={node} />;
   if (node.type === 'intent') return <RequestBody node={node} />;
   if (node.type === 'html') return <iframe className="hii-html" srcDoc={text(payload.srcdoc)} title={name} sandbox="allow-forms allow-scripts" />;
@@ -105,9 +207,6 @@ function NodeBody({ node, onPayload }: { node: WorkspaceNode; onPayload: (patch:
     return payload.kind === 'audio'
       ? <audio className="hii-node-video" src={url} controls />
       : <video className="hii-node-video" src={url} controls />;
-  }
-  if (node.type === 'link' && url) {
-    return <a className="hii-node-link" href={url} target="_blank" rel="noreferrer"><strong>{name}</strong><small>{url}</small></a>;
   }
   if (node.type === 'note' || node.type === 'canvas-text') {
     return (
@@ -139,7 +238,10 @@ function Prompt({
   const input = useRef<HTMLInputElement | null>(null);
   useEffect(() => { input.current?.focus(); }, []);
   return (
-    <div className="hii-prompt-shell" style={{ left: Math.min(anchor.x, window.innerWidth - 24), top: Math.min(anchor.y, window.innerHeight - 90) }}>
+    <div
+      className="hii-prompt-shell"
+      style={{ left: Math.min(anchor.x, window.innerWidth - 24), top: Math.min(anchor.y, window.innerHeight - 90) }}
+    >
       <form className="hii-prompt" onSubmit={(event) => { event.preventDefault(); if (value.trim()) onSubmit(value.trim()); }}>
         <div className="hii-prompt-line">
           <span aria-hidden="true">›</span>
@@ -147,14 +249,20 @@ function Prompt({
             ref={input}
             value={value}
             onChange={(event) => setValue(event.target.value)}
-            onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); onDismiss(); } }}
-            placeholder="Run anything…"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                setValue('');
+                onDismiss();
+              }
+            }}
+            placeholder="Understand, find, make, or act…"
             aria-label="Tell HII what should happen"
             autoComplete="off"
             spellCheck
           />
         </div>
-        <div className="hii-prompt-context">{contextLabel || 'cursor context · local workspace'}</div>
+        <div className="hii-prompt-context">{contextLabel || 'web · files · models · tools'}</div>
       </form>
     </div>
   );
@@ -166,7 +274,6 @@ export function HiiRoot() {
   const workspace = useWorkspace(camera.getViewport);
   const [selected, setSelected] = useState<string[]>([]);
   const [prompt, setPrompt] = useState<{ anchor: Point; initialValue: string } | null>(null);
-  const [presence, setPresence] = useState<Point>({ x: 0, y: 0 });
   const mouse = useRef<Point>({ x: 400, y: 280 });
   const runs = useRef(new Map<string, string>());
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -182,6 +289,18 @@ export function HiiRoot() {
       const node = makeNode(seed, at.x + index * 24, at.y + index * 24, workspace.takeZ());
       ids.push(node.id);
       workspace.addNode(node);
+    });
+    setSelected(ids);
+    return ids;
+  }, [workspace]);
+
+  const spawnInformation = useCallback((seeds: NodeSeed[], at: Point) => {
+    const ids = seeds.map((seed, index) => {
+      const column = index % 2;
+      const row = Math.floor(index / 2);
+      const node = makeNode(seed, at.x - 210 + column * 430, at.y + 190 + row * 300, workspace.takeZ());
+      workspace.addNode(node);
+      return node.id;
     });
     setSelected(ids);
     return ids;
@@ -229,9 +348,30 @@ export function HiiRoot() {
       text: intent,
       title: intent,
       status: 'running',
-      output: 'Starting…'
+      output: 'Starting…',
+      contextCount: selectedNodes.length,
+      contextIds: selected
     })], at);
     try {
+      if (/^https?:\/\/\S+$/i.test(intent)) {
+        const capture = await captureInformation(intent);
+        spawnInformation(capturedInformationSeeds(capture), at);
+        workspace.patchNode(intentId, {
+          object: { kind: 'intent', owner: 'human', status: 'completed', proofRefs: [capture.receiptPath] },
+          payload: { text: intent, title: intent, status: 'completed', output: `Captured ${capture.source.title} with ${capture.images.length} linked image${capture.images.length === 1 ? '' : 's'}.`, receiptPath: capture.receiptPath, contextCount: selectedNodes.length, contextIds: selected }
+        });
+        return;
+      }
+      const discovery = intent.match(/^(?:find|research|look up|search for)\s+(.+)$/i);
+      if (discovery) {
+        const results = await findInformation(discovery[1], { web: true, limit: 8 });
+        spawnInformation(results.map(discoveredInformationSeed), at);
+        workspace.patchNode(intentId, {
+          object: { kind: 'intent', owner: 'human', status: 'completed' },
+          payload: { text: intent, title: intent, status: 'completed', output: `Found ${results.length} source candidate${results.length === 1 ? '' : 's'}.`, contextCount: selectedNodes.length, contextIds: selected }
+        });
+        return;
+      }
       const result = await startAgent({
         version: 1,
         intent,
@@ -249,16 +389,16 @@ export function HiiRoot() {
       });
       runs.current.set(result.runId, intentId);
       workspace.patchNode(intentId, {
-        object: { kind: 'intent', owner: 'human', status: 'running', runId: result.runId },
-        payload: { text: intent, title: intent, status: 'running', output: 'Working…' }
+        object: { kind: 'intent', owner: 'human', status: 'running', runId: result.runId, memoryRefs: selected },
+        payload: { text: intent, title: intent, status: 'running', output: 'Working…', contextCount: selectedNodes.length, contextIds: selected }
       });
     } catch (error) {
       workspace.patchNode(intentId, {
         object: { kind: 'intent', owner: 'human', status: 'failed' },
-        payload: { text: intent, title: intent, status: 'failed', output: error instanceof Error ? error.message : 'HII could not start the agent.' }
+        payload: { text: intent, title: intent, status: 'failed', output: error instanceof Error ? error.message : 'HII could not start the agent.', contextCount: selectedNodes.length, contextIds: selected }
       });
     }
-  }, [camera, selected, selectedNodes, spawnSeeds, workspace]);
+  }, [camera, selected, selectedNodes, spawnInformation, spawnSeeds, workspace]);
 
   useEffect(() => {
     let unlisten = () => {};
@@ -269,7 +409,7 @@ export function HiiRoot() {
       const previous = text(node?.payload.output);
       const output = event.text ? `${previous}${previous ? '\n' : ''}${event.text}` : previous;
       workspace.patchNode(nodeId, {
-        object: { kind: 'intent', owner: 'human', status: event.status === 'progress' || event.status === 'started' ? 'running' : event.status, runId: event.runId, proofRefs: event.receiptPath ? [event.receiptPath] : undefined },
+        object: { ...node?.object, kind: 'intent', owner: 'human', status: event.status === 'progress' || event.status === 'started' ? 'running' : event.status, runId: event.runId, proofRefs: event.receiptPath ? [event.receiptPath] : node?.object?.proofRefs },
         payload: { ...(node?.payload || {}), status: event.status, output, receiptPath: event.receiptPath || '' }
       });
       if (event.status === 'completed' || event.status === 'failed' || event.status === 'cancelled') runs.current.delete(event.runId);
@@ -285,11 +425,6 @@ export function HiiRoot() {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? workspace.redo() : workspace.undo(); return; }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setPrompt({ anchor: mouse.current, initialValue: '' }); return; }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'u') { event.preventDefault(); fileInput.current?.click(); return; }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b') {
-        event.preventDefault();
-        spawnSeeds([seedFor('browser', { title: 'browser', url: 'https://www.google.com/webhp?igu=1' })], camera.toWorld(mouse.current.x, mouse.current.y));
-        return;
-      }
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 't') {
         event.preventDefault();
         spawnArtifactTerminals(mouse.current);
@@ -309,19 +444,26 @@ export function HiiRoot() {
         setPrompt({ anchor: mouse.current, initialValue: event.key });
       }
     };
-    const pointermove = (event: PointerEvent) => { mouse.current = { x: event.clientX, y: event.clientY }; setPresence(mouse.current); };
+    const pointermove = (event: PointerEvent) => { mouse.current = { x: event.clientX, y: event.clientY }; };
     const paste = (event: ClipboardEvent) => {
       if (inField(event.target)) return;
       const value = event.clipboardData?.getData('text/plain');
       if (!value) return;
       event.preventDefault();
-      spawnSeeds([seedFromString(value)], camera.toWorld(mouse.current.x, mouse.current.y));
+      const at = camera.toWorld(mouse.current.x, mouse.current.y);
+      if (/^https?:\/\/\S+$/i.test(value.trim())) {
+        void captureInformation(value.trim())
+          .then((result) => spawnInformation(capturedInformationSeeds(result), { x: at.x, y: at.y - 190 }))
+          .catch(() => spawnSeeds([seedFromString(value)], at));
+      } else {
+        spawnSeeds([seedFromString(value)], at);
+      }
     };
     addEventListener('keydown', keydown);
     addEventListener('pointermove', pointermove);
     addEventListener('paste', paste);
     return () => { removeEventListener('keydown', keydown); removeEventListener('pointermove', pointermove); removeEventListener('paste', paste); };
-  }, [camera, selected, spawnArtifactTerminals, spawnSeeds, workspace]);
+  }, [camera, selected, spawnArtifactTerminals, spawnInformation, spawnSeeds, workspace]);
 
   return (
     <main
@@ -342,10 +484,7 @@ export function HiiRoot() {
         seedsFromDataTransfer(event.dataTransfer).then((seeds) => spawnSeeds(seeds, at));
       }}
     >
-      <SpatialActivityLayer nodes={workspace.nodes} selectedIds={selected} />
-      <div className="hii-terminal-identity" aria-hidden="true">
-        <strong>HII</strong><span>visual terminal</span>
-      </div>
+      {workspace.nodes.length > 0 && <SpatialActivityLayer nodes={workspace.nodes} selectedIds={selected} />}
       <div ref={camera.worldRef} className="hii-world">
         {workspace.nodes.map((node) => (
           <NodeFrame
@@ -362,21 +501,16 @@ export function HiiRoot() {
           </NodeFrame>
         ))}
       </div>
-      <span className="hii-agent-presence" style={{ left: presence.x, top: presence.y }} aria-hidden="true" />
-      {workspace.ready && workspace.nodes.length === 0 && (
-        <div className="hii-empty-invite">
-          <strong>Everything starts at the prompt.</strong>
-          <span>Type anywhere · drop context · ⌘⇧T for a visual job loom</span>
-        </div>
-      )}
       {prompt && (
         <Prompt
           key={`${prompt.anchor.x}:${prompt.anchor.y}:${prompt.initialValue}`}
           anchor={prompt.anchor}
           initialValue={prompt.initialValue}
-          contextLabel={selectedNodes.length ? `${selectedNodes.length} selected · ${selectedNodes.map(titleFor).join(' · ')}` : 'cursor context · local workspace'}
+          contextLabel={selectedNodes.length
+            ? `${selectedNodes.length} selected · ${selectedNodes.map(titleFor).join(' · ')}`
+            : 'cursor context · local workspace'}
           onDismiss={() => setPrompt(null)}
-          onSubmit={(value) => submit(value, prompt.anchor)}
+          onSubmit={(value) => void submit(value, prompt.anchor)}
         />
       )}
       <input

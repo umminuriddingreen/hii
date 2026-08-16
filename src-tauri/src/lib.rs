@@ -1,6 +1,8 @@
 use hii_core::{
-    default_workspace_root, new_run_id, read_workspace, write_workspace, AgentEventV1,
-    AgentRequestV1, AgentStartResult, CONTRACT_VERSION,
+    default_workspace_root,
+    information::{self, CaptureResult, InformationImage, InformationSource, SearchResult},
+    new_run_id, read_workspace, write_workspace, AgentEventV1, AgentRequestV1, AgentStartResult,
+    CONTRACT_VERSION,
 };
 use serde_json::Value;
 use std::{
@@ -26,6 +28,29 @@ fn workspace_read() -> Result<Value, String> {
 #[tauri::command]
 fn workspace_write(document: Value) -> Result<Value, String> {
     write_workspace(document)
+}
+
+#[tauri::command]
+fn information_capture(url: String, workspace_root: Option<String>) -> Result<CaptureResult, String> {
+    let workspace = workspace_root
+        .map(PathBuf::from)
+        .unwrap_or(default_workspace_root()?);
+    information::capture(&hii_core::runtime_root()?, &workspace, &url)
+}
+
+#[tauri::command]
+fn information_find(query: String, web: bool, limit: Option<usize>) -> Result<Vec<SearchResult>, String> {
+    let limit = limit.unwrap_or(10);
+    if web {
+        information::discover_web(&query, limit)
+    } else {
+        information::search(&hii_core::runtime_root()?, &query, limit)
+    }
+}
+
+#[tauri::command]
+fn information_inspect(id: String) -> Result<(InformationSource, Vec<InformationImage>), String> {
+    information::inspect(&hii_core::runtime_root()?, &id)
 }
 
 fn safe_asset_name(name: &str) -> String {
@@ -226,6 +251,9 @@ pub fn run() {
             workspace_read,
             workspace_write,
             workspace_asset_store,
+            information_capture,
+            information_find,
+            information_inspect,
             agent_start,
             agent_cancel
         ])

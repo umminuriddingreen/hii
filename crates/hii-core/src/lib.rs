@@ -7,6 +7,8 @@ use std::{
 };
 use uuid::Uuid;
 
+pub mod information;
+
 pub const CONTRACT_VERSION: u8 = 1;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

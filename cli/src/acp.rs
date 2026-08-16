@@ -151,6 +151,20 @@ const TOOLS: &[ToolSpec] = &[
         "repo/runtime context snapshot",
     ),
     tool(
+        "info_find",
+        "hii",
+        Reach::Hii,
+        false,
+        "search durable HII information or discover web sources",
+    ),
+    tool(
+        "info_capture",
+        "hii",
+        Reach::Hii,
+        true,
+        "capture a web source as durable content, image, lineage, and proof objects",
+    ),
+    tool(
         "og_next",
         "hii",
         Reach::Hii,
@@ -284,6 +298,11 @@ pub fn input_schema(name: &str) -> Value {
         ),
         "shell" | "verify" => object(json!({ "command": string }), json!(["command"])),
         "http" => object(json!({ "url": string }), json!(["url"])),
+        "info_find" => object(
+            json!({ "query": string, "web": { "type": "boolean" }, "limit": integer }),
+            json!(["query"]),
+        ),
+        "info_capture" => object(json!({ "url": string }), json!(["url"])),
         "system_status" => object(json!({ "system": string }), json!([])),
         "system_observe" => object(
             json!({

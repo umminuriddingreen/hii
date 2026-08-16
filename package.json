@@ -8,7 +8,7 @@
     "runner:build": "cargo build --release -p hii-native-runner",
     "runner:check": "cargo test -p hii-native-runner && cargo clippy -p hii-native-runner --all-targets -- -D warnings",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true",
-    "dev": "NEXT_PUBLIC_HII_TARGET=web next dev --hostname 127.0.0.1",
+    "dev": "node scripts/hii-dev.mjs",
     "dev:desktop": "NEXT_PUBLIC_HII_TARGET=desktop next dev --hostname 127.0.0.1 --port 3042",
     "dev:tauri": "tauri dev",
     "demo:launch-proof": "node --experimental-strip-types scripts/hii-launch-proof-workspace.mjs",

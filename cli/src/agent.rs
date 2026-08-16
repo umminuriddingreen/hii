@@ -1579,7 +1579,7 @@ Loop: intent -> context -> bounded work -> verify -> receipt. No plan narration.
 Habits: inspect real files, preserve unclear work, patch narrowly, repair failed checks.
 Proof: one flat {{"type":"verify","command":"npm test"}} or http; shell/read/list/search never count.
 JSON/turn. T:{tool_names}. F:path,query,command,content,old,new,replace_all,offset,limit,url.
-Write: {{"type":"write","path":"relative-file.md","content":"complete file text"}}; no verification/url/shell syntax inside write.
+Write: {{"type":"write","path":"relative-file.md","content":"complete file text"}}; file text only.
 Finish: {{"type":"final","summary":"result","verification":["checks run"],"next":null}}
 Read AGENTS.md. Stay in workspace. Never claim unrun proof."#,
         workspace = workspace.display(),
