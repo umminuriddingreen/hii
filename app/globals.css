@@ -114,37 +114,44 @@ button, input, textarea { font: inherit; }
 .hii-prompt-shell {
   position: fixed;
   z-index: 2147483000;
-  width: min(620px, calc(100vw - 24px));
-  transform: translate(-16px, 16px);
+  width: min(640px, calc(100vw - 32px));
+  transform: translate(-14px, 14px);
 }
 
 .hii-prompt {
   width: 100%;
-  border: 1px solid #272a30;
-  border-radius: 10px;
-  background: rgba(8, 9, 11, .97);
-  color: #f4f5f7;
-  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(24px);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  background: var(--field);
+  color: var(--ink);
+  box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.08);
 }
 
-.hii-prompt-line { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; padding-left: 16px; color: #79a8ff; font: 600 18px/1 "SF Mono", ui-monospace, monospace; }
+.hii-prompt-line { display: grid; grid-template-columns: 58px minmax(0, 1fr); align-items: center; min-height: 52px; }
+.hii-prompt-mark { align-self: stretch; display: grid; place-items: center; border-right: 1px solid var(--ink); font: 11px/1 Helvetica, Arial, sans-serif; letter-spacing: .06em; }
 .hii-prompt input {
   width: 100%;
   border: 0;
   background: transparent;
   color: inherit;
-  padding: 15px 17px 10px 10px;
+  padding: 15px 18px;
   outline: 0;
-  font-size: 16px;
+  font: 16px/1.25 Helvetica, Arial, sans-serif;
 }
 
 .hii-prompt-context {
-  min-height: 24px;
-  padding: 0 17px 12px;
-  color: #777b84;
-  font: 10px/1.4 "SF Mono", ui-monospace, monospace;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+  padding: 8px 14px 8px 58px;
+  border-top: 1px solid var(--faint);
+  color: var(--muted);
+  font: 11px/1.25 Helvetica, Arial, sans-serif;
 }
+
+.hii-prompt-context span:last-child { white-space: nowrap; }
 
 
 .hii-job-terminal {

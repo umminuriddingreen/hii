@@ -243,7 +243,7 @@ function Prompt({
     >
       <form className="hii-prompt" onSubmit={(event) => { event.preventDefault(); if (value.trim()) onSubmit(value.trim()); }}>
         <div className="hii-prompt-line">
-          <span aria-hidden="true">›</span>
+          <span className="hii-prompt-mark" aria-hidden="true">HII</span>
           <input
             ref={input}
             value={value}
@@ -255,13 +255,16 @@ function Prompt({
                 onDismiss();
               }
             }}
-            placeholder="Understand, find, make, or act…"
+            placeholder="Start with what you have…"
             aria-label="Tell HII what should happen"
             autoComplete="off"
             spellCheck
           />
         </div>
-        <div className="hii-prompt-context">{contextLabel || 'web · files · models · tools'}</div>
+        <div className="hii-prompt-context">
+          <span>{contextLabel || 'local workspace'}</span>
+          <span>return to make</span>
+        </div>
       </form>
     </div>
   );
