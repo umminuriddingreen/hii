@@ -223,13 +223,11 @@ function NodeBody({ node, onPayload }: { node: WorkspaceNode; onPayload: (patch:
 function Prompt({
   anchor,
   initialValue,
-  contextLabel,
   onDismiss,
   onSubmit
 }: {
   anchor: Point;
   initialValue: string;
-  contextLabel: string;
   onDismiss: () => void;
   onSubmit: (value: string) => void;
 }) {
@@ -243,7 +241,6 @@ function Prompt({
     >
       <form className="hii-prompt" onSubmit={(event) => { event.preventDefault(); if (value.trim()) onSubmit(value.trim()); }}>
         <div className="hii-prompt-line">
-          <span className="hii-prompt-mark" aria-hidden="true">HII</span>
           <input
             ref={input}
             value={value}
@@ -260,10 +257,6 @@ function Prompt({
             autoComplete="off"
             spellCheck
           />
-        </div>
-        <div className="hii-prompt-context">
-          <span>{contextLabel || 'local workspace'}</span>
-          <span>return to make</span>
         </div>
       </form>
     </div>
@@ -507,9 +500,6 @@ export function HiiRoot() {
           key={`${prompt.anchor.x}:${prompt.anchor.y}:${prompt.initialValue}`}
           anchor={prompt.anchor}
           initialValue={prompt.initialValue}
-          contextLabel={selectedNodes.length
-            ? `${selectedNodes.length} selected · ${selectedNodes.map(titleFor).join(' · ')}`
-            : 'cursor context · local workspace'}
           onDismiss={() => setPrompt(null)}
           onSubmit={(value) => void submit(value, prompt.anchor)}
         />

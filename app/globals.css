@@ -127,8 +127,7 @@ button, input, textarea { font: inherit; }
   box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.08);
 }
 
-.hii-prompt-line { display: grid; grid-template-columns: 58px minmax(0, 1fr); align-items: center; min-height: 52px; }
-.hii-prompt-mark { align-self: stretch; display: grid; place-items: center; border-right: 1px solid var(--ink); font: 11px/1 Helvetica, Arial, sans-serif; letter-spacing: .06em; }
+.hii-prompt-line { display: grid; align-items: center; min-height: 52px; }
 .hii-prompt input {
   width: 100%;
   border: 0;
@@ -139,19 +138,6 @@ button, input, textarea { font: inherit; }
   font: 16px/1.25 Helvetica, Arial, sans-serif;
 }
 
-.hii-prompt-context {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 30px;
-  padding: 8px 14px 8px 58px;
-  border-top: 1px solid var(--faint);
-  color: var(--muted);
-  font: 11px/1.25 Helvetica, Arial, sans-serif;
-}
-
-.hii-prompt-context span:last-child { white-space: nowrap; }
 
 
 .hii-job-terminal {
