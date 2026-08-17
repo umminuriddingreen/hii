@@ -16,6 +16,10 @@ import {
   selectConsumerModelProfile,
   totalMemoryGiB
 } from "../model-runtime/profiles.mjs";
+import {
+  buildCodexMemoryPack,
+  codexExecInvocation
+} from "./codex-memory.mjs";
 
 const ROOT = process.env.HII_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const RUNTIME = process.env.HII_RUNTIME_DIR || path.join(os.homedir(), ".hii");
@@ -1409,10 +1413,19 @@ function startQueuedRuns() {
   for (const run of queued) {
     if (activeRuns.has(run.id)) continue;
     const logFd = fs.openSync(run.log, "a");
+    const memoryPack = buildCodexMemoryPack({
+      prompt: run.prompt,
+      coordinate: run.coordinate || ROOT
+    });
+    const invocation = codexExecInvocation({
+      prompt: run.prompt,
+      coordinate: run.coordinate || ROOT,
+      memoryPack
+    });
     // Managed runs target coordinates a human already approved (activation wizard
     // or operator queue), which may not be trusted git repos — e.g. a partner's
     // plain project folder — so codex's repo trust check must be bypassed here.
-    const child = spawn(codexBin(), ["exec", "--skip-git-repo-check", "--cd", run.coordinate || ROOT, run.prompt], {
+    const child = spawn(codexBin(), invocation.args, {
       cwd: run.coordinate || ROOT,
       stdio: ["ignore", logFd, logFd],
       env: { ...process.env, HII_DAEMON_RUN_ID: run.id }
@@ -1424,9 +1437,30 @@ function startQueuedRuns() {
       pid: child.pid,
       startedAt: now(),
       updatedAt: now(),
+      memoryContext: memoryPack.ok ? {
+        strategy: memoryPack.strategy,
+        source: memoryPack.source,
+        sourceSha256: memoryPack.sourceSha256,
+        sourceBytes: memoryPack.sourceBytes,
+        tokenBudget: memoryPack.tokenBudget,
+        estimatedTokens: memoryPack.estimatedTokens,
+        selected: memoryPack.selected
+      } : {
+        strategy: "codex-native-memories",
+        reason: memoryPack.reason
+      },
       loop: [...(run.loop || []), "started backend execution"]
     };
     writeRun(running);
+    event("codex.memory_context", {
+      actor: "hii.daemon",
+      target: run.id,
+      status: memoryPack.ok ? "focused" : "native-fallback",
+      text: memoryPack.ok
+        ? `Selected ${memoryPack.selected.length} bounded memory section(s) for Codex`
+        : `Preserved Codex native memories: ${memoryPack.reason}`,
+      memoryContext: running.memoryContext
+    });
     event("codex.started", {
       actor: "hii.daemon",
       target: run.id,
