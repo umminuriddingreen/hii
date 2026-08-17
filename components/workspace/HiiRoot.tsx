@@ -11,7 +11,15 @@ import {
   type InformationSearchResult
 } from '@/lib/client/hii-bridge';
 import { makeNode, seedFor, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
+import {
+  buildCurationAgentPrompt,
+  createMusicPanelPayload,
+  normalizeMusicPanelPayload,
+  parseCurationProposal,
+  type MusicPanelPayload
+} from '@/lib/workspace/music-playlists';
 import type { WorkspaceNode } from '@/lib/workspace/types';
+import { MusicPlaylistPanel } from './MusicPlaylistPanel';
 import { NodeFrame } from './NodeFrame';
 import { useCamera } from './useCamera';
 import { useWorkspace } from './useWorkspace';
@@ -191,7 +199,15 @@ function TerminalBody({ node }: { node: WorkspaceNode }) {
   );
 }
 
-function NodeBody({ node, onPayload }: { node: WorkspaceNode; onPayload: (patch: Record<string, unknown>) => void }) {
+function NodeBody({
+  node,
+  onPayload,
+  onCurationRequest
+}: {
+  node: WorkspaceNode;
+  onPayload: (patch: Record<string, unknown>) => void;
+  onCurationRequest: (request: string, payload: MusicPanelPayload) => void;
+}) {
   const payload = node.payload;
   const content = text(payload.content) || text(payload.text) || text(payload.output) || text(payload.summary);
   const url = text(payload.url);
@@ -200,6 +216,9 @@ function NodeBody({ node, onPayload }: { node: WorkspaceNode; onPayload: (patch:
   if (node.type === 'browser' || node.type === 'link') return <SourceBody node={node} />;
   if (node.type === 'terminal') return <TerminalBody node={node} />;
   if (node.type === 'intent') return <RequestBody node={node} />;
+  if (node.type === 'surface' && payload.surface === 'profile-music') {
+    return <MusicPlaylistPanel payload={payload} onPayload={onPayload} onRequestCuration={onCurationRequest} />;
+  }
   if (node.type === 'html') return <iframe className="hii-html" srcDoc={text(payload.srcdoc)} title={name} sandbox="allow-forms allow-scripts" />;
   if (node.type === 'image' && url) return <img className="hii-node-image" src={url} alt={name} draggable={false} />;
   if (node.type === 'media' && url) {
@@ -243,7 +262,8 @@ function Prompt({
         ['/claude <task>', 'run with Claude'],
         ['/model [name]', 'choose a local model'],
         ['/proof', 'inspect the latest receipt'],
-        ['/status', 'show HII state']
+        ['/status', 'show HII state'],
+        ['/music', 'open profile playlists']
       ].filter(([command]) => command.startsWith(value.trim().toLowerCase()) || value.trim() === '/')
     : [];
   const submit = () => {
@@ -294,7 +314,10 @@ export function HiiRoot() {
   const [promptVisible, setPromptVisible] = useState(false);
   const mouse = useRef<Point>({ x: 400, y: 280 });
   const activeRun = useRef<string | null>(null);
+  const curationRun = useRef<{ runId: string; nodeId: string; request: string; text: string } | null>(null);
+  const workspaceRef = useRef(workspace);
   const fileInput = useRef<HTMLInputElement | null>(null);
+  workspaceRef.current = workspace;
   save.current = workspace.scheduleSave;
 
   useEffect(() => {
@@ -359,10 +382,58 @@ export function HiiRoot() {
 
   const selectedNodes = useMemo(() => workspace.nodes.filter((node) => selected.includes(node.id)), [selected, workspace.nodes]);
 
+  const openMusicPanel = useCallback((at: Point) => {
+    const existing = workspace.nodes.find((node) => node.type === 'surface' && node.payload.surface === 'profile-music');
+    if (existing) {
+      setSelected([existing.id]);
+      workspace.bringToFront(existing.id);
+      return existing.id;
+    }
+    const seed: NodeSeed = {
+      type: 'surface',
+      w: 800,
+      h: 740,
+      object: {
+        kind: 'interface',
+        owner: 'hii',
+        status: 'ready',
+        source: 'HII profile music v1',
+        capabilityId: 'hii.profile.music-playlists',
+        audit: [{ ts: new Date().toISOString(), actor: 'human', action: 'opened profile music surface' }]
+      },
+      payload: createMusicPanelPayload()
+    };
+    return spawnSeeds([seed], at)[0];
+  }, [spawnSeeds, workspace]);
+
+  const requestCuration = useCallback(async (nodeId: string, request: string, payload: MusicPanelPayload) => {
+    setPrompt({ anchor: mouse.current, initialValue: '', response: 'Preparing a curation proposal…', status: 'running' });
+    setPromptVisible(true);
+    try {
+      const result = await startAgent({
+        version: 1,
+        intent: buildCurationAgentPrompt(request, payload),
+        contextNodeIds: [nodeId],
+        context: { surface: 'profile-music', proposalOnly: true }
+      });
+      activeRun.current = result.runId;
+      curationRun.current = { runId: result.runId, nodeId, request, text: '' };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'HII could not start the curation agent.';
+      workspaceRef.current.patchNode(nodeId, { payload: { ...payload, curationError: `${message} Nothing changed.` } });
+      setPrompt((current) => current ? { ...current, response: message, status: 'failed' } : current);
+    }
+  }, []);
+
   const submit = useCallback(async (intent: string, anchor: Point) => {
     setPrompt((current) => current ? { ...current, initialValue: intent, response: 'Thinking…', status: 'running' } : current);
     const at = camera.toWorld(anchor.x, anchor.y);
     try {
+      if (/^(?:\/music|\/playlist|music|open (?:music|playlists?))$/i.test(intent)) {
+        openMusicPanel(at);
+        setPromptVisible(false);
+        return;
+      }
       if (/^https?:\/\/\S+$/i.test(intent)) {
         const capture = await captureInformation(intent);
         spawnInformation(capturedInformationSeeds(capture), at);
@@ -395,14 +466,27 @@ export function HiiRoot() {
     } catch (error) {
       setPrompt((current) => current ? { ...current, response: error instanceof Error ? error.message : 'HII could not start the model.', status: 'failed' } : current);
     }
-  }, [camera, selected, selectedNodes, spawnInformation]);
+  }, [camera, openMusicPanel, selected, selectedNodes, spawnInformation]);
 
   useEffect(() => {
     let unlisten = () => {};
     listenAgentEvents((event: AgentEventV1) => {
       if (activeRun.current !== event.runId) return;
+      const curation = curationRun.current?.runId === event.runId ? curationRun.current : null;
+      if (curation && event.text) curation.text += `${curation.text ? '\n' : ''}${event.text}`;
       setPrompt((current) => {
         if (!current || current.status !== 'running') return current;
+        if (curation) {
+          return {
+            ...current,
+            response: event.status === 'failed'
+              ? 'HII could not prepare the proposal. Nothing changed.'
+              : event.status === 'completed'
+                ? 'Curation proposal ready in the music panel.'
+                : 'Preparing a curation proposal…',
+            status: event.status === 'failed' ? 'failed' : event.status === 'completed' ? 'completed' : 'running'
+          };
+        }
         const prior = current.response === 'Thinking…' ? '' : current.response;
         const response = event.text ? `${prior}${prior ? '\n' : ''}${event.text}` : prior || 'Thinking…';
         return {
@@ -411,6 +495,23 @@ export function HiiRoot() {
           status: event.status === 'failed' ? 'failed' : event.status === 'completed' ? 'completed' : 'running'
         };
       });
+      if (curation && (event.status === 'completed' || event.status === 'failed' || event.status === 'cancelled')) {
+        const node = workspaceRef.current.nodes.find((entry) => entry.id === curation.nodeId);
+        if (node) {
+          const panel = normalizeMusicPanelPayload(node.payload);
+          if (event.status === 'completed') {
+            try {
+              const proposal = parseCurationProposal(curation.text, curation.request, panel);
+              workspaceRef.current.patchNode(node.id, { payload: { ...panel, proposal, curationError: undefined } });
+            } catch (error) {
+              workspaceRef.current.patchNode(node.id, { payload: { ...panel, curationError: error instanceof Error ? error.message : 'Invalid proposal. Nothing changed.' } });
+            }
+          } else {
+            workspaceRef.current.patchNode(node.id, { payload: { ...panel, curationError: 'The curation run did not complete. Nothing changed.' } });
+          }
+        }
+        curationRun.current = null;
+      }
       if (event.status === 'completed' || event.status === 'failed' || event.status === 'cancelled') activeRun.current = null;
     }).then((dispose) => { unlisten = dispose; });
     return () => unlisten();
@@ -511,7 +612,11 @@ export function HiiRoot() {
             onCommit={(patch) => workspace.patchNode(node.id, patch)}
             chromeless={node.type === 'canvas-text' || node.type === 'ink' || node.type === 'image'}
           >
-            <NodeBody node={node} onPayload={(patch) => workspace.patchNode(node.id, { payload: { ...node.payload, ...patch } })} />
+            <NodeBody
+              node={node}
+              onPayload={(patch) => workspace.patchNode(node.id, { payload: { ...node.payload, ...patch } })}
+              onCurationRequest={(request, payload) => void requestCuration(node.id, request, payload)}
+            />
           </NodeFrame>
         ))}
       </div>

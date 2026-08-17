@@ -12,6 +12,8 @@ export default defineConfig({
       'tests/unit/workspace-connections.test.ts',
       'tests/unit/workspace-history-frames.test.ts',
       'tests/unit/workspace-layout.test.ts',
+      'tests/unit/link-embeds.test.ts',
+      'tests/unit/music-playlists.test.ts',
       'tests/unit/workspace-persistence.test.ts',
       'tests/unit/workspace-rebase.test.ts',
       'tests/unit/workspace-scenes.test.ts',
