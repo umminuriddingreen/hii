@@ -254,32 +254,55 @@ impl Toolbelt {
             return tool_result(Err("web search query cannot be empty".into()), false);
         }
         let result = (|| {
-            let url = std::env::var("HII_WEB_SEARCH_URL")
+            let searxng = std::env::var("HII_SEARXNG_URL")
                 .ok()
                 .filter(|value| {
                     value.starts_with("http://127.0.0.1:") || value.starts_with("http://localhost:")
                 })
-                .map(|value| format!("{value}?q={}", percent_encode(query)))
-                .unwrap_or_else(|| {
-                    format!(
-                        "https://html.duckduckgo.com/html/?q={}",
-                        percent_encode(query)
-                    )
-                });
-            let response = self
+                .unwrap_or_else(|| "http://127.0.0.1:8888".into());
+            let searxng = if searxng.trim_end_matches('/').ends_with("/search") {
+                searxng
+            } else {
+                format!("{}/search", searxng.trim_end_matches('/'))
+            };
+            let searx_results = self
                 .ollama_http
-                .get(&url)
-                .set("User-Agent", "HII/0.1 (+local agent web search)")
-                .call()
-                .map_err(|error| format!("web search failed: {error}"))?;
-            let mut bytes = Vec::new();
-            response
-                .into_reader()
-                .take(MAX_OUTPUT_BYTES as u64)
-                .read_to_end(&mut bytes)
-                .map_err(|error| error.to_string())?;
-            let html = String::from_utf8_lossy(&bytes);
-            let results = parse_web_results(&html, 8);
+                .post(&searxng)
+                .set("User-Agent", "HII/0.1 (+local SearxNG agent search)")
+                .send_form(&[
+                    ("q", query),
+                    ("language", "auto"),
+                    ("safesearch", "0"),
+                    ("category_general", "1"),
+                ])
+                .ok()
+                .and_then(|response| bounded_response_text(response).ok())
+                .map(|html| parse_web_results(&html, 12))
+                .unwrap_or_default();
+            let results = if searx_results.is_empty() {
+                let url = std::env::var("HII_WEB_SEARCH_URL")
+                    .ok()
+                    .filter(|value| {
+                        value.starts_with("http://127.0.0.1:")
+                            || value.starts_with("http://localhost:")
+                    })
+                    .map(|value| format!("{value}?q={}", percent_encode(query)))
+                    .unwrap_or_else(|| {
+                        format!(
+                            "https://html.duckduckgo.com/html/?q={}",
+                            percent_encode(query)
+                        )
+                    });
+                let response = self
+                    .ollama_http
+                    .get(&url)
+                    .set("User-Agent", "HII/0.1 (+agent web-search fallback)")
+                    .call()
+                    .map_err(|error| format!("web search failed: {error}"))?;
+                parse_web_results(&bounded_response_text(response)?, 12)
+            } else {
+                searx_results
+            };
             if results.is_empty() {
                 return Err("web search returned no readable results".into());
             }
@@ -695,7 +718,45 @@ fn percent_encode(value: &str) -> String {
         .collect()
 }
 
+fn bounded_response_text(response: ureq::Response) -> Result<String, String> {
+    let mut bytes = Vec::new();
+    response
+        .into_reader()
+        .take(MAX_OUTPUT_BYTES as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 fn parse_web_results(html: &str, limit: usize) -> Vec<(String, String, String)> {
+    let article =
+        regex::Regex::new(r#"(?s)<article[^>]*class="[^"]*\bresult\b[^"]*"[^>]*>(.*?)</article>"#)
+            .expect("valid SearxNG result regex");
+    let searx_anchor = regex::Regex::new(r#"(?s)<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>"#)
+        .expect("valid SearxNG anchor regex");
+    let searx_snippet = regex::Regex::new(
+        r#"(?s)<(?:p|div|span)[^>]*class="[^"]*(?:content|description)[^"]*"[^>]*>(.*?)</(?:p|div|span)>"#,
+    )
+    .expect("valid SearxNG snippet regex");
+    let searx_results = article
+        .captures_iter(html)
+        .filter_map(|capture| capture.get(1))
+        .filter_map(|body| {
+            let anchor = searx_anchor.captures(body.as_str())?;
+            let url = decode_entities(anchor.get(1)?.as_str());
+            let title = clean_html(anchor.get(2)?.as_str());
+            let summary = searx_snippet
+                .captures(body.as_str())
+                .and_then(|capture| capture.get(1))
+                .map(|snippet| clean_html(snippet.as_str()))
+                .unwrap_or_default();
+            Some((title, url, summary))
+        })
+        .take(limit)
+        .collect::<Vec<_>>();
+    if !searx_results.is_empty() {
+        return searx_results;
+    }
     let anchor = regex::Regex::new(
         r#"(?s)<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>"#,
     )
@@ -1611,6 +1672,25 @@ mod tests {
         assert_eq!(results[0].0, "A & B Guide");
         assert_eq!(results[0].1, "https://example.com/guide");
         assert_eq!(results[0].2, "A concise verified answer.");
+    }
+
+    #[test]
+    fn parses_searxng_web_results() {
+        let html = r#"
+          <article class="result result-default">
+            <h3><a href="https://example.com/context">External context</a></h3>
+            <p class="content">A private metasearch result with useful context.</p>
+          </article>
+        "#;
+        let results = super::parse_web_results(html, 12);
+        assert_eq!(
+            results,
+            vec![(
+                "External context".into(),
+                "https://example.com/context".into(),
+                "A private metasearch result with useful context.".into()
+            )]
+        );
     }
 
     #[test]

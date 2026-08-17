@@ -9,6 +9,37 @@ import { randomUUID } from 'node:crypto';
 const repo = path.resolve(process.cwd());
 const port = Number(process.env.HII_WEB_DEV_RUNTIME_PORT || 3043);
 const runs = new Map();
+const canvasModes = new Set(['build', 'plan', 'browse', 'see', 'show']);
+
+function normalizedMode(input) {
+  const mode = String(input.mode || 'build');
+  if (!canvasModes.has(mode)) throw new Error(`Unsupported HII canvas mode: ${mode}`);
+  return mode;
+}
+
+function visibleExternalOutput(tool, output) {
+  const limit = tool === 'web_fetch' ? 500 : 8_000;
+  const value = String(output || '').trim();
+  return value.length > limit ? `${value.slice(0, limit)}\n…source context continues inside the agent` : value;
+}
+
+function userMessage(event) {
+  const data = event?.data || {};
+  const text = (key) => typeof data[key] === 'string' ? data[key] : '';
+  if (event?.event === 'tool.started') {
+    const target = text('target') || 'working';
+    if (text('tool') === 'web_search') return `Searching external context · ${target}`;
+    if (text('tool') === 'web_fetch') return `Loading external source · ${target}`;
+    return `${text('tool') || 'tool'} · ${target}`;
+  }
+  if (event?.event === 'tool.result' && data.ok === true && ['web_search', 'web_fetch'].includes(text('tool')) && text('output').trim()) {
+    return `External context loaded\n${visibleExternalOutput(text('tool'), text('output'))}`;
+  }
+  if (event?.event === 'tool.result' && data.ok === false && text('output').trim()) return `Revising after tool error · ${text('output')}`;
+  if (['run.blocked', 'run.interrupted', 'budget.exceeded'].includes(event?.event)) return text('message') || text('reason');
+  if (event?.event === 'run.finished') return text('summary');
+  return '';
+}
 
 function hiiBinary() {
   const candidates = [
@@ -68,13 +99,25 @@ function startAgent(input) {
   const id = `web-${randomUUID()}`;
   const state = { version: 1, runId: id, status: 'started', text: '', receiptPath: undefined };
   runs.set(id, state);
+  const mode = normalizedMode(input);
+  const readOnly = ['plan', 'browse', 'see'].includes(mode);
   const args = [
     '--cwd', String(input.workspaceRoot || repo),
     'run', '--jsonl', '--stream', '--autonomy', 'local-full',
-    String(input.intent || '')
+    '--authority', readOnly ? 'read-only' : 'workspace'
   ];
+  // A declared informational outcome requires a predeclared verification check.
+  // Canvas research instead completes from source-tool evidence, which HII marks
+  // incidental (not high-trust), while read-only authority still blocks mutation.
+  args.push(String(input.intent || ''));
   const child = spawn(hiiBinary(), args, { cwd: repo, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
   let pending = '';
+  const appendProgress = (message) => {
+    const normalized = String(message || '').trim();
+    if (!normalized || state.text.endsWith(normalized)) return;
+    state.text = `${state.text}${state.text ? '\n' : ''}${normalized}`.slice(-60_000);
+    state.status = 'progress';
+  };
   const consume = (chunk) => {
     pending += chunk;
     const lines = pending.split('\n');
@@ -83,8 +126,9 @@ function startAgent(input) {
       try {
         const event = JSON.parse(line);
         const data = event.data || {};
+        const message = userMessage(event);
+        appendProgress(message);
         if (event.event === 'run.finished') {
-          state.text = data.summary || state.text;
           state.receiptPath = data.proof;
         }
       } catch {
@@ -93,7 +137,7 @@ function startAgent(input) {
     }
   };
   child.stdout.on('data', (chunk) => consume(String(chunk)));
-  child.stderr.on('data', (chunk) => consume(String(chunk)));
+  child.stderr.on('data', () => {});
   child.on('error', (error) => Object.assign(state, { status: 'failed', text: error.message }));
   child.on('close', (code) => {
     state.status = code === 0 ? 'completed' : 'failed';

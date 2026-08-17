@@ -118,22 +118,45 @@ fn jsonl_receipt_path(value: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
+fn visible_external_output(tool: &str, output: &str) -> String {
+    let limit = if tool == "web_fetch" { 500 } else { 8_000 };
+    if output.chars().count() <= limit {
+        return output.to_owned();
+    }
+    format!(
+        "{}\n…source context continues inside the agent",
+        output.chars().take(limit).collect::<String>()
+    )
+}
+
 fn jsonl_user_message(value: &Value) -> Option<String> {
     let event = value.get("event")?.as_str()?;
     let data = value.get("data").unwrap_or(&Value::Null);
     let string = |key: &str| data.get(key).and_then(Value::as_str);
     match event {
-        "model.delta" if string("channel") == Some("content") => {
-            string("text").filter(|text| !text.trim().is_empty()).map(str::to_owned)
-        }
         "tool.started" => {
             let tool = string("tool").unwrap_or("tool");
             let target = string("target").unwrap_or("working");
-            Some(format!("{tool} · {target}"))
+            Some(match tool {
+                "web_search" => format!("Searching external context · {target}"),
+                "web_fetch" => format!("Loading external source · {target}"),
+                _ => format!("{tool} · {target}"),
+            })
+        }
+        "tool.result"
+            if data.get("ok").and_then(Value::as_bool) == Some(true)
+                && matches!(string("tool"), Some("web_search" | "web_fetch")) =>
+        {
+            string("output")
+                .filter(|text| !text.trim().is_empty())
+                .map(|text| {
+                    let tool = string("tool").unwrap_or("web_search");
+                    format!("External context loaded\n{}", visible_external_output(tool, text))
+                })
         }
         "tool.result" if data.get("ok").and_then(Value::as_bool) == Some(false) => string("output")
             .filter(|text| !text.trim().is_empty())
-            .map(|text| format!("Tool error · {text}")),
+            .map(|text| format!("Revising after tool error · {text}")),
         "run.blocked" | "run.interrupted" | "budget.exceeded" => string("message")
             .or_else(|| string("reason"))
             .map(str::to_owned),
@@ -155,6 +178,11 @@ fn agent_start(app: tauri::AppHandle, state: tauri::State<AgentProcesses>, reque
     if !root.is_dir() {
         return Err(format!("HII workspace does not exist: {}", root.display()));
     }
+    let mode = request.mode.as_deref().unwrap_or("build");
+    if !matches!(mode, "build" | "plan" | "browse" | "see" | "show") {
+        return Err(format!("Unsupported HII canvas mode: {mode}"));
+    }
+    let read_only = matches!(mode, "plan" | "browse" | "see");
     let run_id = new_run_id();
     let context = serde_json::to_string(&request.context).unwrap_or_else(|_| "null".into());
     let selected = request.context_node_ids.join(", ");
@@ -170,7 +198,12 @@ fn agent_start(app: tauri::AppHandle, state: tauri::State<AgentProcesses>, reque
     command
         .args(["run", "--cwd"])
         .arg(&root)
-        .args(["--jsonl", "--stream", "--autonomy", "local-full"])
+        .args(["--jsonl", "--stream", "--autonomy", "local-full", "--authority"])
+        .arg(if read_only { "read-only" } else { "workspace" });
+    // Do not declare an informational outcome here: declared outcomes require a
+    // predeclared verification check. Read-only canvas research instead rests on
+    // source-tool evidence, which remains incidental and cannot unlock high trust.
+    command
         .arg(goal)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -202,11 +235,7 @@ fn agent_start(app: tauri::AppHandle, state: tauri::State<AgentProcesses>, reque
         let run = run_id.clone();
         thread::spawn(move || {
             for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                if let Ok(value) = serde_json::from_str::<Value>(&line) {
-                    if let Some(message) = jsonl_user_message(&value) {
-                        emit_agent(&app, &run, "progress", Some(message), None);
-                    }
-                } else if !line.trim().is_empty() {
+                if serde_json::from_str::<Value>(&line).is_err() && !line.trim().is_empty() {
                     emit_agent(&app, &run, "progress", Some(line), None);
                 }
             }
@@ -285,6 +314,38 @@ mod tests {
         });
         assert_eq!(jsonl_user_message(&event).as_deref(), Some("Imported the images."));
         assert_eq!(jsonl_receipt_path(&event).as_deref(), Some("/tmp/receipt.json"));
+    }
+
+    #[test]
+    fn web_tools_surface_external_context_progress_and_links() {
+        let started = json!({
+            "event": "tool.started",
+            "data": { "tool": "web_fetch", "target": "https://example.com/source" }
+        });
+        let completed = json!({
+            "event": "tool.result",
+            "data": { "tool": "web_fetch", "ok": true, "output": "Source\nhttps://example.com/source" }
+        });
+        assert_eq!(
+            jsonl_user_message(&started).as_deref(),
+            Some("Loading external source · https://example.com/source")
+        );
+        assert_eq!(
+            jsonl_user_message(&completed).as_deref(),
+            Some("External context loaded\nSource\nhttps://example.com/source")
+        );
+    }
+
+    #[test]
+    fn tool_errors_explain_that_hii_is_revising() {
+        let event = json!({
+            "event": "tool.result",
+            "data": { "tool": "http", "ok": false, "output": "public URLs are not allowed" }
+        });
+        assert_eq!(
+            jsonl_user_message(&event).as_deref(),
+            Some("Revising after tool error · public URLs are not allowed")
+        );
     }
 
     #[test]

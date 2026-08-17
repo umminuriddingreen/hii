@@ -115,7 +115,6 @@ button, input, textarea { font: inherit; }
   position: fixed;
   z-index: 2147483000;
   width: min(640px, calc(100vw - 32px));
-  transform: translate(-14px, 14px);
 }
 
 .hii-prompt {
@@ -149,6 +148,22 @@ button, input, textarea { font: inherit; }
   white-space: pre-wrap;
 }
 
+.hii-prompt-response-line { display: block; min-height: 1.5em; }
+.hii-prompt-response a { color: var(--selection); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.hii-prompt-response a:hover { color: var(--ink); }
+.hii-external-context-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -2px 0 10px;
+  color: var(--muted);
+  font: 9px/1.2 "SF Mono", ui-monospace, monospace;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.hii-external-context-state i { width: 6px; height: 6px; border-radius: 50%; background: var(--selection); box-shadow: 0 0 0 4px color-mix(in srgb, var(--selection) 12%, transparent); }
+.hii-prompt[data-status="running"] .hii-external-context-state i { animation: hii-external-pulse 1.2s ease-in-out infinite; }
+
 .hii-prompt[data-status="running"] .hii-prompt-response::after {
   content: '';
   display: inline-block;
@@ -171,6 +186,37 @@ button, input, textarea { font: inherit; }
 
 .hii-prompt-commands span { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; }
 .hii-prompt-commands b { color: var(--ink); font-weight: 400; }
+
+.hii-mode-strip {
+  --mode-accent: var(--selection);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--faint);
+  color: var(--muted);
+  font: 9px/1.2 "SF Mono", ui-monospace, monospace;
+}
+.hii-prompt[data-mode="plan"] .hii-mode-strip { --mode-accent: #6f57a7; }
+.hii-prompt[data-mode="browse"] .hii-mode-strip { --mode-accent: #007a78; }
+.hii-prompt[data-mode="see"] .hii-mode-strip { --mode-accent: #9a5d00; }
+.hii-prompt[data-mode="show"] .hii-mode-strip { --mode-accent: #a33a65; }
+.hii-mode-strip > div { display: flex; align-items: center; gap: 2px; }
+.hii-mode-strip button {
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-transform: uppercase;
+}
+.hii-mode-strip button:hover { color: var(--ink); }
+.hii-mode-strip button[aria-pressed="true"] { background: var(--mode-accent); color: #fff; }
+.hii-mode-strip small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hii-mode-strip kbd { padding: 3px 5px; border: 1px solid var(--faint); border-radius: 3px; background: #f8f8f8; color: var(--ink); font: inherit; white-space: nowrap; }
 
 
 
@@ -211,6 +257,13 @@ button, input, textarea { font: inherit; }
 .hii-job-terminal footer span { font-size: 8px; letter-spacing: .13em; text-transform: uppercase; }
 .hii-job-terminal footer code { overflow: hidden; color: #a8abb2; font: 9px/1 inherit; text-overflow: ellipsis; white-space: nowrap; }
 @keyframes hii-cursor { 0%, 48% { opacity: 1; } 49%, 100% { opacity: 0; } }
+@keyframes hii-external-pulse { 0%, 100% { opacity: .35; transform: scale(.75); } 50% { opacity: 1; transform: scale(1); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .hii-terminal-prompt i,
+  .hii-prompt[data-status="running"] .hii-prompt-response::after,
+  .hii-prompt[data-status="running"] .hii-external-context-state i { animation: none; }
+}
 
 .hii-music-panel {
   --music-ink: #17211c;

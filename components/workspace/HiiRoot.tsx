@@ -12,12 +12,23 @@ import {
 } from '@/lib/client/hii-bridge';
 import { makeNode, seedFor, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
 import {
+  canvasMode,
+  canvasModes,
+  canMutateCanvas,
+  defaultCanvasMode,
+  isCanvasMode,
+  modeIntent,
+  nextCanvasMode,
+  type CanvasModeId
+} from '@/lib/workspace/canvas-modes';
+import {
   buildCurationAgentPrompt,
   createMusicPanelPayload,
   normalizeMusicPanelPayload,
   parseCurationProposal,
   type MusicPanelPayload
 } from '@/lib/workspace/music-playlists';
+import { terminalSeedFromCommand } from '@/lib/workspace/terminal-command';
 import type { WorkspaceNode } from '@/lib/workspace/types';
 import { MusicPlaylistPanel } from './MusicPlaylistPanel';
 import { NodeFrame } from './NodeFrame';
@@ -25,6 +36,7 @@ import { useCamera } from './useCamera';
 import { useWorkspace } from './useWorkspace';
 
 type Point = { x: number; y: number };
+const RESPONSE_URL = /(https?:\/\/[^\s<>()]+)/g;
 
 function text(value: unknown) {
   return typeof value === 'string' ? value : '';
@@ -40,6 +52,28 @@ function hostFor(url: string) {
   } catch {
     return '';
   }
+}
+
+function PromptResponse({ value, running }: { value: string; running: boolean }) {
+  const external = /external context|web_search|web_fetch|https?:\/\//i.test(value);
+  return (
+    <output className="hii-prompt-response" data-external={external || undefined} aria-live="polite">
+      {external && <span className="hii-external-context-state"><i aria-hidden="true" />{running ? 'External context loading' : 'External context loaded'}</span>}
+      {value.split('\n').map((line, lineIndex) => (
+        <span className="hii-prompt-response-line" key={`${line}:${lineIndex}`}>
+          {line.split(RESPONSE_URL).map((part, partIndex) => /^https?:\/\//i.test(part)
+            ? <a href={part} target="_blank" rel="noreferrer" key={`${part}:${partIndex}`}>{part}</a>
+            : <span key={`${part}:${partIndex}`}>{part}</span>)}
+        </span>
+      ))}
+    </output>
+  );
+}
+
+function isAgentPlaceholder(value: string) {
+  return value === 'Thinking…'
+    || value === 'Searching external context…'
+    || /^(?:Build|Plan|Browse|See|Show) mode · .+…$/.test(value);
 }
 
 function capturedInformationSeeds(result: InformationCaptureResult): NodeSeed[] {
@@ -181,6 +215,9 @@ function TerminalBody({ node }: { node: WorkspaceNode }) {
   const cwd = text(node.payload.cwd) || '~/hii';
   const artifact = text(node.payload.artifact) || 'artifact pending';
   const status = text(node.payload.status) || 'ready';
+  const operatorTerminal = node.payload.role === 'operator-terminal';
+  const footerLabel = operatorTerminal ? 'scope' : 'artifact';
+  const footerValue = operatorTerminal ? text(node.payload.scope) || 'local session' : artifact;
   const lines = Array.isArray(node.payload.lines) ? node.payload.lines.map(text).filter(Boolean) : [];
   return (
     <article className="hii-job-terminal" data-status={status}>
@@ -194,7 +231,7 @@ function TerminalBody({ node }: { node: WorkspaceNode }) {
         {lines.map((line, index) => <span key={`${line}:${index}`}>{line}</span>)}
         <span className="hii-terminal-prompt"><b>›</b> <i aria-hidden="true" /></span>
       </pre>
-      <footer><span>artifact</span><code>{artifact}</code></footer>
+      <footer><span>{footerLabel}</span><code>{footerValue}</code></footer>
     </article>
   );
 }
@@ -242,16 +279,20 @@ function NodeBody({
 function Prompt({
   anchor,
   initialValue,
+  mode,
   response,
   status,
   onDismiss,
+  onMode,
   onSubmit
 }: {
   anchor: Point;
   initialValue: string;
+  mode: CanvasModeId;
   response: string;
   status: 'idle' | 'running' | 'completed' | 'failed';
   onDismiss: () => void;
+  onMode: (mode: CanvasModeId) => void;
   onSubmit: (value: string) => void;
 }) {
   const [value, setValue] = useState(initialValue);
@@ -263,6 +304,7 @@ function Prompt({
         ['/model [name]', 'choose a local model'],
         ['/proof', 'inspect the latest receipt'],
         ['/status', 'show HII state'],
+        ['/terminal [folder]', 'create a local terminal object'],
         ['/music', 'open profile playlists']
       ].filter(([command]) => command.startsWith(value.trim().toLowerCase()) || value.trim() === '/')
     : [];
@@ -270,18 +312,28 @@ function Prompt({
     if (value.trim() && status !== 'running') onSubmit(value.trim());
   };
   useEffect(() => { input.current?.focus(); }, []);
+  const promptWidth = Math.min(640, window.innerWidth - 32);
+  const promptLeft = Math.max(16, Math.min(anchor.x - 14, window.innerWidth - promptWidth - 16));
+  const promptTop = Math.max(16, Math.min(anchor.y + 14, window.innerHeight - 90));
   return (
     <div
       className="hii-prompt-shell"
-      style={{ left: Math.min(anchor.x, window.innerWidth - 24), top: Math.min(anchor.y, window.innerHeight - 90) }}
+      style={{ left: promptLeft, top: promptTop }}
+      onPointerDown={(event) => event.stopPropagation()}
     >
-      <form className="hii-prompt" data-status={status} onSubmit={(event) => { event.preventDefault(); submit(); }}>
+      <form className="hii-prompt" data-mode={mode} data-status={status} onSubmit={(event) => { event.preventDefault(); submit(); }}>
         <div className="hii-prompt-line">
           <input
             ref={input}
             value={value}
             onChange={(event) => setValue(event.target.value)}
             onKeyDown={(event) => {
+              if (event.key === 'Tab' && event.shiftKey) {
+                event.preventDefault();
+                event.stopPropagation();
+                onMode(nextCanvasMode(mode));
+                return;
+              }
               if (event.key === 'Escape') {
                 event.preventDefault();
                 setValue('');
@@ -292,14 +344,21 @@ function Prompt({
                 submit();
               }
             }}
-            placeholder={response ? 'Continue the conversation…' : 'Start with what you have…'}
+            placeholder={response ? `Continue in ${canvasMode(mode).label} mode…` : `${canvasMode(mode).label}: ${canvasMode(mode).description}`}
             aria-label="Tell HII what should happen"
             autoComplete="off"
             spellCheck
           />
         </div>
-        {response && <output className="hii-prompt-response" aria-live="polite">{response}</output>}
+        {response && <PromptResponse value={response} running={status === 'running'} />}
         {commands.length > 0 && <div className="hii-prompt-commands" aria-label="HII commands">{commands.map(([command, description]) => <span key={command}><b>{command}</b>{description}</span>)}</div>}
+        <div className="hii-mode-strip" aria-label="Canvas interaction mode">
+          <div>{canvasModes.map((item) => (
+            <button key={item.id} type="button" aria-pressed={item.id === mode} onClick={() => onMode(item.id)}>{item.label}</button>
+          ))}</div>
+          <small>{canvasMode(mode).description}</small>
+          <kbd>⇧ Tab</kbd>
+        </div>
       </form>
     </div>
   );
@@ -310,6 +369,11 @@ export function HiiRoot() {
   const camera = useCamera(() => save.current());
   const workspace = useWorkspace(camera.getViewport);
   const [selected, setSelected] = useState<string[]>([]);
+  const [mode, setMode] = useState<CanvasModeId>(() => {
+    if (typeof window === 'undefined') return defaultCanvasMode;
+    const stored = window.localStorage.getItem('hii.canvas.mode.v1');
+    return isCanvasMode(stored) ? stored : defaultCanvasMode;
+  });
   const [prompt, setPrompt] = useState<{ anchor: Point; initialValue: string; response: string; status: 'idle' | 'running' | 'completed' | 'failed' } | null>(null);
   const [promptVisible, setPromptVisible] = useState(false);
   const mouse = useRef<Point>({ x: 400, y: 280 });
@@ -319,6 +383,8 @@ export function HiiRoot() {
   const fileInput = useRef<HTMLInputElement | null>(null);
   workspaceRef.current = workspace;
   save.current = workspace.scheduleSave;
+
+  useEffect(() => { window.localStorage.setItem('hii.canvas.mode.v1', mode); }, [mode]);
 
   useEffect(() => {
     if (workspace.initialViewport) camera.setViewport(workspace.initialViewport);
@@ -426,33 +492,57 @@ export function HiiRoot() {
   }, []);
 
   const submit = useCallback(async (intent: string, anchor: Point) => {
-    setPrompt((current) => current ? { ...current, initialValue: intent, response: 'Thinking…', status: 'running' } : current);
+    const activeMode = canvasMode(mode);
+    setPrompt((current) => current ? {
+      ...current,
+      initialValue: intent,
+      response: mode === 'browse' ? 'Searching external context…' : `${activeMode.label} mode · ${activeMode.verb}…`,
+      status: 'running'
+    } : current);
     const at = camera.toWorld(anchor.x, anchor.y);
     try {
-      if (/^(?:\/music|\/playlist|music|open (?:music|playlists?))$/i.test(intent)) {
+      const terminalSeed = terminalSeedFromCommand(intent);
+      if (terminalSeed) {
+        if (mode !== 'build') {
+          setPrompt((current) => current ? { ...current, response: 'Terminal objects are created in Build mode. Switch to Build, then run this command again.', status: 'failed' } : current);
+          return;
+        }
+        spawnSeeds([terminalSeed], at);
+        setPrompt(null);
+        setPromptVisible(false);
+        return;
+      }
+      if (canMutateCanvas(mode) && /^(?:\/music|\/playlist|music|open (?:music|playlists?))$/i.test(intent)) {
         openMusicPanel(at);
         setPromptVisible(false);
         return;
       }
-      if (/^https?:\/\/\S+$/i.test(intent)) {
+      if (canMutateCanvas(mode) && /^https?:\/\/\S+$/i.test(intent)) {
         const capture = await captureInformation(intent);
         spawnInformation(capturedInformationSeeds(capture), at);
         setPrompt((current) => current ? { ...current, response: `Captured ${capture.source.title} with ${capture.images.length} linked image${capture.images.length === 1 ? '' : 's'}.`, status: 'completed' } : current);
         return;
       }
       const discovery = intent.match(/^(?:find|research|look up|search for)\s+(.+)$/i);
-      if (discovery) {
+      if (canMutateCanvas(mode) && discovery) {
         const results = await findInformation(discovery[1], { web: true, limit: 8 });
         spawnInformation(results.map(discoveredInformationSeed), at);
-        setPrompt((current) => current ? { ...current, response: `Found ${results.length} source candidate${results.length === 1 ? '' : 's'}.`, status: 'completed' } : current);
+        const links = results.map((result) => `${result.title}\n${result.url}`).join('\n');
+        setPrompt((current) => current ? {
+          ...current,
+          response: `External context loaded · ${results.length} source candidate${results.length === 1 ? '' : 's'}.${links ? `\n${links}` : ''}`,
+          status: 'completed'
+        } : current);
         return;
       }
       const result = await startAgent({
         version: 1,
-        intent,
+        intent: modeIntent(mode, intent),
+        mode,
         contextNodeIds: selected,
         context: {
           anchor,
+          mode,
           selected: selectedNodes.map((node) => ({
             id: node.id,
             type: node.type,
@@ -466,10 +556,11 @@ export function HiiRoot() {
     } catch (error) {
       setPrompt((current) => current ? { ...current, response: error instanceof Error ? error.message : 'HII could not start the model.', status: 'failed' } : current);
     }
-  }, [camera, openMusicPanel, selected, selectedNodes, spawnInformation]);
+  }, [camera, mode, openMusicPanel, selected, selectedNodes, spawnInformation, spawnSeeds]);
 
   useEffect(() => {
     let unlisten = () => {};
+    let disposed = false;
     listenAgentEvents((event: AgentEventV1) => {
       if (activeRun.current !== event.runId) return;
       const curation = curationRun.current?.runId === event.runId ? curationRun.current : null;
@@ -487,7 +578,7 @@ export function HiiRoot() {
             status: event.status === 'failed' ? 'failed' : event.status === 'completed' ? 'completed' : 'running'
           };
         }
-        const prior = current.response === 'Thinking…' ? '' : current.response;
+        const prior = isAgentPlaceholder(current.response) ? '' : current.response;
         const response = event.text ? `${prior}${prior ? '\n' : ''}${event.text}` : prior || 'Thinking…';
         return {
           ...current,
@@ -513,14 +604,32 @@ export function HiiRoot() {
         curationRun.current = null;
       }
       if (event.status === 'completed' || event.status === 'failed' || event.status === 'cancelled') activeRun.current = null;
-    }).then((dispose) => { unlisten = dispose; });
-    return () => unlisten();
+    }).then((dispose) => {
+      if (disposed) dispose();
+      else unlisten = dispose;
+    });
+    return () => {
+      disposed = true;
+      unlisten();
+    };
   }, []);
 
   useEffect(() => {
     const inField = (target: EventTarget | null) => (target as Element | null)?.closest?.('input,textarea,[contenteditable]');
     const keydown = (event: KeyboardEvent) => {
       if (inField(event.target)) return;
+      if (event.key === 'Tab' && event.shiftKey) {
+        event.preventDefault();
+        setMode((current) => nextCanvasMode(current));
+        setPrompt((current) => ({
+          anchor: mouse.current,
+          initialValue: current?.initialValue || '',
+          response: current?.response || '',
+          status: current?.status || 'idle'
+        }));
+        setPromptVisible(true);
+        return;
+      }
       if (event.key === 'Escape') { setPromptVisible(false); setSelected([]); return; }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? workspace.redo() : workspace.undo(); return; }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
@@ -625,9 +734,11 @@ export function HiiRoot() {
           key={`${prompt.anchor.x}:${prompt.anchor.y}:${prompt.initialValue}`}
           anchor={prompt.anchor}
           initialValue={prompt.initialValue}
+          mode={mode}
           response={prompt.response}
           status={prompt.status}
           onDismiss={() => setPromptVisible(false)}
+          onMode={setMode}
           onSubmit={(value) => void submit(value, prompt.anchor)}
         />
       )}

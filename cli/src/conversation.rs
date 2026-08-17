@@ -886,6 +886,8 @@ impl Conversation {
                     limit,
                     ..
                 } => {
+                    let (tool, rerouted_public_http) =
+                        crate::agent::route_public_http(tool, url.as_deref());
                     used_tools = true;
                     let target = tool_target(
                         &tool,
@@ -1111,7 +1113,6 @@ impl Conversation {
                         rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                         continue;
                     }
-                    rejected_actions.reset();
                     let result = if crate::hii_tools::is_hii_tool(&tool) {
                         let args = serde_json::json!({ "query": query.as_deref().unwrap_or("") });
                         crate::hii_tools::execute(&self.paths.repo, &tool, Some(&args))
@@ -1138,10 +1139,22 @@ impl Conversation {
                     let mut safe_output = redact_text(&result.output);
                     if result.ok {
                         self.action_failures = 0;
+                        rejected_actions.reset();
                     } else {
                         self.action_failures += 1;
+                        rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                     }
                     let mut repair_hint = String::new();
+                    if rerouted_public_http {
+                        repair_hint.push_str(
+                            "\n\nHII ROUTE: this public URL was read with web_fetch. Use web_search for broader SearxNG discovery; http remains reserved for localhost verification.",
+                        );
+                    }
+                    if !result.ok {
+                        repair_hint.push_str(
+                            "\n\nERROR_RECOVERY: inspect the exact failure before acting. Do not repeat the same action unchanged. Diagnose the cause, gather missing external context with web_search/web_fetch when relevant, then choose the smallest corrected action.",
+                        );
+                    }
                     if result.ok {
                         if mutation {
                             mutation_epoch += 1;
@@ -2450,7 +2463,7 @@ impl Conversation {
             ReasoningMode::Off => (false, false),
             ReasoningMode::Deep => (true, false),
             ReasoningMode::Auto if force_action_once => (false, false),
-            ReasoningMode::Auto if plan_mode || phase == "reviewing" || action_failures >= 2 => {
+            ReasoningMode::Auto if plan_mode || phase == "reviewing" || action_failures >= 1 => {
                 (true, true)
             }
             ReasoningMode::Auto => (false, false),

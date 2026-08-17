@@ -1,10 +1,12 @@
 'use client';
 
 import { emptyWorkspace, normalizeWorkspace, type WorkspaceDoc } from '@/lib/workspace/types';
+import type { CanvasModeId } from '@/lib/workspace/canvas-modes';
 
 export type AgentRequestV1 = {
   version: 1;
   intent: string;
+  mode?: CanvasModeId;
   workspaceRoot?: string;
   contextNodeIds: string[];
   context?: Record<string, unknown>;

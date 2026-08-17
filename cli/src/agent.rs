@@ -234,6 +234,36 @@ fn normalized_action(raw: &str) -> String {
     raw.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+pub(crate) fn route_public_http(tool: String, url: Option<&str>) -> (String, bool) {
+    let public_url = url.is_some_and(|url| {
+        let lowered = url.trim().to_ascii_lowercase();
+        let loopback = [
+            "http://127.0.0.1:",
+            "https://127.0.0.1:",
+            "http://localhost:",
+            "https://localhost:",
+            "http://[::1]:",
+            "https://[::1]:",
+        ]
+        .iter()
+        .any(|prefix| lowered.starts_with(prefix));
+        (lowered.starts_with("http://") || lowered.starts_with("https://")) && !loopback
+    });
+    if tool == "http" && public_url {
+        ("web_fetch".into(), true)
+    } else {
+        (tool, false)
+    }
+}
+
+fn final_requires_model_verification(
+    declared_verification: bool,
+    mutation_epoch: usize,
+    verified_epoch: Option<usize>,
+) -> bool {
+    !declared_verification && mutation_epoch > 0 && verified_epoch != Some(mutation_epoch)
+}
+
 pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     if options.goal.trim().is_empty() {
         return Err("goal cannot be empty".into());
@@ -499,7 +529,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             break;
         }
         steps += 1;
-        let request_reasoning = action_failures >= 2;
+        let request_reasoning = action_failures >= 1;
         journal.emit(Event::new("model.reasoning_policy").data(json!({
             "step": steps,
             "mode": "auto",
@@ -639,6 +669,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 offset,
                 limit,
             } => {
+                let (tool, rerouted_public_http) = route_public_http(tool, url.as_deref());
                 if repeats_passing_verification(
                     &tool,
                     command.as_deref().or(url.as_deref()),
@@ -783,7 +814,6 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                     continue;
                 }
-                rejected_actions.reset();
                 let result = if is_hii {
                     let args = json!({ "query": query.as_deref().unwrap_or("") });
                     crate::hii_tools::execute(&paths.repo, &tool, Some(&args))
@@ -810,8 +840,10 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 let safe_output = redact_text(&result.output);
                 if result.ok {
                     action_failures = 0;
+                    rejected_actions.reset();
                 } else {
                     action_failures += 1;
+                    rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                 }
                 if result.ok {
                     if mutates && !options.dry_run {
@@ -885,6 +917,16 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 } else {
                     String::new()
                 };
+                let route_hint = if rerouted_public_http {
+                    "\n\nHII ROUTE: this public URL was read with web_fetch. Use web_search for broader SearxNG discovery; http remains reserved for localhost verification."
+                } else {
+                    ""
+                };
+                let repair_hint = if result.ok {
+                    ""
+                } else {
+                    "\n\nERROR_RECOVERY: inspect the exact failure before acting. Do not repeat the same action unchanged. Diagnose the cause, gather missing external context with web_search/web_fetch when relevant, then choose the smallest corrected action."
+                };
                 let feedback = journal.feedback(
                     Event::new("tool.result")
                         .data(json!({
@@ -900,7 +942,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                             detail: (!result.ok).then(|| safe_output.clone()),
                         }),
                     format!(
-                        "TOOL RESULT [{}]:\n{}{}{}{}",
+                        "TOOL RESULT [{}]:\n{}{}{}{}{}{}",
                         if result.ok { "ok" } else { "error" },
                         safe_output,
                         proof_hint,
@@ -911,7 +953,9 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                             String::new()
                         } else {
                             format!("\n\n{hook_feedback}")
-                        }
+                        },
+                        route_hint,
+                        repair_hint
                     ),
                 )?;
                 messages.push(Message::assistant(raw));
@@ -1127,11 +1171,11 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 verification: claimed,
                 next,
             } => {
-                let current_proof_missing =
-                    mutation_epoch > 0 && verified_epoch != Some(mutation_epoch);
-                if options.verify.is_empty()
-                    && (!verification.iter().any(|check| check.ok) || current_proof_missing)
-                {
+                if final_requires_model_verification(
+                    !options.verify.is_empty(),
+                    mutation_epoch,
+                    verified_epoch,
+                ) {
                     if missing_proof.repeated_without_progress(mutation_epoch, verified_epoch) {
                         model_loop_detected = true;
                         journal.emit(
@@ -2629,6 +2673,34 @@ mod tests {
         assert!(!guard.repeated_without_progress(1, None));
         assert!(!guard.repeated_without_progress(1, Some(1)));
         assert!(guard.repeated_without_progress(1, Some(1)));
+    }
+
+    #[test]
+    fn public_http_actions_route_to_bounded_web_fetch() {
+        assert_eq!(
+            route_public_http("http".into(), Some("https://example.com/guide")),
+            ("web_fetch".into(), true)
+        );
+        assert_eq!(
+            route_public_http("http".into(), Some("http://127.0.0.1:3042/")),
+            ("http".into(), false)
+        );
+        assert_eq!(
+            route_public_http("http".into(), Some("https://localhost:3042/")),
+            ("http".into(), false)
+        );
+        assert_eq!(
+            route_public_http("web_search".into(), None),
+            ("web_search".into(), false)
+        );
+    }
+
+    #[test]
+    fn observation_only_answers_do_not_enter_a_missing_proof_loop() {
+        assert!(!final_requires_model_verification(false, 0, None));
+        assert!(final_requires_model_verification(false, 1, None));
+        assert!(!final_requires_model_verification(false, 1, Some(1)));
+        assert!(!final_requires_model_verification(true, 1, None));
     }
 
     #[test]

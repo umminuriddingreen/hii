@@ -17,6 +17,8 @@ pub struct AgentRequestV1 {
     pub version: u8,
     pub intent: String,
     #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
     pub workspace_root: Option<String>,
     #[serde(default)]
     pub context_node_ids: Vec<String>,
@@ -166,6 +168,7 @@ mod tests {
         let request = AgentRequestV1 {
             version: CONTRACT_VERSION,
             intent: "shape this information".into(),
+            mode: Some("build".into()),
             workspace_root: None,
             context_node_ids: vec![],
             context: Value::Null,
@@ -173,5 +176,6 @@ mod tests {
         let encoded = serde_json::to_value(request).unwrap();
         assert_eq!(encoded["version"], 1);
         assert_eq!(encoded["intent"], "shape this information");
+        assert_eq!(encoded["mode"], "build");
     }
 }
