@@ -264,6 +264,10 @@ fn final_requires_model_verification(
     !declared_verification && mutation_epoch > 0 && verified_epoch != Some(mutation_epoch)
 }
 
+fn counts_as_read_only_source_evidence(authority: Authority, tool: &str, ok: bool) -> bool {
+    ok && authority == Authority::ReadOnly && matches!(tool, "web_search" | "web_fetch")
+}
+
 pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     if options.goal.trim().is_empty() {
         return Err("goal cannot be empty".into());
@@ -863,7 +867,9 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                         }
                     }
                 }
-                if result.verification {
+                let read_only_source_evidence =
+                    counts_as_read_only_source_evidence(options.authority, &tool, result.ok);
+                if result.verification || read_only_source_evidence {
                     record_verification(
                         &mut verification,
                         VerificationRecord {
@@ -872,7 +878,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                             output: safe_output.clone(),
                         },
                     );
-                    if result.ok {
+                    if result.verification && result.ok {
                         verified_epoch = Some(mutation_epoch);
                     }
                 }
@@ -2701,6 +2707,35 @@ mod tests {
         assert!(final_requires_model_verification(false, 1, None));
         assert!(!final_requires_model_verification(false, 1, Some(1)));
         assert!(!final_requires_model_verification(true, 1, None));
+    }
+
+    #[test]
+    fn successful_read_only_source_tools_count_as_incidental_evidence() {
+        assert!(counts_as_read_only_source_evidence(
+            Authority::ReadOnly,
+            "web_search",
+            true
+        ));
+        assert!(counts_as_read_only_source_evidence(
+            Authority::ReadOnly,
+            "web_fetch",
+            true
+        ));
+        assert!(!counts_as_read_only_source_evidence(
+            Authority::Workspace,
+            "web_fetch",
+            true
+        ));
+        assert!(!counts_as_read_only_source_evidence(
+            Authority::ReadOnly,
+            "read",
+            true
+        ));
+        assert!(!counts_as_read_only_source_evidence(
+            Authority::ReadOnly,
+            "web_search",
+            false
+        ));
     }
 
     #[test]

@@ -265,20 +265,27 @@ impl Toolbelt {
             } else {
                 format!("{}/search", searxng.trim_end_matches('/'))
             };
-            let searx_results = self
-                .ollama_http
-                .post(&searxng)
-                .set("User-Agent", "HII/0.1 (+local SearxNG agent search)")
-                .send_form(&[
-                    ("q", query),
-                    ("language", "auto"),
-                    ("safesearch", "0"),
-                    ("category_general", "1"),
-                ])
-                .ok()
-                .and_then(|response| bounded_response_text(response).ok())
-                .map(|html| parse_web_results(&html, 12))
-                .unwrap_or_default();
+            let search_searxng = |candidate: &str| {
+                self.ollama_http
+                    .post(&searxng)
+                    .set("User-Agent", "HII/0.1 (+local SearxNG agent search)")
+                    .send_form(&[
+                        ("q", candidate),
+                        ("language", "auto"),
+                        ("safesearch", "0"),
+                        ("category_general", "1"),
+                    ])
+                    .ok()
+                    .and_then(|response| bounded_response_text(response).ok())
+                    .map(|html| parse_web_results(&html, 12))
+                    .unwrap_or_default()
+            };
+            let mut searx_results = search_searxng(query);
+            if searx_results.is_empty() {
+                if let Some(relaxed) = relaxed_web_query(query) {
+                    searx_results = search_searxng(&relaxed);
+                }
+            }
             let results = if searx_results.is_empty() {
                 let url = std::env::var("HII_WEB_SEARCH_URL")
                     .ok()
@@ -703,6 +710,17 @@ impl Toolbelt {
             ))
         }
     }
+}
+
+fn relaxed_web_query(query: &str) -> Option<String> {
+    let relaxed = query
+        .split_whitespace()
+        .filter(|part| !part.to_ascii_lowercase().starts_with("site:"))
+        .map(|part| part.trim_matches(|character| character == '"' || character == '\''))
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    (relaxed != query && !relaxed.is_empty()).then_some(relaxed)
 }
 
 fn percent_encode(value: &str) -> String {
@@ -1672,6 +1690,15 @@ mod tests {
         assert_eq!(results[0].0, "A & B Guide");
         assert_eq!(results[0].1, "https://example.com/guide");
         assert_eq!(results[0].2, "A concise verified answer.");
+    }
+
+    #[test]
+    fn relaxes_search_syntax_for_one_bounded_searxng_retry() {
+        assert_eq!(
+            super::relaxed_web_query("\"local-first software\" site:wikipedia.org").as_deref(),
+            Some("local-first software")
+        );
+        assert_eq!(super::relaxed_web_query("local-first software"), None);
     }
 
     #[test]
