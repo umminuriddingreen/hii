@@ -454,7 +454,8 @@ impl Toolbelt {
         let result = (|| {
             if !(url.starts_with("http://127.0.0.1:") || url.starts_with("http://localhost:")) {
                 return Err(
-                    "http tool is local-only; URL must use 127.0.0.1 or localhost".to_string(),
+                    "http tool is loopback-only and requires an explicit port; use http://127.0.0.1:<port> or http://localhost:<port>"
+                        .to_string(),
                 );
             }
             let response = match self.ollama_http.get(url).call() {
@@ -1676,6 +1677,25 @@ mod tests {
         assert!(result.output.contains("HTTP 422"));
         assert!(result.output.contains("SyntaxError: Missing }"));
         server.join().unwrap();
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn http_rejects_public_urls_and_loopback_without_a_port() {
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+
+        for url in [
+            "https://example.com/",
+            "http://localhost",
+            "http://127.0.0.1",
+        ] {
+            let result = tools.http(url);
+            assert!(!result.ok, "{url} should be blocked");
+            assert!(result.verification);
+            assert!(result.output.contains("requires an explicit port"));
+        }
+
         let _ = fs::remove_dir_all(path);
     }
 

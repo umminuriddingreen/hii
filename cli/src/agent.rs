@@ -209,6 +209,27 @@ impl RejectedActionGuard {
     }
 }
 
+#[derive(Debug, Default)]
+struct MissingProofGuard {
+    last_state: Option<(usize, Option<usize>)>,
+}
+
+impl MissingProofGuard {
+    fn repeated_without_progress(
+        &mut self,
+        mutation_epoch: usize,
+        verified_epoch: Option<usize>,
+    ) -> bool {
+        let state = (mutation_epoch, verified_epoch);
+        if self.last_state == Some(state) {
+            true
+        } else {
+            self.last_state = Some(state);
+            false
+        }
+    }
+}
+
 fn normalized_action(raw: &str) -> String {
     raw.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -447,6 +468,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let mut observations = HashSet::new();
     let mut steps = 0usize;
     let mut rejected_actions = RejectedActionGuard::default();
+    let mut missing_proof = MissingProofGuard::default();
     let mut model_loop_detected = false;
     let mut action_failures = 0usize;
     let mut prompt_tokens = 0u64;
@@ -1110,6 +1132,20 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 if options.verify.is_empty()
                     && (!verification.iter().any(|check| check.ok) || current_proof_missing)
                 {
+                    if missing_proof.repeated_without_progress(mutation_epoch, verified_epoch) {
+                        model_loop_detected = true;
+                        journal.emit(
+                            Event::new("model.loop_detected")
+                                .data(json!({
+                                    "step": steps,
+                                    "reason": "final repeated without verification progress",
+                                    "mutation_epoch": mutation_epoch,
+                                    "message": MODEL_LOOP_DETECTED_MESSAGE
+                                }))
+                                .human(Human::Recovery(MODEL_LOOP_DETECTED_MESSAGE.into())),
+                        )?;
+                        break;
+                    }
                     pending_final = Some(PendingFinal {
                         summary,
                         next,
@@ -1119,7 +1155,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                         Event::new("convergence.proof_required")
                             .data(json!({ "step": steps, "mutation_epoch": mutation_epoch })),
                         format!(
-                            "No passing HII verification exists for the latest workspace mutation (model claim: {}). Read/list/search are observation only. Run one actual check with verify or http before finalizing.",
+                            "No passing HII verification exists for the latest workspace mutation (model claim: {}). Read/list/search/web_search/web_fetch are observation only. Use web_search/web_fetch for public research; never pass a public URL to http. Create the requested artifact when the goal asks for one, then run verify or a loopback http check with an explicit port before finalizing.",
                             if claimed.is_empty() { "none" } else { "present" }
                         ),
                     )?;
@@ -2582,6 +2618,17 @@ mod tests {
 
         guard.reset();
         assert!(!guard.would_loop("same action", 1, None));
+    }
+
+    #[test]
+    fn repeated_missing_proof_final_without_progress_stops() {
+        let mut guard = MissingProofGuard::default();
+
+        assert!(!guard.repeated_without_progress(0, None));
+        assert!(guard.repeated_without_progress(0, None));
+        assert!(!guard.repeated_without_progress(1, None));
+        assert!(!guard.repeated_without_progress(1, Some(1)));
+        assert!(guard.repeated_without_progress(1, Some(1)));
     }
 
     #[test]
