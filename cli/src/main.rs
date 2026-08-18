@@ -30,6 +30,7 @@ mod mcp_client;
 mod ollama;
 mod picker;
 mod pipe;
+mod project;
 mod receipt;
 mod run_context;
 mod runlog;
@@ -370,6 +371,11 @@ enum Commands {
         #[arg(long, help = "Emit the complete machine-readable pipe plan")]
         json: bool,
     },
+    #[command(about = "Plan, price, triage, and govern organizational and physical projects")]
+    Project {
+        #[command(subcommand)]
+        action: ProjectCommand,
+    },
     #[command(about = "Manage local recurring HII work through cron")]
     Schedule {
         #[command(subcommand)]
@@ -461,6 +467,288 @@ enum InfoCommand {
         id: String,
         #[arg(long, value_name = "PATH")]
         output: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ProjectCommand {
+    #[command(about = "Create a governed project using the architecture delivery profile")]
+    Create {
+        #[arg(required = true, num_args = 1..)]
+        name: Vec<String>,
+        #[arg(long, default_value = "architecture")]
+        project_type: String,
+        #[arg(long)]
+        location: Option<String>,
+        #[arg(long, default_value = "USD")]
+        currency: String,
+        #[arg(long, value_name = "AMOUNT")]
+        budget: Option<String>,
+        #[arg(
+            long,
+            help = "Explicit total professional hours for the coordinated baseline option"
+        )]
+        base_hours: u64,
+        #[arg(
+            long,
+            value_name = "AMOUNT",
+            help = "Explicit loaded blended hourly rate; no market rate is assumed"
+        )]
+        blended_rate: String,
+        #[arg(long, default_value = "0", value_name = "AMOUNT")]
+        consultant_allowance: String,
+        #[arg(long, default_value = "0", value_name = "AMOUNT")]
+        direct_costs: String,
+        #[arg(
+            long,
+            default_value_t = 1_000,
+            help = "Planning contingency in basis points"
+        )]
+        contingency_bps: u32,
+        #[arg(
+            long,
+            default_value_t = 0,
+            help = "Fee markup or overhead adjustment in basis points"
+        )]
+        markup_bps: u32,
+        #[arg(long, default_value_t = 36)]
+        total_weeks: u32,
+        #[arg(long, default_value_t = 3)]
+        options: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(alias = "ls", about = "List local HII projects")]
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Show a project, delivery prices, KPIs, and next actions")]
+    Show {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Recalculate SD, DD, CD, and active-development delivery options")]
+    Price {
+        id: String,
+        #[arg(long)]
+        base_hours: Option<u64>,
+        #[arg(long, value_name = "AMOUNT")]
+        blended_rate: Option<String>,
+        #[arg(long, value_name = "AMOUNT")]
+        consultant_allowance: Option<String>,
+        #[arg(long, value_name = "AMOUNT")]
+        direct_costs: Option<String>,
+        #[arg(long)]
+        contingency_bps: Option<u32>,
+        #[arg(long)]
+        markup_bps: Option<u32>,
+        #[arg(long)]
+        total_weeks: Option<u32>,
+        #[arg(long)]
+        options: Option<usize>,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
+        about = "Triage KPIs, budget coverage, stakeholder questions, suppliers, and next tasks"
+    )]
+    Triage {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
+        name = "stakeholder-add",
+        about = "Add a stakeholder and their decision boundary"
+    )]
+    StakeholderAdd {
+        id: String,
+        name: String,
+        #[arg(long)]
+        role: String,
+        #[arg(long)]
+        decision_scope: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
+        name = "kpi-add",
+        about = "Add an organization-specific KPI definition"
+    )]
+    KpiAdd {
+        id: String,
+        name: String,
+        #[arg(long)]
+        unit: String,
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        calculation: String,
+        #[arg(long, default_value = "project manager")]
+        owner: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
+        name = "kpi-update",
+        about = "Record a KPI reading with source evidence"
+    )]
+    KpiUpdate {
+        id: String,
+        kpi: String,
+        value: String,
+        #[arg(long = "source")]
+        sources: Vec<String>,
+        #[arg(long = "by", default_value = "local operator")]
+        actor: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
+        name = "task-add",
+        about = "Add a KPI-linked task to the dependency graph"
+    )]
+    TaskAdd {
+        id: String,
+        #[arg(required = true, num_args = 1..)]
+        title: Vec<String>,
+        #[arg(long)]
+        phase: String,
+        #[arg(long, default_value = "project-management")]
+        system: String,
+        #[arg(long, default_value = "project team")]
+        owner: String,
+        #[arg(long = "depends-on")]
+        depends_on: Vec<String>,
+        #[arg(long = "kpi")]
+        kpis: Vec<String>,
+        #[arg(long = "budget-line")]
+        budget_lines: Vec<String>,
+        #[arg(long = "evidence")]
+        evidence_required: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Select and record approval of one delivery option")]
+    Select {
+        id: String,
+        option: String,
+        #[arg(long = "by")]
+        actor: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
+        name = "task-complete",
+        about = "Complete a dependency-ready task with evidence"
+    )]
+    TaskComplete {
+        id: String,
+        task: String,
+        #[arg(long = "evidence", required = true)]
+        evidence: Vec<String>,
+        #[arg(long = "by", default_value = "local operator")]
+        actor: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
+        name = "question-add",
+        about = "Add a stakeholder or shareholder question"
+    )]
+    QuestionAdd {
+        id: String,
+        #[arg(required = true, num_args = 1..)]
+        question: Vec<String>,
+        #[arg(long, default_value = "project stakeholder")]
+        asked_by: String,
+        #[arg(long, default_value = "project manager")]
+        owner: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
+        name = "question-answer",
+        about = "Answer a project question with optional source evidence"
+    )]
+    QuestionAnswer {
+        id: String,
+        question: String,
+        #[arg(required = true, num_args = 1..)]
+        answer: Vec<String>,
+        #[arg(long = "source")]
+        sources: Vec<String>,
+        #[arg(long = "by", default_value = "local operator")]
+        actor: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
+        name = "supplier-add",
+        about = "Add a source-linked supplier candidate to a project need"
+    )]
+    SupplierAdd {
+        id: String,
+        need: String,
+        name: String,
+        #[arg(long)]
+        url: Option<String>,
+        #[arg(long)]
+        contact: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
+        name = "supplier-search",
+        about = "Search public sources for supplier candidates without contacting them"
+    )]
+    SupplierSearch {
+        id: String,
+        need: String,
+        #[arg(long, default_value_t = 8)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
+        name = "supplier-quote",
+        about = "Record a supplier quote and update the linked budget forecast"
+    )]
+    SupplierQuote {
+        id: String,
+        need: String,
+        supplier: String,
+        amount: String,
+        #[arg(long, required = true)]
+        source: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Generate an unsent supplier request-for-quote draft")]
+    Rfq { id: String, need: String },
+    #[command(
+        name = "phase-approve",
+        about = "Approve the current phase for the current project revision"
+    )]
+    PhaseApprove {
+        id: String,
+        phase: String,
+        #[arg(long = "by")]
+        actor: String,
+        #[arg(long, required = true)]
+        note: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
+        about = "Advance only after option, task evidence, and revision-scoped phase approval gates pass"
+    )]
+    Advance {
+        id: String,
         #[arg(long)]
         json: bool,
     },
@@ -1158,6 +1446,342 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     },
                 )?;
                 return Ok(ExitCode::from(receipt.exit_code));
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Project { action }) => {
+            let render_project = |project: &project::Project, json: bool| -> Result<(), String> {
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(project).map_err(|error| error.to_string())?
+                    );
+                } else {
+                    println!("{}", project::format_project(project));
+                }
+                Ok(())
+            };
+            match action {
+                ProjectCommand::Create {
+                    name,
+                    project_type,
+                    location,
+                    currency,
+                    budget,
+                    base_hours,
+                    blended_rate,
+                    consultant_allowance,
+                    direct_costs,
+                    contingency_bps,
+                    markup_bps,
+                    total_weeks,
+                    options,
+                    json,
+                } => {
+                    let project = project::create(
+                        &paths.runtime,
+                        project::CreateOptions {
+                            name: name.join(" "),
+                            project_type,
+                            location,
+                            currency,
+                            construction_budget: budget,
+                            base_hours,
+                            blended_rate,
+                            consultant_allowance,
+                            direct_costs,
+                            contingency_bps,
+                            markup_bps,
+                            total_weeks,
+                            option_count: options,
+                        },
+                    )?;
+                    render_project(&project, json)?;
+                }
+                ProjectCommand::List { json } => {
+                    let projects = project::list(&paths.runtime)?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&projects)
+                                .map_err(|error| error.to_string())?
+                        );
+                    } else if projects.is_empty() {
+                        println!("No HII projects yet. Run `hii project create <name>`. ");
+                    } else {
+                        for project in projects {
+                            println!(
+                                "{:<28} {:<10} {:<28} {}",
+                                project.id, project.status, project.current_phase, project.name
+                            );
+                        }
+                    }
+                }
+                ProjectCommand::Show { id, json } => {
+                    render_project(&project::load(&paths.runtime, &id)?, json)?;
+                }
+                ProjectCommand::Price {
+                    id,
+                    base_hours,
+                    blended_rate,
+                    consultant_allowance,
+                    direct_costs,
+                    contingency_bps,
+                    markup_bps,
+                    total_weeks,
+                    options,
+                    json,
+                } => {
+                    let project = project::reprice(
+                        &paths.runtime,
+                        &id,
+                        project::RepriceOptions {
+                            base_hours,
+                            blended_rate,
+                            consultant_allowance,
+                            direct_costs,
+                            contingency_bps,
+                            markup_bps,
+                            total_weeks,
+                            option_count: options,
+                        },
+                    )?;
+                    render_project(&project, json)?;
+                }
+                ProjectCommand::Triage { id, json } => {
+                    let project = project::load(&paths.runtime, &id)?;
+                    let triage = project::triage(&project);
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&triage)
+                                .map_err(|error| error.to_string())?
+                        );
+                    } else {
+                        println!("Project triage — {}\n", project.name);
+                        for kpi in &triage.kpis {
+                            println!(
+                                "{:<12} {:<44} {} / {}",
+                                kpi.status, kpi.name, kpi.value, kpi.target
+                            );
+                        }
+                        if !triage.attention.is_empty() {
+                            println!("\nAttention");
+                            for item in &triage.attention {
+                                println!("  {}  {} — {}", item.priority, item.id, item.summary);
+                            }
+                        }
+                        if !triage.next_actions.is_empty() {
+                            println!("\nNext actions");
+                            for action in &triage.next_actions {
+                                println!("  - {action}");
+                            }
+                        }
+                    }
+                }
+                ProjectCommand::StakeholderAdd {
+                    id,
+                    name,
+                    role,
+                    decision_scope,
+                    json,
+                } => render_project(
+                    &project::add_stakeholder(&paths.runtime, &id, &name, &role, &decision_scope)?,
+                    json,
+                )?,
+                ProjectCommand::KpiAdd {
+                    id,
+                    name,
+                    unit,
+                    target,
+                    calculation,
+                    owner,
+                    json,
+                } => render_project(
+                    &project::add_kpi(
+                        &paths.runtime,
+                        &id,
+                        &name,
+                        &unit,
+                        &target,
+                        &calculation,
+                        &owner,
+                    )?,
+                    json,
+                )?,
+                ProjectCommand::KpiUpdate {
+                    id,
+                    kpi,
+                    value,
+                    sources,
+                    actor,
+                    json,
+                } => render_project(
+                    &project::update_kpi(&paths.runtime, &id, &kpi, &value, &sources, &actor)?,
+                    json,
+                )?,
+                ProjectCommand::TaskAdd {
+                    id,
+                    title,
+                    phase,
+                    system,
+                    owner,
+                    depends_on,
+                    kpis,
+                    budget_lines,
+                    evidence_required,
+                    json,
+                } => render_project(
+                    &project::add_task(
+                        &paths.runtime,
+                        &id,
+                        project::AddTaskOptions {
+                            title: title.join(" "),
+                            phase,
+                            system,
+                            owner,
+                            depends_on,
+                            kpi_ids: kpis,
+                            budget_line_ids: budget_lines,
+                            evidence_required,
+                        },
+                    )?,
+                    json,
+                )?,
+                ProjectCommand::Select {
+                    id,
+                    option,
+                    actor,
+                    json,
+                } => render_project(
+                    &project::select_option(&paths.runtime, &id, &option, &actor)?,
+                    json,
+                )?,
+                ProjectCommand::TaskComplete {
+                    id,
+                    task,
+                    evidence,
+                    actor,
+                    json,
+                } => render_project(
+                    &project::complete_task(&paths.runtime, &id, &task, &evidence, &actor)?,
+                    json,
+                )?,
+                ProjectCommand::QuestionAdd {
+                    id,
+                    question,
+                    asked_by,
+                    owner,
+                    json,
+                } => render_project(
+                    &project::add_question(
+                        &paths.runtime,
+                        &id,
+                        &question.join(" "),
+                        &asked_by,
+                        &owner,
+                    )?,
+                    json,
+                )?,
+                ProjectCommand::QuestionAnswer {
+                    id,
+                    question,
+                    answer,
+                    sources,
+                    actor,
+                    json,
+                } => render_project(
+                    &project::answer_question(
+                        &paths.runtime,
+                        &id,
+                        &question,
+                        &answer.join(" "),
+                        &sources,
+                        &actor,
+                    )?,
+                    json,
+                )?,
+                ProjectCommand::SupplierAdd {
+                    id,
+                    need,
+                    name,
+                    url,
+                    contact,
+                    json,
+                } => render_project(
+                    &project::add_supplier(&paths.runtime, &id, &need, &name, url, contact)?,
+                    json,
+                )?,
+                ProjectCommand::SupplierSearch {
+                    id,
+                    need,
+                    limit,
+                    json,
+                } => {
+                    let (project, query, added) =
+                        project::research_suppliers(&paths.runtime, &id, &need, limit)?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::json!({
+                                "kind": "hii.project.supplier-research/1",
+                                "query": query,
+                                "added": added,
+                                "project": project,
+                            }))
+                            .map_err(|error| error.to_string())?
+                        );
+                    } else {
+                        println!("Supplier research · {added} candidate(s) added\nquery: {query}");
+                        if let Some(need) = project.supplier_needs.iter().find(|candidate| {
+                            candidate.id == need || candidate.id.starts_with(&need)
+                        }) {
+                            for supplier in &need.suppliers {
+                                println!(
+                                    "  {}\n    {}",
+                                    supplier.name,
+                                    supplier.url.as_deref().unwrap_or("no public URL")
+                                );
+                            }
+                        }
+                        println!("\nNo supplier was contacted. Review candidates, then generate an RFQ draft.");
+                    }
+                }
+                ProjectCommand::SupplierQuote {
+                    id,
+                    need,
+                    supplier,
+                    amount,
+                    source,
+                    json,
+                } => render_project(
+                    &project::record_quote(
+                        &paths.runtime,
+                        &id,
+                        &need,
+                        &supplier,
+                        &amount,
+                        &source,
+                    )?,
+                    json,
+                )?,
+                ProjectCommand::Rfq { id, need } => {
+                    let project = project::load(&paths.runtime, &id)?;
+                    println!("{}", project::rfq(&project, &need)?);
+                }
+                ProjectCommand::PhaseApprove {
+                    id,
+                    phase,
+                    actor,
+                    note,
+                    json,
+                } => render_project(
+                    &project::approve_phase(&paths.runtime, &id, &phase, &actor, &note)?,
+                    json,
+                )?,
+                ProjectCommand::Advance { id, json } => {
+                    render_project(&project::advance(&paths.runtime, &id)?, json)?;
+                }
             }
             Ok(ExitCode::SUCCESS)
         }
@@ -2935,6 +3559,7 @@ fn is_native_command(command: &str) -> bool {
             | "find"
             | "info"
             | "pipe"
+            | "project"
             | "skills"
             | "tools"
             | "legacy"
@@ -3006,6 +3631,7 @@ fn command_suggestion(args: &[String]) -> Option<(String, &'static str)> {
         "board",
         "discover",
         "pipe",
+        "project",
         "help",
         "home",
         "agents",
@@ -3460,6 +4086,44 @@ mod tests {
                 ..
             }) if intent == ["send", "an", "iMessage"] && authority == "external-commit"
         ));
+    }
+
+    #[test]
+    fn parses_project_create_with_explicit_pricing_basis() {
+        let cli = Cli::try_parse_from([
+            "hii",
+            "project",
+            "create",
+            "Community",
+            "Workshop",
+            "--budget",
+            "1250000.00",
+            "--base-hours",
+            "1400",
+            "--blended-rate",
+            "185.00",
+            "--options",
+            "4",
+            "--json",
+        ])
+        .expect("parse project creation");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Project {
+                action: ProjectCommand::Create {
+                    name,
+                    budget: Some(budget),
+                    base_hours: 1400,
+                    blended_rate,
+                    options: 4,
+                    json: true,
+                    ..
+                }
+            }) if name == ["Community", "Workshop"]
+                && budget == "1250000.00"
+                && blended_rate == "185.00"
+        ));
+        assert!(Cli::try_parse_from(["hii", "project", "create", "Missing basis"]).is_err());
     }
 
     #[test]

@@ -8,6 +8,7 @@ use std::{
 use uuid::Uuid;
 
 pub mod information;
+pub mod operational;
 
 pub const CONTRACT_VERSION: u8 = 1;
 

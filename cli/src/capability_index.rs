@@ -47,13 +47,53 @@ pub struct Match {
 /// failing the search — a broken capabilities.json must not hide the 131 skills.
 pub fn load_all(paths: &AppPaths) -> Vec<Entry> {
     let runtime = &paths.runtime;
-    let mut entries = Vec::new();
+    let mut entries = built_in_project_capabilities();
     entries.extend(load_skills(&runtime.join("skills")));
     entries.extend(load_registered_skills(&runtime.join("skills/registered")));
     entries.extend(load_capabilities(&runtime.join("capabilities.json")));
     entries.extend(load_drafts(&runtime.join("skills/proposed")));
     apply_lifecycle(paths, &mut entries);
     entries
+}
+
+/// Native project capabilities ship with the Rust CLI, so they remain
+/// discoverable in a standalone app even when no user registry exists yet.
+fn built_in_project_capabilities() -> Vec<Entry> {
+    vec![
+        Entry {
+            id: "hii.project.execution-plan".into(),
+            name: "Project Execution Planning and KPI Triage".into(),
+            description: "Create a governed organizational project linking objectives, KPIs, stakeholder questions, dependent tasks, budgets, approvals, and evidence.".into(),
+            source: "capability",
+            category: "hii-project".into(),
+            tags: vec!["local-only".into(), "write HII project state".into()],
+            invoke: Some("hii project create".into()),
+            status: "ready".into(),
+            examples: vec!["hii project triage <project> --json".into()],
+        },
+        Entry {
+            id: "hii.project.architecture-pricing".into(),
+            name: "Architecture SD DD CD and Active Development Pricing".into(),
+            description: "Generate deterministic, line-item delivery options for schematic design, design development, construction documents, and active project development.".into(),
+            source: "capability",
+            category: "hii-project".into(),
+            tags: vec!["local-only".into(), "planning estimate".into()],
+            invoke: Some("hii project price".into()),
+            status: "ready".into(),
+            examples: vec!["hii project show <project> --json".into()],
+        },
+        Entry {
+            id: "hii.project.supplier-rfq".into(),
+            name: "Supplier Requirements, Quote Comparison, and RFQ Drafting".into(),
+            description: "Track supplier requirements and source-backed quotes, then produce an unsent RFQ draft. External contact and purchasing remain separately approval-gated.".into(),
+            source: "capability",
+            category: "hii-project".into(),
+            tags: vec!["local-only".into(), "external action requires approval".into()],
+            invoke: Some("hii project rfq".into()),
+            status: "ready".into(),
+            examples: vec!["hii project supplier-quote <project> <need> <supplier> <amount> --source <url-or-document>".into()],
+        },
+    ]
 }
 
 fn load_registered_skills(dir: &Path) -> Vec<Entry> {

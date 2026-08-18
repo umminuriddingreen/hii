@@ -458,28 +458,59 @@ pub fn discover_web(query: &str, limit: usize) -> Result<Vec<SearchResult>, Stri
     if query.trim().is_empty() {
         return Err("web discovery needs a query".into());
     }
-    let endpoint = std::env::var("HII_SEARCH_ENDPOINT")
-        .unwrap_or_else(|_| "https://html.duckduckgo.com/html/".into());
+    let explicit = std::env::var("HII_SEARCH_ENDPOINT").ok();
+    let endpoints = explicit.map_or_else(
+        || {
+            vec![
+                "http://127.0.0.1:8888/search".to_string(),
+                "https://html.duckduckgo.com/html/".to_string(),
+            ]
+        },
+        |endpoint| vec![endpoint],
+    );
     let response = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(10))
         .timeout_read(Duration::from_secs(20))
-        .build()
-        .get(&endpoint)
+        .build();
+    let mut failures = Vec::new();
+    for endpoint in endpoints {
+        match fetch_search_endpoint(&response, &endpoint, query, limit) {
+            Ok(results) if !results.is_empty() => return Ok(results),
+            Ok(_) => failures.push(format!("{endpoint}: no results parsed")),
+            Err(error) => failures.push(format!("{endpoint}: {error}")),
+        }
+    }
+    Err(format!("web discovery failed: {}", failures.join("; ")))
+}
+
+fn fetch_search_endpoint(
+    agent: &ureq::Agent,
+    endpoint: &str,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<SearchResult>, String> {
+    let response = agent
+        .get(endpoint)
         .query("q", query)
         .set("User-Agent", "HII/0.1 information discovery")
         .call()
-        .map_err(|error| format!("web discovery failed: {error}"))?;
+        .map_err(|error| error.to_string())?;
     let mut raw = String::new();
     response
         .into_reader()
         .take(MAX_RESPONSE_BYTES)
         .read_to_string(&mut raw)
         .map_err(|error| error.to_string())?;
-    let document = Html::parse_document(&raw);
+    parse_search_html(&raw, limit)
+}
+
+fn parse_search_html(raw: &str, limit: usize) -> Result<Vec<SearchResult>, String> {
+    let document = Html::parse_document(raw);
     let result_selector = Selector::parse(".result").map_err(|error| error.to_string())?;
-    let title_selector = Selector::parse("a.result__a").map_err(|error| error.to_string())?;
-    let snippet_selector =
-        Selector::parse(".result__snippet").map_err(|error| error.to_string())?;
+    let title_selector = Selector::parse("a.result__a, h3 a, h4 a, .result_header a")
+        .map_err(|error| error.to_string())?;
+    let snippet_selector = Selector::parse(".result__snippet, .content, p.content")
+        .map_err(|error| error.to_string())?;
     let mut results = Vec::new();
     for result in document.select(&result_selector) {
         let Some(anchor) = result.select(&title_selector).next() else {
@@ -854,5 +885,18 @@ mod tests {
     fn unwraps_duckduckgo_result_urls() {
         let target = duckduckgo_target("/l/?uddg=https%3A%2F%2Fexample.com%2Fpaper").unwrap();
         assert_eq!(target, "https://example.com/paper");
+    }
+
+    #[test]
+    fn parses_local_searxng_results_with_clickable_sources() {
+        let results = parse_search_html(
+            r#"<article class="result"><h3><a href="https://supplier.example/catalog">Supplier Catalog</a></h3><p class="content">Local materials and lead times.</p></article>"#,
+            8,
+        )
+        .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].url, "https://supplier.example/catalog");
+        assert_eq!(results[0].title, "Supplier Catalog");
+        assert!(results[0].excerpt.contains("lead times"));
     }
 }
