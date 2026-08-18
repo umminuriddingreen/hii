@@ -2,8 +2,8 @@
 
 **Founder:** Ummi Nuriddin Green  
 **Status:** Founder-level product and architecture context  
-**Version:** 1.0  
-**Date:** 2026-07-14
+**Version:** 1.1
+**Date:** 2026-08-18
 
 This document gives implementation agents one coherent account of what HII
 means, what is being shipped now, what belongs later, and how work must be
@@ -20,6 +20,17 @@ receipt-backed CLI loop excellent: intent, approved context, bounded work,
 verification, saved receipt, and repeatable capability. If that loop cannot
 repeatedly complete concrete external tasks with less prompting and clear proof,
 new or expanded surfaces are still decoration.
+
+**Cross-chat synthesis, 2026-08-18:** The founder-level human experience and
+the CLI-first implementation decision are complementary, not competing. HII is
+personal intelligence made spatial: the canvas and durable objects are the
+shared world, models supply replaceable cognition, and the CLI/runtime supplies
+deterministic hands, authority, verification, and receipts. People should work
+through direct manipulation, selection, speech, typing, and a finite interaction
+grammar—not be required to think like the CLI. See
+[`records/2026-08-18-cross-chat-hii-synthesis.md`](records/2026-08-18-cross-chat-hii-synthesis.md)
+for the consolidated product direction, interaction model, web/information
+model, provider strategy, practice structure, sequencing, and evidence boundary.
 
 ## Authority and use
 
@@ -46,10 +57,16 @@ Report material conflicts. Do not silently invent a compromise.
 
 ## Canonical definition
 
-**HII means Human Information Interface.** HII is the local-first, user-owned,
-human-facing interface and context system that turns intent into verified agent
-work across information, tools, files, machines, memory, and reusable
-capabilities.
+**HII means Human Information Interface.** HII is personal intelligence made
+spatial: a local-first, user-owned environment that lets people work directly
+with durable information, tools, projects, and artifacts while models help
+perceive, connect, transform, and act within explicit authority.
+
+HII turns intent into verified work across information, tools, files, machines,
+memory, and reusable capabilities. It is an information-model interface first:
+pages, files, images, people, claims, questions, relationships, jobs, and
+artifacts become source-backed objects that can be understood, manipulated,
+connected, revised, and put to work without losing provenance.
 
 HII's agent-facing coordination, policy, execution, capability publication,
 agent lifecycle management, action governance, and proof recording are internal
@@ -73,6 +90,18 @@ HII is not a chatbot, model wrapper, terminal skin, marketplace, or collection
 of unrelated tools. Internally, the sharp metaphor is a **control plane for
 artificial labor**: it gives agents assignments, context, boundaries, tools,
 status, proof, review, memory, and handoffs.
+
+The equally important human-facing metaphor is:
+
+```text
+canvas and objects = shared world
+models             = cognition
+CLI/runtime        = deterministic hands
+human              = intent, taste, authority, and final judgment
+```
+
+Chat remains available, but it is one gesture among pointing, selecting,
+dragging, drawing, typing, speaking, grouping, revising, and approving.
 
 ## The three scales of HII
 
@@ -146,6 +175,29 @@ The ideal daily question is:
 > what is the next executable action?
 
 ## HII CLI/runtime boundary
+
+### CLI-first does not mean terminal-first for humans
+
+ADR 004 assigns ownership of state, policy, execution, verification, and agent
+contracts to the Rust CLI/runtime. It does not require the human to formulate
+their work as commands.
+
+The intended dependency is:
+
+```text
+human behavior and expressed intent
+→ perception and evidence-backed intent inference
+→ proposed bounded action
+→ CLI-owned capability and authority contract
+→ deterministic execution
+→ verified result and receipt
+→ shared environment update
+```
+
+Inference may be probabilistic. The boundary where the world changes must be
+deterministic and inspectable. The human-facing grammar should remain finite:
+**Look · Do · Delegate**, with preview or approval before consequence and proof
+after consequence.
 
 ### HII owns the whole product direction
 

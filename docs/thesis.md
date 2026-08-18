@@ -1,6 +1,7 @@
 # HII Thesis
 
-> **HII is the user-owned context and control plane for human–agent computing.**
+> **HII is personal intelligence made spatial: the user-owned information,
+> context, and control plane for human–agent computing.**
 
 Not "HII remembers what you do."
 
@@ -19,7 +20,14 @@ repeated workflows → skills → automations* is remarkably close to the shape 
 had been converging on. It is also a clear signal. **Memory capture cannot be the
 moat.** Every major vendor will ship it, each wired to its own agent.
 
-So HII moves up the stack. It does not compete for mouse clicks.
+So HII moves up the stack. It does not compete for mouse clicks or ask people
+to compress their world into prompts. It gives their existing material a shared
+space in which it can become connected, understandable, actionable, and
+durable.
+
+Chat is one gesture, not the organizing model. People can point, select, move,
+draw, type, speak, group, revise, and approve. Models infer and propose;
+CLI-owned capabilities act within bounds; receipts show what changed.
 
 ## The architecture
 
@@ -47,8 +55,21 @@ Human ─ intent ──►  ├─ terminal            ──►  HII GRAPH
 ```
 
 Everything on the left is a **sensor**. Sensors are commodity, they are
-replaceable, and new ones will keep arriving. HII's job is everything below the
-graph.
+replaceable, and new ones will keep arriving. The graph is not a database
+diagram users must operate; it appears as meaningful source-backed objects,
+relationships, jobs, artifacts, and receipts on a shared work surface. HII's
+job is everything below and around that living object world.
+
+The working loop is:
+
+```text
+perceive → understand → propose or act → verify → remember → continue
+```
+
+The human-facing grammar is **Look · Do · Delegate**. Authority is a separate
+dimension, from observation through reversible change to external or
+irreversible commitment. Determinism belongs where the world changes, not in
+the way the human must express thought.
 
 ## What HII owns
 

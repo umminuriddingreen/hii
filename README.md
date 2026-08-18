@@ -26,7 +26,8 @@ human intent
 ```
 
 Read [the HII master context](docs/HII_AII_MASTER_CONTEXT.md) and
-[ADR 004: CLI-First HII Runtime](docs/decisions/004-cli-first-hii-runtime.md)
+[the cross-chat HII synthesis](docs/records/2026-08-18-cross-chat-hii-synthesis.md),
+then [ADR 004: CLI-First HII Runtime](docs/decisions/004-cli-first-hii-runtime.md)
 before making product or architecture changes.
 
 ## Product Shape
