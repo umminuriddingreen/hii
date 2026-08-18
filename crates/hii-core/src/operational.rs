@@ -82,7 +82,10 @@ pub fn upsert_project(
         )
         .map_err(|error| error.to_string())?;
     let operation_id = Uuid::new_v4().to_string();
-    let idempotency = format!("project:{id}:revision:{revision}");
+    // A semantic revision can contain several append-only evidence events
+    // (supplier research, approvals, receipts). Deduplicate an identical
+    // snapshot, not every snapshot that happens to share the same revision.
+    let idempotency = format!("project:{id}:revision:{revision}:hash:{operation_hash}");
     let payload = serde_json::json!({
         "projectId": id,
         "revision": revision,
@@ -323,14 +326,40 @@ mod tests {
             "2026-08-18T00:01:00Z",
         )
         .unwrap();
+        upsert_project(
+            &runtime.0,
+            "one",
+            2,
+            &serde_json::json!({"id":"one","revision":2,"evidence":"supplier research"}),
+            "tester",
+            "2026-08-18T00:02:00Z",
+        )
+        .unwrap();
+        // Retrying an identical snapshot stays idempotent.
+        upsert_project(
+            &runtime.0,
+            "one",
+            2,
+            &serde_json::json!({"id":"one","revision":2,"evidence":"supplier research"}),
+            "tester",
+            "2026-08-18T00:02:00Z",
+        )
+        .unwrap();
         let values = list_projects(&runtime.0).unwrap();
-        assert_eq!(values, vec![serde_json::json!({"id":"one","revision":2})]);
+        assert_eq!(
+            values,
+            vec![serde_json::json!({
+                "id":"one",
+                "revision":2,
+                "evidence":"supplier research"
+            })]
+        );
         let connection = database(&runtime.0).unwrap();
         let operations: i64 = connection
             .query_row("SELECT COUNT(*) FROM operational_operations", [], |row| {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(operations, 2);
+        assert_eq!(operations, 3);
     }
 }

@@ -989,9 +989,10 @@ pub fn research_suppliers(
         .ok_or_else(|| format!("supplier need not found: {need_id}"))?;
     let need = &project.supplier_needs[need_index];
     let query = format!(
-        "{} supplier {} {} request quote",
+        "{} {} serving {} {} project",
         need.category,
-        need.location.as_deref().unwrap_or(""),
+        supplier_search_terms(&need.category),
+        need.location.as_deref().unwrap_or("the project location"),
         project.project_type
     );
     let results = hii_core::information::discover_web(&query, limit.clamp(1, 20))?;
@@ -1951,6 +1952,21 @@ fn material_change(project: &mut Project, event: &str, detail: &str) {
     touch(project, event, "local operator", detail);
 }
 
+fn supplier_search_terms(category: &str) -> &'static str {
+    match category {
+        "Site and civil" => "licensed land surveyor civil engineering site contractor",
+        "Structure" => "structural engineer steel concrete contractor fabricator",
+        "Envelope and enclosure" => "building envelope roofing glazing contractor supplier",
+        "Interiors and finishes" => "commercial interiors finishes contractor supplier",
+        "Mechanical systems" => "HVAC mechanical contractor equipment supplier",
+        "Electrical and lighting" => "electrical contractor lighting supplier",
+        "Plumbing and fire protection" => "plumbing fire protection contractor",
+        "Equipment and furnishings" => "commercial equipment furnishings supplier",
+        "General conditions and logistics" => "general contractor construction logistics firm",
+        _ => "qualified contractor supplier",
+    }
+}
+
 fn touch(project: &mut Project, event: &str, actor: &str, detail: &str) {
     project.updated_at = now();
     project.events.push(ProjectEvent {
@@ -2264,6 +2280,10 @@ mod tests {
         assert!(needs
             .iter()
             .all(|need| need.location.as_deref() == Some("Newark, NJ")));
+        assert_eq!(
+            supplier_search_terms("Site and civil"),
+            "licensed land surveyor civil engineering site contractor"
+        );
     }
 
     #[test]
