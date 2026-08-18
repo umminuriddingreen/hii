@@ -40,11 +40,12 @@ Business Source License 1.1  →  Apache-2.0 on the Change Date
     scripts/               operational tooling
 
 Apache License, Version 2.0
-  Full text: ./LICENSES/Apache-2.0.txt (and a copy in each directory below)
+  Full text: ./LICENSES/Apache-2.0.txt (referenced by package metadata below)
 
     protocol/                  HII protocol, object schemas, receipt format,
                                Operational Graph schema, agent and plugin
                                interfaces
+    fabric/protocol/           machine-fabric wire protocol and schemas
     extensions/hii-stream-mcp/ MCP extension
     skills/                    skill definitions
     aii/skills/                skill definitions

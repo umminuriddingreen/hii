@@ -5,6 +5,10 @@
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
   "scripts": {
+    "fabric:protocol:check": "cargo fmt --manifest-path fabric/protocol/Cargo.toml -- --check && cargo test --locked --manifest-path fabric/protocol/Cargo.toml && cargo clippy --locked --manifest-path fabric/protocol/Cargo.toml --all-targets -- -D warnings",
+    "fabric:windows-receiver:check": "cargo fmt --manifest-path fabric/windows-receiver/Cargo.toml -- --check && cargo test --locked --manifest-path fabric/windows-receiver/Cargo.toml && cargo clippy --locked --manifest-path fabric/windows-receiver/Cargo.toml --all-targets -- -D warnings",
+    "fabric:macos-capture:check": "swift test --package-path fabric/macos-capture && swift build -c release --package-path fabric/macos-capture",
+    "fabric:check": "npm run fabric:protocol:check && npm run fabric:windows-receiver:check && npm run fabric:macos-capture:check",
     "runner:build": "cargo build --release -p hii-native-runner",
     "runner:check": "cargo test -p hii-native-runner && cargo clippy -p hii-native-runner --all-targets -- -D warnings",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true",

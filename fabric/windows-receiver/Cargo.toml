@@ -1,0 +1,34 @@
+[package]
+name = "hii-windows-receiver"
+version = "0.1.0"
+edition = "2021"
+description = "Bounded Windows receiver scaffold for the HII machine fabric"
+license-file = "../../LICENSE"
+publish = false
+
+# Keep this bounded scaffold independent from HII's root Rust workspace until
+# the shared fabric protocol is ready to own the integration.
+[workspace]
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "hii-windows-receiver"
+path = "src/main.rs"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+] }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+all = "deny"
+pedantic = "allow"
