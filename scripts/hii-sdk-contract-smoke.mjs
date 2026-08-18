@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ROOT = path.join(os.homedir(), "hii");
+const ROOT = process.env.HII_ROOT
+  ? path.resolve(process.env.HII_ROOT)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REGISTRY = path.join(ROOT, "aii", "capabilities", "registry.json");
 const JOBS = path.join(ROOT, ".hii", "capability-jobs.jsonl");
-const API_CAPABILITIES_ROUTE = path.join(ROOT, "app", "api", "capabilities", "route.ts");
+const CAPABILITY_READER = path.join(ROOT, "lib", "capabilities", "index.ts");
 const CLI = path.join(ROOT, "scripts", "hii-cli.mjs");
 
 const allowed = {
@@ -148,10 +150,10 @@ function validateJobs(jobRows, registry) {
 
 function validateStaticParity() {
   const issues = [];
-  const apiRoute = fs.readFileSync(API_CAPABILITIES_ROUTE, "utf8");
+  const capabilityReader = fs.readFileSync(CAPABILITY_READER, "utf8");
   const cli = fs.readFileSync(CLI, "utf8");
-  if (!apiRoute.includes("listCapabilities")) {
-    pushIssue(issues, "api/capabilities", "route should expose listCapabilities()");
+  if (!capabilityReader.includes("listCapabilities")) {
+    pushIssue(issues, "lib/capabilities", "reader should expose listCapabilities()");
   }
   if (!cli.includes("CAPABILITY_REGISTRY")) {
     pushIssue(issues, "hii-cli", "CLI should read CAPABILITY_REGISTRY");

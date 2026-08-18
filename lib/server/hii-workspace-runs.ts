@@ -342,8 +342,9 @@ export async function createWorkspaceRunCapabilityDraft(input: { id?: unknown; n
 
   const name = clean(input.name, 160) || current.job.inputSummary;
   const id = skillId(name) || `workspace-run-${current.job.id.slice(0, 12).toLowerCase()}`;
-  const script = path.join(os.homedir(), 'hii', 'scripts', 'hii-cli.mjs');
-  const coordinate = clean(current.job.metadata?.workspaceRoot, 1000) || path.join(os.homedir(), 'hii');
+  const hiiRoot = process.env.HII_ROOT ? path.resolve(process.env.HII_ROOT) : path.resolve(process.cwd());
+  const script = path.join(hiiRoot, 'scripts', 'hii-cli.mjs');
+  const coordinate = clean(current.job.metadata?.workspaceRoot, 1000) || hiiRoot;
   const result = await execFileAsync(process.execPath, [
     script,
     'skill',

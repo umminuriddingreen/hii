@@ -9,11 +9,11 @@
     "runner:check": "cargo test -p hii-native-runner && cargo clippy -p hii-native-runner --all-targets -- -D warnings",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true",
     "dev": "node scripts/hii-dev.mjs",
-    "dev:desktop": "NEXT_PUBLIC_HII_TARGET=desktop next dev --hostname 127.0.0.1 --port 3042",
+    "dev:desktop": "node scripts/hii-stage-cli.mjs && NEXT_PUBLIC_HII_TARGET=desktop next dev --hostname 127.0.0.1 --port 3042",
     "dev:tauri": "tauri dev",
     "demo:launch-proof": "node --experimental-strip-types scripts/hii-launch-proof-workspace.mjs",
     "build": "NEXT_PUBLIC_HII_TARGET=web next build",
-    "build:desktop": "NEXT_PUBLIC_HII_TARGET=desktop next build",
+    "build:desktop": "node scripts/hii-stage-cli.mjs --release && NEXT_PUBLIC_HII_TARGET=desktop next build",
     "build:tauri": "node scripts/hii-tauri-build.mjs",
     "build:tauri:mac": "node scripts/hii-tauri-build.mjs --bundles app",
     "build:tauri:windows": "node scripts/hii-tauri-build.mjs --bundles nsis",
@@ -64,6 +64,8 @@
     "cli:check": "cargo fmt --all -- --check && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings",
     "cli:build": "cargo build --workspace --release",
     "cli:install": "node scripts/hii-cli-install.mjs",
+    "bar:build": "node scripts/hii-bar-build.mjs",
+    "bar:check": "node scripts/hii-bar-build.mjs --test",
     "cli:eval:local": "bash cli/scripts/local-model-eval.sh",
     "test": "vitest run",
     "security:secrets": "node scripts/hii-secret-scan.mjs",
@@ -74,7 +76,8 @@
     "ci:full": "npm run ci:fast && npm run cli:build && npm run ci:product && npm run build",
     "ci:release-candidate": "npm run ci:full && npm run build:tauri && npm run hii:packaged-app:check",
     "check": "tsc -p tsconfig.json --noEmit",
-    "lint": "tsc -p tsconfig.json --noEmit"
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "stage:cli": "node scripts/hii-stage-cli.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",

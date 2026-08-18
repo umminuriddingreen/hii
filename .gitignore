@@ -14,6 +14,8 @@ next-env.d.ts
 .DS_Store
 *.tsbuildinfo
 src-tauri/target/
+# The CLI staged into the bundle by scripts/hii-tauri-build.mjs is a build output.
+src-tauri/resources/
 /target/
 .hii/
 /.hii-run-context/
@@ -36,3 +38,6 @@ life/
 /external/
 /social/
 /install_ssh_mac.sh
+
+# SwiftPM build output for the macOS menu bar app (macos/).
+/macos/.build/

@@ -185,7 +185,7 @@ try {
       : null,
     'AII did not reconcile the interrupted workspace run.'
   );
-  assert.match(reconciled.logs.at(-1), /no owned process or verified receipt/i);
+  assert.match(reconciled.logs.at(-1), /no owned process and no satisfied receipt/i);
   assert.equal(reconciled.metadata.contextStaging.cleanupStatus, 'removed');
   assert.equal(fs.existsSync(interruptedStagedPath), false);
 

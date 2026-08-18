@@ -2,6 +2,7 @@
 mod acp;
 mod agent;
 mod agents;
+mod ask;
 mod attachments;
 mod background;
 mod board;
@@ -30,6 +31,7 @@ mod mcp_client;
 mod ollama;
 mod picker;
 mod pipe;
+mod presence;
 mod project;
 mod receipt;
 mod run_context;
@@ -141,6 +143,16 @@ enum SessionProfile {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    #[command(about = "Stream one direct answer from the fastest configured local model")]
+    Ask {
+        #[arg(required = true, num_args = 1..)]
+        prompt: Vec<String>,
+        #[arg(
+            long,
+            help = "Stream machine-readable answer events, one JSON object per line"
+        )]
+        jsonl: bool,
+    },
     #[command(alias = "agent", about = "Complete a goal inside a bounded workspace")]
     Run {
         #[arg(required = true, num_args = 1..)]
@@ -202,6 +214,12 @@ enum Commands {
         )]
         no_context: bool,
         #[arg(
+            long = "context-source",
+            value_name = "SOURCE",
+            help = "Source-labelled invocation context recorded in the receipt; repeatable"
+        )]
+        context_sources: Vec<String>,
+        #[arg(
             long,
             conflicts_with_all = ["jsonl", "verbose"],
             help = "Print one machine-readable final result"
@@ -253,6 +271,11 @@ enum Commands {
     },
     #[command(about = "Show the local workspace-agent state")]
     Status {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Show HII's grounded continuity, attention, and authority boundary")]
+    Presence {
         #[arg(long)]
         json: bool,
     },
@@ -1102,6 +1125,10 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         );
     }
     match cli.command {
+        Some(Commands::Ask { prompt, jsonl }) => {
+            ask::run(&paths, cli.model.as_deref(), prompt.join(" "), jsonl)?;
+            Ok(ExitCode::SUCCESS)
+        }
         Some(Commands::Run {
             goal,
             review,
@@ -1115,6 +1142,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             outcome,
             require_artifact,
             no_context,
+            context_sources,
             json,
             jsonl,
             quiet,
@@ -1165,6 +1193,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                         &require_artifact,
                     )?,
                     use_context: !no_context,
+                    context_sources,
                     output,
                     stream,
                     allow_missing_verify_deps,
@@ -1190,6 +1219,13 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         }
         Some(Commands::Status { json }) => {
             status(&paths, cli.cwd, json)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Presence { json }) => {
+            let workspace = cli
+                .cwd
+                .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+            presence::show(&paths, &workspace, json)?;
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Doctor) => {
@@ -1325,6 +1361,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                             verify,
                             outcome_requirements: None,
                             use_context: true,
+                            context_sources: Vec::new(),
                             output: RunOutput::Human,
                             stream: StreamPolicy::Auto,
                             allow_missing_verify_deps: false,
@@ -1422,6 +1459,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                         verify,
                         outcome_requirements: None,
                         use_context: true,
+                        context_sources: Vec::new(),
                         output: if json {
                             RunOutput::Json
                         } else {
@@ -3542,9 +3580,11 @@ fn claimed_from_legacy(args: &[String]) -> bool {
 fn is_native_command(command: &str) -> bool {
     matches!(
         command,
-        "run"
+        "ask"
+            | "run"
             | "agent"
             | "status"
+            | "presence"
             | "doctor"
             | "models"
             | "providers"
@@ -4041,6 +4081,28 @@ mod tests {
                 last_message: Some(path),
                 ..
             }) if goal == ["build", "the", "site"] && path == Path::new("output/final.txt")
+        ));
+    }
+
+    #[test]
+    fn run_parses_repeatable_context_sources() {
+        let cli = Cli::try_parse_from([
+            "hii",
+            "run",
+            "inspect this",
+            "--context-source",
+            "nsworkspace:frontmost-app:Rhino",
+            "--context-source",
+            "app-scripting:document-path:/tmp/tower.3dm",
+        ])
+        .expect("parse invocation context");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Run { context_sources, .. })
+                if context_sources == [
+                    "nsworkspace:frontmost-app:Rhino",
+                    "app-scripting:document-path:/tmp/tower.3dm"
+                ]
         ));
     }
 

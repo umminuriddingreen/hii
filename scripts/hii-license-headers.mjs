@@ -26,6 +26,9 @@ const targets = [
   ['cli/src/main.rs', BSL],
   ['native-runner/src/main.rs', BSL],
   ['src-tauri/src/main.rs', BSL],
+  // Package.swift is deliberately absent: its `// swift-tools-version:` comment
+  // must stay on line 1, and this script only makes room for a shebang.
+  ['macos/Sources/HiiBar/main.swift', BSL],
   ['server.mjs', BSL],
   ['app/layout.tsx', BSL],
   ['app/page.tsx', BSL],

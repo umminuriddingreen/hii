@@ -5,6 +5,15 @@ import type { NodeSeed } from './ingest';
 const TERMINAL_COMMAND = /^\/terminal(?:\s+(.+))?$/i;
 const DEFAULT_CWD = '~/hii';
 
+export function isTerminalShortcut(event: Pick<KeyboardEvent, 'altKey' | 'code' | 'ctrlKey' | 'metaKey' | 'repeat' | 'shiftKey'>) {
+  return event.code === 'Space'
+    && !event.altKey
+    && !event.ctrlKey
+    && !event.metaKey
+    && !event.shiftKey
+    && !event.repeat;
+}
+
 function cleanCwd(value?: string) {
   const cleaned = (value || DEFAULT_CWD)
     .replace(/[\u0000-\u001f\u007f]/g, '')

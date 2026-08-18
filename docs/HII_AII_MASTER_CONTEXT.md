@@ -2,7 +2,7 @@
 
 **Founder:** Ummi Nuriddin Green  
 **Status:** Founder-level product and architecture context  
-**Version:** 1.1
+**Version:** 1.2
 **Date:** 2026-08-18
 
 This document gives implementation agents one coherent account of what HII
@@ -32,13 +32,22 @@ grammar—not be required to think like the CLI. See
 for the consolidated product direction, interaction model, web/information
 model, provider strategy, practice structure, sequencing, and evidence boundary.
 
+**Founder decision, 2026-08-18:** ADR 005 makes HII one user-owned inference
+surface for systems and data across all of the user's devices and networks. The
+canvas/workspace is the human-facing product center; the CLI remains the
+deterministic runtime and authority boundary. The Knowledge Workspace and
+Context Dock become the durable context and memory foundation for this surface.
+The Mac/Windows machine fabric is a primary product direction, but it is not
+implemented or verified merely because the direction is documented.
+
 ## Authority and use
 
 Agents must distinguish four levels of truth:
 
 1. **Founder thesis** explains why HII exists and protects its direction.
 2. **System architecture** defines the HII CLI/runtime boundary and operating loop.
-3. **Current product decision** defines immediate scope: HII Context Dock 0.1.
+3. **Current product decision** defines the one-surface direction and the next
+   narrow proof; Context Dock remains the local context and memory foundation.
 4. **Future ecosystem** preserves Workstation, Foundry, Interform, commerce,
    fabrication, and personal intelligence as roadmap context.
 
@@ -128,21 +137,22 @@ state and proof while models remain replaceable reasoning engines.
 
 ### HII as the product being shipped now
 
-The product foundation is **HII Context Dock** and its active human-facing
-surface is now the **HII Knowledge Workspace**:
+The product is **one user-owned inference surface for systems and data across
+all of the user's devices and networks**. Its active human-facing expression is
+the spatial HII workspace:
 
-> A local-first knowledge and project context environment that lets humans and
-> agents create, connect, retrieve, review, and verify durable work without
-> losing source provenance.
+> Point at, select, speak to, type to, arrange, and act on the user's digital
+> world as durable objects—without hiding authority, provenance, or proof.
 
-The product promise is:
+The Knowledge Workspace and Context Dock remain the first local proof and the
+durable context/memory layer:
 
 > Build knowledge once. HII keeps it linked, source-aware, agent-ready, and
 > accountable.
 
-Founder decision ADR 001 explicitly reopens an Obsidian-class local knowledge
-workspace inside HII. It does not authorize a separate runtime, cloud-first
-sync, plugin marketplace, or unbounded agent access.
+ADR 005 extends, rather than replaces, ADRs 001–004. It authorizes a governed
+machine fabric among the user's own devices; it does not authorize a separate
+runtime, cloud-first sync, marketplace, or unbounded remote access.
 
 ## Ummi's central goal
 
@@ -207,8 +217,9 @@ terminal surfaces, approvals, verification views, receipts, agent lifecycle,
 capabilities, policy, managed execution, handoffs, proof collection, runtime
 configuration, and skill promotion.
 
-The CLI is the primary product and control surface for now. Visual surfaces are
-named **HII** when they are used, but they are projections over CLI-owned HII
+The spatial workspace is the primary human-facing product surface. The CLI is
+the primary runtime, authority, verification, and agent-contract surface.
+Visual surfaces are named **HII** when they are used and project CLI-owned HII
 state and proof history.
 
 Do not expand product surfaces until the CLI loop is strong enough to finish
@@ -294,28 +305,29 @@ Context Dock owns the before-work context layer. HII runtime owns the
 during-work governance layer. Receipts, memory, and skills close the after-work
 layer.
 
-## Current product: HII Knowledge Workspace on Context Dock
+## Current product: one inference surface on a governed machine fabric
 
 ### User outcome
 
 A user should be able to:
 
 1. Install and launch HII without using a terminal.
-2. Add a repository or deliberately selected folder.
-3. See exactly what HII may read and what is excluded.
-4. Inspect deterministic inventory, formats, Git state, and extraction status.
-5. Enter a concrete task.
-6. Receive a compact proposed context pack.
-7. Inspect why each item was selected and its source provenance.
-8. Remove, add, pin, or exclude context before delivery.
-9. Make the approved pack available through bounded MCP.
-10. Let an agent perform separately authorized work.
-11. Record decisions, files changed, verification, blockers, and next action.
-12. Resume later without reconstructing project understanding.
-13. Create and edit durable workspace memory as typed objects with folders or
+2. See local and connected systems, files, services, displays, applications,
+   agents, and results as typed, source-identified objects.
+3. Select those objects and express intent through direct manipulation, text,
+   or voice without rebuilding context in a long prompt.
+4. See exactly what HII may observe, what it may change, which device would act,
+   what data would cross a link, and what is excluded.
+5. Preview consequential work, authorize it at the right boundary, and receive
+   live state plus proof from the actual executor.
+6. Move frames, files, clipboard data, explicit services, and bounded jobs over
+   authenticated user-owned links while preserving provenance.
+7. Record decisions, files changed, verification, blockers, and next action.
+8. Resume later without reconstructing project or machine understanding.
+9. Create and edit durable workspace memory as typed objects with folders or
     collections, tags, links/backlinks, graph navigation, daily surfaces,
     history, and local Markdown/JSON export.
-14. Let verified agent work become linked object memory and reusable capability.
+10. Let verified work become linked object memory and reusable capability.
 
 ### P0 capabilities
 
@@ -518,16 +530,17 @@ screenshots, receipts, or commits.
 ```text
 Level 0 — Founder practice and mission
 Level 1 — HII CLI/runtime substrate and verified-work loop
-Level 2 — Current launch: Context Dock 0.1
-Level 3 — Daily project operating intelligence
-Level 4 — HII agent operations and multi-machine work
+Level 2 — Current launch: one local spatial inference surface
+Level 3 — Context Dock, Knowledge Workspace, and daily project intelligence
+Level 4 — Authenticated user-owned multi-machine fabric
 Level 5 — Foundry and productization systems
 Level 6 — Interform, AEC, geometry, media, and business applications
 Level 7 — Networks, services, licensing, fabrication, and commerce
 Level 8 — Separately permissioned personal operational intelligence
 ```
 
-The existence of later levels never authorizes skipping Level 2.
+The existence of later levels never authorizes claiming transport, observation,
+or execution that has not been proven on a live device.
 
 ## Deferred and prohibited scope
 
@@ -540,7 +553,7 @@ Do not expand the current release into:
 - unrestricted autonomous agents or unrestricted shell MCP tools;
 - cloud collaboration, mobile, social networking, or broad web crawling;
 - a marketplace, payments, credits expansion, runner exchange, or
-  decentralized compute system;
+  third-party decentralized compute system;
 - a geometry compiler, CAD replacement, or fabrication marketplace;
 - a custom foundation model;
 - a dashboard of nonfunctional controls;
@@ -572,13 +585,15 @@ CD-080  Verification and security testing
 CD-090  Packaging and founder-beta launch
 ```
 
-The current priority is a truthful, end-to-end local knowledge loop:
+The current priority is a truthful local surface and the smallest real
+cross-device proof:
 
 ```text
 ADR = README = AGENTS.md = CLI help = UI = database = capability metadata
 ```
 
-Truth fragmentation is a larger immediate risk than missing features.
+Truth fragmentation and simulated remote capability are larger immediate risks
+than missing features.
 
 The current product acceptance test is not a larger interface. It is a concrete
 external task completed through:
@@ -646,6 +661,10 @@ is easy to review and reuse?
 **Platform:** Can one local-first system eventually support code, design,
 architecture, fabrication, media, and business through the same context →
 execution → proof → memory loop?
+
+**Integrated surface:** Can a user point, select, type, or speak once and have
+HII coordinate the right data and capability across their own devices, while
+showing what crossed the link, what changed, and what proof came back?
 
 ## Final principle
 

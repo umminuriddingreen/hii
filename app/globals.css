@@ -111,6 +111,56 @@ button, input, textarea { font: inherit; }
 .hii-source p { max-width: 64ch; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
 .hii-source[data-legacy="true"]::after { content: 'This older browser node is preserved as a source. Ask HII to revisit or use it.'; position: absolute; right: 16px; bottom: 46px; max-width: 30ch; color: var(--muted); font: 9px/1.4 "SF Mono", ui-monospace, monospace; text-align: right; }
 
+.hii-dev-browser {
+  --browser-ink: #e9edf4;
+  --browser-muted: #8d96a6;
+  --browser-line: #292e37;
+  display: grid;
+  grid-template-rows: 34px 46px minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #101216;
+  color: var(--browser-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+}
+.hii-browser-tabs, .hii-browser-nav { display: flex; align-items: center; border-bottom: 1px solid var(--browser-line); }
+.hii-browser-tabs { justify-content: space-between; padding: 0 10px 0 14px; background: #181b21; }
+.hii-browser-tabs > div { display: flex; align-items: center; min-width: 0; gap: 8px; }
+.hii-browser-tabs i { width: 7px; height: 7px; border-radius: 50%; background: #7ce3ae; box-shadow: 0 0 10px rgba(124, 227, 174, .38); }
+.hii-browser-tabs strong { max-width: 260px; overflow: hidden; font-size: 10px; font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
+.hii-browser-tabs small { color: var(--browser-muted); font: 8px/1 "SF Mono", ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase; }
+.hii-dev-browser button { border: 0; background: transparent; color: var(--browser-muted); cursor: pointer; }
+.hii-dev-browser button:hover { color: var(--browser-ink); }
+.hii-browser-tabs button { padding: 4px 7px; border: 1px solid var(--browser-line); border-radius: 4px; font: 9px/1 "SF Mono", ui-monospace, monospace; }
+.hii-browser-nav { gap: 3px; padding: 6px 9px; background: #12151a; }
+.hii-browser-nav > button { width: 30px; height: 30px; border-radius: 5px; font-size: 15px; }
+.hii-browser-nav form { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; flex: 1; height: 32px; margin: 0 5px; border: 1px solid #303641; border-radius: 6px; background: #0b0d10; }
+.hii-browser-nav form:focus-within { border-color: #657089; box-shadow: 0 0 0 2px rgba(101, 112, 137, .18); }
+.hii-browser-nav form span { padding-left: 10px; color: #65d0a0; font-size: 12px; }
+.hii-browser-nav input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--browser-ink); padding: 0 10px; font: 11px/1 "SF Mono", ui-monospace, monospace; }
+.hii-browser-nav .hii-browser-capture { width: auto; padding: 0 10px; border: 1px solid #3b765f; color: #87dab5; font: 9px/1 "SF Mono", ui-monospace, monospace; letter-spacing: .04em; }
+.hii-browser-workarea { display: grid; grid-template-columns: minmax(0, 1fr) 260px; min-height: 0; }
+.hii-dev-browser[data-device="mobile"] .hii-browser-viewport { width: 390px; justify-self: center; border-inline: 1px solid var(--browser-line); }
+.hii-browser-viewport { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #fff; }
+.hii-browser-viewport iframe { width: 100%; height: 100%; border: 0; background: #fff; }
+.hii-browser-loading { position: absolute; left: 50%; top: 50%; z-index: 1; transform: translate(-50%, -50%); color: #5d6572; font: 10px/1.4 "SF Mono", ui-monospace, monospace; pointer-events: none; }
+.hii-browser-agent { display: grid; grid-template-rows: auto auto minmax(120px, 1fr) auto; gap: 13px; min-height: 0; padding: 16px; border-left: 1px solid var(--browser-line); background: #15181d; }
+.hii-browser-agent > header { display: flex; align-items: center; justify-content: space-between; }
+.hii-browser-agent > header span { font-size: 11px; font-weight: 620; }
+.hii-browser-agent > header small { color: #65d0a0; font: 8px/1 "SF Mono", ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.hii-browser-agent > p { margin: 0; color: var(--browser-muted); font-size: 10px; line-height: 1.5; }
+.hii-browser-agent form { display: grid; grid-template-rows: minmax(90px, 1fr) auto; gap: 8px; min-height: 0; }
+.hii-browser-agent textarea { width: 100%; resize: none; border: 1px solid var(--browser-line); border-radius: 6px; outline: 0; background: #0d0f12; color: var(--browser-ink); padding: 10px; font-size: 11px; line-height: 1.45; }
+.hii-browser-agent textarea:focus { border-color: #657089; }
+.hii-browser-agent form button { display: flex; align-items: center; justify-content: space-between; min-height: 32px; padding: 0 10px; border-radius: 5px; background: #e8edf5; color: #111419; font-size: 10px; font-weight: 600; }
+.hii-browser-agent form button:disabled { cursor: default; opacity: .28; }
+.hii-browser-agent form button span { color: #626a77; font: 8px/1 "SF Mono", ui-monospace, monospace; }
+.hii-browser-agent dl { display: grid; gap: 7px; margin: 0; padding-top: 12px; border-top: 1px solid var(--browser-line); }
+.hii-browser-agent dl div { display: flex; justify-content: space-between; gap: 8px; font: 8px/1.2 "SF Mono", ui-monospace, monospace; text-transform: uppercase; }
+.hii-browser-agent dt { color: #626b79; }
+.hii-browser-agent dd { margin: 0; color: #aeb6c3; text-align: right; }
+
 .hii-prompt-shell {
   position: fixed;
   z-index: 2147483000;

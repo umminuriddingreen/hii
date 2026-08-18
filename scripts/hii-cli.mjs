@@ -6,9 +6,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import url from "node:url";
 import { runSkillCommand } from "../aii/skills/registry.mjs";
 
-const ROOT = path.join(os.homedir(), "hii");
+// The repository this CLI belongs to. Derived from this file's own location so
+// a checkout anywhere works; HII_ROOT overrides it. Hardcoding ~/hii made every
+// delegated command report on whatever repo happened to sit at that path.
+const ROOT = process.env.HII_ROOT
+  ? path.resolve(process.env.HII_ROOT)
+  : path.dirname(path.dirname(url.fileURLToPath(import.meta.url)));
 const RUNTIME = process.env.HII_RUNTIME_DIR || path.join(os.homedir(), ".hii");
 const BRIDGE_DIR = path.join(RUNTIME, "bridge", "messages");
 const BRIDGE_LOG = path.join(RUNTIME, "bridge", "codex.jsonl");

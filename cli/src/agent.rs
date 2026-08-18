@@ -62,6 +62,10 @@ pub struct RunOptions {
     /// every contract written before this existed still means what it meant.
     pub outcome_requirements: Option<crate::contract::OutcomeRequirements>,
     pub use_context: bool,
+    /// Explicit, source-labelled context supplied by a trusted invocation
+    /// surface (for example HII Bar's frontmost-app observer). These are
+    /// recorded even when the run exits before model execution completes.
+    pub context_sources: Vec<String>,
     pub output: RunOutput,
     pub stream: StreamPolicy,
     pub budgets: Budgets,
@@ -89,6 +93,27 @@ pub enum RunOutput {
 pub enum AutonomyLevel {
     Approval,
     LocalFull,
+}
+
+const MAX_INVOCATION_CONTEXT_SOURCES: usize = 32;
+const MAX_INVOCATION_CONTEXT_SOURCE_CHARS: usize = 1_024;
+
+fn bounded_context_sources(sources: &[String]) -> Vec<String> {
+    let mut bounded = Vec::new();
+    for source in sources.iter().take(MAX_INVOCATION_CONTEXT_SOURCES) {
+        let source = redact_text(source.trim());
+        if source.is_empty() {
+            continue;
+        }
+        let source = source
+            .chars()
+            .take(MAX_INVOCATION_CONTEXT_SOURCE_CHARS)
+            .collect::<String>();
+        if !bounded.contains(&source) {
+            bounded.push(source);
+        }
+    }
+    bounded
 }
 
 impl AutonomyLevel {
@@ -340,6 +365,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     } else {
         None
     };
+    let invocation_context_sources = bounded_context_sources(&options.context_sources);
     let store = RunStore::create(&paths.runtime)?;
     crate::run_context::set_origin(crate::run_context::WriteOrigin::Operator);
     let run_id = store.id.clone();
@@ -362,6 +388,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             &model,
             &model_source,
             options.autonomy_level,
+            &invocation_context_sources,
         ),
     )?;
     let mut journal = Journal::new(store, options.output.mode(options.verbose), options.stream);
@@ -425,11 +452,16 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let contract = Contract::infer(&options.goal, options.authority)
         .with_done_when(options.done_when.as_deref())
         .with_outcome_requirements(options.outcome_requirements.clone());
-    let capsule = if options.use_context {
+    let mut capsule = if options.use_context {
         crate::context::ContextCapsule::build(&paths.runtime, tools.workspace())
     } else {
         crate::context::ContextCapsule::default()
     };
+    for source in &invocation_context_sources {
+        if !capsule.sources.contains(source) {
+            capsule.sources.push(source.clone());
+        }
+    }
     journal.emit(Event::new("contract").data(json!({
         "goal": contract.goal,
         "authority": contract.authority.label(),
@@ -1809,6 +1841,7 @@ fn draft_receipt(
     model: &str,
     model_source: &str,
     autonomy_level: AutonomyLevel,
+    context_sources: &[String],
 ) -> Receipt {
     Receipt {
         schema_version: 8,
@@ -1832,7 +1865,7 @@ fn draft_receipt(
         approvals: Vec::new(),
         artifacts: Vec::new(),
         reversible: None,
-        context_sources: Vec::new(),
+        context_sources: context_sources.to_vec(),
         preexisting_changes: Vec::new(),
         hooks: Vec::new(),
         outcome: Outcome::Running.label().into(),
@@ -2459,6 +2492,42 @@ mod tests {
             std::env::temp_dir().join(format!("hii-run-output-{}-{nonce}-{serial}", process::id()));
         fs::create_dir_all(&path).expect("create temporary workspace");
         path.canonicalize().expect("canonicalize workspace")
+    }
+
+    #[test]
+    fn draft_receipt_preserves_invocation_context_before_model_work() {
+        let sources = vec!["nsworkspace:frontmost-app:Rhino".to_string()];
+        let receipt = draft_receipt(
+            "run-id",
+            1,
+            "inspect",
+            Authority::ReadOnly,
+            None,
+            Path::new("/tmp"),
+            "local-model",
+            "provider-default",
+            AutonomyLevel::Approval,
+            &sources,
+        );
+        assert_eq!(receipt.context_sources, sources);
+    }
+
+    #[test]
+    fn invocation_context_sources_are_bounded_redacted_and_deduplicated() {
+        let sources = vec![
+            " nsworkspace:frontmost-app:Rhino ".to_string(),
+            "nsworkspace:frontmost-app:Rhino".to_string(),
+            "token=secret-value".to_string(),
+            "x".repeat(MAX_INVOCATION_CONTEXT_SOURCE_CHARS + 100),
+        ];
+        let bounded = bounded_context_sources(&sources);
+        assert_eq!(bounded.len(), 3);
+        assert_eq!(bounded[0], "nsworkspace:frontmost-app:Rhino");
+        assert!(!bounded[1].contains("secret-value"));
+        assert_eq!(
+            bounded[2].chars().count(),
+            MAX_INVOCATION_CONTEXT_SOURCE_CHARS
+        );
     }
 
     #[test]

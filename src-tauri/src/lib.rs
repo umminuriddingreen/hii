@@ -17,6 +17,14 @@ use std::{
 };
 use tauri::{Emitter, Manager};
 
+mod browser;
+
+/// Name of the CLI executable staged into the bundle by `scripts/hii-tauri-build.mjs`.
+#[cfg(windows)]
+const CLI_BINARY_NAME: &str = "hii.exe";
+#[cfg(not(windows))]
+const CLI_BINARY_NAME: &str = "hii";
+
 #[derive(Default)]
 struct AgentProcesses(Mutex<HashMap<String, u32>>);
 
@@ -87,17 +95,33 @@ fn workspace_asset_store(name: String, mime: String, bytes: Vec<u8>) -> Result<V
     }))
 }
 
-fn hii_binary() -> Result<PathBuf, String> {
+/// Locate the `hii` CLI the packaged app drives.
+///
+/// The bundled copy inside `Contents/Resources` comes first: a downloaded
+/// HII.app has to work on a machine that has never built this repository. The
+/// developer-machine paths below it are a convenience for running `tauri dev`
+/// against a local `cargo build`, not a distribution mechanism — when they were
+/// the only candidates, the app launched fine for anyone and then failed at the
+/// first agent run with "could not locate its Rust CLI".
+fn hii_binary(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     if let Some(path) = env::var_os("HII_CLI_BIN") {
         return Ok(PathBuf::from(path));
     }
     let mut candidates = Vec::new();
-    if let Some(home) = dirs::home_dir() {
-        candidates.push(home.join("bin/hii"));
-        candidates.push(home.join("hii/target/release/hii"));
+    if let Ok(resources) = app.path().resource_dir() {
+        candidates.push(resources.join(CLI_BINARY_NAME));
+        // Tauri nests declared resources under their staged directory name.
+        candidates.push(resources.join("resources").join(CLI_BINARY_NAME));
     }
-    candidates.push(PathBuf::from("/opt/homebrew/bin/hii"));
-    candidates.into_iter().find(|path| path.is_file()).ok_or_else(|| "HII could not locate its Rust CLI.".into())
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join("bin").join(CLI_BINARY_NAME));
+        candidates.push(home.join("hii/target/release").join(CLI_BINARY_NAME));
+    }
+    candidates.push(PathBuf::from("/opt/homebrew/bin").join(CLI_BINARY_NAME));
+    candidates.into_iter().find(|path| path.is_file()).ok_or_else(|| {
+        "HII could not locate its Rust CLI. Reinstall HII, or set HII_CLI_BIN to a `hii` binary."
+            .into()
+    })
 }
 
 fn emit_agent(app: &tauri::AppHandle, run_id: &str, status: &str, text: Option<String>, receipt_path: Option<String>) {
@@ -194,7 +218,7 @@ fn agent_start(app: tauri::AppHandle, state: tauri::State<AgentProcesses>, reque
     } else {
         intent.to_owned()
     };
-    let mut command = Command::new(hii_binary()?);
+    let mut command = Command::new(hii_binary(&app)?);
     command
         .args(["run", "--cwd"])
         .arg(&root)
@@ -221,7 +245,7 @@ fn agent_start(app: tauri::AppHandle, state: tauri::State<AgentProcesses>, reque
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                 if let Ok(value) = serde_json::from_str::<Value>(&line) {
                     if let Some(path) = jsonl_receipt_path(&value) {
-                        if let Ok(mut target) = receipt.lock() { *target = Some(path.into()); }
+                        if let Ok(mut target) = receipt.lock() { *target = Some(path); }
                     }
                     if let Some(message) = jsonl_user_message(&value) {
                         emit_agent(&app, &run, "progress", Some(message), None);
@@ -284,7 +308,9 @@ pub fn run() {
             information_find,
             information_inspect,
             agent_start,
-            agent_cancel
+            agent_cancel,
+            browser::browser_navigate,
+            browser::browser_action
         ])
         .build(tauri::generate_context!())
         .expect("error while building HII desktop interface");

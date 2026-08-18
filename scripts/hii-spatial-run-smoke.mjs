@@ -168,7 +168,18 @@ try {
     status: 'completed',
     summary: 'Created the isolated proof artifact.',
     artifacts: ['proof.txt', 'proof.png', 'proof.html', 'escape.txt'],
-    verification: [{ command: 'test -f proof.txt', ok: true, output: 'passed' }]
+    verification: [{ command: 'test -f proof.txt', ok: true, output: 'passed' }],
+    completion: {
+      version: 1,
+      satisfied: true,
+      proofStrength: 'declared',
+      unmetRequirements: [],
+      failedChecks: [],
+      missingArtifacts: [],
+      invalidArtifacts: [],
+      warnings: [],
+      evidence: ['test -f proof.txt']
+    }
   }, null, 2)}\n`);
   const completedAt = new Date().toISOString();
   await jobs.appendCapabilityJob({

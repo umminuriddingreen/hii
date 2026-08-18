@@ -1,9 +1,9 @@
 # HII — Human Information Interface
 
-HII is a local-first CLI and control plane for verified agent work. It gives
-people one owner-operated path for turning intent,
-source-linked knowledge, tools, files, machines, and memory into work that can
-be reviewed, proved, and reused.
+HII is one user-owned inference surface for systems and data across all of the
+user's devices and networks. It lets people point at, select, speak to, type to,
+arrange, and act on their digital world as durable objects while a local-first
+control plane keeps the work bounded, reviewable, proved, and reusable.
 
 HII is not another AI chat UI and it is not an autonomous system that silently
 owns the user's state. The user owns the workspace and final decisions. Agents
@@ -28,11 +28,12 @@ human intent
 Read [the HII master context](docs/HII_AII_MASTER_CONTEXT.md) and
 [the cross-chat HII synthesis](docs/records/2026-08-18-cross-chat-hii-synthesis.md),
 then [ADR 004: CLI-First HII Runtime](docs/decisions/004-cli-first-hii-runtime.md)
+and [ADR 005: One Surface over the User's Systems and Data](docs/decisions/005-one-surface-machine-fabric.md)
 before making product or architecture changes.
 
 ## Product Shape
 
-HII brings the loop together as one spatial workspace:
+HII brings the user's digital world together as one spatial workspace:
 
 - **Notch:** the persistent macOS edge for intent, active state, approvals, and returning to work.
 - **Browser:** a quiet local retrieval mode that turns pages and selections into source-linked context.
@@ -47,6 +48,9 @@ HII brings the loop together as one spatial workspace:
 - **Context Dock:** the source-aware knowledge layer that makes selected
   material useful to agents without losing provenance.
 - **HII runtime:** bounded coordination and execution behind the CLI contract.
+- **Machine fabric:** authenticated, explicitly scoped links that can carry
+  frames, files, input, clipboard, services, jobs, artifacts, and receipts
+  among the user's own devices.
 
 External apps, models, local runtimes, and specialist systems such as Termite
 are capabilities HII coordinates. HII should not recreate every tool it can
@@ -55,9 +59,9 @@ govern.
 Notch, Browser, Create, and the spatial Workspace are views over the same HII
 project state and proof history. See [Notch, Browser, and Create](docs/NOTCH_BROWSER_CREATE.md).
 
-The CLI is the product center for now. Visual surfaces should feel bright,
-spatial, calm, and playful when they return to the foreground, but they are
-projections over the same CLI-owned state and proof history.
+The spatial surface is the human-facing product center. The CLI is the runtime,
+authority, verification, and agent-contract center underneath it. Visual
+surfaces are projections over the same CLI-owned state and proof history.
 
 ## Privacy and Human Authority
 
@@ -85,9 +89,9 @@ provenance, status, readable code and tables, and stable document URLs.
 
 ## Current Product Decision
 
-The active wedge is **HII Knowledge Workspace**, built on the Context Dock
-foundation. It is the first complete proof of the broader HII control plane,
-not a separate product identity:
+The active product direction is **one spatial inference surface over a governed
+machine fabric**. The HII Knowledge Workspace and Context Dock are its durable
+context and memory foundation and its first complete local proof:
 
 > Build knowledge once. HII keeps it linked, source-aware, agent-ready, and
 > accountable.
@@ -115,17 +119,21 @@ linked assets retain their paths and hashes. Project System Maps are
 source-linked views over the same knowledge—not a separate diagram product or
 chat transcript.
 
-The knowledge and Context Dock loop is not yet complete. Existing boards,
-console, daemon, jobs, capabilities, bridge, packs, link, credit, exchange,
-and Termite surfaces are implementation history or substrate. They are not
-permission to widen Context Dock 0.1 into a marketplace, AI chat product,
-decentralized compute network, geometry platform, or personal-data harvester.
+The knowledge and Context Dock loop is not yet complete, and the cross-device
+fabric is not yet proven. Existing boards, console, daemon, jobs, capabilities,
+bridge, packs, link, credit, exchange, and Termite surfaces are implementation
+history or substrate. They are not permission to invent remote observation,
+claim near-native streaming, expose arbitrary ports, or widen HII into a
+marketplace, generic chat product, or personal-data harvester.
 
 ## Build Now / Build Next / Later
 
 ### Build now
 
-- Close the local Knowledge → Agent → Receipt loop.
+- Preserve one direct canvas conversation loop where selection, text, and voice
+  can address the same typed objects and produce visible consequences.
+- Close the local Knowledge → Agent → Receipt loop as the durable context and
+  proof foundation.
 - Make project selection, source permissions, provenance, and outbound context
   understandable before work begins.
 - Provide reliable notes, links, backlinks, tags, search, graph, history,
@@ -134,11 +142,17 @@ decentralized compute network, geometry platform, or personal-data harvester.
   receipts.
 - Prove one useful workflow outside HII development repeatedly, measuring
   prompting burden, intervention, elapsed time, reliability, and proof quality.
+- Define and prove one authenticated Mac/Windows device link before adding
+  remote capability claims.
 
 ### Build next
 
-- Unify the sidebar, canvas, `⌘I` palette, and governed HII nodes around the
-  same workspace state.
+- Stream one display with measured capture-to-present latency and a latest-frame
+  policy, then add explicit remote input as a separately governed channel.
+- Add resumable, hash-verified file transfer and explicitly allowed localhost
+  service proxying over the same authenticated link.
+- Unify the canvas, text, voice, and governed HII objects around the same intent
+  and workspace state.
 - Promote repeatable work into reviewed capabilities only when receipts prove
   that later runs are genuinely easier and reliable.
 - Deepen specialist capability integrations without weakening permissions,
@@ -150,6 +164,8 @@ decentralized compute network, geometry platform, or personal-data harvester.
 
 - Collaboration, exchange, marketplace, credits, cloud sync, and broader
   network effects remain deferred until the local governed loop is dependable.
+- Route job-level compute to user-owned devices and return results as artifacts;
+  do not begin with arbitrary shared GPU memory or decentralized scheduling.
 - A first-party browser engine, generalized geometry platform, and autonomous
   publishing are separate product decisions, not implied by the current
   substrate.

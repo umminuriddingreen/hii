@@ -5,12 +5,14 @@
 
 ## Decision
 
-HII is CLI-first for now.
+HII is CLI-first in its runtime architecture.
 
-The Rust CLI is the primary product surface, runtime owner, verification
+The Rust CLI is the primary runtime surface, runtime owner, verification
 surface, and agent contract. Everything needed to operate HII should be
 reachable through the CLI before it is promoted into web, Tauri, Notch,
-Browser, Create, or spatial workspace views.
+Browser, Create, or spatial workspace views. ADR 005 subsequently establishes
+the spatial integrated surface—not the terminal—as the primary human-facing
+product experience; it does not change this runtime ownership decision.
 
 AII is no longer a separate product, brand, app, repo, or planning track.
 Useful code that currently lives under `aii/` is internal HII runtime code and

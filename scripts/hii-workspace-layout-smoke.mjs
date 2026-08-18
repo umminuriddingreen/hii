@@ -30,13 +30,13 @@ const repeated = findOpenWorkspacePosition(
 );
 assert.deepEqual(repeated, { x: 1352, y: 0 });
 
-const workspaceSource = await readFile(new URL('../src/lib/components/workspace/WorkspacePage.svelte', import.meta.url), 'utf8');
-assert.match(workspaceSource, /function focusNode\(node:WorkspaceNode\)\{select\(node\);/);
-assert.match(workspaceSource, /function followUp[\s\S]*findOpenWorkspacePosition/);
-assert.match(workspaceSource, /function completedRunNodes[\s\S]*findOpenWorkspacePosition/);
+const workspaceSource = await readFile(new URL('../components/workspace/HiiRoot.tsx', import.meta.url), 'utf8');
+assert.match(workspaceSource, /setSelected\(\[node\.id\]\); workspace\.bringToFront\(node\.id\)/);
+assert.match(workspaceSource, /const spawnSeeds = useCallback[\s\S]*workspace\.takeZ\(\)/);
+assert.match(workspaceSource, /const spawnInformation = useCallback[\s\S]*column \* 430[\s\S]*row \* 300/);
 
 console.log('HII workspace layout smoke');
 console.log('status:       ok');
-console.log('focus:        Map-selected object is raised above overlapping work');
-console.log('follow-up:    new intent and run group chooses an open lane');
-console.log('results:      artifact and receipt group reserves collision-free space');
+console.log('focus:        selected object is raised above overlapping work');
+console.log('spawn:        direct objects receive monotonic z-order');
+console.log('information:  result groups use deterministic rows and columns');

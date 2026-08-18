@@ -6,6 +6,7 @@ Before planning or modifying HII, read:
 
 - `docs/HII_AII_MASTER_CONTEXT.md`
 - `docs/decisions/004-cli-first-hii-runtime.md`
+- `docs/decisions/005-one-surface-machine-fabric.md`
 
 These documents define the founder thesis, the CLI-first product direction,
 current Context Dock product scope, architecture constraints, deferred roadmap,
@@ -16,11 +17,13 @@ This repo is an active multi-agent worktree. Codex, Claude, HII workers, and the
 
 ## Mission
 
-HII is a local-first control plane for verified agent work.
+HII is one user-owned inference surface for systems and data across all of the
+user's devices and networks, backed by a local-first control plane for verified
+work.
 
 The current product wedge is:
 
-Human intent -> bounded agent/tool work -> logs/proof -> verification -> receipt -> reusable capability.
+Selected object + text/voice intent -> bounded capability -> visible result -> proof -> durable object/receipt.
 
 ## Worktree Discipline
 
@@ -32,7 +35,16 @@ Human intent -> bounded agent/tool work -> logs/proof -> verification -> receipt
 - Check `git status --short` and targeted diffs before editing.
 - Do not reset, delete, format, or rewrite files outside your scoped task.
 - Treat broad untracked folders such as `.claude/`, `.hermes/`, screenshots, and `life/` as possibly owned by another agent or the user.
-- Treat `/Users/ummi/hii` as the only current HII. Mine old checkouts for migration evidence only; do not add new dependencies on `/Users/ummi/hii-old`.
+- Treat `/Users/ummi/hii-newest`, checked out on `main`, as the current HII. It is
+  a linked worktree and it is where the product lives; `/Users/ummi/hii` is the
+  original checkout, left detached at the pre-2026-08-17 `main` and holding only
+  build junk and untracked scratch. Mine old checkouts for migration evidence
+  only; do not add new dependencies on `/Users/ummi/hii-old`.
+- `main` was repointed at the real product on 2026-08-17. It had been a single
+  orphan commit — a 2026-06-28 SvelteKit track store sharing no history with any
+  live branch — so a clone produced a product that no longer existed. The prior
+  tip is preserved at tag `main-orphan-20260817`. `main` is ahead of `origin/main`
+  and has not been pushed; pushing is the user's call, and it will need `--force`.
 - Keep secrets reference-only. Never print raw token values or copy credential files into docs, logs, or commits.
 - Complete work locally by default. Do not fetch, push, publish, upload, or call
   external services unless the user explicitly asks for that external action.
@@ -45,23 +57,29 @@ Human intent -> bounded agent/tool work -> logs/proof -> verification -> receipt
 
 ## Current Product Direction
 
-- HII is a local-first control plane for verified agent work.
-- HII is CLI-first for now. The Rust CLI is the primary product, control
-  surface, runtime entrypoint, verification surface, and agent contract.
+- HII is one user-owned inference surface for systems and data across all of
+  the user's devices and networks. The spatial workspace, text, voice,
+  selection, and direct manipulation are inputs to the same typed intent and
+  object model.
+- The Rust CLI is the primary runtime, authority, verification surface, and
+  agent contract. CLI-first defines implementation ownership; it does not make
+  a terminal the human-facing product center.
 - Do not introduce or revive AII as a separate product, brand, app, repo,
   daemon family, or planning track. Existing `aii/` code is legacy/internal HII
   runtime code until it is migrated behind CLI-owned modules and commands.
 - Web, Tauri, Notch, Browser, Create, and spatial workspace surfaces are
   projections over CLI-owned HII state. They should not become the source of
   truth until the CLI loop is boringly reliable.
-- Founder decision ADR 001 reopens an Obsidian-class HII Knowledge Workspace
-  built on Context Dock and `~/.hii/hii.db`.
-- The current implementation target is an end-to-end local knowledge loop:
-  Markdown notes, folders, links/backlinks, tags, FTS5 search, graph, daily
-  notes, history, trash/restore, import/export, provenance, and receipts.
-- Do not expand this into a plugin marketplace, cloud sync product, Creator
-  Desk, credits expansion, or decentralized compute feature until the local
-  knowledge loop is reliable.
+- Founder decision ADR 005 makes the integrated surface and governed machine
+  fabric the product center. ADR 001's Knowledge Workspace and Context Dock are
+  its durable context and memory layer, not a separate destination product.
+- Build the direction as narrow verified slices: local typed objects and system
+  observation first, then authenticated Mac/Windows transport for displays,
+  files, services, input, and bounded jobs. Never claim a remote device or
+  capability is available without working transport and a live executor.
+- Do not confuse the machine fabric with a marketplace, cloud sync product,
+  credits expansion, or decentralized compute network. It is a user-owned,
+  explicitly authorized link among the user's own resources.
 - Local terminal execution remains operator-controlled and local-only until a hardened remote runner exists.
 
 ## CLI Interaction Surfaces

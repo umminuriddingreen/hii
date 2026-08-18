@@ -28,9 +28,10 @@ import {
   parseCurationProposal,
   type MusicPanelPayload
 } from '@/lib/workspace/music-playlists';
-import { terminalSeedFromCommand } from '@/lib/workspace/terminal-command';
+import { isTerminalShortcut, terminalSeedFromCommand } from '@/lib/workspace/terminal-command';
 import type { WorkspaceNode } from '@/lib/workspace/types';
 import { MusicPlaylistPanel } from './MusicPlaylistPanel';
+import { NativeDevBrowser } from './NativeDevBrowser';
 import { NodeFrame } from './NodeFrame';
 import { useCamera } from './useCamera';
 import { useWorkspace } from './useWorkspace';
@@ -239,17 +240,24 @@ function TerminalBody({ node }: { node: WorkspaceNode }) {
 function NodeBody({
   node,
   onPayload,
-  onCurationRequest
+  onCurationRequest,
+  onBrowserAgent,
+  onBrowserCapture
 }: {
   node: WorkspaceNode;
   onPayload: (patch: Record<string, unknown>) => void;
   onCurationRequest: (request: string, payload: MusicPanelPayload) => void;
+  onBrowserAgent: (request: string) => void;
+  onBrowserCapture: (result: InformationCaptureResult) => void;
 }) {
   const payload = node.payload;
   const content = text(payload.content) || text(payload.text) || text(payload.output) || text(payload.summary);
   const url = text(payload.url);
   const name = text(payload.name) || text(payload.title) || node.type;
 
+  if (node.type === 'browser' && payload.surface === 'native-dev-browser') {
+    return <NativeDevBrowser nodeId={node.id} initialUrl={url} onUrl={(nextUrl) => onPayload({ url: nextUrl, title: hostFor(nextUrl) })} onAgent={onBrowserAgent} onCapture={onBrowserCapture} />;
+  }
   if (node.type === 'browser' || node.type === 'link') return <SourceBody node={node} />;
   if (node.type === 'terminal') return <TerminalBody node={node} />;
   if (node.type === 'intent') return <RequestBody node={node} />;
@@ -305,6 +313,7 @@ function Prompt({
         ['/proof', 'inspect the latest receipt'],
         ['/status', 'show HII state'],
         ['/terminal [folder]', 'create a local terminal object'],
+        ['/browser [url]', 'open the native development browser'],
         ['/music', 'open profile playlists']
       ].filter(([command]) => command.startsWith(value.trim().toLowerCase()) || value.trim() === '/')
     : [];
@@ -472,6 +481,44 @@ export function HiiRoot() {
     return spawnSeeds([seed], at)[0];
   }, [spawnSeeds, workspace]);
 
+  const openDevBrowser = useCallback((at: Point, requestedUrl?: string) => {
+    const url = requestedUrl && /^https?:\/\//i.test(requestedUrl) ? requestedUrl : 'https://developer.mozilla.org';
+    const seed: NodeSeed = {
+      type: 'browser',
+      w: 1120,
+      h: 720,
+      object: {
+        kind: 'browser',
+        owner: 'human',
+        status: 'ready',
+        source: url,
+        capabilityId: 'hii.browser.retrieval',
+        audit: [{ ts: new Date().toISOString(), actor: 'human', action: 'opened native development browser' }]
+      },
+      payload: { surface: 'native-dev-browser', title: hostFor(url), url }
+    };
+    return spawnSeeds([seed], at)[0];
+  }, [spawnSeeds]);
+
+  const requestBrowserAgent = useCallback(async (node: WorkspaceNode, request: string) => {
+    const url = text(node.payload.url);
+    setSelected([node.id]);
+    setPrompt({ anchor: mouse.current, initialValue: '', response: 'Reading the active page context…', status: 'running' });
+    setPromptVisible(true);
+    try {
+      const result = await startAgent({
+        version: 1,
+        intent: modeIntent(mode, `${request}\n\nActive browser page: ${url}`),
+        mode,
+        contextNodeIds: [node.id],
+        context: { surface: 'native-dev-browser', url, title: titleFor(node), authority: mode === 'build' ? 'governed-write' : 'read-only' }
+      });
+      activeRun.current = result.runId;
+    } catch (error) {
+      setPrompt((current) => current ? { ...current, response: error instanceof Error ? error.message : 'HII could not start the browser agent.', status: 'failed' } : current);
+    }
+  }, [mode]);
+
   const requestCuration = useCallback(async (nodeId: string, request: string, payload: MusicPanelPayload) => {
     setPrompt({ anchor: mouse.current, initialValue: '', response: 'Preparing a curation proposal…', status: 'running' });
     setPromptVisible(true);
@@ -517,6 +564,13 @@ export function HiiRoot() {
         setPromptVisible(false);
         return;
       }
+      const browserCommand = intent.match(/^\/?browser(?:\s+(https?:\/\/\S+))?$/i);
+      if (canMutateCanvas(mode) && browserCommand) {
+        openDevBrowser(at, browserCommand[1]);
+        setPrompt(null);
+        setPromptVisible(false);
+        return;
+      }
       if (canMutateCanvas(mode) && /^https?:\/\/\S+$/i.test(intent)) {
         const capture = await captureInformation(intent);
         spawnInformation(capturedInformationSeeds(capture), at);
@@ -556,7 +610,7 @@ export function HiiRoot() {
     } catch (error) {
       setPrompt((current) => current ? { ...current, response: error instanceof Error ? error.message : 'HII could not start the model.', status: 'failed' } : current);
     }
-  }, [camera, mode, openMusicPanel, selected, selectedNodes, spawnInformation, spawnSeeds]);
+  }, [camera, mode, openDevBrowser, openMusicPanel, selected, selectedNodes, spawnInformation, spawnSeeds]);
 
   useEffect(() => {
     let unlisten = () => {};
@@ -631,6 +685,13 @@ export function HiiRoot() {
         return;
       }
       if (event.key === 'Escape') { setPromptVisible(false); setSelected([]); return; }
+      if (isTerminalShortcut(event)) {
+        event.preventDefault();
+        const terminalSeed = terminalSeedFromCommand('/terminal');
+        if (terminalSeed) spawnSeeds([terminalSeed], camera.toWorld(mouse.current.x, mouse.current.y));
+        setPromptVisible(false);
+        return;
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? workspace.redo() : workspace.undo(); return; }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
@@ -647,6 +708,11 @@ export function HiiRoot() {
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 't') {
         event.preventDefault();
         spawnArtifactTerminals(mouse.current);
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'b') {
+        event.preventDefault();
+        openDevBrowser(camera.toWorld(mouse.current.x, mouse.current.y));
         return;
       }
       if ((event.key === 'Delete' || event.key === 'Backspace') && selected.length) { event.preventDefault(); selected.forEach(workspace.removeNode); setSelected([]); return; }
@@ -688,7 +754,7 @@ export function HiiRoot() {
     addEventListener('pointermove', pointermove);
     addEventListener('paste', paste);
     return () => { removeEventListener('keydown', keydown); removeEventListener('pointermove', pointermove); removeEventListener('paste', paste); };
-  }, [camera, selected, spawnArtifactTerminals, spawnInformation, spawnSeeds, workspace]);
+  }, [camera, openDevBrowser, selected, spawnArtifactTerminals, spawnInformation, spawnSeeds, workspace]);
 
   return (
     <main
@@ -725,6 +791,8 @@ export function HiiRoot() {
               node={node}
               onPayload={(patch) => workspace.patchNode(node.id, { payload: { ...node.payload, ...patch } })}
               onCurationRequest={(request, payload) => void requestCuration(node.id, request, payload)}
+              onBrowserAgent={(request) => void requestBrowserAgent(node, request)}
+              onBrowserCapture={(result) => spawnInformation(capturedInformationSeeds(result), { x: node.x + node.w + 40, y: node.y })}
             />
           </NodeFrame>
         ))}
