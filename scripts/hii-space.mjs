@@ -62,6 +62,56 @@ for (let index = 0; index < windowInfo.count; index += 1) {
 JSON.stringify({ activeApplication, applications, monitors, windows });
 `;
 
+const NATIVE_ACTION_SCRIPT = String.raw`
+ObjC.import('AppKit');
+ObjC.import('CoreGraphics');
+
+function run(argv) {
+  const command = argv[0] || '';
+  const input = JSON.parse(argv[1] || '{}');
+  if (command === 'open-terminal') {
+    const terminal = Application('Terminal');
+    terminal.doScript(String(input.command || ''));
+    terminal.activate();
+    return JSON.stringify({ action: command, application: 'Terminal' });
+  }
+  if (command === 'activate-application') {
+    const application = Application(String(input.name || ''));
+    application.activate();
+    return JSON.stringify({ action: command, application: String(input.name || '') });
+  }
+  if (command === 'focus-window') {
+    const targetId = Number(input.id || 0);
+    const windowInfo = $.CGWindowListCopyWindowInfo($.kCGWindowListOptionAll, $.kCGNullWindowID);
+    let target = null;
+    for (let index = 0; index < windowInfo.count; index += 1) {
+      const candidate = ObjC.deepUnwrap(windowInfo.objectAtIndex(index));
+      if (Number(candidate.kCGWindowNumber || 0) === targetId) {
+        target = candidate;
+        break;
+      }
+    }
+    if (!target) throw new Error('Window ' + targetId + ' was not found.');
+    const pid = Number(target.kCGWindowOwnerPID || 0);
+    const title = String(target.kCGWindowName || '');
+    const events = Application('System Events');
+    const processes = events.applicationProcesses.whose({ unixId: pid });
+    if (!processes.length) throw new Error('The owning application is not available to Accessibility.');
+    const process = processes[0];
+    process.frontmost = true;
+    if (title) {
+      const windows = process.windows.whose({ name: title });
+      if (windows.length) {
+        const raise = windows[0].actions.byName('AXRaise');
+        if (raise.exists()) raise.perform();
+      }
+    }
+    return JSON.stringify({ action: command, windowId: targetId, pid, title });
+  }
+  throw new Error('Native macOS does not support action: ' + command);
+}
+`;
+
 function clean(value) {
   return String(value || '').trim();
 }
@@ -83,6 +133,23 @@ export function runAeroSpace(args, options = {}) {
 
 export function runNativeObserver(options = {}) {
   const result = spawnSync(options.binary || process.env.HII_OSASCRIPT_BIN || 'osascript', ['-l', 'JavaScript', '-e', NATIVE_OBSERVER_SCRIPT], {
+    encoding: 'utf8',
+    timeout: options.timeoutMs || COMMAND_TIMEOUT_MS,
+    maxBuffer: 4 * 1024 * 1024
+  });
+  return {
+    status: result.status,
+    stdout: clean(result.stdout),
+    stderr: clean(result.stderr),
+    error: result.error?.message || '',
+    timedOut: result.error?.code === 'ETIMEDOUT'
+  };
+}
+
+export function runNativeAction(command, input = {}, options = {}) {
+  const result = spawnSync(options.binary || process.env.HII_OSASCRIPT_BIN || 'osascript', [
+    '-l', 'JavaScript', '-e', NATIVE_ACTION_SCRIPT, '--', command, JSON.stringify(input)
+  ], {
     encoding: 'utf8',
     timeout: options.timeoutMs || COMMAND_TIMEOUT_MS,
     maxBuffer: 4 * 1024 * 1024
@@ -151,7 +218,7 @@ function systemLayer(backend, monitors, workspaces, windows, mutationAvailable) 
   };
 }
 
-export function createSpaceController(run = runAeroSpace, observe = runNativeObserver) {
+export function createSpaceController(run = runAeroSpace, observe = runNativeObserver, mutate = runNativeAction) {
   function nativeState(status) {
     const result = observe();
     const state = parseJson(result, null);
@@ -185,55 +252,39 @@ export function createSpaceController(run = runAeroSpace, observe = runNativeObs
         Array.isArray(state.monitors) ? state.monitors : [],
         [],
         Array.isArray(state.windows) ? state.windows : [],
-        false
+        Boolean(status.mutationAvailable)
       )
     };
   }
 
   function health() {
     const version = run(['--version']);
-    if (version.status !== 0) {
-      return {
-        ok: false,
-        state: 'unavailable',
-        installed: false,
-        running: false,
-        version: null,
-        summary: 'AeroSpace is not installed or cannot be executed.',
-        detail: failureDetail(version),
-        nextCommand: 'brew install --cask nikitabobko/tap/aerospace'
-      };
-    }
-    const workspaces = run(['list-workspaces', '--all', '--json']);
-    if (workspaces.status !== 0) {
-      return {
-        ok: false,
-        state: workspaces.timedOut ? 'attention' : 'offline',
-        installed: true,
-        running: false,
-        version: version.stdout,
-        summary: workspaces.timedOut
-          ? 'AeroSpace is installed but its local server did not answer.'
-          : 'AeroSpace is installed but its local server is not running.',
-        detail: failureDetail(workspaces),
-        nextCommand: 'open -a AeroSpace'
-      };
-    }
-    return {
-      ok: true,
-      state: 'ready',
-      installed: true,
-      running: true,
-      version: version.stdout,
-      summary: 'AeroSpace is ready for deterministic HII desktop actions.',
-      detail: `${parseJson(workspaces).length} workspaces visible`,
+    const workspaces = version.status === 0 ? run(['list-workspaces', '--all', '--json']) : null;
+    if (workspaces?.status === 0) return {
+      ok: true, state: 'ready', backend: 'aerospace', mutationAvailable: true,
+      installed: true, running: true, version: version.stdout,
+      summary: 'HII desktop control is ready with AeroSpace workspace features.',
+      detail: `${parseJson(workspaces).length} workspaces visible`, nextCommand: 'hii space snapshot'
+    };
+    const native = observe();
+    if (native.status === 0 && parseJson(native, null)) return {
+      ok: true, state: 'ready', backend: 'native-macos', mutationAvailable: true,
+      installed: version.status === 0, running: false, version: version.status === 0 ? version.stdout : null,
+      summary: 'HII native macOS desktop control is ready; AeroSpace is optional.',
+      detail: version.status === 0 ? 'AeroSpace workspace features are offline.' : 'AeroSpace is not installed.',
       nextCommand: 'hii space snapshot'
+    };
+    return {
+      ok: false, state: native.timedOut ? 'attention' : 'unavailable', backend: 'unavailable', mutationAvailable: false,
+      installed: version.status === 0, running: false, version: version.status === 0 ? version.stdout : null,
+      summary: 'HII could not reach a macOS desktop-control backend.',
+      detail: observerFailureDetail(native), nextCommand: 'hii space health'
     };
   }
 
   function snapshot() {
     const status = health();
-    if (!status.ok) {
+    if (!status.ok || status.backend !== 'aerospace') {
       const native = nativeState(status);
       return { ...native, workspaces: [] };
     }
@@ -264,7 +315,7 @@ export function createSpaceController(run = runAeroSpace, observe = runNativeObs
 
   function apps() {
     const status = health();
-    if (!status.ok) {
+    if (!status.ok || status.backend !== 'aerospace') {
       const native = nativeState(status);
       return { ...native, apps: native.applications };
     }
@@ -277,9 +328,16 @@ export function createSpaceController(run = runAeroSpace, observe = runNativeObs
     return { ...native, apps: native.applications };
   }
 
-  function action(command, args) {
+  function action(command, args, nativeCommand = command, nativeInput = {}, preferNative = false) {
     const status = health();
     if (!status.ok) return { ok: false, health: status, command, args };
+    if (preferNative || status.backend !== 'aerospace') {
+      const result = mutate(nativeCommand, nativeInput);
+      return {
+        ok: result.status === 0, health: status, backend: 'native-macos', command: nativeCommand,
+        args: nativeInput, output: result.stdout, error: result.status === 0 ? '' : observerFailureDetail(result)
+      };
+    }
     const result = run([command, ...args]);
     return {
       ok: result.status === 0,
@@ -345,7 +403,11 @@ export function cmdSpace(args, options = {}) {
     const target = valueAfter(positional, '--target');
     const name = valueAfter(positional, '--name');
     const id = valueAfter(positional, '--id');
-    if (subcommand === 'focus-window' && id) result = controller.action('focus', ['--window-id', id]);
+    const command = valueAfter(positional, '--command');
+    const application = valueAfter(positional, '--application');
+    if (subcommand === 'focus-window' && id) result = controller.action('focus', ['--window-id', id], 'focus-window', { id });
+    else if (subcommand === 'open-terminal' && command) result = controller.action('open-terminal', [], 'open-terminal', { command }, true);
+    else if (subcommand === 'activate-application' && application) result = controller.action('activate-application', [], 'activate-application', { name: application }, true);
     else if (subcommand === 'switch-workspace' && name) result = controller.action('workspace', ['--', name]);
     else if (subcommand === 'move-window-to-workspace' && name) result = controller.action('move-node-to-workspace', ['--', name]);
     else if (subcommand === 'balance') result = controller.action('balance-sizes', []);
@@ -353,7 +415,7 @@ export function cmdSpace(args, options = {}) {
     else if (subcommand === 'move-workspace-to-monitor' && target) result = controller.action('move-workspace-to-monitor', monitorTargetArgs(target));
     else if (subcommand === 'reload-config') result = controller.action('reload-config', []);
     else {
-      writeError('usage: hii space <health|snapshot|apps|focus-window --id ID|switch-workspace --name NAME|move-window-to-workspace --name NAME|balance|focus-monitor --target TARGET|move-workspace-to-monitor --target TARGET|reload-config> [--json]');
+      writeError('usage: hii space <health|snapshot|apps|focus-window --id ID|open-terminal --command COMMAND|activate-application --application NAME|switch-workspace --name NAME|move-window-to-workspace --name NAME|balance|focus-monitor --target TARGET|move-workspace-to-monitor --target TARGET|reload-config> [--json]');
       return 2;
     }
   }
@@ -372,7 +434,10 @@ export function cmdSpace(args, options = {}) {
     }
   } else {
     humanHealth(result.health, write);
-    if (result.ok) write(`action:  ${result.command} ${result.args.join(' ')}`.trim());
+    if (result.ok) {
+      const renderedArgs = Array.isArray(result.args) ? result.args.join(' ') : JSON.stringify(result.args || {});
+      write(`action:  ${result.command} ${renderedArgs}`.trim());
+    }
     else if (result.error) writeError(result.error);
   }
   return result.ok ? 0 : 1;
