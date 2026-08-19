@@ -128,6 +128,20 @@ struct ModelTag {
     name: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct RunningModelsResponse {
+    #[serde(default)]
+    models: Vec<RunningModel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RunningModel {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    model: String,
+}
+
 /// OpenAI-compatible `/v1/models` listing used by LM Studio and HII Native.
 #[derive(Debug, Deserialize)]
 struct OpenAiModels {
@@ -263,6 +277,43 @@ start Ollama with `ollama serve`, or pin a provider with HII_MODEL_URL=<url>.",
                 Ok(response.data.into_iter().map(|model| model.id).collect())
             }
         }
+    }
+
+    /// Return models that the provider explicitly reports as loaded now.
+    ///
+    /// Ollama exposes this distinction at `/api/ps`. OpenAI-compatible local
+    /// runtimes only expose a model catalog, so `None` means "not observable"
+    /// rather than "nothing loaded". The short timeout keeps status surfaces
+    /// from hanging behind a stalled local provider.
+    pub fn running_models(&self) -> Result<Option<Vec<String>>, String> {
+        if self.provider != ModelProvider::Ollama {
+            return Ok(None);
+        }
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(1))
+            .timeout_read(Duration::from_secs(2))
+            .timeout_write(Duration::from_secs(2))
+            .build();
+        let response: RunningModelsResponse = agent
+            .get(&format!("{}/api/ps", self.base_url))
+            .call()
+            .map_err(format_ureq)?
+            .into_json()
+            .map_err(|error| format!("invalid Ollama running-model response: {error}"))?;
+        Ok(Some(
+            response
+                .models
+                .into_iter()
+                .filter_map(|model| {
+                    let name = if model.name.trim().is_empty() {
+                        model.model
+                    } else {
+                        model.name
+                    };
+                    (!name.trim().is_empty()).then_some(name)
+                })
+                .collect(),
+        ))
     }
 
     pub fn model_supports_vision(&self, model: &str) -> Result<Option<bool>, String> {

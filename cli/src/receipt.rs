@@ -324,6 +324,21 @@ fn workspace_pointer_dir(runtime: &Path, workspace: &Path) -> PathBuf {
         .join(hex)
 }
 
+/// Resolve only the per-workspace latest pointer without scanning historical
+/// runs. Status surfaces use this bounded lookup so a large proof archive can
+/// never turn a health probe into an unbounded read.
+pub fn latest_receipt_pointer(runtime: &Path, workspace: &Path) -> Option<PathBuf> {
+    let id = fs::read_to_string(workspace_pointer_dir(runtime, workspace).join("latest"))
+        .ok()?
+        .trim()
+        .to_string();
+    if id.is_empty() {
+        return None;
+    }
+    let path = runtime.join("runs/cli").join(id).join("receipt.json");
+    path.is_file().then_some(path)
+}
+
 /// Keeps a run's receipt durable no matter how the run ends.
 ///
 /// A draft is written the moment the run starts and rewritten on drop if it was
@@ -491,14 +506,8 @@ pub fn find_receipt(runtime: &Path, id: Option<&str>, workspace: &Path) -> Resul
     let id = match id {
         Some(id) => id.to_string(),
         None => {
-            let pointer = workspace_pointer_dir(runtime, workspace).join("latest");
-            let scoped = fs::read_to_string(pointer)
-                .ok()
-                .map(|id| id.trim().to_string())
-                .filter(|id| !id.is_empty())
-                .filter(|id| cli_runs.join(id).join("receipt.json").is_file());
-            match scoped {
-                Some(id) => id,
+            match latest_receipt_pointer(runtime, workspace) {
+                Some(path) => return Ok(path),
                 // Fall back to a scan: the pointer only exists for runs recorded
                 // since it was introduced.
                 None => match receipts_for_workspace(runtime, workspace)
