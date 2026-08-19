@@ -37,6 +37,7 @@ mod receipt;
 mod run_context;
 mod runlog;
 mod schedule;
+mod service;
 mod skill_lifecycle;
 mod skill_runtime;
 mod skills;
@@ -394,6 +395,13 @@ enum Commands {
         #[arg(long, help = "Emit the complete machine-readable pipe plan")]
         json: bool,
     },
+    #[command(
+        about = "Match human or agent needs to HII-hosted services and verified fulfillment"
+    )]
+    Service {
+        #[command(subcommand)]
+        action: ServiceCommand,
+    },
     #[command(about = "Plan, price, triage, and govern organizational and physical projects")]
     Project {
         #[command(subcommand)]
@@ -491,6 +499,73 @@ enum InfoCommand {
         #[arg(long, value_name = "PATH")]
         output: PathBuf,
         #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ServiceCommand {
+    #[command(about = "List capabilities exposed as local service offers")]
+    Offers {
+        #[arg(help = "Optional need or capability query")]
+        query: Vec<String>,
+        #[arg(long, help = "Maximum service offers to return")]
+        limit: Option<usize>,
+        #[arg(long, help = "Emit the typed service catalog as JSON")]
+        json: bool,
+    },
+    #[command(about = "Record a need with authority, success, service, and proof contracts")]
+    Request {
+        #[arg(required = true, num_args = 1.., help = "Human or agent need")]
+        need: Vec<String>,
+        #[arg(
+            long,
+            value_name = "ID_OR_QUERY",
+            help = "Select a capability while preserving NEED as the requested outcome"
+        )]
+        capability: Option<String>,
+        #[arg(
+            long,
+            value_name = "LEVEL",
+            help = "Authority envelope: read-only | workspace | external-preview | external-commit"
+        )]
+        authority: Option<String>,
+        #[arg(
+            long,
+            value_name = "CRITERIA",
+            help = "Required success condition for fulfillment"
+        )]
+        done_when: String,
+        #[arg(
+            long,
+            value_name = "EVIDENCE",
+            help = "Required fulfillment evidence; repeat for multiple proof obligations"
+        )]
+        proof: Vec<String>,
+        #[arg(long, help = "Emit the typed service request as JSON")]
+        json: bool,
+    },
+    #[command(alias = "ls", about = "List durable local service requests")]
+    Requests {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Inspect one durable service request")]
+    Show {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Fulfill a ready request through the governed HII runner")]
+    Fulfill {
+        id: String,
+        #[arg(
+            long,
+            value_name = "COMMAND",
+            help = "Deterministic acceptance check; repeat for multiple checks"
+        )]
+        verify: Vec<String>,
+        #[arg(long, help = "Emit the updated request and receipt link as JSON")]
         json: bool,
     },
 }
@@ -1487,6 +1562,95 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             }
             Ok(ExitCode::SUCCESS)
         }
+        Some(Commands::Service { action }) => match action {
+            ServiceCommand::Offers { query, limit, json } => {
+                let offers = service::offers(&paths, &query.join(" "), limit);
+                println!("{}", service::render_offers(&offers, json)?);
+                Ok(ExitCode::SUCCESS)
+            }
+            ServiceCommand::Request {
+                need,
+                capability,
+                authority,
+                done_when,
+                proof,
+                json,
+            } => {
+                let authority =
+                    resolve_authority(false, authority.as_deref(), AuthorityContext::Operator)?;
+                let request = service::create_request(
+                    &paths,
+                    &need.join(" "),
+                    capability.as_deref(),
+                    authority,
+                    &done_when,
+                    &proof,
+                )?;
+                println!("{}", service::render_request(&request, json)?);
+                Ok(ExitCode::SUCCESS)
+            }
+            ServiceCommand::Requests { json } => {
+                let requests = service::list_requests(&paths)?;
+                println!("{}", service::render_requests(&requests, json)?);
+                Ok(ExitCode::SUCCESS)
+            }
+            ServiceCommand::Show { id, json } => {
+                let request = service::read_request(&paths, &id)?;
+                println!("{}", service::render_request(&request, json)?);
+                Ok(ExitCode::SUCCESS)
+            }
+            ServiceCommand::Fulfill { id, verify, json } => {
+                let request = service::read_request(&paths, &id)?;
+                let spec = service::prepare_fulfillment(&paths, &request)?;
+                let workspace = cli
+                    .cwd
+                    .clone()
+                    .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+                let receipt = agent::run(
+                    &paths,
+                    RunOptions {
+                        goal: spec.goal,
+                        workspace,
+                        model: cli.model.clone(),
+                        review: false,
+                        review_model: None,
+                        max_steps: cli.max_steps,
+                        dry_run: false,
+                        verbose: false,
+                        authority: spec.authority,
+                        done_when: Some(spec.done_when),
+                        verify,
+                        outcome_requirements: None,
+                        use_context: true,
+                        context_sources: vec![format!("hii-service-request:{}", request.id)],
+                        output: if json {
+                            RunOutput::Quiet
+                        } else {
+                            RunOutput::Human
+                        },
+                        stream: StreamPolicy::Auto,
+                        allow_missing_verify_deps: false,
+                        budgets: Budgets {
+                            max_steps: cli.max_steps,
+                            max_tokens: cli.token_budget,
+                            wall_clock: match cli.deadline.as_deref() {
+                                Some(value) => parse_duration(value)?,
+                                None => Some(Duration::from_secs(DEFAULT_WALL_CLOCK_SECS)),
+                            },
+                            ..Budgets::default()
+                        },
+                        last_message: None,
+                        hooks: lifecycle_hooks_enabled(cli.no_hooks, cli.session_profile),
+                        coding: false,
+                        skill_ids: spec.skill_ids,
+                        autonomy_level: AutonomyLevel::LocalFull,
+                    },
+                )?;
+                let request = service::record_fulfillment(&paths, &request.id, &receipt)?;
+                println!("{}", service::render_request(&request, json)?);
+                Ok(ExitCode::from(receipt.exit_code))
+            }
+        },
         Some(Commands::Project { action }) => {
             let render_project = |project: &project::Project, json: bool| -> Result<(), String> {
                 if json {
@@ -3599,6 +3763,7 @@ fn is_native_command(command: &str) -> bool {
             | "find"
             | "info"
             | "pipe"
+            | "service"
             | "project"
             | "skills"
             | "tools"
@@ -3671,6 +3836,7 @@ fn command_suggestion(args: &[String]) -> Option<(String, &'static str)> {
         "board",
         "discover",
         "pipe",
+        "service",
         "project",
         "help",
         "home",
@@ -4147,6 +4313,46 @@ mod tests {
                 json: true,
                 ..
             }) if intent == ["send", "an", "iMessage"] && authority == "external-commit"
+        ));
+    }
+
+    #[test]
+    fn parses_service_request_as_a_bounded_fulfillment_contract() {
+        let cli = Cli::try_parse_from([
+            "hii",
+            "service",
+            "request",
+            "prepare",
+            "a",
+            "project",
+            "brief",
+            "--capability",
+            "hii.agent.workspace_run",
+            "--authority",
+            "workspace",
+            "--done-when",
+            "the brief exists and its checks pass",
+            "--proof",
+            "brief validator passes",
+            "--json",
+        ])
+        .expect("parse service request");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Service {
+                action: ServiceCommand::Request {
+                    need,
+                    capability: Some(capability),
+                    authority: Some(authority),
+                    done_when,
+                    proof,
+                    json: true,
+                }
+            }) if need == ["prepare", "a", "project", "brief"]
+                && capability == "hii.agent.workspace_run"
+                && authority == "workspace"
+                && done_when == "the brief exists and its checks pass"
+                && proof == ["brief validator passes"]
         ));
     }
 

@@ -17,6 +17,7 @@ hii proof [id]      inspect a durable run receipt
 hii board [action]  local kanban/todo board (list/add/move/done/edit/dedupe)
 hii login local     create or update the local HII user identity
 hii pipe [intent]   compile intent into capability, authority, execution, and proof stages
+hii service         match needs to hosted capabilities and verified fulfillment
 hii skills run      execute a reviewed skill with receipt attribution and grading
 ```
 
@@ -37,6 +38,47 @@ separate from the intent: the ID chooses the mechanism while INTENT remains the
 actual goal. Execution fails closed for ambiguous, partial, unavailable,
 unauthorized, or adapter-less capabilities. The first native adapters are
 `hii.agent.workspace_run` and reviewed HII skills.
+
+## Service and fulfillment protocol
+
+`hii service` is the first local protocol between a human or agent need and the
+systems able to fulfill it. It does not create a marketplace, payment rail, or
+new execution authority. Existing HII capabilities become typed service offers
+hosted by the user-owned local runtime, while the governed runner remains the
+only execution path.
+
+```text
+need
+→ service offer (provider + host + capability)
+→ authority envelope
+→ success and proof contract
+→ governed fulfillment
+→ canonical HII receipt
+```
+
+Discover live offers, then record a durable request:
+
+```sh
+hii service offers "prepare a project brief"
+hii service request "prepare a verified project brief" \
+  --capability hii.agent.workspace_run \
+  --authority workspace \
+  --done-when "the brief exists and its checks pass" \
+  --proof "brief validator passes"
+```
+
+The request is saved privately under `~/.hii/services/requests/`. `hii service
+requests` lists current requests and `hii service show ID` exposes the full
+typed contract. A request may stay `ambiguous`, `unavailable`, `partial`,
+`needs-adapter`, or `needs-approval`; HII preserves the unmet need instead of
+inventing fulfillment.
+
+`hii service fulfill ID` re-resolves the selected capability against live
+registry and authority state before running. Ready requests execute through the
+existing governed agent loop. The resulting canonical run receipt is linked
+back to the service request, whose status becomes `fulfilled` only when the
+receipt's completion assessment is satisfied. Use `--verify COMMAND` to bind
+deterministic acceptance checks to the fulfillment receipt.
 
 Reviewed skills can also run directly with `hii skills run ID GOAL`. HII loads
 only bounded `SKILL.md` files from `~/.hii/skills/registered/`; drafts and
