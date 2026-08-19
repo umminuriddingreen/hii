@@ -28,8 +28,10 @@ final class ChatModel: ObservableObject {
     /// `onAppear` fires once per hosting controller, not once per panel reveal.
     @Published var focusToken: Int = 0
     @Published var commandShiftReady: Bool = false
-    @Published var invocationShortcut: String = "⌃⌥H fallback"
+    @Published var invocationShortcut: String = "Enable ⌘ SHIFT"
     @Published var isAwaitingApproval: Bool = false
+    @Published var applications: [HiiApplication] = []
+    @Published var applicationStatus: String = "Loading HII applications…"
 
     private var transcript = TranscriptStore()
     private var process: Process?
@@ -69,6 +71,63 @@ final class ChatModel: ObservableObject {
         self.cliPath = AgentExecutableLocator.resolve(backend: AgentBackends.defaultBackend)?.path
         if cliPath == nil {
             self.status = "No hii CLI found. Set HII_CLI_BIN or install the CLI."
+        }
+        refreshApplications()
+    }
+
+    var filteredApplications: [HiiApplication] {
+        HiiApplicationSearch.filter(applications, query: intent)
+    }
+
+    func refreshApplications() {
+        guard let executable = AgentExecutableLocator.resolve(backend: AgentBackends.defaultBackend) else {
+            applicationStatus = "HII application registry unavailable"
+            return
+        }
+        do {
+            let catalog = try HiiApplicationRuntime.list(executable: executable)
+            applications = catalog.applications
+            applicationStatus = applications.isEmpty ? "No HII applications registered" : "\(applications.count) HII applications"
+        } catch {
+            applicationStatus = error.localizedDescription
+        }
+    }
+
+    func scanForApplications() {
+        guard let executable = AgentExecutableLocator.resolve(backend: AgentBackends.defaultBackend) else {
+            applicationStatus = "HII application registry unavailable"
+            return
+        }
+        do {
+            let previousIDs = Set(applications.map(\.id))
+            let catalog = try HiiApplicationRuntime.refresh(executable: executable)
+            applications = catalog.applications
+            let added = applications.filter { !previousIDs.contains($0.id) }.count
+            applicationStatus = added == 0 ? "No new applications" : "Added \(added) new application\(added == 1 ? "" : "s")"
+        } catch {
+            applicationStatus = error.localizedDescription
+        }
+    }
+
+    func requestApplicationLaunch(_ application: HiiApplication, surface: String) -> Bool {
+        if application.id == "hii.canvas" && surface == "canvas" {
+            status = "Opening HII Canvas"
+            return true
+        }
+        guard let executable = AgentExecutableLocator.resolve(backend: AgentBackends.defaultBackend) else {
+            status = "HII application registry unavailable"
+            return false
+        }
+        do {
+            let requestID = try HiiApplicationRuntime.requestLaunch(executable: executable, applicationID: application.id, surface: surface, source: "bar")
+            if surface == "native" {
+                try HiiApplicationRuntime.acknowledge(executable: executable, requestID: requestID)
+            }
+            status = "Opening \(application.name) in \(surface)"
+            return true
+        } catch {
+            status = error.localizedDescription
+            return false
         }
     }
 

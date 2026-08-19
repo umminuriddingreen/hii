@@ -5,6 +5,7 @@ node_modules
 /out
 /output/
 /build
+/dist/
 .next-tauri/
 .hii-app/
 .env
@@ -36,6 +37,7 @@ life/
 # Local research/vendor/artifact workspaces. Keep them on disk, not in this repo.
 /browser/
 /external/
+/hii-archive/
 /social/
 /install_ssh_mac.sh
 

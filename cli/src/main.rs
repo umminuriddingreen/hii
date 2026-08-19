@@ -2,6 +2,7 @@
 mod acp;
 mod agent;
 mod agents;
+mod applications;
 mod ask;
 mod attachments;
 mod background;
@@ -10,6 +11,7 @@ mod budget;
 mod capability_discovery;
 mod capability_index;
 mod capability_resolver;
+mod clean;
 mod completion;
 mod config;
 mod context;
@@ -28,6 +30,7 @@ mod learning;
 mod legacy;
 mod mcp;
 mod mcp_client;
+mod notification;
 mod ollama;
 mod picker;
 mod pipe;
@@ -153,6 +156,27 @@ enum Commands {
             help = "Stream machine-readable answer events, one JSON object per line"
         )]
         jsonl: bool,
+    },
+    #[command(name = "apps", about = "List, register, and launch HII applications")]
+    Apps {
+        #[command(subcommand)]
+        action: ApplicationsCommand,
+    },
+    #[command(about = "Preview or apply a restorable cleanup of installed HII surfaces")]
+    Clean {
+        #[arg(
+            long,
+            help = "Back up and remove the installed HII application bundles"
+        )]
+        apply: bool,
+        #[arg(
+            long,
+            requires = "apply",
+            help = "Confirm without an interactive prompt"
+        )]
+        yes: bool,
+        #[arg(long, help = "Emit one machine-readable result")]
+        json: bool,
     },
     #[command(alias = "agent", about = "Complete a goal inside a bounded workspace")]
     Run {
@@ -302,6 +326,11 @@ enum Commands {
         )]
         email: Option<String>,
     },
+    #[command(about = "Create a signed local contact card for HII Link")]
+    Link {
+        #[command(subcommand)]
+        action: LinkCommand,
+    },
     #[command(
         alias = "receipt",
         about = "Inspect the latest or selected run receipt"
@@ -402,6 +431,11 @@ enum Commands {
         #[command(subcommand)]
         action: ServiceCommand,
     },
+    #[command(about = "Send and inspect source-attributed agent notifications")]
+    Notify {
+        #[command(subcommand)]
+        action: NotifyCommand,
+    },
     #[command(about = "Plan, price, triage, and govern organizational and physical projects")]
     Project {
         #[command(subcommand)]
@@ -460,6 +494,59 @@ enum Commands {
 }
 
 #[derive(Subcommand, Debug)]
+enum ApplicationsCommand {
+    #[command(alias = "ls", about = "List applications registered with HII")]
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Scan the macOS Applications folders for newly installed applications")]
+    Refresh {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Register an agent-made application manifest")]
+    Register {
+        #[arg(value_name = "MANIFEST")]
+        manifest: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Request an application on a declared HII surface")]
+    Launch {
+        #[arg(value_name = "APPLICATION")]
+        application: String,
+        #[arg(long, default_value = "canvas")]
+        surface: String,
+        #[arg(long, default_value = "cli")]
+        source: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "List launch requests not yet handled by a surface")]
+    Requests {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Acknowledge a handled application launch request")]
+    Acknowledge {
+        #[arg(value_name = "REQUEST")]
+        request: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum LinkCommand {
+    #[command(about = "Print the current signed HII contact card")]
+    Card {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum InfoCommand {
     #[command(about = "Capture a web source with content, images, lineage, and a receipt")]
     Capture {
@@ -498,6 +585,44 @@ enum InfoCommand {
         id: String,
         #[arg(long, value_name = "PATH")]
         output: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum NotifyCommand {
+    #[command(about = "Send one event to the HII canvas and requested owned-device routes")]
+    Send {
+        #[arg(long)]
+        title: String,
+        #[arg(required = true, num_args = 1..)]
+        message: Vec<String>,
+        #[arg(long, default_value = "agent")]
+        source: String,
+        #[arg(long, default_value = "info")]
+        severity: String,
+        #[arg(long)]
+        coordinate: Option<String>,
+        #[arg(long = "route")]
+        routes: Vec<String>,
+        #[arg(long = "proof")]
+        proof_refs: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "List the shared HII notification inbox")]
+    List {
+        #[arg(long)]
+        unread: bool,
+        #[arg(long, default_value_t = 40)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Mark one notification read")]
+    Read {
+        id: String,
         #[arg(long)]
         json: bool,
     },
@@ -1204,6 +1329,56 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             ask::run(&paths, cli.model.as_deref(), prompt.join(" "), jsonl)?;
             Ok(ExitCode::SUCCESS)
         }
+        Some(Commands::Apps { action }) => {
+            match action {
+                ApplicationsCommand::List { json } => applications::render_list(&paths, json)?,
+                ApplicationsCommand::Refresh { json } => {
+                    applications::render_refresh(&paths, json)?
+                }
+                ApplicationsCommand::Register { manifest, json } => {
+                    applications::render_register(&paths, &manifest, json)?
+                }
+                ApplicationsCommand::Launch {
+                    application,
+                    surface,
+                    source,
+                    json,
+                } => applications::render_launch(&paths, &application, &surface, &source, json)?,
+                ApplicationsCommand::Requests { json } => {
+                    applications::render_requests(&paths, json)?
+                }
+                ApplicationsCommand::Acknowledge { request, json } => {
+                    applications::render_acknowledge(&paths, &request, json)?
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Clean { apply, yes, json }) => {
+            let clean_paths = clean::CleanPaths::installed_hii()?;
+            if !apply {
+                clean::render(&clean::preview(&clean_paths)?, json)?;
+                return Ok(ExitCode::SUCCESS);
+            }
+            if !yes {
+                if json || !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+                    return Err("automation must use `hii clean --apply --yes --json`".into());
+                }
+                let preview = clean::preview(&clean_paths)?;
+                clean::render(&preview, false)?;
+                print!("\nBack up and remove these installed app bundles? [y/N] ");
+                io::stdout().flush().map_err(|error| error.to_string())?;
+                let mut response = String::new();
+                io::stdin()
+                    .read_line(&mut response)
+                    .map_err(|error| error.to_string())?;
+                if !matches!(response.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+                    println!("Cancelled. Nothing changed.");
+                    return Ok(ExitCode::SUCCESS);
+                }
+            }
+            clean::render(&clean::apply(&clean_paths, true)?, json)?;
+            Ok(ExitCode::SUCCESS)
+        }
         Some(Commands::Run {
             goal,
             review,
@@ -1340,6 +1515,26 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 "{}",
                 login_command(&paths, &provider, name.as_deref(), email.as_deref())?
             );
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Link { action }) => {
+            match action {
+                LinkCommand::Card { json } => {
+                    let card = identity::IdentityStore::open(&paths).contact_card()?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&card)
+                                .map_err(|error| error.to_string())?
+                        );
+                    } else {
+                        println!(
+                            "HII contact card\nname: {}\nid: {}\npublic key: {}",
+                            card.name, card.id, card.public_key
+                        );
+                    }
+                }
+            }
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Proof { id, json }) => {
@@ -1481,6 +1676,37 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 .cwd
                 .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
             information_command(&paths, &workspace, action)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Notify { action }) => {
+            match action {
+                NotifyCommand::Send {
+                    title,
+                    message,
+                    source,
+                    severity,
+                    coordinate,
+                    routes,
+                    proof_refs,
+                    json,
+                } => notification::send(
+                    &paths,
+                    &title,
+                    &message.join(" "),
+                    &source,
+                    &severity,
+                    coordinate.as_deref(),
+                    &routes,
+                    &proof_refs,
+                    json,
+                )?,
+                NotifyCommand::List {
+                    unread,
+                    limit,
+                    json,
+                } => notification::list(&paths, unread, limit, json)?,
+                NotifyCommand::Read { id, json } => notification::read(&paths, &id, json)?,
+            }
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Pipe {
@@ -3745,6 +3971,8 @@ fn is_native_command(command: &str) -> bool {
     matches!(
         command,
         "ask"
+            | "apps"
+            | "clean"
             | "run"
             | "agent"
             | "status"
@@ -3753,6 +3981,7 @@ fn is_native_command(command: &str) -> bool {
             | "models"
             | "providers"
             | "login"
+            | "link"
             | "proof"
             | "receipt"
             | "stream"
@@ -3762,6 +3991,7 @@ fn is_native_command(command: &str) -> bool {
             | "discover"
             | "find"
             | "info"
+            | "notify"
             | "pipe"
             | "service"
             | "project"

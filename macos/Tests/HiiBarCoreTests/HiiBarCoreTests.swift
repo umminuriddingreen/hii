@@ -3,6 +3,73 @@
 import XCTest
 @testable import HiiBarCore
 
+final class HiiApplicationSearchTests: XCTestCase {
+    private let applications = [
+        HiiApplication(
+            schemaVersion: 1,
+            id: "hii.canvas",
+            name: "HII Canvas",
+            version: "0.1.0",
+            developer: "HII",
+            summary: "Spatial work surface",
+            icon: "square.on.square.dashed",
+            surfaces: HiiApplicationSurfaces(
+                canvas: HiiCanvasApplicationSurface(surface: "canvas-root", width: 1440, height: 960, entryUrl: nil),
+                native: HiiNativeApplicationSurface(bundleIdentifier: "com.ummi.hii")
+            ),
+            capabilities: ["hii.workspace.creative_canvas"],
+            builtIn: true
+        ),
+        HiiApplication(
+            schemaVersion: 1,
+            id: "community.waymark.location-studio",
+            name: "Waymark",
+            version: "0.2.0-beta",
+            developer: "Waymark Labs",
+            summary: "Location studio",
+            icon: "location.circle",
+            surfaces: HiiApplicationSurfaces(
+                canvas: HiiCanvasApplicationSurface(surface: "waymark-location", width: 1080, height: 720, entryUrl: nil),
+                native: nil
+            ),
+            capabilities: ["hii.location.preview"],
+            builtIn: true
+        )
+    ]
+
+    func testSearchUsesNamesDevelopersAndCapabilities() {
+        XCTAssertEqual(HiiApplicationSearch.filter(applications, query: "way labs").map(\.id), ["community.waymark.location-studio"])
+        XCTAssertEqual(HiiApplicationSearch.filter(applications, query: "creative canvas").map(\.id), ["hii.canvas"])
+        XCTAssertEqual(HiiApplicationSearch.filter(applications, query: "").count, 2)
+    }
+}
+
+final class CanvasApplicationIdentityTests: XCTestCase {
+    func testInstalledCanvasMatchesItsBundleIdentifier() {
+        XCTAssertTrue(CanvasApplicationIdentity.matches(
+            bundleIdentifier: "com.ummi.hii",
+            executablePath: "/Applications/HII.app/Contents/MacOS/hii",
+            workspaceRoot: "/Users/test/hii"
+        ))
+    }
+
+    func testUnbundledTauriDevelopmentCanvasMatchesWorkspacePath() {
+        XCTAssertTrue(CanvasApplicationIdentity.matches(
+            bundleIdentifier: nil,
+            executablePath: "/Users/test/hii/src-tauri/target/debug/hii",
+            workspaceRoot: "/Users/test/hii"
+        ))
+    }
+
+    func testUnrelatedHiiBinaryIsNotMistakenForCanvas() {
+        XCTAssertFalse(CanvasApplicationIdentity.matches(
+            bundleIdentifier: nil,
+            executablePath: "/opt/homebrew/bin/hii",
+            workspaceRoot: "/Users/test/hii"
+        ))
+    }
+}
+
 /// These tests exist because this mapping is a copy of `jsonl_user_message` in
 /// `src-tauri/src/lib.rs`. Two surfaces describing the same run differently is
 /// a proof bug, not a cosmetic one — so every branch of the Rust match is

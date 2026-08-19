@@ -11,15 +11,17 @@ type NodeFrameProps = {
   onSelect: () => void;
   onOpenConversation: () => void;
   onCommit: (patch: Partial<WorkspaceNode>) => void;
+  onWindowAction?: (action: 'minimize' | 'maximize' | 'restore') => void;
   onErase?: () => void;
   chromeless?: boolean;
   children: React.ReactNode;
 };
 
-const INTERACTIVE = 'input,textarea,select,iframe,video,audio,embed,a,[contenteditable]';
+const INTERACTIVE = 'button,input,textarea,select,iframe,video,audio,embed,a,[contenteditable]';
 
-export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConversation, onCommit, chromeless, children }: NodeFrameProps) {
+export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConversation, onCommit, onWindowAction, chromeless, children }: NodeFrameProps) {
   const frame = useRef<HTMLDivElement | null>(null);
+  const windowState = node.type === 'app' && typeof node.payload.windowState === 'string' ? node.payload.windowState : 'normal';
 
   const pointerDown = (event: React.PointerEvent) => {
     if (event.button !== 0) return;
@@ -66,6 +68,7 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConv
       data-node-id={node.id}
       data-selected={selected}
       data-chromeless={chromeless || undefined}
+      data-window-state={node.type === 'app' ? windowState : undefined}
       onPointerDown={pointerDown}
       onDoubleClick={(event) => {
         event.stopPropagation();
@@ -75,6 +78,10 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConv
       style={{ transform: `translate(${node.x}px, ${node.y}px)`, width: node.w, height: node.h, zIndex: Math.round(node.z) }}
     >
       <span className="hii-node-caption">{title}</span>
+      {node.type === 'app' && <div className="hii-app-window-controls" aria-label={`${title} window controls`}>
+        <button aria-label={`Minimize ${title}`} title="Minimize" onClick={() => onWindowAction?.('minimize')}>−</button>
+        <button aria-label={windowState === 'maximized' ? `Restore ${title}` : `Maximize ${title}`} title={windowState === 'maximized' ? 'Restore' : 'Maximize'} onClick={() => onWindowAction?.(windowState === 'maximized' ? 'restore' : 'maximize')}>{windowState === 'maximized' ? '↙' : '↗'}</button>
+      </div>}
       <div className="hii-node-body">{children}</div>
     </section>
   );

@@ -6,7 +6,7 @@
 ## The whole product surface for now
 
 ```text
-tap Command + Shift
+click the HII menu bar item
         ↓
 translucent text field beside the pointer
         ↓
@@ -28,9 +28,11 @@ The earlier governed implementation is integrated through explicit `/do`,
 write-capable commands reveal an inline Allow/Cancel boundary. Existing CLI
 receipts remain underneath the surface without becoming persistent chrome.
 
-Command + Shift is a modifier-only gesture and therefore requires Accessibility
-permission. Any non-modifier key press cancels the gesture, preserving normal
-shortcuts such as Command + Shift + 4. Control + Option + H is the fallback.
+Command + Shift is reserved for the full HII canvas. It is a modifier-only
+gesture and therefore requires Accessibility permission. Any non-modifier key
+press cancels the gesture, preserving normal shortcuts such as Command + Shift
++ 4. HII registers no fallback global shortcut and leaves Command + Space to
+Spotlight.
 
 ## Proof boundary
 

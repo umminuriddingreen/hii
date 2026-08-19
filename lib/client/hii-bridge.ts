@@ -2,6 +2,7 @@
 
 import { emptyWorkspace, normalizeWorkspace, type WorkspaceDoc } from '@/lib/workspace/types';
 import type { CanvasModeId } from '@/lib/workspace/canvas-modes';
+import type { HiiNotification } from '@/lib/notifications/types';
 
 export type AgentRequestV1 = {
   version: 1;
@@ -62,6 +63,44 @@ export type InformationSearchResult = {
   siteName: string;
   contentHash?: string;
   capturedAt?: string;
+};
+
+export type HiiApplicationManifest = {
+  schemaVersion: 1;
+  id: string;
+  name: string;
+  version: string;
+  developer: string;
+  summary: string;
+  icon: string;
+  surfaces: {
+    canvas?: { surface: string; width: number; height: number; entryUrl?: string };
+    native?: { bundleIdentifier: string };
+  };
+  capabilities: string[];
+  builtIn: boolean;
+};
+
+export type ApplicationLaunchRequest = {
+  schemaVersion: 1;
+  id: string;
+  applicationId: string;
+  surface: 'canvas' | 'native' | 'bar';
+  source: string;
+  status: 'requested';
+  requestedAt: string;
+  receiptPath: string;
+};
+
+export type HiiContactCard = {
+  schemaVersion: 1;
+  kind: 'hii.contact-card/1';
+  id: string;
+  name: string;
+  email?: string;
+  publicKey: string;
+  issuedAt: string;
+  signature: string;
 };
 
 function developmentRuntime() {
@@ -159,6 +198,52 @@ export async function listenAgentEvents(handler: (event: AgentEventV1) => void) 
   }
   const { listen } = await import('@tauri-apps/api/event');
   return listen<AgentEventV1>('hii://agent-event', (event) => handler(event.payload));
+}
+
+export async function listNotifications(): Promise<HiiNotification[]> {
+  if (isTauri()) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<HiiNotification[]>('notification_list');
+  }
+  return [];
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  if (!isTauri()) return;
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('notification_read', { id });
+}
+
+export async function listApplications(): Promise<HiiApplicationManifest[]> {
+  if (!isTauri()) return [];
+  const { invoke } = await import('@tauri-apps/api/core');
+  const value = await invoke<{ applications: HiiApplicationManifest[] }>('applications_list');
+  return value.applications;
+}
+
+export async function listApplicationLaunchRequests(): Promise<ApplicationLaunchRequest[]> {
+  if (!isTauri()) return [];
+  const { invoke } = await import('@tauri-apps/api/core');
+  const value = await invoke<{ requests: ApplicationLaunchRequest[] }>('application_requests');
+  return value.requests;
+}
+
+export async function acknowledgeApplicationLaunch(id: string): Promise<void> {
+  if (!isTauri()) return;
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('application_acknowledge', { id });
+}
+
+export async function getHiiContactCard(): Promise<HiiContactCard | null> {
+  if (!isTauri()) return null;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<HiiContactCard>('link_contact_card');
+}
+
+export async function openHiiLinkHandoff(kind: 'messages' | 'facetime', recipient: string, body = ''): Promise<void> {
+  if (!isTauri()) throw new Error('Install HII on macOS to open this handoff.');
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('link_open_handoff', { kind, recipient, body });
 }
 
 export async function captureInformation(url: string, workspaceRoot?: string): Promise<InformationCaptureResult> {

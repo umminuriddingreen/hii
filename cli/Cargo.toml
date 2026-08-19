@@ -23,6 +23,7 @@ dirs = "5.0.1"
 ignore = "0.4.23"
 hii-core = { path = "../crates/hii-core" }
 libc = "0.2.177"
+plist = "1.8.0"
 regex = "1.11.1"
 ring = "0.17.14"
 serde = { version = "1.0.228", features = ["derive"] }
