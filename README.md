@@ -234,6 +234,7 @@ hii
 hii "fix the failing tests and prove the result"
 hii run --review "ship the smallest verified patch"
 hii status
+hii presence status --json  # observed continuity, model, supervisor, traces, context, and proof
 hii doctor
 hii models
 hii proof

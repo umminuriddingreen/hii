@@ -226,6 +226,38 @@
     "trustLevel": "first-party"
   },
   {
+    "id": "hii.presence.status",
+    "name": "Inspect Grounded HII Presence",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Report HII continuity, current attention, live HII-owned executors, loaded local models, instrumented trace coverage, context sources, authority, and recent proof without claiming consciousness or unobserved host activity.",
+    "inputs": [
+      "current workspace",
+      "local HII runtime state"
+    ],
+    "outputs": [
+      "human-readable presence status",
+      "hii.presence JSON projection"
+    ],
+    "permissions": [
+      "local-only",
+      "read local HII state",
+      "probe configured local model endpoint",
+      "no process mutation",
+      "no external transmission"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii presence status --json",
+      "cli/src/presence.rs"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
     "id": "hii.space.desktop_control",
     "name": "Inspect and Control HII Desktop Space",
     "owner": "hii",

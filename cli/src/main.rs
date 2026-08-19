@@ -302,7 +302,13 @@ enum Commands {
     },
     #[command(about = "Show HII's grounded continuity, attention, and authority boundary")]
     Presence {
-        #[arg(long)]
+        #[command(subcommand)]
+        action: Option<PresenceCommand>,
+        #[arg(
+            long,
+            global = true,
+            help = "Emit one machine-readable presence snapshot"
+        )]
         json: bool,
     },
     #[command(about = "Check Rust CLI, workspace, Git, and Ollama readiness")]
@@ -497,6 +503,12 @@ enum Commands {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum PresenceCommand {
+    #[command(about = "Report observed runtime, model, trace, context, and proof state")]
+    Status,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1497,7 +1509,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             status(&paths, cli.cwd, json)?;
             Ok(ExitCode::SUCCESS)
         }
-        Some(Commands::Presence { json }) => {
+        Some(Commands::Presence { action: _, json }) => {
             let workspace = cli
                 .cwd
                 .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
@@ -4484,6 +4496,29 @@ mod tests {
         let cli =
             Cli::try_parse_from(["hii", "--no-hooks", "run", "inspect"]).expect("parse no-hooks");
         assert!(cli.no_hooks);
+    }
+
+    #[test]
+    fn presence_status_keeps_the_short_form_and_accepts_json_after_status() {
+        let short = Cli::try_parse_from(["hii", "presence", "--json"])
+            .expect("parse short presence status");
+        assert!(matches!(
+            short.command,
+            Some(Commands::Presence {
+                action: None,
+                json: true
+            })
+        ));
+
+        let explicit = Cli::try_parse_from(["hii", "presence", "status", "--json"])
+            .expect("parse explicit presence status");
+        assert!(matches!(
+            explicit.command,
+            Some(Commands::Presence {
+                action: Some(PresenceCommand::Status),
+                json: true
+            })
+        ));
     }
 
     #[test]
