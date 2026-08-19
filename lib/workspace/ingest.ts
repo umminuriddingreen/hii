@@ -49,6 +49,7 @@ export const defaultSize: Record<WorkspaceNodeType, { w: number; h: number }> = 
   board: { w: 360, h: 440 },
   frame: { w: 720, h: 480 },
   surface: { w: 1080, h: 720 },
+  app: { w: 1080, h: 720 },
   job: { w: 360, h: 300 },
   'sound-field': { w: 820, h: 600 }
 };

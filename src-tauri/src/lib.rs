@@ -7,8 +7,7 @@ use hii_core::{
 use serde_json::Value;
 use std::{
     collections::HashMap,
-    env,
-    fs,
+    env, fs,
     io::{BufRead, BufReader},
     path::PathBuf,
     process::{Command, Stdio},
@@ -39,7 +38,10 @@ fn workspace_write(document: Value) -> Result<Value, String> {
 }
 
 #[tauri::command]
-fn information_capture(url: String, workspace_root: Option<String>) -> Result<CaptureResult, String> {
+fn information_capture(
+    url: String,
+    workspace_root: Option<String>,
+) -> Result<CaptureResult, String> {
     let workspace = workspace_root
         .map(PathBuf::from)
         .unwrap_or(default_workspace_root()?);
@@ -47,7 +49,11 @@ fn information_capture(url: String, workspace_root: Option<String>) -> Result<Ca
 }
 
 #[tauri::command]
-fn information_find(query: String, web: bool, limit: Option<usize>) -> Result<Vec<SearchResult>, String> {
+fn information_find(
+    query: String,
+    web: bool,
+    limit: Option<usize>,
+) -> Result<Vec<SearchResult>, String> {
     let limit = limit.unwrap_or(10);
     if web {
         information::discover_web(&query, limit)
@@ -73,7 +79,11 @@ fn safe_asset_name(name: &str) -> String {
         })
         .collect();
     let cleaned = cleaned.trim_matches(['.', '_']);
-    if cleaned.is_empty() { "asset".into() } else { cleaned.chars().take(160).collect() }
+    if cleaned.is_empty() {
+        "asset".into()
+    } else {
+        cleaned.chars().take(160).collect()
+    }
 }
 
 #[tauri::command]
@@ -118,20 +128,36 @@ fn hii_binary(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         candidates.push(home.join("hii/target/release").join(CLI_BINARY_NAME));
     }
     candidates.push(PathBuf::from("/opt/homebrew/bin").join(CLI_BINARY_NAME));
-    candidates.into_iter().find(|path| path.is_file()).ok_or_else(|| {
+    let current_executable = env::current_exe().ok().and_then(|path| path.canonicalize().ok());
+    candidates.into_iter().find(|path| {
+        if !path.is_file() {
+            return false;
+        }
+        let candidate = path.canonicalize().ok();
+        candidate.is_none() || candidate != current_executable
+    }).ok_or_else(|| {
         "HII could not locate its Rust CLI. Reinstall HII, or set HII_CLI_BIN to a `hii` binary."
             .into()
     })
 }
 
-fn emit_agent(app: &tauri::AppHandle, run_id: &str, status: &str, text: Option<String>, receipt_path: Option<String>) {
-    let _ = app.emit("hii://agent-event", AgentEventV1 {
-        version: CONTRACT_VERSION,
-        run_id: run_id.into(),
-        status: status.into(),
-        text,
-        receipt_path,
-    });
+fn emit_agent(
+    app: &tauri::AppHandle,
+    run_id: &str,
+    status: &str,
+    text: Option<String>,
+    receipt_path: Option<String>,
+) {
+    let _ = app.emit(
+        "hii://agent-event",
+        AgentEventV1 {
+            version: CONTRACT_VERSION,
+            run_id: run_id.into(),
+            status: status.into(),
+            text,
+            receipt_path,
+        },
+    );
 }
 
 fn jsonl_receipt_path(value: &Value) -> Option<String> {
@@ -175,7 +201,10 @@ fn jsonl_user_message(value: &Value) -> Option<String> {
                 .filter(|text| !text.trim().is_empty())
                 .map(|text| {
                     let tool = string("tool").unwrap_or("web_search");
-                    format!("External context loaded\n{}", visible_external_output(tool, text))
+                    format!(
+                        "External context loaded\n{}",
+                        visible_external_output(tool, text)
+                    )
                 })
         }
         "tool.result" if data.get("ok").and_then(Value::as_bool) == Some(false) => string("output")
@@ -190,15 +219,25 @@ fn jsonl_user_message(value: &Value) -> Option<String> {
 }
 
 #[tauri::command]
-fn agent_start(app: tauri::AppHandle, state: tauri::State<AgentProcesses>, request: AgentRequestV1) -> Result<AgentStartResult, String> {
+fn agent_start(
+    app: tauri::AppHandle,
+    state: tauri::State<AgentProcesses>,
+    request: AgentRequestV1,
+) -> Result<AgentStartResult, String> {
     if request.version != CONTRACT_VERSION {
-        return Err(format!("Unsupported HII agent contract version {}.", request.version));
+        return Err(format!(
+            "Unsupported HII agent contract version {}.",
+            request.version
+        ));
     }
     let intent = request.intent.trim();
     if intent.is_empty() || intent.len() > 16_000 {
         return Err("HII needs an intent between 1 and 16000 characters.".into());
     }
-    let root = request.workspace_root.map(PathBuf::from).unwrap_or(default_workspace_root()?);
+    let root = request
+        .workspace_root
+        .map(PathBuf::from)
+        .unwrap_or(default_workspace_root()?);
     if !root.is_dir() {
         return Err(format!("HII workspace does not exist: {}", root.display()));
     }
@@ -222,7 +261,13 @@ fn agent_start(app: tauri::AppHandle, state: tauri::State<AgentProcesses>, reque
     command
         .args(["run", "--cwd"])
         .arg(&root)
-        .args(["--jsonl", "--stream", "--autonomy", "local-full", "--authority"])
+        .args([
+            "--jsonl",
+            "--stream",
+            "--autonomy",
+            "local-full",
+            "--authority",
+        ])
         .arg(if read_only { "read-only" } else { "workspace" });
     // Do not declare an informational outcome here: declared outcomes require a
     // predeclared verification check. Read-only canvas research instead rests on
@@ -231,10 +276,22 @@ fn agent_start(app: tauri::AppHandle, state: tauri::State<AgentProcesses>, reque
         .arg(goal)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|error| format!("HII could not start the agent: {error}"))?;
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("HII could not start the agent: {error}"))?;
     let pid = child.id();
-    state.0.lock().map_err(|error| error.to_string())?.insert(run_id.clone(), pid);
-    emit_agent(&app, &run_id, "started", Some(format!("Working in {}", root.display())), None);
+    state
+        .0
+        .lock()
+        .map_err(|error| error.to_string())?
+        .insert(run_id.clone(), pid);
+    emit_agent(
+        &app,
+        &run_id,
+        "started",
+        Some(format!("Working in {}", root.display())),
+        None,
+    );
 
     let receipt = Arc::new(Mutex::new(None::<String>));
     if let Some(stdout) = child.stdout.take() {
@@ -245,7 +302,9 @@ fn agent_start(app: tauri::AppHandle, state: tauri::State<AgentProcesses>, reque
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                 if let Ok(value) = serde_json::from_str::<Value>(&line) {
                     if let Some(path) = jsonl_receipt_path(&value) {
-                        if let Ok(mut target) = receipt.lock() { *target = Some(path); }
+                        if let Ok(mut target) = receipt.lock() {
+                            *target = Some(path);
+                        }
                     }
                     if let Some(message) = jsonl_user_message(&value) {
                         emit_agent(&app, &run, "progress", Some(message), None);
@@ -270,30 +329,171 @@ fn agent_start(app: tauri::AppHandle, state: tauri::State<AgentProcesses>, reque
     thread::spawn(move || {
         let status = child.wait();
         if let Some(processes) = app_for_wait.try_state::<AgentProcesses>() {
-            if let Ok(mut processes) = processes.0.lock() { processes.remove(&run_for_wait); }
+            if let Ok(mut processes) = processes.0.lock() {
+                processes.remove(&run_for_wait);
+            }
         }
         let receipt_path = receipt.lock().ok().and_then(|value| value.clone());
         match status {
-            Ok(value) if value.success() => emit_agent(&app_for_wait, &run_for_wait, "completed", Some("Agent work completed.".into()), receipt_path),
-            Ok(value) => emit_agent(&app_for_wait, &run_for_wait, "failed", Some(format!("Agent stopped with exit {}.", value.code().unwrap_or(1))), receipt_path),
-            Err(error) => emit_agent(&app_for_wait, &run_for_wait, "failed", Some(error.to_string()), receipt_path),
+            Ok(value) if value.success() => emit_agent(
+                &app_for_wait,
+                &run_for_wait,
+                "completed",
+                Some("Agent work completed.".into()),
+                receipt_path,
+            ),
+            Ok(value) => emit_agent(
+                &app_for_wait,
+                &run_for_wait,
+                "failed",
+                Some(format!(
+                    "Agent stopped with exit {}.",
+                    value.code().unwrap_or(1)
+                )),
+                receipt_path,
+            ),
+            Err(error) => emit_agent(
+                &app_for_wait,
+                &run_for_wait,
+                "failed",
+                Some(error.to_string()),
+                receipt_path,
+            ),
         }
     });
     Ok(AgentStartResult { run_id })
 }
 
 #[tauri::command]
-fn agent_cancel(app: tauri::AppHandle, state: tauri::State<AgentProcesses>, run_id: String) -> Result<(), String> {
-    let pid = state.0.lock().map_err(|error| error.to_string())?.get(&run_id).copied().ok_or_else(|| "HII agent run is not active.".to_string())?;
+fn agent_cancel(
+    app: tauri::AppHandle,
+    state: tauri::State<AgentProcesses>,
+    run_id: String,
+) -> Result<(), String> {
+    let pid = state
+        .0
+        .lock()
+        .map_err(|error| error.to_string())?
+        .get(&run_id)
+        .copied()
+        .ok_or_else(|| "HII agent run is not active.".to_string())?;
     #[cfg(unix)]
-    let status = Command::new("/bin/kill").args(["-TERM", &pid.to_string()]).status();
+    let status = Command::new("/bin/kill")
+        .args(["-TERM", &pid.to_string()])
+        .status();
     #[cfg(windows)]
-    let status = Command::new("taskkill").args(["/PID", &pid.to_string(), "/T"]).status();
+    let status = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T"])
+        .status();
     if status.is_ok_and(|value| value.success()) {
-        emit_agent(&app, &run_id, "cancelled", Some("Agent run cancelled.".into()), None);
+        emit_agent(
+            &app,
+            &run_id,
+            "cancelled",
+            Some("Agent run cancelled.".into()),
+            None,
+        );
         Ok(())
     } else {
         Err("HII could not cancel the agent run.".into())
+    }
+}
+
+#[tauri::command]
+fn notification_list(app: tauri::AppHandle) -> Result<Value, String> {
+    let output = Command::new(hii_binary(&app)?)
+        .args(["notify", "list", "--limit", "80", "--json"])
+        .output()
+        .map_err(|error| format!("HII could not read notifications: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn notification_read(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let output = Command::new(hii_binary(&app)?)
+        .args(["notify", "read", &id])
+        .output()
+        .map_err(|error| format!("HII could not update the notification: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+fn hii_json(app: &tauri::AppHandle, arguments: &[&str]) -> Result<Value, String> {
+    let output = Command::new(hii_binary(app)?)
+        .args(arguments)
+        .output()
+        .map_err(|error| format!("HII could not run its application registry: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn applications_list(app: tauri::AppHandle) -> Result<Value, String> {
+    hii_json(&app, &["apps", "list", "--json"])
+}
+
+#[tauri::command]
+fn application_requests(app: tauri::AppHandle) -> Result<Value, String> {
+    hii_json(&app, &["apps", "requests", "--json"])
+}
+
+#[tauri::command]
+fn application_acknowledge(app: tauri::AppHandle, id: String) -> Result<Value, String> {
+    hii_json(&app, &["apps", "acknowledge", &id, "--json"])
+}
+
+#[tauri::command]
+fn link_contact_card(app: tauri::AppHandle) -> Result<Value, String> {
+    hii_json(&app, &["link", "card", "--json"])
+}
+
+fn url_component(value: &str) -> String {
+    value
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (byte as char).to_string()
+            }
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn link_open_handoff(kind: String, recipient: String, body: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let url = match kind.as_str() {
+            "messages" => format!(
+                "sms:{}&body={}",
+                url_component(recipient.trim()),
+                url_component(body.trim())
+            ),
+            "facetime" => format!("facetime:{}", url_component(recipient.trim())),
+            _ => return Err("HII Link handoff must be messages or facetime".into()),
+        };
+        let status = Command::new("open")
+            .arg(&url)
+            .status()
+            .map_err(|error| format!("could not open the {kind} handoff: {error}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("macOS did not accept the {kind} handoff"))
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (kind, recipient, body);
+        Err("HII Link's Messages and FaceTime handoff is available on macOS".into())
     }
 }
 
@@ -309,6 +509,13 @@ pub fn run() {
             information_inspect,
             agent_start,
             agent_cancel,
+            notification_list,
+            notification_read,
+            applications_list,
+            application_requests,
+            application_acknowledge,
+            link_contact_card,
+            link_open_handoff,
             browser::browser_navigate,
             browser::browser_action
         ])
@@ -338,8 +545,14 @@ mod tests {
             "event": "run.finished",
             "data": { "summary": "Imported the images.", "proof": "/tmp/receipt.json" }
         });
-        assert_eq!(jsonl_user_message(&event).as_deref(), Some("Imported the images."));
-        assert_eq!(jsonl_receipt_path(&event).as_deref(), Some("/tmp/receipt.json"));
+        assert_eq!(
+            jsonl_user_message(&event).as_deref(),
+            Some("Imported the images.")
+        );
+        assert_eq!(
+            jsonl_receipt_path(&event).as_deref(),
+            Some("/tmp/receipt.json")
+        );
     }
 
     #[test]
@@ -376,6 +589,9 @@ mod tests {
 
     #[test]
     fn asset_names_cannot_escape_the_asset_directory() {
-        assert_eq!(safe_asset_name("../../client brief.pdf"), "client_brief.pdf");
+        assert_eq!(
+            safe_asset_name("../../client brief.pdf"),
+            "client_brief.pdf"
+        );
     }
 }

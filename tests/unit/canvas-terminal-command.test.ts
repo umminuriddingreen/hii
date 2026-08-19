@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isTerminalShortcut, terminalSeedFromCommand } from '../../lib/workspace/terminal-command';
+import {
+  agentTerminalSeedFromText,
+  isDirectCanvasTyping,
+  isTerminalShortcut,
+  terminalSeedFromCommand
+} from '../../lib/workspace/terminal-command';
 
 describe('canvas terminal command', () => {
   it('creates a governed terminal object at the default HII folder', () => {
@@ -44,5 +49,31 @@ describe('canvas terminal command', () => {
     expect(isTerminalShortcut({ ...key, shiftKey: true })).toBe(false);
     expect(isTerminalShortcut({ ...key, repeat: true })).toBe(false);
     expect(isTerminalShortcut({ ...key, code: 'KeyA' })).toBe(false);
+  });
+
+  it('turns direct canvas typing into an agent-bound terminal draft', () => {
+    expect(agentTerminalSeedFromText('b', { mode: 'build', contextNodeIds: ['source-1', 'source-1'] })).toMatchObject({
+      type: 'terminal',
+      object: {
+        kind: 'terminal',
+        status: 'ready',
+        capabilityId: 'hii.agent.workspace_run'
+      },
+      payload: {
+        title: 'agent terminal · build',
+        role: 'agent-terminal',
+        mode: 'build',
+        draft: 'b',
+        contextNodeIds: ['source-1']
+      }
+    });
+  });
+
+  it('recognizes plain typed text without capturing shortcuts', () => {
+    const key = { key: 'b', altKey: false, ctrlKey: false, metaKey: false };
+    expect(isDirectCanvasTyping(key)).toBe(true);
+    expect(isDirectCanvasTyping({ ...key, metaKey: true })).toBe(false);
+    expect(isDirectCanvasTyping({ ...key, key: 'Enter' })).toBe(false);
+    expect(isDirectCanvasTyping({ ...key, key: ' ' })).toBe(false);
   });
 });

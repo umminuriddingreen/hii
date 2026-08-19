@@ -69,12 +69,13 @@ never built this repository. Resolution order:
 
 ## Using it
 
-- Tap **⌘ SHIFT** from any app. Ordinary shortcuts such as `⌘⇧4` cancel the
+- Tap **⌘ SHIFT** from any app to open the full HII canvas. Ordinary shortcuts such as `⌘⇧4` cancel the
   modifier gesture and continue normally. Because modifier-only global gestures
   need macOS Accessibility permission, use the menu bar's **Enable ⌘ SHIFT…**
-  item once, then relaunch HII Bar if macOS requests it. **⌃⌥H** remains a
-  permission-free fallback. HII never takes `⌘ Space` from Spotlight.
-- A translucent text capsule appears beside the pointer. Type and press Return.
+  item once, then relaunch HII Bar if macOS requests it. There is no secondary
+  HII global shortcut. HII never takes `⌘ Space` from Spotlight.
+- Clicking the menu bar item opens HII Bar: search the shared HII application
+  registry, launch an app into Canvas, or type an unmatched request to ask HII.
 - The response expands immediately under the input and streams in place.
 - Plain text is local, read-only chat using HII's default fast local model and
   skips the workspace agent loop for latency.

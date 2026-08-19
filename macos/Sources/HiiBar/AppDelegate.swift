@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: LicenseRef-BSL-1.1
 
 import AppKit
-import SwiftUI
 import HiiBarCore
 
-/// AppKit shell rather than SwiftUI's `MenuBarExtra`: the global hotkey has to
-/// be able to open and close the panel programmatically, which `MenuBarExtra`
-/// does not expose.
+/// Menu-bar launcher for the single HII canvas. HII Bar intentionally owns no
+/// second content window; every invocation focuses or launches the canvas.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
-    private var panel: CursorPanel!
     private var hotKey: HotKey?
     private let model = ChatModel()
 
@@ -21,20 +18,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "circle.hexagongrid", accessibilityDescription: "HII")
             button.image?.isTemplate = true
-            button.action = #selector(toggle(_:))
+            button.action = #selector(statusItemClicked(_:))
             button.target = self
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             button.toolTip = "HII — ⌘ SHIFT"
         }
 
-        panel = CursorPanel(size: NSSize(width: 520, height: 190))
-        panel.delegate = self
-        panel.contentViewController = NSHostingController(
-            rootView: ChatPanel(model: model) { [weak self] in self?.panel.orderOut(nil) }
-        )
-
         hotKey = HotKey { [weak self] in
-            DispatchQueue.main.async { self?.toggle(nil) }
+            DispatchQueue.main.async { self?.openCanvas() }
         }
         updateShortcutState()
 
@@ -43,44 +34,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
     }
 
-    @objc private func toggle(_ sender: Any?) {
+    @objc private func statusItemClicked(_ sender: Any?) {
         updateShortcutState()
-        if ProcessInfo.processInfo.environment["HII_BAR_DEBUG"] != nil {
-            FileHandle.standardError.write("hii-bar: toggle shown=\(panel.isVisible)\n".data(using: .utf8)!)
-        }
         if let event = NSApp.currentEvent, event.type == .rightMouseUp {
             showMenu()
             return
         }
-        if panel.isVisible {
-            panel.orderOut(nil)
-        } else {
-            model.observeNow()
-            positionBesidePointer()
-            NSApp.activate(ignoringOtherApps: true)
-            panel.makeKeyAndOrderFront(nil)
-            model.focusToken += 1
-            model.enrichObservation()
+        openCanvas()
+    }
+
+    private func openCanvas() {
+        if let running = NSWorkspace.shared.runningApplications.first(where: {
+            !$0.isTerminated && CanvasApplicationIdentity.matches(
+                bundleIdentifier: $0.bundleIdentifier,
+                executablePath: $0.executableURL?.path,
+                workspaceRoot: model.workspaceRoot
+            )
+        }) {
+            running.activate(options: [.activateAllWindows])
+            return
         }
-    }
-
-    private func positionBesidePointer() {
-        let pointer = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first(where: { NSMouseInRect(pointer, $0.frame, false) })
-            ?? NSScreen.main
-        guard let frame = screen?.visibleFrame else { return }
-        let size = panel.frame.size
-        let gap: CGFloat = 16
-        var x = pointer.x + gap
-        var y = pointer.y - size.height - gap
-        x = min(max(x, frame.minX + gap), frame.maxX - size.width - gap)
-        if y < frame.minY + gap { y = pointer.y + gap }
-        y = min(max(y, frame.minY + gap), frame.maxY - size.height - gap)
-        panel.setFrameOrigin(NSPoint(x: x, y: y))
-    }
-
-    func windowDidResignKey(_ notification: Notification) {
-        panel.orderOut(nil)
+        guard let url = NSWorkspace.shared.urlForApplication(
+            withBundleIdentifier: CanvasApplicationIdentity.bundleIdentifier
+        ) else {
+            FileHandle.standardError.write(
+                "hii-bar: HII canvas app is not installed\n".data(using: .utf8)!
+            )
+            return
+        }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        configuration.createsNewApplicationInstance = false
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, error in
+            if let error {
+                FileHandle.standardError.write(
+                    "hii-bar: could not open HII canvas: \(error.localizedDescription)\n".data(using: .utf8)!
+                )
+            }
+        }
     }
 
     private func showMenu() {
@@ -118,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         model.commandShiftReady = hotKey?.commandShiftReady ?? false
         model.invocationShortcut = hotKey?.label ?? "menu bar"
         statusItem?.button?.toolTip = model.commandShiftReady
-            ? "HII — ⌘ SHIFT"
-            : "HII — ⌃⌥H fallback · enable ⌘ SHIFT in Accessibility"
+            ? "HII canvas — ⌘ SHIFT"
+            : "HII — enable ⌘ SHIFT in Accessibility"
     }
 }

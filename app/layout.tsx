@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-BSL-1.1
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import './apps.css';
 
 export const metadata: Metadata = {
   title: 'HII',

@@ -18,7 +18,7 @@ export type WorkspaceApi = {
   redo: () => void;
 };
 
-export function useWorkspace(getViewport: () => WorkspaceViewport): WorkspaceApi {
+export function useWorkspace(getViewport: () => WorkspaceViewport, bootstrap?: (document: WorkspaceDoc) => WorkspaceDoc): WorkspaceApi {
   const [document, setDocument] = useState<WorkspaceDoc>(emptyWorkspace);
   const [ready, setReady] = useState(false);
   const [initialViewport, setInitialViewport] = useState<WorkspaceViewport | null>(null);
@@ -45,13 +45,14 @@ export function useWorkspace(getViewport: () => WorkspaceViewport): WorkspaceApi
   }, [persist]);
 
   useEffect(() => {
-    readWorkspace().then((loaded) => {
+    readWorkspace().then((source) => {
+      const loaded = bootstrap ? bootstrap(source) : source;
       current.current = loaded;
       setDocument(loaded);
       setInitialViewport(loaded.viewport);
       setReady(true);
     }).catch(() => setReady(true));
-  }, []);
+  }, [bootstrap]);
 
   const mutate = useCallback((change: (nodes: WorkspaceNode[]) => WorkspaceNode[]) => {
     setDocument((before) => {

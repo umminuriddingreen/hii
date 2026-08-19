@@ -14,6 +14,14 @@ export function isTerminalShortcut(event: Pick<KeyboardEvent, 'altKey' | 'code' 
     && !event.repeat;
 }
 
+export function isDirectCanvasTyping(event: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'key' | 'metaKey'>) {
+  return !event.altKey
+    && !event.ctrlKey
+    && !event.metaKey
+    && event.key.length === 1
+    && Boolean(event.key.trim());
+}
+
 function cleanCwd(value?: string) {
   const cleaned = (value || DEFAULT_CWD)
     .replace(/[\u0000-\u001f\u007f]/g, '')
@@ -57,6 +65,47 @@ export function terminalSeedFromCommand(value: string): NodeSeed | null {
       scope: 'local session · no command started',
       sessionId: crypto.randomUUID(),
       lines: ['HII terminal object', 'Type an intent on the canvas to start verified work.']
+    }
+  };
+}
+
+/** Create the terminal-shaped draft used when the human starts typing directly on the canvas. */
+export function agentTerminalSeedFromText(
+  value: string,
+  options: { mode?: string; contextNodeIds?: string[] } = {}
+): NodeSeed {
+  const mode = options.mode || 'build';
+  const contextNodeIds = [...new Set(options.contextNodeIds || [])].slice(0, 100);
+  return {
+    type: 'terminal',
+    w: 620,
+    h: 320,
+    object: {
+      kind: 'terminal',
+      owner: 'human',
+      status: 'ready',
+      source: 'HII direct canvas typing',
+      capabilityId: 'hii.agent.workspace_run',
+      audit: [{
+        ts: new Date().toISOString(),
+        actor: 'human',
+        action: 'started a direct-typing agent terminal'
+      }]
+    },
+    payload: {
+      title: `agent terminal · ${mode}`,
+      job: `agent · ${mode}`,
+      cwd: '~/hii',
+      status: 'ready',
+      role: 'agent-terminal',
+      mode,
+      draft: value,
+      contextNodeIds,
+      scope: contextNodeIds.length
+        ? `${mode} authority · ${contextNodeIds.length} selected object${contextNodeIds.length === 1 ? '' : 's'}`
+        : `${mode} authority · canvas`,
+      sessionId: crypto.randomUUID(),
+      lines: ['Direct canvas intent · Return binds and starts an agent.']
     }
   };
 }

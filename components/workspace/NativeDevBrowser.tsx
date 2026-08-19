@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { captureInformation, type InformationCaptureResult } from '@/lib/client/hii-bridge';
+import { browserTargetKind, normalizedBrowserUrl } from '@/lib/workspace/browser-target';
 
 type Props = {
   nodeId: string;
@@ -11,26 +12,21 @@ type Props = {
   onCapture: (result: InformationCaptureResult) => void;
 };
 
-function normalizedUrl(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return 'https://developer.mozilla.org';
-  try {
-    const parsed = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
-    return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : null;
-  } catch {
-    return null;
-  }
-}
-
 function isTauri() {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
 export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture }: Props) {
-  const [url, setUrl] = useState(initialUrl || 'https://developer.mozilla.org');
+  const initial = normalizedBrowserUrl(initialUrl || '') || 'https://developer.mozilla.org/';
+  const [url, setUrl] = useState(initial);
+  const [draftUrl, setDraftUrl] = useState(initial);
+  const [history, setHistory] = useState([initial]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const [reloadKey, setReloadKey] = useState(0);
   const [status, setStatus] = useState<'loading' | 'ready' | 'captured' | 'error'>('loading');
   const [request, setRequest] = useState('');
-  const [device, setDevice] = useState<'responsive' | 'mobile'>('responsive');
+  const [device, setDevice] = useState<'responsive' | 'desktop' | 'mobile'>('responsive');
+  const [showAgent, setShowAgent] = useState(true);
   const viewport = useRef<HTMLDivElement | null>(null);
   const webview = useRef<import('@tauri-apps/api/webview').Webview | null>(null);
   const label = `hii-browser-${nodeId.replace(/[^a-zA-Z0-9-]/g, '-')}`;
@@ -59,7 +55,7 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
       if (disposed) return;
       const rect = viewport.current!.getBoundingClientRect();
       const next = existing || new Webview(getCurrentWindow(), label, {
-        url: normalizedUrl(url) || 'https://developer.mozilla.org',
+        url: normalizedBrowserUrl(url) || 'https://developer.mozilla.org',
         x: rect.left,
         y: rect.top,
         width: rect.width,
@@ -84,11 +80,22 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [label, syncBounds]);
 
-  const navigate = async (nextValue = url) => {
-    const next = normalizedUrl(nextValue);
-    if (!next) { setStatus('error'); return; }
+  const targetKind = useMemo(() => browserTargetKind(url), [url]);
+
+  const commitUrl = useCallback((next: string, pushHistory = true) => {
     setUrl(next);
+    setDraftUrl(next);
+    if (pushHistory) {
+      setHistory((current) => [...current.slice(0, historyIndex + 1), next]);
+      setHistoryIndex((current) => current + 1);
+    }
     onUrl(next);
+  }, [historyIndex, onUrl]);
+
+  const navigate = async (nextValue = draftUrl) => {
+    const next = normalizedBrowserUrl(nextValue);
+    if (!next) { setStatus('error'); return; }
+    commitUrl(next);
     setStatus('loading');
     try {
       if (isTauri()) {
@@ -100,10 +107,25 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
   };
 
   const action = async (kind: 'back' | 'forward' | 'reload') => {
-    if (!isTauri()) return;
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('browser_action', { label, action: kind });
+    if (isTauri()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('browser_action', { label, action: kind });
+      return;
+    }
+    if (kind === 'reload') {
+      setStatus('loading');
+      setReloadKey((current) => current + 1);
+      return;
+    }
+    const nextIndex = kind === 'back' ? historyIndex - 1 : historyIndex + 1;
+    const next = history[nextIndex];
+    if (!next) return;
+    setHistoryIndex(nextIndex);
+    commitUrl(next, false);
+    setStatus('loading');
   };
+
+  const cycleDevice = () => setDevice((current) => current === 'responsive' ? 'desktop' : current === 'desktop' ? 'mobile' : 'responsive');
 
   const capture = async () => {
     setStatus('loading');
@@ -115,28 +137,32 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
   };
 
   return (
-    <article className="hii-dev-browser" data-device={device}>
+    <article className="hii-dev-browser" data-device={device} data-agent={showAgent || undefined} data-target={targetKind}>
       <header className="hii-browser-tabs">
-        <div><i aria-hidden="true" /><strong>{new URL(normalizedUrl(url) || 'https://developer.mozilla.org').hostname}</strong><small>native</small></div>
-        <button type="button" onClick={() => setDevice(device === 'responsive' ? 'mobile' : 'responsive')}>{device === 'responsive' ? 'Responsive' : '390 px'}</button>
+        <div><i aria-hidden="true" /><strong>{new URL(normalizedBrowserUrl(url) || 'https://developer.mozilla.org').hostname}</strong><small>{targetKind === 'local-service' ? 'local service' : isTauri() ? 'native webview' : 'interactive web'}</small></div>
+        <div className="hii-browser-view-actions">
+          <button type="button" onClick={cycleDevice}>{device === 'responsive' ? 'Fluid' : device === 'desktop' ? '1280 px' : '390 px'}</button>
+          <button type="button" onClick={() => setShowAgent((current) => !current)}>{showAgent ? 'Hide agent' : 'Show agent'}</button>
+        </div>
       </header>
       <nav className="hii-browser-nav" aria-label="Browser controls">
-        <button type="button" title="Back" onClick={() => void action('back')}>←</button>
-        <button type="button" title="Forward" onClick={() => void action('forward')}>→</button>
+        <button type="button" title="Back" disabled={!isTauri() && historyIndex === 0} onClick={() => void action('back')}>←</button>
+        <button type="button" title="Forward" disabled={!isTauri() && historyIndex >= history.length - 1} onClick={() => void action('forward')}>→</button>
         <button type="button" title="Reload" onClick={() => void action('reload')}>↻</button>
         <form onSubmit={(event) => { event.preventDefault(); void navigate(); }}>
           <span aria-hidden="true">⌁</span>
-          <input value={url} onChange={(event) => setUrl(event.target.value)} aria-label="URL" spellCheck={false} />
+          <input value={draftUrl} onChange={(event) => setDraftUrl(event.target.value)} aria-label="URL" spellCheck={false} />
         </form>
+        <a className="hii-browser-open" href={url} target="_blank" rel="noreferrer">Open ↗</a>
         <button type="button" className="hii-browser-capture" onClick={() => void capture()}>{status === 'captured' ? 'Captured' : 'Capture'}</button>
       </nav>
       <section className="hii-browser-workarea">
         <div ref={viewport} className="hii-browser-viewport">
-          {!isTauri() && <iframe src={normalizedUrl(url) || undefined} title="HII development browser preview" sandbox="allow-forms allow-scripts allow-same-origin" />}
-          {status === 'loading' && <span className="hii-browser-loading">Loading native view…</span>}
-          {status === 'error' && <span className="hii-browser-loading">This page could not be opened.</span>}
+          {!isTauri() && <iframe key={`${url}:${reloadKey}`} src={normalizedBrowserUrl(url) || undefined} title="HII interactive browser" sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts" allow="clipboard-read; clipboard-write; fullscreen" onLoad={() => setStatus('ready')} onError={() => setStatus('error')} />}
+          {status === 'loading' && <span className="hii-browser-loading">Opening {targetKind === 'local-service' ? 'local service' : 'website'}…</span>}
+          {status === 'error' && <span className="hii-browser-loading">This page refused the embedded view. Open it in its own window or check the local service.</span>}
         </div>
-        <aside className="hii-browser-agent">
+        {showAgent && <aside className="hii-browser-agent">
           <header><span>Agent lens</span><small>page context</small></header>
           <p>Give HII the current URL and a bounded instruction. Reading is allowed; changes still follow the active mode and approval boundary.</p>
           <form onSubmit={(event) => { event.preventDefault(); if (request.trim()) { onAgent(request.trim()); setRequest(''); } }}>
@@ -145,10 +171,12 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
           </form>
           <dl>
             <div><dt>Context</dt><dd>current page</dd></div>
+            <div><dt>Target</dt><dd>{targetKind === 'local-service' ? 'localhost' : 'public web'}</dd></div>
+            <div><dt>View</dt><dd>{device}</dd></div>
             <div><dt>Authority</dt><dd>read first</dd></div>
             <div><dt>Proof</dt><dd>{status === 'captured' ? 'source saved' : 'on capture'}</dd></div>
           </dl>
-        </aside>
+        </aside>}
       </section>
     </article>
   );
