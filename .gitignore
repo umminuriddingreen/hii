@@ -35,7 +35,8 @@ life/
 .playwright-cli/
 
 # Local research/vendor/artifact workspaces. Keep them on disk, not in this repo.
-/browser/
+/browser/dist/
+/browser/node_modules/
 /external/
 /hii-archive/
 /social/

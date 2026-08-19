@@ -50,6 +50,7 @@ mod system_monitor;
 mod timeline;
 mod tools;
 mod tui;
+mod web_cmd;
 
 use agent::{AutonomyLevel, RunOptions, RunOutput};
 use budget::{Budgets, DEFAULT_WALL_CLOCK_SECS};
@@ -396,6 +397,11 @@ enum Commands {
         #[command(subcommand)]
         action: InfoCommand,
     },
+    #[command(about = "Run governed web intent slices through the local browser worker")]
+    Web {
+        #[command(subcommand)]
+        action: WebCommand,
+    },
     #[command(about = "Compile intent into a capability, authority, execution, and proof plan")]
     Pipe {
         #[arg(required = true, num_args = 1.., help = "Human intent to compile")]
@@ -585,6 +591,26 @@ enum InfoCommand {
         id: String,
         #[arg(long, value_name = "PATH")]
         output: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum WebCommand {
+    #[command(
+        name = "vertical-test",
+        about = "Prove the deterministic browser intent loop"
+    )]
+    VerticalTest {
+        #[arg(long)]
+        url: String,
+        #[arg(long, value_name = "PATH")]
+        browserd: PathBuf,
+        #[arg(long)]
+        require_approval: bool,
+        #[arg(long, requires = "require_approval")]
+        approve: bool,
         #[arg(long)]
         json: bool,
     },
@@ -1676,6 +1702,25 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 .cwd
                 .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
             information_command(&paths, &workspace, action)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Web { action }) => {
+            match action {
+                WebCommand::VerticalTest {
+                    url,
+                    browserd,
+                    require_approval,
+                    approve,
+                    json,
+                } => web_cmd::vertical_test(
+                    &paths,
+                    &url,
+                    &browserd,
+                    require_approval,
+                    approve,
+                    json,
+                )?,
+            }
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Notify { action }) => {
@@ -3991,6 +4036,7 @@ fn is_native_command(command: &str) -> bool {
             | "discover"
             | "find"
             | "info"
+            | "web"
             | "notify"
             | "pipe"
             | "service"

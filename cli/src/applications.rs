@@ -347,7 +347,7 @@ fn scan_roots(roots: &[PathBuf]) -> Result<Vec<ApplicationManifest>, String> {
             }
         }
     }
-    discovered.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    discovered.sort_by_key(|application| application.name.to_lowercase());
     Ok(discovered)
 }
 
@@ -366,7 +366,7 @@ fn refresh_from_roots(paths: &AppPaths, roots: &[PathBuf]) -> Result<RefreshResu
         .cloned()
         .collect();
     registered.extend(added.iter().cloned());
-    registered.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    registered.sort_by_key(|application| application.name.to_lowercase());
     write_json_atomic(
         &registry_path(paths),
         &Registry {
