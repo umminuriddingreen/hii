@@ -12,7 +12,7 @@
 
 use serde::Serialize;
 use serde_json::Value;
-use std::{fs, path::Path};
+use std::{collections::HashSet, fs, path::Path};
 
 use crate::config::AppPaths;
 
@@ -52,6 +52,11 @@ pub fn load_all(paths: &AppPaths) -> Vec<Entry> {
     entries.extend(load_registered_skills(&runtime.join("skills/registered")));
     entries.extend(load_capabilities(&runtime.join("capabilities.json")));
     entries.extend(load_drafts(&runtime.join("skills/proposed")));
+    // One capability id denotes one executable contract. Keep the first source
+    // in precedence order so a stale runtime registry cannot duplicate or
+    // shadow a core adapter shipped by this CLI.
+    let mut ids = HashSet::new();
+    entries.retain(|entry| ids.insert(entry.id.clone()));
     apply_lifecycle(paths, &mut entries);
     entries
 }
@@ -60,6 +65,24 @@ pub fn load_all(paths: &AppPaths) -> Vec<Entry> {
 /// discoverable in a standalone app even when no user registry exists yet.
 fn built_in_project_capabilities() -> Vec<Entry> {
     vec![
+        // This is the universal typed adapter behind `hii run` and
+        // `hii pipe --execute`. A fresh or isolated runtime must not report its
+        // own core executor as unavailable while using that executor anyway.
+        Entry {
+            id: "hii.agent.workspace_run".into(),
+            name: "Run Bounded Local Workspace Agent".into(),
+            description: "Turn human intent and source-linked workspace context into bounded local tool work, verification, a receipt, and durable learning evidence.".into(),
+            source: "capability",
+            category: "hii-core-loop".into(),
+            tags: vec![
+                "selected workspace only".into(),
+                "write selected workspace".into(),
+                "local-only".into(),
+            ],
+            invoke: Some("hii run".into()),
+            status: "ready".into(),
+            examples: vec!["hii run <intent> --verify <check>".into()],
+        },
         Entry {
             id: "hii.project.execution-plan".into(),
             name: "Project Execution Planning and KPI Triage".into(),
@@ -569,5 +592,48 @@ mod tests {
             entry("skill-three", "Three", "shared word", &[]),
         ];
         assert_eq!(search(&entries, "shared", 2).len(), 2);
+    }
+
+    #[test]
+    fn core_workspace_runner_exists_without_a_runtime_registry() {
+        let entries = built_in_project_capabilities();
+        let runner = entries
+            .iter()
+            .find(|entry| entry.id == "hii.agent.workspace_run")
+            .expect("core workspace runner");
+        assert_eq!(runner.status, "ready");
+        assert_eq!(runner.invoke.as_deref(), Some("hii run"));
+    }
+
+    #[test]
+    fn load_all_deduplicates_a_runtime_copy_of_a_core_capability() {
+        let root = std::env::temp_dir().join(format!(
+            "hii-capability-dedupe-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let paths = AppPaths {
+            repo: root.join("repo"),
+            runtime: root.join("runtime"),
+        };
+        fs::create_dir_all(&paths.runtime).expect("runtime");
+        fs::write(
+            paths.runtime.join("capabilities.json"),
+            r#"[{"id":"hii.agent.workspace_run","name":"stale copy","summary":"duplicate","runtime":"local-cli","status":"ready"}]"#,
+        )
+        .expect("capabilities");
+
+        let entries = load_all(&paths);
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.id == "hii.agent.workspace_run")
+                .count(),
+            1
+        );
+        fs::remove_dir_all(root).expect("cleanup");
     }
 }

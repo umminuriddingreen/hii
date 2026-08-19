@@ -50,6 +50,7 @@ mod system_monitor;
 mod timeline;
 mod tools;
 mod tui;
+mod usefulness;
 mod web_cmd;
 
 use agent::{AutonomyLevel, RunOptions, RunOutput};
@@ -436,6 +437,11 @@ enum Commands {
         #[arg(long, help = "Emit the complete machine-readable pipe plan")]
         json: bool,
     },
+    #[command(about = "Measure one shared HII loop against 20 everyday requests")]
+    Usefulness {
+        #[command(subcommand)]
+        action: UsefulnessCommand,
+    },
     #[command(
         about = "Match human or agent needs to HII-hosted services and verified fulfillment"
     )]
@@ -604,6 +610,31 @@ enum InfoCommand {
         #[arg(long, value_name = "PATH")]
         output: PathBuf,
         #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum UsefulnessCommand {
+    #[command(about = "Run or validate the 20-request usefulness benchmark")]
+    Benchmark {
+        #[arg(long, help = "Validate the declarative suite without invoking a model")]
+        validate_only: bool,
+        #[arg(long, value_name = "ID", help = "Run or validate one benchmark case")]
+        case: Option<String>,
+        #[arg(
+            long,
+            default_value_t = 14,
+            help = "Tool-step ceiling for each request"
+        )]
+        max_steps: usize,
+        #[arg(
+            long,
+            default_value_t = 90,
+            help = "Wall-clock ceiling in seconds for each request"
+        )]
+        deadline_secs: u64,
+        #[arg(long, help = "Emit a machine-readable validation or benchmark report")]
         json: bool,
     },
 }
@@ -1845,6 +1876,48 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             }
             Ok(ExitCode::SUCCESS)
         }
+        Some(Commands::Usefulness { action }) => match action {
+            UsefulnessCommand::Benchmark {
+                validate_only,
+                case,
+                max_steps,
+                deadline_secs,
+                json,
+            } => {
+                if validate_only {
+                    let validation = usefulness::validate_only(case.as_deref())?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&validation)
+                                .map_err(|error| error.to_string())?
+                        );
+                    } else {
+                        println!(
+                            "HII usefulness benchmark\nvalid      yes\nsuite      {}\ncases      {}",
+                            validation["suite"].as_str().unwrap_or("unknown"),
+                            validation["cases"].as_u64().unwrap_or(0)
+                        );
+                    }
+                    return Ok(ExitCode::SUCCESS);
+                }
+                let report = usefulness::run(
+                    &paths,
+                    usefulness::BenchmarkOptions {
+                        model: cli.model.clone(),
+                        case,
+                        max_steps,
+                        deadline: Duration::from_secs(deadline_secs),
+                    },
+                )?;
+                println!("{}", usefulness::render(&report, json)?);
+                Ok(if report.failed == 0 {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::from(3)
+                })
+            }
+        },
         Some(Commands::Service { action }) => match action {
             ServiceCommand::Offers { query, limit, json } => {
                 let offers = service::offers(&paths, &query.join(" "), limit);
@@ -4051,6 +4124,7 @@ fn is_native_command(command: &str) -> bool {
             | "web"
             | "notify"
             | "pipe"
+            | "usefulness"
             | "service"
             | "project"
             | "skills"
@@ -4124,6 +4198,7 @@ fn command_suggestion(args: &[String]) -> Option<(String, &'static str)> {
         "board",
         "discover",
         "pipe",
+        "usefulness",
         "service",
         "project",
         "help",
@@ -4393,6 +4468,29 @@ mod tests {
             "cad".into(),
         ];
         assert_eq!(normalize_goal_args(args.clone()), args);
+    }
+
+    #[test]
+    fn usefulness_benchmark_is_native_and_parses_validation_mode() {
+        let args = vec![
+            "hii".into(),
+            "usefulness".into(),
+            "benchmark".into(),
+            "--validate-only".into(),
+            "--json".into(),
+        ];
+        assert_eq!(normalize_goal_args(args.clone()), args);
+        let cli = Cli::try_parse_from(args).expect("parse usefulness benchmark");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Usefulness {
+                action: UsefulnessCommand::Benchmark {
+                    validate_only: true,
+                    json: true,
+                    ..
+                }
+            })
+        ));
     }
 
     #[test]

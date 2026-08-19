@@ -25,6 +25,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+const TRANSIENT_PROVIDER_RETRIES: usize = 2;
+const TRANSIENT_PROVIDER_RETRY_DELAY: Duration = Duration::from_millis(200);
+
 /// The process-wide cancellation signal driven by Ctrl-C.
 ///
 /// A run clones this so the loop, the budget checks, and the provider's
@@ -572,13 +575,14 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             "requested": request_reasoning,
             "bounded": request_reasoning
         })))?;
-        let result = match stream_model_json(
+        let result = match stream_model_json_with_retries(
             &ollama,
             &model,
             &messages,
             ModelStreamPolicy {
                 step: steps,
                 think: request_reasoning,
+                relaxed_json: false,
             },
             &mut journal,
             &deadline,
@@ -617,6 +621,26 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 break;
             }
             Err(error) if cancel.is_cancelled() => {
+                if matches!(
+                    cancel.reason(),
+                    Some(CancelReason::Budget(
+                        BudgetKind::ModelCall | BudgetKind::StreamIdle
+                    ))
+                ) && mutation_epoch > 0
+                    && verified_epoch == Some(mutation_epoch)
+                    && verification.iter().any(|check| check.ok)
+                {
+                    journal.emit(Event::new("convergence.verified_timeout_recovered").data(
+                        json!({
+                            "step": steps,
+                            "mutation_epoch": mutation_epoch,
+                            "reason": cancellation_message(&cancel)
+                        }),
+                    ))?;
+                    final_summary = Some(verified_completion_summary(&touched_artifacts));
+                    final_next = None;
+                    break;
+                }
                 match cancel.reason() {
                     Some(CancelReason::Budget(kind)) => budget_exceeded = Some(kind),
                     _ => interrupted = true,
@@ -1696,7 +1720,7 @@ Workspace:{workspace}
 Loop: intent -> context -> bounded work -> verify -> receipt. No plan narration.
 Habits: inspect real files, preserve unclear work, patch narrowly, repair failed checks.
 Proof: one flat {{"type":"verify","command":"npm test"}} or http; shell/read/list/search never count.
-JSON/turn. T:{tool_names}. F:path,query,command,content,old,new,replace_all,offset,limit,url.
+JSON only; no native tool tags. T:{tool_names}. F:path,query,command,content,old,new,replace_all,offset,limit,url.
 Write: {{"type":"write","path":"relative-file.md","content":"complete file text"}}; file text only.
 Finish: {{"type":"final","summary":"result","verification":["checks run"],"next":null}}
 Read AGENTS.md. Stay in workspace. Never claim unrun proof."#,
@@ -1708,6 +1732,7 @@ Read AGENTS.md. Stay in workspace. Never claim unrun proof."#,
 struct ModelStreamPolicy {
     step: usize,
     think: bool,
+    relaxed_json: bool,
 }
 
 fn stream_model_json(
@@ -1719,21 +1744,35 @@ fn stream_model_json(
     deadline: &Deadline,
     cancel: &Cancel,
 ) -> Result<ChatResult, String> {
-    let ModelStreamPolicy { step, think } = policy;
+    let ModelStreamPolicy {
+        step,
+        think,
+        relaxed_json,
+    } = policy;
     let ollama = ollama.clone();
     let model_for_thread = model.to_string();
     let messages = messages.to_vec();
     let stream_cancel = cancel.clone();
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
-        ollama.chat_with_stream(
-            &model_for_thread,
-            &messages,
-            true,
-            think,
-            &stream_cancel,
-            sender,
-        );
+        if relaxed_json {
+            ollama.chat_with_stream_unconstrained(
+                &model_for_thread,
+                &messages,
+                think,
+                &stream_cancel,
+                sender,
+            );
+        } else {
+            ollama.chat_with_stream(
+                &model_for_thread,
+                &messages,
+                true,
+                think,
+                &stream_cancel,
+                sender,
+            );
+        }
     });
 
     // Whether progress is shown at all is the journal's decision, so `--stream`
@@ -1823,6 +1862,80 @@ fn stream_model_json(
             }
         }
     }
+}
+
+fn stream_model_json_with_retries(
+    ollama: &Ollama,
+    model: &str,
+    messages: &[Message],
+    policy: ModelStreamPolicy,
+    journal: &mut Journal,
+    deadline: &Deadline,
+    cancel: &Cancel,
+) -> Result<ChatResult, String> {
+    let step = policy.step;
+    let think = policy.think;
+    for retry in 0..=TRANSIENT_PROVIDER_RETRIES {
+        let result = stream_model_json(
+            ollama,
+            model,
+            messages,
+            ModelStreamPolicy {
+                step,
+                think,
+                relaxed_json: retry > 0,
+            },
+            journal,
+            deadline,
+            cancel,
+        );
+        match result {
+            Ok(result) => return Ok(result),
+            Err(error)
+                if retry < TRANSIENT_PROVIDER_RETRIES
+                    && (is_transient_provider_error(&error)
+                        || matches!(
+                            cancel.reason(),
+                            Some(CancelReason::Budget(
+                                BudgetKind::ModelCall | BudgetKind::StreamIdle
+                            ))
+                        ))
+                    && deadline.exceeded(step, 0).is_none() =>
+            {
+                cancel.reset();
+                journal.emit(
+                    Event::new("model.provider_retry")
+                        .data(json!({
+                            "step": step,
+                            "retry": retry + 1,
+                            "max_retries": TRANSIENT_PROVIDER_RETRIES,
+                            "error": redact_text(&error)
+                        }))
+                        .human(Human::Line(format!(
+                            "[step {step}] local model transport interrupted; retrying"
+                        ))),
+                )?;
+                thread::sleep(TRANSIENT_PROVIDER_RETRY_DELAY);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("bounded provider retry loop always returns")
+}
+
+fn is_transient_provider_error(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    error.contains("model provider returned http 500")
+        || error.contains("model provider returned http 502")
+        || error.contains("model provider returned http 503")
+        || error.contains("model provider returned http 504")
+        || error.contains("failed to read ollama stream")
+        || error.contains("local model stream stopped unexpectedly")
+        || (error.contains("invalid ollama stream response")
+            && error.contains("missing field `message`"))
+        || error.contains("connection reset")
+        || error.contains("broken pipe")
+        || error.contains("unexpected eof")
 }
 
 /// The receipt written before the first model call.
@@ -2970,6 +3083,29 @@ mod tests {
         assert!(resolve_last_message_path(&workspace, Path::new("outside/final.txt")).is_err());
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
         fs::remove_dir_all(outside).expect("remove outside directory");
+    }
+
+    #[test]
+    fn retries_only_transient_provider_transport_failures() {
+        for error in [
+            "model provider returned HTTP 500: {\"error\":\"EOF\"}",
+            "model provider returned HTTP 503: overloaded",
+            "failed to read Ollama stream: unexpected EOF",
+            "invalid Ollama stream response: missing field `message`",
+            "the local model stream stopped unexpectedly",
+            "cannot reach local model provider: connection reset by peer",
+        ] {
+            assert!(is_transient_provider_error(error), "{error}");
+        }
+
+        for error in [
+            "MODEL LOOP DETECTED — repeated block",
+            "Protocol error: expected one JSON object",
+            "authority denied shell command",
+            ADAPTIVE_REASONING_BUDGET_RETRY,
+        ] {
+            assert!(!is_transient_provider_error(error), "{error}");
+        }
     }
 }
 #[test]
