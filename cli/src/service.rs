@@ -401,7 +401,9 @@ fn offer_from_entry(entries: &[Entry], entry: Entry) -> Option<ServiceOffer> {
 fn provider_ref(entry: &Entry) -> String {
     match (entry.source, entry.category.trim()) {
         ("capability", "") => "hii.runtime".into(),
-        ("capability", owner) if owner.eq_ignore_ascii_case("aii") => "hii.runtime".into(),
+        ("capability", owner) if owner.eq_ignore_ascii_case("aii") || owner == "hii-core-loop" => {
+            "hii.runtime".into()
+        }
         ("capability", owner) => format!("hii.capability:{owner}"),
         ("skill", "") => "hii.skill-registry".into(),
         ("skill", category) => format!("hii.skill-registry:{category}"),

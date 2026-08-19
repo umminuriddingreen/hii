@@ -1,0 +1,215 @@
+{
+  "schemaVersion": 1,
+  "id": "hii-usefulness-v1",
+  "cases": [
+    {
+      "id": "find-invoice-deadline",
+      "category": "find-understand",
+      "intent": "Find the unpaid studio invoice, tell me its due date and amount, and write a short source-linked answer to result.md.",
+      "fixtures": [
+        {"path": "records/invoice-203.txt", "content": "Invoice 203\nStatus: paid\nAmount: $860\n"},
+        {"path": "records/invoice-204.txt", "content": "Invoice 204\nStatus: unpaid\nAmount: $1,240\nDue: September 12, 2026\n"},
+        {"path": "records/notes.txt", "content": "The studio invoice is the only unpaid vendor invoice this month.\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["$1,240", "September 12, 2026", "records/invoice-204.txt"], "minBytes": 80}]
+    },
+    {
+      "id": "find-open-project-work",
+      "category": "find-understand",
+      "intent": "Work out what is still unfinished for the neighborhood presentation and write the remaining items with their sources to result.md.",
+      "fixtures": [
+        {"path": "project/checklist.md", "content": "# Presentation\n- [x] Site photographs\n- [ ] Confirm room capacity\n- [x] Draft introduction\n- [ ] Export accessible PDF\n"},
+        {"path": "project/update.md", "content": "The venue manager confirmed the projector, but room capacity is still unknown.\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["Confirm room capacity", "Export accessible PDF", "project/checklist.md"], "excludes": ["Site photographs are unfinished"], "minBytes": 100}]
+    },
+    {
+      "id": "find-trip-connection",
+      "category": "find-understand",
+      "intent": "Find the connection I need to make after arriving in Philadelphia and write the exact train, departure time, platform, and source to result.md.",
+      "fixtures": [
+        {"path": "trip/flight.txt", "content": "Flight arrives Philadelphia 3:05 PM on August 28.\n"},
+        {"path": "trip/rail-confirmation.txt", "content": "Amtrak 177\nPhiladelphia 30th Street to Washington Union Station\nDeparts 4:12 PM\nPlatform 7\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["Amtrak 177", "4:12 PM", "Platform 7", "trip/rail-confirmation.txt"], "minBytes": 90}]
+    },
+    {
+      "id": "find-latest-decision",
+      "category": "find-understand",
+      "intent": "Reconstruct our latest decision about the launch color and explain which older note it superseded in result.md, citing both files.",
+      "fixtures": [
+        {"path": "decisions/2026-08-02.md", "content": "Decision: launch color will be cobalt blue.\n"},
+        {"path": "decisions/2026-08-15.md", "content": "Decision: use warm white for launch. This supersedes the cobalt direction after accessibility review.\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["warm white", "cobalt", "decisions/2026-08-15.md", "decisions/2026-08-02.md"], "minBytes": 110}]
+    },
+
+    {
+      "id": "organize-downloads-plan",
+      "category": "organize",
+      "intent": "Make a safe organization plan for these downloads without moving or deleting anything. Write a file-to-folder table and source note to result.md.",
+      "fixtures": [
+        {"path": "downloads/client-brief.pdf.txt", "content": "Client: Northstar\nProject brief for storefront renovation.\n"},
+        {"path": "downloads/kickoff-audio.wav.txt", "content": "Audio metadata: Northstar kickoff recording.\n"},
+        {"path": "downloads/tax-2025.pdf.txt", "content": "2025 federal tax return copy.\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["client-brief.pdf", "kickoff-audio.wav", "tax-2025.pdf", "Northstar", "Finance"], "excludes": ["Files moved"], "minBytes": 180}]
+    },
+    {
+      "id": "organize-detect-duplicates",
+      "category": "organize",
+      "intent": "Identify the exact duplicate notes and distinguish them from the similar but different note. Do not delete anything; explain the evidence in result.md.",
+      "fixtures": [
+        {"path": "notes/idea-a.txt", "content": "Build a small public garden beside the library.\n"},
+        {"path": "notes/idea-a-copy.txt", "content": "Build a small public garden beside the library.\n"},
+        {"path": "notes/idea-b.txt", "content": "Build a small public garden behind the library.\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["notes/idea-a.txt", "notes/idea-a-copy.txt", "notes/idea-b.txt", "not an exact duplicate"], "minBytes": 140}]
+    },
+    {
+      "id": "organize-contact-records",
+      "category": "organize",
+      "intent": "Combine these contact fragments into one clean, source-linked contact summary in result.md without inventing missing information.",
+      "fixtures": [
+        {"path": "contacts/card.txt", "content": "Maya Chen\nArchitect\nmaya@example.test\n"},
+        {"path": "contacts/call-note.txt", "content": "Maya Chen prefers calls after 2 PM. Office number: 555-0142.\n"},
+        {"path": "contacts/old-note.txt", "content": "Possible company: unknown. Do not assume.\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["Maya Chen", "maya@example.test", "555-0142", "after 2 PM", "contacts/card.txt", "contacts/call-note.txt"], "excludes": ["Company:"], "minBytes": 150}]
+    },
+    {
+      "id": "organize-expense-summary",
+      "category": "organize",
+      "intent": "Categorize the listed expenses and calculate the exact total for travel and supplies. Put the calculation and source filename in result.md.",
+      "fixtures": [
+        {"path": "expenses/august.csv", "content": "item,category,amount\nTrain,travel,48\nTaxi,travel,32\nSketchbook,supplies,20\nInk,supplies,15\nLunch,meals,18\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["Travel: $80", "Supplies: $35", "expenses/august.csv"], "minBytes": 100}]
+    },
+
+    {
+      "id": "decide-laptop",
+      "category": "decide",
+      "intent": "Choose the better laptop for local 3D work under a $2,000 budget using only these specifications. Explain the tradeoff and cite the source files in result.md.",
+      "fixtures": [
+        {"path": "options/atlas.txt", "content": "Atlas 14\nPrice: $1,850\nMemory: 32 GB\nGPU memory: 12 GB\nWeight: 4.2 lb\n"},
+        {"path": "options/feather.txt", "content": "Feather 13\nPrice: $1,600\nMemory: 16 GB\nGPU memory: 4 GB\nWeight: 2.7 lb\n"},
+        {"path": "requirements.txt", "content": "Priority: local 3D rendering. Budget ceiling: $2,000. Portability is secondary.\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["Atlas 14", "$1,850", "12 GB", "requirements.txt", "options/atlas.txt"], "minBytes": 160}]
+    },
+    {
+      "id": "decide-contractor",
+      "category": "decide",
+      "intent": "Recommend the contractor who satisfies the schedule and insurance requirements, and explain why the cheaper bid does not qualify. Write the sourced decision to result.md.",
+      "fixtures": [
+        {"path": "bids/river.txt", "content": "River Build\nBid: $8,400\nStart: September 3\nInsurance: current\n"},
+        {"path": "bids/pine.txt", "content": "Pine Works\nBid: $7,900\nStart: September 20\nInsurance: expired\n"},
+        {"path": "constraints.txt", "content": "Must start by September 10 and carry current insurance.\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["River Build", "September 3", "Pine Works", "expired", "constraints.txt"], "minBytes": 170}]
+    },
+    {
+      "id": "decide-meal-plan",
+      "category": "decide",
+      "intent": "Choose a dinner that respects the household constraint and uses what is already available. Explain the choice and cite the pantry and preference files in result.md.",
+      "fixtures": [
+        {"path": "home/pantry.txt", "content": "rice\nblack beans\ntomatoes\ncheddar cheese\nchicken stock\n"},
+        {"path": "home/preferences.txt", "content": "Dinner must be vegetarian tonight. Avoid buying more than one ingredient.\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["rice", "black beans", "vegetarian", "home/pantry.txt", "home/preferences.txt"], "excludes": ["chicken stock"], "minBytes": 130}]
+    },
+    {
+      "id": "decide-priority-order",
+      "category": "decide",
+      "intent": "Prioritize today's three tasks using deadlines and consequences, then write the ordered list and rationale with sources to result.md.",
+      "fixtures": [
+        {"path": "day/tasks.md", "content": "Submit permit correction\nReply to supplier quote\nChoose studio plants\n"},
+        {"path": "day/constraints.md", "content": "Permit correction due today at 4 PM and blocks review. Supplier quote expires tomorrow. Plants have no deadline.\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["1. Submit permit correction", "2. Reply to supplier quote", "3. Choose studio plants", "day/constraints.md"], "minBytes": 160}]
+    },
+
+    {
+      "id": "create-email-draft",
+      "category": "create",
+      "intent": "Turn the rough notes into a concise, polite email draft. Do not send it. Put the subject and complete draft in result.md and cite the notes source.",
+      "fixtures": [
+        {"path": "draft/notes.txt", "content": "To Jordan. Thank them for yesterday. Ask whether Tuesday at 10 works for reviewing the model. Mention I will bring revised drawings.\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["Subject:", "Jordan", "Tuesday at 10", "revised drawings", "draft/notes.txt"], "minBytes": 180}]
+    },
+    {
+      "id": "create-meeting-actions",
+      "category": "create",
+      "intent": "Convert the meeting record into a clear action list with owner and deadline for every commitment. Write it to result.md with a source citation.",
+      "fixtures": [
+        {"path": "meeting/record.md", "content": "Maya will send dimensions by August 22. Leo will price the revised facade by August 24. Ummi will issue the combined review on August 25.\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["Maya", "August 22", "Leo", "August 24", "Ummi", "August 25", "meeting/record.md"], "minBytes": 170}]
+    },
+    {
+      "id": "create-one-page-brief",
+      "category": "create",
+      "intent": "Turn the idea fragments into a one-page project brief with purpose, audience, constraints, and first test. Keep uncertain claims labeled and cite both sources in result.md.",
+      "fixtures": [
+        {"path": "idea/problem.md", "content": "Neighbors cannot easily see which public workshops still have seats.\n"},
+        {"path": "idea/concept.md", "content": "A simple local bulletin could show workshop, date, seats and registration link. Unknown: whether organizers expose live capacity.\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["Purpose", "Audience", "Constraints", "First test", "Unknown", "idea/problem.md", "idea/concept.md"], "minBytes": 300}]
+    },
+    {
+      "id": "create-source-linked-summary",
+      "category": "create",
+      "intent": "Write a short factual summary of the garden proposal that separates confirmed facts from open questions and cites each source file in result.md.",
+      "fixtures": [
+        {"path": "garden/site.md", "content": "Confirmed: the available lot is 40 by 60 feet and owned by the library.\n"},
+        {"path": "garden/community.md", "content": "Confirmed: 18 residents signed an interest sheet. Open question: who will manage watering.\n"},
+        {"path": "garden/budget.md", "content": "Estimate only: initial materials may cost $3,500. Funding is not confirmed.\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["Confirmed", "Open questions", "40 by 60", "18 residents", "$3,500", "garden/site.md", "garden/community.md", "garden/budget.md"], "minBytes": 260}]
+    },
+
+    {
+      "id": "continue-project-handoff",
+      "category": "continue",
+      "intent": "Continue from the handoff: identify the single next executable action, explain why it is next, and write it with source evidence to result.md.",
+      "fixtures": [
+        {"path": "handoff/state.md", "content": "Completed: measured site and drafted floor plan. Blocked: final layout depends on fire-exit clearance. Next missing input: obtain the inspector's clearance requirement.\n"},
+        {"path": "handoff/history.md", "content": "Decision: do not render finishes until the exit path is validated.\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["obtain the inspector's clearance requirement", "fire-exit", "handoff/state.md", "handoff/history.md"], "minBytes": 160}]
+    },
+    {
+      "id": "continue-apply-feedback",
+      "category": "continue",
+      "intent": "Update the existing introduction using the latest feedback while preserving its factual claim. Write the revised introduction and a short change note to result.md with both sources.",
+      "fixtures": [
+        {"path": "article/introduction.md", "content": "The library opened in 1968 and now serves three neighborhoods. This report describes the renovation study.\n"},
+        {"path": "article/feedback.md", "content": "Latest feedback: lead with the human benefit, keep the 1968 fact, and remove the phrase 'this report describes'.\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["1968", "three neighborhoods", "Change note", "article/introduction.md", "article/feedback.md"], "excludes": ["this report describes"], "minBytes": 180}]
+    },
+    {
+      "id": "continue-what-changed",
+      "category": "continue",
+      "intent": "Tell me what materially changed since the baseline and what remains unchanged. Write a precise comparison with both source files in result.md.",
+      "fixtures": [
+        {"path": "status/baseline.md", "content": "Budget: $12,000\nOpening: October 1\nScope: lobby and signage\n"},
+        {"path": "status/current.md", "content": "Budget: $14,500\nOpening: October 1\nScope: lobby, signage and lighting\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["$12,000", "$14,500", "lighting", "October 1", "unchanged", "status/baseline.md", "status/current.md"], "minBytes": 180}]
+    },
+    {
+      "id": "continue-respect-preference",
+      "category": "continue",
+      "intent": "Recommend a note-taking setup that respects the saved preference and current need. Explain the recommendation with both sources in result.md.",
+      "fixtures": [
+        {"path": "memory/preferences.md", "content": "Preference: keep personal notes local and readable as ordinary Markdown. Avoid mandatory subscriptions.\n"},
+        {"path": "memory/current-need.md", "content": "Need: search project notes across a laptop and export them without lock-in.\n"},
+        {"path": "memory/options.md", "content": "Option A: local Markdown folder with desktop search. Option B: cloud-only subscription with proprietary export.\n"}
+      ],
+      "expectations": [{"path": "result.md", "contains": ["Option A", "local Markdown", "without lock-in", "memory/preferences.md", "memory/current-need.md"], "excludes": ["Option B is recommended"], "minBytes": 170}]
+    }
+  ]
+}

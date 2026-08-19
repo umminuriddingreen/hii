@@ -464,6 +464,34 @@ start Ollama with `ollama serve`, or pin a provider with HII_MODEL_URL=<url>.",
         cancel: &Cancel,
         sender: mpsc::Sender<ChatStreamEvent>,
     ) {
+        self.chat_with_stream_format(model, messages, json_format, true, think, cancel, sender);
+    }
+
+    /// Retry a structured action request without a provider-side grammar.
+    /// Some local backends reject both schema and broad JSON constraints before
+    /// returning any tokens; HII still validates the action with its own parser.
+    pub fn chat_with_stream_unconstrained(
+        &self,
+        model: &str,
+        messages: &[Message],
+        think: bool,
+        cancel: &Cancel,
+        sender: mpsc::Sender<ChatStreamEvent>,
+    ) {
+        self.chat_with_stream_format(model, messages, false, false, think, cancel, sender);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn chat_with_stream_format(
+        &self,
+        model: &str,
+        messages: &[Message],
+        json_format: bool,
+        strict_json_schema: bool,
+        think: bool,
+        cancel: &Cancel,
+        sender: mpsc::Sender<ChatStreamEvent>,
+    ) {
         if self.provider != ModelProvider::Ollama {
             self.chat_openai_with_stream(model, messages, json_format, cancel, sender);
             return;
@@ -483,7 +511,11 @@ start Ollama with `ollama serve`, or pin a provider with HII_MODEL_URL=<url>.",
             }
         });
         if json_format {
-            body["format"] = action_schema();
+            body["format"] = if strict_json_schema {
+                action_schema()
+            } else {
+                json!("json")
+            };
         }
         let response = match self
             .agent
