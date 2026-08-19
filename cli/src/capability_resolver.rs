@@ -4,7 +4,7 @@
 //! executor needs before it can claim an action is possible: availability,
 //! direct invocation, minimum authority, and evidence.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     capability_index::{self, Entry, Match},
@@ -14,7 +14,7 @@ use crate::{
 
 const CANDIDATE_LIMIT: usize = 5;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Availability {
     Ready,
