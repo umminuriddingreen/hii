@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 pub mod information;
 pub mod operational;
+pub mod web;
 
 pub const CONTRACT_VERSION: u8 = 1;
 
