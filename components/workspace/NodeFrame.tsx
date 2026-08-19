@@ -9,6 +9,7 @@ type NodeFrameProps = {
   title: string;
   getZoom: () => number;
   onSelect: () => void;
+  onOpenConversation: () => void;
   onCommit: (patch: Partial<WorkspaceNode>) => void;
   onErase?: () => void;
   chromeless?: boolean;
@@ -17,7 +18,7 @@ type NodeFrameProps = {
 
 const INTERACTIVE = 'input,textarea,select,iframe,video,audio,embed,a,[contenteditable]';
 
-export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, chromeless, children }: NodeFrameProps) {
+export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConversation, onCommit, chromeless, children }: NodeFrameProps) {
   const frame = useRef<HTMLDivElement | null>(null);
 
   const pointerDown = (event: React.PointerEvent) => {
@@ -66,6 +67,11 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, 
       data-selected={selected}
       data-chromeless={chromeless || undefined}
       onPointerDown={pointerDown}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        onOpenConversation();
+      }}
       style={{ transform: `translate(${node.x}px, ${node.y}px)`, width: node.w, height: node.h, zIndex: Math.round(node.z) }}
     >
       <span className="hii-node-caption">{title}</span>

@@ -29,6 +29,12 @@ import {
   type MusicPanelPayload
 } from '@/lib/workspace/music-playlists';
 import { isTerminalShortcut, terminalSeedFromCommand } from '@/lib/workspace/terminal-command';
+import {
+  appendObjectConversationTurn,
+  finishObjectConversationTurn,
+  objectConversationTurns,
+  type ObjectConversationTurn
+} from '@/lib/workspace/object-conversation';
 import type { WorkspaceNode } from '@/lib/workspace/types';
 import { MusicPlaylistPanel } from './MusicPlaylistPanel';
 import { NativeDevBrowser } from './NativeDevBrowser';
@@ -37,6 +43,14 @@ import { useCamera } from './useCamera';
 import { useWorkspace } from './useWorkspace';
 
 type Point = { x: number; y: number };
+type PromptState = {
+  anchor: Point;
+  initialValue: string;
+  response: string;
+  status: 'idle' | 'running' | 'completed' | 'failed';
+  objectId?: string;
+  conversationId?: string;
+};
 const RESPONSE_URL = /(https?:\/\/[^\s<>()]+)/g;
 
 function text(value: unknown) {
@@ -288,8 +302,10 @@ function Prompt({
   anchor,
   initialValue,
   mode,
+  objectTitle,
   response,
   status,
+  timeline,
   onDismiss,
   onMode,
   onSubmit
@@ -297,8 +313,10 @@ function Prompt({
   anchor: Point;
   initialValue: string;
   mode: CanvasModeId;
+  objectTitle?: string;
   response: string;
   status: 'idle' | 'running' | 'completed' | 'failed';
+  timeline: ObjectConversationTurn[];
   onDismiss: () => void;
   onMode: (mode: CanvasModeId) => void;
   onSubmit: (value: string) => void;
@@ -331,6 +349,24 @@ function Prompt({
       onPointerDown={(event) => event.stopPropagation()}
     >
       <form className="hii-prompt" data-mode={mode} data-status={status} onSubmit={(event) => { event.preventDefault(); submit(); }}>
+        {objectTitle && (
+          <div className="hii-prompt-context">
+            <span>Conversation with</span>
+            <strong>{objectTitle}</strong>
+            <small>{timeline.length} turn{timeline.length === 1 ? '' : 's'}</small>
+          </div>
+        )}
+        {timeline.length > 0 && (
+          <ol className="hii-conversation-timeline" aria-label={`Conversation timeline for ${objectTitle || 'canvas'}`}>
+            {timeline.slice(-8).map((turn) => (
+              <li key={turn.id} data-role={turn.role} data-status={turn.status}>
+                <span>{turn.role === 'human' ? 'You' : 'HII'}</span>
+                <p>{turn.text}</p>
+                <time dateTime={turn.at}>{new Date(turn.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>
+              </li>
+            ))}
+          </ol>
+        )}
         <div className="hii-prompt-line">
           <input
             ref={input}
@@ -383,10 +419,17 @@ export function HiiRoot() {
     const stored = window.localStorage.getItem('hii.canvas.mode.v1');
     return isCanvasMode(stored) ? stored : defaultCanvasMode;
   });
-  const [prompt, setPrompt] = useState<{ anchor: Point; initialValue: string; response: string; status: 'idle' | 'running' | 'completed' | 'failed' } | null>(null);
+  const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [promptVisible, setPromptVisible] = useState(false);
   const mouse = useRef<Point>({ x: 400, y: 280 });
   const activeRun = useRef<string | null>(null);
+  const activeConversation = useRef<{
+    runId: string;
+    nodeId: string;
+    conversationId: string;
+    humanTurnId: string;
+    assistantText: string;
+  } | null>(null);
   const curationRun = useRef<{ runId: string; nodeId: string; request: string; text: string } | null>(null);
   const workspaceRef = useRef(workspace);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -456,6 +499,40 @@ export function HiiRoot() {
   }, [camera, workspace]);
 
   const selectedNodes = useMemo(() => workspace.nodes.filter((node) => selected.includes(node.id)), [selected, workspace.nodes]);
+
+  const openObjectConversation = useCallback((node: WorkspaceNode) => {
+    const conversationId = text(node.payload.conversationId) || crypto.randomUUID();
+    if (!text(node.payload.conversationId)) {
+      workspace.patchNode(node.id, {
+        payload: { ...node.payload, conversationId, conversationTimeline: [] },
+        object: {
+          ...(node.object || { kind: 'event' as const }),
+          audit: [
+            ...(node.object?.audit || []),
+            { ts: new Date().toISOString(), actor: 'human' as const, action: 'opened linked object conversation' }
+          ].slice(-20)
+        }
+      });
+    }
+    const viewport = camera.cam.current;
+    const anchor = {
+      x: viewport.x + node.x * viewport.z,
+      y: viewport.y + (node.y + node.h) * viewport.z
+    };
+    const timeline = objectConversationTurns(node.payload, conversationId);
+    const previous = [...timeline].reverse().find((turn) => turn.role === 'assistant');
+    setSelected([node.id]);
+    workspace.bringToFront(node.id);
+    setPrompt({
+      anchor,
+      initialValue: '',
+      response: previous?.text || '',
+      status: 'idle',
+      objectId: node.id,
+      conversationId
+    });
+    setPromptVisible(true);
+  }, [camera, workspace]);
 
   const openMusicPanel = useCallback((at: Point) => {
     const existing = workspace.nodes.find((node) => node.type === 'surface' && node.payload.surface === 'profile-music');
@@ -538,7 +615,7 @@ export function HiiRoot() {
     }
   }, []);
 
-  const submit = useCallback(async (intent: string, anchor: Point) => {
+  const submit = useCallback(async (intent: string, anchor: Point, objectId?: string, conversationId?: string) => {
     const activeMode = canvasMode(mode);
     setPrompt((current) => current ? {
       ...current,
@@ -597,6 +674,14 @@ export function HiiRoot() {
         context: {
           anchor,
           mode,
+          conversation: objectId && conversationId ? {
+            id: conversationId,
+            objectId,
+            timeline: objectConversationTurns(
+              selectedNodes.find((node) => node.id === objectId)?.payload || {},
+              conversationId
+            ).slice(-12)
+          } : undefined,
           selected: selectedNodes.map((node) => ({
             id: node.id,
             type: node.type,
@@ -607,6 +692,35 @@ export function HiiRoot() {
         }
       });
       activeRun.current = result.runId;
+      if (objectId && conversationId) {
+        const node = workspaceRef.current.nodes.find((entry) => entry.id === objectId);
+        if (node) {
+          const humanTurnId = crypto.randomUUID();
+          const turn: ObjectConversationTurn = {
+            id: humanTurnId,
+            conversationId,
+            at: new Date().toISOString(),
+            role: 'human',
+            text: intent,
+            status: 'running',
+            runId: result.runId
+          };
+          workspaceRef.current.patchNode(objectId, {
+            payload: {
+              ...node.payload,
+              conversationId,
+              conversationTimeline: appendObjectConversationTurn(node.payload, turn)
+            }
+          });
+          activeConversation.current = {
+            runId: result.runId,
+            nodeId: objectId,
+            conversationId,
+            humanTurnId,
+            assistantText: ''
+          };
+        }
+      }
     } catch (error) {
       setPrompt((current) => current ? { ...current, response: error instanceof Error ? error.message : 'HII could not start the model.', status: 'failed' } : current);
     }
@@ -618,6 +732,10 @@ export function HiiRoot() {
     listenAgentEvents((event: AgentEventV1) => {
       if (activeRun.current !== event.runId) return;
       const curation = curationRun.current?.runId === event.runId ? curationRun.current : null;
+      const conversation = activeConversation.current?.runId === event.runId ? activeConversation.current : null;
+      if (conversation && event.text) {
+        conversation.assistantText += `${conversation.assistantText ? '\n' : ''}${event.text}`;
+      }
       if (curation && event.text) curation.text += `${curation.text ? '\n' : ''}${event.text}`;
       setPrompt((current) => {
         if (!current || current.status !== 'running') return current;
@@ -656,6 +774,33 @@ export function HiiRoot() {
           }
         }
         curationRun.current = null;
+      }
+      if (conversation && (event.status === 'completed' || event.status === 'failed' || event.status === 'cancelled')) {
+        const node = workspaceRef.current.nodes.find((entry) => entry.id === conversation.nodeId);
+        if (node) {
+          const terminalStatus = event.status === 'completed' ? 'completed' : event.status === 'cancelled' ? 'cancelled' : 'failed';
+          let timeline = finishObjectConversationTurn(node.payload, conversation.humanTurnId, terminalStatus);
+          const assistantText = conversation.assistantText.trim();
+          if (assistantText) {
+            timeline = appendObjectConversationTurn(
+              { ...node.payload, conversationTimeline: timeline },
+              {
+                id: crypto.randomUUID(),
+                conversationId: conversation.conversationId,
+                at: new Date().toISOString(),
+                role: 'assistant',
+                text: assistantText,
+                status: terminalStatus,
+                runId: event.runId,
+                receiptPath: event.receiptPath
+              }
+            );
+          }
+          workspaceRef.current.patchNode(node.id, {
+            payload: { ...node.payload, conversationId: conversation.conversationId, conversationTimeline: timeline }
+          });
+        }
+        activeConversation.current = null;
       }
       if (event.status === 'completed' || event.status === 'failed' || event.status === 'cancelled') activeRun.current = null;
     }).then((dispose) => {
@@ -784,6 +929,7 @@ export function HiiRoot() {
             title={titleFor(node)}
             getZoom={() => camera.cam.current.z}
             onSelect={() => { setSelected([node.id]); workspace.bringToFront(node.id); }}
+            onOpenConversation={() => openObjectConversation(node)}
             onCommit={(patch) => workspace.patchNode(node.id, patch)}
             chromeless={node.type === 'canvas-text' || node.type === 'ink' || node.type === 'image'}
           >
@@ -803,11 +949,15 @@ export function HiiRoot() {
           anchor={prompt.anchor}
           initialValue={prompt.initialValue}
           mode={mode}
+          objectTitle={prompt.objectId ? titleFor(workspace.nodes.find((node) => node.id === prompt.objectId) || ({ type: 'context', payload: {} } as WorkspaceNode)) : undefined}
           response={prompt.response}
           status={prompt.status}
+          timeline={prompt.objectId
+            ? objectConversationTurns(workspace.nodes.find((node) => node.id === prompt.objectId)?.payload || {}, prompt.conversationId)
+            : []}
           onDismiss={() => setPromptVisible(false)}
           onMode={setMode}
-          onSubmit={(value) => void submit(value, prompt.anchor)}
+          onSubmit={(value) => void submit(value, prompt.anchor, prompt.objectId, prompt.conversationId)}
         />
       )}
       <input
