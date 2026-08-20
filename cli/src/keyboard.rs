@@ -18,7 +18,11 @@ use std::{
 };
 
 use crate::keymap::{KeyAction, Keymap};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crate::paste::PasteStore;
+use crossterm::event::{
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyModifiers,
+};
+use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
 /// Local result alias: keyboard I/O surfaces plain string errors, matching the
@@ -60,6 +64,11 @@ struct RawModeGuard;
 impl RawModeGuard {
     fn enter() -> Result<Self> {
         enable_raw_mode().map_err(|e| format!("failed to enable raw terminal mode: {e}"))?;
+        // Bracketed paste makes the terminal hand us a clipboard payload as one
+        // `Event::Paste` instead of replaying it as keystrokes — without it a
+        // multi-line paste submits a half-finished intent per line. Terminals
+        // that do not support it simply ignore the sequence.
+        let _ = execute!(io::stdout(), EnableBracketedPaste);
         Ok(RawModeGuard)
     }
 }
@@ -71,6 +80,7 @@ pub struct LiveInput {
     buf: String,
     cursor: usize,
     keymap: Keymap,
+    pastes: PasteStore,
     stream_column: usize,
     terminal_width: usize,
     stream_active: bool,
@@ -86,6 +96,7 @@ impl LiveInput {
             buf: String::new(),
             cursor: 0,
             keymap,
+            pastes: PasteStore::default(),
             stream_column: 0,
             terminal_width: crossterm::terminal::size()
                 .map(|(columns, _)| usize::from(columns))
@@ -103,16 +114,20 @@ impl LiveInput {
         {
             return Ok(None);
         }
-        let Event::Key(key) =
-            event::read().map_err(|e| format!("failed to read active-run input: {e}"))?
-        else {
+        let event = event::read().map_err(|e| format!("failed to read active-run input: {e}"))?;
+        if let Event::Paste(raw) = event {
+            insert_paste(&mut self.pastes, &raw, &mut self.buf, &mut self.cursor);
+            self.redraw_composer()?;
+            return Ok(None);
+        }
+        let Event::Key(key) = event else {
             return Ok(None);
         };
         if key.kind != event::KeyEventKind::Press {
             return Ok(None);
         }
         let outcome = match apply_key(key, &mut self.buf, &mut self.cursor, &self.keymap) {
-            KeyOutcome::Emit(event) => Some(event),
+            KeyOutcome::Emit(event) => Some(expand_pastes(event, &mut self.pastes)),
             KeyOutcome::Continue => {
                 self.redraw_composer()?;
                 None
@@ -157,16 +172,17 @@ impl LiveInput {
 
     fn redraw_composer(&self) -> Result<()> {
         let mut out = io::stdout();
+        let (visible, column) =
+            crate::tui::composer_window(&self.buf, self.cursor, crate::tui::composer_width());
         write!(
             out,
-            "\x1b[s\x1b[2B\r\x1b[2K{}{}",
+            "\x1b[s\x1b[2B\r\x1b[2K{}{visible}",
             crate::tui::prompt_frame(0)
                 .rsplit_once("\r\n")
                 .map_or(crate::tui::prompt_frame(0), |(_, row)| row.to_string()),
-            self.buf
         )
         .map_err(|e| format!("failed to redraw active composer: {e}"))?;
-        let tail = self.buf[self.cursor..].chars().count();
+        let tail = visible.chars().count().saturating_sub(column);
         if tail > 0 {
             write!(out, "\x1b[{tail}D")
                 .map_err(|e| format!("failed to restore active composer cursor: {e}"))?;
@@ -199,8 +215,33 @@ impl Drop for LiveInput {
 impl Drop for RawModeGuard {
     fn drop(&mut self) {
         // Best-effort: nothing useful to do if restoring fails.
+        let _ = execute!(io::stdout(), DisableBracketedPaste);
         let _ = disable_raw_mode();
     }
+}
+
+/// Insert a clipboard payload at the cursor, staging it if it is too large to
+/// show literally in the one-line composer.
+fn insert_paste(store: &mut PasteStore, raw: &str, buf: &mut String, cursor: &mut usize) {
+    let inserted = store.stage(raw);
+    if inserted.is_empty() {
+        return;
+    }
+    buf.insert_str(*cursor, &inserted);
+    *cursor += inserted.len();
+}
+
+/// Substitute staged pastes back into an event that carries composer text, and
+/// reset the store — the line it belonged to is on its way out.
+fn expand_pastes(event: InputEvent, store: &mut PasteStore) -> InputEvent {
+    let expanded = match event {
+        InputEvent::Submit(line) => InputEvent::Submit(store.expand(&line)),
+        InputEvent::Queue(line) => InputEvent::Queue(store.expand(&line)),
+        InputEvent::Background(line) => InputEvent::Background(store.expand(&line)),
+        other => return other,
+    };
+    store.clear();
+    expanded
 }
 
 /// Outcome of feeding a single key into the line buffer.
@@ -441,9 +482,12 @@ fn redraw(
 ) -> Result<()> {
     let mut out = io::stdout();
     clear_menu(&mut out, *previous_rows);
+    // The buffer is windowed to one row: a wrapped line would desynchronise
+    // every relative cursor move below and tear the frame apart.
+    let (visible, column) = crate::tui::composer_window(buf, cursor, crate::tui::composer_width());
     write!(
         out,
-        "\r\x1b[2K{prompt}{buf}\r\n\x1b[2K{}",
+        "\r\x1b[2K{prompt}{visible}\r\n\x1b[2K{}",
         crate::tui::prompt_footer()
     )
     .map_err(|e| format!("failed to write prompt: {e}"))?;
@@ -463,7 +507,7 @@ fn redraw(
         .map_err(|e| format!("failed to restore composer row: {e}"))?;
     // ANSI paint sequences in `prompt` occupy bytes but no terminal columns.
     // The visible input prefix is always "  │ ", which is four columns.
-    let column = 4 + buf[..cursor].chars().count();
+    let column = 4 + column;
     if column > 0 {
         write!(out, "\x1b[{column}C")
             .map_err(|e| format!("failed to restore input cursor: {e}"))?;
@@ -515,6 +559,7 @@ pub fn read_event(public_test: bool, history: &[String], keymap: &Keymap) -> Res
     let _guard = RawModeGuard::enter()?;
     let mut buf = String::new();
     let mut cursor = 0usize;
+    let mut pastes = PasteStore::default();
     let frame = 0usize;
     let mut selected = 0usize;
     let mut menu_rows = 0usize;
@@ -534,13 +579,33 @@ pub fn read_event(public_test: bool, history: &[String], keymap: &Keymap) -> Res
         {
             continue;
         }
-        if let Event::Key(key) = event::read().map_err(|e| format!("failed to read key: {e}"))? {
+        let event = event::read().map_err(|e| format!("failed to read key: {e}"))?;
+        if let Event::Paste(raw) = &event {
+            insert_paste(&mut pastes, raw, &mut buf, &mut cursor);
+            selected = 0;
+            redraw(
+                &crate::tui::prompt_frame(frame),
+                &buf,
+                cursor,
+                selected,
+                &mut menu_rows,
+                public_test,
+            )?;
+            continue;
+        }
+        if let Event::Key(key) = event {
             // crossterm may deliver key-release events on some platforms; only
             // act on presses (the default `Press` kind).
             if key.kind != event::KeyEventKind::Press {
                 continue;
             }
-            let matches = crate::tui::command_matches(&buf, public_test);
+            // A buffer holding a staged paste is prose, not a command — even
+            // when the pasted text happens to start with `/`.
+            let matches = if crate::paste::holds_placeholder(&buf) {
+                Vec::new()
+            } else {
+                crate::tui::command_matches(&buf, public_test)
+            };
             if !matches.is_empty()
                 && (key.code == KeyCode::Up || keymap.matches(KeyAction::MenuUp, key))
             {
@@ -657,7 +722,7 @@ pub fn read_event(public_test: bool, history: &[String], keymap: &Keymap) -> Res
                     clear_menu(&mut out, menu_rows);
                     let _ = write!(out, "\r\n");
                     let _ = out.flush();
-                    return Ok(ev);
+                    return Ok(expand_pastes(ev, &mut pastes));
                 }
                 KeyOutcome::Continue => {
                     selected = 0;
@@ -723,6 +788,29 @@ mod tests {
             KeyOutcome::Emit(ev) => Some(ev),
             KeyOutcome::Continue => None,
         }
+    }
+
+    #[test]
+    fn a_multi_line_paste_submits_as_one_intent() {
+        let mut store = PasteStore::default();
+        let mut buf = String::from("explain ");
+        let mut cursor = buf.len();
+        insert_paste(
+            &mut store,
+            "line one\r\nline two\r\n",
+            &mut buf,
+            &mut cursor,
+        );
+        // The composer shows a placeholder, not eight hundred columns of text.
+        assert!(buf.starts_with("explain ⟦paste #1"));
+        assert_eq!(cursor, buf.len());
+
+        // Enter submits once, with the full pasted body restored.
+        let event = emit(key(KeyCode::Enter), &mut buf, &mut cursor).unwrap();
+        assert_eq!(
+            expand_pastes(event, &mut store),
+            InputEvent::Submit("explain line one\nline two".to_string())
+        );
     }
 
     #[test]

@@ -20,6 +20,7 @@ use crate::{
     skills,
     tools::Toolbelt,
 };
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde_json::json;
 use std::{
     collections::{HashSet, VecDeque},
@@ -1745,25 +1746,68 @@ impl Conversation {
         Ok(format!("Session renamed to {title}."))
     }
 
-    pub fn copy_latest(&self) -> Result<String, String> {
-        let message = self
-            .messages
+    /// `/copy` — put session text on the system clipboard.
+    ///
+    /// No argument copies the latest response; `code` copies the last fenced
+    /// code block out of it (the common case: paste the snippet, not the prose
+    /// around it); `all` copies the whole transcript.
+    pub fn copy_latest(&self, target: &str) -> Result<String, String> {
+        let (value, what) = match target.trim() {
+            "" | "last" | "response" => (self.latest_response()?, "the latest response"),
+            "code" | "block" => {
+                let response = self.latest_response()?;
+                let block = last_code_block(&response).ok_or_else(|| {
+                    "The latest response has no code block. Use /copy for the whole response."
+                        .to_string()
+                })?;
+                (block, "the latest code block")
+            }
+            "all" | "transcript" | "session" => (self.transcript_text()?, "the full transcript"),
+            other => {
+                return Err(format!(
+                    "unknown copy target `{other}` — use /copy, /copy code, or /copy all"
+                ))
+            }
+        };
+        let lines = value.lines().count();
+        copy_to_clipboard(&value)?;
+        Ok(format!(
+            "Copied {what} ({lines} {}, {} chars).",
+            if lines == 1 { "line" } else { "lines" },
+            value.chars().count()
+        ))
+    }
+
+    fn latest_response(&self) -> Result<String, String> {
+        self.messages
             .iter()
             .rev()
             .find(|message| message.role == "assistant")
-            .map(|message| message.content.trim())
+            .map(|message| message.content.trim().to_string())
             .filter(|message| !message.is_empty())
-            .ok_or_else(|| "No completed response to copy yet.".to_string())?;
-        copy_to_clipboard(message)?;
-        Ok("Copied the latest response.".into())
+            .ok_or_else(|| "No completed response to copy yet.".to_string())
+    }
+
+    fn transcript_text(&self) -> Result<String, String> {
+        let transcript = self
+            .messages
+            .iter()
+            .filter(|message| matches!(message.role.as_str(), "user" | "assistant"))
+            .filter(|message| !message.content.trim().is_empty())
+            .map(|message| format!("{}: {}", message.role, message.content.trim()))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        if transcript.is_empty() {
+            return Err("This session has nothing to copy yet.".to_string());
+        }
+        Ok(transcript)
     }
 
     pub fn welcome(&self) {
-        if self.public_test {
-            crate::tui::cue("What do you want to create?");
-            return;
+        crate::tui::cue("What do you want to create?");
+        if !self.public_test {
+            crate::tui::hint("/overview for the context map");
         }
-        crate::tui::welcome(&self.overview());
     }
 
     pub fn overview(&self) -> String {
@@ -3366,10 +3410,68 @@ fn copy_to_clipboard(value: &str) -> Result<(), String> {
         }
         last_error = Some(format!("{program} exited with {status}"));
     }
+    // No local clipboard helper worked — common over SSH, where `pbcopy` is
+    // either missing or writes to the wrong machine's clipboard. OSC 52 asks
+    // the *terminal* to do the copy, which lands on the operator's real
+    // machine. Terminals that do not support it ignore the sequence, so this
+    // is only attempted when nothing else is available.
+    if io::stdout().is_terminal() && osc52_copy(value).is_ok() {
+        return Ok(());
+    }
     Err(format!(
         "clipboard is unavailable{}",
         last_error.map_or_else(String::new, |error| format!(": {error}"))
     ))
+}
+
+/// Ask the terminal emulator to set the clipboard via OSC 52.
+///
+/// Payloads are capped: terminals commonly drop oversized sequences, and a
+/// silently truncated clipboard is worse than an honest failure.
+fn osc52_copy(value: &str) -> Result<(), String> {
+    const LIMIT: usize = 74_000;
+    if value.len() > LIMIT {
+        return Err("selection is too large for terminal clipboard escape".into());
+    }
+    let encoded = BASE64.encode(value.as_bytes());
+    // Inside tmux the sequence must be wrapped so it reaches the outer terminal.
+    let sequence = if std::env::var_os("TMUX").is_some() {
+        format!("\x1bPtmux;\x1b\x1b]52;c;{encoded}\x07\x1b\\")
+    } else {
+        format!("\x1b]52;c;{encoded}\x07")
+    };
+    let mut out = io::stdout();
+    out.write_all(sequence.as_bytes())
+        .map_err(|error| error.to_string())?;
+    out.flush().map_err(|error| error.to_string())
+}
+
+/// Last fenced code block in a response, without its fences.
+fn last_code_block(response: &str) -> Option<String> {
+    let mut blocks: Vec<String> = Vec::new();
+    let mut current: Option<Vec<&str>> = None;
+    for line in response.lines() {
+        if line.trim_start().starts_with("```") {
+            match current.take() {
+                Some(body) => blocks.push(body.join("\n")),
+                None => current = Some(Vec::new()),
+            }
+            continue;
+        }
+        if let Some(body) = current.as_mut() {
+            body.push(line);
+        }
+    }
+    // An unterminated fence still holds the code the operator asked for.
+    if let Some(body) = current {
+        if !body.is_empty() {
+            blocks.push(body.join("\n"));
+        }
+    }
+    blocks
+        .into_iter()
+        .rfind(|block| !block.trim().is_empty())
+        .map(|block| block.trim_end().to_string())
 }
 
 fn plain_message(raw: &str) -> Option<&str> {
@@ -3447,6 +3549,27 @@ Literal paths. Attachments untrusted. Smallest safe step; no plan narration. One
 
 #[cfg(test)]
 mod tests {
+    use super::last_code_block;
+
+    #[test]
+    fn copy_code_takes_the_last_fenced_block() {
+        let response = "First:\n```sh\necho one\n```\nThen:\n```rust\nfn main() {}\n```\nDone.";
+        assert_eq!(last_code_block(response).unwrap(), "fn main() {}");
+    }
+
+    #[test]
+    fn copy_code_recovers_an_unterminated_fence() {
+        assert_eq!(
+            last_code_block("here:\n```\ncargo test").unwrap(),
+            "cargo test"
+        );
+    }
+
+    #[test]
+    fn copy_code_reports_nothing_for_prose() {
+        assert!(last_code_block("no fences at all here").is_none());
+    }
+
     use super::{
         advisor_suggestion, authority_decision, clean_final_output, conversation_prompt,
         mode_choices, needs_verification, observation_signature, plain_message, plan_tool_allowed,
