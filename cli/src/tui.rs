@@ -99,7 +99,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/clear", "fresh conversation"),
     ("/new", "fresh conversation"),
     ("/rename", "name this session"),
-    ("/copy", "copy latest response"),
+    ("/copy", "copy response, code, or all"),
     ("/undo", "drop last exchange"),
     ("/fork", "snapshot session"),
     ("/teach", "save as skill"),
@@ -272,6 +272,61 @@ pub(crate) fn terminal_width() -> usize {
         .clamp(48, 104)
 }
 
+/// Columns the composer may paint on its single editable row.
+///
+/// The prompt gutter `"  │ "` takes four columns, and one trailing column is
+/// left unused so a cursor resting after the last character cannot trigger the
+/// terminal's auto-wrap. The frame is clamped to 104 columns but the real
+/// terminal may be narrower, so honour whichever is smaller.
+pub(crate) fn composer_width() -> usize {
+    let real = crossterm::terminal::size()
+        .map(|(columns, _)| usize::from(columns))
+        .unwrap_or(80);
+    real.min(terminal_width()).saturating_sub(5).max(8)
+}
+
+/// Render the slice of the composer buffer that fits on one row, plus the
+/// column the cursor lands on within that slice.
+///
+/// The composer's redraw uses relative cursor movement and assumes the input
+/// occupies exactly one terminal row. A buffer wider than the row would wrap,
+/// shifting every subsequent move and tearing the frame apart — so long lines
+/// scroll horizontally instead, and newlines (recalled from a multi-line
+/// history entry) are shown as a glyph rather than breaking the row.
+pub(crate) fn composer_window(buf: &str, cursor: usize, width: usize) -> (String, usize) {
+    if width == 0 {
+        return (String::new(), 0);
+    }
+    let flattened: Vec<char> = buf
+        .chars()
+        .map(|character| match character {
+            '\n' => '⏎',
+            '\t' => ' ',
+            other => other,
+        })
+        .collect();
+    let cursor_column = buf[..cursor.min(buf.len())].chars().count();
+    if flattened.len() <= width {
+        return (flattened.into_iter().collect(), cursor_column);
+    }
+    // Scrolled windows keep the cursor on the right edge, which is where it sits
+    // while typing or pasting past the end of the row.
+    let start = cursor_column.saturating_sub(width.saturating_sub(1));
+    let end = (start + width).min(flattened.len());
+    let mut visible: Vec<char> = flattened[start..end].to_vec();
+    if start > 0 {
+        visible[0] = '…';
+    }
+    // Only mark hidden trailing text when the cursor is not sitting on that
+    // last cell — otherwise the ellipsis would hide the character being edited.
+    if end < flattened.len() && cursor_column < end.saturating_sub(1) {
+        if let Some(last) = visible.last_mut() {
+            *last = '…';
+        }
+    }
+    (visible.into_iter().collect(), cursor_column - start)
+}
+
 fn short_path(path: &Path) -> String {
     let displayed = path.display().to_string();
     let Some(home) = dirs::home_dir() else {
@@ -365,10 +420,9 @@ pub fn overview(
     lines.join("\n")
 }
 
-pub fn welcome(map: &str) {
-    for line in map.lines() {
-        println!("{}", paint(line, &[palette().muted]));
-    }
+pub fn hint(message: &str) {
+    println!("  {}", paint(message, &[DIM, palette().muted]));
+    println!();
 }
 
 pub fn prompt_frame(_frame: usize) -> String {
@@ -637,8 +691,8 @@ pub fn error(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        command_matches, command_menu, overview, prompt_frame, short_path, theme_choices, truncate,
-        workspace_state, Theme,
+        command_matches, command_menu, composer_window, overview, prompt_frame, short_path,
+        theme_choices, truncate, workspace_state, Theme,
     };
     use std::path::Path;
 
@@ -689,6 +743,45 @@ mod tests {
         assert!(rendered.contains("doing:1"));
         assert!(rendered.contains("completed · 2 checks · run-123"));
         assert!(rendered.contains("/overview refresh"));
+    }
+
+    #[test]
+    fn composer_window_keeps_a_long_line_on_one_row() {
+        let long = "x".repeat(300);
+        let (visible, column) = composer_window(&long, long.len(), 40);
+        // One row, never more; the cursor rests just past the last character.
+        assert!(visible.chars().count() <= 40);
+        assert!(visible.starts_with('…'));
+        assert_eq!(column, visible.chars().count());
+    }
+
+    #[test]
+    fn composer_window_shows_short_lines_whole() {
+        let (visible, column) = composer_window("deploy", 3, 40);
+        assert_eq!(visible, "deploy");
+        assert_eq!(column, 3);
+    }
+
+    #[test]
+    fn composer_window_marks_text_hidden_to_the_right() {
+        let line = "abcdefghij";
+        let (visible, column) = composer_window(line, 0, 5);
+        assert_eq!(visible, "abcd…");
+        assert_eq!(column, 0);
+    }
+
+    #[test]
+    fn composer_window_flattens_newlines_from_history() {
+        let (visible, _) = composer_window("one\ntwo", 7, 40);
+        assert_eq!(visible, "one⏎two");
+    }
+
+    #[test]
+    fn composer_window_counts_columns_not_bytes() {
+        let line = "héllo wörld";
+        let (visible, column) = composer_window(line, line.len(), 40);
+        assert_eq!(visible, line);
+        assert_eq!(column, 11);
     }
 
     #[test]
