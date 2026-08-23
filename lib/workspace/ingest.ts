@@ -594,6 +594,13 @@ export function seedFromString(text: string): NodeSeed {
   return seedFor('text', { content: text.slice(0, 100_000), name: 'text' });
 }
 
+export function directPasteSeeds(seeds: NodeSeed[]): NodeSeed[] {
+  return seeds.map((seed) => ({
+    ...seed,
+    payload: { ...seed.payload, canvasPresentation: 'direct-paste' }
+  }));
+}
+
 export async function seedsFromDataTransfer(dt: DataTransfer): Promise<NodeSeed[]> {
   const files = [...dt.files];
   if (files.length) return seedsFromFiles(files);
