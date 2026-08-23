@@ -14,7 +14,7 @@ import {
   type InformationCaptureResult,
   type InformationSearchResult
 } from '@/lib/client/hii-bridge';
-import { makeNode, nodeSeedFromResourceProjection, seedFor, seedFromFile, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
+import { directPasteSeeds, makeNode, nodeSeedFromResourceProjection, seedFor, seedFromFile, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
 import { HII_PROJECTION_MIME, type ProjectionIntent, type ResourceProjectionSeed } from '@/lib/ecosystem/contracts';
 import {
   canvasMode,
@@ -1247,10 +1247,10 @@ export function HiiRoot({
       const at = camera.toWorld(mouse.current.x, mouse.current.y);
       if (/^https?:\/\/\S+$/i.test(value.trim())) {
         void captureInformation(value.trim())
-          .then((result) => spawnInformation(capturedInformationSeeds(result), { x: at.x, y: at.y - 190 }))
-          .catch(() => spawnSeeds([seedFromString(value)], at));
+          .then((result) => spawnInformation(directPasteSeeds(capturedInformationSeeds(result)), { x: at.x, y: at.y - 190 }))
+          .catch(() => spawnSeeds(directPasteSeeds([seedFromString(value)]), at));
       } else {
-        spawnSeeds([seedFromString(value)], at);
+        spawnSeeds(directPasteSeeds([seedFromString(value)]), at);
       }
     };
     addEventListener('keydown', keydown);
@@ -1337,7 +1337,7 @@ export function HiiRoot({
             onWindowAction={(action) => appWindowAction(node, action)}
             onErase={() => { workspace.removeNode(node.id); setSelected((ids) => ids.filter((id) => id !== node.id)); }}
             touchControls={isSpace}
-            chromeless={node.type === 'canvas-text' || node.type === 'ink' || node.type === 'image'}
+            chromeless={node.payload.canvasPresentation === 'direct-paste' || node.type === 'canvas-text' || node.type === 'ink' || node.type === 'image'}
           >
             <NodeBody
               node={node}
