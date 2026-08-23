@@ -580,6 +580,8 @@ fn link_open_handoff(kind: String, recipient: String, body: String) -> Result<()
 
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(AgentProcesses::default())
         .invoke_handler(tauri::generate_handler![
             workspace_read,

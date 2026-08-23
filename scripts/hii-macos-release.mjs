@@ -1,17 +1,14 @@
 #!/usr/bin/env node
+/**
+ * Produce one distributable macOS release: a notarized DMG plus the signed updater
+ * artifact and the `latest.json` manifest the app polls.
+ *
+ * Distribution trust has two independent signatures and both are required:
+ *   - Apple Developer ID + notarization, so Gatekeeper opens the download.
+ *   - A minisign key, so the updater refuses any bundle it cannot verify.
+ */
 import { createHash } from 'node:crypto';
-import {
-  copyFileSync,
-  cpSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -26,15 +23,20 @@ const config = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.conf.
 const packageConfig = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
 const packageLock = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
 const version = config.version;
-const arch = process.arch === 'arm64' ? 'arm64' : process.arch;
-const app = path.join(root, 'src-tauri', 'target', 'release', 'bundle', 'macos', 'HII.app');
-const bootstrap = path.join(root, 'scripts', 'hii-bootstrap.sh');
-const installGuide = path.join(root, 'docs', 'INSTALL.md');
+const arch = process.arch === 'arm64' ? 'aarch64' : process.arch;
+const bundleDir = path.join(root, 'src-tauri', 'target', 'release', 'bundle');
+const app = path.join(bundleDir, 'macos', 'HII.app');
+const dmg = path.join(bundleDir, 'dmg', `HII_${version}_${arch}.dmg`);
+const updaterArchive = path.join(bundleDir, 'macos', 'HII.app.tar.gz');
+const updaterSignature = `${updaterArchive}.sig`;
 const outputDir = path.join(root, 'dist', 'releases');
-const releaseName = `HII-${version}-macos-${arch}`;
-const archive = path.join(outputDir, `${releaseName}.zip`);
+const releaseDmg = path.join(outputDir, `HII-${version}-macos-${arch}.dmg`);
+const releaseUpdater = path.join(outputDir, `HII-${version}-macos-${arch}.app.tar.gz`);
+
 const identity = process.env.HII_SIGNING_IDENTITY?.trim();
 const notaryProfile = process.env.HII_NOTARY_PROFILE?.trim();
+const updaterKeyPath = process.env.TAURI_SIGNING_PRIVATE_KEY_PATH?.trim()
+  || path.join(process.env.HOME ?? '', '.hii', 'keys', 'hii-updater.key');
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { cwd: root, stdio: 'inherit', ...options });
@@ -50,13 +52,14 @@ function capture(command, args) {
   return result.stdout.trim();
 }
 
+/** A release must name one exact commit, so a receipt can be traced back to its source. */
 function requireSourceIdentity(expectedCommit) {
   const currentCommit = capture('git', ['rev-parse', '--verify', 'HEAD']);
   const gitStatus = capture('git', ['status', '--porcelain', '--untracked-files=all']);
   if (currentCommit !== expectedCommit || gitStatus) {
     console.error([
       'hii:release:mac requires one unchanged clean Git commit.',
-      'Commit or explicitly remove every tracked and untracked change before producing a signed release.'
+      'Commit or explicitly remove every tracked and untracked change before producing a release.'
     ].join('\n'));
     process.exit(2);
   }
@@ -75,10 +78,23 @@ if (
 
 if (!identity || !notaryProfile) {
   console.error([
-    'hii:release:mac is intentionally closed until distribution trust is configured.',
+    'hii:release:mac is closed until Apple distribution trust is configured.',
+    '',
     'Set HII_SIGNING_IDENTITY to an Apple Developer ID Application identity.',
     'Set HII_NOTARY_PROFILE to an xcrun notarytool keychain profile.',
-    'The script will not create a public archive from an ad-hoc signed app.'
+    '',
+    'Without both, macOS Gatekeeper refuses a downloaded build and the only',
+    'workaround asks every user to weaken their own security. Run',
+    '`npm run build:tauri:dmg` for an unsigned local build instead.'
+  ].join('\n'));
+  process.exit(2);
+}
+
+if (!existsSync(updaterKeyPath)) {
+  console.error([
+    `hii:release:mac could not read the updater signing key at ${updaterKeyPath}.`,
+    'Generate one with: npx tauri signer generate -w ~/.hii/keys/hii-updater.key',
+    'Its public half must match plugins.updater.pubkey in src-tauri/tauri.conf.json.'
   ].join('\n'));
   process.exit(2);
 }
@@ -87,70 +103,80 @@ const gitCommit = capture('git', ['rev-parse', '--verify', 'HEAD']);
 requireSourceIdentity(gitCommit);
 
 run('security', ['find-identity', '-v', '-p', 'codesigning']);
-run('npm', ['run', 'build:tauri']);
+
+// Tauri signs the app with the Apple identity and the updater archive with minisign.
+run('npm', ['run', 'build:tauri:release'], {
+  env: {
+    ...process.env,
+    APPLE_SIGNING_IDENTITY: identity,
+    TAURI_SIGNING_PRIVATE_KEY: updaterKeyPath,
+    TAURI_SIGNING_PRIVATE_KEY_PASSWORD: process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ?? ''
+  }
+});
 requireSourceIdentity(gitCommit);
 
-if (!existsSync(app) || !existsSync(bootstrap) || !existsSync(installGuide)) {
-  console.error('hii:release:mac could not find the app, bootstrap, or install guide.');
-  process.exit(1);
+for (const required of [app, dmg, updaterArchive, updaterSignature]) {
+  if (!existsSync(required)) {
+    console.error(`hii:release:mac expected ${path.relative(root, required)} and it is missing.`);
+    process.exit(1);
+  }
 }
 
-run('codesign', [
-  '--force',
-  '--deep',
-  '--options',
-  'runtime',
-  '--timestamp',
-  '--sign',
-  identity,
-  app
-]);
 run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app]);
 
-const temporary = mkdtempSync(path.join(tmpdir(), 'hii-release-'));
-try {
-  const submission = path.join(temporary, `${releaseName}-notary.zip`);
-  run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', app, submission]);
-  run('xcrun', [
-    'notarytool',
-    'submit',
-    submission,
-    '--keychain-profile',
-    notaryProfile,
-    '--wait'
-  ]);
-  run('xcrun', ['stapler', 'staple', app]);
-  run('xcrun', ['stapler', 'validate', app]);
-  run('spctl', ['-a', '-vv', '--type', 'execute', app]);
+// Notarize the DMG. Stapling the disk image covers the app inside it.
+run('xcrun', ['notarytool', 'submit', dmg, '--keychain-profile', notaryProfile, '--wait']);
+run('xcrun', ['stapler', 'staple', dmg]);
+run('xcrun', ['stapler', 'validate', dmg]);
+run('spctl', ['-a', '-vv', '--type', 'install', dmg]);
 
-  const releaseFolder = path.join(temporary, releaseName);
-  mkdirSync(releaseFolder);
-  cpSync(app, path.join(releaseFolder, 'HII.app'), { recursive: true });
-  copyFileSync(bootstrap, path.join(releaseFolder, 'hii-bootstrap.sh'));
-  copyFileSync(installGuide, path.join(releaseFolder, 'INSTALL.md'));
+mkdirSync(outputDir, { recursive: true });
+copyFileSync(dmg, releaseDmg);
+copyFileSync(updaterArchive, releaseUpdater);
+copyFileSync(updaterSignature, `${releaseUpdater}.sig`);
 
-  mkdirSync(outputDir, { recursive: true });
-  run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', releaseFolder, archive]);
+const dmgBytes = statSync(releaseDmg).size;
+const dmgSha256 = createHash('sha256').update(readFileSync(releaseDmg)).digest('hex');
+const signature = readFileSync(updaterSignature, 'utf8').trim();
+const downloadBase = `https://github.com/umminuriddingreen/hii/releases/download/v${version}`;
+const publishedAt = new Date().toISOString();
 
-  const bytes = statSync(archive).size;
-  const sha256 = createHash('sha256').update(readFileSync(archive)).digest('hex');
-  const manifest = {
+// The shape the Tauri updater expects at plugins.updater.endpoints.
+writeFileSync(
+  path.join(outputDir, 'latest.json'),
+  `${JSON.stringify({
+    version,
+    notes: `HII ${version}`,
+    pub_date: publishedAt,
+    platforms: {
+      'darwin-aarch64': { signature, url: `${downloadBase}/${path.basename(releaseUpdater)}` },
+      'darwin-x86_64': { signature, url: `${downloadBase}/${path.basename(releaseUpdater)}` }
+    }
+  }, null, 2)}\n`
+);
+
+// A human-readable receipt for the download page and the release notes.
+writeFileSync(
+  path.join(outputDir, 'release.json'),
+  `${JSON.stringify({
     version,
     platform: 'macos',
     architecture: arch,
     minimumSystemVersion: config.bundle.macOS.minimumSystemVersion,
-    filename: path.basename(archive),
-    bytes,
-    sha256,
+    download: path.basename(releaseDmg),
+    bytes: dmgBytes,
+    sha256: dmgSha256,
     gitCommit,
     gitTree: 'clean',
     signed: true,
     notarized: true,
-    createdAt: new Date().toISOString()
-  };
-  writeFileSync(path.join(outputDir, 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-  console.log(`hii release ready: ${path.relative(root, archive)}`);
-  console.log(`sha256: ${sha256}`);
-} finally {
-  rmSync(temporary, { recursive: true, force: true });
-}
+    updaterSigned: true,
+    createdAt: publishedAt
+  }, null, 2)}\n`
+);
+
+console.log(`hii release ready: ${path.relative(root, releaseDmg)}`);
+console.log(`sha256: ${dmgSha256}`);
+console.log('');
+console.log('Publish with:');
+console.log(`  gh release create v${version} dist/releases/* --title "HII ${version}" --notes "HII ${version}"`);

@@ -615,3 +615,40 @@ export async function seedsFromDataTransfer(dt: DataTransfer): Promise<NodeSeed[
   if (text) return [seedFromString(text)];
   return [];
 }
+
+const CANVAS_TEXT_MIN = defaultSize['canvas-text'];
+const CANVAS_TEXT_CHARS_PER_LINE = 34;
+const CANVAS_TEXT_LINE_HEIGHT = 26;
+
+/** Size a canvas-text node so the written text is visible without a manual resize. */
+export function canvasTextSize(value: string) {
+  const lines = value.split('\n').reduce(
+    (total, line) => total + Math.max(1, Math.ceil(line.length / CANVAS_TEXT_CHARS_PER_LINE)),
+    0
+  );
+  return {
+    w: CANVAS_TEXT_MIN.w,
+    h: Math.min(720, Math.max(CANVAS_TEXT_MIN.h, lines * CANVAS_TEXT_LINE_HEIGHT + 36))
+  };
+}
+
+/** The plain text object created by typing or double-clicking directly on the canvas. */
+export function canvasTextSeed(value = ''): NodeSeed {
+  return {
+    ...seedFor('canvas-text', { text: value, name: 'Text' }),
+    ...canvasTextSize(value)
+  };
+}
+
+/**
+ * Files carried by a clipboard payload. Chrome and Firefox populate `files`;
+ * Safari exposes a pasted image only through `items`, so read both.
+ */
+export function clipboardFiles(transfer: DataTransfer): File[] {
+  const direct = [...transfer.files];
+  if (direct.length) return direct;
+  return [...(transfer.items || [])]
+    .filter((item) => item.kind === 'file')
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => Boolean(file));
+}
