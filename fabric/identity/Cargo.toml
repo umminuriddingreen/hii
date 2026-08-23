@@ -1,0 +1,40 @@
+[package]
+name = "hii-fabric-identity"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Single-owner passkey and trusted-device authority foundation for HII Fabric"
+license = "UNLICENSED"
+publish = false
+
+[dependencies]
+argon2 = { version = "0.5.3", features = ["std"] }
+axum = "0.8"
+base64 = "0.22"
+cookie = "0.18"
+fs2 = "0.4"
+hex = "0.4"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tower = { version = "0.5", features = ["limit", "util"] }
+url = { version = "2", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+webauthn-rs = "=0.5.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "deny"
+pedantic = "allow"
+
+# Keep identity independently testable until its storage and CLI adapters are
+# deliberately integrated into the root workspace.
+[workspace]

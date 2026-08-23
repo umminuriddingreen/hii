@@ -75,6 +75,8 @@ export interface MutationRequest {
 export interface MutationResult {
   operationId: string;
   operationHash: string;
+  /** Server-issued total-order cursor for this Space. Clients never supply it. */
+  lamport: number;
   applied: boolean;
   /** False when an idempotency key replayed an operation already recorded. */
   replayed: boolean;
@@ -256,7 +258,7 @@ export function applyGraphMutation(request: MutationRequest): MutationResult {
       const previous = db
         .prepare('SELECT * FROM operational_operations WHERE space_id = ? AND idempotency_key = ?')
         .get(spaceId, idempotencyKey) as unknown as
-        | { id: string; operation_hash: string | null; target_id: string | null; base_version: number | null; result_version: number | null }
+        | { id: string; operation_hash: string | null; target_id: string | null; base_version: number | null; result_version: number | null; lamport: number }
         | undefined;
       if (previous) {
         if (previous.operation_hash !== hash) {
@@ -272,6 +274,7 @@ export function applyGraphMutation(request: MutationRequest): MutationResult {
         return {
           operationId: previous.id,
           operationHash: hash,
+          lamport: previous.lamport,
           applied: false,
           replayed: true,
           targetId: previous.target_id,
@@ -312,6 +315,7 @@ export function applyGraphMutation(request: MutationRequest): MutationResult {
     return {
       operationId,
       operationHash: hash,
+      lamport,
       applied: true,
       replayed: false,
       targetId: outcome.targetId,

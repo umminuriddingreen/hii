@@ -1,0 +1,3 @@
+Invoice 203
+Status: paid
+Amount: $860

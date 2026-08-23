@@ -1,0 +1,4 @@
+Invoice 204
+Status: unpaid
+Amount: $1,240
+Due: September 12, 2026

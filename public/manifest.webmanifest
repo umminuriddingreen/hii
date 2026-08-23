@@ -1,0 +1,21 @@
+{
+  "name": "HII — Human Information Interface",
+  "short_name": "HII",
+  "description": "Your machines, agents, Spaces, work, and proof in one private surface.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#eef1ed",
+  "theme_color": "#101213",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/hii-ecosystem-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

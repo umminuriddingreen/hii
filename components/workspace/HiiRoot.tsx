@@ -14,7 +14,8 @@ import {
   type InformationCaptureResult,
   type InformationSearchResult
 } from '@/lib/client/hii-bridge';
-import { makeNode, seedFor, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
+import { makeNode, nodeSeedFromResourceProjection, seedFor, seedFromFile, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
+import { HII_PROJECTION_MIME, type ProjectionIntent, type ResourceProjectionSeed } from '@/lib/ecosystem/contracts';
 import {
   canvasMode,
   canvasModes,
@@ -56,9 +57,19 @@ import { RegisteredApplication } from './RegisteredApplication';
 import { WaymarkApp } from './WaymarkApp';
 import { packagePlacementSeed, WAYMARK_PACKAGE, type HiiMarketplacePackage } from '@/lib/marketplace/catalog';
 import { useCamera } from './useCamera';
-import { useWorkspace } from './useWorkspace';
+import { useWorkspace, type WorkspacePersistence } from './useWorkspace';
+import { SpaceToolbar } from '@/components/spaces/SpaceToolbar';
+import { InkBody } from '@/components/spaces/InkBody';
+import { inkSeedFromPoints } from '@/components/spaces/ink-capture';
+import { isSpaceCanvasNode } from '@/components/spaces/space-surface';
+import { trackPointerGesture } from '@/lib/workspace/gestures';
 
 type Point = { x: number; y: number };
+export type WorkspaceProjectionRequest = {
+  id: string;
+  projection: ResourceProjectionSeed;
+  intent: ProjectionIntent;
+};
 type PromptState = {
   anchor: Point;
   initialValue: string;
@@ -332,6 +343,8 @@ function NodeBody({
   if (node.type === 'app' && payload.surface === 'hii-link') return <HiiLinkApp />;
   if (node.type === 'app') return <RegisteredApplication name={name} summary={content || 'Registered HII application'} entryUrl={text(payload.entryUrl) || undefined} />;
   if (node.type === 'html') return <iframe className="hii-html" srcDoc={text(payload.srcdoc)} title={name} sandbox="allow-forms allow-scripts" />;
+  if (node.type === 'ink') return <InkBody node={node} />;
+  if (node.type === 'image' && payload.sticker === true) return <div className="hii-sticker" role="img" aria-label={name}>{text(payload.emoji) || '✦'}</div>;
   if (node.type === 'image' && url) return <img className="hii-node-image" src={url} alt={name} draggable={false} />;
   if (node.type === 'media' && url) {
     return payload.kind === 'audio'
@@ -463,10 +476,23 @@ function Prompt({
   );
 }
 
-export function HiiRoot() {
+export function HiiRoot({
+  surface = 'workspace',
+  spaceId = '',
+  creatorId = 'guest:pending',
+  persistence,
+  projectionRequest = null
+}: {
+  surface?: 'workspace' | 'space';
+  spaceId?: string;
+  creatorId?: string;
+  persistence?: WorkspacePersistence;
+  projectionRequest?: WorkspaceProjectionRequest | null;
+} = {}) {
+  const isSpace = surface === 'space';
   const save = useRef<() => void>(() => {});
   const camera = useCamera(() => save.current());
-  const workspace = useWorkspace(camera.getViewport);
+  const workspace = useWorkspace(camera.getViewport, undefined, persistence);
   const [selected, setSelected] = useState<string[]>([]);
   const [mode, setMode] = useState<CanvasModeId>(() => {
     if (typeof window === 'undefined') return defaultCanvasMode;
@@ -475,6 +501,7 @@ export function HiiRoot() {
   });
   const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [promptVisible, setPromptVisible] = useState(false);
+  const [drawing, setDrawing] = useState(false);
   const [devFixtureState, setDevFixtureState] = useState<'normal' | 'minimized' | 'maximized'>('normal');
   const mouse = useRef<Point>({ x: 400, y: 280 });
   const activeRun = useRef<string | null>(null);
@@ -491,6 +518,7 @@ export function HiiRoot() {
   const fileInput = useRef<HTMLInputElement | null>(null);
   const applicationCatalog = useRef(new Map<string, HiiApplicationManifest>());
   const applicationPollActive = useRef(false);
+  const handledProjectionRequest = useRef<string | null>(null);
   workspaceRef.current = workspace;
   save.current = workspace.scheduleSave;
   const devFixtureNode = useMemo(() => {
@@ -514,15 +542,31 @@ export function HiiRoot() {
     const ids: string[] = [];
     seeds.forEach((seed, index) => {
       const node = makeNode(seed, at.x + index * 24, at.y + index * 24, workspace.takeZ());
+      if (isSpace) {
+        node.spaceId = spaceId;
+        node.creatorId = creatorId;
+        node.permissions = { inheritance: 'space-policy' };
+      }
       ids.push(node.id);
       workspace.addNode(node);
     });
     setSelected(ids);
     return ids;
-  }, [workspace]);
+  }, [creatorId, isSpace, spaceId, workspace]);
 
   useEffect(() => {
-    if (!workspace.ready) return;
+    if (!workspace.ready || !projectionRequest || handledProjectionRequest.current === projectionRequest.id) return;
+    handledProjectionRequest.current = projectionRequest.id;
+    const seed = nodeSeedFromResourceProjection(projectionRequest.projection);
+    const intent = projectionRequest.intent;
+    const anchor = typeof intent.clientX === 'number' && typeof intent.clientY === 'number'
+      ? camera.toWorld(intent.clientX, intent.clientY)
+      : camera.centerWorld();
+    spawnSeeds([seed], { x: anchor.x - seed.w / 2, y: anchor.y - seed.h / 2 });
+  }, [camera, projectionRequest, spawnSeeds, workspace.ready]);
+
+  useEffect(() => {
+    if (isSpace || !workspace.ready) return;
     let cancelled = false;
     const poll = async () => {
       if (cancelled || applicationPollActive.current) return;
@@ -570,7 +614,12 @@ export function HiiRoot() {
     void poll();
     const timer = window.setInterval(() => void poll(), 1500);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [camera, spawnSeeds, workspace.ready]);
+  }, [camera, isSpace, spawnSeeds, workspace.ready]);
+
+  const visibleNodes = useMemo(
+    () => isSpace ? workspace.nodes.filter((node) => isSpaceCanvasNode(node, spaceId)) : workspace.nodes,
+    [isSpace, spaceId, workspace.nodes]
+  );
 
   const spawnInformation = useCallback((seeds: NodeSeed[], at: Point) => {
     const ids = seeds.map((seed, index) => {
@@ -988,6 +1037,7 @@ export function HiiRoot() {
   }, [camera, mode, openDevBrowser, openMarketplace, openMusicPanel, selected, selectedNodes, spawnInformation, spawnSeeds]);
 
   useEffect(() => {
+    if (isSpace) return;
     let unlisten = () => {};
     let disposed = false;
     listenAgentEvents((event: AgentEventV1) => {
@@ -1113,12 +1163,20 @@ export function HiiRoot() {
       disposed = true;
       unlisten();
     };
-  }, []);
+  }, [isSpace]);
 
   useEffect(() => {
     const inField = (target: EventTarget | null) => (target as Element | null)?.closest?.('input,textarea,[contenteditable]');
     const keydown = (event: KeyboardEvent) => {
       if (inField(event.target)) return;
+      if (isSpace) {
+        if ((event.key === 'Delete' || event.key === 'Backspace') && selected.length) {
+          event.preventDefault();
+          selected.forEach(workspace.removeNode);
+          setSelected([]);
+        }
+        return;
+      }
       if (event.key === 'Tab' && event.shiftKey) {
         event.preventDefault();
         setMode((current) => nextCanvasMode(current));
@@ -1200,36 +1258,65 @@ export function HiiRoot() {
     addEventListener('pointermove', pointermove);
     addEventListener('paste', paste);
     return () => { removeEventListener('keydown', keydown); removeEventListener('pointermove', pointermove); removeEventListener('paste', paste); };
-  }, [camera, mode, openDevBrowser, selected, spawnArtifactTerminals, spawnInformation, spawnSeeds, workspace]);
+  }, [camera, isSpace, mode, openDevBrowser, selected, spawnArtifactTerminals, spawnInformation, spawnSeeds, workspace]);
 
   return (
     <main
       ref={camera.viewportRef}
       className="hii-canvas"
+      data-surface={surface}
       tabIndex={-1}
       aria-label="HII canvas"
       onPointerDown={(event) => {
         if ((event.target as Element).closest('[data-node-id],input,textarea,audio,video,a')) return;
         setSelected([]);
         setPromptVisible(false);
+        if (isSpace && drawing) {
+          event.preventDefault();
+          const start = camera.toWorld(event.clientX, event.clientY);
+          const points = [start.x, start.y];
+          trackPointerGesture(event.nativeEvent, {
+            onMove: (_delta, current) => {
+              const point = camera.toWorld(current.clientX, current.clientY);
+              points.push(point.x, point.y);
+            },
+            onEnd: () => {
+              const captured = inkSeedFromPoints(points);
+              if (captured) spawnSeeds([captured.seed], captured.at);
+            }
+          });
+          return;
+        }
+        if (camera.touchStart(event)) return;
         camera.panStart(event);
       }}
-      onDragOver={(event) => event.preventDefault()}
+      onDragOver={(event) => {
+        event.preventDefault();
+        if (Array.from(event.dataTransfer.types).includes(HII_PROJECTION_MIME)) event.dataTransfer.dropEffect = 'copy';
+      }}
       onDrop={(event) => {
         event.preventDefault();
+        if (Array.from(event.dataTransfer.types).includes(HII_PROJECTION_MIME)) return;
         const at = camera.toWorld(event.clientX, event.clientY);
         seedsFromDataTransfer(event.dataTransfer).then((seeds) => spawnSeeds(seeds, at));
       }}
     >
-      {workspace.nodes.some((node) => node.type === 'app') && <div className="hii-app-dock" onPointerDown={(event) => event.stopPropagation()}>
+      {isSpace && <SpaceToolbar
+        drawing={drawing}
+        onAddImage={() => fileInput.current?.click()}
+        onAddText={() => spawnSeeds([seedFor('canvas-text', { text: 'Tap to write', name: 'Text' })], camera.centerWorld())}
+        onAddSticker={() => spawnSeeds([{ ...seedFor('image', { sticker: true, emoji: '✦', name: 'Sticker' }), w: 120, h: 120 }], camera.centerWorld())}
+        onToggleDrawing={() => setDrawing((value) => !value)}
+      />}
+      {!isSpace && workspace.nodes.some((node) => node.type === 'app') && <div className="hii-app-dock" onPointerDown={(event) => event.stopPropagation()}>
         <button onClick={tileApps}>Tile apps</button>
         {workspace.nodes.filter((node) => node.type === 'app').map((node) => <button key={node.id} data-active={selected.includes(node.id) || undefined} onClick={() => {
           if (node.payload.windowState === 'minimized') workspace.patchNode(node.id, { payload: { ...node.payload, windowState: 'normal' } });
           setSelected([node.id]); workspace.bringToFront(node.id);
         }}>{titleFor(node)}</button>)}
       </div>}
-      <HiiNotificationInbox />
-      {process.env.NEXT_PUBLIC_HII_DEV_BOARD === 'waymark' && (
+      {!isSpace && <HiiNotificationInbox />}
+      {!isSpace && process.env.NEXT_PUBLIC_HII_DEV_BOARD === 'waymark' && (
         <section className="hii-dev-board-direct" data-window-state={devFixtureState} style={{ width: devFixtureNode.w, height: devFixtureNode.h }}>
           <div className="hii-app-window-controls" aria-label="Waymark window controls">
             <button aria-label="Minimize Waymark" onClick={() => setDevFixtureState('minimized')}>−</button>
@@ -1239,7 +1326,7 @@ export function HiiRoot() {
         </section>
       )}
       <div ref={camera.worldRef} className="hii-world">
-        {workspace.nodes.filter((node) => node.type !== 'intent').map((node) => (
+        {visibleNodes.filter((node) => node.type !== 'intent').map((node) => (
           <NodeFrame
             key={node.id}
             node={node}
@@ -1247,9 +1334,11 @@ export function HiiRoot() {
             title={titleFor(node)}
             getZoom={() => camera.cam.current.z}
             onSelect={() => { setSelected([node.id]); workspace.bringToFront(node.id); }}
-            onOpenConversation={() => openObjectConversation(node)}
+            onOpenConversation={() => { if (!isSpace) openObjectConversation(node); }}
             onCommit={(patch) => workspace.patchNode(node.id, patch)}
             onWindowAction={(action) => appWindowAction(node, action)}
+            onErase={() => { workspace.removeNode(node.id); setSelected((ids) => ids.filter((id) => id !== node.id)); }}
+            touchControls={isSpace}
             chromeless={node.type === 'canvas-text' || node.type === 'ink' || node.type === 'image'}
           >
             <NodeBody
@@ -1264,7 +1353,7 @@ export function HiiRoot() {
           </NodeFrame>
         ))}
       </div>
-      {promptVisible && prompt && (
+      {!isSpace && promptVisible && prompt && (
         <Prompt
           key={`${prompt.anchor.x}:${prompt.anchor.y}:${prompt.initialValue}`}
           anchor={prompt.anchor}
@@ -1285,13 +1374,19 @@ export function HiiRoot() {
         ref={fileInput}
         className="hii-file-input"
         type="file"
-        multiple
-        aria-label="Upload files to HII"
+        multiple={!isSpace}
+        accept={isSpace ? 'image/*' : undefined}
+        capture={isSpace ? 'environment' : undefined}
+        aria-label={isSpace ? 'Take or choose a Space photo' : 'Upload files to HII'}
         onChange={(event) => {
           const files = [...(event.currentTarget.files || [])];
           event.currentTarget.value = '';
           if (!files.length) return;
-          void seedsFromFiles(files).then((seeds) => spawnSeeds(seeds, camera.toWorld(mouse.current.x, mouse.current.y)));
+          if (isSpace) {
+            void Promise.all(files.map((file) => seedFromFile(file, { spaceId }))).then((seeds) => spawnSeeds(seeds, camera.centerWorld()));
+          } else {
+            void seedsFromFiles(files).then((seeds) => spawnSeeds(seeds, camera.toWorld(mouse.current.x, mouse.current.y)));
+          }
         }}
       />
     </main>

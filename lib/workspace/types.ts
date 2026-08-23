@@ -29,6 +29,9 @@ export type WorkspaceNodeType =
 export type SpatialObjectKind =
   | 'agent'
   | 'actor'
+  | 'device'
+  | 'service'
+  | 'space'
   | 'intent'
   | 'idea'
   | 'constraint'
@@ -38,7 +41,9 @@ export type SpatialObjectKind =
   | 'alternative'
   | 'task'
   | 'run'
+  | 'job'
   | 'model'
+  | 'file'
   | 'source'
   | 'asset'
   | 'artifact'
@@ -118,16 +123,40 @@ export const workspaceNodeTypes: WorkspaceNodeType[] = [
   'sound-field'
 ];
 
+/**
+ * Spaces reuses WorkspaceNode rather than introducing a parallel object model.
+ * Stickers are images whose payload carries `sticker: true`.
+ */
+export const spaceObjectNodeTypes = {
+  Image: 'image',
+  Text: 'canvas-text',
+  Sticker: 'image',
+  Drawing: 'ink'
+} as const satisfies Record<'Image' | 'Text' | 'Sticker' | 'Drawing', WorkspaceNodeType>;
+
+/** Object authority remains canonical at the Space policy layer for the MVP. */
+export type WorkspaceNodePermissions = {
+  inheritance: 'space-policy';
+};
+
 export type WorkspaceNode = {
   id: string;
   type: WorkspaceNodeType;
+  /** Stable Space identity, independent of its current host or address. */
+  spaceId?: string;
+  /** Object attribution such as `user:<id>` or `guest:<id>`. */
+  creatorId?: string;
   x: number;
   y: number;
   w: number;
   h: number;
   z: number;
+  /** Clockwise degrees. Legacy nodes normalize to zero. */
+  rotation?: number;
   createdAt: string;
   updatedAt: string;
+  /** Declares policy inheritance; it does not grant per-object authority. */
+  permissions?: WorkspaceNodePermissions;
   object?: SpatialObjectMetadata;
   objectRef?: {
     authority: 'hii-knowledge' | 'knowledge-vault' | 'hii-runtime';
@@ -138,6 +167,12 @@ export type WorkspaceNode = {
   frameId?: string;
   payload: Record<string, unknown>;
 };
+
+/** Canonical CSS transform used for both rendering and in-progress dragging. */
+export function workspaceNodeTransform(node: Pick<WorkspaceNode, 'x' | 'y' | 'rotation'>) {
+  const rotation = typeof node.rotation === 'number' && Number.isFinite(node.rotation) ? node.rotation : 0;
+  return `translate(${node.x}px, ${node.y}px) rotate(${rotation}deg)`;
+}
 
 export type WorkspaceViewport = { x: number; y: number; zoom: number };
 
@@ -209,6 +244,9 @@ export function normalizeSpatialObject(raw: unknown): SpatialObjectMetadata | un
   const kinds: SpatialObjectKind[] = [
     'agent',
     'actor',
+    'device',
+    'service',
+    'space',
     'intent',
     'idea',
     'constraint',
@@ -218,7 +256,9 @@ export function normalizeSpatialObject(raw: unknown): SpatialObjectMetadata | un
     'alternative',
     'task',
     'run',
+    'job',
     'model',
+    'file',
     'source',
     'asset',
     'artifact',
@@ -303,16 +343,24 @@ export function normalizeNode(raw: unknown): WorkspaceNode | null {
         kind: sanitizeText(objectRef.kind, 80)
       }
     : undefined;
+  const permissions = node.permissions && typeof node.permissions === 'object'
+    && (node.permissions as Record<string, unknown>).inheritance === 'space-policy'
+    ? { inheritance: 'space-policy' as const }
+    : undefined;
   return {
     id: node.id.slice(0, 64),
     type: node.type as WorkspaceNodeType,
+    spaceId: sanitizeText(node.spaceId, 160),
+    creatorId: sanitizeText(node.creatorId, 160),
     x: node.x as number,
     y: node.y as number,
     w: Math.max(40, node.w as number),
     h: Math.max(28, node.h as number),
     z: isFiniteNumber(node.z) ? node.z : 1,
+    rotation: isFiniteNumber(node.rotation) ? node.rotation : 0,
     createdAt: typeof node.createdAt === 'string' ? node.createdAt : now,
     updatedAt: typeof node.updatedAt === 'string' ? node.updatedAt : now,
+    permissions,
     object: normalizeSpatialObject(node.object),
     objectRef: normalizedRef,
     frameId: sanitizeText(node.frameId, 64),
