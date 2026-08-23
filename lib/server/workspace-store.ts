@@ -126,14 +126,14 @@ async function parseWorkspace(file: string) {
   }
 }
 
-async function persistWorkspace(workspaceId: string, doc: WorkspaceDoc) {
+async function persistWorkspace(workspaceId: string, doc: WorkspaceDoc, projectIntoGraph = true) {
   const { workspaces } = paths();
   await mkdir(workspaces, { recursive: true });
   // Written compactly on purpose. This file is rewritten on every autosave and
   // pretty-printing a board with image contact sheets in it roughly doubled the
   // bytes serialized, written, and fsynced on each keystroke-triggered save.
   await atomicWriteFile(workspacePath(workspaceId), `${JSON.stringify(doc)}\n`);
-  projectWorkspaceIntoOperationalGraph(workspaceId, doc);
+  if (projectIntoGraph) projectWorkspaceIntoOperationalGraph(workspaceId, doc);
 }
 
 export async function getSelectedWorkspaceId(): Promise<string> {
@@ -295,6 +295,39 @@ export async function writeWorkspace(
     doc.revision = actualRevision + 1;
     doc.updatedAt = new Date().toISOString();
     await persistWorkspace(workspaceId, doc);
+    return doc;
+  });
+}
+
+/**
+ * Persist the human-readable projection of a graph-authoritative Space.
+ *
+ * This uses the same lock, revision check, atomic rename and recovery behavior
+ * as Workspace writes, but deliberately does not project the JSON back into the
+ * graph. Doing so would create workspace-json-owned duplicates beside the
+ * canonical graph-owned Space objects.
+ */
+export async function writeGraphCanonicalWorkspace(
+  raw: unknown,
+  expectedRevision: number,
+  requestedWorkspaceId: string
+): Promise<WorkspaceDoc> {
+  if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+    throw new TypeError('expectedRevision must be a non-negative integer');
+  }
+  const workspaceId = validateWorkspaceId(requestedWorkspaceId);
+  const file = workspacePath(workspaceId);
+  await mkdir(paths().workspaces, { recursive: true });
+  return withFileLock(file, async () => {
+    const loaded = await loadWorkspace(workspaceId);
+    const actualRevision = loaded.workspace.revision;
+    if (actualRevision !== expectedRevision) {
+      throw new WorkspaceRevisionConflictError(expectedRevision, actualRevision);
+    }
+    const doc = normalizeWorkspace(raw);
+    doc.revision = actualRevision + 1;
+    doc.updatedAt = new Date().toISOString();
+    await persistWorkspace(workspaceId, doc, false);
     return doc;
   });
 }

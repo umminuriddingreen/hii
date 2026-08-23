@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef } from 'react';
-import type { WorkspaceNode } from '@/lib/workspace/types';
+import { workspaceNodeTransform, type WorkspaceNode } from '@/lib/workspace/types';
 
 type NodeFrameProps = {
   node: WorkspaceNode;
@@ -13,17 +13,18 @@ type NodeFrameProps = {
   onCommit: (patch: Partial<WorkspaceNode>) => void;
   onWindowAction?: (action: 'minimize' | 'maximize' | 'restore') => void;
   onErase?: () => void;
+  touchControls?: boolean;
   chromeless?: boolean;
   children: React.ReactNode;
 };
 
 const INTERACTIVE = 'button,input,textarea,select,iframe,video,audio,embed,a,[contenteditable]';
 
-export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConversation, onCommit, onWindowAction, chromeless, children }: NodeFrameProps) {
+export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConversation, onCommit, onWindowAction, onErase, touchControls, chromeless, children }: NodeFrameProps) {
   const frame = useRef<HTMLDivElement | null>(null);
   const windowState = node.type === 'app' && typeof node.payload.windowState === 'string' ? node.payload.windowState : 'normal';
 
-  const pointerDown = (event: React.PointerEvent) => {
+  const beginGesture = (event: React.PointerEvent, forceResize = false) => {
     if (event.button !== 0) return;
     onSelect();
     if ((event.target as Element).closest(INTERACTIVE)) {
@@ -36,7 +37,7 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConv
     const startY = event.clientY;
     const origin = { x: node.x, y: node.y, w: node.w, h: node.h };
     let next = { ...origin };
-    const resize = event.altKey;
+    const resize = forceResize || event.altKey;
     const move = (current: PointerEvent) => {
       const zoom = getZoom();
       if (resize) {
@@ -49,7 +50,7 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConv
       } else {
         next.x = origin.x + (current.clientX - startX) / zoom;
         next.y = origin.y + (current.clientY - startY) / zoom;
-        if (frame.current) frame.current.style.transform = `translate(${next.x}px, ${next.y}px)`;
+        if (frame.current) frame.current.style.transform = workspaceNodeTransform({ ...next, rotation: node.rotation });
       }
     };
     const up = () => {
@@ -60,6 +61,8 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConv
     addEventListener('pointermove', move);
     addEventListener('pointerup', up);
   };
+
+  const pointerDown = (event: React.PointerEvent) => beginGesture(event);
 
   return (
     <section
@@ -75,9 +78,13 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConv
         event.preventDefault();
         onOpenConversation();
       }}
-      style={{ transform: `translate(${node.x}px, ${node.y}px)`, width: node.w, height: node.h, zIndex: Math.round(node.z) }}
+      style={{ transform: workspaceNodeTransform(node), width: node.w, height: node.h, zIndex: Math.round(node.z) }}
     >
       <span className="hii-node-caption">{title}</span>
+      {touchControls && selected && <div className="hii-node-touch-controls" data-workspace-ui>
+        <button type="button" className="hii-node-delete" aria-label={`Delete ${title}`} onPointerDown={(event) => event.stopPropagation()} onClick={onErase}>Delete</button>
+        <button type="button" className="hii-node-resize" aria-label={`Resize ${title}`} onPointerDown={(event) => beginGesture(event, true)}>Resize</button>
+      </div>}
       {node.type === 'app' && <div className="hii-app-window-controls" aria-label={`${title} window controls`}>
         <button aria-label={`Minimize ${title}`} title="Minimize" onClick={() => onWindowAction?.('minimize')}>−</button>
         <button aria-label={windowState === 'maximized' ? `Restore ${title}` : `Maximize ${title}`} title={windowState === 'maximized' ? 'Restore' : 'Maximize'} onClick={() => onWindowAction?.(windowState === 'maximized' ? 'restore' : 'maximize')}>{windowState === 'maximized' ? '↙' : '↗'}</button>

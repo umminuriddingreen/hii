@@ -5,7 +5,8 @@ import './apps.css';
 
 export const metadata: Metadata = {
   title: 'HII',
-  description: 'A human information interface for working with agents.'
+  description: 'A human information interface for working with agents.',
+  manifest: '/manifest.webmanifest'
 };
 
 export const viewport: Viewport = {

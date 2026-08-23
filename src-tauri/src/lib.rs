@@ -8,11 +8,12 @@ use serde_json::Value;
 use std::{
     collections::HashMap,
     env, fs,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read},
     path::PathBuf,
     process::{Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{mpsc, Arc, Mutex},
     thread,
+    time::{Duration, Instant},
 };
 use tauri::{Emitter, Manager};
 
@@ -440,6 +441,86 @@ fn applications_list(app: tauri::AppHandle) -> Result<Value, String> {
     hii_json(&app, &["apps", "list", "--json"])
 }
 
+const ECOSYSTEM_CATALOG_MAX_BYTES: u64 = 256 * 1024;
+const ECOSYSTEM_CATALOG_TIMEOUT: Duration = Duration::from_secs(5);
+
+fn ecosystem_catalog_process_error() -> String {
+    "HII could not read its ecosystem catalog (catalog_process_failed)".to_string()
+}
+
+fn spawn_catalog_reader<R: Read + Send + 'static>(
+    is_stdout: bool,
+    stream: R,
+    sender: mpsc::Sender<(bool, Result<Vec<u8>, std::io::Error>)>,
+) {
+    thread::spawn(move || {
+        let mut output = Vec::new();
+        let result = stream
+            .take(ECOSYSTEM_CATALOG_MAX_BYTES + 1)
+            .read_to_end(&mut output)
+            .map(|_| output);
+        let _ = sender.send((is_stdout, result));
+    });
+}
+
+#[tauri::command]
+fn ecosystem_catalog(app: tauri::AppHandle) -> Result<Value, String> {
+    let mut child = Command::new(hii_binary(&app)?)
+        .args(["ecosystem", "catalog", "--json"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("HII could not read its ecosystem catalog: {error}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or("HII catalog stdout was unavailable")?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or("HII catalog stderr was unavailable")?;
+    let (sender, receiver) = mpsc::channel();
+    spawn_catalog_reader(true, stdout, sender.clone());
+    spawn_catalog_reader(false, stderr, sender.clone());
+    drop(sender);
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            let mut stdout = Vec::new();
+            let mut stderr = Vec::new();
+            for _ in 0..2 {
+                let (is_stdout, result) = receiver
+                    .recv_timeout(Duration::from_secs(1))
+                    .map_err(|_| "HII catalog output was incomplete".to_string())?;
+                let value = result.map_err(|error| error.to_string())?;
+                if value.len() as u64 > ECOSYSTEM_CATALOG_MAX_BYTES {
+                    return Err("HII catalog exceeded its output limit".to_string());
+                }
+                if is_stdout {
+                    stdout = value
+                } else {
+                    stderr = value
+                }
+            }
+            if !status.success() {
+                // stderr is deliberately drained above for process safety, but
+                // never crosses the Tauri boundary: future CLI diagnostics may
+                // contain private runtime paths or secret-bearing context.
+                let _ = stderr;
+                return Err(ecosystem_catalog_process_error());
+            }
+            return serde_json::from_slice(&stdout)
+                .map_err(|_| "HII returned an invalid ecosystem catalog".to_string());
+        }
+        if started.elapsed() >= ECOSYSTEM_CATALOG_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("HII ecosystem catalog timed out".to_string());
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 #[tauri::command]
 fn application_requests(app: tauri::AppHandle) -> Result<Value, String> {
     hii_json(&app, &["apps", "requests", "--json"])
@@ -512,6 +593,7 @@ pub fn run() {
             notification_list,
             notification_read,
             applications_list,
+            ecosystem_catalog,
             application_requests,
             application_acknowledge,
             link_contact_card,
@@ -529,6 +611,16 @@ pub fn run() {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn ecosystem_catalog_process_errors_do_not_expose_child_stderr() {
+        let private_diagnostic = "/Users/owner/.hii/private token=do-not-leak";
+        let error = ecosystem_catalog_process_error();
+        assert!(error.contains("catalog_process_failed"));
+        assert!(!error.contains(private_diagnostic));
+        assert!(!error.contains("/Users/"));
+        assert!(!error.contains("token="));
+    }
 
     #[test]
     fn internal_protocol_events_are_not_user_output() {

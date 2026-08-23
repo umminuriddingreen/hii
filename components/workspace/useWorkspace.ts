@@ -18,7 +18,18 @@ export type WorkspaceApi = {
   redo: () => void;
 };
 
-export function useWorkspace(getViewport: () => WorkspaceViewport, bootstrap?: (document: WorkspaceDoc) => WorkspaceDoc): WorkspaceApi {
+export type WorkspacePersistence = {
+  read: () => Promise<WorkspaceDoc>;
+  write: (document: WorkspaceDoc) => Promise<WorkspaceDoc>;
+  /** Optional authoritative updates, used by connected Spaces only. */
+  subscribe?: (listener: (document: WorkspaceDoc) => void) => () => void;
+};
+
+export function useWorkspace(
+  getViewport: () => WorkspaceViewport,
+  bootstrap?: (document: WorkspaceDoc) => WorkspaceDoc,
+  persistence?: WorkspacePersistence
+): WorkspaceApi {
   const [document, setDocument] = useState<WorkspaceDoc>(emptyWorkspace);
   const [ready, setReady] = useState(false);
   const [initialViewport, setInitialViewport] = useState<WorkspaceViewport | null>(null);
@@ -31,13 +42,13 @@ export function useWorkspace(getViewport: () => WorkspaceViewport, bootstrap?: (
   const persist = useCallback(async () => {
     const next = { ...current.current, viewport: getViewport(), updatedAt: new Date().toISOString() };
     try {
-      const saved = await writeWorkspace(next);
+      const saved = await (persistence?.write(next) ?? writeWorkspace(next));
       current.current = saved;
       setDocument(saved);
     } catch {
       // The next mutation retries. The in-memory canvas remains usable.
     }
-  }, [getViewport]);
+  }, [getViewport, persistence]);
 
   const scheduleSave = useCallback(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -45,14 +56,20 @@ export function useWorkspace(getViewport: () => WorkspaceViewport, bootstrap?: (
   }, [persist]);
 
   useEffect(() => {
-    readWorkspace().then((source) => {
+    (persistence?.read() ?? readWorkspace()).then((source) => {
       const loaded = bootstrap ? bootstrap(source) : source;
       current.current = loaded;
       setDocument(loaded);
       setInitialViewport(loaded.viewport);
       setReady(true);
     }).catch(() => setReady(true));
-  }, [bootstrap]);
+  }, [bootstrap, persistence]);
+
+  useEffect(() => persistence?.subscribe?.((source) => {
+    const loaded = bootstrap ? bootstrap(source) : source;
+    current.current = loaded;
+    setDocument(loaded);
+  }), [bootstrap, persistence]);
 
   const mutate = useCallback((change: (nodes: WorkspaceNode[]) => WorkspaceNode[]) => {
     setDocument((before) => {

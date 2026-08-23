@@ -1,4 +1,5 @@
-import type { SpatialObjectMetadata, WorkspaceNode, WorkspaceNodeType } from './types';
+import type { SpatialObjectMetadata, SpatialObjectStatus, WorkspaceNode, WorkspaceNodeType } from './types';
+import type { ResourceProjectionSeed } from '@/lib/ecosystem/contracts';
 import { perceptualHashForImage } from './image-similarity.ts';
 
 export type NodeSeed = {
@@ -6,6 +7,7 @@ export type NodeSeed = {
   w: number;
   h: number;
   object?: SpatialObjectMetadata;
+  objectRef?: WorkspaceNode['objectRef'];
   payload: Record<string, unknown>;
 };
 
@@ -67,7 +69,32 @@ export function makeNode(seed: NodeSeed, x: number, y: number, z: number): Works
     createdAt: now,
     updatedAt: now,
     object: seed.object,
+    objectRef: seed.objectRef,
     payload: seed.payload
+  };
+}
+
+export function nodeSeedFromResourceProjection(projection: ResourceProjectionSeed): NodeSeed {
+  const supportedStatus: SpatialObjectStatus = projection.object.status === 'offline'
+    ? 'unknown'
+    : projection.object.status;
+  return {
+    type: 'surface',
+    w: projection.w,
+    h: projection.h,
+    objectRef: { ...projection.objectRef },
+    object: {
+      kind: projection.object.kind,
+      owner: projection.object.owner,
+      status: supportedStatus,
+      source: projection.object.source,
+      audit: [{
+        ts: new Date().toISOString(),
+        actor: 'human',
+        action: `placed ${projection.object.kind} reference on the HII canvas`
+      }]
+    },
+    payload: { ...projection.payload }
   };
 }
 
@@ -229,9 +256,13 @@ export type StoredWorkspaceAsset = {
   path: string;
   url: string;
   sha256?: string;
+  width?: number;
+  height?: number;
 };
 
-export async function storeWorkspaceAsset(file: File): Promise<StoredWorkspaceAsset | null> {
+export type WorkspaceAssetStoreOptions = { spaceId?: string };
+
+export async function storeWorkspaceAsset(file: File, options: WorkspaceAssetStoreOptions = {}): Promise<StoredWorkspaceAsset | null> {
   try {
     if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
       const { convertFileSrc, invoke } = await import('@tauri-apps/api/core');
@@ -244,7 +275,8 @@ export async function storeWorkspaceAsset(file: File): Promise<StoredWorkspaceAs
     }
     const form = new FormData();
     form.set('file', file, file.name || 'pasted-media');
-    const response = await fetch('/api/workspace/assets', { method: 'POST', body: form });
+    const endpoint = options.spaceId ? `/api/spaces/${encodeURIComponent(options.spaceId)}/blobs` : '/api/workspace/assets';
+    const response = await fetch(endpoint, { method: 'POST', body: form });
     if (!response.ok) return null;
     const asset = (await response.json()) as Partial<StoredWorkspaceAsset>;
     if (!asset.url || !asset.path || !asset.name) return null;
@@ -254,7 +286,9 @@ export async function storeWorkspaceAsset(file: File): Promise<StoredWorkspaceAs
       size: Number(asset.size ?? file.size),
       path: asset.path,
       url: asset.url,
-      sha256: asset.sha256
+      sha256: asset.sha256,
+      width: Number.isFinite(asset.width) ? Number(asset.width) : undefined,
+      height: Number.isFinite(asset.height) ? Number(asset.height) : undefined
     };
   } catch {
     return null;
@@ -349,12 +383,12 @@ function governedAsset(
   };
 }
 
-export async function seedFromFile(file: File): Promise<NodeSeed> {
+export async function seedFromFile(file: File, options: WorkspaceAssetStoreOptions = {}): Promise<NodeSeed> {
   const name = file.name || 'untitled';
   const t = file.type || '';
   const extension = extensionFor(name);
   if (VIEWABLE_MODEL.test(name)) {
-    const stored = await storeWorkspaceAsset(file);
+    const stored = await storeWorkspaceAsset(file, options);
     return {
       type: 'model',
       ...defaultSize.model,
@@ -368,7 +402,7 @@ export async function seedFromFile(file: File): Promise<NodeSeed> {
     };
   }
   if (extension === 'dxf') {
-    const stored = await storeWorkspaceAsset(file);
+    const stored = await storeWorkspaceAsset(file, options);
     return {
       type: 'cad',
       ...defaultSize.cad,
@@ -383,14 +417,14 @@ export async function seedFromFile(file: File): Promise<NodeSeed> {
     };
   }
   if (t.startsWith('image/') || IMAGE_FILE.test(name)) {
-    const stored = await storeWorkspaceAsset(file);
+    const stored = await storeWorkspaceAsset(file, options);
     const asset = stored
       ? { url: stored.url, path: stored.path, name: stored.name, mime: stored.mime, size: stored.size, sha256: stored.sha256 }
       : { url: URL.createObjectURL(file), name, mime: t, size: file.size, ephemeral: true };
     return seedFor('image', { ...asset, extension });
   }
   if (t === 'application/pdf' || PDF_FILE.test(name)) {
-    const stored = await storeWorkspaceAsset(file);
+    const stored = await storeWorkspaceAsset(file, options);
     return {
       type: 'document',
       ...defaultSize.document,
@@ -404,7 +438,7 @@ export async function seedFromFile(file: File): Promise<NodeSeed> {
     };
   }
   if (t.startsWith('video/') || VIDEO_FILE.test(name) || t.startsWith('audio/') || AUDIO_FILE.test(name)) {
-    const stored = await storeWorkspaceAsset(file);
+    const stored = await storeWorkspaceAsset(file, options);
     const asset = stored
       ? { url: stored.url, path: stored.path, name: stored.name, mime: stored.mime, size: stored.size, sha256: stored.sha256 }
       : { url: URL.createObjectURL(file), name, mime: t, size: file.size, ephemeral: true };
@@ -413,7 +447,7 @@ export async function seedFromFile(file: File): Promise<NodeSeed> {
     return { ...seedFor('media', { ...asset, kind, extension }), ...size };
   }
   if (DESIGN.test(name)) {
-    const stored = await storeWorkspaceAsset(file);
+    const stored = await storeWorkspaceAsset(file, options);
     return {
       type: 'file',
       w: 420,
@@ -504,7 +538,7 @@ function contactSheetSeed(
 
 export async function seedsFromFiles(files: File[]): Promise<NodeSeed[]> {
   const imageFiles = files.filter(isImageFile);
-  if (imageFiles.length < CONTACT_SHEET_THRESHOLD) return Promise.all(files.map(seedFromFile));
+  if (imageFiles.length < CONTACT_SHEET_THRESHOLD) return Promise.all(files.map((file) => seedFromFile(file)));
 
   const nonImages = files.filter((file) => !isImageFile(file));
   const uniqueImages: File[] = [];
@@ -526,7 +560,7 @@ export async function seedsFromFiles(files: File[]): Promise<NodeSeed[]> {
         ? { ...seed, payload: { ...seed.payload, perceptualHash } }
         : seed;
     })),
-    Promise.all(nonImages.map(seedFromFile))
+    Promise.all(nonImages.map((file) => seedFromFile(file)))
   ]);
   const sheetCount = Math.max(1, Math.ceil(imageSeeds.length / CONTACT_SHEET_LIMIT));
   const sheets = Array.from({ length: sheetCount }, (_, index) =>

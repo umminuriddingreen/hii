@@ -1,0 +1,27 @@
+[package]
+name = "hii-fabric-relay"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "Non-authoritative mailbox and rendezvous foundation for the HII fabric"
+license = "UNLICENSED"
+publish = false
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "deny"
+pedantic = "allow"
+
+# Keep this foundation independently buildable until the root workspace adopts it.
+[workspace]

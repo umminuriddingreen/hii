@@ -19,6 +19,7 @@ mod contract;
 mod conversation;
 mod declaration;
 mod design;
+mod ecosystem_catalog;
 mod file_explorer;
 mod governance;
 mod hii_tools;
@@ -366,6 +367,11 @@ enum Commands {
     Systems {
         #[command(subcommand)]
         action: Option<SystemsCommand>,
+    },
+    #[command(about = "Project CLI-owned runtime resources for HII surfaces")]
+    Ecosystem {
+        #[command(subcommand)]
+        action: EcosystemCommand,
     },
     #[command(about = "Run a bounded command against an enrolled system")]
     On {
@@ -1090,6 +1096,15 @@ enum SystemsCommand {
 }
 
 #[derive(Subcommand, Debug)]
+enum EcosystemCommand {
+    #[command(about = "Emit a bounded, source-linked runtime resource catalog")]
+    Catalog {
+        #[arg(long, help = "Emit the catalog as JSON")]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum OnCommand {
     #[command(about = "Run a shell command on an enrolled executor")]
     Run {
@@ -1626,6 +1641,15 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Systems { action }) => systems_command(&paths, action),
+        Some(Commands::Ecosystem { action }) => match action {
+            EcosystemCommand::Catalog { json: true } => {
+                println!("{}", ecosystem_catalog::render_json(&paths.runtime)?);
+                Ok(ExitCode::SUCCESS)
+            }
+            EcosystemCommand::Catalog { json: false } => {
+                Err("`hii ecosystem catalog` requires --json".to_string())
+            }
+        },
         Some(Commands::On { system, action }) => on_command(&paths, &system, action),
         Some(Commands::Board { action }) => board_command(&paths, cli.cwd, action),
         Some(Commands::Discover { action }) => {
@@ -4117,6 +4141,7 @@ fn is_native_command(command: &str) -> bool {
             | "receipt"
             | "stream"
             | "systems"
+            | "ecosystem"
             | "on"
             | "board"
             | "discover"
@@ -4397,6 +4422,7 @@ mod tests {
     #[test]
     fn multi_system_commands_are_native_bindings() {
         assert!(is_native_command("systems"));
+        assert!(is_native_command("ecosystem"));
         assert!(is_native_command("on"));
     }
 
