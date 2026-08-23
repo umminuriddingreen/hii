@@ -13,14 +13,28 @@ The installer includes the WebView2 bootstrapper HII needs for its desktop inter
 
 ## macOS 13 or newer
 
-The public Mac download remains closed until Apple Developer ID signing and notarization pass. When the notarized archive is available:
+The public Mac download remains closed until Apple Developer ID signing and notarization pass. When the notarized disk image is available:
 
-1. Download and open the HII archive.
-2. Drag **HII.app** to **Applications**.
-3. Open HII normally from Applications.
+1. Download `HII-<version>-macos-aarch64.dmg` and open it.
+2. Drag **HII** onto the **Applications** shortcut in the same window.
+3. Eject the disk image and open HII from Applications.
 4. If macOS blocks a build that is supposed to be notarized, stop and report it. Do not disable Gatekeeper.
 
-The optional `hii-bootstrap.sh` included with the Mac archive prepares the local CLI folders and reports supported agents. Run it from Terminal with `bash hii-bootstrap.sh`. It does not use administrator access, install agents, or sign in to external services.
+HII updates itself after that. It checks for a new version on launch, shows a notice in the
+corner, and installs only when you choose to. Every update is verified against HII's signing
+key before it is applied; an update that fails verification is refused.
+
+### Building it yourself
+
+Anyone with the repository can build and install the app without an Apple account:
+
+```bash
+npm run build:tauri:dmg   # produces src-tauri/target/release/bundle/dmg/
+npm run install:tauri     # or build the .app and copy it to /Applications
+```
+
+A locally built app is ad-hoc signed. It runs on the machine that built it, but macOS will
+refuse it if it is copied to another Mac — that is what Developer ID signing is for.
 
 ## Connect an agent
 

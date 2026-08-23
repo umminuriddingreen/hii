@@ -27,14 +27,21 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$HOME/.hii/workspace/assets/**"]
+        "scope": [
+          "$HOME/.hii/workspace/assets/**"
+        ]
       }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["app"],
-    "resources": ["resources/hii"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "resources": [
+      "resources/hii"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -44,7 +51,23 @@
       "icons/icon.png"
     ],
     "macOS": {
-      "minimumSystemVersion": "13.0"
+      "minimumSystemVersion": "13.0",
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.plist",
+      "dmg": {
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        },
+        "appPosition": {
+          "x": 180,
+          "y": 170
+        },
+        "applicationFolderPosition": {
+          "x": 480,
+          "y": 170
+        }
+      }
     },
     "windows": {
       "webviewInstallMode": {
@@ -52,6 +75,21 @@
       },
       "nsis": {
         "installMode": "currentUser"
+      }
+    },
+    "category": "Productivity",
+    "shortDescription": "One local canvas for a person and their agents.",
+    "copyright": "Copyright © 2026 Ummi Nuriddin Green",
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERCN0Y1OTI3MUFCRkUzQjkKUldTNTQ3OGFKMWwvMjgwQWIwSWNOVi9PS2lIVWpSaHAzSzl6MTc0a3N0Ymk5QnpETGx4L1JQYkgK",
+      "endpoints": [
+        "https://github.com/umminuriddingreen/hii/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

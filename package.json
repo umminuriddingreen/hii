@@ -84,7 +84,9 @@
     "ci:release-candidate": "npm run ci:full && npm run build:tauri && npm run hii:packaged-app:check",
     "check": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "stage:cli": "node scripts/hii-stage-cli.mjs"
+    "stage:cli": "node scripts/hii-stage-cli.mjs",
+    "build:tauri:dmg": "node scripts/hii-tauri-build.mjs --bundles dmg",
+    "build:tauri:release": "node scripts/hii-tauri-build.mjs --bundles app,dmg"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",
@@ -94,6 +96,8 @@
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.45.0",
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "@types/qrcode": "^1.5.6",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.11.0",

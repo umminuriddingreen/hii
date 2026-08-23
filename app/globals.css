@@ -122,6 +122,8 @@ button, input, textarea { font: inherit; }
 .hii-node-copy { width: 100%; height: 100%; margin: 0; padding: 16px; overflow: auto; white-space: pre-wrap; font-size: 14px; line-height: 1.55; }
 .hii-node-copy[data-mono="true"] { font-family: "SF Mono", ui-monospace, monospace; font-size: 12px; }
 .hii-node-editor { width: 100%; height: 100%; resize: none; border: 0; background: transparent; color: inherit; padding: 16px; outline: 0; line-height: 1.55; }
+.hii-node-editor::placeholder { color: currentColor; opacity: .38; }
+.hii-canvas[data-drop-active]::after { content: ''; position: absolute; inset: 8px; border: 2px dashed currentColor; border-radius: 12px; opacity: .35; pointer-events: none; z-index: 2147483000; }
 .hii-node-image, .hii-node-video { width: 100%; height: 100%; display: block; object-fit: contain; background: transparent; }
 .hii-ink-canvas { display: block; width: 100%; height: 100%; pointer-events: none; }
 .hii-sticker { display: grid; width: 100%; height: 100%; place-items: center; font-size: min(18vw, 96px); line-height: 1; }
@@ -508,3 +510,7 @@ button, input, textarea { font: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }
+.hii-update-banner { position: fixed; right: 16px; bottom: 16px; z-index: 2147483100; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(127, 127, 127, .28); background: var(--field); color: var(--ink); font-size: 13px; box-shadow: 0 8px 28px rgba(0, 0, 0, .18); }
+.hii-update-banner button { border: 1px solid rgba(127, 127, 127, .35); border-radius: 7px; padding: 5px 10px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.hii-update-banner button:hover { border-color: currentColor; }
+.hii-update-banner .hii-update-dismiss { border-color: transparent; opacity: .65; }

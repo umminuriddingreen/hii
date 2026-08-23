@@ -14,7 +14,7 @@ import {
   type InformationCaptureResult,
   type InformationSearchResult
 } from '@/lib/client/hii-bridge';
-import { directPasteSeeds, makeNode, nodeSeedFromResourceProjection, seedFor, seedFromFile, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
+import { canvasTextSeed, canvasTextSize, clipboardFiles, directPasteSeeds, makeNode, nodeSeedFromResourceProjection, seedFor, seedFromFile, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
 import { HII_PROJECTION_MIME, type ProjectionIntent, type ResourceProjectionSeed } from '@/lib/ecosystem/contracts';
 import {
   canvasMode,
@@ -34,7 +34,6 @@ import {
   type MusicPanelPayload
 } from '@/lib/workspace/music-playlists';
 import {
-  agentTerminalSeedFromText,
   isDirectCanvasTyping,
   isTerminalShortcut,
   terminalSeedFromCommand
@@ -48,6 +47,7 @@ import {
 import type { WorkspaceNode } from '@/lib/workspace/types';
 import { applicationSeed } from '@/lib/workspace/application-seed';
 import { MusicPlaylistPanel } from './MusicPlaylistPanel';
+import { UpdateBanner } from './UpdateBanner';
 import { NativeDevBrowser } from './NativeDevBrowser';
 import { HiiMarketplace } from './HiiMarketplace';
 import { HiiLinkApp } from './HiiLinkApp';
@@ -306,9 +306,63 @@ function TerminalBody({
   );
 }
 
+/**
+ * The text editor used by `note` and `canvas-text` objects. It takes focus when the
+ * object was just created by typing or double-clicking, and grows to fit what is written
+ * so text is never truncated behind a manual resize.
+ */
+function CanvasEditor({
+  node,
+  label,
+  value,
+  autoFocus,
+  onAutoFocused,
+  onPayload,
+  onResize
+}: {
+  node: WorkspaceNode;
+  label: string;
+  value: string;
+  autoFocus?: boolean;
+  onAutoFocused?: () => void;
+  onPayload: (patch: Record<string, unknown>) => void;
+  onResize?: (size: { w: number; h: number }) => void;
+}) {
+  const field = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (!autoFocus) return;
+    const element = field.current;
+    if (!element) return;
+    element.focus();
+    element.setSelectionRange(element.value.length, element.value.length);
+    onAutoFocused?.();
+  }, [autoFocus, onAutoFocused]);
+
+  return (
+    <textarea
+      ref={field}
+      className="hii-node-editor"
+      aria-label={label}
+      value={value}
+      onPointerDown={(event) => event.stopPropagation()}
+      onChange={(event) => {
+        const next = event.target.value;
+        onPayload(node.type === 'canvas-text' ? { text: next } : { content: next });
+        if (node.type !== 'canvas-text') return;
+        const grown = canvasTextSize(next);
+        if (grown.h > node.h) onResize?.({ w: node.w, h: grown.h });
+      }}
+    />
+  );
+}
+
 function NodeBody({
   node,
+  autoFocus,
+  onAutoFocused,
   onPayload,
+  onResize,
   onAgentSubmit,
   onInstallPackage,
   onCurationRequest,
@@ -316,7 +370,10 @@ function NodeBody({
   onBrowserCapture
 }: {
   node: WorkspaceNode;
+  autoFocus?: boolean;
+  onAutoFocused?: () => void;
   onPayload: (patch: Record<string, unknown>) => void;
+  onResize?: (size: { w: number; h: number }) => void;
   onAgentSubmit: (intent: string) => void;
   onInstallPackage: (pkg: HiiMarketplacePackage, destination: string) => void;
   onCurationRequest: (request: string, payload: MusicPanelPayload) => void;
@@ -352,11 +409,14 @@ function NodeBody({
   }
   if (node.type === 'note' || node.type === 'canvas-text') {
     return (
-      <textarea
-        className="hii-node-editor"
-        aria-label={name}
+      <CanvasEditor
+        node={node}
+        label={name}
         value={content}
-        onChange={(event) => onPayload(node.type === 'canvas-text' ? { text: event.target.value } : { content: event.target.value })}
+        autoFocus={autoFocus}
+        onAutoFocused={onAutoFocused}
+        onPayload={onPayload}
+        onResize={onResize}
       />
     );
   }
@@ -501,6 +561,8 @@ export function HiiRoot({
   const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [promptVisible, setPromptVisible] = useState(false);
   const [drawing, setDrawing] = useState(false);
+  const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  const [dropActive, setDropActive] = useState(false);
   const [devFixtureState, setDevFixtureState] = useState<'normal' | 'minimized' | 'maximized'>('normal');
   const mouse = useRef<Point>({ x: 400, y: 280 });
   const activeRun = useRef<string | null>(null);
@@ -1230,21 +1292,27 @@ export function HiiRoot({
       }
       if (isDirectCanvasTyping(event)) {
         event.preventDefault();
-        const contextNodeIds = [...selected];
-        spawnSeeds(
-          [agentTerminalSeedFromText(event.key, { mode, contextNodeIds })],
-          camera.toWorld(mouse.current.x, mouse.current.y)
-        );
+        const at = camera.toWorld(mouse.current.x, mouse.current.y);
+        const [id] = spawnSeeds([canvasTextSeed(event.key)], at);
+        setFocusNodeId(id ?? null);
         setPromptVisible(false);
       }
     };
     const pointermove = (event: PointerEvent) => { mouse.current = { x: event.clientX, y: event.clientY }; };
     const paste = (event: ClipboardEvent) => {
       if (inField(event.target)) return;
-      const value = event.clipboardData?.getData('text/plain');
+      const transfer = event.clipboardData;
+      if (!transfer) return;
+      const at = camera.toWorld(mouse.current.x, mouse.current.y);
+      const files = clipboardFiles(transfer);
+      if (files.length) {
+        event.preventDefault();
+        void seedsFromFiles(files).then((seeds) => spawnSeeds(directPasteSeeds(seeds), at));
+        return;
+      }
+      const value = transfer.getData('text/plain');
       if (!value) return;
       event.preventDefault();
-      const at = camera.toWorld(mouse.current.x, mouse.current.y);
       if (/^https?:\/\/\S+$/i.test(value.trim())) {
         void captureInformation(value.trim())
           .then((result) => spawnInformation(directPasteSeeds(capturedInformationSeeds(result)), { x: at.x, y: at.y - 190 }))
@@ -1257,15 +1325,23 @@ export function HiiRoot({
     addEventListener('pointermove', pointermove);
     addEventListener('paste', paste);
     return () => { removeEventListener('keydown', keydown); removeEventListener('pointermove', pointermove); removeEventListener('paste', paste); };
-  }, [camera, isSpace, mode, openDevBrowser, selected, spawnArtifactTerminals, spawnInformation, spawnSeeds, workspace]);
+  }, [camera, isSpace, openDevBrowser, selected, spawnArtifactTerminals, spawnInformation, spawnSeeds, workspace]);
 
   return (
     <main
       ref={camera.viewportRef}
       className="hii-canvas"
       data-surface={surface}
+      data-drop-active={dropActive || undefined}
       tabIndex={-1}
       aria-label="HII canvas"
+      onDoubleClick={(event) => {
+        if ((event.target as Element).closest('[data-node-id],input,textarea,button,a,[data-workspace-ui]')) return;
+        if (isSpace && drawing) return;
+        event.preventDefault();
+        const [id] = spawnSeeds([canvasTextSeed()], camera.toWorld(event.clientX, event.clientY));
+        setFocusNodeId(id ?? null);
+      }}
       onPointerDown={(event) => {
         if ((event.target as Element).closest('[data-node-id],input,textarea,audio,video,a')) return;
         setSelected([]);
@@ -1291,15 +1367,23 @@ export function HiiRoot({
       }}
       onDragOver={(event) => {
         event.preventDefault();
-        if (Array.from(event.dataTransfer.types).includes(HII_PROJECTION_MIME)) event.dataTransfer.dropEffect = 'copy';
+        event.dataTransfer.dropEffect = 'copy';
+        if (!Array.from(event.dataTransfer.types).includes(HII_PROJECTION_MIME)) setDropActive(true);
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        setDropActive(false);
       }}
       onDrop={(event) => {
         event.preventDefault();
+        setDropActive(false);
         if (Array.from(event.dataTransfer.types).includes(HII_PROJECTION_MIME)) return;
         const at = camera.toWorld(event.clientX, event.clientY);
-        seedsFromDataTransfer(event.dataTransfer).then((seeds) => spawnSeeds(seeds, at));
+        void seedsFromDataTransfer(event.dataTransfer)
+          .then((seeds) => { if (seeds.length) spawnSeeds(seeds, at); });
       }}
     >
+      {!isSpace && <UpdateBanner />}
       {isSpace && <SpaceToolbar
         drawing={drawing}
         onAddImage={() => fileInput.current?.click()}
@@ -1341,7 +1425,10 @@ export function HiiRoot({
           >
             <NodeBody
               node={node}
+              autoFocus={focusNodeId === node.id}
+              onAutoFocused={() => setFocusNodeId(null)}
               onPayload={(patch) => workspace.patchNode(node.id, { payload: { ...node.payload, ...patch } })}
+              onResize={(size) => workspace.patchNode(node.id, size)}
               onAgentSubmit={(intent) => void startTerminalAgent(node.id, intent)}
               onInstallPackage={installPackage}
               onCurationRequest={(request, payload) => void requestCuration(node.id, request, payload)}
