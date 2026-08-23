@@ -47,7 +47,6 @@ import {
 } from '@/lib/workspace/object-conversation';
 import type { WorkspaceNode } from '@/lib/workspace/types';
 import { applicationSeed } from '@/lib/workspace/application-seed';
-import { HiiNotificationInbox } from './HiiNotificationInbox';
 import { MusicPlaylistPanel } from './MusicPlaylistPanel';
 import { NativeDevBrowser } from './NativeDevBrowser';
 import { HiiMarketplace } from './HiiMarketplace';
@@ -1315,7 +1314,6 @@ export function HiiRoot({
           setSelected([node.id]); workspace.bringToFront(node.id);
         }}>{titleFor(node)}</button>)}
       </div>}
-      {!isSpace && <HiiNotificationInbox />}
       {!isSpace && process.env.NEXT_PUBLIC_HII_DEV_BOARD === 'waymark' && (
         <section className="hii-dev-board-direct" data-window-state={devFixtureState} style={{ width: devFixtureNode.w, height: devFixtureNode.h }}>
           <div className="hii-app-window-controls" aria-label="Waymark window controls">

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-BSL-1.1
-import { HiiProductEntry } from '@/components/spaces/SpacesHome';
+import { HiiRoot } from '@/components/workspace/HiiRoot';
 
 export default function Home() {
-  return <HiiProductEntry />;
+  return <HiiRoot />;
 }
