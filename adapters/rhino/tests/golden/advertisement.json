@@ -1,0 +1,10 @@
+{
+  "protocol_version": 1,
+  "rhino_instance_id": "11112222-3333-4444-5555-666677778888",
+  "process_id": 14324,
+  "session_id": 1,
+  "pipe_name": "LOCAL\\hii.rhino.1.14324",
+  "application_version": "8.0.0.0",
+  "adapter_version": "0.1.0",
+  "started_at_unix_ms": 1700000000000
+}

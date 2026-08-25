@@ -1,0 +1,11 @@
+[
+  {
+    "rhino_instance_id": "11112222-3333-4444-5555-666677778888",
+    "rhino_document_runtime_serial": 17,
+    "gh_runtime_id": "01020304-0506-0708-090a-0b0c0d0e0f10"
+  },
+  {
+    "gh_runtime_id": "01020304-0506-0708-090a-0b0c0d0e0f10",
+    "instance_guid": "9999aaaa-bbbb-cccc-dddd-eeeeffff0000"
+  }
+]

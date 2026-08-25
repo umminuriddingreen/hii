@@ -1,0 +1,20 @@
+{
+  "verdict": "verified",
+  "checks": [
+    {
+      "description": "bounding box is 40x40x40 mm",
+      "via_operation": "rhino.geometry.bounding_box",
+      "ok": true,
+      "expected": [
+        40.0,
+        40.0,
+        40.0
+      ],
+      "actual": [
+        40.0,
+        40.0,
+        40.0
+      ]
+    }
+  ]
+}

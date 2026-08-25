@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>$(RhinoTargetFramework)</TargetFramework>
+    <AssemblyName>HiiRhino.Core</AssemblyName>
+    <RootNamespace>HiiRhino.Core</RootNamespace>
+    <!-- Deliberately free of any RhinoCommon reference. Everything here can be
+         built, run and tested without Rhino installed, which is what makes the
+         protocol and transport testable outside the host. -->
+  </PropertyGroup>
+
+</Project>

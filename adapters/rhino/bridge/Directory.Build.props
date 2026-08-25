@@ -1,0 +1,17 @@
+<Project>
+  <PropertyGroup>
+    <!-- Rhino 8 on Windows runs .NET 7 (verified on this machine: the Rhino
+         process loads hostfxr.dll and coreclr.dll, not clr.dll). Its host
+         rolls forward to the installed .NET 8 runtime, but net7.0-windows is
+         the target framework a Rhino 8 plug-in is built against. -->
+    <RhinoTargetFramework>net7.0-windows</RhinoTargetFramework>
+    <LangVersion>11.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- net7.0 is out of support; that is Rhino's choice, not ours, and the
+         warning would otherwise fail the build under TreatWarningsAsErrors. -->
+    <NoWarn>$(NoWarn);NETSDK1138</NoWarn>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+</Project>

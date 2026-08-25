@@ -50,3 +50,6 @@ life/
 /work/
 /pi-session-*.html
 /pi-session-*.pdf
+
+# Local dev logs
+/.hii-dev-logs/

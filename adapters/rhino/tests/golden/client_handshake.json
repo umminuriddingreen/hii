@@ -1,0 +1,6 @@
+{
+  "envelope": "handshake",
+  "protocol_version": 1,
+  "client": "hii-cli",
+  "client_version": "0.1.0"
+}

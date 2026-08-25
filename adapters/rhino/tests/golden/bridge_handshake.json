@@ -1,0 +1,15 @@
+{
+  "envelope": "handshake",
+  "protocol_version": 1,
+  "application": {
+    "application": "rhino",
+    "application_version": "8.0.0.0",
+    "adapter_version": "0.1.0",
+    "process_id": 14324,
+    "rhino_instance_id": "11112222-3333-4444-5555-666677778888"
+  },
+  "features": [
+    "rhino.document",
+    "rhino.geometry"
+  ]
+}
