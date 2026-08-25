@@ -43,9 +43,9 @@ export default function HomePage() {
       </p>
 
       <div className="public-cta">
-        <a className="public-cta-primary" href="/download/windows">Download for Windows ↓</a>
+        <a className="public-cta-primary" href="/download/windows">Download for Windows</a>
         <a href="/download">All platforms</a>
-        <a href="/building">What is being built ↗</a>
+        <a href="/building">What is being built</a>
       </div>
       <p className="public-fine">
         Windows 10 / 11 · x64. A current-user installer with HII&rsquo;s local runtime included, no
