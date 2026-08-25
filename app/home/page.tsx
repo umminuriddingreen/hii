@@ -25,9 +25,10 @@ const LOOP = [
 ];
 
 const SURFACES = [
+  { name: 'Context Dock', body: 'Choose a project, see exactly which sources an agent may read, and keep provenance on every excerpt it uses.' },
+  { name: 'Knowledge', body: 'Notes, links, backlinks, tags, search, graph, and history on a canonical local store. Import a Markdown vault without mutating it; export back to portable files.' },
   { name: 'Workspace', body: 'Arrange sources, live tools, agent work, and receipts as connected objects on one spatial canvas.' },
-  { name: 'Knowledge', body: 'Write, link, search, graph, import, and export local knowledge without losing provenance.' },
-  { name: 'HII CLI', body: 'Use the same local runtime from a native terminal: observe state, act within bounds, verify the result.' }
+  { name: 'HII CLI', body: 'The runtime, authority, and verification layer underneath every view. Observe state, act within bounds, verify the result.' }
 ];
 
 export default function HomePage() {
@@ -72,8 +73,8 @@ export default function HomePage() {
       <section className="public-section">
         <h2>One system, not one screen.</h2>
         <p className="public-lede">
-          Workspace, Knowledge, Browser, Create, Notch, the native terminal, and the HII CLI all read
-          from the same local project state and proof history.
+          The Workspace, Knowledge, the Context Dock, Notch, Browser, Create, and the HII CLI are views
+          over one local project state and one proof history — not seven products that sync.
         </p>
         <ul className="public-surfaces">
           {SURFACES.map((surface) => (
@@ -107,6 +108,15 @@ export default function HomePage() {
           That is a session: HII is pointed at a real problem of yours, and the workspace, the
           artifacts, and the receipts are yours to keep.{' '}
           <a href="mailto:hello@humaninformationinterface.com">hello@humaninformationinterface.com</a>
+        </p>
+      </section>
+
+      <section className="public-section">
+        <h2>My computer decides what leaves my computer.</h2>
+        <p className="public-lede">
+          Before anything is sent outward you can see what would leave, remove what should not,
+          approve or refuse it, and keep a receipt of that decision. Sharing means approved traces
+          and verified capabilities, never an automatic upload of your project state.
         </p>
       </section>
 

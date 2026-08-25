@@ -9,7 +9,7 @@ test.describe('waitlist', () => {
   test('a person can join from the building page', async ({ page }) => {
     await page.goto('/building');
 
-    await page.getByRole('radio', { name: 'Memory Dock' }).check();
+    await page.getByRole('radio', { name: 'Context Dock' }).check();
     await page.getByLabel('Email').fill(throwawayEmail());
     await page.getByLabel('What would you point it at? (optional)').fill('an e2e run');
     await page.getByRole('button', { name: 'Join the waitlist' }).click();

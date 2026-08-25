@@ -5,26 +5,32 @@ import { useState } from 'react';
 const SURFACES = [
   {
     id: 'hii',
-    name: 'HII',
-    state: 'Windows now · Mac waiting on Apple',
-    body: 'The local canvas and the hii runtime. Context, approval, bounded work, proof, receipt — the loop the rest of this is built on.'
+    name: 'HII desktop',
+    state: 'Windows now. Mac waiting on Apple notarization.',
+    body: 'The local canvas and the hii runtime: context, approval, bounded work, proof, receipt. Every important operation works through the command line before it becomes a view.'
   },
   {
-    id: 'memory-dock',
-    name: 'Memory Dock',
-    state: 'In build',
-    body: 'Source-linked project memory that keeps provenance instead of flattening everything into a summary. Sensor adapters read what other tools already capture rather than capturing again.'
+    id: 'context-dock',
+    name: 'Context Dock',
+    state: 'Building now. Loop not yet complete.',
+    body: 'Project selection, visible source permissions, deterministic local inventory and extraction, and a source-linked project model — so an agent gets what it needs without anyone losing track of where it came from.'
   },
   {
-    id: 'interform',
-    name: 'Interform',
-    state: 'In build',
-    body: 'Versioned capabilities you can review, run, and reuse — the visual workflow surface over the same local runtime.'
+    id: 'knowledge',
+    name: 'Knowledge Workspace',
+    state: 'Building now. Loop not yet complete.',
+    body: 'Notes, folders, tags, links, backlinks, search, graph, history, import and export on a canonical local store at ~/.hii/hii.db. Obsidian and Markdown vaults import without mutating the source, and export back to portable files.'
+  },
+  {
+    id: 'fabric',
+    name: 'Machine fabric',
+    state: 'One authenticated Mac/Windows link first. Not yet proven.',
+    body: 'Explicitly scoped links between your own devices, carrying files, services, jobs, artifacts, and receipts. One proven device link comes before any remote capability claim.'
   },
   {
     id: 'concierge',
-    name: 'AI → 3D concierge',
-    state: 'Taking work now',
+    name: 'AI to 3D concierge',
+    state: 'Taking work now.',
     body: 'Plain-language request to editable Rhino geometry, run against your own project. This one is a session, not a download.'
   }
 ] as const;

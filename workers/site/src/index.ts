@@ -24,7 +24,7 @@ export interface Env {
 }
 
 /** Surfaces someone can wait on. Anything else is not a real signup. */
-const SURFACES = new Set(['hii', 'memory-dock', 'interform', 'concierge']);
+const SURFACES = new Set(['hii', 'context-dock', 'knowledge', 'fabric', 'concierge']);
 
 const MAX_EMAIL = 254;
 const MAX_NOTE = 500;
