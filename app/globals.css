@@ -514,3 +514,29 @@ button, input, textarea { font: inherit; }
 .hii-update-banner button { border: 1px solid rgba(127, 127, 127, .35); border-radius: 7px; padding: 5px 10px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .hii-update-banner button:hover { border-color: currentColor; }
 .hii-update-banner .hii-update-dismiss { border-color: transparent; opacity: .65; }
+
+/* The public landing page. It shares the quiet typography of the other public
+   pages but carries more structure, so it relaxes the narrow measure the single
+   statement pages rely on. */
+.public-landing h1 { max-width: 18ch; font-size: clamp(44px, 7.5vw, 104px); }
+.public-landing > p:not(.public-name):not(.public-fine) { max-width: 40rem; margin-top: 32px; font-size: clamp(17px, 1.6vw, 22px); }
+.public-landing .public-cta { display: flex; flex-wrap: wrap; align-items: center; gap: 20px; margin-top: 40px; }
+.public-landing .public-cta-primary { display: inline-block; padding: 13px 22px; border: 1px solid currentColor; border-radius: 9px; text-decoration: none; font-size: 17px; }
+.public-landing .public-cta-primary:hover { background: var(--ink); color: var(--field); }
+.public-landing .public-fine { max-width: 40rem; margin-top: 18px; font-size: 14px; line-height: 1.5; color: var(--muted); }
+.public-landing .public-section { margin-top: clamp(72px, 12vh, 144px); }
+.public-landing h2 { max-width: 22ch; margin: 0; font-size: clamp(28px, 4vw, 46px); letter-spacing: -.03em; line-height: 1.05; }
+.public-landing .public-lede { max-width: 40rem; margin-top: 20px; font-size: clamp(16px, 1.5vw, 20px); line-height: 1.5; color: var(--muted); }
+.public-landing h3 { margin: 0 0 8px; font-size: 19px; letter-spacing: -.01em; }
+.public-landing .public-loop,
+.public-landing .public-surfaces { display: grid; gap: 32px; margin: 40px 0 0; padding: 0; list-style: none; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.public-landing .public-loop li,
+.public-landing .public-surfaces li { border-top: 1px solid var(--faint); padding-top: 18px; }
+.public-landing .public-loop p,
+.public-landing .public-surfaces p { margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted); }
+.public-landing .public-step { display: block; margin-bottom: 12px; font: 12px "SF Mono", ui-monospace, monospace; color: var(--muted); }
+.public-landing .public-run { display: flex; flex-wrap: wrap; gap: 10px; margin: 36px 0 0; padding: 0; list-style: none; counter-reset: run; }
+.public-landing .public-run li { counter-increment: run; padding: 9px 15px; border: 1px solid var(--faint); border-radius: 999px; font-size: 14px; }
+.public-landing .public-run li::before { content: counter(run, decimal-leading-zero) " "; color: var(--muted); font: 12px "SF Mono", ui-monospace, monospace; }
+.public-landing code { font: .92em "SF Mono", ui-monospace, monospace; }
+.public-landing nav { margin-top: clamp(72px, 12vh, 120px); padding-top: 28px; border-top: 1px solid var(--faint); }

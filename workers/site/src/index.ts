@@ -63,6 +63,17 @@ async function serveRelease(platform: string, env: Env): Promise<Response> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    // `/` is the desktop app's entry point: the Tauri window loads index.html
+    // straight off disk, so that route is the workspace shell and it expects a
+    // local HII runtime that a visitor's browser does not have. The web is
+    // served the landing page instead. Rewriting here rather than moving the
+    // route keeps the shipped desktop app's entry point untouched.
+    if (url.pathname === '/') {
+      const landing = new URL('/home', url);
+      return env.ASSETS.fetch(new Request(landing, request));
+    }
+
     const release = /^\/download\/([a-z]+)\/?$/.exec(url.pathname);
     if (release) {
       if (request.method !== 'GET' && request.method !== 'HEAD') {
