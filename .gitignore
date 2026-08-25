@@ -53,3 +53,6 @@ life/
 
 # Local dev logs
 /.hii-dev-logs/
+
+# Next static export output
+/out/

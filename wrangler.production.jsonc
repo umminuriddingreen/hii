@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "hii-site-preview",
+  "name": "hii",
   "main": "workers/site/src/index.ts",
   "compatibility_date": "2026-08-04",
   "compatibility_flags": ["nodejs_compat"],
@@ -24,8 +24,15 @@
       "binding": "DOWNLOADS",
       "bucket_name": "hii"
     }
+  ],
+  "routes": [
+    {
+      "pattern": "humaninformationinterface.com",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.humaninformationinterface.com",
+      "custom_domain": true
+    }
   ]
-  // Deliberately no production routes. The custom domain still points at the
-  // deployed SvelteKit build; wrangler.production.jsonc records the route
-  // ownership so the switch is one reviewed step, not a side effect of a deploy.
 }

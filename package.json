@@ -17,6 +17,8 @@
     "dev:tauri": "tauri dev",
     "demo:launch-proof": "node --experimental-strip-types scripts/hii-launch-proof-workspace.mjs",
     "build": "NEXT_PUBLIC_HII_TARGET=web next build",
+    "deploy:preview": "npm run build && wrangler deploy",
+    "deploy:production": "npm run build && wrangler deploy --config wrangler.production.jsonc",
     "build:desktop": "node scripts/hii-stage-cli.mjs --release && NEXT_PUBLIC_HII_TARGET=desktop next build",
     "build:tauri": "node scripts/hii-tauri-build.mjs",
     "build:tauri:mac": "node scripts/hii-tauri-build.mjs --bundles app",
