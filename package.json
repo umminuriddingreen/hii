@@ -17,6 +17,7 @@
     "dev:tauri": "tauri dev",
     "demo:launch-proof": "node --experimental-strip-types scripts/hii-launch-proof-workspace.mjs",
     "build": "NEXT_PUBLIC_HII_TARGET=web next build",
+    "test:e2e": "playwright test",
     "deploy:preview": "npm run build && wrangler deploy",
     "deploy:production": "npm run build && wrangler deploy --config wrangler.production.jsonc",
     "build:desktop": "node scripts/hii-stage-cli.mjs --release && NEXT_PUBLIC_HII_TARGET=desktop next build",
@@ -116,6 +117,7 @@
     "yaml": "^2.8.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tauri-apps/cli": "^2",
     "@testing-library/jest-dom": "^6.9.1",
     "@types/node": "^26.1.1",

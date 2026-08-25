@@ -495,8 +495,11 @@ button, input, textarea { font: inherit; }
 
 
 .public-home {
-  min-height: 100vh;
-  overflow: auto;
+  /* html and body are locked to the viewport with overflow hidden for the
+     canvas app, so a public page has to be its own scroll container rather
+     than growing past a clipped body. */
+  height: 100%;
+  overflow-y: auto;
   padding: clamp(28px, 7vw, 96px);
   background: var(--field);
   color: var(--ink);

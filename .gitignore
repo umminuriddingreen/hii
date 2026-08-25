@@ -56,3 +56,8 @@ life/
 
 # Next static export output
 /out/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
