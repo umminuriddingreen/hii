@@ -11,7 +11,7 @@
     "binding": "ASSETS",
     "html_handling": "auto-trailing-slash",
     "not_found_handling": "404-page",
-    "run_worker_first": ["/", "/download/*"]
+    "run_worker_first": ["/", "/api/*", "/download/*"]
   },
   "observability": {
     "enabled": true
@@ -19,6 +19,14 @@
   "vars": {
     "HII_REMOTE_USER": "ummi"
   },
+  "d1_databases": [
+    {
+      "binding": "WAITLIST",
+      "database_name": "hii-waitlist",
+      "database_id": "56e4c3ed-1c4c-4240-80a1-36ce8f4f372d",
+      "migrations_dir": "./migrations"
+    }
+  ],
   "r2_buckets": [
     {
       "binding": "DOWNLOADS",

@@ -20,12 +20,73 @@ type ReleaseManifest = {
 export interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
   DOWNLOADS?: R2Bucket;
+  WAITLIST?: D1Database;
 }
+
+/** Surfaces someone can wait on. Anything else is not a real signup. */
+const SURFACES = new Set(['hii', 'memory-dock', 'interform', 'concierge']);
+
+const MAX_EMAIL = 254;
+const MAX_NOTE = 500;
 
 const PLATFORMS: Record<string, string> = {
   windows: 'Windows',
   macos: 'macOS'
 };
+
+function json(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }
+  });
+}
+
+/**
+ * Deliberately narrow. This is not RFC 5322 — it is the shape a person types,
+ * with the length bound that keeps a header-sized string out of the database.
+ */
+function usableEmail(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= MAX_EMAIL && /^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(value);
+}
+
+async function joinWaitlist(request: Request, env: Env, url: URL): Promise<Response> {
+  if (request.method !== 'POST') return json(405, { error: 'Use POST to join the waitlist.' });
+
+  // The form is served from this origin. Rejecting everything else keeps the
+  // endpoint from being a convenient open write for someone else's page.
+  const origin = request.headers.get('origin');
+  if (origin && origin !== url.origin) return json(403, { error: 'Cross-origin signups are not accepted.' });
+
+  if (!env.WAITLIST) return json(503, { error: 'The waitlist is not configured on this environment.' });
+
+  let payload: { email?: unknown; surface?: unknown; note?: unknown };
+  try {
+    payload = await request.json();
+  } catch {
+    return json(400, { error: 'Send a JSON body.' });
+  }
+
+  const email = usableEmail(payload.email) ? payload.email.trim().toLowerCase() : null;
+  if (!email) return json(400, { error: 'That does not look like an email address.' });
+
+  const surface = typeof payload.surface === 'string' && SURFACES.has(payload.surface) ? payload.surface : 'hii';
+  const note = typeof payload.note === 'string' && payload.note.trim() ? payload.note.trim().slice(0, MAX_NOTE) : null;
+
+  try {
+    // Signing up twice is the same as signing up once. The response does not
+    // distinguish the two, so the endpoint cannot be used to test whether a
+    // given address is already on the list.
+    await env.WAITLIST.prepare(
+      'INSERT INTO waitlist (email, surface, note) VALUES (?, ?, ?) ON CONFLICT(email) DO NOTHING'
+    )
+      .bind(email, surface, note)
+      .run();
+  } catch {
+    return json(500, { error: 'The waitlist could not record that. Try again shortly.' });
+  }
+
+  return json(200, { ok: true });
+}
 
 function fail(status: number, message: string): Response {
   return new Response(message, { status, headers: { 'content-type': 'text/plain; charset=utf-8' } });
@@ -73,6 +134,8 @@ export default {
       const landing = new URL('/home', url);
       return env.ASSETS.fetch(new Request(landing, request));
     }
+
+    if (url.pathname === '/api/waitlist') return joinWaitlist(request, env, url);
 
     const release = /^\/download\/([a-z]+)\/?$/.exec(url.pathname);
     if (release) {

@@ -543,3 +543,20 @@ button, input, textarea { font: inherit; }
 .public-landing .public-run li::before { content: counter(run, decimal-leading-zero) " "; color: var(--muted); font: 12px "SF Mono", ui-monospace, monospace; }
 .public-landing code { font: .92em "SF Mono", ui-monospace, monospace; }
 .public-landing nav { margin-top: clamp(72px, 12vh, 120px); padding-top: 28px; border-top: 1px solid var(--faint); }
+
+/* Waitlist form on the building page. */
+.public-landing .public-state { margin: 0 0 8px; font: 12px "SF Mono", ui-monospace, monospace; color: var(--ink); }
+.public-landing .public-waitlist { display: grid; gap: 22px; max-width: 34rem; margin-top: 36px; }
+.public-landing .public-waitlist fieldset { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0; padding: 0; border: 0; }
+.public-landing .public-waitlist legend { margin-bottom: 10px; padding: 0; font-size: 14px; color: var(--muted); }
+.public-landing .public-waitlist fieldset label { display: inline-flex; align-items: center; gap: 7px; font-size: 15px; }
+.public-landing .public-field { display: grid; gap: 7px; }
+.public-landing .public-field span { font-size: 14px; color: var(--muted); }
+.public-landing .public-waitlist input[type="email"],
+.public-landing .public-waitlist input[type="text"] { width: 100%; padding: 11px 13px; border: 1px solid var(--faint); border-radius: 8px; background: var(--field); color: var(--ink); font: inherit; font-size: 16px; }
+.public-landing .public-waitlist input:focus-visible { outline: 2px solid var(--selection); outline-offset: 1px; }
+.public-landing .public-waitlist button { justify-self: start; padding: 12px 22px; border: 1px solid currentColor; border-radius: 9px; background: transparent; color: inherit; font: inherit; font-size: 16px; cursor: pointer; }
+.public-landing .public-waitlist button:hover:not(:disabled) { background: var(--ink); color: var(--field); }
+.public-landing .public-waitlist button:disabled { opacity: .55; cursor: default; }
+.public-landing .public-waitlist-done { max-width: 34rem; margin-top: 32px; font-size: 18px; line-height: 1.5; }
+.public-landing .public-waitlist-error { margin: 0; font-size: 15px; color: var(--danger); }
