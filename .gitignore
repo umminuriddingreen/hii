@@ -44,3 +44,9 @@ life/
 
 # SwiftPM build output for the macOS menu bar app (macos/).
 /macos/.build/
+
+# Personal records and captured sessions — never in the product repo
+/records/
+/work/
+/pi-session-*.html
+/pi-session-*.pdf

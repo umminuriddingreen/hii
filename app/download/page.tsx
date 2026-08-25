@@ -2,21 +2,32 @@ export default function DownloadPage() {
   return (
     <main className="public-home">
       <p className="public-name">HII / Download</p>
-      <h1>HII for Mac.</h1>
+      <h1>HII for Windows.</h1>
       <p>
-        A local canvas for a person and their agents. Apple Silicon, macOS 13 or newer.
-        Download the disk image, drag HII to Applications, and open it.
+        HII is a local canvas for a person and their agents. Windows can install it today. The Mac
+        app is still closed while it waits on Apple.
       </p>
       <p>
-        HII keeps itself current after that. It checks for a new version on launch and installs
-        only when you say so, and it verifies every update against HII&rsquo;s signing key before
-        applying it.
+        <strong>Windows.</strong> Available now. Every release build produces an installer that is
+        smoke-tested from a clean machine before it counts. It is not yet code-signed, so Windows
+        will warn you once on first run.
       </p>
       <p>
-        The public download opens once Apple Developer ID signing and notarization pass. Until
-        then you can build it from source; see the installation guide.
+        <strong>Mac.</strong> Apple Silicon, macOS 13 or newer. The disk image opens to the public
+        once Apple Developer ID signing and notarization pass. Until then the Mac app is
+        build-from-source only.
       </p>
-      <nav><a href="/">Home</a><a href="/docs">Documentation</a></nav>
+      <p>
+        <strong>The <code>hii</code> command line.</strong> Released for macOS and Linux, and the
+        fastest way to see the runtime without waiting for the app. Every important operation in
+        HII works through it first.
+      </p>
+      <p>
+        Want it run against your own work instead? That is a session, and the result is yours to
+        keep. Write to{' '}
+        <a href="mailto:hello@humaninformationinterface.com">hello@humaninformationinterface.com</a>.
+      </p>
+      <nav><a href="/download/windows">Download for Windows</a><a href="/">Home</a><a href="/docs">Documentation</a></nav>
     </main>
   );
 }
