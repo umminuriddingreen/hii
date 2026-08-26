@@ -103,8 +103,8 @@ else {
 }
 
 # Rhino sets LoadMode 2 (load on demand) itself. That is what we want, and it is
-# deliberately not the same as starting the bridge: running StartHiiRhinoBridge
+# deliberately not the same as starting the bridge: running Hii
 # loads the plug-in, and only that command opens a pipe.
 Write-Host ''
-Write-Host 'In Rhino, run:  StartHiiRhinoBridge'
-Write-Host 'and to stop it: StopHiiRhinoBridge'
+Write-Host 'In Rhino, run:  Hii'
+Write-Host 'and to stop it: HiiStop'

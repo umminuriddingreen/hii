@@ -9,9 +9,9 @@
 //!
 //! ```text
 //! cargo run -p hii-rhino-ipc --example acceptance -- running
-//!     after StartHiiRhinoBridge
+//!     after Hii
 //! cargo run -p hii-rhino-ipc --example acceptance -- stopped
-//!     after StopHiiRhinoBridge
+//!     after HiiStop
 //! cargo run -p hii-rhino-ipc --example acceptance -- watch
 //!     leave it running, then close Rhino
 //! ```
@@ -990,7 +990,7 @@ fn watch() -> ExitCode {
         }
     };
 
-    println!("connected. Now run StopHiiRhinoBridge, or close or kill Rhino —");
+    println!("connected. Now run HiiStop, or close or kill Rhino —");
     println!("whenever you like. Waiting up to ten minutes, talking to the");
     println!("bridge the whole time so a request is in flight when it dies.\n");
 

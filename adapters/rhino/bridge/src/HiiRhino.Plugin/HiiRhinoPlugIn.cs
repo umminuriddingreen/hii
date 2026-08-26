@@ -74,14 +74,14 @@ public sealed class HiiRhinoPlugIn : PlugIn
         }
 
         // The bridge is not started here. Starting it is an explicit act:
-        // StartHiiRhinoBridge. A plug-in that opens a pipe merely because it was
+        // Hii. A plug-in that opens a pipe merely because it was
         // loaded is a plug-in the user did not agree to run.
         return LoadReturnCode.Success;
     }
 
     protected override void OnShutdown()
     {
-        // Rhino is closing. Same cleanup as StopHiiRhinoBridge, and bounded for
+        // Rhino is closing. Same cleanup as HiiStop, and bounded for
         // the same reason: whatever state the bridge is in, it does not get to
         // hold Rhino open.
         StopBridge();

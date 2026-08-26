@@ -11,9 +11,9 @@ namespace HiiRhino.Plugin.Commands;
 /// HII Rhino into Rhino in the first place. Explicit in both senses: nothing
 /// opens a pipe until somebody asks for it.
 /// </remarks>
-public sealed class StartHiiRhinoBridgeCommand : Command
+public sealed class HiiCommand : Command
 {
-    public override string EnglishName => "StartHiiRhinoBridge";
+    public override string EnglishName => "Hii";
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
@@ -37,9 +37,9 @@ public sealed class StartHiiRhinoBridgeCommand : Command
 /// The bridge can be started again afterwards. Stopping does not unload the
 /// plug-in and does not require restarting Rhino.
 /// </remarks>
-public sealed class StopHiiRhinoBridgeCommand : Command
+public sealed class HiiStopCommand : Command
 {
-    public override string EnglishName => "StopHiiRhinoBridge";
+    public override string EnglishName => "HiiStop";
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
