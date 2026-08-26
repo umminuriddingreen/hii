@@ -230,10 +230,12 @@ fn expect_running() -> ExitCode {
         "no grasshopper capability claimed",
     );
 
-    // Proves request routing, correlation by request id, and typed errors,
-    // without any operation existing to be called.
+    // Proves request routing, correlation by request id, and typed errors.
+    // The operation named here must stay one the bridge will never implement —
+    // an operation that later gets built turns this into a check of something
+    // else entirely, which is exactly what happened to rhino.document.describe.
     match client.request(
-        "rhino.document.describe",
+        "rhino.nothing.will.ever.implement.this",
         None,
         serde_json::Value::Null,
         None,

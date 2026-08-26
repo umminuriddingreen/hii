@@ -346,13 +346,14 @@ internal static class MutationOperations
             // than assumed. So there is nothing to report about *what* was
             // undone, and the caller must confirm the effect by reading the
             // document back. Which it should be doing regardless.
-            if (!document.UndoActive)
-            {
-                throw new OperationFailedException(
-                    ErrorCode.UndoFailed,
-                    "this document has nothing to undo");
-            }
-
+            //
+            // There is deliberately no pre-flight "is there anything to undo"
+            // guard. RhinoDoc.UndoActive reads as though it were one, but the
+            // installed SDK documents it as "Undo is currently active" and it
+            // is observably false immediately after a change this bridge just
+            // recorded — it reports that an undo is *in progress*, not that one
+            // is available. Asking Rhino to undo and reporting what it says is
+            // the only answer that is actually true.
             int before = document.Objects.Count;
             bool undone = document.Undo();
             document.Views.Redraw();
@@ -361,7 +362,7 @@ internal static class MutationOperations
             {
                 throw new OperationFailedException(
                     ErrorCode.UndoFailed,
-                    "Rhino refused to undo");
+                    "Rhino would not undo; there may be nothing left to undo");
             }
 
             return new Dictionary<string, object?>
@@ -369,7 +370,6 @@ internal static class MutationOperations
                 ["document_runtime_serial"] = document.RuntimeSerialNumber,
                 ["object_count_before"] = before,
                 ["object_count"] = document.Objects.Count,
-                ["undo_still_available"] = document.UndoActive,
             };
         }
     }
