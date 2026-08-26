@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/hii-core", "cli", "native-runner"]
+members = ["crates/hii-core", "cli", "native-runner", "adapters/rhino/protocol", "adapters/rhino/ipc"]
 exclude = ["src-tauri"]
 resolver = "2"
 
