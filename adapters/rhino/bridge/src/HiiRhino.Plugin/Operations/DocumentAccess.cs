@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Text.Json;
 using HiiRhino.Core.Hosting;
 using HiiRhino.Core.Protocol;
@@ -76,6 +77,30 @@ internal static class DocumentAccess
     public static double MillimetresPerUnit(RhinoDoc document) =>
         RhinoMath.UnitScale(document.ModelUnitSystem, UnitSystem.Millimeters);
 
+    /// <summary>
+    /// How many objects the document actually holds right now.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not <c>document.Objects.Count</c>. That count includes
+    /// objects that have been deleted but whose undo record has not been purged,
+    /// so immediately after a delete or an undo it reports the state before the
+    /// change — which is precisely when a verifier asks. Enumerating with the
+    /// same settings the read operations use keeps every count in one language.
+    /// </remarks>
+    public static int LiveObjectCount(RhinoDoc document) =>
+        document.Objects.GetObjectList(LiveObjects).Count();
+
+    /// <summary>The enumeration every count and listing in this bridge agrees on.</summary>
+    public static ObjectEnumeratorSettings LiveObjects => new()
+    {
+        IncludeLights = false,
+        IncludeGrips = false,
+        DeletedObjects = false,
+        HiddenObjects = true,
+        LockedObjects = true,
+        NormalObjects = true,
+    };
+
     public static DocumentSummary Summarise(RhinoDoc document) => new()
     {
         DocumentRuntimeSerial = document.RuntimeSerialNumber,
@@ -85,7 +110,7 @@ internal static class DocumentAccess
         MillimetresPerUnit = MillimetresPerUnit(document),
         IsActive = RhinoDoc.ActiveDoc is { } active && active.RuntimeSerialNumber == document.RuntimeSerialNumber,
         IsModified = document.Modified,
-        ObjectCount = document.Objects.Count,
+        ObjectCount = LiveObjectCount(document),
         LayerCount = document.Layers.Count,
     };
 

@@ -354,7 +354,7 @@ internal static class MutationOperations
             // recorded — it reports that an undo is *in progress*, not that one
             // is available. Asking Rhino to undo and reporting what it says is
             // the only answer that is actually true.
-            int before = document.Objects.Count;
+            int before = DocumentAccess.LiveObjectCount(document);
             bool undone = document.Undo();
             document.Views.Redraw();
 
@@ -369,7 +369,7 @@ internal static class MutationOperations
             {
                 ["document_runtime_serial"] = document.RuntimeSerialNumber,
                 ["object_count_before"] = before,
-                ["object_count"] = document.Objects.Count,
+                ["object_count"] = DocumentAccess.LiveObjectCount(document),
             };
         }
     }

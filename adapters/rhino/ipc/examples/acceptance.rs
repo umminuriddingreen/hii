@@ -273,10 +273,28 @@ fn expect_running() -> ExitCode {
         check_mutation(&mut report, &client, &advertisement, document);
     }
 
+    // This used to assert the queue was empty, which was true only while no
+    // operation existed to change anything. Checkpoints E and F make Rhino emit
+    // real events, so the honest question is no longer "were there none" but
+    // "are the ones that arrived attributable to this Rhino".
+    let leftover = client.drain_events();
+    let foreign: Vec<&str> = leftover
+        .iter()
+        .filter(|event| event.session.rhino_instance_id != advertisement.rhino_instance_id)
+        .map(|event| event.event_id.as_str())
+        .collect();
+    let kinds: Vec<String> = leftover
+        .iter()
+        .map(|event| format!("{:?}", event.kind))
+        .collect();
     report.check(
-        "C  no unsolicited events are emitted in this checkpoint",
-        client.drain_events().is_empty(),
-        "event queue empty",
+        "C  every event the bridge emitted belongs to this Rhino",
+        foreign.is_empty(),
+        if foreign.is_empty() {
+            format!("{} event(s) left after the mutation: {:?}", leftover.len(), kinds)
+        } else {
+            format!("events from another instance: {foreign:?}")
+        },
     );
 
     // G: drop the client the way a killed CLI would, then come back.
@@ -864,11 +882,23 @@ fn check_mutation(
         Value::Null,
         Some(Duration::from_secs(30)),
     ) {
-        Ok(response) => report.check(
-            "F  one undo is accepted",
-            true,
-            format!("{}", response.result),
-        ),
+        Ok(response) => {
+            report.check(
+                "F  one undo is accepted",
+                true,
+                format!("{}", response.result),
+            );
+            // The undo reports a count of its own. If that disagrees with what
+            // an independent read sees a moment later, the evidence the bridge
+            // hands back is worse than none — so hold it to the same answer.
+            let claimed = response.result.get("object_count").and_then(|v| v.as_u64());
+            let observed = object_count(client, &target);
+            report.check(
+                "F  the count the undo reports is the count anyone else can see",
+                claimed.is_some() && claimed == observed,
+                format!("undo said {claimed:?}, an independent read says {observed:?}"),
+            );
+        }
         Err(error) => report.check(
             "F  one undo is accepted",
             false,

@@ -142,17 +142,9 @@ internal static class ReadOperations
             // Normal objects only, and deleted ones excluded: a deleted object is
             // still in the table until the undo record is purged, and reporting
             // one as present would be a lie that verification would believe.
-            var settings = new ObjectEnumeratorSettings
-            {
-                IncludeLights = false,
-                IncludeGrips = false,
-                DeletedObjects = false,
-                HiddenObjects = true,
-                LockedObjects = true,
-                NormalObjects = true,
-            };
-
-            List<RhinoObject> all = document.Objects.GetObjectList(settings).ToList();
+            List<RhinoObject> all = document.Objects
+                .GetObjectList(DocumentAccess.LiveObjects)
+                .ToList();
 
             var page = new ObjectPage
             {
