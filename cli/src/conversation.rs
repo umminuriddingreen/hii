@@ -1804,10 +1804,7 @@ impl Conversation {
     }
 
     pub fn welcome(&self) {
-        crate::tui::cue("What do you want to create?");
-        if !self.public_test {
-            crate::tui::hint("/overview for the context map");
-        }
+        crate::tui::welcome(self.tools.workspace(), &self.model, self.public_test);
     }
 
     pub fn overview(&self) -> String {

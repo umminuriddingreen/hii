@@ -2558,10 +2558,12 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             continue;
         }
         let result = match slash {
-            Some(SlashCommand::Help) => Ok(if conversation.is_public_test() {
+            Some(SlashCommand::Help(all)) => Ok(if conversation.is_public_test() {
                 public_test_slash_help().to_string()
-            } else {
+            } else if all {
                 slash_help()
+            } else {
+                slash_help_compact()
             }),
             Some(SlashCommand::Compact) => conversation.compact(),
             Some(SlashCommand::Clear) => conversation.clear(),
@@ -2662,7 +2664,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 let help = if conversation.is_public_test() {
                     public_test_slash_help().to_string()
                 } else {
-                    slash_help()
+                    slash_help_compact()
                 };
                 Ok(format!("Unknown command: {command}\n\n{help}"))
             }
@@ -2690,7 +2692,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
 
 #[derive(Debug, PartialEq)]
 enum SlashCommand {
-    Help,
+    Help(bool),
     Compact,
     Clear,
     Overview,
@@ -2769,7 +2771,8 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         .unwrap_or((input, ""));
     let argument = (!rest.is_empty()).then(|| rest.to_string());
     Some(match command {
-        "/help" if argument.is_none() => SlashCommand::Help,
+        "/help" if argument.is_none() => SlashCommand::Help(false),
+        "/help" if rest == "all" => SlashCommand::Help(true),
         "/compact" if argument.is_none() => SlashCommand::Compact,
         "/clear" if argument.is_none() => SlashCommand::Clear,
         "/overview" if argument.is_none() => SlashCommand::Overview,
@@ -2892,6 +2895,11 @@ fn slash_help() -> String {
         "/thinking [mode]              off | compact | raw model stream\n",
         "/thinking [mode]              off | compact | raw display\n/reasoning [mode]             auto | off | deep model effort\n/mode [coding|general|auto|local|private|best]\n                               choose coding behavior or provider routing\n/autonomy [local-full|approval]\n                               choose local autonomy policy\n/model save                   persist the current user-determined model\n/learn [status]               show learning memory\nAuto-compact is on by default.\n",
     )
+}
+
+fn slash_help_compact() -> String {
+    "CREATE + ACT\n  Describe the outcome you want. HII can inspect, make, and verify.\n  !<command>             run a shell command directly\n  /attach <path>         add a file or image\n  /plan [prompt|off]     explore without changing anything\n\nYOUR WORK\n  /status                session, workspace, model, and usage\n  /overview              projects, context, and latest proof\n  /proof [run-id]        inspect what completed\n  /diff                   see workspace changes\n  /files                  browse and attach local files\n\nSHAPE THE SESSION\n  /model                  choose a model\n  /theme                  choose the visual signature\n  /permissions            inspect or change authority\n  /undo                   remove the last exchange\n  /new                    begin with fresh context\n  /exit                   leave HII\n\nType / to browse controls  ·  /help all for the complete reference\nWhile HII works: Enter steers  ·  Tab queues  ·  Esc stops"
+        .to_string()
 }
 
 fn public_test_slash_help() -> String {
@@ -4073,7 +4081,7 @@ fn first_command(args: &[String]) -> Option<&str> {
 fn public_test_slash_allowed(command: &SlashCommand) -> bool {
     matches!(
         command,
-        SlashCommand::Help
+        SlashCommand::Help(_)
             | SlashCommand::Compact
             | SlashCommand::Clear
             | SlashCommand::Overview

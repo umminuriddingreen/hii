@@ -420,17 +420,42 @@ pub fn overview(
     lines.join("\n")
 }
 
-pub fn hint(message: &str) {
-    println!("  {}", paint(message, &[DIM, palette().muted]));
+/// A quiet first frame for the human-facing terminal surface. It establishes
+/// place and possibility without turning startup into a dashboard.
+pub fn welcome(workspace: &Path, model: &str, public_test: bool) {
+    println!("{}", welcome_frame(workspace, model, public_test));
     println!();
+}
+
+pub(crate) fn welcome_frame(workspace: &Path, model: &str, public_test: bool) -> String {
+    let brand = format!(
+        "{}  {}",
+        paint("HII", &[BOLD, palette().primary]),
+        paint("HUMAN INFORMATION INTERFACE", &[DIM, palette().muted])
+    );
+    let location = paint(
+        &format!("{}  ·  {}", short_path(workspace), model),
+        &[DIM, palette().muted],
+    );
+    let question = paint("What do you want to make, understand, or change?", &[BOLD]);
+    let guidance = paint(
+        if public_test {
+            "Type naturally  ·  / for controls"
+        } else {
+            "Type naturally  ·  / for controls  ·  /overview for context"
+        },
+        &[DIM, palette().muted],
+    );
+    format!("{brand}\n{location}\n\n{question}\n{guidance}")
 }
 
 pub fn prompt_frame(_frame: usize) -> String {
     let width = terminal_width().saturating_sub(4);
-    let rule = "─".repeat(width.saturating_sub(2));
+    let label = " INTENT ";
+    let rule = "─".repeat(width.saturating_sub(label.chars().count() + 2));
     format!(
         "  {}\r\n  {} ",
-        paint(&format!("╭─{rule}╮"), &[DIM, palette().primary]),
+        paint(&format!("╭─{label}{rule}╮"), &[DIM, palette().primary]),
         paint("│", &[BOLD, palette().primary])
     )
 }
@@ -672,11 +697,6 @@ pub fn system(message: &str) {
     println!();
 }
 
-pub fn cue(message: &str) {
-    println!("  {}", paint(message, &[BOLD]));
-    println!();
-}
-
 pub fn error(message: &str) {
     println!();
     let label = if message.starts_with("Response interrupted") {
@@ -692,7 +712,7 @@ pub fn error(message: &str) {
 mod tests {
     use super::{
         command_matches, command_menu, composer_window, overview, prompt_frame, short_path,
-        theme_choices, truncate, workspace_state, Theme,
+        theme_choices, truncate, welcome_frame, workspace_state, Theme,
     };
     use std::path::Path;
 
@@ -790,6 +810,15 @@ mod tests {
         assert_eq!(prompt_frame(0), prompt_frame(99));
         assert!(!prompt_frame(0).contains("STEER MODEL"));
         assert!(!super::prompt_footer().contains("Enter steer"));
+    }
+
+    #[test]
+    fn welcome_is_compact_and_oriented_around_human_intent() {
+        let rendered = welcome_frame(Path::new("/tmp/studio"), "local-model", false);
+        assert!(rendered.contains("HUMAN INFORMATION INTERFACE"));
+        assert!(rendered.contains("make, understand, or change"));
+        assert!(rendered.contains("/overview for context"));
+        assert_eq!(rendered.lines().count(), 5);
     }
 
     #[test]
