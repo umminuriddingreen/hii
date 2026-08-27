@@ -117,16 +117,16 @@ fn project_systems(
         // Enrollment proves identity, not liveness or executor readiness.
         insert(
             resources,
-            resource(
-                id.clone(),
-                ResourceKind::Device,
-                id.clone(),
+            resource(ResourceSpec {
+                id: id.clone(),
+                kind: ResourceKind::Device,
+                name: id.clone(),
                 detail,
-                ResourceStatus::Unknown,
-                Some(id.clone()),
-                None,
-                format!("hii-runtime://systems/{id}"),
-            ),
+                status: ResourceStatus::Unknown,
+                node_id: Some(id.clone()),
+                updated_at: None,
+                source_ref: format!("hii-runtime://systems/{id}"),
+            }),
         );
     }
 }
@@ -150,16 +150,16 @@ fn project_captures(
         };
         insert(
             resources,
-            resource(
-                id.clone(),
-                ResourceKind::Artifact,
+            resource(ResourceSpec {
+                id: id.clone(),
+                kind: ResourceKind::Artifact,
                 name,
-                Some("Captured browser artifact".to_string()),
-                ResourceStatus::Ready,
-                None,
-                clean_timestamp(object.get("createdAt")),
-                format!("hii-runtime://ecosystem/captures/{id}"),
-            ),
+                detail: Some("Captured browser artifact".to_string()),
+                status: ResourceStatus::Ready,
+                node_id: None,
+                updated_at: clean_timestamp(object.get("createdAt")),
+                source_ref: format!("hii-runtime://ecosystem/captures/{id}"),
+            }),
         );
     }
 }
@@ -182,16 +182,16 @@ fn project_workflows(
             continue;
         };
         let revision = object.get("revision").and_then(Value::as_u64).unwrap_or(0);
-        let next = resource(
-            id.clone(),
-            ResourceKind::Capability,
+        let next = resource(ResourceSpec {
+            id: id.clone(),
+            kind: ResourceKind::Capability,
             name,
-            (revision > 0).then(|| format!("Saved workflow · revision {revision}")),
-            ResourceStatus::Ready,
-            None,
-            clean_timestamp(object.get("updatedAt")),
-            format!("hii-runtime://ecosystem/workflows/{id}"),
-        );
+            detail: (revision > 0).then(|| format!("Saved workflow · revision {revision}")),
+            status: ResourceStatus::Ready,
+            node_id: None,
+            updated_at: clean_timestamp(object.get("updatedAt")),
+            source_ref: format!("hii-runtime://ecosystem/workflows/{id}"),
+        });
         let key = (ResourceKind::Capability, id);
         let replace = resources
             .get(&key)
@@ -235,16 +235,16 @@ fn project_events(
         };
         let summary = clean_text(event.get("summary"), 240)
             .unwrap_or_else(|| format!("{} {id}", kind_label(kind)));
-        let next = resource(
-            id.clone(),
+        let next = resource(ResourceSpec {
+            id: id.clone(),
             kind,
-            summary,
-            Some("Durable ecosystem event reference".to_string()),
+            name: summary,
+            detail: Some("Durable ecosystem event reference".to_string()),
             status,
-            None,
-            clean_timestamp(event.get("createdAt")),
-            format!("hii-runtime://ecosystem/{}/{id}", kind_label(kind)),
-        );
+            node_id: None,
+            updated_at: clean_timestamp(event.get("createdAt")),
+            source_ref: format!("hii-runtime://ecosystem/{}/{id}", kind_label(kind)),
+        });
         let key = (kind, id);
         let replace = resources
             .get(&key)
@@ -256,7 +256,7 @@ fn project_events(
     }
 }
 
-fn resource(
+struct ResourceSpec {
     id: String,
     kind: ResourceKind,
     name: String,
@@ -265,21 +265,23 @@ fn resource(
     node_id: Option<String>,
     updated_at: Option<String>,
     source_ref: String,
-) -> EcosystemResource {
+}
+
+fn resource(spec: ResourceSpec) -> EcosystemResource {
     EcosystemResource {
         object_ref: ObjectRef {
             authority: "hii-runtime",
-            id: id.clone(),
-            kind,
+            id: spec.id.clone(),
+            kind: spec.kind,
         },
-        id,
-        kind,
-        name,
-        detail,
-        status,
-        node_id,
-        updated_at,
-        source_ref,
+        id: spec.id,
+        kind: spec.kind,
+        name: spec.name,
+        detail: spec.detail,
+        status: spec.status,
+        node_id: spec.node_id,
+        updated_at: spec.updated_at,
+        source_ref: spec.source_ref,
     }
 }
 
