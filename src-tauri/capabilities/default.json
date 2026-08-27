@@ -14,5 +14,13 @@
     "core:webview:allow-webview-show",
     "updater:default",
     "process:allow-restart"
-  ]
+  ],
+  "remote": {
+    "urls": [
+      "hiiui://localhost/*",
+      "http://hiiui.localhost/*",
+      "http://127.0.0.1:*",
+      "http://localhost:*"
+    ]
+  }
 }

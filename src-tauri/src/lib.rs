@@ -18,6 +18,7 @@ use std::{
 use tauri::{Emitter, Manager};
 
 mod browser;
+mod ui_channel;
 
 /// Name of the CLI executable staged into the bundle by `scripts/hii-tauri-build.mjs`.
 #[cfg(windows)]
@@ -129,7 +130,9 @@ fn hii_binary(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         candidates.push(home.join("hii/target/release").join(CLI_BINARY_NAME));
     }
     candidates.push(PathBuf::from("/opt/homebrew/bin").join(CLI_BINARY_NAME));
-    let current_executable = env::current_exe().ok().and_then(|path| path.canonicalize().ok());
+    let current_executable = env::current_exe()
+        .ok()
+        .and_then(|path| path.canonicalize().ok());
     candidates.into_iter().find(|path| {
         if !path.is_file() {
             return false;
@@ -583,6 +586,36 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(AgentProcesses::default())
+        .manage(ui_channel::ActiveBundle::default())
+        // Serves an installed interface bundle out of ~/.hii/ui/bundles/<version>.
+        .register_uri_scheme_protocol("hiiui", |ctx, request| {
+            let active = ctx.app_handle().state::<ui_channel::ActiveBundle>().get();
+            let path = request.uri().path().to_string();
+            let resolved = active
+                .as_deref()
+                .and_then(|root| ui_channel::resolve_asset(root, &path));
+            match resolved.and_then(|file| fs::read(&file).ok().map(|body| (file, body))) {
+                Some((file, body)) => tauri::http::Response::builder()
+                    .header("content-type", ui_channel::content_type(&file))
+                    .header("cache-control", "no-store")
+                    .body(body)
+                    .unwrap_or_else(|_| {
+                        tauri::http::Response::builder()
+                            .status(500)
+                            .body(Vec::new())
+                            .expect("static error response")
+                    }),
+                None => tauri::http::Response::builder()
+                    .status(404)
+                    .body(Vec::new())
+                    .expect("static error response"),
+            }
+        })
+        .setup(|app| {
+            ui_channel::apply_startup(&app.handle().clone());
+            ui_channel::spawn_poller(app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             workspace_read,
             workspace_write,
@@ -601,7 +634,13 @@ pub fn run() {
             link_contact_card,
             link_open_handoff,
             browser::browser_navigate,
-            browser::browser_action
+            browser::browser_action,
+            ui_channel::ui_channel_status,
+            ui_channel::ui_channel_set_live,
+            ui_channel::ui_channel_configure,
+            ui_channel::ui_channel_check,
+            ui_channel::ui_channel_apply,
+            ui_channel::ui_channel_versions
         ])
         .build(tauri::generate_context!())
         .expect("error while building HII desktop interface");
