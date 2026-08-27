@@ -1,0 +1,76 @@
+schemaVersion: 1
+kind: hii.product.feature-registry
+products: [harness, space, network]
+classifications: [object_type, view, capability, network_service, runtime_invariant]
+statuses: [now, next, later, experimental, superseded]
+
+features:
+  - { id: runtime.object-graph, name: Object graph, classification: runtime_invariant, product: harness, status: now }
+  - { id: runtime.event-history, name: Event history and replay, classification: runtime_invariant, product: space, status: now }
+  - { id: runtime.authority, name: Identity and bounded grants, classification: runtime_invariant, product: harness, status: now }
+  - { id: runtime.provenance, name: Sources provenance and lineage, classification: runtime_invariant, product: space, status: now }
+  - { id: runtime.verification, name: Independent verification and receipts, classification: runtime_invariant, product: harness, status: now }
+  - { id: runtime.portability, name: Import export and derived-data deletion, classification: runtime_invariant, product: space, status: now }
+  - { id: runtime.capability-formation, name: Promote repeated verified work, classification: runtime_invariant, product: harness, status: next }
+
+  - { id: space.canvas, name: Infinite spatial canvas, classification: view, product: space, status: now }
+  - { id: space.cli, name: CLI and textual projection, classification: view, product: space, status: now }
+  - { id: space.terminal, name: Agent and shell terminal object, classification: object_type, product: space, status: now }
+  - { id: space.drawing, name: Drawing and annotation, classification: view, product: space, status: now }
+  - { id: space.browser, name: Browser and web-object view, classification: view, product: space, status: next }
+  - { id: space.mobile, name: Mobile Space client, classification: view, product: space, status: later }
+  - { id: space.evoked-interfaces, name: Contextual evoked interfaces, classification: view, product: space, status: next }
+  - { id: space.orientation, name: Space privacy activity and navigation orientation, classification: view, product: space, status: now }
+  - { id: space.board, name: Board arrangement, classification: view, product: space, status: next }
+  - { id: space.feed, name: Shared-object feed, classification: view, product: network, status: later }
+  - { id: space.watch, name: Video knowledge view, classification: view, product: space, status: later }
+  - { id: space.work, name: Tasks runs and proof view, classification: view, product: space, status: now }
+  - { id: space.interform, name: Architecture and design view, classification: view, product: space, status: later }
+
+  - { id: object.universal-save, name: Universal Save, classification: capability, product: harness, status: next }
+  - { id: object.message, name: Message and correspondence, classification: object_type, product: space, status: next }
+  - { id: object.decision, name: Reviewed decision lifecycle, classification: object_type, product: space, status: next }
+  - { id: object.web-page, name: Source-linked webpage, classification: object_type, product: space, status: next }
+  - { id: object.geometry, name: Geometry and CAD artifact, classification: object_type, product: space, status: later }
+  - { id: object.application, name: Generated application artifact, classification: object_type, product: space, status: experimental }
+
+  - { id: harness.context-pack, name: Previewable minimal context packs, classification: capability, product: harness, status: now }
+  - { id: harness.memory, name: Source-linked retrieval and project memory, classification: capability, product: harness, status: now }
+  - { id: harness.browser-research, name: Verified browser research, classification: capability, product: harness, status: next }
+  - { id: harness.mail-import, name: Mail importer and actions, classification: capability, product: harness, status: later }
+  - { id: harness.rhino, name: Rhino and Grasshopper adapter, classification: capability, product: harness, status: next }
+  - { id: harness.form-compiler, name: Image-to-3D generation and cleanup, classification: capability, product: harness, status: later }
+  - { id: harness.foundry, name: Verified software-production workflow, classification: capability, product: harness, status: later }
+  - { id: harness.teach-hii, name: Correction examples and preference learning, classification: capability, product: harness, status: later }
+  - { id: harness.personal-operations, name: Personal operational intelligence, classification: capability, product: harness, status: later }
+
+  - { id: network.identity, name: Human device agent service and Space identity, classification: network_service, product: network, status: now }
+  - { id: network.live-reference, name: Revocable live object reference, classification: network_service, product: network, status: now }
+  - { id: network.snapshot-fork-export, name: Snapshot fork and export, classification: network_service, product: network, status: now }
+  - { id: network.direct-relay, name: Direct connection with encrypted relay fallback, classification: network_service, product: network, status: now }
+  - { id: network.messages, name: DMs and permissioned object streams, classification: network_service, product: network, status: later }
+  - { id: network.physical-space, name: QR and place-linked Spaces, classification: network_service, product: network, status: later }
+  - { id: network.publication, name: Public links discovery and creator pages, classification: network_service, product: network, status: later }
+  - { id: network.marketplace, name: Capability and artifact marketplace, classification: network_service, product: network, status: later }
+  - { id: network.lrx, name: Local Resource Exchange, classification: network_service, product: network, status: later }
+  - { id: network.fabrication, name: Fabrication and fulfillment network, classification: network_service, product: network, status: later }
+  - { id: network.commerce, name: Licensing payments and commerce, classification: network_service, product: network, status: later }
+
+  - id: legacy.aii-product
+    name: AII as a separate product
+    classification: capability
+    product: harness
+    status: superseded
+    supersedes: internal Harness orchestration only
+  - id: legacy.hii-owned-space
+    name: Company-owned user context graph
+    classification: runtime_invariant
+    product: space
+    status: superseded
+    supersedes: user-owned Spaces and objects
+  - id: legacy.tailscale-network
+    name: Tailscale or SSH as the HII Network
+    classification: network_service
+    product: network
+    status: superseded
+    supersedes: development and recovery transport only

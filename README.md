@@ -1,9 +1,13 @@
 # HII — Human Information Interface
 
-HII is one user-owned inference surface for systems and data across all of the
-user's devices and networks. It lets people point at, select, speak to, type to,
-arrange, and act on their digital world as durable objects while a local-first
-control plane keeps the work bounded, reviewable, proved, and reusable.
+HII consists of a model-and-tool-neutral Harness, a persistent user-owned
+Space, and a permissioned Network connecting Spaces and objects. All three
+operate through one local-first Object and Event protocol that preserves
+authority, provenance, verification, portability, and user ownership.
+
+The Harness understands and acts. Space stores, presents, and lets people
+manipulate state. The Network moves only explicitly authorized state. The
+Runtime/Protocol keeps those products in one coherent world.
 
 HII is not another AI chat UI and it is not an autonomous system that silently
 owns the user's state. The user owns the workspace and final decisions. Agents
@@ -26,6 +30,8 @@ human intent
 ```
 
 Read [the HII master context](docs/HII_AII_MASTER_CONTEXT.md) and
+[the HII constitution](docs/HII_CONSTITUTION.md),
+[the classified feature registry](docs/HII_FEATURE_REGISTRY.yaml),
 [the cross-chat HII synthesis](docs/records/2026-08-18-cross-chat-hii-synthesis.md),
 then [ADR 004: CLI-First HII Runtime](docs/decisions/004-cli-first-hii-runtime.md)
 and [ADR 005: One Surface over the User's Systems and Data](docs/decisions/005-one-surface-machine-fabric.md)
