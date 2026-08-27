@@ -8,7 +8,7 @@ use std::{
     env, fs,
     io::{self, IsTerminal},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU8, Ordering},
+    sync::atomic::{AtomicU8, AtomicUsize, Ordering},
 };
 
 const RESET: &str = "\x1b[0m";
@@ -54,6 +54,7 @@ const MONO: Palette = Palette {
 };
 
 static ACTIVE_THEME: AtomicU8 = AtomicU8::new(Theme::Heritage as u8);
+static ACTIVITY_ROWS: AtomicUsize = AtomicUsize::new(0);
 
 const COMMANDS: &[(&str, &str)] = &[
     ("/help", "all controls"),
@@ -633,7 +634,18 @@ pub fn idle_background() {
 }
 
 pub fn stage(label: &str, message: &str) {
-    let _ = (label, message);
+    activity_line(&format!(
+        "{}  {}",
+        paint("◐", &[palette().primary]),
+        paint(
+            &format!(
+                "{}  {}",
+                label.to_ascii_lowercase(),
+                truncate(message, terminal_width().saturating_sub(22))
+            ),
+            &[DIM, palette().muted]
+        )
+    ));
 }
 
 pub fn model_text(message: &str) {
@@ -641,11 +653,71 @@ pub fn model_text(message: &str) {
 }
 
 pub fn tool_start(step: usize, tool: &str, target: &str) {
-    let _ = (step, tool, target);
+    activity_line(&format!(
+        "{}  {}  {}",
+        paint("◇", &[palette().secondary]),
+        paint(&format!("{step:02} {tool}"), &[BOLD]),
+        paint(
+            &truncate(target, terminal_width().saturating_sub(30)),
+            &[DIM, palette().muted]
+        )
+    ));
 }
 
 pub fn tool_result(ok: bool, verification: bool) {
-    let _ = (ok, verification);
+    let (mark, label, color) = if !ok {
+        ("×", "tool failed", palette().error)
+    } else if verification {
+        ("✓", "verified", palette().primary)
+    } else {
+        ("✓", "complete", palette().primary)
+    };
+    activity_line(&format!(
+        "{}  {}",
+        paint(mark, &[BOLD, color]),
+        paint(label, &[DIM, palette().muted])
+    ));
+}
+
+pub fn model_activity(frame: usize, phase: &str, detail: Option<&str>) -> String {
+    const FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
+    let phase = match phase {
+        "thinking" => "Thinking",
+        "reviewing" => "Reviewing",
+        "side chat" => "Considering",
+        "compacting" => "Compacting",
+        "learning" => "Learning",
+        other => other,
+    };
+    let detail = detail
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| format!("  {}", truncate(value, terminal_width().saturating_sub(24))))
+        .unwrap_or_default();
+    format!(
+        "  {}  {}{}",
+        paint(FRAMES[frame % FRAMES.len()], &[BOLD, palette().primary]),
+        paint(phase, &[BOLD]),
+        paint(&detail, &[DIM, palette().muted])
+    )
+}
+
+fn activity_line(line: &str) {
+    println!("{line}");
+    ACTIVITY_ROWS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn finish_activity() {
+    let rows = ACTIVITY_ROWS.swap(0, Ordering::Relaxed);
+    if rows == 0 || !io::stdout().is_terminal() {
+        return;
+    }
+    print!("{}", clear_activity_sequence(rows));
+    let _ = std::io::Write::flush(&mut io::stdout());
+}
+
+fn clear_activity_sequence(rows: usize) -> String {
+    "\x1b[1A\r\x1b[2K".repeat(rows)
 }
 
 pub fn tool_failure_detail(output: &str) {
@@ -664,23 +736,23 @@ pub fn tool_failure_detail(output: &str) {
         }
     }
     for line in shown {
-        println!(
+        activity_line(&format!(
             "  {} {}",
             paint("│", &[DIM, palette().error]),
             paint(&line, &[palette().error])
-        );
+        ));
     }
 }
 
 pub fn recovery(message: &str) {
-    println!(
+    activity_line(&format!(
         "  {}  {}",
         paint("REPAIR STALLED", &[BOLD, palette().warning]),
         paint(
             &truncate(message, terminal_width().saturating_sub(20)),
             &[palette().warning]
         )
-    );
+    ));
 }
 
 pub fn reply(message: &str, activity: Option<&str>) {
@@ -698,6 +770,7 @@ pub fn system(message: &str) {
 }
 
 pub fn error(message: &str) {
+    finish_activity();
     println!();
     let label = if message.starts_with("Response interrupted") {
         "! INTERRUPTED"
@@ -711,8 +784,9 @@ pub fn error(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        command_matches, command_menu, composer_window, overview, prompt_frame, short_path,
-        theme_choices, truncate, welcome_frame, workspace_state, Theme,
+        clear_activity_sequence, command_matches, command_menu, composer_window, model_activity,
+        overview, prompt_frame, short_path, terminal_width, theme_choices, truncate, welcome_frame,
+        workspace_state, Theme,
     };
     use std::path::Path;
 
@@ -819,6 +893,23 @@ mod tests {
         assert!(rendered.contains("make, understand, or change"));
         assert!(rendered.contains("/overview for context"));
         assert_eq!(rendered.lines().count(), 5);
+    }
+
+    #[test]
+    fn model_activity_has_motion_phase_and_bounded_detail() {
+        let first = model_activity(0, "thinking", Some(&"detail ".repeat(80)));
+        let second = model_activity(1, "thinking", None);
+        assert!(first.contains("Thinking"));
+        assert!(first.contains("detail"));
+        assert_ne!(first, second);
+        assert!(first.chars().count() <= terminal_width() + 10);
+    }
+
+    #[test]
+    fn collapsed_activity_clears_exactly_the_rows_it_owned() {
+        assert_eq!(clear_activity_sequence(0), "");
+        assert_eq!(clear_activity_sequence(2).matches("\x1b[1A").count(), 2);
+        assert_eq!(clear_activity_sequence(2).matches("\x1b[2K").count(), 2);
     }
 
     #[test]

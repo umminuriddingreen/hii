@@ -2680,11 +2680,15 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 } else {
                     reply
                 };
+                tui::finish_activity();
                 if !reply.trim().is_empty() {
                     tui::reply(&reply, None);
                 }
             }
-            Err(error) => tui::error(&error),
+            Err(error) => {
+                tui::finish_activity();
+                tui::error(&error)
+            }
         }
     }
     Ok(ExitCode::SUCCESS)

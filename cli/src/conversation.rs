@@ -118,6 +118,15 @@ impl VisibleReasoning {
     }
 }
 
+fn activity_excerpt(value: &str) -> String {
+    let compact = redact_text(value)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let length = compact.chars().count();
+    compact.chars().skip(length.saturating_sub(120)).collect()
+}
+
 impl SessionUsage {
     fn record(&mut self, usage: &ChatUsage) {
         self.calls += 1;
@@ -2524,8 +2533,17 @@ impl Conversation {
         let mut reasoning_started = false;
         let mut live_input = crate::keyboard::LiveInput::enter(self.keymap.clone())?;
         let interactive = io::stdout().is_terminal();
+        let raw_activity = matches!(self.thinking_mode, ThinkingMode::Raw);
+        let compact_activity = matches!(self.thinking_mode, ThinkingMode::Compact);
         let mut content_started = false;
         let mut reasoning_chars = 0usize;
+        let mut activity_frame = 0usize;
+        let mut thinking_excerpt = String::new();
+        if interactive && !raw_activity {
+            if let Some(input) = live_input.as_mut() {
+                input.replace_stream_line(&crate::tui::model_activity(0, phase, None))?;
+            }
+        }
         loop {
             if let Some(input) = live_input.as_mut() {
                 if let Some(event) = input.poll()? {
@@ -2590,7 +2608,17 @@ impl Conversation {
                         self.cancel.cancel(CancelReason::Client);
                         return Err(REASONING_BUDGET_RETRY.into());
                     }
-                    if interactive && matches!(self.thinking_mode, ThinkingMode::Raw) {
+                    if compact_activity {
+                        thinking_excerpt.push_str(&delta);
+                        thinking_excerpt = activity_excerpt(&thinking_excerpt);
+                        if let Some(input) = live_input.as_mut() {
+                            input.replace_stream_line(&crate::tui::model_activity(
+                                activity_frame,
+                                phase,
+                                Some(&thinking_excerpt),
+                            ))?;
+                        }
+                    } else if interactive && raw_activity {
                         for line in reasoning.push(&delta) {
                             if let Some(input) = live_input.as_mut() {
                                 input.write_stream(&format!("{line}\n"))?;
@@ -2603,19 +2631,34 @@ impl Conversation {
                 }
                 Ok(ChatStreamEvent::Content(delta)) => {
                     if interactive && show_content {
-                        self.last_reply_streamed = true;
                         content_started = true;
-                        if let Some(input) = live_input.as_mut() {
-                            input.write_stream(&delta)?;
+                        if raw_activity {
+                            self.last_reply_streamed = true;
+                            if let Some(input) = live_input.as_mut() {
+                                input.write_stream(&delta)?;
+                            } else {
+                                print!("{delta}");
+                                let _ = io::stdout().flush();
+                            }
+                        } else if let Some(input) = live_input.as_mut() {
+                            let detail = if phase == "thinking" {
+                                "Preparing the next action"
+                            } else {
+                                "Composing the response"
+                            };
+                            input.replace_stream_line(&crate::tui::model_activity(
+                                activity_frame,
+                                phase,
+                                Some(detail),
+                            ))?;
                         } else {
-                            print!("{delta}");
-                            let _ = io::stdout().flush();
+                            let _ = delta;
                         }
                     }
                 }
                 Ok(ChatStreamEvent::Done(result)) => {
                     if interactive {
-                        if matches!(self.thinking_mode, ThinkingMode::Raw) {
+                        if raw_activity {
                             if let Some(line) = reasoning.finish() {
                                 if let Some(input) = live_input.as_mut() {
                                     input.write_stream(&format!("{line}\n"))?;
@@ -2663,7 +2706,19 @@ impl Conversation {
                     return Ok(result);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    let _ = (&started, &phase, &model);
+                    if interactive && !raw_activity {
+                        activity_frame = activity_frame.wrapping_add(1);
+                        if let Some(input) = live_input.as_mut() {
+                            let detail = compact_activity
+                                .then_some(thinking_excerpt.as_str())
+                                .filter(|value| !value.is_empty());
+                            input.replace_stream_line(&crate::tui::model_activity(
+                                activity_frame,
+                                phase,
+                                detail,
+                            ))?;
+                        }
+                    }
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     if interactive {
@@ -3568,12 +3623,12 @@ mod tests {
     }
 
     use super::{
-        advisor_suggestion, authority_decision, clean_final_output, conversation_prompt,
-        mode_choices, needs_verification, observation_signature, plain_message, plan_tool_allowed,
-        public_test_sensitive_shell, render_permissions, resumable_messages, session_authority,
-        session_goal, session_plan_mode, session_title, shell_command_is_observation_only,
-        shell_command_is_preview, shell_command_is_read_only, side_context,
-        verification_required_message, Conversation, ReasoningMode, REASONING_MODES,
+        activity_excerpt, advisor_suggestion, authority_decision, clean_final_output,
+        conversation_prompt, mode_choices, needs_verification, observation_signature,
+        plain_message, plan_tool_allowed, public_test_sensitive_shell, render_permissions,
+        resumable_messages, session_authority, session_goal, session_plan_mode, session_title,
+        shell_command_is_observation_only, shell_command_is_preview, shell_command_is_read_only,
+        side_context, verification_required_message, Conversation, ReasoningMode, REASONING_MODES,
         THINKING_MODES,
     };
     use crate::contract::{Authority, Decision};
@@ -3583,6 +3638,17 @@ mod tests {
     fn final_output_does_not_repeat_streamed_content_or_append_workspace_noise() {
         assert_eq!(clean_final_output("Hello, Ummi.\n", true), "");
         assert_eq!(clean_final_output("Hello, Ummi.\n", false), "Hello, Ummi.");
+    }
+
+    #[test]
+    fn compact_activity_excerpt_is_redacted_single_line_and_bounded() {
+        let excerpt = activity_excerpt(&format!(
+            "first line\nsecond line sk-test-{}",
+            "x".repeat(180)
+        ));
+        assert!(!excerpt.contains('\n'));
+        assert!(!excerpt.contains("sk-test"));
+        assert!(excerpt.chars().count() <= 120);
     }
 
     #[test]

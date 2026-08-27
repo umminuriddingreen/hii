@@ -170,6 +170,16 @@ impl LiveInput {
             .map_err(|e| format!("failed to flush model stream: {e}"))
     }
 
+    /// Replace the single transient activity row above the live composer.
+    /// Keeping this to one row lets the final response erase it cleanly.
+    pub fn replace_stream_line(&mut self, line: &str) -> Result<()> {
+        let mut out = io::stdout();
+        write!(out, "\r\x1b[2K{line}")
+            .map_err(|e| format!("failed to update model activity: {e}"))?;
+        out.flush()
+            .map_err(|e| format!("failed to flush model activity: {e}"))
+    }
+
     fn redraw_composer(&self) -> Result<()> {
         let mut out = io::stdout();
         let (visible, column) =
