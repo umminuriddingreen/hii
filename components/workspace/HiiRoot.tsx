@@ -357,6 +357,30 @@ function CanvasEditor({
   );
 }
 
+/**
+ * A stored document on the canvas. PDFs render in the webview's own viewer,
+ * which scrolls page to page inside the node instead of showing a metadata card.
+ */
+function DocumentBody({ url, name, kind }: { url: string; name: string; kind: string }) {
+  const [failed, setFailed] = useState(false);
+  const isPdf = kind === 'pdf' || /\.pdf(\?|#|$)/i.test(url);
+
+  if (isPdf && !failed) {
+    return (
+      <object className="hii-node-document" data={url} type="application/pdf" aria-label={name}>
+        {/* Rendered only when the webview declines to embed the PDF itself. */}
+        <iframe className="hii-node-document" src={url} title={name} onError={() => setFailed(true)} />
+      </object>
+    );
+  }
+  return (
+    <div className="hii-node-document-fallback">
+      <strong>{name}</strong>
+      <a href={url} target="_blank" rel="noreferrer">Open document</a>
+    </div>
+  );
+}
+
 function NodeBody({
   node,
   autoFocus,
@@ -402,6 +426,7 @@ function NodeBody({
   if (node.type === 'ink') return <InkBody node={node} />;
   if (node.type === 'image' && payload.sticker === true) return <div className="hii-sticker" role="img" aria-label={name}>{text(payload.emoji) || '✦'}</div>;
   if (node.type === 'image' && url) return <img className="hii-node-image" src={url} alt={name} draggable={false} />;
+  if (node.type === 'document' && url) return <DocumentBody url={url} name={name} kind={text(payload.kind)} />;
   if (node.type === 'media' && url) {
     return payload.kind === 'audio'
       ? <audio className="hii-node-video" src={url} controls />
