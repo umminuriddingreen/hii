@@ -327,6 +327,9 @@ fn set_directory_mode(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Symlink creation is unprivileged only on unix; the tests that use it
+    // check a unix-specific escape, so they compile only where it exists.
+    #[cfg(unix)]
     use std::os::unix::fs::symlink;
 
     fn runtime() -> PathBuf {
@@ -367,6 +370,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn symlinked_config_is_rejected() {
         let root = runtime();
         let config = root.join("config");

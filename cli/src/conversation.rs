@@ -1482,7 +1482,11 @@ impl Conversation {
     }
 
     pub fn attach(&mut self, path: &str) -> Result<String, String> {
-        let result = self.attachments.add(path)?;
+        // `import` handles both cases: a workspace-relative path attaches
+        // directly, an absolute one is copied in first. Dropping a file onto
+        // the composer produces the second, and it is the ordinary way people
+        // hand a reference image to a model.
+        let result = self.attachments.import(path)?;
         self.store.event(
             "attachment.added",
             json!({

@@ -9,6 +9,9 @@ const MAX_TEXT_BYTES: usize = 256 * 1024;
 const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 const MAX_TOTAL_BYTES: usize = 20 * 1024 * 1024;
 
+/// Where files dropped from outside the workspace are copied to.
+const IMPORT_DIR: &str = "attachments";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ImagePayload {
     pub mime_type: String,
@@ -111,6 +114,76 @@ impl AttachmentQueue {
             relative.display(),
             self.summary()
         ))
+    }
+
+    /// Bring a file from outside the workspace in, then attach the copy.
+    ///
+    /// Dragging an image onto the composer is the ordinary way people hand a
+    /// reference to a model, and the path that arrives is absolute and lives
+    /// wherever the user keeps their files. [`Self::add`] refuses that by
+    /// design, and relaxing it would be the wrong repair: the workspace is what
+    /// makes an attachment reproducible, auditable, and safe to re-read later.
+    ///
+    /// So the file is copied in and the copy is attached through exactly the
+    /// same guards as anything else. The receipt then names something that
+    /// still exists when someone comes back to check, instead of a path on a
+    /// machine that has since moved on.
+    pub fn import(&mut self, raw_path: &str) -> Result<String, String> {
+        let trimmed = unquote(raw_path);
+        if trimmed.is_empty() {
+            return Err("usage: /attach <path>".into());
+        }
+        let source = Path::new(trimmed);
+
+        // Already inside? Then this is an ordinary attach and copying it would
+        // just litter the workspace with duplicates.
+        if let Ok(relative) = source.strip_prefix(&self.workspace) {
+            return self.add(&relative.to_string_lossy());
+        }
+        if !source.is_absolute() {
+            return self.add(trimmed);
+        }
+
+        let metadata = fs::symlink_metadata(source)
+            .map_err(|error| format!("cannot open {trimmed}: {error}"))?;
+        if metadata.file_type().is_symlink() {
+            return Err("symlink attachments are not allowed".into());
+        }
+        if !metadata.is_file() {
+            return Err("attachment must be a regular file".into());
+        }
+
+        let name = source
+            .file_name()
+            .map(|part| part.to_string_lossy().to_string())
+            .ok_or_else(|| "that path names no file".to_string())?;
+        if is_secret_name(&name) || (self.public_test && name.starts_with('.')) {
+            return Err("private, hidden, and secret-bearing files cannot be attached".into());
+        }
+
+        // Refuse before copying rather than after. Writing ten megabytes into
+        // the workspace only to reject it on the next line would leave the
+        // user's directory dirtier than they found it.
+        let ceiling = if is_image_name(&name) {
+            MAX_IMAGE_BYTES
+        } else {
+            MAX_TEXT_BYTES
+        };
+        if metadata.len() > ceiling as u64 {
+            return Err(format!(
+                "{name} is too large ({} MiB max)",
+                ceiling / 1024 / 1024
+            ));
+        }
+
+        let directory = self.workspace.join(IMPORT_DIR);
+        fs::create_dir_all(&directory)
+            .map_err(|error| format!("cannot create {IMPORT_DIR}: {error}"))?;
+        let target = unique_name(&directory, &sanitise(&name));
+        fs::copy(source, directory.join(&target))
+            .map_err(|error| format!("cannot copy {name} into the workspace: {error}"))?;
+
+        self.add(&format!("{IMPORT_DIR}/{target}"))
     }
 
     pub fn remove(&mut self, requested: Option<&str>) -> Result<String, String> {
@@ -240,6 +313,84 @@ impl AttachmentQueue {
     }
 }
 
+/// Strip the quotes a terminal adds when a file is dropped onto it.
+///
+/// Windows quotes any dropped path; most shells quote one containing a space.
+/// The quotes are an artefact of the transport, not part of the name.
+fn unquote(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    let unquoted = trimmed
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .or_else(|| {
+            trimmed
+                .strip_prefix('\'')
+                .and_then(|rest| rest.strip_suffix('\''))
+        });
+    unquoted.unwrap_or(trimmed)
+}
+
+/// Does this path look like a file the composer should offer to attach?
+///
+/// Used to decide whether a pasted line is a dropped file rather than prose.
+/// Deliberately conservative: it must already exist as a regular file, so a
+/// sentence that happens to look path-shaped is left alone as text.
+pub fn looks_like_dropped_file(line: &str) -> Option<&str> {
+    let candidate = unquote(line);
+    if candidate.is_empty() || candidate.lines().count() > 1 {
+        return None;
+    }
+    match fs::symlink_metadata(Path::new(candidate)) {
+        Ok(metadata) if metadata.is_file() => Some(candidate),
+        _ => None,
+    }
+}
+
+fn is_image_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    [".png", ".jpg", ".jpeg", ".gif", ".webp"]
+        .iter()
+        .any(|extension| lower.ends_with(extension))
+}
+
+/// Reduce a name from anywhere on disk to one that is safe inside the workspace.
+fn sanitise(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let cleaned = cleaned.trim_matches(['.', '-']).to_string();
+    if cleaned.is_empty() {
+        "attachment".into()
+    } else {
+        cleaned
+    }
+}
+
+/// A name that is not already taken, so importing twice keeps both files.
+fn unique_name(directory: &Path, name: &str) -> String {
+    if !directory.join(name).exists() {
+        return name.to_string();
+    }
+    let (stem, extension) = match name.rsplit_once('.') {
+        Some((stem, extension)) => (stem, format!(".{extension}")),
+        None => (name, String::new()),
+    };
+    for index in 2..1000 {
+        let candidate = format!("{stem}-{index}{extension}");
+        if !directory.join(&candidate).exists() {
+            return candidate;
+        }
+    }
+    format!("{stem}-{}{extension}", std::process::id())
+}
+
 fn image_mime(bytes: &[u8]) -> Option<&'static str> {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         Some("image/png")
@@ -280,12 +431,111 @@ fn format_bytes(bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Symlink creation is unprivileged only on unix; the tests that use it
+    // check a unix-specific escape, so they compile only where it exists.
+    #[cfg(unix)]
     use std::os::unix::fs::symlink;
 
     fn workspace() -> PathBuf {
         let path = std::env::temp_dir().join(format!("hii-attachments-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&path).unwrap();
         path.canonicalize().unwrap()
+    }
+
+    /// A one-pixel PNG, so the magic-byte check sees a real image.
+    fn png() -> Vec<u8> {
+        STANDARD
+            .decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn imports_a_file_dropped_from_outside_the_workspace() {
+        let space = workspace();
+        let elsewhere = workspace();
+        let dropped = elsewhere.join("reference shot.png");
+        fs::write(&dropped, png()).unwrap();
+
+        let mut queue = AttachmentQueue::new(&space, false);
+        // Quoted, because that is what a terminal produces on drop.
+        let message = queue
+            .import(&format!("\"{}\"", dropped.display()))
+            .expect("a dropped image should attach");
+
+        assert!(message.contains("image"), "{message}");
+        assert!(
+            space.join(IMPORT_DIR).join("reference-shot.png").is_file(),
+            "the file should have been copied into the workspace"
+        );
+        assert!(queue.has_images());
+    }
+
+    #[test]
+    fn importing_the_same_name_twice_keeps_both() {
+        let space = workspace();
+        let first = workspace();
+        let second = workspace();
+        fs::write(first.join("plan.png"), png()).unwrap();
+        fs::write(second.join("plan.png"), png()).unwrap();
+
+        let mut queue = AttachmentQueue::new(&space, false);
+        queue.import(&first.join("plan.png").display().to_string()).unwrap();
+        queue
+            .import(&second.join("plan.png").display().to_string())
+            .expect("a second file of the same name should not collide");
+
+        assert!(space.join(IMPORT_DIR).join("plan.png").is_file());
+        assert!(space.join(IMPORT_DIR).join("plan-2.png").is_file());
+        assert_eq!(queue.count(), 2);
+    }
+
+    #[test]
+    fn importing_does_not_copy_what_is_already_inside() {
+        let space = workspace();
+        fs::write(space.join("notes.txt"), b"already here").unwrap();
+
+        let mut queue = AttachmentQueue::new(&space, false);
+        queue
+            .import(&space.join("notes.txt").display().to_string())
+            .unwrap();
+
+        assert!(
+            !space.join(IMPORT_DIR).exists(),
+            "a file already in the workspace should be attached where it lies"
+        );
+    }
+
+    #[test]
+    fn importing_still_refuses_a_secret() {
+        let elsewhere = workspace();
+        let secret = elsewhere.join("id_rsa");
+        fs::write(&secret, b"-----BEGIN PRIVATE KEY-----").unwrap();
+
+        let space = workspace();
+        let mut queue = AttachmentQueue::new(&space, false);
+        let refusal = queue
+            .import(&secret.display().to_string())
+            .expect_err("a secret must not be importable just because it was dropped");
+
+        assert!(refusal.contains("secret-bearing"), "{refusal}");
+        assert!(!space.join(IMPORT_DIR).exists(), "nothing should have been copied");
+    }
+
+    #[test]
+    fn a_dropped_path_is_recognised_but_prose_is_not() {
+        let elsewhere = workspace();
+        let dropped = elsewhere.join("sketch.png");
+        fs::write(&dropped, png()).unwrap();
+
+        let quoted = format!("\"{}\"", dropped.display());
+        assert_eq!(
+            looks_like_dropped_file(&quoted),
+            Some(dropped.display().to_string().as_str())
+        );
+        assert_eq!(looks_like_dropped_file("make this 40 mm wide"), None);
+        assert_eq!(looks_like_dropped_file("C:/nothing/here.png"), None);
     }
 
     #[test]
@@ -317,6 +567,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn blocks_escape_symlink_and_secret_paths() {
         let root = workspace();
         fs::write(root.join(".env"), "TOKEN=nope").unwrap();
