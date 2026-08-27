@@ -36,6 +36,7 @@ internal static class MutationOperations
         new CreateObject(identity),
         new DeleteObject(identity),
         new Undo(identity),
+        new UndoStateDiagnostic(identity),
     };
 
     /// <summary>The feature flags these operations justify advertising.</summary>
@@ -67,9 +68,15 @@ internal static class MutationOperations
                 // Rhino refuses to open a record when undo is disabled or one is
                 // already open. Going ahead anyway would produce a change the
                 // user cannot reverse, which is worse than not doing it.
+                //
+                // Which of those two it was matters enormously and used to be
+                // invisible: "undo is switched off in this document" and "a
+                // record leaked and every future mutation is now refused" look
+                // identical from outside and need opposite responses. So say.
                 throw new OperationFailedException(
                     ErrorCode.UndoFailed,
-                    "Rhino would not open an undo record, so this change was not made");
+                    "Rhino would not open an undo record, so this change was not made "
+                        + $"({DescribeUndoState(document)})");
             }
 
             try
@@ -78,8 +85,74 @@ internal static class MutationOperations
             }
             finally
             {
-                document.EndUndoRecord(record);
+                // A record that will not close is the thing that poisons every
+                // later mutation, so it is not allowed to fail quietly. There
+                // is nothing useful to do about it here — the work is already
+                // done — but it must be visible in the log rather than inferred
+                // days later from an unexplained refusal.
+                if (!document.EndUndoRecord(record))
+                {
+                    RhinoApp.WriteLine(
+                        $"HII Rhino: undo record {record} would not close ({DescribeUndoState(document)}). "
+                            + "Later changes may be refused until this document's undo is reset.");
+                }
             }
+        }
+
+        /// <summary>Everything Rhino will say about this document's undo system.</summary>
+        internal static Dictionary<string, object?> UndoState(RhinoDoc document) => new()
+        {
+            // "Returns 0 if record is not started because undo information is
+            // already being recorded or undo is disabled" — these are the two
+            // properties that separate those cases.
+            ["recording_enabled"] = document.UndoRecordingEnabled,
+            ["recording_is_active"] = document.UndoRecordingIsActive,
+            ["current_record_serial"] = document.CurrentUndoRecordSerialNumber,
+            ["next_record_serial"] = document.NextUndoRecordSerialNumber,
+            // Named as though it meant "an undo is available". It does not: it
+            // means an undo is in progress.
+            ["undo_in_progress"] = document.UndoActive,
+        };
+
+        private static string DescribeUndoState(RhinoDoc document)
+        {
+            if (!document.UndoRecordingEnabled)
+            {
+                return "undo recording is disabled for this document";
+            }
+            uint open = document.CurrentUndoRecordSerialNumber;
+            if (open > 0)
+            {
+                return $"undo record {open} is still open";
+            }
+            return document.UndoActive
+                ? "an undo is still in progress"
+                : "Rhino gave no reason";
+        }
+    }
+
+    /// <summary>
+    /// Report the document's undo state without changing anything.
+    /// </summary>
+    /// <remarks>
+    /// A diagnostic, not a tool: it exists so a refused mutation can be
+    /// explained rather than guessed at, and it must never reach a model's
+    /// catalogue. Hence the <c>bridge.diagnostics.</c> prefix.
+    /// </remarks>
+    private sealed class UndoStateDiagnostic : INativeOperation
+    {
+        private readonly BridgeIdentity _identity;
+
+        public UndoStateDiagnostic(BridgeIdentity identity) => _identity = identity;
+
+        public string Name => DiagnosticOperations.Prefix + "undo_state";
+
+        public object Execute(RequestEnvelope request, CancellationToken cancellationToken)
+        {
+            RhinoDoc document = DocumentAccess.RequireDocument(request, _identity.InstanceId);
+            Dictionary<string, object?> state = MutationOperation.UndoState(document);
+            state["document_runtime_serial"] = document.RuntimeSerialNumber;
+            return state;
         }
     }
 
@@ -370,6 +443,10 @@ internal static class MutationOperations
                 ["document_runtime_serial"] = document.RuntimeSerialNumber,
                 ["object_count_before"] = before,
                 ["object_count"] = DocumentAccess.LiveObjectCount(document),
+                // The state an undo leaves behind decides whether the next
+                // mutation is possible at all, so it travels with the answer
+                // instead of having to be asked for separately afterwards.
+                ["undo_state"] = UndoState(document),
             };
         }
     }
