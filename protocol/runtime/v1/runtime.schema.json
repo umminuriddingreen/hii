@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hii.local/protocol/runtime/v1/runtime.schema.json",
+  "title": "HII Runtime Protocol v1",
+  "type": "object",
+  "required": ["version", "kind"],
+  "properties": {
+    "version": { "const": 1 },
+    "kind": {
+      "enum": ["object", "edge", "event", "identity", "grant", "capability", "run", "receipt", "spaceProjection"]
+    }
+  },
+  "$defs": {
+    "identityRef": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "kind": { "enum": ["human", "device", "agent", "service", "space"] }
+      },
+      "additionalProperties": false
+    },
+    "object": {
+      "type": "object",
+      "required": ["version", "id", "schemaVersion", "type", "owner", "spaceId", "payload", "provenance", "createdAt", "updatedAt", "availableActions"],
+      "properties": {
+        "version": { "const": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "schemaVersion": { "type": "integer", "minimum": 1 },
+        "type": { "type": "string", "minLength": 1 },
+        "owner": { "type": "string", "minLength": 1 },
+        "spaceId": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "payload": {},
+        "blobReferences": { "type": "array", "items": { "type": "string" } },
+        "source": {},
+        "provenance": {},
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "availableActions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": ["version", "id", "type", "spaceId", "fromObjectId", "toObjectId", "properties", "provenance", "createdAt", "updatedAt"],
+      "properties": {
+        "version": { "const": 1 },
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "spaceId": { "type": "string" },
+        "fromObjectId": { "type": "string" },
+        "toObjectId": { "type": "string" },
+        "properties": {},
+        "provenance": {},
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "event": {
+      "type": "object",
+      "required": ["version", "id", "spaceId", "sequence", "actor", "type", "payload", "createdAt"],
+      "properties": {
+        "version": { "const": 1 },
+        "id": { "type": "string" },
+        "spaceId": { "type": "string" },
+        "sequence": { "type": "integer", "minimum": 0 },
+        "actor": { "$ref": "#/$defs/identityRef" },
+        "type": { "type": "string" },
+        "targetId": { "type": "string" },
+        "payload": {},
+        "authorityGrantId": { "type": "string" },
+        "runId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      }
+    },
+    "grant": {
+      "type": "object",
+      "required": ["version", "id", "subject", "actions", "resource", "issuedAt"],
+      "properties": {
+        "version": { "const": 1 },
+        "id": { "type": "string" },
+        "subject": { "$ref": "#/$defs/identityRef" },
+        "actions": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "resource": { "type": "string" },
+        "conditions": {},
+        "issuedAt": { "type": "string" },
+        "expiresAt": { "type": "string" },
+        "revokedAt": { "type": "string" }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "required": ["version", "id", "capabilityVersion", "inputSchema", "outputSchema", "permissionsRequired", "supportedEnvironments", "executionLimits", "verificationMethod", "failureRecovery"],
+      "properties": {
+        "version": { "const": 1 },
+        "id": { "type": "string" },
+        "capabilityVersion": { "type": "string" },
+        "inputSchema": { "type": "object" },
+        "outputSchema": { "type": "object" },
+        "permissionsRequired": { "type": "array", "items": { "type": "string" } },
+        "supportedEnvironments": { "type": "array", "items": { "type": "string" } },
+        "executionLimits": { "type": "object" },
+        "verificationMethod": { "type": "object" },
+        "failureRecovery": { "type": "object" }
+      }
+    },
+    "run": {
+      "type": "object",
+      "required": ["version", "id", "intent", "selectedObjects", "contextPack", "capabilities", "authority", "limits", "progress", "artifacts", "verification", "status"],
+      "properties": {
+        "version": { "const": 1 },
+        "id": { "type": "string" },
+        "intent": { "type": "string" },
+        "selectedObjects": { "type": "array", "items": { "type": "string" } },
+        "contextPack": {},
+        "model": {},
+        "capabilities": { "type": "array", "items": { "type": "string" } },
+        "authority": {},
+        "limits": {},
+        "progress": { "type": "array" },
+        "artifacts": { "type": "array" },
+        "verification": {},
+        "status": { "type": "string" }
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "required": ["version", "id", "runId", "intent", "context", "permissions", "operations", "affectedObjects", "artifacts", "checks", "verification", "approvals", "failures", "timestamps"],
+      "properties": {
+        "version": { "const": 1 },
+        "id": { "type": "string" },
+        "runId": { "type": "string" },
+        "intent": { "type": "string" },
+        "context": {},
+        "permissions": { "type": "array" },
+        "operations": { "type": "array" },
+        "affectedObjects": { "type": "array" },
+        "artifacts": { "type": "array" },
+        "checks": { "type": "array" },
+        "verification": {},
+        "approvals": { "type": "array" },
+        "failures": { "type": "array" },
+        "timestamps": { "type": "object" }
+      }
+    }
+  }
+}

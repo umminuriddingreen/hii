@@ -103,6 +103,35 @@ export type HiiContactCard = {
   signature: string;
 };
 
+export type RuntimeIdentityRefV1 = {
+  id: string;
+  kind: 'human' | 'device' | 'agent' | 'service' | 'space';
+};
+
+export type RuntimeEventV1 = {
+  version: 1;
+  id: string;
+  spaceId: string;
+  sequence: number;
+  actor: RuntimeIdentityRefV1;
+  type: string;
+  targetId?: string;
+  payload: Record<string, unknown>;
+  authorityGrantId?: string;
+  runId?: string;
+  createdAt: string;
+};
+
+export type RuntimeSpaceSnapshotV1 = {
+  version: 1;
+  spaceId: string;
+  sequence: number;
+  document: WorkspaceDoc;
+  objects: Array<Record<string, unknown>>;
+  edges: Array<Record<string, unknown>>;
+  recentEvents: RuntimeEventV1[];
+};
+
 function developmentRuntime() {
   if (typeof window === 'undefined') return 'http://127.0.0.1:3043';
   const port = Number(window.location.port);
@@ -135,7 +164,8 @@ function isTauri() {
 export async function readWorkspace(): Promise<WorkspaceDoc> {
   if (isTauri()) {
     const { invoke } = await import('@tauri-apps/api/core');
-    return normalizeWorkspace(await invoke('workspace_read'));
+    const snapshot = await invoke<RuntimeSpaceSnapshotV1>('runtime_space_snapshot_v1');
+    return normalizeWorkspace(snapshot.document);
   }
   try {
     return normalizeWorkspace(JSON.parse(localStorage.getItem('hii.workspace.v2') || 'null'));
@@ -147,10 +177,26 @@ export async function readWorkspace(): Promise<WorkspaceDoc> {
 export async function writeWorkspace(document: WorkspaceDoc): Promise<WorkspaceDoc> {
   if (isTauri()) {
     const { invoke } = await import('@tauri-apps/api/core');
-    return normalizeWorkspace(await invoke('workspace_write', { document }));
+    const snapshot = await invoke<RuntimeSpaceSnapshotV1>('runtime_space_apply_v1', {
+      request: {
+        version: 1,
+        expectedSequence: document.revision,
+        actor: { id: 'human:local', kind: 'human' },
+        idempotencyKey: `canvas:${document.revision}:${document.updatedAt}`,
+        document
+      }
+    });
+    return normalizeWorkspace(snapshot.document);
   }
-  localStorage.setItem('hii.workspace.v2', JSON.stringify(document));
-  return document;
+  const saved = { ...document, revision: document.revision + 1 };
+  localStorage.setItem('hii.workspace.v2', JSON.stringify(saved));
+  return saved;
+}
+
+export async function readRuntimeSpaceHistory(limit = 100): Promise<RuntimeEventV1[]> {
+  if (!isTauri()) return [];
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<RuntimeEventV1[]>('runtime_space_history_v1', { limit });
 }
 
 export async function startAgent(request: AgentRequestV1): Promise<AgentStartResult> {

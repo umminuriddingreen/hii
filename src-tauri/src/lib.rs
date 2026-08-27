@@ -1,8 +1,11 @@
 use hii_core::{
     default_workspace_root,
     information::{self, CaptureResult, InformationImage, InformationSource, SearchResult},
-    new_run_id, read_workspace, write_workspace, AgentEventV1, AgentRequestV1, AgentStartResult,
-    CONTRACT_VERSION,
+    new_run_id, read_workspace,
+    runtime::RuntimeSpaceApplyV1,
+    runtime::RuntimeSpaceSnapshotV1,
+    runtime_space_apply, runtime_space_history, runtime_space_snapshot, write_workspace,
+    AgentEventV1, AgentRequestV1, AgentStartResult, CONTRACT_VERSION,
 };
 use serde_json::Value;
 use std::{
@@ -37,6 +40,24 @@ fn workspace_read() -> Result<Value, String> {
 #[tauri::command]
 fn workspace_write(document: Value) -> Result<Value, String> {
     write_workspace(document)
+}
+
+#[tauri::command]
+fn runtime_space_snapshot_v1(space_id: Option<String>) -> Result<RuntimeSpaceSnapshotV1, String> {
+    runtime_space_snapshot(space_id)
+}
+
+#[tauri::command]
+fn runtime_space_apply_v1(request: RuntimeSpaceApplyV1) -> Result<RuntimeSpaceSnapshotV1, String> {
+    runtime_space_apply(request)
+}
+
+#[tauri::command]
+fn runtime_space_history_v1(
+    space_id: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<hii_core::runtime::RuntimeEventV1>, String> {
+    runtime_space_history(space_id, limit)
 }
 
 #[tauri::command]
@@ -617,6 +638,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            runtime_space_snapshot_v1,
+            runtime_space_apply_v1,
+            runtime_space_history_v1,
             workspace_read,
             workspace_write,
             workspace_asset_store,

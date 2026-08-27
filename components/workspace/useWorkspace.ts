@@ -76,7 +76,9 @@ export function useWorkspace(
       past.current.push(before.nodes);
       if (past.current.length > 80) past.current.shift();
       future.current = [];
-      const next = { ...before, nodes: change(before.nodes), revision: before.revision + 1, updatedAt: new Date().toISOString() };
+      // Revision is the authoritative Runtime sequence. Local optimistic edits
+      // keep the last observed sequence; persistence advances it atomically.
+      const next = { ...before, nodes: change(before.nodes), updatedAt: new Date().toISOString() };
       current.current = next;
       return next;
     });
@@ -100,7 +102,7 @@ export function useWorkspace(
     const nodes = source.current.pop();
     if (!nodes) return;
     destination.current.push(current.current.nodes);
-    const next = { ...current.current, nodes, revision: current.current.revision + 1, updatedAt: new Date().toISOString() };
+    const next = { ...current.current, nodes, updatedAt: new Date().toISOString() };
     current.current = next;
     setDocument(next);
     scheduleSave();

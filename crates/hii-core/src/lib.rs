@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 pub mod information;
 pub mod operational;
+pub mod runtime;
 pub mod web;
 
 pub const CONTRACT_VERSION: u8 = 1;
@@ -152,6 +153,55 @@ pub fn write_workspace(mut document: Value) -> Result<Value, String> {
     Ok(document)
 }
 
+/// Read the canonical Runtime projection, importing the legacy Workspace JSON
+/// once when this Space has not entered Runtime v1 yet.
+pub fn runtime_space_snapshot(
+    space_id: Option<String>,
+) -> Result<runtime::RuntimeSpaceSnapshotV1, String> {
+    let space_id = space_id.unwrap_or_else(selected_workspace_id);
+    if let Some(snapshot) = runtime::read_space(&runtime_root()?, &space_id)? {
+        return Ok(snapshot);
+    }
+    let legacy = read_workspace()?;
+    runtime::initialize_space(&runtime_root()?, &space_id, &legacy)
+}
+
+/// Apply a bounded Space mutation through the Runtime and refresh the old JSON
+/// file as a compatibility/export snapshot. The JSON file is no longer read as
+/// authority after Runtime initialization.
+pub fn runtime_space_apply(
+    mut request: runtime::RuntimeSpaceApplyV1,
+) -> Result<runtime::RuntimeSpaceSnapshotV1, String> {
+    let space_id = request
+        .space_id
+        .clone()
+        .unwrap_or_else(selected_workspace_id);
+    request.space_id = Some(space_id.clone());
+    let _ = runtime_space_snapshot(Some(space_id.clone()))?;
+    let snapshot = runtime::apply_space(&runtime_root()?, &space_id, &request)?;
+    write_workspace_snapshot(&snapshot.document)?;
+    Ok(snapshot)
+}
+
+pub fn runtime_space_history(
+    space_id: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<runtime::RuntimeEventV1>, String> {
+    let space_id = space_id.unwrap_or_else(selected_workspace_id);
+    let _ = runtime_space_snapshot(Some(space_id.clone()))?;
+    runtime::history(&runtime_root()?, &space_id, limit.unwrap_or(100))
+}
+
+fn write_workspace_snapshot(document: &Value) -> Result<(), String> {
+    let path = workspace_path()?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "HII state path has no parent.".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let _lock = WorkspaceFileLock::acquire(&path)?;
+    atomic_json_write(&path, document)
+}
+
 struct WorkspaceFileLock {
     path: PathBuf,
     file: Option<fs::File>,
@@ -287,7 +337,10 @@ mod tests {
             .spawn()
             .unwrap();
         thread::sleep(Duration::from_millis(100));
-        assert!(child.try_wait().unwrap().is_none(), "native writer bypassed the shared lock");
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "native writer bypassed the shared lock"
+        );
 
         let mut typescript_winner = empty_workspace();
         typescript_winner["revision"] = Value::from(1);
@@ -308,8 +361,12 @@ mod tests {
         fs::remove_file(&lock).unwrap();
 
         let status = child.wait().unwrap();
-        assert!(status.success(), "cross-process native lock assertion failed");
-        let preserved: Value = serde_json::from_str(&fs::read_to_string(&workspace).unwrap()).unwrap();
+        assert!(
+            status.success(),
+            "cross-process native lock assertion failed"
+        );
+        let preserved: Value =
+            serde_json::from_str(&fs::read_to_string(&workspace).unwrap()).unwrap();
         assert_eq!(preserved["revision"], 1);
         assert_eq!(preserved["nodes"][0]["id"], "typescript-winner");
         fs::remove_dir_all(runtime).unwrap();

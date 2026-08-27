@@ -18,8 +18,9 @@ export function browserSpacePersistence(spaceId: string): WorkspacePersistence {
       }
     },
     async write(document) {
-      localStorage.setItem(key, JSON.stringify(document));
-      return document;
+      const saved = { ...document, revision: document.revision + 1 };
+      localStorage.setItem(key, JSON.stringify(saved));
+      return saved;
     }
   };
 }

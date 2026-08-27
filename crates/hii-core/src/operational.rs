@@ -139,7 +139,7 @@ pub fn list_projects(runtime: &Path) -> Result<Vec<Value>, String> {
     .collect()
 }
 
-fn database(runtime: &Path) -> Result<Connection, String> {
+pub(crate) fn database(runtime: &Path) -> Result<Connection, String> {
     fs::create_dir_all(runtime).map_err(|error| error.to_string())?;
     let path = env::var_os("HII_DB_PATH")
         .map(std::path::PathBuf::from)
@@ -153,10 +153,14 @@ fn database(runtime: &Path) -> Result<Connection, String> {
     Ok(connection)
 }
 
-fn migrate(connection: &Connection) -> Result<(), String> {
+pub(crate) fn migrate(connection: &Connection) -> Result<(), String> {
     connection
         .execute_batch(
-            "CREATE TABLE IF NOT EXISTS operational_objects (
+            "CREATE TABLE IF NOT EXISTS schema_migrations (
+               version TEXT PRIMARY KEY,
+               applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             );
+             CREATE TABLE IF NOT EXISTS operational_objects (
                id TEXT PRIMARY KEY,
                space_id TEXT NOT NULL,
                type TEXT NOT NULL,
@@ -173,6 +177,25 @@ fn migrate(connection: &Connection) -> Result<(), String> {
              );
              CREATE INDEX IF NOT EXISTS idx_operational_objects_space
                ON operational_objects(space_id, deleted_at, type);
+             CREATE TABLE IF NOT EXISTS operational_relations (
+               id TEXT PRIMARY KEY,
+               space_id TEXT NOT NULL,
+               type TEXT NOT NULL,
+               from_object_id TEXT NOT NULL,
+               to_object_id TEXT NOT NULL,
+               properties_json TEXT NOT NULL DEFAULT '{}',
+               provenance_json TEXT NOT NULL DEFAULT '{}',
+               created_at TEXT NOT NULL,
+               updated_at TEXT NOT NULL,
+               deleted_at TEXT,
+               relation_version INTEGER NOT NULL DEFAULT 1,
+               canonical_source TEXT NOT NULL DEFAULT 'graph',
+               provenance_class TEXT NOT NULL DEFAULT 'human_authored',
+               FOREIGN KEY (from_object_id) REFERENCES operational_objects(id),
+               FOREIGN KEY (to_object_id) REFERENCES operational_objects(id)
+             );
+             CREATE INDEX IF NOT EXISTS idx_operational_relations_space
+               ON operational_relations(space_id, deleted_at, type);
              CREATE TABLE IF NOT EXISTS operational_operations (
                id TEXT PRIMARY KEY,
                space_id TEXT NOT NULL,
@@ -193,6 +216,40 @@ fn migrate(connection: &Connection) -> Result<(), String> {
              );
              CREATE UNIQUE INDEX IF NOT EXISTS idx_operational_operations_lamport
                ON operational_operations(space_id, lamport);
+             CREATE TABLE IF NOT EXISTS object_projections (
+               space_id TEXT NOT NULL,
+               object_id TEXT NOT NULL,
+               projection TEXT NOT NULL,
+               state_json TEXT NOT NULL DEFAULT '{}',
+               updated_at TEXT NOT NULL,
+               projection_version INTEGER NOT NULL DEFAULT 1,
+               canonical_source TEXT NOT NULL DEFAULT 'graph',
+               deleted_at TEXT,
+               PRIMARY KEY (space_id, object_id, projection),
+               FOREIGN KEY (object_id) REFERENCES operational_objects(id) ON DELETE CASCADE
+             );
+             CREATE TABLE IF NOT EXISTS runtime_spaces (
+               id TEXT PRIMARY KEY,
+               schema_version INTEGER NOT NULL DEFAULT 1,
+               owner_actor_id TEXT NOT NULL,
+               sequence INTEGER NOT NULL DEFAULT 0,
+               viewport_json TEXT NOT NULL DEFAULT '{\"x\":0,\"y\":0,\"zoom\":1}',
+               next_z INTEGER NOT NULL DEFAULT 1,
+               created_at TEXT NOT NULL,
+               updated_at TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS runtime_grants (
+               id TEXT PRIMARY KEY,
+               subject_id TEXT NOT NULL,
+               action TEXT NOT NULL,
+               resource_id TEXT NOT NULL,
+               conditions_json TEXT NOT NULL DEFAULT '{}',
+               issued_at TEXT NOT NULL,
+               expires_at TEXT,
+               revoked_at TEXT
+             );
+             INSERT OR IGNORE INTO schema_migrations(version)
+               VALUES ('hii-runtime-v1');
              ",
         )
         .map_err(|error| error.to_string())?;
@@ -244,6 +301,38 @@ fn migrate(connection: &Connection) -> Result<(), String> {
         "authority_json",
         "TEXT NOT NULL DEFAULT '{}'",
     )?;
+    add_column(connection, "operational_operations", "run_id", "TEXT")?;
+    add_column(
+        connection,
+        "operational_relations",
+        "relation_version",
+        "INTEGER NOT NULL DEFAULT 1",
+    )?;
+    add_column(
+        connection,
+        "operational_relations",
+        "canonical_source",
+        "TEXT NOT NULL DEFAULT 'workspace-json'",
+    )?;
+    add_column(
+        connection,
+        "operational_relations",
+        "provenance_class",
+        "TEXT NOT NULL DEFAULT 'migration'",
+    )?;
+    add_column(
+        connection,
+        "object_projections",
+        "projection_version",
+        "INTEGER NOT NULL DEFAULT 1",
+    )?;
+    add_column(
+        connection,
+        "object_projections",
+        "canonical_source",
+        "TEXT NOT NULL DEFAULT 'workspace-json'",
+    )?;
+    add_column(connection, "object_projections", "deleted_at", "TEXT")?;
     connection
         .execute_batch(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_operational_operations_idempotency
@@ -263,7 +352,7 @@ fn sha256(value: &str) -> String {
         .collect()
 }
 
-fn add_column(
+pub(crate) fn add_column(
     connection: &Connection,
     table: &str,
     column: &str,
