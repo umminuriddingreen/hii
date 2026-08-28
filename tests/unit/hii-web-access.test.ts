@@ -56,7 +56,8 @@ describe('HII web access gate', () => {
     expect(canvas).toContain('if (!files.length || (isSpace && !allowPhoto)) return;');
     expect(canvas).toContain('canvasTextSeed(value.slice(0, 100_000))');
     expect(canvas).toContain("surface?: 'workspace' | 'space' | 'account'");
-    expect(canvas).toContain('accountTools={isAccount}');
+    expect(canvas).toContain('{isSpace && <SpaceToolbar');
+    expect(canvas).not.toContain('accountTools={isAccount}');
     expect(canvas).toContain('fileSeeder ? fileSeeder(files) : seedsFromFiles(files)');
   });
 

@@ -240,42 +240,12 @@
 .canvasShell :global(.hii-canvas[data-surface="space"]),
 .canvasShell :global(.hii-canvas[data-surface="account"]) {
   background: #fff;
-  background-image: radial-gradient(circle at 1px 1px, rgba(0, 0, 0, .09) 1px, transparent 0);
-  background-size: 24px 24px;
 }
-
-.canvasShell :global(.hii-space-toolbar) {
-  border: 1px solid #d8d8d8;
-  border-radius: 0;
-  background: rgba(255, 255, 255, .96);
-  box-shadow: none;
-  color: #111;
-}
-
-.canvasShell :global(.hii-space-toolbar button),
-.canvasShell :global(.hii-space-toolbar button[aria-pressed="true"]) {
-  min-height: 44px;
-  border-radius: 0;
-  background: transparent;
-  color: #111;
-  font: 10px/1 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  font-weight: 400;
-}
-
-.canvasShell :global(.hii-account-tools) {
-  border-color: #d8d8d8;
-  background: rgba(255, 255, 255, .985);
-  color: #111;
-}
-
-.canvasShell :global(.hii-account-tools > div) { background: #d8d8d8; border-color: #d8d8d8; }
-.canvasShell :global(.hii-account-tools > div button) { background: #fff; }
 
 .canvasShell :global(.hii-node-touch-controls button) {
   min-height: 44px;
 }
 
-.canvasShell :global(.hii-space-toolbar button:focus-visible),
 .canvasHeader button:focus-visible,
 .accountPanel button:focus-visible {
   outline: 1px solid currentColor;

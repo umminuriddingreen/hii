@@ -674,7 +674,7 @@ export function HiiRoot({
   const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [promptVisible, setPromptVisible] = useState(false);
   const [drawing, setDrawing] = useState(false);
-  const [toolMessage, setToolMessage] = useState('');
+  const [, setToolMessage] = useState('');
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [dropActive, setDropActive] = useState(false);
   const [devFixtureState, setDevFixtureState] = useState<'normal' | 'minimized' | 'maximized'>('normal');
@@ -1594,15 +1594,12 @@ export function HiiRoot({
       }}
     >
       {runtimeEnabled && <UpdateBanner />}
-      {isTouchCanvas && <SpaceToolbar
+      {isSpace && <SpaceToolbar
         drawing={drawing}
-        photo={isSpace && allowPhoto}
-        accountTools={isAccount}
-        status={toolMessage}
+        photo={allowPhoto}
         onAddImage={() => fileInput.current?.click()}
         onAddText={() => spawnSeeds([seedFor('canvas-text', { text: 'Tap to write', name: 'Text' })], camera.centerWorld())}
         onAddSticker={() => spawnSeeds([{ ...seedFor('image', { sticker: true, emoji: '✦', name: 'Sticker' }), w: 120, h: 120 }], camera.centerWorld())}
-        onAddLink={(url) => spawnSeeds([accountLinkSeed(url)], camera.centerWorld())}
         onOpenTerminal={onRequestDevice}
         onUndo={workspace.undo}
         onRedo={workspace.redo}
