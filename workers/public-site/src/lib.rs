@@ -2,6 +2,7 @@
 
 mod chat;
 mod feed;
+mod remote;
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use passkey_rp::{
@@ -122,7 +123,10 @@ struct SessionResponse<'a> {
 pub async fn main(mut request: Request, env: Env, _ctx: Context) -> Result<Response> {
     match handle_request(&mut request, &env).await {
         Ok(response) => Ok(response),
-        Err(_) => secure_no_store(api_error(500, "internal_error")?),
+        Err(error) => {
+            worker::console_error!("request failed: {error}");
+            secure_no_store(api_error(500, "internal_error")?)
+        }
     }
 }
 
@@ -143,10 +147,16 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
     let db = env.d1("IDENTITY")?;
 
     if path.starts_with("/api/") {
+        if remote::is_remote_host_socket(&path) {
+            return remote::handle_host_socket(request, env).await;
+        }
         if matches!(method, Method::Post | Method::Delete) && !origin_allowed(request)? {
             return secure_no_store(api_error(403, "cross_origin_denied")?);
         }
-        if path.starts_with("/api/chat") || feed::is_feed_api_path(&path) {
+        if path.starts_with("/api/chat")
+            || feed::is_feed_api_path(&path)
+            || remote::is_remote_api_path(&path)
+        {
             let Some(token) = cookie(request, SESSION_COOKIE)? else {
                 return secure_no_store(api_error(401, "authentication_required")?);
             };
@@ -156,12 +166,23 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
             if matches!(method, Method::Post | Method::Delete) {
                 let action = if path.starts_with("/api/chat") {
                     "chat-write"
+                } else if remote::is_remote_api_path(&path) {
+                    "remote-write"
                 } else {
                     "feed-write"
                 };
                 if !rate_limit(request, env, &db, action, 5_000_000).await? {
                     return secure_no_store(api_error(429, "rate_limited")?);
                 }
+            }
+            if remote::is_remote_api_path(&path) {
+                let response = remote::handle_remote_api(request, env, &session).await?;
+                // The viewer upgrade must pass through untouched: a 101 carries
+                // no body and cannot take the no-store security headers.
+                if response.status_code() == 101 {
+                    return Ok(response);
+                }
+                return secure_no_store(response);
             }
             if path.starts_with("/api/chat") {
                 let passkey_recent = now_ms().saturating_sub(session.created_at) <= CEREMONY_TTL_MS;

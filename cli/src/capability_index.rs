@@ -125,17 +125,17 @@ fn load_registered_skills(dir: &Path) -> Vec<Entry> {
     };
     read.flatten()
         .filter_map(|folder| {
-            let value = read_json(&folder.path().join("manifest.json"))?;
-            let id = str_field(&value, "id")?;
+            let value = crate::store::read_value(&folder.path().join("manifest.json"))?;
+            let id = crate::store::field(&value, "id")?;
             Some(Entry {
-                name: str_field(&value, "name").unwrap_or_else(|| id.clone()),
-                description: str_field(&value, "description").unwrap_or_default(),
+                name: crate::store::field(&value, "name").unwrap_or_else(|| id.clone()),
+                description: crate::store::field(&value, "description").unwrap_or_default(),
                 source: "skill",
                 category: "registered".into(),
-                tags: str_array(&value, "capabilities"),
+                tags: crate::store::field_array(&value, "capabilities"),
                 invoke: Some(format!("hii skills run {id}")),
                 status: "verified".into(),
-                examples: str_array(&value, "verification"),
+                examples: crate::store::field_array(&value, "verification"),
                 id,
             })
         })
@@ -205,21 +205,21 @@ fn load_skills(dir: &Path) -> Vec<Entry> {
         if name.starts_with('_') {
             continue;
         }
-        let Some(value) = read_json(&path) else {
+        let Some(value) = crate::store::read_value(&path) else {
             continue;
         };
-        let Some(id) = str_field(&value, "id") else {
+        let Some(id) = crate::store::field(&value, "id") else {
             continue;
         };
         entries.push(Entry {
-            name: str_field(&value, "name").unwrap_or_else(|| id.clone()),
-            description: str_field(&value, "description").unwrap_or_default(),
+            name: crate::store::field(&value, "name").unwrap_or_else(|| id.clone()),
+            description: crate::store::field(&value, "description").unwrap_or_default(),
             source: "skill",
-            category: str_field(&value, "category").unwrap_or_default(),
-            tags: str_array(&value, "tags"),
+            category: crate::store::field(&value, "category").unwrap_or_default(),
+            tags: crate::store::field_array(&value, "tags"),
             invoke: Some(format!("hii skills run {id}")),
             status: "ready".into(),
-            examples: str_array(&value, "examples"),
+            examples: crate::store::field_array(&value, "examples"),
             id,
         });
     }
@@ -227,24 +227,24 @@ fn load_skills(dir: &Path) -> Vec<Entry> {
 }
 
 fn load_capabilities(path: &Path) -> Vec<Entry> {
-    let Some(Value::Array(items)) = read_json(path) else {
+    let Some(Value::Array(items)) = crate::store::read_value(path) else {
         return Vec::new();
     };
     items
         .into_iter()
         .filter_map(|value| {
-            let id = str_field(&value, "id")?;
+            let id = crate::store::field(&value, "id")?;
             Some(Entry {
-                name: str_field(&value, "name").unwrap_or_else(|| id.clone()),
-                description: str_field(&value, "summary")
-                    .or_else(|| str_field(&value, "description"))
+                name: crate::store::field(&value, "name").unwrap_or_else(|| id.clone()),
+                description: crate::store::field(&value, "summary")
+                    .or_else(|| crate::store::field(&value, "description"))
                     .unwrap_or_default(),
                 source: "capability",
-                category: str_field(&value, "owner").unwrap_or_default(),
-                tags: str_array(&value, "permissions"),
-                invoke: str_field(&value, "runtime"),
-                status: str_field(&value, "status").unwrap_or_else(|| "declared".into()),
-                examples: str_array(&value, "evidence"),
+                category: crate::store::field(&value, "owner").unwrap_or_default(),
+                tags: crate::store::field_array(&value, "permissions"),
+                invoke: crate::store::field(&value, "runtime"),
+                status: crate::store::field(&value, "status").unwrap_or_else(|| "declared".into()),
+                examples: crate::store::field_array(&value, "evidence"),
                 id,
             })
         })
@@ -258,18 +258,18 @@ fn load_drafts(dir: &Path) -> Vec<Entry> {
     let mut entries = Vec::new();
     for file in read.flatten() {
         let manifest = file.path().join("manifest.json");
-        let Some(value) = read_json(&manifest) else {
+        let Some(value) = crate::store::read_value(&manifest) else {
             continue;
         };
         let fallback = file.file_name().to_string_lossy().to_string();
-        let id = str_field(&value, "id").unwrap_or(fallback);
+        let id = crate::store::field(&value, "id").unwrap_or(fallback);
         let observations = value
             .get("observations")
             .and_then(Value::as_u64)
             .unwrap_or(0);
         entries.push(Entry {
-            name: str_field(&value, "name").unwrap_or_else(|| id.clone()),
-            description: str_field(&value, "description").unwrap_or_default(),
+            name: crate::store::field(&value, "name").unwrap_or_else(|| id.clone()),
+            description: crate::store::field(&value, "description").unwrap_or_default(),
             source: "draft",
             category: "proposed".into(),
             tags: Vec::new(),
@@ -428,7 +428,7 @@ pub fn find(paths: &AppPaths, query: &str, limit: Option<usize>, json: bool) -> 
         let entry = &hit.entry;
         println!("{}  [{}] {}", entry.id, entry.source, entry.status);
         if !entry.description.is_empty() {
-            println!("  {}", truncate(&entry.description, 240));
+            println!("  {}", crate::text::clip(&entry.description, 240));
         }
         if let Some(invoke) = &entry.invoke {
             println!("  → {invoke}");
@@ -468,37 +468,6 @@ pub fn summary(paths: &AppPaths, json: bool) -> Result<(), String> {
     println!("  {capabilities} declared capability/ies");
     println!("  {drafts} skill draft(s) awaiting promotion");
     Ok(())
-}
-
-fn read_json(path: &Path) -> Option<Value> {
-    serde_json::from_slice(&fs::read(path).ok()?).ok()
-}
-
-fn str_field(value: &Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .filter(|found| !found.is_empty())
-}
-
-fn str_array(value: &Value, key: &str) -> Vec<String> {
-    value
-        .get(key)
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(str::to_string)
-        .collect()
-}
-
-fn truncate(value: &str, max: usize) -> String {
-    if value.chars().count() <= max {
-        return value.to_string();
-    }
-    let head: String = value.chars().take(max).collect();
-    format!("{}…", head.trim_end())
 }
 
 #[cfg(test)]

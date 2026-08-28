@@ -64,7 +64,7 @@ import { useWorkspace, type WorkspacePersistence } from './useWorkspace';
 import { SpaceToolbar } from '@/components/spaces/SpaceToolbar';
 import { InkBody } from '@/components/spaces/InkBody';
 import { inkSeedFromPoints } from '@/components/spaces/ink-capture';
-import { isSpaceCanvasNode, isSpaceCanvasNodeType } from '@/components/spaces/space-surface';
+import { isAccountCanvasNode, isAccountCanvasNodeType, isSpaceCanvasNode, isSpaceCanvasNodeType } from '@/components/spaces/space-surface';
 import { trackPointerGesture } from '@/lib/workspace/gestures';
 import { updateTerminalActivity } from '@/lib/workspace/terminal-activity';
 
@@ -104,6 +104,31 @@ function hostFor(url: string) {
   } catch {
     return '';
   }
+}
+
+function accountLinkSeed(url: string): NodeSeed {
+  const host = hostFor(url);
+  return seedFor('link', { url, host, name: host || 'link' });
+}
+
+function accountSeedsFromDataTransfer(transfer: DataTransfer): NodeSeed[] {
+  const uriValues = transfer.getData('text/uri-list').split('\n').map((value) => value.trim()).filter((value) => value && !value.startsWith('#'));
+  if (uriValues.length) {
+    const links = uriValues.flatMap((value) => {
+      try {
+        const parsed = new URL(value);
+        return ['http:', 'https:'].includes(parsed.protocol) ? [accountLinkSeed(parsed.href)] : [];
+      } catch {
+        return [];
+      }
+    });
+    if (links.length) return links;
+  }
+  const value = transfer.getData('text/plain');
+  if (!value) return [];
+  const trimmed = value.trim();
+  if (/^https?:\/\/\S+$/i.test(trimmed)) return [accountLinkSeed(trimmed)];
+  return [canvasTextSeed(value.slice(0, 100_000))];
 }
 
 function PromptResponse({ value, running }: { value: string; running: boolean }) {
@@ -617,19 +642,26 @@ export function HiiRoot({
   persistence,
   allowPhoto = true,
   onShareNode,
+  onRequestDevice,
+  fileSeeder,
   canvasImportRequest = null,
   projectionRequest = null
 }: {
-  surface?: 'workspace' | 'space';
+  surface?: 'workspace' | 'space' | 'account';
   spaceId?: string;
   creatorId?: string;
   persistence?: WorkspacePersistence;
   allowPhoto?: boolean;
   onShareNode?: (node: WorkspaceNode) => void;
+  onRequestDevice?: () => void;
+  fileSeeder?: (files: File[]) => Promise<NodeSeed[]>;
   canvasImportRequest?: CanvasImportRequest | null;
   projectionRequest?: WorkspaceProjectionRequest | null;
 } = {}) {
   const isSpace = surface === 'space';
+  const isAccount = surface === 'account';
+  const isTouchCanvas = isSpace || isAccount;
+  const runtimeEnabled = !isTouchCanvas;
   const save = useRef<() => void>(() => {});
   const camera = useCamera(() => save.current());
   const workspace = useWorkspace(camera.getViewport, undefined, persistence);
@@ -642,6 +674,7 @@ export function HiiRoot({
   const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [promptVisible, setPromptVisible] = useState(false);
   const [drawing, setDrawing] = useState(false);
+  const [toolMessage, setToolMessage] = useState('');
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [dropActive, setDropActive] = useState(false);
   const [devFixtureState, setDevFixtureState] = useState<'normal' | 'minimized' | 'maximized'>('normal');
@@ -746,10 +779,14 @@ export function HiiRoot({
 
   const spawnSeeds = useCallback((seeds: NodeSeed[], at: Point) => {
     const ids: string[] = [];
-    const acceptedSeeds = isSpace ? seeds.filter((seed) => isSpaceCanvasNodeType(seed.type)) : seeds;
+    const acceptedSeeds = isSpace
+      ? seeds.filter((seed) => isSpaceCanvasNodeType(seed.type))
+      : isAccount
+        ? seeds.filter((seed) => isAccountCanvasNodeType(seed.type))
+        : seeds;
     acceptedSeeds.forEach((seed, index) => {
       const node = makeNode(seed, at.x + index * 24, at.y + index * 24, workspace.takeZ());
-      if (isSpace) {
+      if (isTouchCanvas) {
         node.spaceId = spaceId;
         node.creatorId = creatorId;
         node.permissions = { inheritance: 'space-policy' };
@@ -759,7 +796,24 @@ export function HiiRoot({
     });
     setSelected(ids);
     return ids;
-  }, [creatorId, isSpace, spaceId, workspace]);
+  }, [creatorId, isAccount, isSpace, isTouchCanvas, spaceId, workspace]);
+
+  const importFiles = useCallback(async (files: File[], at: Point, direct = false) => {
+    try {
+      const seeds = await (fileSeeder ? fileSeeder(files) : seedsFromFiles(files));
+      spawnSeeds(direct ? directPasteSeeds(seeds) : seeds, at);
+      setToolMessage('');
+    } catch (error) {
+      const code = error instanceof Error ? error.message : '';
+      setToolMessage(code === 'canvas_asset_batch_too_many'
+        ? 'import up to 12 files at once.'
+        : code === 'canvas_asset_batch_too_large'
+          ? 'each import must be 128 MB or smaller.'
+          : error instanceof RangeError
+            ? 'each file must be 64 MB or smaller.'
+            : 'could not store that file on this device.');
+    }
+  }, [fileSeeder, spawnSeeds]);
 
   useEffect(() => {
     if (!workspace.ready || !projectionRequest || handledProjectionRequest.current === projectionRequest.id) return;
@@ -783,7 +837,7 @@ export function HiiRoot({
   }, [camera, canvasImportRequest, spawnSeeds, workspace.ready]);
 
   useEffect(() => {
-    if (isSpace || !workspace.ready) return;
+    if (!runtimeEnabled || !workspace.ready) return;
     let cancelled = false;
     const poll = async () => {
       if (cancelled || applicationPollActive.current) return;
@@ -831,11 +885,15 @@ export function HiiRoot({
     void poll();
     const timer = window.setInterval(() => void poll(), 1500);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [camera, isSpace, spawnSeeds, workspace.ready]);
+  }, [camera, runtimeEnabled, spawnSeeds, workspace.ready]);
 
   const visibleNodes = useMemo(
-    () => isSpace ? workspace.nodes.filter((node) => isSpaceCanvasNode(node, spaceId)) : workspace.nodes,
-    [isSpace, spaceId, workspace.nodes]
+    () => isSpace
+      ? workspace.nodes.filter((node) => isSpaceCanvasNode(node, spaceId))
+      : isAccount
+        ? workspace.nodes.filter((node) => isAccountCanvasNode(node, spaceId))
+        : workspace.nodes,
+    [isAccount, isSpace, spaceId, workspace.nodes]
   );
 
   const spawnInformation = useCallback((seeds: NodeSeed[], at: Point) => {
@@ -1230,7 +1288,7 @@ export function HiiRoot({
   }, [camera, mode, openDevBrowser, openMarketplace, openMusicPanel, selected, spawnInformation, spawnSeeds, startWithContext]);
 
   useEffect(() => {
-    if (isSpace) return;
+    if (!runtimeEnabled) return;
     let unlisten = () => {};
     let disposed = false;
     listenAgentEvents((event: AgentEventV1) => {
@@ -1355,17 +1413,21 @@ export function HiiRoot({
       disposed = true;
       unlisten();
     };
-  }, [isSpace]);
+  }, [runtimeEnabled]);
 
   useEffect(() => {
     const inField = (target: EventTarget | null) => (target as Element | null)?.closest?.('input,textarea,[contenteditable]');
     const keydown = (event: KeyboardEvent) => {
       if (inField(event.target)) return;
-      if (isSpace) {
+      if (!runtimeEnabled) {
         if ((event.key === 'Delete' || event.key === 'Backspace') && selected.length) {
           event.preventDefault();
           selected.forEach(workspace.removeNode);
           setSelected([]);
+        }
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+          event.preventDefault();
+          event.shiftKey ? workspace.redo() : workspace.undo();
         }
         return;
       }
@@ -1439,13 +1501,17 @@ export function HiiRoot({
       if (files.length) {
         if (isSpace && !allowPhoto) return;
         event.preventDefault();
-        void seedsFromFiles(files).then((seeds) => spawnSeeds(directPasteSeeds(seeds), at));
+        void importFiles(files, at, true);
         return;
       }
       const value = transfer.getData('text/plain');
       if (!value) return;
       event.preventDefault();
-      if (isSpace) {
+      if (isTouchCanvas) {
+        if (isAccount && /^https?:\/\/\S+$/i.test(value.trim())) {
+          spawnSeeds([accountLinkSeed(value.trim())], at);
+          return;
+        }
         spawnSeeds([canvasTextSeed(value.slice(0, 100_000))], at);
         return;
       }
@@ -1461,7 +1527,7 @@ export function HiiRoot({
     addEventListener('pointermove', pointermove);
     addEventListener('paste', paste);
     return () => { removeEventListener('keydown', keydown); removeEventListener('pointermove', pointermove); removeEventListener('paste', paste); };
-  }, [allowPhoto, camera, isSpace, openDevBrowser, selected, spawnArtifactTerminals, spawnInformation, spawnSeeds, workspace]);
+  }, [allowPhoto, camera, importFiles, isAccount, isSpace, isTouchCanvas, openDevBrowser, runtimeEnabled, selected, spawnArtifactTerminals, spawnInformation, spawnSeeds, workspace]);
 
   return (
     <main
@@ -1473,7 +1539,7 @@ export function HiiRoot({
       aria-label="HII canvas"
       onDoubleClick={(event) => {
         if ((event.target as Element).closest('[data-node-id],input,textarea,button,a,[data-workspace-ui]')) return;
-        if (isSpace && drawing) return;
+        if (isTouchCanvas && drawing) return;
         event.preventDefault();
         const [id] = spawnSeeds([canvasTextSeed()], camera.toWorld(event.clientX, event.clientY));
         setFocusNodeId(id ?? null);
@@ -1482,7 +1548,7 @@ export function HiiRoot({
         if ((event.target as Element).closest('[data-node-id],input,textarea,audio,video,a')) return;
         setSelected([]);
         setPromptVisible(false);
-        if (isSpace && drawing) {
+        if (isTouchCanvas && drawing) {
           event.preventDefault();
           const start = camera.toWorld(event.clientX, event.clientY);
           const points = [start.x, start.y];
@@ -1516,27 +1582,41 @@ export function HiiRoot({
         if (isSpace && !allowPhoto) return;
         if (Array.from(event.dataTransfer.types).includes(HII_PROJECTION_MIME)) return;
         const at = camera.toWorld(event.clientX, event.clientY);
-        void seedsFromDataTransfer(event.dataTransfer)
-          .then((seeds) => { if (seeds.length) spawnSeeds(seeds, at); });
+        const droppedFiles = [...event.dataTransfer.files];
+        if (droppedFiles.length) {
+          void importFiles(droppedFiles, at);
+        } else if (isAccount) {
+          const seeds = accountSeedsFromDataTransfer(event.dataTransfer);
+          if (seeds.length) spawnSeeds(seeds, at);
+        } else {
+          void seedsFromDataTransfer(event.dataTransfer).then((seeds) => { if (seeds.length) spawnSeeds(seeds, at); });
+        }
       }}
     >
-      {!isSpace && <UpdateBanner />}
-      {isSpace && <SpaceToolbar
+      {runtimeEnabled && <UpdateBanner />}
+      {isTouchCanvas && <SpaceToolbar
         drawing={drawing}
-        photo={allowPhoto}
+        photo={isSpace && allowPhoto}
+        accountTools={isAccount}
+        status={toolMessage}
         onAddImage={() => fileInput.current?.click()}
         onAddText={() => spawnSeeds([seedFor('canvas-text', { text: 'Tap to write', name: 'Text' })], camera.centerWorld())}
         onAddSticker={() => spawnSeeds([{ ...seedFor('image', { sticker: true, emoji: '✦', name: 'Sticker' }), w: 120, h: 120 }], camera.centerWorld())}
+        onAddLink={(url) => spawnSeeds([accountLinkSeed(url)], camera.centerWorld())}
+        onOpenTerminal={onRequestDevice}
+        onUndo={workspace.undo}
+        onRedo={workspace.redo}
+        onResetView={camera.reset}
         onToggleDrawing={() => setDrawing((value) => !value)}
       />}
-      {!isSpace && workspace.nodes.some((node) => node.type === 'app') && <div className="hii-app-dock" onPointerDown={(event) => event.stopPropagation()}>
+      {runtimeEnabled && workspace.nodes.some((node) => node.type === 'app') && <div className="hii-app-dock" onPointerDown={(event) => event.stopPropagation()}>
         <button onClick={tileApps}>Tile apps</button>
         {workspace.nodes.filter((node) => node.type === 'app').map((node) => <button key={node.id} data-active={selected.includes(node.id) || undefined} onClick={() => {
           if (node.payload.windowState === 'minimized') workspace.patchNode(node.id, { payload: { ...node.payload, windowState: 'normal' } });
           setSelected([node.id]); workspace.bringToFront(node.id);
         }}>{titleFor(node)}</button>)}
       </div>}
-      {!isSpace && process.env.NEXT_PUBLIC_HII_DEV_BOARD === 'waymark' && (
+      {runtimeEnabled && process.env.NEXT_PUBLIC_HII_DEV_BOARD === 'waymark' && (
         <section className="hii-dev-board-direct" data-window-state={devFixtureState} style={{ width: devFixtureNode.w, height: devFixtureNode.h }}>
           <div className="hii-app-window-controls" aria-label="Waymark window controls">
             <button aria-label="Minimize Waymark" onClick={() => setDevFixtureState('minimized')}>−</button>
@@ -1554,12 +1634,12 @@ export function HiiRoot({
             title={titleFor(node)}
             getZoom={() => camera.cam.current.z}
             onSelect={() => { setSelected([node.id]); workspace.bringToFront(node.id); }}
-            onOpenConversation={() => { if (!isSpace) openObjectConversation(node); }}
+            onOpenConversation={() => { if (runtimeEnabled) openObjectConversation(node); }}
             onCommit={(patch) => workspace.patchNode(node.id, patch)}
             onWindowAction={(action) => appWindowAction(node, action)}
             onErase={() => { workspace.removeNode(node.id); setSelected((ids) => ids.filter((id) => id !== node.id)); }}
-            onShare={isSpace && onShareNode && isSpaceCanvasNode(node, spaceId) ? () => onShareNode(node) : undefined}
-            touchControls={isSpace}
+            onShare={onShareNode && (isAccount || (isSpace && isSpaceCanvasNode(node, spaceId))) ? () => onShareNode(node) : undefined}
+            touchControls={isTouchCanvas}
             chromeless={node.payload.canvasPresentation === 'direct-paste' || node.type === 'canvas-text' || node.type === 'ink' || node.type === 'image'}
           >
             <NodeBody
@@ -1577,7 +1657,7 @@ export function HiiRoot({
           </NodeFrame>
         ))}
       </div>
-      {!isSpace && promptVisible && prompt && (
+      {runtimeEnabled && promptVisible && prompt && (
         <Prompt
           key={`${prompt.anchor.x}:${prompt.anchor.y}:${prompt.initialValue}`}
           anchor={prompt.anchor}
@@ -1603,7 +1683,7 @@ export function HiiRoot({
         multiple={!isSpace}
         accept={isSpace ? 'image/*' : undefined}
         capture={isSpace ? 'environment' : undefined}
-        aria-label={isSpace ? 'Take or choose a Space photo' : 'Upload files to HII'}
+        aria-label={isSpace ? 'Take or choose a Space photo' : 'Import files to HII'}
         onChange={(event) => {
           const files = [...(event.currentTarget.files || [])];
           event.currentTarget.value = '';
@@ -1611,7 +1691,7 @@ export function HiiRoot({
           if (isSpace) {
             void Promise.all(files.map((file) => seedFromFile(file, { spaceId }))).then((seeds) => spawnSeeds(seeds, camera.centerWorld()));
           } else {
-            void seedsFromFiles(files).then((seeds) => spawnSeeds(seeds, camera.toWorld(mouse.current.x, mouse.current.y)));
+            void importFiles(files, camera.centerWorld());
           }
         }}
       />}

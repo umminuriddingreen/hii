@@ -154,7 +154,7 @@ impl BrowserState {
         {
             let marker = if row == self.selected { ">" } else { " " };
             let suffix = if entry.is_dir { "/" } else { "" };
-            let name = truncate(&format!("{}{}", entry.name, suffix), width);
+            let name = crate::text::clip(&format!("{}{}", entry.name, suffix), width);
             writeln!(out, "{marker} {name}").map_err(|error| error.to_string())?;
         }
         if self.entries.is_empty() {
@@ -266,18 +266,6 @@ fn compare_entries(left: &Entry, right: &Entry) -> Ordering {
         .cmp(&left.is_dir)
         .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
         .then_with(|| left.name.cmp(&right.name))
-}
-
-fn truncate(value: &str, max: usize) -> String {
-    if value.chars().count() <= max {
-        return value.to_string();
-    }
-    let mut clipped = value
-        .chars()
-        .take(max.saturating_sub(1))
-        .collect::<String>();
-    clipped.push('…');
-    clipped
 }
 
 #[cfg(test)]

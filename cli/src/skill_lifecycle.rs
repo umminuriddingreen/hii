@@ -262,15 +262,10 @@ pub fn load(paths: &AppPaths) -> Lifecycle {
 
 pub fn save(paths: &AppPaths, lifecycle: &Lifecycle) -> Result<(), String> {
     let path = store_path(paths);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let raw = serde_json::to_string_pretty(lifecycle).map_err(|error| error.to_string())?;
     // Write-then-rename: a lifecycle truncated by a crash would silently reset
-    // every skill's standing to proposed.
-    let temp = path.with_extension("json.tmp");
-    fs::write(&temp, raw).map_err(|error| error.to_string())?;
-    fs::rename(&temp, &path).map_err(|error| error.to_string())
+    // every skill's standing to proposed. This used a fixed `*.json.tmp` name,
+    // which two concurrent writers collided on; `store` names it uniquely.
+    crate::store::write_json_atomic(&path, lifecycle)
 }
 
 /// Project the legacy stores into the canonical lifecycle.
@@ -321,17 +316,17 @@ fn project_registered(lifecycle: &mut Lifecycle, dir: &Path) {
         if name.starts_with('_') || name == "lifecycle.json" {
             continue;
         }
-        let Some(value) = read_json(&path) else {
+        let Some(value) = crate::store::read_value(&path) else {
             continue;
         };
-        let Some(id) = string(&value, "id") else {
+        let Some(id) = crate::store::field(&value, "id") else {
             continue;
         };
         let record = lifecycle.skills.entry(id.clone()).or_insert_with(|| {
             SkillRecord::new(
                 id.clone(),
-                string(&value, "name").unwrap_or_else(|| id.clone()),
-                string(&value, "description").unwrap_or_default(),
+                crate::store::field(&value, "name").unwrap_or_else(|| id.clone()),
+                crate::store::field(&value, "description").unwrap_or_default(),
                 "registry",
             )
         });
@@ -356,21 +351,21 @@ fn project_drafts(paths: &AppPaths, lifecycle: &mut Lifecycle, dir: &Path) {
     };
     for file in read.flatten() {
         let manifest = file.path().join("manifest.json");
-        let Some(value) = read_json(&manifest) else {
+        let Some(value) = crate::store::read_value(&manifest) else {
             continue;
         };
         let fallback = file.file_name().to_string_lossy().to_string();
-        let id = string(&value, "id").unwrap_or(fallback);
+        let id = crate::store::field(&value, "id").unwrap_or(fallback);
         let record = lifecycle.skills.entry(id.clone()).or_insert_with(|| {
             SkillRecord::new(
                 id.clone(),
-                string(&value, "name").unwrap_or_else(|| id.clone()),
-                string(&value, "description").unwrap_or_default(),
+                crate::store::field(&value, "name").unwrap_or_else(|| id.clone()),
+                crate::store::field(&value, "description").unwrap_or_default(),
                 "draft",
             )
         });
         remember_origin(record, "draft");
-        for receipt_id in string_array(&value, "sourceReceiptIds") {
+        for receipt_id in crate::store::field_array(&value, "sourceReceiptIds") {
             let observation = observe_receipt(paths, &receipt_id);
             record.observe(observation);
         }
@@ -387,14 +382,14 @@ fn project_learning(lifecycle: &mut Lifecycle, path: &Path) {
         let Ok(value) = serde_json::from_str::<Value>(line) else {
             continue;
         };
-        let Some(id) = string(&value, "id") else {
+        let Some(id) = crate::store::field(&value, "id") else {
             continue;
         };
         let record = lifecycle.skills.entry(id.clone()).or_insert_with(|| {
             SkillRecord::new(
                 id.clone(),
-                string(&value, "summary").unwrap_or_else(|| id.clone()),
-                string(&value, "summary").unwrap_or_default(),
+                crate::store::field(&value, "summary").unwrap_or_else(|| id.clone()),
+                crate::store::field(&value, "summary").unwrap_or_default(),
                 "learning",
             )
         });
@@ -601,7 +596,7 @@ fn decide(paths: &AppPaths, id: &str, kind: OverrideKind, reason: &str) -> Resul
     record.human_override = Some(HumanOverride {
         kind,
         reason: reason.to_string(),
-        at_unix_ms: crate::receipt::unix_ms(),
+        at_unix_ms: crate::clock::unix_ms(),
     });
     record.recompute();
     let state = record.state;
@@ -663,29 +658,6 @@ fn remember_origin(record: &mut SkillRecord, origin: &str) {
     if !record.origins.iter().any(|existing| existing == origin) {
         record.origins.push(origin.to_string());
     }
-}
-
-fn read_json(path: &Path) -> Option<Value> {
-    serde_json::from_slice(&fs::read(path).ok()?).ok()
-}
-
-fn string(value: &Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .filter(|found| !found.is_empty())
-}
-
-fn string_array(value: &Value, key: &str) -> Vec<String> {
-    value
-        .get(key)
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(str::to_string)
-        .collect()
 }
 
 #[cfg(test)]

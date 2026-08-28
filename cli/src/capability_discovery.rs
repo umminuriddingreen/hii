@@ -17,7 +17,7 @@ pub fn search_github(query: &str, min_stars: u64, limit: usize) -> Result<String
     let limit = limit.clamp(1, MAX_RESULTS);
     let url = format!(
         "https://api.github.com/search/repositories?q={}&sort=stars&order=desc&per_page={limit}",
-        percent_encode(&format!("{query} stars:>={min_stars}"))
+        crate::text::percent_encode_query(&format!("{query} stars:>={min_stars}"))
     );
     let response: GithubSearchResponse = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(20))
@@ -184,23 +184,10 @@ fn safe_dir_name(value: &str) -> String {
     }
 }
 
-fn percent_encode(value: &str) -> String {
-    value
-        .bytes()
-        .map(|byte| match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (byte as char).to_string()
-            }
-            b' ' => "+".into(),
-            _ => format!("%{byte:02X}"),
-        })
-        .collect()
-}
-
 fn search_public_web(query: &str, allowed_domains: Option<&[&str]>) -> Result<String, String> {
     let url = format!(
         "https://html.duckduckgo.com/html/?q={}",
-        percent_encode(query)
+        crate::text::percent_encode_query(query)
     );
     let response = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(20))

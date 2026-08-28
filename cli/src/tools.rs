@@ -293,11 +293,11 @@ impl Toolbelt {
                         value.starts_with("http://127.0.0.1:")
                             || value.starts_with("http://localhost:")
                     })
-                    .map(|value| format!("{value}?q={}", percent_encode(query)))
+                    .map(|value| format!("{value}?q={}", crate::text::percent_encode_query(query)))
                     .unwrap_or_else(|| {
                         format!(
                             "https://html.duckduckgo.com/html/?q={}",
-                            percent_encode(query)
+                            crate::text::percent_encode_query(query)
                         )
                     });
                 let response = self
@@ -721,19 +721,6 @@ fn relaxed_web_query(query: &str) -> Option<String> {
         .collect::<Vec<_>>()
         .join(" ");
     (relaxed != query && !relaxed.is_empty()).then_some(relaxed)
-}
-
-fn percent_encode(value: &str) -> String {
-    value
-        .bytes()
-        .map(|byte| match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (byte as char).to_string()
-            }
-            b' ' => "+".into(),
-            _ => format!("%{byte:02X}"),
-        })
-        .collect()
 }
 
 fn bounded_response_text(response: ureq::Response) -> Result<String, String> {

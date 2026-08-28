@@ -2,8 +2,7 @@ use crate::receipt::Receipt;
 use serde::Serialize;
 use serde_json::json;
 use std::{
-    fs::{self, OpenOptions},
-    io::Write,
+    fs,
     path::{Path, PathBuf},
 };
 
@@ -81,9 +80,9 @@ pub fn record_from_receipt(
             "authority": receipt.authority,
         }),
         approved: false,
-        created_at_unix_ms: crate::receipt::unix_ms(),
+        created_at_unix_ms: crate::clock::unix_ms(),
     };
-    append_jsonl(&path, &record)?;
+    crate::store::append_jsonl(&path, &record)?;
     write_verified_lessons(runtime)?;
     Ok(Some(path))
 }
@@ -134,14 +133,4 @@ pub fn status(runtime: &Path) -> Result<String, String> {
         "{count} learning candidate(s)\n{}",
         lessons.display()
     ))
-}
-
-fn append_jsonl(path: &Path, value: &impl Serialize) -> Result<(), String> {
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|error| error.to_string())?;
-    let raw = serde_json::to_string(value).map_err(|error| error.to_string())?;
-    writeln!(file, "{raw}").map_err(|error| error.to_string())
 }

@@ -12,6 +12,7 @@ mod capability_discovery;
 mod capability_index;
 mod capability_resolver;
 mod clean;
+mod clock;
 mod completion;
 mod config;
 mod context;
@@ -39,6 +40,7 @@ mod pipe;
 mod presence;
 mod project;
 mod receipt;
+mod route;
 mod run_context;
 mod runlog;
 mod schedule;
@@ -46,9 +48,11 @@ mod service;
 mod skill_lifecycle;
 mod skill_runtime;
 mod skills;
+mod store;
 mod stream;
 #[cfg(feature = "preview")]
 mod system_monitor;
+mod text;
 mod timeline;
 mod tools;
 mod tui;
@@ -70,7 +74,7 @@ use std::{
     io::{self, IsTerminal, Write},
     path::PathBuf,
     process::{Command, ExitCode},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 #[derive(Parser, Debug)]
@@ -78,7 +82,7 @@ use std::{
     name = "hii",
     version,
     about = "Fast, local-first workspace agent",
-    long_about = "HII is the local home for human intent, bounded agent work, and inspectable proof.\n\nStart here:\n  hii                          open the interactive workspace\n  hii home                     show the compact current coordinate\n  hii \"fix the failing tests\"  run a bounded goal\n  hii proof                    inspect what completed",
+    long_about = legacy::intro_resolved(),
     after_help = legacy::help_footer_resolved()
 )]
 struct Cli {
@@ -163,6 +167,7 @@ enum Commands {
         jsonl: bool,
     },
     #[command(about = "Create a native shell terminal object in the current HII Space")]
+    #[command(hide = true)]
     Terminal {
         #[arg(value_name = "DIRECTORY", help = "Working directory for the shell")]
         directory: Option<PathBuf>,
@@ -172,16 +177,19 @@ enum Commands {
         json: bool,
     },
     #[command(about = "Create and inspect permission-scoped HII object shares")]
+    #[command(hide = true)]
     Share {
         #[command(subcommand)]
         action: ShareCommand,
     },
     #[command(about = "Compile, inspect, approve, and search bounded Runtime context packs")]
+    #[command(hide = true)]
     Context {
         #[command(subcommand)]
         action: ContextCommand,
     },
     #[command(name = "apps", about = "List, register, and launch HII applications")]
+    #[command(hide = true)]
     Apps {
         #[command(subcommand)]
         action: ApplicationsCommand,
@@ -304,11 +312,18 @@ enum Commands {
             help = "Run with a reviewed HII skill and attribute the receipt; repeatable"
         )]
         skills: Vec<String>,
+        // Named `--autonomy` until it was noticed that `--help` presented it
+        // beside `--authority` as if both were enforced. Only `--authority` is:
+        // this one is prose in the system prompt, so it is now named for what it
+        // does — how often the model pauses to ask — and says so.
         #[arg(
-            long,
+            long = "asks",
+            alias = "autonomy",
             value_enum,
             default_value_t = AutonomyArg::LocalFull,
-            help = "Autonomy mode: local-full | approval"
+            value_name = "WHEN",
+            help = "How often the model should stop and ask: never | sensitive. \
+                    A prompt instruction, not an enforced boundary — use --authority for that"
         )]
         autonomy: AutonomyArg,
         #[arg(
@@ -324,6 +339,7 @@ enum Commands {
         json: bool,
     },
     #[command(about = "Show HII's grounded continuity, attention, and authority boundary")]
+    #[command(hide = true)]
     Presence {
         #[command(subcommand)]
         action: Option<PresenceCommand>,
@@ -357,6 +373,7 @@ enum Commands {
         email: Option<String>,
     },
     #[command(about = "Create a signed local contact card for HII Link")]
+    #[command(hide = true)]
     Link {
         #[command(subcommand)]
         action: LinkCommand,
@@ -384,16 +401,19 @@ enum Commands {
         jsonl: bool,
     },
     #[command(about = "Manage enrolled Macs and PCs controlled by this HII")]
+    #[command(hide = true)]
     Systems {
         #[command(subcommand)]
         action: Option<SystemsCommand>,
     },
     #[command(about = "Project CLI-owned runtime resources for HII surfaces")]
+    #[command(hide = true)]
     Ecosystem {
         #[command(subcommand)]
         action: EcosystemCommand,
     },
     #[command(about = "Run a bounded command against an enrolled system")]
+    #[command(hide = true)]
     On {
         #[arg(value_name = "SYSTEM")]
         system: String,
@@ -406,11 +426,13 @@ enum Commands {
         action: Option<BoardCommand>,
     },
     #[command(about = "Discover and download capability sources from trusted online indexes")]
+    #[command(hide = true)]
     Discover {
         #[command(subcommand)]
         action: DiscoverCommand,
     },
     #[command(about = "Skill lifecycle: proposed -> observed -> verified -> trusted")]
+    #[command(hide = true)]
     Skills {
         #[command(subcommand)]
         action: SkillsCommand,
@@ -427,16 +449,19 @@ enum Commands {
         json: bool,
     },
     #[command(about = "Find, capture, inspect, and export durable information objects")]
+    #[command(hide = true)]
     Info {
         #[command(subcommand)]
         action: InfoCommand,
     },
     #[command(about = "Run governed web intent slices through the local browser worker")]
+    #[command(hide = true)]
     Web {
         #[command(subcommand)]
         action: WebCommand,
     },
     #[command(about = "Compile intent into a capability, authority, execution, and proof plan")]
+    #[command(hide = true)]
     Pipe {
         #[arg(required = true, num_args = 1.., help = "Human intent to compile")]
         intent: Vec<String>,
@@ -465,28 +490,34 @@ enum Commands {
         json: bool,
     },
     #[command(about = "Measure one shared HII loop against 20 everyday requests")]
+    #[command(hide = true)]
     Usefulness {
         #[command(subcommand)]
         action: UsefulnessCommand,
     },
     #[command(
-        about = "Match human or agent needs to HII-hosted services and verified fulfillment"
+        about = "Match human or agent needs to HII-hosted services and verified fulfillment",
+        hide = true
     )]
+    #[command(hide = true)]
     Service {
         #[command(subcommand)]
         action: ServiceCommand,
     },
     #[command(about = "Send and inspect source-attributed agent notifications")]
+    #[command(hide = true)]
     Notify {
         #[command(subcommand)]
         action: NotifyCommand,
     },
     #[command(about = "Plan, price, triage, and govern organizational and physical projects")]
+    #[command(hide = true)]
     Project {
         #[command(subcommand)]
         action: ProjectCommand,
     },
     #[command(about = "Manage local recurring HII work through cron")]
+    #[command(hide = true)]
     Schedule {
         #[command(subcommand)]
         action: ScheduleCommand,
@@ -495,8 +526,10 @@ enum Commands {
         name = "tools-manifest",
         about = "Print the agent tool capability manifest (ACP/MCP boundary) as JSON"
     )]
+    #[command(hide = true)]
     ToolsManifest,
     #[command(about = "Inspect and guide autonomous HII tool creation")]
+    #[command(hide = true)]
     Tools {
         #[command(subcommand)]
         action: ToolsCommand,
@@ -505,6 +538,7 @@ enum Commands {
         name = "mcp-serve",
         about = "Serve the tool surface as an MCP server over stdio (JSON-RPC 2.0, line-delimited)"
     )]
+    #[command(hide = true)]
     McpServe {
         #[arg(
             long,
@@ -523,6 +557,7 @@ enum Commands {
         name = "acp-serve",
         about = "Serve the ACP northbound handshake over stdio (JSON-RPC 2.0, minimal stub)"
     )]
+    #[command(hide = true)]
     AcpServe {
         #[arg(
             long,
@@ -1577,8 +1612,12 @@ enum DiscoverCommand {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 enum AutonomyArg {
+    /// Pause before sensitive, destructive, or external actions.
+    #[value(name = "sensitive", alias = "approval")]
     Approval,
+    /// Act without pausing; `--authority` remains the boundary that is enforced.
     #[default]
+    #[value(name = "never", alias = "local-full")]
     LocalFull,
 }
 
@@ -1597,6 +1636,12 @@ fn main() -> ExitCode {
         Err(error) => return fail(error),
     };
     let raw: Vec<String> = env::args().collect();
+    // `--help` shows the core surface only; the full 77-command table lives here
+    // so that neither listing can drift from what actually routes.
+    if wants_full_command_list(&raw[1..]) {
+        println!("{}", route::full_command_list());
+        return ExitCode::SUCCESS;
+    }
     if let Some(result) = delegate_legacy(&paths.repo, &raw[1..]) {
         return match result {
             Ok(code) => ExitCode::from(code as u8),
@@ -1718,9 +1763,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             autonomy,
             last_message,
         }) => {
-            let workspace = cli
-                .cwd
-                .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+            let workspace = workspace(cli.cwd.clone())?;
             let authority =
                 resolve_authority(yolo, authority.as_deref(), AuthorityContext::Operator)?;
             let output = if jsonl {
@@ -1787,9 +1830,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Presence { action: _, json }) => {
-            let workspace = cli
-                .cwd
-                .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+            let workspace = workspace(cli.cwd.clone())?;
             presence::show(&paths, &workspace, json)?;
             Ok(ExitCode::SUCCESS)
         }
@@ -2094,9 +2135,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Proof { id, json }) => {
-            let workspace = cli
-                .cwd
-                .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+            let workspace = workspace(cli.cwd.clone())?;
             proof(&paths, &workspace, id.as_deref(), json)?;
             Ok(ExitCode::SUCCESS)
         }
@@ -2105,9 +2144,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             snapshot,
             jsonl,
         }) => {
-            let workspace = cli
-                .cwd
-                .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+            let workspace = workspace(cli.cwd.clone())?;
             stream::watch(&paths.runtime, &workspace, run.as_deref(), !snapshot, jsonl)?;
             Ok(ExitCode::SUCCESS)
         }
@@ -2176,10 +2213,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     verify,
                     done_when,
                 } => {
-                    let workspace = cli
-                        .cwd
-                        .clone()
-                        .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+                    let workspace = workspace(cli.cwd.clone())?;
                     let receipt = agent::run(
                         &paths,
                         RunOptions {
@@ -2237,9 +2271,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Info { action }) => {
-            let workspace = cli
-                .cwd
-                .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+            let workspace = workspace(cli.cwd.clone())?;
             information_command(&paths, &workspace, action)?;
             Ok(ExitCode::SUCCESS)
         }
@@ -2324,10 +2356,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                         return Err("resolved capability has no typed invocation adapter".into())
                     }
                 };
-                let workspace = cli
-                    .cwd
-                    .clone()
-                    .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+                let workspace = workspace(cli.cwd.clone())?;
                 let receipt = agent::run(
                     &paths,
                     RunOptions {
@@ -2454,10 +2483,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             ServiceCommand::Fulfill { id, verify, json } => {
                 let request = service::read_request(&paths, &id)?;
                 let spec = service::prepare_fulfillment(&paths, &request)?;
-                let workspace = cli
-                    .cwd
-                    .clone()
-                    .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+                let workspace = workspace(cli.cwd.clone())?;
                 let receipt = agent::run(
                     &paths,
                     RunOptions {
@@ -2848,9 +2874,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             authority,
             client_identity,
         }) => {
-            let workspace = cli
-                .cwd
-                .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+            let workspace = workspace(cli.cwd.clone())?;
             let authority =
                 resolve_authority(false, authority.as_deref(), AuthorityContext::Server)?;
             mcp::serve(&paths, &workspace, authority, client_identity.as_deref())
@@ -2891,9 +2915,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
 }
 
 fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
-    let workspace = cli
-        .cwd
-        .unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+    let workspace = workspace(cli.cwd.clone())?;
     let mut conversation = Conversation::new(
         paths,
         workspace,
@@ -3403,7 +3425,7 @@ fn parse_calendar_add(rest: &str) -> Option<SlashCommand> {
 
 fn status(paths: &AppPaths, cwd: Option<PathBuf>, json: bool) -> Result<(), String> {
     let started = Instant::now();
-    let workspace = cwd.unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+    let workspace = workspace(cwd)?;
     let branch = command_text("git", &["branch", "--show-current"], &workspace)
         .unwrap_or_else(|| "not-git".into());
     let dirty = command_text("git", &["status", "--porcelain"], &workspace)
@@ -3472,11 +3494,12 @@ fn status(paths: &AppPaths, cwd: Option<PathBuf>, json: bool) -> Result<(), Stri
 }
 
 fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
-    let workspace = cwd.unwrap_or(env::current_dir().map_err(|error| error.to_string())?);
+    let workspace = workspace(cwd)?;
     let checks = [
         (
             "Rust binary",
             true,
+            "",
             env::current_exe()
                 .map(|path| path.display().to_string())
                 .unwrap_or_default(),
@@ -3484,22 +3507,26 @@ fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
         (
             "Workspace",
             workspace.is_dir(),
+            "pass an existing directory with --cwd, or cd into your project first",
             workspace.display().to_string(),
         ),
         (
             "HII runtime",
             paths.runtime.is_dir(),
+            "run any `hii` command once to create it, or set HII_HOME to a writable path",
             paths.runtime.display().to_string(),
         ),
         (
             "Git",
             command_text("git", &["--version"], &workspace).is_some(),
+            "install Git: `xcode-select --install` on macOS",
             "git --version".into(),
         ),
         (
             // Search backend is never fatal: absent rg falls back to a native walk.
             "Search",
             true,
+            "",
             if command_text("rg", &["--version"], &workspace).is_some() {
                 "ripgrep".into()
             } else {
@@ -3509,6 +3536,7 @@ fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
         (
             "Shell",
             true,
+            "",
             std::env::var("HII_SHELL")
                 .ok()
                 .or_else(|| std::env::var("SHELL").ok())
@@ -3524,6 +3552,7 @@ fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
         (
             "Model endpoint",
             true,
+            "",
             format!(
                 "{} ({:?})",
                 AppPaths::model_url(),
@@ -3532,9 +3561,15 @@ fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
         ),
     ];
     let mut ok = true;
-    for (name, passed, detail) in checks {
+    // A diagnostic that only names what is broken leaves the user exactly where
+    // they started. Every failable check carries the command that fixes it.
+    let mut fixes: Vec<String> = Vec::new();
+    for (name, passed, fix, detail) in checks {
         ok &= passed;
         println!("{}  {name:<14} {detail}", if passed { "ok" } else { "!!" });
+        if !passed && !fix.is_empty() {
+            fixes.push(format!("{name}: {fix}"));
+        }
     }
     let ollama = Ollama::discover();
     match ollama.models() {
@@ -3550,6 +3585,20 @@ fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
                 format!("{} agent", ollama.provider_label()),
                 default_model
             );
+            if !default {
+                fixes.push(format!(
+                    "{} agent: the default model is not installed; run `ollama pull {default_model}` \
+                     or pick another with --model",
+                    ollama.provider_label()
+                ));
+            }
+            // Only worth saying when it is a different pull than the agent model's.
+            if !review && review_model != default_model {
+                fixes.push(format!(
+                    "{} review: optional; `ollama pull {review_model}` enables `hii run --review`",
+                    ollama.provider_label()
+                ));
+            }
             println!(
                 "{}  {:<14} {}",
                 if review { "ok" } else { "--" },
@@ -3560,6 +3609,18 @@ fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
         Err(error) => {
             ok = false;
             println!("!!  {:<14} {error}", ollama.provider_label());
+            fixes.push(format!(
+                "{}: no model backend answered at {}; start it, or set HII_MODEL_URL to one \
+                 that is running",
+                ollama.provider_label(),
+                AppPaths::model_url()
+            ));
+        }
+    }
+    if !fixes.is_empty() {
+        println!("\nTo fix:");
+        for fix in &fixes {
+            println!("  {fix}");
         }
     }
     println!("\n{}", if ok { "ready" } else { "not ready" });
@@ -4045,7 +4106,7 @@ struct ToolActivity {
 fn tools_command(paths: &AppPaths, action: ToolsCommand) -> Result<ExitCode, String> {
     match action {
         ToolsCommand::Activity { json } => {
-            let events = read_jsonl::<ToolActivity>(&tool_activity_path(paths))?;
+            let events = store::read_jsonl::<ToolActivity>(&tool_activity_path(paths))?;
             if json {
                 println!(
                     "{}",
@@ -4130,7 +4191,7 @@ fn tools_command(paths: &AppPaths, action: ToolsCommand) -> Result<ExitCode, Str
             json,
         } => {
             let intent = intent.join(" ");
-            let id = format!("tool-{}", now_unix_ms());
+            let id = format!("tool-{}", clock::unix_ms());
             let authority = authority.unwrap_or_else(|| {
                 if read_only {
                     "read-only".into()
@@ -4145,7 +4206,7 @@ fn tools_command(paths: &AppPaths, action: ToolsCommand) -> Result<ExitCode, Str
                 read_only,
                 status: "draft".into(),
                 proof: Vec::new(),
-                created_at_unix_ms: now_unix_ms(),
+                created_at_unix_ms: clock::unix_ms(),
             };
             write_tool_draft(paths, &draft)?;
             append_tool_activity(
@@ -4158,7 +4219,7 @@ fn tools_command(paths: &AppPaths, action: ToolsCommand) -> Result<ExitCode, Str
                     effect: vec![tool_draft_path(paths, &id).display().to_string()],
                     proof: Vec::new(),
                     next: "scaffold and test the draft before promotion".into(),
-                    created_at_unix_ms: now_unix_ms(),
+                    created_at_unix_ms: clock::unix_ms(),
                 },
             )?;
             if json {
@@ -4196,7 +4257,8 @@ fn tools_command(paths: &AppPaths, action: ToolsCommand) -> Result<ExitCode, Str
             )
         }
         ToolsCommand::Observe { json } => {
-            let observations = read_jsonl::<serde_json::Value>(&tool_observations_path(paths))?;
+            let observations =
+                store::read_jsonl::<serde_json::Value>(&tool_observations_path(paths))?;
             if json {
                 println!(
                     "{}",
@@ -4246,7 +4308,7 @@ fn update_tool_draft(
                 }
                 _ => "inspect activity and continue".into(),
             },
-            created_at_unix_ms: now_unix_ms(),
+            created_at_unix_ms: clock::unix_ms(),
         },
     )?;
     println!("{}  {}", status, draft.id);
@@ -4301,37 +4363,7 @@ fn write_tool_draft(paths: &AppPaths, draft: &ToolDraft) -> Result<(), String> {
 }
 
 fn append_tool_activity(paths: &AppPaths, event: ToolActivity) -> Result<(), String> {
-    append_jsonl(&tool_activity_path(paths), &event)
-}
-
-fn append_jsonl<T: Serialize>(path: &PathBuf, value: &T) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
-    let raw = serde_json::to_string(value).map_err(|error| error.to_string())?;
-    writeln!(file, "{raw}").map_err(|error| error.to_string())
-}
-
-fn read_jsonl<T: for<'de> Deserialize<'de>>(path: &PathBuf) -> Result<Vec<T>, String> {
-    let Ok(raw) = fs::read_to_string(path) else {
-        return Ok(Vec::new());
-    };
-    raw.lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| serde_json::from_str(line).map_err(|error| error.to_string()))
-        .collect()
-}
-
-fn now_unix_ms() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or(0)
+    store::append_jsonl(&tool_activity_path(paths), &event)
 }
 
 fn board_command(
@@ -4582,6 +4614,34 @@ fn public_test_slash_allowed(command: &SlashCommand) -> bool {
     )
 }
 
+/// `hii help --all`, `hii --help --all`, or `hii help -a`.
+fn wants_full_command_list(args: &[String]) -> bool {
+    let mut saw_help = false;
+    let mut saw_all = false;
+    for arg in args {
+        match arg.as_str() {
+            "help" | "--help" | "-h" => saw_help = true,
+            "--all" | "-a" => saw_all = true,
+            _ => return false,
+        }
+    }
+    saw_help && saw_all
+}
+
+/// The workspace a command is bound to: `--cwd` when given, otherwise the
+/// directory the user is standing in.
+///
+/// Thirteen call sites open-coded this, which meant thirteen chances for one of
+/// them to resolve the workspace differently from the boundary the run is checked
+/// against.
+fn workspace(cwd: Option<PathBuf>) -> Result<PathBuf, String> {
+    match cwd {
+        Some(path) => Ok(path),
+        None => env::current_dir()
+            .map_err(|error| format!("HII could not read the current directory: {error}")),
+    }
+}
+
 fn delegate_legacy(repo: &std::path::Path, args: &[String]) -> Option<Result<i32, String>> {
     let command = first_command(args)?;
     if claimed_from_legacy(args) {
@@ -4599,10 +4659,17 @@ fn claimed_from_legacy(args: &[String]) -> bool {
     let Some(index) = first_command_index(args) else {
         return false;
     };
-    let first = args.get(index).map(String::as_str);
+    let Some(command) = args.get(index).map(String::as_str) else {
+        return false;
+    };
+    route::claims_verb(command, first_positional_after(args, index))
+}
+
+/// The first non-flag argument after `index`, skipping any global flag's value.
+fn first_positional_after(args: &[String], index: usize) -> Option<&str> {
     let value_flags = value_taking_globals();
     let mut skip_value = false;
-    let second = args.iter().skip(index + 1).find_map(|arg| {
+    args.iter().skip(index + 1).find_map(|arg| {
         if skip_value {
             skip_value = false;
             return None;
@@ -4615,64 +4682,12 @@ fn claimed_from_legacy(args: &[String]) -> bool {
         } else {
             Some(arg.as_str())
         }
-    });
-    if first == Some("terminal") {
-        return true;
-    }
-    matches!(
-        (first, second),
-        (
-            Some("skills"),
-            Some("promote" | "reject" | "lifecycle" | "record-use" | "run")
-        ) | (
-            Some("context"),
-            Some("compile" | "show" | "approve" | "search")
-        )
-    )
+    })
 }
 
+/// Whether clap can parse this command, so the goal normalizer leaves it alone.
 fn is_native_command(command: &str) -> bool {
-    matches!(
-        command,
-        "ask"
-            | "terminal"
-            | "share"
-            | "context"
-            | "apps"
-            | "clean"
-            | "run"
-            | "agent"
-            | "status"
-            | "presence"
-            | "doctor"
-            | "models"
-            | "providers"
-            | "login"
-            | "link"
-            | "proof"
-            | "receipt"
-            | "stream"
-            | "systems"
-            | "ecosystem"
-            | "on"
-            | "board"
-            | "discover"
-            | "find"
-            | "info"
-            | "web"
-            | "notify"
-            | "pipe"
-            | "usefulness"
-            | "service"
-            | "project"
-            | "skills"
-            | "tools"
-            | "legacy"
-            | "help"
-            | "tools-manifest"
-            | "mcp-serve"
-            | "acp-serve"
-    ) || command == "schedule"
+    route::has_native_surface(command)
 }
 
 fn terminal_node(cwd: &std::path::Path, z: u64, now: &str) -> serde_json::Value {
@@ -4733,8 +4748,7 @@ fn create_space_terminal(
     open: bool,
     json_output: bool,
 ) -> Result<(), String> {
-    let directory = directory
-        .unwrap_or(env::current_dir().map_err(|error| error.to_string())?)
+    let directory = workspace(directory)?
         .canonicalize()
         .map_err(|error| format!("terminal working directory is unavailable: {error}"))?;
     if !directory.is_dir() {
@@ -5121,43 +5135,7 @@ fn command_suggestion(args: &[String]) -> Option<(String, &'static str)> {
     if is_native_command(typed) || legacy::is_legacy(typed) || typed.len() < 3 {
         return None;
     }
-    let commands = [
-        "run",
-        "status",
-        "doctor",
-        "models",
-        "providers",
-        "login",
-        "proof",
-        "systems",
-        "on",
-        "tools",
-        "board",
-        "discover",
-        "pipe",
-        "usefulness",
-        "service",
-        "project",
-        "help",
-        "home",
-        "agents",
-        "context",
-        "now",
-        "task",
-        "work",
-        "check",
-        "ship",
-        "caps",
-        "jobs",
-        "daemon",
-        "space",
-        "knowledge",
-        "skill",
-        "bridge",
-        "codex",
-    ];
-    commands
-        .into_iter()
+    route::all_names()
         .find(|candidate| {
             edit_distance(typed, candidate) <= 1 || adjacent_transposition(typed, candidate)
         })
@@ -5357,6 +5335,61 @@ mod tests {
         let mac = default_system_capabilities("macos", false);
         assert!(mac.contains(&"applescript".to_string()));
         assert!(mac.contains(&"windows".to_string()));
+    }
+
+    /// The routing table and the clap surface are two descriptions of the same
+    /// thing, so they must agree in both directions: every clap subcommand is a
+    /// native route, every native route is a clap subcommand, and what `--help`
+    /// hides is exactly what the table calls Extended.
+    #[test]
+    fn the_clap_surface_matches_the_routing_table() {
+        use clap::CommandFactory;
+        let command = Cli::command();
+        let mut from_clap: Vec<(String, bool)> = command
+            .get_subcommands()
+            .map(|sub| (sub.get_name().to_string(), sub.is_hide_set()))
+            .collect();
+        from_clap.sort();
+
+        for (name, hidden) in &from_clap {
+            let entry = route::lookup(name)
+                .unwrap_or_else(|| panic!("`hii {name}` is a clap subcommand with no route entry"));
+            assert!(
+                route::has_native_surface(name),
+                "`hii {name}` is implemented in Rust but the table sends it to Node"
+            );
+            if entry.group == route::Group::Internal {
+                assert!(
+                    *hidden || name == "help",
+                    "`hii {name}` is a machine-facing entrypoint and must not be advertised"
+                );
+                continue;
+            }
+            let extended = entry.visibility == route::Visibility::Extended;
+            assert_eq!(
+                *hidden,
+                extended,
+                "`hii {name}`: table says {:?} but --help {}",
+                entry.visibility,
+                if *hidden { "hides it" } else { "shows it" }
+            );
+        }
+
+        let clap_names: Vec<&str> = from_clap.iter().map(|(name, _)| name.as_str()).collect();
+        for entry in route::ROUTES {
+            // `agent`/`receipt` are clap aliases, and `help` is clap's own
+            // builtin; none of them appear as subcommands in their own right.
+            if !route::has_native_surface(entry.name)
+                || matches!(entry.name, "agent" | "receipt" | "help")
+            {
+                continue;
+            }
+            assert!(
+                clap_names.contains(&entry.name),
+                "`{}` is routed native but no clap subcommand answers it",
+                entry.name
+            );
+        }
     }
 
     const FROZEN_LEGACY_FAMILIES: &[&str] = &[

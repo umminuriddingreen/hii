@@ -5,14 +5,14 @@ import './apps.css';
 
 export const metadata: Metadata = {
   title: 'HII',
-  description: 'A human information interface for working with agents.',
+  description: 'An infinite 2D canvas.',
   manifest: '/manifest.webmanifest'
 };
 
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  colorScheme: 'light dark'
+  colorScheme: 'light'
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -4,8 +4,17 @@ import { isSpaceId } from '@/lib/spaces/types';
 export const SPACE_ALLOWED_NODE_TYPES = ['image', 'canvas-text', 'ink'] as const satisfies readonly WorkspaceNodeType[];
 const allowed = new Set<WorkspaceNodeType>(SPACE_ALLOWED_NODE_TYPES);
 
+export const ACCOUNT_ALLOWED_NODE_TYPES = [
+  'image', 'canvas-text', 'ink', 'link', 'file', 'text', 'note', 'media', 'document', 'cad', 'model', 'font'
+] as const satisfies readonly WorkspaceNodeType[];
+const accountAllowed = new Set<WorkspaceNodeType>(ACCOUNT_ALLOWED_NODE_TYPES);
+
 export function isSpaceCanvasNodeType(type: WorkspaceNodeType) {
   return allowed.has(type);
+}
+
+export function isAccountCanvasNodeType(type: WorkspaceNodeType) {
+  return accountAllowed.has(type);
 }
 
 export const SPACE_SURFACE_CAPABILITIES = Object.freeze({
@@ -15,8 +24,19 @@ export const SPACE_SURFACE_CAPABILITIES = Object.freeze({
   applications: false, developerControls: false
 });
 
+export const ACCOUNT_SURFACE_CAPABILITIES = Object.freeze({
+  pan: true, zoom: true, select: true, move: true, resize: true, delete: true,
+  image: true, text: true, sticker: true, drawing: true, files: true, links: true,
+  undo: true, redo: true, terminal: 'trusted-device-required', browser: 'passive-links',
+  agents: false, applications: false, developerControls: false
+});
+
 export function isSpaceCanvasNode(node: Pick<WorkspaceNode, 'type' | 'spaceId'>, spaceId: string) {
   return isSpaceCanvasNodeType(node.type) && node.spaceId === spaceId;
+}
+
+export function isAccountCanvasNode(node: Pick<WorkspaceNode, 'type' | 'spaceId'>, spaceId: string) {
+  return isAccountCanvasNodeType(node.type) && node.spaceId === spaceId;
 }
 
 export function spaceStorageKey(spaceId: string) {

@@ -1,13 +1,14 @@
 use crate::{
     budget::{BudgetKind, Budgets, Cancel, CancelReason, Deadline},
+    clock::unix_ms,
     config::{AppPaths, ModelProvider},
     contract::{deletion_shell, sensitive_shell, Authority, Contract, Decision},
     hooks::{HookBatch, HookEvent, HookRunner},
     mcp_client::McpClients,
     ollama::{ChatResult, ChatStreamEvent, Message, Ollama},
     receipt::{
-        classify_error, record_verification, redact_text, unix_ms, HookRecord, Outcome, Receipt,
-        RunGuard, RunStore, TokenUsageRecord, VerificationRecord,
+        classify_error, record_verification, redact_text, HookRecord, Outcome, Receipt, RunGuard,
+        RunStore, TokenUsageRecord, VerificationRecord,
     },
     runlog::{Delta, Event, Feedback, Human, Journal, OutputMode, StreamPolicy},
     tools::{ToolResult, Toolbelt},

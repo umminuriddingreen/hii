@@ -188,7 +188,7 @@ impl McpClients {
         let mut rows = Vec::new();
         let mut used = 0;
         for tool in &tools {
-            let description = inline_text(&truncate_text(&tool.description, 512));
+            let description = inline_text(&crate::text::clip_bytes(&tool.description, 512));
             let row = format!(
                 "{}.{} [{}{}]{} — {}",
                 tool.server,
@@ -587,7 +587,7 @@ fn discover(name: &str, server: &ServerConfig, workspace: &Path) -> Result<Vec<M
             }
             let read_only = annotations["readOnlyHint"].as_bool().unwrap_or(false)
                 || annotations["mutates"].as_bool() == Some(false);
-            let description = truncate_text(
+            let description = crate::text::clip_bytes(
                 &redact_text(tool["description"].as_str().unwrap_or("No description")),
                 MAX_DESCRIPTION_BYTES,
             );
@@ -630,7 +630,7 @@ fn call_tool(
         .collect::<Vec<_>>()
         .join("\n");
     if output.len() > MAX_OUTPUT_BYTES {
-        output = truncate_text(&output, MAX_OUTPUT_BYTES);
+        output = crate::text::clip_bytes(&output, MAX_OUTPUT_BYTES);
         output.push_str("\n… MCP output truncated");
     }
     Ok(McpCallResult {
@@ -1066,7 +1066,7 @@ fn persist_private(path: &Path, value: &impl Serialize) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     validate_private_directory(parent)?;
-    set_directory_mode(parent)?;
+    crate::store::set_directory_mode(parent)?;
     if path.exists() {
         validate_private_file(path)?;
     }
@@ -1143,18 +1143,6 @@ fn validate_private_directory(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn set_directory_mode(path: &Path) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-            .map_err(|error| error.to_string())?;
-    }
-    #[cfg(not(unix))]
-    let _ = path;
-    Ok(())
-}
-
 fn executable_sha256(path: &Path) -> Result<String, String> {
     let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
     let mut context = ring::digest::Context::new(&ring::digest::SHA256);
@@ -1172,17 +1160,6 @@ fn executable_sha256(path: &Path) -> Result<String, String> {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect())
-}
-
-fn truncate_text(value: &str, max_bytes: usize) -> String {
-    if value.len() <= max_bytes {
-        return value.into();
-    }
-    let mut boundary = max_bytes;
-    while boundary > 0 && !value.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-    value[..boundary].into()
 }
 
 #[cfg(test)]
@@ -1397,8 +1374,8 @@ done
 
     #[test]
     fn truncation_preserves_utf8_boundaries() {
-        assert_eq!(truncate_text("a💜b", 4), "a");
-        assert_eq!(truncate_text("a💜b", 5), "a💜");
+        assert_eq!(crate::text::clip_bytes("a💜b", 4), "a");
+        assert_eq!(crate::text::clip_bytes("a💜b", 5), "a💜");
         assert_eq!(
             schema_hint(&json!({
                 "type": "object",

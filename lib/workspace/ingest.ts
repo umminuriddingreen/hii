@@ -260,9 +260,10 @@ export type StoredWorkspaceAsset = {
   height?: number;
 };
 
-export type WorkspaceAssetStoreOptions = { spaceId?: string };
+export type WorkspaceAssetStoreOptions = { spaceId?: string; store?: boolean };
 
 export async function storeWorkspaceAsset(file: File, options: WorkspaceAssetStoreOptions = {}): Promise<StoredWorkspaceAsset | null> {
+  if (options.store === false) return null;
   try {
     if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
       const { convertFileSrc, invoke } = await import('@tauri-apps/api/core');

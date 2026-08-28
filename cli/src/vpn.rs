@@ -1077,24 +1077,9 @@ fn ensure_private_dir(root: &Path) -> Result<(), String> {
 }
 
 fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let parent = path
-        .parent()
+    path.parent()
         .ok_or("HII VPN path has no parent directory.")?;
-    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    let temporary = parent.join(format!(".vpn-{}.tmp", Uuid::new_v4()));
-    fs::write(&temporary, bytes).map_err(|error| error.to_string())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))
-            .map_err(|error| error.to_string())?;
-    }
-    #[cfg(windows)]
-    if path.exists() {
-        fs::remove_file(path).map_err(|error| error.to_string())?;
-    }
-    fs::rename(&temporary, path).map_err(|error| error.to_string())?;
-    Ok(())
+    crate::store::write_private_atomic(path, bytes)
 }
 
 fn write_private_json(path: &Path, value: &impl Serialize) -> Result<(), String> {

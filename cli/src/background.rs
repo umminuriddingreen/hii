@@ -44,7 +44,7 @@ impl BackgroundJobs {
     pub fn new(runtime: &Path, workspace: &Path) -> Result<Self, String> {
         let root = runtime.join("background-jobs");
         fs::create_dir_all(&root).map_err(|error| error.to_string())?;
-        set_directory_mode(&root)?;
+        crate::store::set_directory_mode(&root)?;
         Ok(Self {
             root,
             workspace: workspace.to_path_buf(),
@@ -67,7 +67,7 @@ impl BackgroundJobs {
         let id = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
         let directory = self.root.join(&id);
         fs::create_dir(&directory).map_err(|error| error.to_string())?;
-        set_directory_mode(&directory)?;
+        crate::store::set_directory_mode(&directory)?;
         let log = directory.join("output.jsonl");
         let stdout = secure_log(&log)?;
         let stderr = stdout.try_clone().map_err(|error| error.to_string())?;
@@ -141,7 +141,7 @@ impl BackgroundJobs {
                     "{}  {:<9} {}{}",
                     record.id,
                     record.status,
-                    truncate(&record.goal, 64),
+                    crate::text::clip(&record.goal, 64),
                     proof
                 )
             })
@@ -379,20 +379,6 @@ fn validate_id(id: &str) -> Result<(), String> {
     }
 }
 
-fn truncate(value: &str, width: usize) -> String {
-    if value.chars().count() <= width {
-        value.into()
-    } else {
-        format!(
-            "{}…",
-            value
-                .chars()
-                .take(width.saturating_sub(1))
-                .collect::<String>()
-        )
-    }
-}
-
 fn process_alive(pid: u32) -> bool {
     #[cfg(unix)]
     {
@@ -450,18 +436,6 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
     use std::io::Write;
     let mut file = options.open(path).map_err(|error| error.to_string())?;
     file.write_all(bytes).map_err(|error| error.to_string())
-}
-
-fn set_directory_mode(path: &Path) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-            .map_err(|error| error.to_string())?;
-    }
-    #[cfg(not(unix))]
-    let _ = path;
-    Ok(())
 }
 
 #[cfg(test)]

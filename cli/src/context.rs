@@ -42,7 +42,7 @@ impl ContextCapsule {
 
         let instructions = workspace.join("AGENTS.md");
         if let Ok(content) = fs::read_to_string(&instructions) {
-            let content = truncate_chars(&redact_text(&content), MAX_INSTRUCTIONS_CHARS);
+            let content = crate::text::clip(&redact_text(&content), MAX_INSTRUCTIONS_CHARS);
             sections.push(format!(
                 "WORKSPACE INSTRUCTIONS\nsource: {}\n{}",
                 instructions.display(),
@@ -78,8 +78,8 @@ impl ContextCapsule {
                         receipt.status,
                         receipt.outcome,
                         record,
-                        one_line(&receipt.goal, 180),
-                        one_line(&receipt.summary, 260),
+                        crate::text::clip_line(&receipt.goal, 180),
+                        crate::text::clip_line(&receipt.summary, 260),
                         receipt.next.as_deref().map_or("none", |next| next),
                         verified
                     )
@@ -127,7 +127,7 @@ fn user_profile(runtime: &Path) -> Option<(String, String)> {
                 format!(
                     "{label}\nsource: {}\nCurrent operator statements and current system state override this working profile.\n{}",
                     path.display(),
-                    truncate_chars(&redact_text(&content), MAX_PROFILE_CHARS)
+                    crate::text::clip(&redact_text(&content), MAX_PROFILE_CHARS)
                 ),
                 path.display().to_string(),
             )
@@ -151,8 +151,8 @@ fn shared_hii_state(runtime: &Path) -> Option<(String, Vec<String>)> {
                         &task.id[..8.min(task.id.len())],
                         task.lane,
                         task.priority,
-                        one_line(&task.title, 180),
-                        one_line(&task.coordinate, 180)
+                        crate::text::clip_line(&task.title, 180),
+                        crate::text::clip_line(&task.coordinate, 180)
                     )
                 })
                 .collect::<Vec<_>>()
@@ -179,7 +179,10 @@ fn shared_hii_state(runtime: &Path) -> Option<(String, Vec<String>)> {
                     "- {}  {}  {}",
                     item.get("id").and_then(Value::as_str).unwrap_or("schedule"),
                     item.get("cron").and_then(Value::as_str).unwrap_or(""),
-                    one_line(item.get("task").and_then(Value::as_str).unwrap_or(""), 220)
+                    crate::text::clip_line(
+                        item.get("task").and_then(Value::as_str).unwrap_or(""),
+                        220
+                    )
                 )
             })
             .collect::<Vec<_>>();
@@ -230,7 +233,7 @@ fn shared_hii_state(runtime: &Path) -> Option<(String, Vec<String>)> {
 
     (!sections.is_empty()).then(|| {
         (
-            truncate_chars(&sections.join("\n\n"), MAX_SHARED_STATE_CHARS),
+            crate::text::clip(&sections.join("\n\n"), MAX_SHARED_STATE_CHARS),
             sources,
         )
     })
@@ -283,7 +286,7 @@ fn git_context(runtime: &Path, workspace: &Path) -> Option<String> {
             recent.trim()
         }
     );
-    Some(truncate_chars(&body, MAX_GIT_CHARS))
+    Some(crate::text::clip(&body, MAX_GIT_CHARS))
 }
 
 fn command(workspace: &Path, args: &[&str]) -> Option<String> {
@@ -314,25 +317,6 @@ fn recent_receipts(runtime: &Path, workspace: &Path) -> Vec<Receipt> {
         })
         .take(MAX_HISTORY)
         .collect()
-}
-
-fn truncate_chars(value: &str, limit: usize) -> String {
-    if value.chars().count() <= limit {
-        return value.to_string();
-    }
-    let mut truncated = value
-        .chars()
-        .take(limit.saturating_sub(1))
-        .collect::<String>();
-    truncated.push('…');
-    truncated
-}
-
-fn one_line(value: &str, limit: usize) -> String {
-    truncate_chars(
-        &value.split_whitespace().collect::<Vec<_>>().join(" "),
-        limit,
-    )
 }
 
 #[cfg(test)]

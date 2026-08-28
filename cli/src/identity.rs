@@ -190,33 +190,13 @@ fn hex(bytes: &[u8]) -> String {
         .join("")
 }
 
+/// The local identity is a signing key: it is written atomically and owner-only.
 fn write_private_json(path: &Path, identity: &LocalIdentity) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let raw = serde_json::to_string_pretty(identity).map_err(|error| error.to_string())?;
-    fs::write(path, format!("{raw}\n")).map_err(|error| error.to_string())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
+    crate::store::write_json_private_atomic(path, identity)
 }
 
 fn write_private_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    fs::write(path, bytes).map_err(|error| error.to_string())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
+    crate::store::write_private_atomic(path, bytes)
 }
 
 #[cfg(test)]

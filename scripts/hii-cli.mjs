@@ -2722,6 +2722,26 @@ if (cmd && !["help", "--help", "-h"].includes(cmd) && rest.some((arg) => arg ===
   cmdHelp(cmd);
   process.exit(0);
 }
+
+// Commands whose handler reads flags only and ignores every positional argument.
+// `hii context list` used to print the agent context and exit 0, so a typo produced
+// plausible output for a command the user never ran. Silence is worse than an error.
+const FLAG_ONLY_COMMANDS = new Set([
+  "home",
+  "context",
+  "agent-context",
+  "probe",
+  "health"
+]);
+
+if (FLAG_ONLY_COMMANDS.has(cmd)) {
+  const stray = rest.find((arg) => !arg.startsWith("-"));
+  if (stray !== undefined) {
+    console.error(`hii ${cmd}: unexpected argument \`${stray}\``);
+    console.error(`\`hii ${cmd}\` takes options only. Run \`hii ${cmd} --help\` to see them.`);
+    process.exit(1);
+  }
+}
 switch (cmd) {
   case undefined:
     if (process.stdin.isTTY && process.stdout.isTTY) cmdChat(rest);

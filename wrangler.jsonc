@@ -37,6 +37,20 @@
       "bucket_name": "hii"
     }
   ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "REMOTE_ROOM",
+        "class_name": "RemoteRoom"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RemoteRoom"]
+    }
+  ],
   "d1_databases": [
     {
       "binding": "IDENTITY",

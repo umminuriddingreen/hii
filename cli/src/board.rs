@@ -7,7 +7,7 @@ use std::{
 };
 use uuid::Uuid;
 
-use crate::receipt::{redact_text, unix_ms};
+use crate::receipt::redact_text;
 
 pub const LANES: &[&str] = &["backlog", "next", "doing", "blocked", "done"];
 pub const PRIORITIES: &[&str] = &["low", "normal", "high", "urgent"];
@@ -174,8 +174,8 @@ impl Board {
         if is_command_flag(&title) {
             return Err("Use an outcome-focused task title instead of a command flag.".to_string());
         }
-        let now = iso_now();
-        let coordinate = truncate_chars(
+        let now = crate::clock::iso_millis();
+        let coordinate = crate::text::clip_hard(
             redact_text(
                 options
                     .coordinate
@@ -199,15 +199,15 @@ impl Board {
         }
         let task = Task {
             id: Uuid::new_v4().to_string(),
-            title: truncate_chars(&title, 240),
+            title: crate::text::clip_hard(&title, 240),
             lane: normalize(options.lane.as_deref(), LANES, "backlog"),
             priority: normalize(options.priority.as_deref(), PRIORITIES, "normal"),
-            owner: truncate_chars(
+            owner: crate::text::clip_hard(
                 redact_text(options.owner.as_deref().unwrap_or("main agent")).trim(),
                 80,
             ),
             coordinate,
-            notes: truncate_chars(
+            notes: crate::text::clip_hard(
                 redact_text(options.notes.as_deref().unwrap_or("")).trim(),
                 2000,
             ),
@@ -255,7 +255,7 @@ impl Board {
 
     pub fn update(&self, id_prefix: &str, patch: EditPatch) -> Result<Task, String> {
         let task = self.find_one(id_prefix)?;
-        let now = iso_now();
+        let now = crate::clock::iso_millis();
         let mut event = serde_json::json!({});
         let approval_requested = patch.review_state.as_deref() == Some("approved");
         if let Some(lane) = &patch.lane {
@@ -283,7 +283,7 @@ impl Board {
             }
         }
         if let Some(title) = &patch.title {
-            let clean = truncate_chars(redact_text(title).trim(), 240);
+            let clean = crate::text::clip_hard(redact_text(title).trim(), 240);
             if !clean.is_empty() && clean != task.title {
                 event["title"] = Value::String(clean);
             }
@@ -295,7 +295,7 @@ impl Board {
             }
         }
         if let Some(owner) = &patch.owner {
-            let clean = truncate_chars(redact_text(owner).trim(), 80);
+            let clean = crate::text::clip_hard(redact_text(owner).trim(), 80);
             let owner = if clean.is_empty() {
                 task.owner.clone()
             } else {
@@ -306,7 +306,7 @@ impl Board {
             }
         }
         if let Some(coordinate) = &patch.coordinate {
-            let clean = truncate_chars(redact_text(coordinate).trim(), 240);
+            let clean = crate::text::clip_hard(redact_text(coordinate).trim(), 240);
             let coordinate = if clean.is_empty() {
                 task.coordinate.clone()
             } else {
@@ -317,7 +317,7 @@ impl Board {
             }
         }
         if let Some(notes) = &patch.notes {
-            let notes = truncate_chars(redact_text(notes).trim(), 2000);
+            let notes = crate::text::clip_hard(redact_text(notes).trim(), 2000);
             if notes != task.notes {
                 event["notes"] = Value::String(notes);
             }
@@ -348,7 +348,7 @@ impl Board {
             }
             event["reviewState"] = Value::String("approved".to_string());
             event["approvedAt"] = Value::String(now.clone());
-            event["approvedBy"] = Value::String(truncate_chars(
+            event["approvedBy"] = Value::String(crate::text::clip_hard(
                 redact_text(patch.approved_by.as_deref().unwrap_or("local operator")).trim(),
                 80,
             ));
@@ -420,7 +420,7 @@ impl Board {
                         .filter(|value| !value.is_empty())
                         .collect::<Vec<_>>()
                         .join("\n");
-                    let notes = truncate_chars(&notes, 2000);
+                    let notes = crate::text::clip_hard(&notes, 2000);
                     self.update(
                         &duplicate.id,
                         EditPatch {
@@ -546,7 +546,7 @@ fn normalize(value: Option<&str>, allowed: &[&str], fallback: &str) -> String {
 fn normalize_acceptance(values: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     for value in values {
-        let criterion = truncate_chars(redact_text(value).trim(), 240);
+        let criterion = crate::text::clip_hard(redact_text(value).trim(), 240);
         if !criterion.is_empty() && !out.contains(&criterion) {
             out.push(criterion);
         }
@@ -595,18 +595,6 @@ fn parse_csv_tags(value: &str) -> Vec<String> {
         .take(12)
         .map(str::to_string)
         .collect()
-}
-
-fn truncate_chars(value: &str, max: usize) -> String {
-    value.chars().take(max).collect()
-}
-
-fn iso_now() -> String {
-    let millis = unix_ms();
-    chrono::DateTime::from_timestamp_millis(millis as i64)
-        .unwrap_or_default()
-        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-        .to_string()
 }
 
 pub fn print_board(store: &Path, tasks: &[Task], include_done: bool) {
@@ -859,9 +847,9 @@ mod tests {
                 "patch": {
                     "runId": "run-one",
                     "runStatus": "running",
-                    "updatedAt": iso_now()
+                    "updatedAt": crate::clock::iso_millis()
                 },
-                "ts": iso_now()
+                "ts": crate::clock::iso_millis()
             }))
             .unwrap();
 
@@ -883,9 +871,9 @@ mod tests {
                 "patch": {
                     "runStatus": "completed",
                     "receiptRef": "/tmp/receipt.json",
-                    "updatedAt": iso_now()
+                    "updatedAt": crate::clock::iso_millis()
                 },
-                "ts": iso_now()
+                "ts": crate::clock::iso_millis()
             }))
             .unwrap();
         let completed = board
@@ -951,12 +939,12 @@ mod tests {
             .unwrap();
         let mut second = first.clone();
         second.id = Uuid::new_v4().to_string();
-        second.updated_at = iso_now();
+        second.updated_at = crate::clock::iso_millis();
         board
             .append(serde_json::json!({
                 "type": "created",
                 "task": second,
-                "ts": iso_now()
+                "ts": crate::clock::iso_millis()
             }))
             .unwrap();
         let reconciled = board.dedupe(false).unwrap();
@@ -1018,12 +1006,12 @@ mod tests {
             run_id: None,
             run_status: None,
             receipt_ref: None,
-            created_at: iso_now(),
-            updated_at: iso_now(),
+            created_at: crate::clock::iso_millis(),
+            updated_at: crate::clock::iso_millis(),
             completed_at: None,
         };
         board
-            .append(serde_json::json!({ "type": "created", "task": task, "ts": iso_now() }))
+            .append(serde_json::json!({ "type": "created", "task": task, "ts": crate::clock::iso_millis() }))
             .unwrap();
 
         let error = board
@@ -1069,12 +1057,12 @@ mod tests {
             run_id: None,
             run_status: None,
             receipt_ref: None,
-            created_at: iso_now(),
-            updated_at: iso_now(),
+            created_at: crate::clock::iso_millis(),
+            updated_at: crate::clock::iso_millis(),
             completed_at: None,
         };
         board
-            .append(serde_json::json!({ "type": "created", "task": task, "ts": iso_now() }))
+            .append(serde_json::json!({ "type": "created", "task": task, "ts": crate::clock::iso_millis() }))
             .unwrap();
 
         let error = board.approve(&task.id, None).unwrap_err();

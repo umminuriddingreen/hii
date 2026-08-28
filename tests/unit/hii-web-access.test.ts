@@ -31,13 +31,16 @@ describe('HII web access gate', () => {
     const source = readFileSync('components/auth/HiiWebAccess.tsx', 'utf8');
     const css = readFileSync('components/auth/HiiWebAccess.module.css', 'utf8');
 
-    expect(source).toContain('surface="space"');
+    expect(source).toContain('surface="account"');
     expect(source).toContain('spaceId={`account:${canvasAccountId}`}');
     expect(source).toContain('creatorId={`account:${canvasAccountId}`}');
     expect(source).toContain('persistence={canvasPersistence}');
-    expect(source).toContain('browserSpacePersistence(`account:${canvasAccountId}`)');
+    expect(source).toContain('browserSpacePersistence(`account:${canvasAccountId}`');
+    expect(source).toContain('hydrateBrowserCanvasAssets(canvasAccountId, document)');
+    expect(source).toContain('fileSeeder={canvasFileSeeder}');
+    expect(source).toContain("onRequestDevice={() => setPanel('models')}");
     expect(source).toContain('stored only in this browser');
-    expect(source).toContain('allowPhoto={false}');
+    expect(source).toContain('allowPhoto');
     expect(source).toContain('/^[A-Za-z0-9_-]{43}$/.test(canvasAccountId)');
     expect(source).toContain("setDeviceMessage('could not log out. try again.')");
     expect(source).toContain('open on another device');
@@ -45,13 +48,30 @@ describe('HII web access gate', () => {
     expect(source).not.toContain('href="hii://');
     expect(source).not.toContain('the terminal runs natively on your machine');
     expect(source).not.toContain('download for windows');
-    expect(css).toContain('.canvasShell :global(.hii-canvas[data-surface="space"])');
+    expect(css).toContain('.canvasShell :global(.hii-canvas[data-surface="account"])');
     expect(css).toContain('min-height: 44px');
 
     const canvas = readFileSync('components/workspace/HiiRoot.tsx', 'utf8');
     expect(canvas).toContain('{(!isSpace || allowPhoto) && <input');
     expect(canvas).toContain('if (!files.length || (isSpace && !allowPhoto)) return;');
     expect(canvas).toContain('canvasTextSeed(value.slice(0, 100_000))');
+    expect(canvas).toContain("surface?: 'workspace' | 'space' | 'account'");
+    expect(canvas).toContain('accountTools={isAccount}');
+    expect(canvas).toContain('fileSeeder ? fileSeeder(files) : seedsFromFiles(files)');
+  });
+
+  it('keeps imported canvas assets local to the authenticated browser device', () => {
+    const source = readFileSync('lib/web/canvas-assets.ts', 'utf8');
+
+    expect(source).toContain("const DATABASE = 'hii-web-canvas-assets-v1'");
+    expect(source).toContain('file.size > MAX_FILE_BYTES');
+    expect(source).toContain('files.length > MAX_BATCH_FILES');
+    expect(source).toContain('MAX_BATCH_BYTES');
+    expect(source).toContain("seedFromFile(file, { store: false })");
+    expect(source).toContain('database.transaction(STORE, \'readwrite\')');
+    expect(source).toContain('indexeddb:${asset.id}');
+    expect(source).toContain("crypto.subtle.digest('SHA-256'");
+    expect(source).not.toContain('fetch(');
   });
 
   it('receives an opaque account id for account-scoped browser storage', () => {
@@ -72,11 +92,12 @@ describe('HII web access gate', () => {
     expect(css).not.toContain('#0066ff');
   });
 
-  it('keeps the desktop entry target while using the authenticated web gate', () => {
+  it('mounts only the infinite canvas at the app entry', () => {
     const page = readFileSync('app/page.tsx', 'utf8');
 
-    expect(page).toContain("process.env.NEXT_PUBLIC_HII_TARGET === 'desktop'");
-    expect(page).toContain("await import('@/components/workspace/HiiRoot')");
-    expect(page).toContain('return <HiiWebAccess />');
+    expect(page).toContain("import { InfiniteCanvas }");
+    expect(page).toContain('return <InfiniteCanvas />');
+    expect(page).not.toContain('HiiRoot');
+    expect(page).not.toContain('HiiWebAccess');
   });
 });

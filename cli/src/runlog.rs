@@ -14,7 +14,10 @@
 //! be produced by [`Journal::feedback`], which journals it on the way out. A
 //! string the model saw is therefore always in `events.jsonl`.
 
-use crate::receipt::{unix_ms, Receipt, RunStore};
+use crate::{
+    clock::unix_ms,
+    receipt::{Receipt, RunStore},
+};
 use serde_json::{json, Value};
 use std::{
     io::{self, IsTerminal, Write},

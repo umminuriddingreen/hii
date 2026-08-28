@@ -79,7 +79,7 @@ impl Declaration {
             fingerprint: fingerprint(&checks),
             checks,
             origin,
-            declared_at_unix_ms: crate::receipt::unix_ms(),
+            declared_at_unix_ms: crate::clock::unix_ms(),
         })
     }
 

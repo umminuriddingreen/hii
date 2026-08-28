@@ -496,25 +496,7 @@ fn read_request_path(path: &Path) -> Result<ServiceRequest, String> {
 fn write_request(paths: &AppPaths, request: &ServiceRequest) -> Result<(), String> {
     validate_request_id(&request.id)?;
     let path = request_path(paths, &request.id);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let raw = serde_json::to_string_pretty(request).map_err(|error| error.to_string())?;
-    let temporary = path.with_extension(format!("json.tmp-{}", Uuid::new_v4()));
-    let result = (|| {
-        fs::write(&temporary, format!("{raw}\n")).map_err(|error| error.to_string())?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))
-                .map_err(|error| error.to_string())?;
-        }
-        fs::rename(&temporary, &path).map_err(|error| error.to_string())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(temporary);
-    }
-    result
+    crate::store::write_json_private_atomic(&path, request)
 }
 
 fn availability_label(value: Availability) -> &'static str {

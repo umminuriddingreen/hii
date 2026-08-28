@@ -7,7 +7,6 @@
 //! object. Prices are planning estimates until source-backed quotes replace the
 //! allowances; no estimate is represented as a bid or professional certification.
 
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -16,6 +15,9 @@ use std::{
     path::{Path, PathBuf},
 };
 use uuid::Uuid;
+
+/// Longest slug embedded in a project or KPI identifier.
+const PROJECT_SLUG_MAX: usize = 48;
 
 const SCHEMA_VERSION: u8 = 1;
 const MAX_OPTIONS: usize = 8;
@@ -477,10 +479,10 @@ pub fn create(runtime: &Path, options: CreateOptions) -> Result<Project, String>
             })
             .collect(),
     };
-    let now = now();
+    let now = crate::clock::rfc3339();
     let project_id = format!(
         "{}-{}",
-        slug(&options.name),
+        crate::text::slug(&options.name, PROJECT_SLUG_MAX),
         &Uuid::new_v4().simple().to_string()[..8]
     );
     let (budget_lines, supplier_needs) = build_system_budget(budget, options.location.as_deref());
@@ -648,7 +650,7 @@ pub fn select_option(
         option_id: Some(selected),
         actor: required_text(actor, "approval actor")?,
         note: "Approved for planning and internal activation only; external commitments remain separately gated".into(),
-        created_at: now(),
+        created_at: crate::clock::rfc3339(),
     });
     save(runtime, &project)?;
     Ok(project)
@@ -749,7 +751,7 @@ pub fn add_stakeholder(
     decision_scope: &str,
 ) -> Result<Project, String> {
     let mut project = load(runtime, id)?;
-    let base = slug(name);
+    let base = crate::text::slug(name, PROJECT_SLUG_MAX);
     let stakeholder_id = if project.stakeholders.iter().any(|item| item.id == base) {
         format!("{}-{}", base, &Uuid::new_v4().simple().to_string()[..6])
     } else {
@@ -780,7 +782,7 @@ pub fn add_kpi(
     owner: &str,
 ) -> Result<Project, String> {
     let mut project = load(runtime, id)?;
-    let kpi_id = format!("kpi-{}", slug(name));
+    let kpi_id = format!("kpi-{}", crate::text::slug(name, PROJECT_SLUG_MAX));
     if project.kpis.iter().any(|kpi| kpi.id == kpi_id) {
         return Err(format!("KPI already exists: {kpi_id}"));
     }
@@ -1115,7 +1117,7 @@ pub fn approve_phase(
         option_id: project.selected_option_id.clone(),
         actor: required_text(actor, "approval actor")?,
         note: required_text(note, "approval note")?,
-        created_at: now(),
+        created_at: crate::clock::rfc3339(),
     });
     let revision = project.revision;
     touch(
@@ -1907,13 +1909,7 @@ fn save(runtime: &Path, project: &Project) -> Result<PathBuf, String> {
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))
         .map_err(|error| error.to_string())?;
     let path = dir.join(format!("{}.json", project.id));
-    let temporary = dir.join(format!(".{}.{}.tmp", project.id, std::process::id()));
-    let bytes = serde_json::to_vec_pretty(project).map_err(|error| error.to_string())?;
-    fs::write(&temporary, bytes).map_err(|error| error.to_string())?;
-    #[cfg(unix)]
-    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))
-        .map_err(|error| error.to_string())?;
-    fs::rename(&temporary, &path).map_err(|error| error.to_string())?;
+    crate::store::write_json_private_atomic(&path, project)?;
     Ok(path)
 }
 
@@ -1968,7 +1964,7 @@ fn supplier_search_terms(category: &str) -> &'static str {
 }
 
 fn touch(project: &mut Project, event: &str, actor: &str, detail: &str) {
-    project.updated_at = now();
+    project.updated_at = crate::clock::rfc3339();
     project.events.push(ProjectEvent {
         event: event.into(),
         actor: actor.into(),
@@ -2085,9 +2081,6 @@ fn reading(id: &str, name: &str, value: String, target: &str, status: &str) -> K
         status: status.into(),
     }
 }
-fn now() -> String {
-    Utc::now().to_rfc3339()
-}
 
 fn required_text(value: &str, label: &str) -> Result<String, String> {
     let value = value.trim();
@@ -2117,30 +2110,6 @@ fn normalize_phase(value: &str) -> Result<String, String> {
         .find(|phase| phase.code == normalized)
         .map(|phase| phase.code.to_string())
         .ok_or_else(|| "phase must be sd, dd, cd, or active-project-development".into())
-}
-
-fn slug(value: &str) -> String {
-    let slug = value
-        .trim()
-        .to_ascii_lowercase()
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() {
-                character
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .split('-')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("-");
-    if slug.is_empty() {
-        "project".into()
-    } else {
-        slug.chars().take(48).collect()
-    }
 }
 
 #[cfg(test)]

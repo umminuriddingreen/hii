@@ -151,7 +151,7 @@ impl Keymap {
             .parent()
             .ok_or_else(|| "keymap config has no parent directory".to_string())?;
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        set_directory_mode(parent)?;
+        crate::store::set_directory_mode(parent)?;
         if self.path.exists() {
             validate_config_file(&self.path)?;
         }
@@ -312,18 +312,6 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
     }
     let mut file = options.open(path).map_err(|error| error.to_string())?;
     file.write_all(bytes).map_err(|error| error.to_string())
-}
-
-fn set_directory_mode(path: &Path) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-            .map_err(|error| error.to_string())?;
-    }
-    #[cfg(not(unix))]
-    let _ = path;
-    Ok(())
 }
 
 #[cfg(test)]

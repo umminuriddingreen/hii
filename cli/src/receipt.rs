@@ -5,7 +5,6 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -202,7 +201,7 @@ pub struct ConversationStore {
 
 impl ConversationStore {
     pub fn create(runtime: &Path) -> Result<Self, String> {
-        let now = unix_ms();
+        let now = crate::clock::unix_ms();
         let id = format!("{now:x}-{:x}", std::process::id());
         let dir = runtime.join("conversations").join("cli");
         fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
@@ -214,7 +213,7 @@ impl ConversationStore {
 
     pub fn event(&self, kind: &str, data: Value) -> Result<(), String> {
         let entry = serde_json::json!({
-            "ts_unix_ms": unix_ms(),
+            "ts_unix_ms": crate::clock::unix_ms(),
             "conversation_id": self.id,
             "kind": kind,
             "data": data
@@ -231,7 +230,7 @@ impl ConversationStore {
 
 impl RunStore {
     pub fn create(runtime: &Path) -> Result<Self, String> {
-        let now = unix_ms();
+        let now = crate::clock::unix_ms();
         let id = format!("{now:x}-{:x}", std::process::id());
         let dir = runtime.join("runs").join("cli").join(&id);
         fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
@@ -255,7 +254,7 @@ impl RunStore {
 
     pub fn event(&self, kind: &str, data: Value) -> Result<(), String> {
         let entry = serde_json::json!({
-            "ts_unix_ms": unix_ms(),
+            "ts_unix_ms": crate::clock::unix_ms(),
             "run_id": self.id,
             "kind": kind,
             "data": data
@@ -376,7 +375,7 @@ impl RunGuard {
         self.draft.status = outcome.status().into();
         self.draft.outcome = outcome.label().into();
         self.draft.exit_code = outcome.exit_code();
-        self.draft.finished_at_unix_ms = unix_ms();
+        self.draft.finished_at_unix_ms = crate::clock::unix_ms();
         self.draft.summary = redact_text(message);
     }
 
@@ -395,7 +394,7 @@ impl Drop for RunGuard {
             self.draft.status = Outcome::Aborted.status().into();
             self.draft.outcome = Outcome::Aborted.label().into();
             self.draft.exit_code = Outcome::Aborted.exit_code();
-            self.draft.finished_at_unix_ms = unix_ms();
+            self.draft.finished_at_unix_ms = crate::clock::unix_ms();
         }
         // Best effort: a failure here must not mask the error being unwound.
         let _ = write_receipt(&self.dir, &self.runtime, &self.id, &self.draft);
@@ -420,13 +419,6 @@ pub fn record_verification(
     }
     records.push(record);
     true
-}
-
-pub fn unix_ms() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
 }
 
 pub fn redact_text(value: &str) -> String {
@@ -575,7 +567,7 @@ mod tests {
             let path = std::env::temp_dir().join(format!(
                 "hii-receipt-{tag}-{}-{}",
                 std::process::id(),
-                unix_ms()
+                crate::clock::unix_ms()
             ));
             fs::create_dir_all(&path).expect("create temp dir");
             Self(path)

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-BSL-1.1
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { HiiRoot } from '@/components/workspace/HiiRoot';
 import { browserSpacePersistence } from '@/components/spaces/SpaceCanvas';
 import type { WorkspaceNode } from '@/lib/workspace/types';
+import { browserCanvasSeedsFromFiles, hydrateBrowserCanvasAssets } from '@/lib/web/canvas-assets';
 import { nodeSeedFromFeedSnapshot, type FeedItem } from '@/lib/web/feed-contract';
 import { HiiWebPanel, type WebPanel } from './HiiWebPanels';
 import styles from './HiiWebAccess.module.css';
@@ -126,8 +127,14 @@ export function HiiWebAccess() {
   const canvasAccountId = session.accountId ?? '';
   const canvasAccountReady = /^[A-Za-z0-9_-]{43}$/.test(canvasAccountId);
   const canvasPersistence = useMemo(
-    () => canvasAccountReady ? browserSpacePersistence(`account:${canvasAccountId}`) : undefined,
+    () => canvasAccountReady
+      ? browserSpacePersistence(`account:${canvasAccountId}`, (document) => hydrateBrowserCanvasAssets(canvasAccountId, document))
+      : undefined,
     [canvasAccountId, canvasAccountReady],
+  );
+  const canvasFileSeeder = useCallback(
+    (files: File[]) => browserCanvasSeedsFromFiles(canvasAccountId, files),
+    [canvasAccountId],
   );
 
   useEffect(() => {
@@ -277,11 +284,13 @@ export function HiiWebAccess() {
     return (
       <div className={styles.canvasShell}>
         <HiiRoot
-          surface="space"
+          surface="account"
           spaceId={`account:${canvasAccountId}`}
           creatorId={`account:${canvasAccountId}`}
           persistence={canvasPersistence}
-          allowPhoto={false}
+          allowPhoto
+          fileSeeder={canvasFileSeeder}
+          onRequestDevice={() => setPanel('models')}
           onShareNode={(node) => { setShareNode(node); setPanel('feed'); }}
           canvasImportRequest={canvasImport}
         />

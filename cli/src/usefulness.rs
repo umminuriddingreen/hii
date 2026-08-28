@@ -188,7 +188,7 @@ pub fn run(paths: &AppPaths, options: BenchmarkOptions) -> Result<BenchmarkRepor
         ));
     }
 
-    let benchmark_id = format!("{:x}", crate::receipt::unix_ms());
+    let benchmark_id = format!("{:x}", crate::clock::unix_ms());
     let root = paths
         .runtime
         .join("benchmarks/usefulness")

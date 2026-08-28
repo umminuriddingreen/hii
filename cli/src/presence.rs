@@ -416,7 +416,7 @@ struct InstanceRecord {
 fn observe_supervisor(runtime: &Path) -> Supervisor {
     let daemon_dir = runtime.join("daemon");
     let status_path = daemon_dir.join("status.json");
-    let status = read_json::<DaemonStatusFile>(&status_path).unwrap_or_default();
+    let status = crate::store::read_json::<DaemonStatusFile>(&status_path).unwrap_or_default();
     let pid_path = daemon_dir.join("daemon.pid");
     let pid = fs::read_to_string(&pid_path)
         .ok()
@@ -429,7 +429,7 @@ fn observe_supervisor(runtime: &Path) -> Supervisor {
         _ => "stopped",
     }
     .to_string();
-    let instances = read_json::<InstancesFile>(&daemon_dir.join("instances.json"))
+    let instances = crate::store::read_json::<InstancesFile>(&daemon_dir.join("instances.json"))
         .unwrap_or_default()
         .instances;
     let managed_instances = instances.iter().filter(|instance| instance.owned).count();
@@ -463,10 +463,6 @@ fn process_is_alive(pid: u32) -> bool {
         let _ = pid;
         false
     }
-}
-
-fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
-    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
 }
 
 fn observe_traces(runtime: &Path) -> TraceCoverage {

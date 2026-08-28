@@ -369,7 +369,7 @@ fn refresh_from_roots(paths: &AppPaths, roots: &[PathBuf]) -> Result<RefreshResu
         .collect();
     registered.extend(added.iter().cloned());
     registered.sort_by_key(|application| application.name.to_lowercase());
-    write_json_atomic(
+    crate::store::write_json_atomic(
         &registry_path(paths),
         &Registry {
             schema_version: SCHEMA_VERSION,
@@ -385,16 +385,6 @@ fn refresh_from_roots(paths: &AppPaths, roots: &[PathBuf]) -> Result<RefreshResu
         added,
         applications: list(paths)?,
     })
-}
-
-fn write_json_atomic(path: &Path, value: &impl Serialize) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let temporary = path.with_extension(format!("{}.tmp", Uuid::new_v4()));
-    let bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
-    fs::write(&temporary, bytes).map_err(|error| error.to_string())?;
-    fs::rename(&temporary, path).map_err(|error| error.to_string())
 }
 
 pub fn register(paths: &AppPaths, manifest_path: &Path) -> Result<ApplicationManifest, String> {
@@ -415,7 +405,7 @@ pub fn register(paths: &AppPaths, manifest_path: &Path) -> Result<ApplicationMan
     applications.retain(|entry| entry.id != manifest.id);
     applications.push(manifest.clone());
     applications.sort_by(|left, right| left.id.cmp(&right.id));
-    write_json_atomic(
+    crate::store::write_json_atomic(
         &registry_path(paths),
         &Registry {
             schema_version: SCHEMA_VERSION,
@@ -482,7 +472,7 @@ pub fn launch(
         receipt_path: receipt.display().to_string(),
     };
     append_json_line(&request_path(paths), &request)?;
-    write_json_atomic(
+    crate::store::write_json_atomic(
         &receipt,
         &serde_json::json!({
             "schemaVersion": 1,
@@ -551,7 +541,7 @@ fn acknowledge(paths: &AppPaths, request_id: &str) -> Result<Acknowledgement, St
         receipt_path: receipt.display().to_string(),
     };
     append_json_line(&acknowledgement_path(paths), &acknowledgement)?;
-    write_json_atomic(
+    crate::store::write_json_atomic(
         &receipt,
         &serde_json::json!({
             "schemaVersion": 1,

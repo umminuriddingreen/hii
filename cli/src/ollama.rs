@@ -10,6 +10,11 @@ use std::{
     time::Duration,
 };
 
+/// Model the native runner boots on when no runtime manifest names one yet.
+const NATIVE_BOOTSTRAP_MODEL: &str = "Qwen/Qwen3-4B";
+/// A first start has to fetch weights before it can listen; allow for that.
+const NATIVE_BOOTSTRAP_TIMEOUT_SECS: u64 = 45 * 60;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
     pub role: String,
@@ -685,42 +690,118 @@ fn pinned_model_url() -> bool {
     std::env::var_os("HII_MODEL_URL").is_some() || std::env::var_os("HII_OLLAMA_URL").is_some()
 }
 
-fn spawn_detached(program: &str, args: &[&str]) -> bool {
-    std::process::Command::new(program)
-        .args(args)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .is_ok()
-}
+/// Wait for the native runner while showing the operator that startup is
+/// happening. A first run has to fetch weights, so the wait is long and silence
+/// would read as a hang; the runner's own log tail is the progress report.
+fn wait_ready_verbose(
+    base_url: &str,
+    timeout: Duration,
+    log: &std::path::Path,
+    child: &mut std::process::Child,
+) -> bool {
+    use std::io::{IsTerminal, Write};
 
-fn wait_ready(base_url: &str) -> bool {
-    for _ in 0..40 {
+    let show = std::io::stderr().is_terminal();
+    let started = std::time::Instant::now();
+    let frames = ['|', '/', '-', '\\'];
+    let mut tick = 0usize;
+    while started.elapsed() < timeout {
         if endpoint_ready(base_url) {
+            if show {
+                eprint!("\r\x1b[2K");
+                let _ = std::io::stderr().flush();
+            }
             return true;
         }
+        // A runner that has already exited will never listen; report what it
+        // said rather than spending the whole timeout waiting on a dead process.
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            if show {
+                eprint!("\r\x1b[2K");
+                let _ = std::io::stderr().flush();
+            }
+            eprintln!("hii: HII Native exited during startup — {}", log_tail(log));
+            eprintln!("hii: full startup log at {}", log.display());
+            return false;
+        }
+        if show {
+            let detail = log_tail(log);
+            eprint!(
+                "\r\x1b[2K{} starting HII Native ({}s){}",
+                frames[tick % frames.len()],
+                started.elapsed().as_secs(),
+                if detail.is_empty() {
+                    String::new()
+                } else {
+                    format!(" — {detail}")
+                }
+            );
+            let _ = std::io::stderr().flush();
+        }
+        tick += 1;
         std::thread::sleep(Duration::from_millis(250));
+    }
+    if show {
+        eprint!("\r\x1b[2K");
+        let _ = std::io::stderr().flush();
     }
     false
 }
 
-/// Start the HII native runner when a previous run already left a runtime
-/// manifest behind, meaning its weights are on disk and serving costs nothing
-/// but process startup.
+/// Last non-empty log line, trimmed to one terminal line's worth of detail.
+fn log_tail(log: &std::path::Path) -> String {
+    let Ok(text) = std::fs::read_to_string(log) else {
+        return String::new();
+    };
+    let line = text
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default();
+    line.chars()
+        .rev()
+        .take(96)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
+}
+
+/// Start the HII native runner so `hii` on its own comes up with a runtime.
+/// A previous run leaves a manifest naming the model whose weights are already
+/// on disk, and serving then costs only process startup. With no manifest this
+/// is a first run: the runner is started on the bootstrap model and allowed the
+/// longer wait its weight fetch needs, with progress on stderr so the operator
+/// sees startup happening instead of a silent pause.
 fn start_native_runner() -> Option<Ollama> {
     let native_url = "http://127.0.0.1:11435";
     let paths = crate::config::AppPaths::discover().ok()?;
     let model_home = paths.runtime.join("models");
-    let manifest: Value =
-        serde_json::from_slice(&std::fs::read(model_home.join("runtime-manifest.json")).ok()?)
-            .ok()?;
-    let model = manifest.get("model")?.as_str()?.to_string();
     let binary = paths.repo.join("target/release/hii-native-runner");
     if !binary.is_file() {
         return None;
     }
-    if !spawn_detached(
+    let manifest: Option<Value> = std::fs::read(model_home.join("runtime-manifest.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+    // The runner publishes its manifest before the weights finish loading, so a
+    // manifest still marked `pending-load` proves nothing is on disk yet: that
+    // is a first run, and it gets the first-run banner and the longer wait.
+    let warm = manifest.as_ref().is_some_and(|manifest| {
+        manifest.get("integrity").and_then(Value::as_str) != Some("pending-load")
+    });
+    let model = manifest
+        .as_ref()
+        .and_then(|manifest| manifest.get("model")?.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| NATIVE_BOOTSTRAP_MODEL.to_string());
+
+    let log = paths.runtime.join("logs/native-runner.log");
+    if let Some(parent) = log.parent() {
+        std::fs::create_dir_all(parent).ok()?;
+    }
+    let mut child = spawn_logged(
         binary.to_str()?,
         &[
             "serve",
@@ -729,10 +810,36 @@ fn start_native_runner() -> Option<Ollama> {
             "--model-home",
             model_home.to_str()?,
         ],
-    ) {
-        return None;
+        &log,
+    )?;
+    if !warm {
+        eprintln!("hii: no local runtime yet — starting HII Native on {model} (first run fetches weights).");
     }
-    wait_ready(native_url).then(|| Ollama::new(native_url.to_string()))
+    let timeout = if warm {
+        Duration::from_secs(60)
+    } else {
+        Duration::from_secs(NATIVE_BOOTSTRAP_TIMEOUT_SECS)
+    };
+    wait_ready_verbose(native_url, timeout, &log, &mut child)
+        .then(|| Ollama::new(native_url.to_string()))
+}
+
+/// Spawn the runner detached from this terminal but with its output kept, so
+/// startup progress and any failure survive for the wait loop and the operator.
+fn spawn_logged(
+    program: &str,
+    args: &[&str],
+    log: &std::path::Path,
+) -> Option<std::process::Child> {
+    let out = std::fs::File::create(log).ok()?;
+    let err = out.try_clone().ok()?;
+    std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::from(out))
+        .stderr(std::process::Stdio::from(err))
+        .spawn()
+        .ok()
 }
 
 fn endpoint_ready(base_url: &str) -> bool {

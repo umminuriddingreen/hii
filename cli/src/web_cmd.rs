@@ -15,7 +15,6 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
 };
-use uuid::Uuid;
 
 pub fn vertical_test(
     paths: &AppPaths,
@@ -133,10 +132,7 @@ fn persist_receipt(runtime: &Path, case: &WebIntentCaseV1) -> Result<Option<Path
     let directory = runtime.join("receipts/web").join(case.id.replace(':', "_"));
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     let path = directory.join("receipt.json");
-    let temporary = directory.join(format!(".receipt-{}.tmp", Uuid::new_v4()));
-    let encoded = serde_json::to_vec_pretty(receipt).map_err(|error| error.to_string())?;
-    fs::write(&temporary, encoded).map_err(|error| error.to_string())?;
-    fs::rename(&temporary, &path).map_err(|error| error.to_string())?;
+    crate::store::write_json_atomic(&path, receipt)?;
     Ok(Some(path))
 }
 

@@ -293,21 +293,12 @@ fn timestamp(milliseconds: u128) -> String {
         .unwrap_or_else(|| "--:--:--.---".into())
 }
 
+/// Render a value onto one line, bounded to `max` characters.
+///
+/// The step beyond [`crate::text::clip_line`] is unescaping a literal `\n`: stream
+/// events carry model output whose newlines arrive already escaped.
 fn one_line(value: &str, max: usize) -> String {
-    let compact = value
-        .replace("\\n", " ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    if compact.chars().count() <= max {
-        compact
-    } else {
-        compact
-            .chars()
-            .take(max.saturating_sub(1))
-            .collect::<String>()
-            + "…"
-    }
+    crate::text::clip_line(&value.replace("\\n", " "), max)
 }
 
 #[cfg(test)]

@@ -3,95 +3,35 @@ use std::{
     process::Command,
 };
 
-pub const LEGACY_COMMANDS: &[&str] = &[
-    "now",
-    "chat",
-    "task",
-    "capture",
-    "work",
-    "check",
-    "ship",
-    "health",
-    "home",
-    "agents",
-    "context",
-    "agent-context",
-    "probe",
-    "caps",
-    "sdk",
-    "jobs",
-    "console",
-    "terminal",
-    "og",
-    "loop",
-    "daemon",
-    "instances",
-    "feed",
-    "space",
-    "money",
-    "links",
-    "pack",
-    "knowledge",
-    "skill",
-    "skills",
-    "runner",
-    "registry",
-    "bridge",
-    "mcp",
-    "codex",
-    "dev",
-    "build",
-    "start",
-];
+use crate::route;
 
-/// Additional HII commands, grouped for `--help`.
+/// HII's opening lines, naming only commands this installation can actually run.
 ///
-/// These are routed through the compatibility surface while the Rust migration
-/// continues. That implementation detail should not leak into user-facing help.
-pub const LEGACY_GROUPS: &[(&str, &[&str])] = &[
-    (
-        "work",
-        &[
-            "now", "chat", "task", "capture", "work", "check", "ship", "loop",
-        ],
-    ),
-    (
-        "context",
-        &[
-            "home",
-            "agents",
-            "context",
-            "agent-context",
-            "og",
-            "knowledge",
-            "links",
-            "feed",
-            "pack",
-        ],
-    ),
-    (
-        "infra",
-        &[
-            "health",
-            "probe",
-            "caps",
-            "jobs",
-            "daemon",
-            "instances",
-            "runner",
-            "registry",
-            "space",
-            "money",
-        ],
-    ),
-    (
-        "tools",
-        &[
-            "sdk", "console", "terminal", "bridge", "mcp", "codex", "skill", "skills",
-        ],
-    ),
-    ("build", &["dev", "build", "start"]),
-];
+/// The footer below has always adapted to a standalone binary; this block did not,
+/// so a released `hii` opened by telling a brand-new user to run `hii home` — a
+/// delegated command that build cannot execute. The first instruction a product
+/// gives must not be the first one that fails.
+pub fn intro_resolved() -> String {
+    intro(delegation_available())
+}
+
+/// Split from [`intro_resolved`] so both branches are testable without reaching
+/// for the process environment.
+pub fn intro(delegating: bool) -> String {
+    let mut lines = vec![
+        "HII is the local home for human intent, bounded agent work, and inspectable proof."
+            .to_string(),
+        String::new(),
+        "Start here:".to_string(),
+        "  hii                          open the interactive workspace".to_string(),
+    ];
+    if delegating {
+        lines.push("  hii home                     show the compact current coordinate".into());
+    }
+    lines.push("  hii \"fix the failing tests\"  run a bounded goal".into());
+    lines.push("  hii proof                    inspect what completed".into());
+    lines.join("\n")
+}
 
 /// The `--help` footer for the installation actually running.
 ///
@@ -99,12 +39,10 @@ pub const LEGACY_GROUPS: &[(&str, &[&str])] = &[
 /// an error message: a standalone `hii` listed 39 delegated commands and failed
 /// on every one of them.
 pub fn help_footer_resolved() -> String {
-    let repo = std::env::var_os("HII_ROOT")
-        .map(PathBuf::from)
-        .or_else(|| crate::config::home_dir().ok().map(|home| home.join("hii")));
-    match repo {
-        Some(repo) if is_available(&repo) => help_footer(),
-        _ => STANDALONE_FOOTER.to_string(),
+    if delegation_available() {
+        help_footer()
+    } else {
+        STANDALONE_FOOTER.to_string()
     }
 }
 
@@ -114,19 +52,47 @@ This build ships HII's native commands only.
   HII's extended surface (home, work, context, knowledge, codex, and others)
   needs a HII checkout beside it. Install from source or set HII_ROOT to one.";
 
-/// The `--help` footer naming every additional command.
+/// The `--help` footer: the rest of the core surface, plus the way to see it all.
+///
+/// `--help` used to print all 77 commands, which buried the four that carry the
+/// product. Extended commands still exist and still work; they are one flag away.
 pub fn help_footer() -> String {
-    let mut lines = vec!["More HII commands:".to_string()];
-    for (group, commands) in LEGACY_GROUPS {
-        lines.push(format!("  {group:<9} {}", commands.join(" ")));
+    let mut lines = vec!["More core commands:".to_string()];
+    for group in route::Group::ORDER {
+        let names: Vec<&str> = route::in_group(*group, Some(route::Visibility::Core))
+            .filter(|entry| route::is_delegated(entry.name))
+            .map(|entry| entry.name)
+            .collect();
+        if names.is_empty() {
+            continue;
+        }
+        lines.push(format!(
+            "  {:<9} {}",
+            group.title().to_lowercase(),
+            names.join(" ")
+        ));
     }
     lines.push(String::new());
+    lines.push("  Full command list: hii help --all".into());
     lines.push("  Every command supports `hii <command> --help`.".into());
     lines.join("\n")
 }
 
+/// Whether this installation can run delegated commands at all.
+///
+/// Asks `AppPaths` where the checkout is rather than re-deriving it. A second
+/// answer to "where is the workspace" is how `--help` starts describing one
+/// installation while the commands run against another.
+pub fn delegation_available() -> bool {
+    crate::config::AppPaths::discover().is_ok_and(|paths| is_available(&paths.repo))
+}
+
+/// Whether the Node compatibility surface owns this command.
+///
+/// Delegates to the single routing table; `preview` no longer needs a carve-out
+/// here because `schedule` is simply a native entry in that table.
 pub fn is_legacy(command: &str) -> bool {
-    LEGACY_COMMANDS.contains(&command) && !(cfg!(feature = "preview") && command == "schedule")
+    route::is_delegated(command)
 }
 
 /// The Node compatibility surface these commands are delegated to.
@@ -176,17 +142,54 @@ fn first_word(args: &[String]) -> &str {
 mod help_tests {
     use super::*;
 
-    /// Every delegated command must appear in the help footer, or it stays as
-    /// invisible as `hii context` was.
+    /// `hii --help` shows the core surface; `hii help --all` is where the rest
+    /// must remain reachable. A delegated command missing from both is as
+    /// invisible as `hii context` used to be.
     #[test]
-    fn help_footer_names_every_delegated_command() {
-        let footer = help_footer();
-        for command in LEGACY_COMMANDS {
+    fn every_delegated_command_is_named_by_the_full_list() {
+        let listing = route::full_command_list();
+        for entry in route::ROUTES {
+            if !is_legacy(entry.name) {
+                continue;
+            }
             assert!(
-                footer.contains(command),
-                "{command} is delegated but missing from --help"
+                listing.contains(entry.name),
+                "{} is delegated but `hii help --all` never names it",
+                entry.name
             );
         }
+    }
+
+    /// The footer's job changed: it is now a short core list plus the door to
+    /// everything else. If it stops naming that door, the extended surface is
+    /// undiscoverable.
+    #[test]
+    fn the_footer_points_at_the_full_list() {
+        let footer = help_footer();
+        assert!(footer.contains("hii help --all"), "{footer}");
+        assert!(
+            !footer.contains("knowledge"),
+            "the footer is the core surface, not the whole catalog: {footer}"
+        );
+    }
+
+    /// The broken first impression this change exists to remove: a released
+    /// binary opened by telling a new user to run `hii home`, then failed on it.
+    #[test]
+    fn a_standalone_install_does_not_open_by_naming_a_command_it_cannot_run() {
+        let standalone = intro(false);
+        assert!(
+            !standalone.contains("hii home"),
+            "a build without the Node surface must not advertise `hii home`: {standalone}"
+        );
+        assert!(
+            standalone.contains("hii proof"),
+            "the standalone intro still needs somewhere to send the user: {standalone}"
+        );
+        assert!(
+            intro(true).contains("hii home"),
+            "a checkout must still get the full opening"
+        );
     }
 
     /// The first-run experience for a released binary. A standalone `hii`
@@ -230,18 +233,6 @@ mod help_tests {
             is_available(repo),
             "the repo under test must have the entrypoint"
         );
-        assert!(help_footer().contains("knowledge"));
-    }
-
-    #[test]
-    fn help_groups_do_not_invent_commands() {
-        for (_, commands) in LEGACY_GROUPS {
-            for command in *commands {
-                assert!(
-                    LEGACY_COMMANDS.contains(command),
-                    "{command} is listed in help but is not delegated"
-                );
-            }
-        }
+        assert!(route::full_command_list().contains("knowledge"));
     }
 }

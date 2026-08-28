@@ -18,6 +18,19 @@
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 body { background: var(--field); color: var(--ink); }
 button, input, textarea { font: inherit; }
+.hii-infinite-canvas {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+  background-color: #f3efe4;
+  background-image: radial-gradient(circle, rgba(32, 45, 38, .18) 1px, transparent 1.2px);
+  background-position: var(--canvas-x) var(--canvas-y);
+  background-size: var(--canvas-grid) var(--canvas-grid);
+  user-select: none;
+}
+.hii-infinite-canvas:active { cursor: grabbing; }
 .hii-file-input { display: none; }
 .hii-html { width: 100%; height: 100%; border: 0; background: white; }
 .hii-intent-object { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; width: 100%; height: 100%; padding: 16px 18px 13px; }
@@ -132,11 +145,18 @@ button, input, textarea { font: inherit; }
 .hii-ink-canvas { display: block; width: 100%; height: 100%; pointer-events: none; }
 .hii-sticker { display: grid; width: 100%; height: 100%; place-items: center; font-size: min(18vw, 96px); line-height: 1; }
 .hii-entry-loading { position: fixed; inset: 0; background: var(--field); }
-.hii-canvas[data-surface="space"] { background-color: #f3efe4; background-image: radial-gradient(circle at 1px 1px, rgba(32, 45, 38, .14) 1px, transparent 0); background-size: 24px 24px; }
+.hii-canvas[data-surface="space"], .hii-canvas[data-surface="account"] { background-color: #f3efe4; background-image: radial-gradient(circle at 1px 1px, rgba(32, 45, 38, .14) 1px, transparent 0); background-size: 24px 24px; }
 .hii-space-toolbar { position: fixed; z-index: 2147482000; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 7px; max-width: calc(100vw - 24px); padding: 8px; border: 1px solid rgba(32, 45, 38, .26); border-radius: 18px; background: rgba(255, 253, 247, .94); box-shadow: 0 12px 38px rgba(35, 43, 38, .16); transform: translateX(-50%); backdrop-filter: blur(14px); }
 .hii-space-toolbar strong { padding: 0 10px 0 6px; color: #26342c; font: 10px/1 "SF Mono", ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
 .hii-space-toolbar button { min-width: 62px; min-height: 42px; padding: 0 12px; border: 0; border-radius: 12px; background: #e5e0d4; color: #26342c; font-size: 12px; font-weight: 650; }
 .hii-space-toolbar button[aria-pressed="true"] { background: #26342c; color: #fffdf7; }
+.hii-account-tools { position: absolute; right: 0; bottom: calc(100% + 8px); display: grid; width: min(340px, calc(100vw - 20px)); gap: 14px; padding: 16px; border: 1px solid rgba(32, 45, 38, .26); background: rgba(255, 253, 247, .98); color: #26342c; }
+.hii-account-tools > div { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; border: 1px solid currentColor; background: currentColor; }
+.hii-account-tools > div button { min-height: 40px; border-radius: 0; background: #fffdf7; font-size: 10px; font-weight: 400; }
+.hii-account-tools form { display: grid; grid-template-columns: minmax(0, 1fr) auto; border-bottom: 1px solid currentColor; }
+.hii-account-tools input { min-width: 0; min-height: 40px; padding: 0; border: 0; outline: 0; background: transparent; color: inherit; font: 10px/1 "SF Mono", ui-monospace, monospace; }
+.hii-account-tools form button { min-width: 70px; padding: 0; background: transparent; font-size: 10px; font-weight: 400; }
+.hii-account-tools small { color: currentColor; font: 9px/1.45 "SF Mono", ui-monospace, monospace; opacity: .58; }
 
 @media (max-width: 560px) {
   .hii-space-toolbar { width: calc(100vw - 20px); justify-content: space-between; }

@@ -4,18 +4,21 @@ import { useEffect, useMemo, useState } from 'react';
 import { HiiRoot } from '@/components/workspace/HiiRoot';
 import type { WorkspacePersistence } from '@/components/workspace/useWorkspace';
 import { emptyWorkspace, normalizeWorkspace } from '@/lib/workspace/types';
+import type { WorkspaceDoc } from '@/lib/workspace/types';
 import { spaceIdFromPathname, spaceStorageKey } from './space-surface';
 import { useSpaceTransport } from './useSpaceTransport';
 
-export function browserSpacePersistence(spaceId: string): WorkspacePersistence {
+export function browserSpacePersistence(spaceId: string, hydrate?: (document: WorkspaceDoc) => Promise<WorkspaceDoc>): WorkspacePersistence {
   const key = spaceStorageKey(spaceId);
   return {
     async read() {
+      let document: WorkspaceDoc;
       try {
-        return normalizeWorkspace(JSON.parse(localStorage.getItem(key) || 'null'));
+        document = normalizeWorkspace(JSON.parse(localStorage.getItem(key) || 'null'));
       } catch {
-        return emptyWorkspace();
+        document = emptyWorkspace();
       }
+      return hydrate ? await hydrate(document) : document;
     },
     async write(document) {
       const saved = { ...document, revision: document.revision + 1 };

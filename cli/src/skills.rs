@@ -3,6 +3,9 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::{fs, path::Path, process::Command};
 
+/// Longest generated skill id. Bounds a filesystem-visible name derived from a goal.
+const SKILL_ID_MAX: usize = 63;
+
 #[derive(Debug, Deserialize)]
 pub struct SkillCandidate {
     pub repeatable: bool,
@@ -28,8 +31,8 @@ pub fn candidate_messages(
         Message::user(format!(
             "Goal:\n{goal}\n\nOutcome:\n{summary}\n\nVerified checks:\n{}\n\nConversation context:\n{}\n\nActive HII sessions:\n{}",
             checks.join("\n"),
-            truncate(context, 12_000),
-            truncate(active_sessions, 4_000)
+            crate::text::clip_hard(context, 12_000),
+            crate::text::clip_hard(active_sessions, 4_000)
         )),
     ]
 }
@@ -41,7 +44,7 @@ pub fn parse_candidate(raw: &str) -> Result<SkillCandidate, String> {
         .unwrap_or(raw);
     let mut candidate: SkillCandidate =
         serde_json::from_str(json).map_err(|error| format!("invalid skill analysis: {error}"))?;
-    candidate.id = slug(&candidate.id);
+    candidate.id = crate::text::slug(&candidate.id, SKILL_ID_MAX);
     candidate.name = candidate.name.trim().chars().take(160).collect();
     candidate.description = candidate.description.trim().chars().take(1_000).collect();
     if candidate.repeatable
@@ -61,13 +64,14 @@ pub fn honor_explicit_request(
 ) -> SkillCandidate {
     candidate.repeatable = true;
     if candidate.id.is_empty() {
-        candidate.id = slug(
+        candidate.id = crate::text::slug(
             &goal
                 .split_whitespace()
                 .filter(|word| word.chars().any(char::is_alphanumeric))
                 .take(7)
                 .collect::<Vec<_>>()
                 .join(" "),
+            SKILL_ID_MAX,
         );
     }
     if candidate.name.is_empty() {
@@ -276,28 +280,6 @@ pub fn active_sessions(paths: &AppPaths) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn slug(value: &str) -> String {
-    let mut output = String::new();
-    let mut dash = false;
-    for ch in value.to_ascii_lowercase().chars() {
-        if ch.is_ascii_alphanumeric() {
-            output.push(ch);
-            dash = false;
-        } else if !dash && !output.is_empty() {
-            output.push('-');
-            dash = true;
-        }
-        if output.len() >= 63 {
-            break;
-        }
-    }
-    output.trim_matches('-').to_string()
-}
-
-fn truncate(value: &str, max: usize) -> String {
-    value.chars().take(max).collect()
 }
 
 #[cfg(test)]

@@ -198,7 +198,7 @@ fn frame(
         let marker = if active { "▸" } else { " " };
         // Pad before painting: escape bytes occupy no columns, so a width
         // applied to an already-painted string lines up wrong.
-        let plain = truncate(&choice.value, width);
+        let plain = crate::text::clip(&choice.value, width);
         let padded = format!(
             "{plain}{}",
             " ".repeat(width.saturating_sub(plain.chars().count()))
@@ -232,17 +232,6 @@ fn window_start(selected: usize, total: usize) -> usize {
     selected
         .saturating_sub(VISIBLE_ROWS - 1)
         .min(total - VISIBLE_ROWS)
-}
-
-fn truncate(value: &str, max: usize) -> String {
-    if value.chars().count() <= max {
-        return value.to_string();
-    }
-    let kept = value
-        .chars()
-        .take(max.saturating_sub(1))
-        .collect::<String>();
-    format!("{kept}…")
 }
 
 /// Repaint the block in place, leaving the cursor back on its first row.
@@ -408,7 +397,7 @@ mod tests {
 
     #[test]
     fn long_values_are_truncated_to_the_column_width() {
-        assert_eq!(truncate("qwen3.6:35b-mlx", 8), "qwen3.6…");
-        assert_eq!(truncate("short", 8), "short");
+        assert_eq!(crate::text::clip("qwen3.6:35b-mlx", 8), "qwen3.6…");
+        assert_eq!(crate::text::clip("short", 8), "short");
     }
 }

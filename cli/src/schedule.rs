@@ -1,4 +1,4 @@
-use crate::{config::AppPaths, receipt::unix_ms};
+use crate::{clock::unix_ms, config::AppPaths};
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Timelike};
 use serde::{Deserialize, Serialize};
 use serde_json::json;

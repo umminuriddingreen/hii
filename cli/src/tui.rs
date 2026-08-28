@@ -340,19 +340,6 @@ fn short_path(path: &Path) -> String {
         .unwrap_or(displayed)
 }
 
-fn truncate(value: &str, max: usize) -> String {
-    let single_line = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    if single_line.chars().count() <= max {
-        return single_line;
-    }
-    let mut clipped = single_line
-        .chars()
-        .take(max.saturating_sub(1))
-        .collect::<String>();
-    clipped.push('…');
-    clipped
-}
-
 fn workspace_state(git: &str) -> String {
     match git {
         "clean" => "clean".into(),
@@ -408,8 +395,8 @@ pub fn overview(
         lines.push(format!(
             "│ {:<9} {}  @ {}",
             lane,
-            truncate(title, 34),
-            truncate(coordinate, 28)
+            crate::text::clip_line(title, 34),
+            crate::text::clip_line(coordinate, 28)
         ));
     }
     lines.extend([
@@ -641,7 +628,7 @@ pub fn stage(label: &str, message: &str) {
             &format!(
                 "{}  {}",
                 label.to_ascii_lowercase(),
-                truncate(message, terminal_width().saturating_sub(22))
+                crate::text::clip_line(message, terminal_width().saturating_sub(22))
             ),
             &[DIM, palette().muted]
         )
@@ -658,7 +645,7 @@ pub fn tool_start(step: usize, tool: &str, target: &str) {
         paint("◇", &[palette().secondary]),
         paint(&format!("{step:02} {tool}"), &[BOLD]),
         paint(
-            &truncate(target, terminal_width().saturating_sub(30)),
+            &crate::text::clip_line(target, terminal_width().saturating_sub(30)),
             &[DIM, palette().muted]
         )
     ));
@@ -692,7 +679,12 @@ pub fn model_activity(frame: usize, phase: &str, detail: Option<&str>) -> String
     let detail = detail
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(|value| format!("  {}", truncate(value, terminal_width().saturating_sub(24))))
+        .map(|value| {
+            format!(
+                "  {}",
+                crate::text::clip_line(value, terminal_width().saturating_sub(24))
+            )
+        })
         .unwrap_or_default();
     format!(
         "  {}  {}{}",
@@ -727,7 +719,7 @@ pub fn tool_failure_detail(output: &str) {
         .map(str::trim)
         .filter(|line| !line.is_empty())
     {
-        let line = truncate(line, terminal_width().saturating_sub(10));
+        let line = crate::text::clip_line(line, terminal_width().saturating_sub(10));
         if !shown.contains(&line) {
             shown.push(line);
         }
@@ -749,7 +741,7 @@ pub fn recovery(message: &str) {
         "  {}  {}",
         paint("REPAIR STALLED", &[BOLD, palette().warning]),
         paint(
-            &truncate(message, terminal_width().saturating_sub(20)),
+            &crate::text::clip_line(message, terminal_width().saturating_sub(20)),
             &[palette().warning]
         )
     ));
@@ -785,7 +777,7 @@ pub fn error(message: &str) {
 mod tests {
     use super::{
         clear_activity_sequence, command_matches, command_menu, composer_window, model_activity,
-        overview, prompt_frame, short_path, terminal_width, theme_choices, truncate, welcome_frame,
+        overview, prompt_frame, short_path, terminal_width, theme_choices, welcome_frame,
         workspace_state, Theme,
     };
     use std::path::Path;
@@ -807,8 +799,11 @@ mod tests {
 
     #[test]
     fn truncates_long_activity_targets() {
-        assert_eq!(truncate("one two three four", 12), "one two thr…");
-        assert_eq!(truncate("short", 12), "short");
+        assert_eq!(
+            crate::text::clip_line("one two three four", 12),
+            "one two thr…"
+        );
+        assert_eq!(crate::text::clip_line("short", 12), "short");
     }
 
     #[test]
