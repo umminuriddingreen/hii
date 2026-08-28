@@ -26,6 +26,10 @@ describe('packaged CLI closure', () => {
   it('bundles the CLI as an app resource', async () => {
     const config = JSON.parse(await read('src-tauri', 'tauri.conf.json'));
     expect(config.bundle.resources).toContain('resources/hii');
+
+    const windowsConfig = JSON.parse(await read('src-tauri', 'tauri.windows.conf.json'));
+    expect(windowsConfig.bundle.targets).toContain('nsis');
+    expect(windowsConfig.bundle.resources).toContain('resources/hii.exe');
   });
 
   it('builds the CLI and copies it where the bundle expects it', async () => {
