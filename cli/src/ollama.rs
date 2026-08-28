@@ -186,6 +186,7 @@ impl Ollama {
     pub fn discover() -> Self {
         if std::env::var_os("HII_MODEL_URL").is_some()
             || std::env::var_os("HII_OLLAMA_URL").is_some()
+            || std::env::var_os("HII_RAPID_MLX_URL").is_some()
         {
             return Self::new(crate::config::AppPaths::model_url());
         }
@@ -197,11 +198,7 @@ impl Ollama {
     }
 
     pub fn provider_label(&self) -> &'static str {
-        match self.provider {
-            ModelProvider::Native => "HII Native",
-            ModelProvider::LmStudio => "LM Studio",
-            ModelProvider::Ollama => "Ollama",
-        }
+        self.provider.label()
     }
 
     pub fn base_url(&self) -> &str {
@@ -235,7 +232,7 @@ impl Ollama {
         format!(
             "cannot reach {} at {}. Bring up HII's own runtime with \
 `hii-native-runner serve` (acquire weights first: `hii runner model start --model <id>`), \
-or explicitly pin a compatibility provider with HII_MODEL_URL=<url>.",
+or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPID_MLX_URL=<url>).",
             self.provider_label(),
             self.base_url
         )
@@ -257,7 +254,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url>.",
                     .map(|model| model.name)
                     .collect())
             }
-            ModelProvider::LmStudio | ModelProvider::Native => {
+            ModelProvider::LmStudio | ModelProvider::Native | ModelProvider::RapidMlx => {
                 let response: OpenAiModels = self
                     .agent
                     .get(&format!("{}/v1/models", self.base_url))
@@ -343,7 +340,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url>.",
     ) -> Result<ChatResult, String> {
         let result = match self.provider {
             ModelProvider::Ollama => self.chat_ollama(model, messages, format),
-            ModelProvider::LmStudio | ModelProvider::Native => {
+            ModelProvider::LmStudio | ModelProvider::Native | ModelProvider::RapidMlx => {
                 self.chat_openai(model, messages, format)
             }
         };
@@ -687,7 +684,9 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url>.",
 }
 
 fn pinned_model_url() -> bool {
-    std::env::var_os("HII_MODEL_URL").is_some() || std::env::var_os("HII_OLLAMA_URL").is_some()
+    std::env::var_os("HII_MODEL_URL").is_some()
+        || std::env::var_os("HII_OLLAMA_URL").is_some()
+        || std::env::var_os("HII_RAPID_MLX_URL").is_some()
 }
 
 /// Wait for the native runner while showing the operator that startup is
@@ -971,15 +970,10 @@ fn log_llm_request(model: &str, provider: ModelProvider, usage: &ChatUsage) {
     if std::fs::create_dir_all(&dir).is_err() {
         return;
     }
-    let provider = match provider {
-        ModelProvider::Ollama => "ollama",
-        ModelProvider::LmStudio => "lmstudio",
-        ModelProvider::Native => "native",
-    };
     let mut entry = json!({
         "ts": chrono_now(),
         "source": "hii-cli",
-        "provider": provider,
+        "provider": provider.id(),
         "model": model,
         "prompt_tokens": usage.prompt_tokens,
         "completion_tokens": usage.completion_tokens,

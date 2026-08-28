@@ -25,24 +25,34 @@ pub enum ModelProvider {
     Ollama,
     LmStudio,
     Native,
+    RapidMlx,
 }
 
 impl ModelProvider {
     /// Resolve the provider from `HII_MODEL_PROVIDER`, else infer from the URL.
-    /// The normal HII default URL is the native runtime on loopback port 11435;
-    /// unknown explicitly supplied URLs retain Ollama compatibility.
+    /// `HII_MODEL_PROVIDER` supports explicit overrides (`native`, `lmstudio`,
+    /// `rapid-mlx`, etc.); otherwise infer from standard ports and fall back to
+    /// Ollama compatibility.
     pub fn discover(url: &str) -> Self {
         match env::var("HII_MODEL_PROVIDER")
             .ok()
-            .map(|value| value.trim().to_ascii_lowercase())
-            .as_deref()
+            .and_then(|value| Self::from_env_value(value.trim()))
         {
-            Some("lmstudio") | Some("lm-studio") | Some("lm_studio") => ModelProvider::LmStudio,
-            Some("native") | Some("hii-native") | Some("hii_native") => ModelProvider::Native,
-            Some("ollama") => ModelProvider::Ollama,
+            Some(provider) => provider,
+            None if env::var("HII_RAPID_MLX_URL").is_ok() => ModelProvider::RapidMlx,
             _ if url.contains(":11435") => ModelProvider::Native,
             _ if url.contains(":1234") => ModelProvider::LmStudio,
             _ => ModelProvider::Ollama,
+        }
+    }
+
+    fn from_env_value(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "lmstudio" | "lm-studio" | "lm_studio" => Some(ModelProvider::LmStudio),
+            "native" | "hii-native" | "hii_native" => Some(ModelProvider::Native),
+            "ollama" => Some(ModelProvider::Ollama),
+            "rapid-mlx" | "rapidmlx" | "rapid_mlx" | "rapid" => Some(ModelProvider::RapidMlx),
+            _ => None,
         }
     }
 
@@ -50,7 +60,9 @@ impl ModelProvider {
     pub fn default_model(self) -> &'static str {
         match self {
             ModelProvider::Native => DEFAULT_NATIVE_MODEL,
-            ModelProvider::Ollama | ModelProvider::LmStudio => DEFAULT_MODEL,
+            ModelProvider::RapidMlx | ModelProvider::Ollama | ModelProvider::LmStudio => {
+                DEFAULT_MODEL
+            }
         }
     }
 
@@ -58,7 +70,9 @@ impl ModelProvider {
     pub fn default_review_model(self) -> &'static str {
         match self {
             ModelProvider::Native => DEFAULT_NATIVE_REVIEW_MODEL,
-            ModelProvider::Ollama | ModelProvider::LmStudio => DEFAULT_REVIEW_MODEL,
+            ModelProvider::RapidMlx | ModelProvider::Ollama | ModelProvider::LmStudio => {
+                DEFAULT_REVIEW_MODEL
+            }
         }
     }
 
@@ -67,6 +81,17 @@ impl ModelProvider {
             ModelProvider::Ollama => "ollama",
             ModelProvider::LmStudio => "lmstudio",
             ModelProvider::Native => "native",
+            ModelProvider::RapidMlx => "rapid-mlx",
+        }
+    }
+
+    /// Stable provider label used in status/logging.
+    pub fn label(self) -> &'static str {
+        match self {
+            ModelProvider::Native => "HII Native",
+            ModelProvider::LmStudio => "LM Studio",
+            ModelProvider::Ollama => "Ollama",
+            ModelProvider::RapidMlx => "Rapid-MLX",
         }
     }
 }
@@ -92,10 +117,12 @@ impl AppPaths {
     }
 
     /// Base URL of the local model runtime. Honors `HII_MODEL_URL` first (the
-    /// portable, provider-neutral name), then the legacy `HII_OLLAMA_URL`, then
+    /// portable, provider-neutral name), then the explicit Rapid-MLX alias
+    /// `HII_RAPID_MLX_URL`, then the legacy `HII_OLLAMA_URL`, then
     /// HII's native loopback runtime.
     pub fn model_url() -> String {
         env::var("HII_MODEL_URL")
+            .or_else(|_| env::var("HII_RAPID_MLX_URL"))
             .or_else(|_| env::var("HII_OLLAMA_URL"))
             .unwrap_or_else(|_| "http://127.0.0.1:11435".to_string())
             .trim_end_matches('/')
@@ -145,4 +172,108 @@ fn ensure_parent(path: &Path) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        AppPaths, ModelProvider, DEFAULT_MODEL, DEFAULT_NATIVE_MODEL, DEFAULT_REVIEW_MODEL,
+    };
+    use std::env;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn rapid_mlx_env_alias_is_recognized() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous_provider = env::var_os("HII_MODEL_PROVIDER");
+        env::set_var("HII_MODEL_PROVIDER", "rapid-mlx");
+
+        assert_eq!(
+            ModelProvider::discover("http://127.0.0.1:11435"),
+            ModelProvider::RapidMlx
+        );
+
+        match previous_provider {
+            Some(value) => env::set_var("HII_MODEL_PROVIDER", value),
+            None => env::remove_var("HII_MODEL_PROVIDER"),
+        };
+    }
+
+    #[test]
+    fn rapid_mlx_defaults_to_portable_model_profile() {
+        assert_eq!(ModelProvider::RapidMlx.default_model(), DEFAULT_MODEL);
+        assert_eq!(
+            ModelProvider::RapidMlx.default_review_model(),
+            DEFAULT_REVIEW_MODEL
+        );
+    }
+
+    #[test]
+    fn rapid_mlx_identity_label_and_id() {
+        assert_eq!(ModelProvider::RapidMlx.id(), "rapid-mlx");
+        assert_eq!(ModelProvider::RapidMlx.label(), "Rapid-MLX");
+        assert_eq!(ModelProvider::Native.default_model(), DEFAULT_NATIVE_MODEL);
+    }
+
+    #[test]
+    fn rapid_mlx_url_takes_precedence_over_model_url() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous_url = env::var_os("HII_MODEL_URL");
+        let previous_rmlx = env::var_os("HII_RAPID_MLX_URL");
+        let previous_ollama = env::var_os("HII_OLLAMA_URL");
+
+        env::remove_var("HII_MODEL_URL");
+        env::remove_var("HII_RAPID_MLX_URL");
+        env::remove_var("HII_OLLAMA_URL");
+        env::set_var("HII_RAPID_MLX_URL", "http://127.0.0.1:5555");
+        assert_eq!(AppPaths::model_url(), "http://127.0.0.1:5555");
+
+        env::set_var("HII_MODEL_URL", "http://127.0.0.1:4444");
+        assert_eq!(AppPaths::model_url(), "http://127.0.0.1:4444");
+
+        match previous_url {
+            Some(value) => env::set_var("HII_MODEL_URL", value),
+            None => env::remove_var("HII_MODEL_URL"),
+        };
+        match previous_rmlx {
+            Some(value) => env::set_var("HII_RAPID_MLX_URL", value),
+            None => env::remove_var("HII_RAPID_MLX_URL"),
+        };
+        match previous_ollama {
+            Some(value) => env::set_var("HII_OLLAMA_URL", value),
+            None => env::remove_var("HII_OLLAMA_URL"),
+        };
+    }
+
+    #[test]
+    fn rapid_mlx_url_alias_is_detected() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous_url = env::var_os("HII_MODEL_URL");
+        let previous_rmlx = env::var_os("HII_RAPID_MLX_URL");
+        let previous_provider = env::var_os("HII_MODEL_PROVIDER");
+
+        env::remove_var("HII_MODEL_PROVIDER");
+        env::remove_var("HII_MODEL_URL");
+        env::set_var("HII_RAPID_MLX_URL", "http://127.0.0.1:8080");
+
+        assert_eq!(
+            ModelProvider::discover("http://127.0.0.1:8080"),
+            ModelProvider::RapidMlx
+        );
+
+        match previous_provider {
+            Some(value) => env::set_var("HII_MODEL_PROVIDER", value),
+            None => env::remove_var("HII_MODEL_PROVIDER"),
+        };
+        match previous_url {
+            Some(value) => env::set_var("HII_MODEL_URL", value),
+            None => env::remove_var("HII_MODEL_URL"),
+        };
+        match previous_rmlx {
+            Some(value) => env::set_var("HII_RAPID_MLX_URL", value),
+            None => env::remove_var("HII_RAPID_MLX_URL"),
+        };
+    }
 }
