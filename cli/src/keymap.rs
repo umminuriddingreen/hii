@@ -321,12 +321,15 @@ fn set_directory_mode(path: &Path) -> Result<(), String> {
         fs::set_permissions(path, fs::Permissions::from_mode(0o700))
             .map_err(|error| error.to_string())?;
     }
+    #[cfg(not(unix))]
+    let _ = path;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::os::unix::fs::symlink;
 
     fn runtime() -> PathBuf {
@@ -367,6 +370,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn symlinked_config_is_rejected() {
         let root = runtime();
         let config = root.join("config");

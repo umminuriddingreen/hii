@@ -459,6 +459,8 @@ fn set_directory_mode(path: &Path) -> Result<(), String> {
         fs::set_permissions(path, fs::Permissions::from_mode(0o700))
             .map_err(|error| error.to_string())?;
     }
+    #[cfg(not(unix))]
+    let _ = path;
     Ok(())
 }
 

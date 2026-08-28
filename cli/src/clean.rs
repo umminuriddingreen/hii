@@ -6,10 +6,9 @@ use serde::Serialize;
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::Command,
-    thread,
-    time::Duration,
 };
+#[cfg(target_os = "macos")]
+use std::{process::Command, thread, time::Duration};
 use uuid::Uuid;
 
 const SCHEMA_VERSION: u8 = 1;
