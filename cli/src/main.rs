@@ -161,6 +161,15 @@ enum Commands {
         )]
         jsonl: bool,
     },
+    #[command(about = "Create a native shell terminal object in the current HII Space")]
+    Terminal {
+        #[arg(value_name = "DIRECTORY", help = "Working directory for the shell")]
+        directory: Option<PathBuf>,
+        #[arg(long, help = "Open the HII desktop app after creating the terminal")]
+        open: bool,
+        #[arg(long, help = "Emit the created Runtime object as JSON")]
+        json: bool,
+    },
     #[command(name = "apps", about = "List, register, and launch HII applications")]
     Apps {
         #[command(subcommand)]
@@ -1412,6 +1421,14 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
     match cli.command {
         Some(Commands::Ask { prompt, jsonl }) => {
             ask::run(&paths, cli.model.as_deref(), prompt.join(" "), jsonl)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Terminal {
+            directory,
+            open,
+            json,
+        }) => {
+            create_space_terminal(directory.or(cli.cwd), open, json)?;
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Apps { action }) => {
@@ -4122,11 +4139,12 @@ fn delegate_legacy(repo: &std::path::Path, args: &[String]) -> Option<Result<i32
 /// a time instead of taking the whole family at once.
 fn claimed_from_legacy(args: &[String]) -> bool {
     let mut words = args.iter().filter(|arg| !arg.starts_with('-'));
+    let first = words.next().map(String::as_str);
+    if first == Some("terminal") {
+        return true;
+    }
     matches!(
-        (
-            words.next().map(String::as_str),
-            words.next().map(String::as_str),
-        ),
+        (first, words.next().map(String::as_str),),
         (
             Some("skills"),
             Some("promote" | "reject" | "lifecycle" | "record-use" | "run")
@@ -4138,6 +4156,7 @@ fn is_native_command(command: &str) -> bool {
     matches!(
         command,
         "ask"
+            | "terminal"
             | "apps"
             | "clean"
             | "run"
@@ -4173,6 +4192,135 @@ fn is_native_command(command: &str) -> bool {
             | "mcp-serve"
             | "acp-serve"
     ) || command == "schedule"
+}
+
+fn terminal_node(cwd: &std::path::Path, z: u64, now: &str) -> serde_json::Value {
+    let id = uuid::Uuid::new_v4().to_string();
+    let cwd = cwd.display().to_string();
+    let title = std::path::Path::new(&cwd)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or(&cwd);
+    serde_json::json!({
+        "id": id,
+        "type": "terminal",
+        "x": 120.0,
+        "y": 120.0,
+        "w": 620.0,
+        "h": 320.0,
+        "z": z,
+        "rotation": 0.0,
+        "createdAt": now,
+        "updatedAt": now,
+        "object": {
+            "kind": "terminal",
+            "owner": "human",
+            "status": "ready",
+            "source": "HII CLI Runtime terminal command",
+            "capabilityId": "hii.terminal.shell",
+            "audit": [{ "ts": now, "actor": "human", "action": format!("created explicit native shell terminal at {cwd}") }]
+        },
+        "payload": {
+            "title": format!("terminal · {title}"),
+            "job": "shell",
+            "cwd": cwd,
+            "status": "ready",
+            "role": "operator-terminal",
+            "terminalMode": "shell",
+            "scope": "human-controlled local shell",
+            "sessionId": uuid::Uuid::new_v4().to_string(),
+            "lines": []
+        }
+    })
+}
+
+fn open_hii_desktop() -> bool {
+    #[cfg(target_os = "macos")]
+    let status = Command::new("open").args(["-a", "HII"]).status();
+    #[cfg(windows)]
+    let status = Command::new("cmd")
+        .args(["/C", "start", "", "HII"])
+        .status();
+    #[cfg(all(not(target_os = "macos"), not(windows)))]
+    let status = Command::new("xdg-open").arg("hii://space").status();
+    status.is_ok_and(|value| value.success())
+}
+
+fn create_space_terminal(
+    directory: Option<PathBuf>,
+    open: bool,
+    json_output: bool,
+) -> Result<(), String> {
+    let directory = directory
+        .unwrap_or(env::current_dir().map_err(|error| error.to_string())?)
+        .canonicalize()
+        .map_err(|error| format!("terminal working directory is unavailable: {error}"))?;
+    if !directory.is_dir() {
+        return Err(format!(
+            "terminal working directory is not a directory: {}",
+            directory.display()
+        ));
+    }
+    let snapshot = hii_core::runtime_space_snapshot(None)?;
+    let mut document = snapshot.document.clone();
+    let now = chrono::Utc::now().to_rfc3339();
+    let z = document
+        .get("nextZ")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(1);
+    let node = terminal_node(&directory, z, &now);
+    let node_id = node
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    document
+        .get_mut("nodes")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or_else(|| "Runtime Space does not contain a node collection".to_string())?
+        .push(node.clone());
+    document["nextZ"] = serde_json::Value::from(z + 1);
+    document["updatedAt"] = serde_json::Value::String(now);
+    let updated = hii_core::runtime_space_apply(hii_core::runtime::RuntimeSpaceApplyV1 {
+        version: 1,
+        space_id: Some(snapshot.space_id.clone()),
+        expected_sequence: snapshot.sequence,
+        actor: hii_core::runtime::IdentityRefV1 {
+            id: "human:local".into(),
+            kind: "human".into(),
+        },
+        authority_grant_id: None,
+        run_id: None,
+        idempotency_key: format!("cli:terminal:{node_id}"),
+        document,
+    })?;
+    let launched = open && open_hii_desktop();
+    if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "version": 1,
+                "spaceId": updated.space_id,
+                "sequence": updated.sequence,
+                "node": node,
+                "desktopLaunched": launched
+            }))
+            .map_err(|error| error.to_string())?
+        );
+    } else {
+        println!("Created shell terminal in Space `{}`", updated.space_id);
+        println!("cwd: {}", directory.display());
+        println!("object: {node_id}");
+        if open && !launched {
+            eprintln!(
+                "HII desktop could not be opened automatically; the terminal object is saved."
+            );
+        } else if !open {
+            println!("open: hii terminal --open {}", directory.display());
+        }
+    }
+    Ok(())
 }
 
 fn login_command(
@@ -4656,6 +4804,24 @@ mod tests {
                 json: true
             })
         ));
+    }
+
+    #[test]
+    fn terminal_is_a_native_runtime_command_with_explicit_shell_authority() {
+        let cli =
+            Cli::try_parse_from(["hii", "terminal", "/tmp", "--json"]).expect("parse terminal");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Terminal {
+                directory: Some(_),
+                open: false,
+                json: true
+            })
+        ));
+        let node = terminal_node(std::path::Path::new("/tmp"), 7, "2026-01-01T00:00:00Z");
+        assert_eq!(node["payload"]["terminalMode"], "shell");
+        assert_eq!(node["object"]["capabilityId"], "hii.terminal.shell");
+        assert_eq!(node["z"], 7);
     }
 
     #[test]
