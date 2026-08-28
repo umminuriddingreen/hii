@@ -74,6 +74,11 @@ export type WorkspaceProjectionRequest = {
   projection: ResourceProjectionSeed;
   intent: ProjectionIntent;
 };
+
+export type CanvasImportRequest = {
+  id: string;
+  seed: NodeSeed;
+};
 type PromptState = {
   anchor: Point;
   initialValue: string;
@@ -611,6 +616,8 @@ export function HiiRoot({
   creatorId = 'guest:pending',
   persistence,
   allowPhoto = true,
+  onShareNode,
+  canvasImportRequest = null,
   projectionRequest = null
 }: {
   surface?: 'workspace' | 'space';
@@ -618,6 +625,8 @@ export function HiiRoot({
   creatorId?: string;
   persistence?: WorkspacePersistence;
   allowPhoto?: boolean;
+  onShareNode?: (node: WorkspaceNode) => void;
+  canvasImportRequest?: CanvasImportRequest | null;
   projectionRequest?: WorkspaceProjectionRequest | null;
 } = {}) {
   const isSpace = surface === 'space';
@@ -715,6 +724,7 @@ export function HiiRoot({
   const applicationCatalog = useRef(new Map<string, HiiApplicationManifest>());
   const applicationPollActive = useRef(false);
   const handledProjectionRequest = useRef<string | null>(null);
+  const handledCanvasImportRequest = useRef<string | null>(null);
   workspaceRef.current = workspace;
   save.current = workspace.scheduleSave;
   const devFixtureNode = useMemo(() => {
@@ -761,6 +771,16 @@ export function HiiRoot({
       : camera.centerWorld();
     spawnSeeds([seed], { x: anchor.x - seed.w / 2, y: anchor.y - seed.h / 2 });
   }, [camera, projectionRequest, spawnSeeds, workspace.ready]);
+
+  useEffect(() => {
+    if (!workspace.ready || !canvasImportRequest || handledCanvasImportRequest.current === canvasImportRequest.id) return;
+    handledCanvasImportRequest.current = canvasImportRequest.id;
+    const anchor = camera.centerWorld();
+    spawnSeeds([canvasImportRequest.seed], {
+      x: anchor.x - canvasImportRequest.seed.w / 2,
+      y: anchor.y - canvasImportRequest.seed.h / 2,
+    });
+  }, [camera, canvasImportRequest, spawnSeeds, workspace.ready]);
 
   useEffect(() => {
     if (isSpace || !workspace.ready) return;
@@ -1538,6 +1558,7 @@ export function HiiRoot({
             onCommit={(patch) => workspace.patchNode(node.id, patch)}
             onWindowAction={(action) => appWindowAction(node, action)}
             onErase={() => { workspace.removeNode(node.id); setSelected((ids) => ids.filter((id) => id !== node.id)); }}
+            onShare={isSpace && onShareNode && isSpaceCanvasNode(node, spaceId) ? () => onShareNode(node) : undefined}
             touchControls={isSpace}
             chromeless={node.payload.canvasPresentation === 'direct-paste' || node.type === 'canvas-text' || node.type === 'ink' || node.type === 'image'}
           >

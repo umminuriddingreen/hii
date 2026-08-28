@@ -1,15 +1,18 @@
 #![forbid(unsafe_code)]
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+mod chat;
+mod feed;
+
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use passkey_rp::{
-    decode_base64url, AuthenticationVerification, Challenge, PasskeyRp,
-    RegistrationVerification, RelyingParty, StoredCredential, UserHandleVerification,
+    AuthenticationVerification, Challenge, PasskeyRp, RegistrationVerification, RelyingParty,
+    StoredCredential, UserHandleVerification, decode_base64url,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use wasm_bindgen::JsValue;
-use worker::{event, Context, D1Database, Date, Env, Method, Request, Response, Result};
+use worker::{Context, D1Database, Date, Env, Method, Request, Response, Result, event};
 
 const RP_ID: &str = "humaninformationinterface.com";
 const RP_ORIGIN: &str = "https://humaninformationinterface.com";
@@ -95,6 +98,7 @@ struct SessionRow {
     account_id: String,
     handle: String,
     csrf_token: String,
+    created_at: i64,
 }
 
 #[derive(Deserialize)]
@@ -126,7 +130,9 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
     let url = request.url()?;
     if url.host_str() == Some("www.humaninformationinterface.com") {
         let mut canonical = url;
-        canonical.set_host(Some(RP_ID)).map_err(|_| "invalid canonical host")?;
+        canonical
+            .set_host(Some(RP_ID))
+            .map_err(|_| "invalid canonical host")?;
         let mut response = Response::empty()?.with_status(308);
         response.headers_mut().set("Location", canonical.as_str())?;
         return secure(response);
@@ -137,8 +143,42 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
     let db = env.d1("IDENTITY")?;
 
     if path.starts_with("/api/") {
-        if method == Method::Post && !origin_allowed(request)? {
+        if matches!(method, Method::Post | Method::Delete) && !origin_allowed(request)? {
             return secure_no_store(api_error(403, "cross_origin_denied")?);
+        }
+        if path.starts_with("/api/chat") || feed::is_feed_api_path(&path) {
+            let Some(token) = cookie(request, SESSION_COOKIE)? else {
+                return secure_no_store(api_error(401, "authentication_required")?);
+            };
+            let Some(session) = active_session(&db, &token).await? else {
+                return secure_no_store(api_error(401, "authentication_required")?);
+            };
+            if matches!(method, Method::Post | Method::Delete) {
+                let action = if path.starts_with("/api/chat") {
+                    "chat-write"
+                } else {
+                    "feed-write"
+                };
+                if !rate_limit(request, env, &db, action, 5_000_000).await? {
+                    return secure_no_store(api_error(429, "rate_limited")?);
+                }
+            }
+            if path.starts_with("/api/chat") {
+                let passkey_recent = now_ms().saturating_sub(session.created_at) <= CEREMONY_TTL_MS;
+                let response = chat::handle_chat_api(
+                    request,
+                    &db,
+                    &session.account_id,
+                    &session.csrf_token,
+                    passkey_recent,
+                )
+                .await?
+                .unwrap_or(api_error(404, "not_found")?);
+                return secure_no_store(response);
+            }
+            let actor =
+                feed::FeedActor::new(&session.account_id, &session.handle, &session.csrf_token);
+            return secure_no_store(feed::handle_feed_request(request, &db, &actor).await?);
         }
         let response = match (method, path.as_str()) {
             (Method::Get, "/api/auth/session") => session_status(request, &db).await,
@@ -422,23 +462,44 @@ async fn login_finish(request: &mut Request, db: &D1Database) -> Result<Response
 
 async fn session_status(request: &Request, db: &D1Database) -> Result<Response> {
     let Some(token) = cookie(request, SESSION_COOKIE)? else {
-        return json_response(200, SessionResponse { authenticated: false, account_id: None, handle: None, csrf_token: None });
+        return json_response(
+            200,
+            SessionResponse {
+                authenticated: false,
+                account_id: None,
+                handle: None,
+                csrf_token: None,
+            },
+        );
     };
     let row = active_session(db, &token).await?;
     match row {
-        Some(session) => json_response(200, SessionResponse {
-            authenticated: true,
-            account_id: Some(&session.account_id),
-            handle: Some(&session.handle),
-            csrf_token: Some(&session.csrf_token),
-        }),
-        None => json_response(200, SessionResponse { authenticated: false, account_id: None, handle: None, csrf_token: None }),
+        Some(session) => json_response(
+            200,
+            SessionResponse {
+                authenticated: true,
+                account_id: Some(&session.account_id),
+                handle: Some(&session.handle),
+                csrf_token: Some(&session.csrf_token),
+            },
+        ),
+        None => json_response(
+            200,
+            SessionResponse {
+                authenticated: false,
+                account_id: None,
+                handle: None,
+                csrf_token: None,
+            },
+        ),
     }
 }
 
 async fn logout(request: &Request, db: &D1Database) -> Result<Response> {
     let token = cookie(request, SESSION_COOKIE)?.ok_or_else(|| worker::Error::BadEncoding)?;
-    let session = active_session(db, &token).await?.ok_or_else(|| worker::Error::BadEncoding)?;
+    let session = active_session(db, &token)
+        .await?
+        .ok_or_else(|| worker::Error::BadEncoding)?;
     let supplied = request.headers().get("x-hii-csrf")?.unwrap_or_default();
     if supplied.is_empty() || supplied != session.csrf_token {
         return api_error(403, "csrf_denied");
@@ -447,19 +508,46 @@ async fn logout(request: &Request, db: &D1Database) -> Result<Response> {
         .bind(&[JsValue::from_str(&hash_token(&token))])?
         .run()
         .await?;
-    let mut response = json_response(200, SessionResponse { authenticated: false, account_id: None, handle: None, csrf_token: None })?;
-    response.headers_mut().append("Set-Cookie", &clear_session_cookie())?;
+    let mut response = json_response(
+        200,
+        SessionResponse {
+            authenticated: false,
+            account_id: None,
+            handle: None,
+            csrf_token: None,
+        },
+    )?;
+    response
+        .headers_mut()
+        .append("Set-Cookie", &clear_session_cookie())?;
     Ok(response)
 }
 
 async fn active_session(db: &D1Database, token: &str) -> Result<Option<SessionRow>> {
-    db.prepare("SELECT a.id AS account_id, a.handle, s.csrf_token FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE s.token_hash = ?1 AND s.expires_at > ?2 LIMIT 1")
+    db.prepare("SELECT a.id AS account_id, a.handle, s.csrf_token, s.created_at FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE s.token_hash = ?1 AND s.expires_at > ?2 LIMIT 1")
         .bind(&[
             JsValue::from_str(&hash_token(token)),
             JsValue::from_f64(now_ms() as f64),
         ])?
         .first(None)
         .await
+}
+
+#[event(scheduled)]
+pub async fn scheduled(
+    _event: worker::ScheduledEvent,
+    env: Env,
+    _context: worker::ScheduleContext,
+) {
+    if let Ok(db) = env.d1("IDENTITY") {
+        let now = now_ms();
+        for _ in 0..20 {
+            match chat::purge_expired_messages(&db, now).await {
+                Ok(500) => continue,
+                _ => break,
+            }
+        }
+    }
 }
 
 async fn ceremony(db: &D1Database, token: &str, kind: &str) -> Result<CeremonyRow> {
@@ -474,7 +562,13 @@ async fn ceremony(db: &D1Database, token: &str, kind: &str) -> Result<CeremonyRo
         .ok_or_else(|| worker::Error::BadEncoding)
 }
 
-async fn rate_limit(request: &Request, env: &Env, db: &D1Database, action: &str, daily_limit: i64) -> Result<bool> {
+async fn rate_limit(
+    request: &Request,
+    env: &Env,
+    db: &D1Database,
+    action: &str,
+    daily_limit: i64,
+) -> Result<bool> {
     // Cloudflare overwrites this header on traffic reaching a Worker. The
     // workers.dev and preview routes are disabled, so auth is reachable only
     // through HII's configured custom domains.
@@ -511,7 +605,8 @@ async fn rate_limit(request: &Request, env: &Env, db: &D1Database, action: &str,
         .bind(&[JsValue::from_str(action), JsValue::from_f64(bucket as f64)])?
         .run()
         .await?;
-    let row: Option<RateRow> = db.prepare("SELECT count FROM rate_limits WHERE key = ?1 AND bucket = ?2")
+    let row: Option<RateRow> = db
+        .prepare("SELECT count FROM rate_limits WHERE key = ?1 AND bucket = ?2")
         .bind(&[JsValue::from_str(action), JsValue::from_f64(bucket as f64)])?
         .first(None)
         .await?;
@@ -569,7 +664,8 @@ fn passkey_error(error: passkey_rp::PasskeyError) -> worker::Error {
 
 fn random_bytes(length: usize) -> Result<Vec<u8>> {
     let mut value = vec![0; length];
-    getrandom::fill(&mut value).map_err(|_| worker::Error::RustError("secure random unavailable".into()))?;
+    getrandom::fill(&mut value)
+        .map_err(|_| worker::Error::RustError("secure random unavailable".into()))?;
     Ok(value)
 }
 
@@ -593,33 +689,42 @@ fn now_ms() -> i64 {
 }
 
 fn cookie(request: &Request, name: &str) -> Result<Option<String>> {
-    Ok(request
-        .headers()
-        .get("cookie")?
-        .and_then(|value| {
-            value.split(';').find_map(|part| {
-                let (key, value) = part.trim().split_once('=')?;
-                (key == name && !value.is_empty()).then(|| value.to_owned())
-            })
-        }))
+    Ok(request.headers().get("cookie")?.and_then(|value| {
+        value.split(';').find_map(|part| {
+            let (key, value) = part.trim().split_once('=')?;
+            (key == name && !value.is_empty()).then(|| value.to_owned())
+        })
+    }))
 }
 
 fn session_cookie(token: &str) -> String {
-    format!("{SESSION_COOKIE}={token}; Path=/; Max-Age={SESSION_TTL_SECONDS}; Secure; HttpOnly; SameSite=Strict")
+    format!(
+        "{SESSION_COOKIE}={token}; Path=/; Max-Age={SESSION_TTL_SECONDS}; Secure; HttpOnly; SameSite=Strict"
+    )
 }
 
 fn clear_session_cookie() -> String {
     format!("{SESSION_COOKIE}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Strict")
 }
 
-fn authenticated_response(account_id: &str, handle: &str, csrf: &str, token: &str) -> Result<Response> {
-    let mut response = json_response(200, SessionResponse {
-        authenticated: true,
-        account_id: Some(account_id),
-        handle: Some(handle),
-        csrf_token: Some(csrf),
-    })?;
-    response.headers_mut().append("Set-Cookie", &session_cookie(token))?;
+fn authenticated_response(
+    account_id: &str,
+    handle: &str,
+    csrf: &str,
+    token: &str,
+) -> Result<Response> {
+    let mut response = json_response(
+        200,
+        SessionResponse {
+            authenticated: true,
+            account_id: Some(account_id),
+            handle: Some(handle),
+            csrf_token: Some(csrf),
+        },
+    )?;
+    response
+        .headers_mut()
+        .append("Set-Cookie", &session_cookie(token))?;
     Ok(response)
 }
 
@@ -635,7 +740,10 @@ fn secure(mut response: Response) -> Result<Response> {
     let headers = response.headers_mut();
     headers.set("Cross-Origin-Opener-Policy", "same-origin")?;
     headers.set("Cross-Origin-Resource-Policy", "same-origin")?;
-    headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), hid=()")?;
+    headers.set(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), hid=()",
+    )?;
     headers.set("Referrer-Policy", "no-referrer")?;
     headers.set("X-Content-Type-Options", "nosniff")?;
     headers.set("X-Frame-Options", "DENY")?;
@@ -649,69 +757,114 @@ fn secure_no_store(mut response: Response) -> Result<Response> {
 
 async fn download_desktop(request: &Request, env: &Env, platform: &str) -> Result<Response> {
     let bucket = env.bucket("DOWNLOADS")?;
-    let Some(manifest) = bucket.get(format!("releases/latest-{platform}.json")).execute().await? else {
+    let Some(manifest) = bucket
+        .get(format!("releases/latest-{platform}.json"))
+        .execute()
+        .await?
+    else {
         return api_error(404, "release_not_available");
     };
-    let Some(body) = manifest.body() else { return api_error(502, "release_metadata_invalid") };
+    let Some(body) = manifest.body() else {
+        return api_error(502, "release_metadata_invalid");
+    };
     let value: Value = serde_json::from_str(&body.text().await?)?;
     let Some(filename) = value.get("filename").and_then(Value::as_str) else {
         return api_error(502, "release_metadata_invalid");
     };
-    if filename.is_empty() || !filename.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')) {
+    if filename.is_empty()
+        || !filename
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
         return api_error(502, "release_metadata_invalid");
     }
     let Some(object) = bucket.get(format!("releases/{filename}")).execute().await? else {
         return api_error(404, "release_not_found");
     };
-    downloadable(request, object, filename, value.get("sha256").and_then(Value::as_str))
+    downloadable(
+        request,
+        object,
+        filename,
+        value.get("sha256").and_then(Value::as_str),
+    )
 }
 
 async fn download_cli(request: &Request, env: &Env, asset: &str) -> Result<Response> {
     const ASSETS: &[&str] = &[
-        "hii-macos-arm64.tar.gz", "hii-macos-arm64.tar.gz.sha256",
-        "hii-linux-x64.tar.gz", "hii-linux-x64.tar.gz.sha256",
-        "hii-windows-x64.zip", "hii-windows-x64.zip.sha256",
+        "hii-macos-arm64.tar.gz",
+        "hii-macos-arm64.tar.gz.sha256",
+        "hii-linux-x64.tar.gz",
+        "hii-linux-x64.tar.gz.sha256",
+        "hii-windows-x64.zip",
+        "hii-windows-x64.zip.sha256",
     ];
-    if !ASSETS.contains(&asset) { return api_error(404, "release_not_found") }
+    if !ASSETS.contains(&asset) {
+        return api_error(404, "release_not_found");
+    }
     let bucket = env.bucket("DOWNLOADS")?;
     let Some(manifest) = bucket.get("cli/releases/latest.json").execute().await? else {
         return api_error(404, "release_not_available");
     };
-    let Some(body) = manifest.body() else { return api_error(502, "release_metadata_invalid") };
+    let Some(body) = manifest.body() else {
+        return api_error(502, "release_metadata_invalid");
+    };
     let value: Value = serde_json::from_str(&body.text().await?)?;
     let Some(tag) = value.get("tag").and_then(Value::as_str) else {
         return api_error(502, "release_metadata_invalid");
     };
-    if !valid_cli_tag(tag) { return api_error(502, "release_metadata_invalid") }
-    let Some(object) = bucket.get(format!("cli/releases/{tag}/{asset}")).execute().await? else {
+    if !valid_cli_tag(tag) {
+        return api_error(502, "release_metadata_invalid");
+    }
+    let Some(object) = bucket
+        .get(format!("cli/releases/{tag}/{asset}"))
+        .execute()
+        .await?
+    else {
         return api_error(404, "release_not_found");
     };
     downloadable(request, object, asset, None)
 }
 
-fn downloadable(request: &Request, object: worker::Object, filename: &str, sha256: Option<&str>) -> Result<Response> {
+fn downloadable(
+    request: &Request,
+    object: worker::Object,
+    filename: &str,
+    sha256: Option<&str>,
+) -> Result<Response> {
     let size = object.size();
     let etag = object.http_etag();
     let mut response = if request.method() == Method::Head {
         Response::empty()?
     } else {
-        let body = object.body().ok_or_else(|| worker::Error::RustError("release body unavailable".into()))?;
+        let body = object
+            .body()
+            .ok_or_else(|| worker::Error::RustError("release body unavailable".into()))?;
         Response::from_body(body.response_body()?)?
     };
     let headers = response.headers_mut();
     headers.set("Cache-Control", "private, no-store")?;
-    headers.set("Content-Disposition", &format!("attachment; filename=\"{filename}\""))?;
+    headers.set(
+        "Content-Disposition",
+        &format!("attachment; filename=\"{filename}\""),
+    )?;
     headers.set("Content-Length", &size.to_string())?;
     headers.set("Content-Type", "application/octet-stream")?;
     headers.set("ETag", &etag)?;
-    if let Some(value) = sha256 { headers.set("X-HII-SHA256", value)?; }
+    if let Some(value) = sha256 {
+        headers.set("X-HII-SHA256", value)?;
+    }
     Ok(response)
 }
 
 fn valid_cli_tag(tag: &str) -> bool {
-    let Some(version) = tag.strip_prefix("cli-v") else { return false };
+    let Some(version) = tag.strip_prefix("cli-v") else {
+        return false;
+    };
     let parts: Vec<&str> = version.split('.').collect();
-    parts.len() == 3 && parts.iter().all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+    parts.len() == 3
+        && parts
+            .iter()
+            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 #[cfg(test)]
@@ -733,7 +886,10 @@ mod tests {
 
     #[test]
     fn handles_are_small_and_url_safe() {
-        assert_eq!(normalize_handle(" Ummi.Green ").as_deref(), Some("ummi.green"));
+        assert_eq!(
+            normalize_handle(" Ummi.Green ").as_deref(),
+            Some("ummi.green")
+        );
         assert!(normalize_handle("ab").is_none());
         assert!(normalize_handle("name with space").is_none());
         assert!(normalize_handle("../../owner").is_none());

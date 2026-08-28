@@ -66,9 +66,9 @@
      }
    ],
    "routing": {
-     "auto":        ["hii-native", "ollama", "approved-hosted"],
-     "local":       ["subconscious-35b-a3b", "deliberate-27b-dense", "hii-native", "ollama"],
-     "private":     ["subconscious-35b-a3b", "deliberate-27b-dense", "hii-native", "ollama"],
+     "auto":        ["hii-native"],
+     "local":       ["subconscious-35b-a3b", "deliberate-27b-dense", "hii-native"],
+     "private":     ["subconscious-35b-a3b", "deliberate-27b-dense", "hii-native"],
      "best":        ["strongest-local", "approved-hosted"],
      "tiers":       {
        "0":      "Deterministic — no LLM, tool routing only",

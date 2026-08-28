@@ -18,6 +18,9 @@
   "observability": {
     "enabled": true
   },
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
   "ratelimits": [
     {
       "name": "AUTH_RATE_LIMITER",

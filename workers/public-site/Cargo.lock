@@ -357,6 +357,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "getrandom",
+ "p256",
  "passkey-rp",
  "serde",
  "serde_json",

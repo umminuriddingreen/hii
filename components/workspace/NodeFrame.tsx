@@ -13,6 +13,7 @@ type NodeFrameProps = {
   onCommit: (patch: Partial<WorkspaceNode>) => void;
   onWindowAction?: (action: 'minimize' | 'maximize' | 'restore') => void;
   onErase?: () => void;
+  onShare?: () => void;
   touchControls?: boolean;
   chromeless?: boolean;
   children: React.ReactNode;
@@ -20,7 +21,7 @@ type NodeFrameProps = {
 
 const INTERACTIVE = 'button,input,textarea,select,iframe,video,audio,embed,a,[contenteditable]';
 
-export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConversation, onCommit, onWindowAction, onErase, touchControls, chromeless, children }: NodeFrameProps) {
+export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConversation, onCommit, onWindowAction, onErase, onShare, touchControls, chromeless, children }: NodeFrameProps) {
   const frame = useRef<HTMLDivElement | null>(null);
   const windowState = node.type === 'app' && typeof node.payload.windowState === 'string' ? node.payload.windowState : 'normal';
 
@@ -82,6 +83,7 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConv
     >
       <span className="hii-node-caption">{title}</span>
       {touchControls && selected && <div className="hii-node-touch-controls" data-workspace-ui>
+        {onShare && <button type="button" className="hii-node-share" aria-label={`Share ${title}`} onPointerDown={(event) => event.stopPropagation()} onClick={onShare}>Share</button>}
         <button type="button" className="hii-node-delete" aria-label={`Delete ${title}`} onPointerDown={(event) => event.stopPropagation()} onClick={onErase}>Delete</button>
         <button type="button" className="hii-node-resize" aria-label={`Resize ${title}`} onPointerDown={(event) => beginGesture(event, true)}>Resize</button>
       </div>}

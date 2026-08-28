@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('HII web access gate', () => {
-  it('starts with only the HII wordmark and two account actions', () => {
+  it('starts with the HII wordmark and two account actions before the below-fold support board', () => {
     const source = readFileSync('components/auth/HiiWebAccess.tsx', 'utf8');
 
     expect(source).toContain('<span className={styles.wordmark}>hii</span>');
@@ -10,6 +10,8 @@ describe('HII web access gate', () => {
     expect(source).toContain("chooseMode('signup')");
     expect(source).not.toContain('ShellTerminal');
     expect(source).not.toContain('startTerminalSession');
+    expect(source).toContain('brand the Mac that builds HII.');
+    expect(source).toContain('no bid or payment is taken here');
   });
 
   it('uses HII passkey APIs and reveals the canvas only for an authenticated session', () => {

@@ -187,15 +187,8 @@ impl Ollama {
         Self::for_mode("auto")
     }
 
-    pub fn for_mode(mode: &str) -> Self {
-        let native = "http://127.0.0.1:11435";
-        let ollama = "http://127.0.0.1:11434";
-        let url = match mode {
-            "best" if endpoint_ready(ollama) => ollama,
-            _ if endpoint_ready(native) => native,
-            _ => ollama,
-        };
-        Self::new(url.to_string())
+    pub fn for_mode(_mode: &str) -> Self {
+        Self::new("http://127.0.0.1:11435".to_string())
     }
 
     pub fn provider_label(&self) -> &'static str {
@@ -217,9 +210,9 @@ impl Ollama {
     /// Bring a local provider up when none is listening yet, preferring HII's
     /// own native runner so inference stays inside a runtime HII owns. The
     /// native runner is only started when its weights were already acquired —
-    /// model download stays an explicit operator action — otherwise we fall
-    /// back to starting Ollama on loopback. An explicitly pinned model URL is
-    /// never second-guessed.
+    /// model download stays an explicit operator action. Ollama remains an
+    /// explicit compatibility provider, never an automatic runtime dependency.
+    /// An explicitly pinned model URL is never second-guessed.
     pub fn ensure_reachable(self) -> Result<Self, String> {
         if endpoint_ready(&self.base_url) {
             return Ok(self);
@@ -230,13 +223,6 @@ impl Ollama {
         if let Some(native) = start_native_runner() {
             return Ok(native);
         }
-        if self.provider == ModelProvider::Ollama
-            && is_loopback(&self.base_url)
-            && spawn_detached("ollama", &["serve"])
-            && wait_ready(&self.base_url)
-        {
-            return Ok(self);
-        }
         Err(self.unreachable_error())
     }
 
@@ -244,7 +230,7 @@ impl Ollama {
         format!(
             "cannot reach {} at {}. Bring up HII's own runtime with \
 `hii-native-runner serve` (acquire weights first: `hii runner model start --model <id>`), \
-start Ollama with `ollama serve`, or pin a provider with HII_MODEL_URL=<url>.",
+or explicitly pin a compatibility provider with HII_MODEL_URL=<url>.",
             self.provider_label(),
             self.base_url
         )
@@ -749,17 +735,6 @@ fn start_native_runner() -> Option<Ollama> {
     wait_ready(native_url).then(|| Ollama::new(native_url.to_string()))
 }
 
-fn is_loopback(base_url: &str) -> bool {
-    let host = base_url
-        .rsplit("://")
-        .next()
-        .unwrap_or(base_url)
-        .split('/')
-        .next()
-        .unwrap_or(base_url);
-    host.starts_with("127.0.0.1") || host.starts_with("localhost") || host.starts_with("[::1]")
-}
-
 fn endpoint_ready(base_url: &str) -> bool {
     let address = base_url
         .strip_prefix("http://")
@@ -938,8 +913,9 @@ fn format_ureq(error: ureq::Error) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{openai_messages, openai_reasoning_delta, Message, RepetitionGuard};
+    use super::{openai_messages, openai_reasoning_delta, Message, Ollama, RepetitionGuard};
     use crate::attachments::ImagePayload;
+    use crate::config::ModelProvider;
 
     #[test]
     fn detects_three_substantial_repeated_blocks() {
@@ -1012,5 +988,12 @@ mod tests {
                 Some("trace")
             );
         }
+    }
+
+    #[test]
+    fn automatic_runtime_is_hii_native() {
+        let client = Ollama::for_mode("auto");
+        assert_eq!(client.base_url(), "http://127.0.0.1:11435");
+        assert_eq!(client.provider(), ModelProvider::Native);
     }
 }

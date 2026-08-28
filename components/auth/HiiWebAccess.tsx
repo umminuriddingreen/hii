@@ -4,6 +4,9 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { HiiRoot } from '@/components/workspace/HiiRoot';
 import { browserSpacePersistence } from '@/components/spaces/SpaceCanvas';
+import type { WorkspaceNode } from '@/lib/workspace/types';
+import { nodeSeedFromFeedSnapshot, type FeedItem } from '@/lib/web/feed-contract';
+import { HiiWebPanel, type WebPanel } from './HiiWebPanels';
 import styles from './HiiWebAccess.module.css';
 
 type AccessMode = 'login' | 'signup' | null;
@@ -81,6 +84,33 @@ function loginCredential(credential: PublicKeyCredential) {
   };
 }
 
+function SupportHii({ onCreateAccount }: { onCreateAccount: () => void }) {
+  const [spot, setSpot] = useState(1);
+  return (
+    <section className={styles.support} aria-labelledby="support-hii-title">
+      <header>
+        <small>support the next build</small>
+        <h2 id="support-hii-title">brand the Mac that builds HII.</h2>
+        <p>ten placements. one 14-day round. the round funds HII hardware and local-model work.</p>
+      </header>
+      <div className={styles.supportLid} role="group" aria-label="Mac sponsorship placements">
+        {Array.from({ length: 10 }, (_, index) => index + 1).map((number) => (
+          <button key={number} type="button" aria-pressed={spot === number} onClick={() => setSpot(number)}>
+            {String(number).padStart(2, '0')}
+          </button>
+        ))}
+        <span aria-hidden="true">hii</span>
+      </div>
+      <div className={styles.supportSelection} aria-live="polite">
+        <span>placement {String(spot).padStart(2, '0')}</span>
+        <span>opening round</span>
+      </div>
+      <button className={styles.supportAction} type="button" onClick={onCreateAccount}>create an account</button>
+      <small>preview only. no bid or payment is taken here. terms come before the round opens.</small>
+    </section>
+  );
+}
+
 export function HiiWebAccess() {
   const [mode, setMode] = useState<AccessMode>(null);
   const [session, setSession] = useState<Session>({ authenticated: false });
@@ -90,6 +120,9 @@ export function HiiWebAccess() {
   const [deviceMessage, setDeviceMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
+  const [panel, setPanel] = useState<WebPanel | null>(null);
+  const [shareNode, setShareNode] = useState<WorkspaceNode | null>(null);
+  const [canvasImport, setCanvasImport] = useState<{ id: string; seed: ReturnType<typeof nodeSeedFromFeedSnapshot> } | null>(null);
   const canvasAccountId = session.accountId ?? '';
   const canvasAccountReady = /^[A-Za-z0-9_-]{43}$/.test(canvasAccountId);
   const canvasPersistence = useMemo(
@@ -249,9 +282,16 @@ export function HiiWebAccess() {
           creatorId={`account:${canvasAccountId}`}
           persistence={canvasPersistence}
           allowPhoto={false}
+          onShareNode={(node) => { setShareNode(node); setPanel('feed'); }}
+          canvasImportRequest={canvasImport}
         />
         <header className={styles.canvasHeader} data-workspace-ui>
           <span className={styles.canvasWordmark}>hii</span>
+          <nav className={styles.canvasNav} aria-label="HII canvas views">
+            <button type="button" aria-pressed={panel === 'chat'} onClick={() => setPanel((value) => value === 'chat' ? null : 'chat')}>chat</button>
+            <button type="button" aria-pressed={panel === 'feed'} onClick={() => setPanel((value) => value === 'feed' ? null : 'feed')}>feed</button>
+            <button type="button" aria-pressed={panel === 'models'} onClick={() => setPanel((value) => value === 'models' ? null : 'models')}>models</button>
+          </nav>
           <button
             type="button"
             aria-expanded={accountOpen}
@@ -261,6 +301,18 @@ export function HiiWebAccess() {
             {accountName}
           </button>
         </header>
+        {panel ? <HiiWebPanel
+          panel={panel}
+          accountId={canvasAccountId}
+          csrfToken={session.csrfToken ?? ''}
+          shareNode={shareNode}
+          onClose={() => { setPanel(null); setShareNode(null); }}
+          onImport={(item: FeedItem) => {
+            setCanvasImport({ id: crypto.randomUUID(), seed: nodeSeedFromFeedSnapshot(item) });
+            setPanel(null);
+            setShareNode(null);
+          }}
+        /> : null}
         {accountOpen ? (
           <aside id="hii-web-account" className={styles.accountPanel} data-workspace-ui aria-label="HII account">
             <dl>
@@ -320,6 +372,10 @@ export function HiiWebAccess() {
           <button type="button" onClick={() => chooseMode('signup')}>sign up</button>
         </nav>
       )}
+      <SupportHii onCreateAccount={() => {
+        chooseMode('signup');
+        document.scrollingElement?.scrollTo({ top: 0, behavior: 'smooth' });
+      }} />
     </main>
   );
 }

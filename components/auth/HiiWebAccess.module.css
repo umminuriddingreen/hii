@@ -79,6 +79,8 @@
 
 .formPanel {
   width: min(calc(100% - 48px), 260px);
+  min-height: 100dvh;
+  box-sizing: border-box;
   font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
@@ -148,6 +150,82 @@
   color: var(--ink);
   opacity: .45;
   cursor: default;
+}
+
+.support {
+  width: min(calc(100% - 48px), 620px);
+  min-height: 100svh;
+  margin: 0 auto;
+  padding: 14vh 0 max(64px, calc(env(safe-area-inset-bottom) + 32px));
+  border-top: 1px solid #ddd;
+  font: 10px/1.55 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.support header { max-width: 380px; }
+.support header small,
+.support > small { display: block; opacity: .52; }
+.support h2 {
+  margin: 18px 0 14px;
+  font: 400 20px/1.12 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  letter-spacing: -.02em;
+}
+.support p { margin: 0; max-width: 330px; }
+
+.supportLid {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  width: min(100%, 480px);
+  margin: 52px 0 24px;
+  padding: 10px;
+  border: 1px solid #111;
+  aspect-ratio: 1.62;
+}
+
+.supportLid button {
+  border: 0;
+  border-right: 1px solid #ddd;
+  border-bottom: 1px solid #ddd;
+  border-radius: 0;
+  background: transparent;
+  color: #111;
+  font: inherit;
+  cursor: pointer;
+}
+.supportLid button:nth-child(5n) { border-right: 0; }
+.supportLid button:nth-child(n+6) { border-bottom: 0; }
+.supportLid button[aria-pressed="true"] { background: #111; color: #fff; }
+.supportLid button:focus-visible,
+.supportAction:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.supportLid > span {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  padding: 5px 8px;
+  background: #fff;
+  color: #111;
+  transform: translate(-50%, -50%);
+  letter-spacing: .08em;
+}
+
+.supportSelection {
+  display: flex;
+  justify-content: space-between;
+  width: min(100%, 480px);
+  padding-top: 9px;
+  border-top: 1px solid #111;
+}
+.supportSelection span:last-child { opacity: .52; }
+.supportAction {
+  display: block;
+  margin: 34px 0 14px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #111;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: .28em;
 }
 
 .canvasShell {
@@ -225,6 +303,17 @@
   text-underline-offset: .22em;
 }
 
+.canvasNav {
+  position: absolute;
+  left: 50%;
+  display: flex;
+  gap: 14px;
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+.canvasNav button[aria-pressed="true"] { text-decoration: underline; }
+
 .canvasHeader button:hover,
 .canvasHeader button:focus-visible,
 .accountPanel button:hover,
@@ -263,6 +352,67 @@
 .accountPanel p { min-height: 1.45em; margin: 12px 0 0; }
 .accountPanel small { display: block; margin-top: 3px; opacity: .5; line-height: 1.45; }
 
+.webPanel {
+  position: fixed;
+  z-index: 2147483400;
+  inset: 0;
+  overflow-y: auto;
+  padding: max(72px, calc(env(safe-area-inset-top) + 58px)) max(18px, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
+  background: rgba(255, 255, 255, .985);
+  color: #111;
+  font: 11px/1.5 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.webPanel > header {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 auto 32px;
+  max-width: 620px;
+}
+
+.webPanel button,
+.webPanel input {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.webPanel button { min-height: 44px; padding: 0; cursor: pointer; text-underline-offset: .22em; }
+.webPanel button:hover,
+.webPanel button:focus-visible { text-decoration: underline; }
+.webPanel button:disabled { cursor: default; opacity: .45; }
+.webPanel > p,
+.sharePreview,
+.list,
+.inlineForm,
+.chatList,
+.messages,
+.modelState { width: min(100%, 620px); margin-left: auto; margin-right: auto; }
+
+.sharePreview { margin-bottom: 38px; padding: 18px 0; border-block: 1px solid #ddd; }
+.sharePreview small,
+.modelState small { display: block; opacity: .55; }
+
+.list article { padding: 22px 0; border-top: 1px solid #ddd; }
+.list article:last-child { border-bottom: 1px solid #ddd; }
+.list article > small { opacity: .55; }
+.list article > div { display: flex; gap: 18px; }
+.feedText { white-space: pre-wrap; font: 14px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
+.feedSticker { margin: 20px 0; font-size: 38px; }
+
+.inlineForm { display: flex; gap: 18px; align-items: end; margin-bottom: 24px; }
+.inlineForm input { flex: 1; min-width: 0; padding: 10px 0; border-bottom: 1px solid #aaa; font-size: 16px; }
+.chatList { display: flex; gap: 18px; overflow-x: auto; margin-bottom: 28px; border-bottom: 1px solid #ddd; }
+.chatList button[aria-current="true"] { text-decoration: underline; }
+.messages { min-height: 220px; }
+.messages p { max-width: 82%; margin: 0 0 20px; white-space: pre-wrap; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
+.messages p[data-mine="true"] { margin-left: auto; text-align: right; }
+.messages small { display: block; margin-bottom: 3px; opacity: .5; font: 9px/1.4 ui-monospace, "SFMono-Regular", Menlo, monospace; }
+.modelState p { margin: 0 0 14px; }
+.modelState small + p { margin-top: 34px; }
+
 @media (max-width: 420px) {
   .wordmark {
     top: max(18px, env(safe-area-inset-top));
@@ -270,4 +420,6 @@
   }
 
   .actions { gap: 8px; }
+  .canvasNav { gap: 10px; }
+  .canvasNav button { font-size: 9px; }
 }

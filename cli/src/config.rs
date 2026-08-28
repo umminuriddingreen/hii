@@ -28,8 +28,9 @@ pub enum ModelProvider {
 }
 
 impl ModelProvider {
-    /// Resolve the provider from `HII_MODEL_PROVIDER`, else infer from the URL
-    /// (HII Native uses 11435 and LM Studio uses 1234), else default to Ollama.
+    /// Resolve the provider from `HII_MODEL_PROVIDER`, else infer from the URL.
+    /// The normal HII default URL is the native runtime on loopback port 11435;
+    /// unknown explicitly supplied URLs retain Ollama compatibility.
     pub fn discover(url: &str) -> Self {
         match env::var("HII_MODEL_PROVIDER")
             .ok()
@@ -92,11 +93,11 @@ impl AppPaths {
 
     /// Base URL of the local model runtime. Honors `HII_MODEL_URL` first (the
     /// portable, provider-neutral name), then the legacy `HII_OLLAMA_URL`, then
-    /// the Ollama default.
+    /// HII's native loopback runtime.
     pub fn model_url() -> String {
         env::var("HII_MODEL_URL")
             .or_else(|_| env::var("HII_OLLAMA_URL"))
-            .unwrap_or_else(|_| "http://127.0.0.1:11434".to_string())
+            .unwrap_or_else(|_| "http://127.0.0.1:11435".to_string())
             .trim_end_matches('/')
             .to_string()
     }
