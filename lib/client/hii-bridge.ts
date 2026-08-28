@@ -152,6 +152,33 @@ export type RuntimeSpaceSnapshotV1 = {
   recentEvents: RuntimeEventV1[];
 };
 
+export type RuntimeShareModeV1 = 'liveReference' | 'snapshot' | 'fork' | 'publish' | 'export';
+
+export type RuntimeShareBundleV1 = {
+  version: 1;
+  kind: 'hii.runtime.share-bundle';
+  id: string;
+  mode: RuntimeShareModeV1;
+  sourceSpaceId: string;
+  sourceSequence: number;
+  owner: RuntimeIdentityRefV1;
+  recipientId?: string;
+  createdAt: string;
+  objects: Array<Record<string, unknown>>;
+  edges: Array<Record<string, unknown>>;
+  document: WorkspaceDoc;
+  contentHash: string;
+};
+
+export type RuntimeShareRecordV1 = {
+  id: string;
+  sourceSpaceId: string;
+  mode: RuntimeShareModeV1;
+  recipientId?: string;
+  createdAt: string;
+  revokedAt?: string;
+};
+
 function developmentRuntime() {
   if (typeof window === 'undefined') return 'http://127.0.0.1:3043';
   const port = Number(window.location.port);
@@ -217,6 +244,42 @@ export async function readRuntimeSpaceHistory(limit = 100): Promise<RuntimeEvent
   if (!isTauri()) return [];
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<RuntimeEventV1[]>('runtime_space_history_v1', { limit });
+}
+
+export async function createRuntimeShare(request: {
+  mode: RuntimeShareModeV1;
+  objectIds: string[];
+  recipientId?: string;
+}): Promise<RuntimeShareBundleV1> {
+  if (!isTauri()) throw new Error('Object sharing is available in the HII desktop app.');
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<RuntimeShareBundleV1>('runtime_share_create_v1', {
+    request: {
+      version: 1,
+      mode: request.mode,
+      objectIds: request.objectIds,
+      recipientId: request.recipientId,
+      actor: { id: 'human:local', kind: 'human' }
+    }
+  });
+}
+
+export async function listRuntimeShares(): Promise<RuntimeShareRecordV1[]> {
+  if (!isTauri()) return [];
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<RuntimeShareRecordV1[]>('runtime_share_list_v1');
+}
+
+export async function revokeRuntimeShare(shareId: string): Promise<RuntimeShareRecordV1> {
+  if (!isTauri()) throw new Error('Share revocation is available in the HII desktop app.');
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<RuntimeShareRecordV1>('runtime_share_revoke_v1', {
+    request: {
+      version: 1,
+      shareId,
+      actor: { id: 'human:local', kind: 'human' }
+    }
+  });
 }
 
 export async function startAgent(request: AgentRequestV1): Promise<AgentStartResult> {

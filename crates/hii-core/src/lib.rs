@@ -194,6 +194,31 @@ pub fn runtime_space_history(
     runtime::history(&runtime_root()?, &space_id, limit.unwrap_or(100))
 }
 
+pub fn runtime_share_create(
+    mut request: runtime::RuntimeShareRequestV1,
+) -> Result<runtime::RuntimeShareBundleV1, String> {
+    let space_id = request
+        .space_id
+        .clone()
+        .unwrap_or_else(selected_workspace_id);
+    request.space_id = Some(space_id.clone());
+    let _ = runtime_space_snapshot(Some(space_id))?;
+    runtime::create_share_bundle(&runtime_root()?, &request)
+}
+
+pub fn runtime_share_list(
+    space_id: Option<String>,
+) -> Result<Vec<runtime::RuntimeShareRecordV1>, String> {
+    let space_id = space_id.unwrap_or_else(selected_workspace_id);
+    runtime::list_shares(&runtime_root()?, &space_id)
+}
+
+pub fn runtime_share_revoke(
+    request: runtime::RuntimeShareRevokeRequestV1,
+) -> Result<runtime::RuntimeShareRecordV1, String> {
+    runtime::revoke_share(&runtime_root()?, &request)
+}
+
 fn write_workspace_snapshot(document: &Value) -> Result<(), String> {
     let path = workspace_path()?;
     let parent = path

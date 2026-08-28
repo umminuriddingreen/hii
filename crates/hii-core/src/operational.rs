@@ -248,6 +248,15 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), String> {
                expires_at TEXT,
                revoked_at TEXT
              );
+             CREATE TABLE IF NOT EXISTS runtime_shares (
+               id TEXT PRIMARY KEY,
+               source_space_id TEXT NOT NULL,
+               mode TEXT NOT NULL,
+               recipient_id TEXT,
+               bundle_json TEXT NOT NULL,
+               created_at TEXT NOT NULL,
+               revoked_at TEXT
+             );
              INSERT OR IGNORE INTO schema_migrations(version)
                VALUES ('hii-runtime-v1');
              ",

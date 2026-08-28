@@ -4,8 +4,9 @@ use hii_core::{
     new_run_id, read_workspace,
     runtime::RuntimeSpaceApplyV1,
     runtime::RuntimeSpaceSnapshotV1,
-    runtime_space_apply, runtime_space_history, runtime_space_snapshot, write_workspace,
-    AgentEventV1, AgentRequestV1, AgentStartResult, CONTRACT_VERSION,
+    runtime_share_create, runtime_share_list, runtime_share_revoke, runtime_space_apply,
+    runtime_space_history, runtime_space_snapshot, write_workspace, AgentEventV1, AgentRequestV1,
+    AgentStartResult, CONTRACT_VERSION,
 };
 use serde_json::Value;
 use std::{
@@ -59,6 +60,27 @@ fn runtime_space_history_v1(
     limit: Option<usize>,
 ) -> Result<Vec<hii_core::runtime::RuntimeEventV1>, String> {
     runtime_space_history(space_id, limit)
+}
+
+#[tauri::command]
+fn runtime_share_create_v1(
+    request: hii_core::runtime::RuntimeShareRequestV1,
+) -> Result<hii_core::runtime::RuntimeShareBundleV1, String> {
+    runtime_share_create(request)
+}
+
+#[tauri::command]
+fn runtime_share_list_v1(
+    space_id: Option<String>,
+) -> Result<Vec<hii_core::runtime::RuntimeShareRecordV1>, String> {
+    runtime_share_list(space_id)
+}
+
+#[tauri::command]
+fn runtime_share_revoke_v1(
+    request: hii_core::runtime::RuntimeShareRevokeRequestV1,
+) -> Result<hii_core::runtime::RuntimeShareRecordV1, String> {
+    runtime_share_revoke(request)
 }
 
 #[tauri::command]
@@ -666,6 +688,9 @@ pub fn run() {
             runtime_space_snapshot_v1,
             runtime_space_apply_v1,
             runtime_space_history_v1,
+            runtime_share_create_v1,
+            runtime_share_list_v1,
+            runtime_share_revoke_v1,
             workspace_read,
             workspace_write,
             workspace_asset_store,

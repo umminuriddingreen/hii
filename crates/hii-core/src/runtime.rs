@@ -6,6 +6,7 @@
 
 use crate::operational::{database, migrate};
 use chrono::Utc;
+use ring::digest::{digest, SHA256};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -106,6 +107,74 @@ pub struct RuntimeSpaceSnapshotV1 {
     pub objects: Vec<RuntimeObjectV1>,
     pub edges: Vec<RuntimeEdgeV1>,
     pub recent_events: Vec<RuntimeEventV1>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RuntimeShareModeV1 {
+    LiveReference,
+    Snapshot,
+    Fork,
+    Publish,
+    Export,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeShareRequestV1 {
+    pub version: u8,
+    #[serde(default)]
+    pub space_id: Option<String>,
+    pub mode: RuntimeShareModeV1,
+    #[serde(default)]
+    pub object_ids: Vec<String>,
+    pub actor: IdentityRefV1,
+    #[serde(default)]
+    pub recipient_id: Option<String>,
+    #[serde(default)]
+    pub authority_grant_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeShareBundleV1 {
+    pub version: u8,
+    pub kind: String,
+    pub id: String,
+    pub mode: RuntimeShareModeV1,
+    pub source_space_id: String,
+    pub source_sequence: u64,
+    pub owner: IdentityRefV1,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipient_id: Option<String>,
+    pub created_at: String,
+    pub objects: Vec<RuntimeObjectV1>,
+    pub edges: Vec<RuntimeEdgeV1>,
+    pub document: Value,
+    pub content_hash: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeShareRecordV1 {
+    pub id: String,
+    pub source_space_id: String,
+    pub mode: RuntimeShareModeV1,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipient_id: Option<String>,
+    pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeShareRevokeRequestV1 {
+    pub version: u8,
+    pub share_id: String,
+    pub actor: IdentityRefV1,
+    #[serde(default)]
+    pub authority_grant_id: Option<String>,
 }
 
 struct PendingEvent {
@@ -318,6 +387,413 @@ pub fn history(
     let connection = database(runtime)?;
     migrate(&connection)?;
     read_events(&connection, space_id, limit.clamp(1, 500))
+}
+
+pub fn create_share_bundle(
+    runtime: &Path,
+    request: &RuntimeShareRequestV1,
+) -> Result<RuntimeShareBundleV1, String> {
+    if request.version != RUNTIME_VERSION {
+        return Err(format!("unsupported Runtime version {}", request.version));
+    }
+    if request.actor.id.trim().is_empty() || request.actor.kind.trim().is_empty() {
+        return Err("share actor identity is required".into());
+    }
+    if matches!(request.actor.kind.as_str(), "agent" | "service")
+        && request
+            .authority_grant_id
+            .as_deref()
+            .is_none_or(str::is_empty)
+    {
+        return Err("agent and service sharing requires an explicit authority grant".into());
+    }
+    match request.mode {
+        RuntimeShareModeV1::LiveReference => {
+            return Err("live references require an authorized HII Network sync transport".into())
+        }
+        RuntimeShareModeV1::Publish => {
+            return Err("publishing requires an explicit HII Network publication service".into())
+        }
+        RuntimeShareModeV1::Snapshot | RuntimeShareModeV1::Fork | RuntimeShareModeV1::Export => {}
+    }
+    let space_id = request.space_id.as_deref().unwrap_or("default");
+    validate_space_id(space_id)?;
+    let current = read_space(runtime, space_id)?
+        .ok_or_else(|| format!("runtime space {space_id} is not initialized"))?;
+    authorize_share_action(
+        runtime,
+        space_id,
+        &request.actor,
+        request.authority_grant_id.as_deref(),
+        "object.share",
+    )?;
+    let selected = selected_object_ids(&current, &request.object_ids)?;
+    let objects = current
+        .objects
+        .iter()
+        .filter(|object| selected.contains(&object.id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let edges = current
+        .edges
+        .iter()
+        .filter(|edge| {
+            selected.contains(&edge.from_object_id) && selected.contains(&edge.to_object_id)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let document = filtered_share_document(&current.document, &selected);
+    let now = Utc::now().to_rfc3339();
+    let mut bundle = RuntimeShareBundleV1 {
+        version: RUNTIME_VERSION,
+        kind: "hii.runtime.share-bundle".into(),
+        id: format!("share-{}", Uuid::new_v4()),
+        mode: request.mode,
+        source_space_id: space_id.into(),
+        source_sequence: current.sequence,
+        owner: request.actor.clone(),
+        recipient_id: request.recipient_id.clone(),
+        created_at: now.clone(),
+        objects,
+        edges,
+        document,
+        content_hash: String::new(),
+    };
+    bundle.content_hash = share_bundle_hash(&bundle)?;
+
+    let mut connection = database(runtime)?;
+    migrate(&connection)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
+    let next_sequence = current.sequence + 1;
+    let event_type = match request.mode {
+        RuntimeShareModeV1::Export => "artifact.exported",
+        RuntimeShareModeV1::Snapshot | RuntimeShareModeV1::Fork => "artifact.shared",
+        RuntimeShareModeV1::LiveReference | RuntimeShareModeV1::Publish => unreachable!(),
+    };
+    insert_event(
+        &transaction,
+        EventInsert {
+            space_id,
+            sequence: next_sequence,
+            actor: &request.actor,
+            event_type,
+            target_id: Some(&bundle.id),
+            payload: &json!({
+                "mode": request.mode,
+                "objectIds": selected,
+                "recipientId": request.recipient_id,
+                "contentHash": bundle.content_hash,
+            }),
+            authority_grant_id: request.authority_grant_id.as_deref(),
+            run_id: None,
+            idempotency_key: Some(&format!("share:{}", bundle.id)),
+            created_at: &now,
+        },
+    )?;
+    transaction
+        .execute(
+            "INSERT INTO runtime_shares
+             (id, source_space_id, mode, recipient_id, bundle_json, created_at, revoked_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
+            params![
+                bundle.id,
+                space_id,
+                share_mode_name(request.mode),
+                request.recipient_id,
+                json_string(&serde_json::to_value(&bundle).map_err(|error| error.to_string())?)?,
+                now,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "UPDATE runtime_spaces SET sequence=?2, updated_at=?3 WHERE id=?1",
+            params![space_id, next_sequence, now],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(bundle)
+}
+
+pub fn list_shares(runtime: &Path, space_id: &str) -> Result<Vec<RuntimeShareRecordV1>, String> {
+    validate_space_id(space_id)?;
+    let connection = database(runtime)?;
+    migrate(&connection)?;
+    let mut statement = connection
+        .prepare(
+            "SELECT id, source_space_id, mode, recipient_id, created_at, revoked_at
+             FROM runtime_shares WHERE source_space_id=?1 ORDER BY created_at DESC",
+        )
+        .map_err(|error| error.to_string())?;
+    let records = statement
+        .query_map([space_id], |row| {
+            let mode: String = row.get(2)?;
+            Ok(RuntimeShareRecordV1 {
+                id: row.get(0)?,
+                source_space_id: row.get(1)?,
+                mode: parse_share_mode(&mode).unwrap_or(RuntimeShareModeV1::Export),
+                recipient_id: row.get(3)?,
+                created_at: row.get(4)?,
+                revoked_at: row.get(5)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(records)
+}
+
+pub fn revoke_share(
+    runtime: &Path,
+    request: &RuntimeShareRevokeRequestV1,
+) -> Result<RuntimeShareRecordV1, String> {
+    if request.version != RUNTIME_VERSION || request.share_id.trim().is_empty() {
+        return Err("valid Runtime share revocation is required".into());
+    }
+    if request.actor.id.trim().is_empty() || request.actor.kind.trim().is_empty() {
+        return Err("share revocation actor identity is required".into());
+    }
+    if matches!(request.actor.kind.as_str(), "agent" | "service")
+        && request
+            .authority_grant_id
+            .as_deref()
+            .is_none_or(str::is_empty)
+    {
+        return Err("agent and service revocation requires an explicit authority grant".into());
+    }
+    let mut connection = database(runtime)?;
+    migrate(&connection)?;
+    let existing = connection
+        .query_row(
+            "SELECT source_space_id, mode, recipient_id, created_at, revoked_at
+             FROM runtime_shares WHERE id=?1",
+            [&request.share_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "share does not exist".to_string())?;
+    let mode = parse_share_mode(&existing.1).ok_or_else(|| "share mode is invalid".to_string())?;
+    if let Some(revoked_at) = existing.4 {
+        return Ok(RuntimeShareRecordV1 {
+            id: request.share_id.clone(),
+            source_space_id: existing.0,
+            mode,
+            recipient_id: existing.2,
+            created_at: existing.3,
+            revoked_at: Some(revoked_at),
+        });
+    }
+    let current = read_space(runtime, &existing.0)?
+        .ok_or_else(|| "share source Space does not exist".to_string())?;
+    authorize_share_action(
+        runtime,
+        &existing.0,
+        &request.actor,
+        request.authority_grant_id.as_deref(),
+        "object.share.revoke",
+    )?;
+    let now = Utc::now().to_rfc3339();
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "UPDATE runtime_shares SET revoked_at=?2 WHERE id=?1 AND revoked_at IS NULL",
+            params![request.share_id, now],
+        )
+        .map_err(|error| error.to_string())?;
+    let idempotency_key = format!("share:{}:revoke", request.share_id);
+    insert_event(
+        &transaction,
+        EventInsert {
+            space_id: &existing.0,
+            sequence: current.sequence + 1,
+            actor: &request.actor,
+            event_type: "artifact.share.revoked",
+            target_id: Some(&request.share_id),
+            payload: &json!({"mode": mode, "recipientId": existing.2}),
+            authority_grant_id: request.authority_grant_id.as_deref(),
+            run_id: None,
+            idempotency_key: Some(&idempotency_key),
+            created_at: &now,
+        },
+    )?;
+    transaction
+        .execute(
+            "UPDATE runtime_spaces SET sequence=?2, updated_at=?3 WHERE id=?1",
+            params![existing.0, current.sequence + 1, now],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(RuntimeShareRecordV1 {
+        id: request.share_id.clone(),
+        source_space_id: existing.0,
+        mode,
+        recipient_id: existing.2,
+        created_at: existing.3,
+        revoked_at: Some(now),
+    })
+}
+
+fn selected_object_ids(
+    snapshot: &RuntimeSpaceSnapshotV1,
+    requested: &[String],
+) -> Result<BTreeSet<String>, String> {
+    let available = snapshot
+        .objects
+        .iter()
+        .map(|object| object.id.clone())
+        .collect::<BTreeSet<_>>();
+    if requested.is_empty() {
+        if available.is_empty() {
+            return Err("share requires at least one object".into());
+        }
+        return Ok(available);
+    }
+    let mut selected = BTreeSet::new();
+    for requested_id in requested {
+        let direct = available.get(requested_id).cloned();
+        let by_legacy = available
+            .iter()
+            .find(|candidate| legacy_object_id(candidate) == requested_id)
+            .cloned();
+        let Some(id) = direct.or(by_legacy) else {
+            return Err(format!(
+                "share object does not exist in Space: {requested_id}"
+            ));
+        };
+        selected.insert(id);
+    }
+    Ok(selected)
+}
+
+fn authorize_share_action(
+    runtime: &Path,
+    space_id: &str,
+    actor: &IdentityRefV1,
+    grant_id: Option<&str>,
+    action: &str,
+) -> Result<(), String> {
+    let connection = database(runtime)?;
+    migrate(&connection)?;
+    let owner: String = connection
+        .query_row(
+            "SELECT owner_actor_id FROM runtime_spaces WHERE id=?1",
+            [space_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if actor.kind == "human" && actor.id == owner {
+        return Ok(());
+    }
+    let Some(grant_id) = grant_id.filter(|id| !id.is_empty()) else {
+        return Err("sharing requires the Space owner or an explicit Runtime grant".into());
+    };
+    let now = Utc::now().to_rfc3339();
+    let resource = format!("space:{space_id}");
+    let valid = connection
+        .query_row(
+            "SELECT 1 FROM runtime_grants
+             WHERE id=?1 AND subject_id=?2 AND action=?3 AND resource_id=?4
+               AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?5)",
+            params![grant_id, actor.id, action, resource, now],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+        .is_some();
+    if valid {
+        Ok(())
+    } else {
+        Err("Runtime grant does not authorize this share action".into())
+    }
+}
+
+fn filtered_share_document(document: &Value, selected: &BTreeSet<String>) -> Value {
+    let selected_legacy = selected
+        .iter()
+        .map(|id| legacy_object_id(id).to_string())
+        .collect::<BTreeSet<_>>();
+    let nodes = document
+        .get("nodes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|node| {
+            node.get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| selected_legacy.contains(id))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let links = document
+        .get("links")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|link| {
+            link.get("fromId")
+                .and_then(Value::as_str)
+                .is_some_and(|id| selected_legacy.contains(id))
+                && link
+                    .get("toId")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| selected_legacy.contains(id))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    json!({
+        "version": 1,
+        "revision": document.get("revision").cloned().unwrap_or(json!(0)),
+        "updatedAt": document.get("updatedAt").cloned().unwrap_or(Value::Null),
+        "viewport": document.get("viewport").cloned().unwrap_or(json!({"x":0,"y":0,"zoom":1})),
+        "nextZ": document.get("nextZ").cloned().unwrap_or(json!(1)),
+        "nodes": nodes,
+        "links": links,
+    })
+}
+
+fn share_bundle_hash(bundle: &RuntimeShareBundleV1) -> Result<String, String> {
+    let mut hashable = bundle.clone();
+    hashable.content_hash.clear();
+    let bytes = serde_json::to_vec(&hashable).map_err(|error| error.to_string())?;
+    Ok(digest(&SHA256, &bytes)
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+fn share_mode_name(mode: RuntimeShareModeV1) -> &'static str {
+    match mode {
+        RuntimeShareModeV1::LiveReference => "liveReference",
+        RuntimeShareModeV1::Snapshot => "snapshot",
+        RuntimeShareModeV1::Fork => "fork",
+        RuntimeShareModeV1::Publish => "publish",
+        RuntimeShareModeV1::Export => "export",
+    }
+}
+
+fn parse_share_mode(value: &str) -> Option<RuntimeShareModeV1> {
+    match value {
+        "liveReference" => Some(RuntimeShareModeV1::LiveReference),
+        "snapshot" => Some(RuntimeShareModeV1::Snapshot),
+        "fork" => Some(RuntimeShareModeV1::Fork),
+        "publish" => Some(RuntimeShareModeV1::Publish),
+        "export" => Some(RuntimeShareModeV1::Export),
+        _ => None,
+    }
 }
 
 fn validate_apply_request(request: &RuntimeSpaceApplyV1) -> Result<(), String> {
@@ -1069,7 +1545,7 @@ mod tests {
                 space_id: Some("default".into()),
                 expected_sequence: 0,
                 actor: IdentityRefV1 {
-                    id: "human:test".into(),
+                    id: "human:local".into(),
                     kind: "human".into(),
                 },
                 authority_grant_id: None,
@@ -1094,7 +1570,7 @@ mod tests {
                 space_id: Some("default".into()),
                 expected_sequence: 1,
                 actor: IdentityRefV1 {
-                    id: "human:test".into(),
+                    id: "human:local".into(),
                     kind: "human".into(),
                 },
                 authority_grant_id: None,
@@ -1134,6 +1610,123 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("explicit authority grant"));
+    }
+
+    #[test]
+    fn snapshot_shares_are_filtered_hashed_and_recorded_as_events() {
+        let runtime = TempRuntime::new();
+        initialize_space(
+            &runtime.0,
+            "default",
+            &document(0, vec![node("one", 0), node("two", 20)]),
+        )
+        .unwrap();
+        let bundle = create_share_bundle(
+            &runtime.0,
+            &RuntimeShareRequestV1 {
+                version: 1,
+                space_id: Some("default".into()),
+                mode: RuntimeShareModeV1::Snapshot,
+                object_ids: vec!["one".into()],
+                actor: IdentityRefV1 {
+                    id: "human:local".into(),
+                    kind: "human".into(),
+                },
+                recipient_id: Some("human:recipient".into()),
+                authority_grant_id: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(bundle.objects.len(), 1);
+        assert_eq!(bundle.document["nodes"].as_array().unwrap().len(), 1);
+        assert_eq!(bundle.content_hash.len(), 64);
+        assert_eq!(share_bundle_hash(&bundle).unwrap(), bundle.content_hash);
+        let shares = list_shares(&runtime.0, "default").unwrap();
+        assert_eq!(shares.len(), 1);
+        assert_eq!(shares[0].mode, RuntimeShareModeV1::Snapshot);
+        let updated = read_space(&runtime.0, "default").unwrap().unwrap();
+        assert_eq!(updated.sequence, 1);
+        assert!(updated
+            .recent_events
+            .iter()
+            .any(|event| event.event_type == "artifact.shared"));
+        let revoked = revoke_share(
+            &runtime.0,
+            &RuntimeShareRevokeRequestV1 {
+                version: 1,
+                share_id: bundle.id,
+                actor: IdentityRefV1 {
+                    id: "human:local".into(),
+                    kind: "human".into(),
+                },
+                authority_grant_id: None,
+            },
+        )
+        .unwrap();
+        assert!(revoked.revoked_at.is_some());
+        let after_revoke = read_space(&runtime.0, "default").unwrap().unwrap();
+        assert_eq!(after_revoke.sequence, 2);
+        assert!(after_revoke
+            .recent_events
+            .iter()
+            .any(|event| event.event_type == "artifact.share.revoked"));
+    }
+
+    #[test]
+    fn unsupported_network_modes_fail_closed_without_events() {
+        let runtime = TempRuntime::new();
+        initialize_space(&runtime.0, "default", &document(0, vec![node("one", 0)])).unwrap();
+        for mode in [
+            RuntimeShareModeV1::LiveReference,
+            RuntimeShareModeV1::Publish,
+        ] {
+            let error = create_share_bundle(
+                &runtime.0,
+                &RuntimeShareRequestV1 {
+                    version: 1,
+                    space_id: Some("default".into()),
+                    mode,
+                    object_ids: vec!["one".into()],
+                    actor: IdentityRefV1 {
+                        id: "human:local".into(),
+                        kind: "human".into(),
+                    },
+                    recipient_id: None,
+                    authority_grant_id: None,
+                },
+            )
+            .unwrap_err();
+            assert!(error.contains("HII Network"));
+        }
+        assert!(list_shares(&runtime.0, "default").unwrap().is_empty());
+        assert_eq!(
+            read_space(&runtime.0, "default").unwrap().unwrap().sequence,
+            0
+        );
+    }
+
+    #[test]
+    fn non_owner_cannot_share_by_claiming_a_human_identity() {
+        let runtime = TempRuntime::new();
+        initialize_space(&runtime.0, "default", &document(0, vec![node("one", 0)])).unwrap();
+        let error = create_share_bundle(
+            &runtime.0,
+            &RuntimeShareRequestV1 {
+                version: 1,
+                space_id: Some("default".into()),
+                mode: RuntimeShareModeV1::Snapshot,
+                object_ids: vec!["one".into()],
+                actor: IdentityRefV1 {
+                    id: "human:not-owner".into(),
+                    kind: "human".into(),
+                },
+                recipient_id: None,
+                authority_grant_id: None,
+            },
+        )
+        .unwrap_err();
+        assert!(error.contains("Space owner"));
+        assert!(list_shares(&runtime.0, "default").unwrap().is_empty());
     }
 
     #[test]

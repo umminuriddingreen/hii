@@ -7,7 +7,7 @@
   "properties": {
     "version": { "const": 1 },
     "kind": {
-      "enum": ["object", "edge", "event", "identity", "grant", "capability", "run", "receipt", "spaceProjection"]
+      "enum": ["object", "edge", "event", "identity", "grant", "capability", "run", "receipt", "spaceProjection", "shareBundle"]
     }
   },
   "$defs": {
@@ -55,6 +55,25 @@
         "provenance": {},
         "createdAt": { "type": "string" },
         "updatedAt": { "type": "string" }
+      }
+    },
+    "shareBundle": {
+      "type": "object",
+      "required": ["version", "kind", "id", "mode", "sourceSpaceId", "sourceSequence", "owner", "createdAt", "objects", "edges", "document", "contentHash"],
+      "properties": {
+        "version": { "const": 1 },
+        "kind": { "const": "hii.runtime.share-bundle" },
+        "id": { "type": "string" },
+        "mode": { "enum": ["snapshot", "fork", "export"] },
+        "sourceSpaceId": { "type": "string" },
+        "sourceSequence": { "type": "integer", "minimum": 0 },
+        "owner": { "$ref": "#/$defs/identityRef" },
+        "recipientId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "objects": { "type": "array", "items": { "$ref": "#/$defs/object" } },
+        "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } },
+        "document": { "type": "object" },
+        "contentHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
       }
     },
     "event": {

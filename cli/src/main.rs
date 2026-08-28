@@ -170,6 +170,11 @@ enum Commands {
         #[arg(long, help = "Emit the created Runtime object as JSON")]
         json: bool,
     },
+    #[command(about = "Create and inspect permission-scoped HII object shares")]
+    Share {
+        #[command(subcommand)]
+        action: ShareCommand,
+    },
     #[command(name = "apps", about = "List, register, and launch HII applications")]
     Apps {
         #[command(subcommand)]
@@ -525,6 +530,67 @@ enum Commands {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum ShareCommand {
+    #[command(
+        about = "Create a portable object bundle; live and publish fail closed until Network is configured"
+    )]
+    Create {
+        #[arg(value_enum)]
+        mode: ShareModeArg,
+        #[arg(
+            long = "object",
+            value_name = "ID",
+            help = "Object to include; repeatable; omit for the whole Space"
+        )]
+        objects: Vec<String>,
+        #[arg(
+            long,
+            value_name = "IDENTITY",
+            help = "Explicit intended recipient identity"
+        )]
+        recipient: Option<String>,
+        #[arg(long, value_name = "FILE", help = "New .hii.json bundle path")]
+        output: PathBuf,
+        #[arg(long, help = "Emit the bundle and path as JSON")]
+        json: bool,
+    },
+    #[command(about = "List locally recorded share grants and exported bundles")]
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
+        about = "Revoke future Network use of a share record; portable copies remain portable"
+    )]
+    Revoke {
+        share: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ShareModeArg {
+    LiveReference,
+    Snapshot,
+    Fork,
+    Publish,
+    Export,
+}
+
+impl From<ShareModeArg> for hii_core::runtime::RuntimeShareModeV1 {
+    fn from(value: ShareModeArg) -> Self {
+        match value {
+            ShareModeArg::LiveReference => Self::LiveReference,
+            ShareModeArg::Snapshot => Self::Snapshot,
+            ShareModeArg::Fork => Self::Fork,
+            ShareModeArg::Publish => Self::Publish,
+            ShareModeArg::Export => Self::Export,
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -1429,6 +1495,10 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             json,
         }) => {
             create_space_terminal(directory.or(cli.cwd), open, json)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Share { action }) => {
+            share_command(action)?;
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Apps { action }) => {
@@ -4157,6 +4227,7 @@ fn is_native_command(command: &str) -> bool {
         command,
         "ask"
             | "terminal"
+            | "share"
             | "apps"
             | "clean"
             | "run"
@@ -4321,6 +4392,131 @@ fn create_space_terminal(
         }
     }
     Ok(())
+}
+
+fn share_command(action: ShareCommand) -> Result<(), String> {
+    match action {
+        ShareCommand::Create {
+            mode,
+            objects,
+            recipient,
+            output,
+            json,
+        } => {
+            let parent = output
+                .parent()
+                .filter(|path| !path.as_os_str().is_empty())
+                .unwrap_or_else(|| std::path::Path::new("."));
+            if !parent.is_dir() {
+                return Err(format!(
+                    "share output directory does not exist: {}",
+                    parent.display()
+                ));
+            }
+            if output.exists() {
+                return Err(format!("share output already exists: {}", output.display()));
+            }
+            let bundle =
+                hii_core::runtime_share_create(hii_core::runtime::RuntimeShareRequestV1 {
+                    version: 1,
+                    space_id: None,
+                    mode: mode.into(),
+                    object_ids: objects,
+                    actor: hii_core::runtime::IdentityRefV1 {
+                        id: "human:local".into(),
+                        kind: "human".into(),
+                    },
+                    recipient_id: recipient,
+                    authority_grant_id: None,
+                })?;
+            let bytes = serde_json::to_vec_pretty(&bundle).map_err(|error| error.to_string())?;
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&output)
+                .map_err(|error| format!("could not create share bundle: {error}"))?;
+            file.write_all(&bytes)
+                .and_then(|_| file.write_all(b"\n"))
+                .and_then(|_| file.sync_all())
+                .map_err(|error| format!("could not finish share bundle: {error}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "path": output,
+                        "bundle": bundle,
+                    }))
+                    .map_err(|error| error.to_string())?
+                );
+            } else {
+                println!("Created {} share", share_mode_label(bundle.mode));
+                println!("bundle: {}", output.display());
+                println!("id: {}", bundle.id);
+                println!("objects: {}", bundle.objects.len());
+                println!("hash: {}", bundle.content_hash);
+                println!("not published; no live access was granted");
+            }
+        }
+        ShareCommand::List { json } => {
+            let shares = hii_core::runtime_share_list(None)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&shares).map_err(|error| error.to_string())?
+                );
+            } else if shares.is_empty() {
+                println!("No Runtime shares recorded in this Space.");
+            } else {
+                for share in shares {
+                    let state = if share.revoked_at.is_some() {
+                        "revoked"
+                    } else {
+                        "active"
+                    };
+                    println!(
+                        "{}  {:<8} {:<7} {}",
+                        share.id,
+                        share_mode_label(share.mode),
+                        state,
+                        share.recipient_id.as_deref().unwrap_or("portable bundle")
+                    );
+                }
+            }
+        }
+        ShareCommand::Revoke { share, json } => {
+            let record =
+                hii_core::runtime_share_revoke(hii_core::runtime::RuntimeShareRevokeRequestV1 {
+                    version: 1,
+                    share_id: share,
+                    actor: hii_core::runtime::IdentityRefV1 {
+                        id: "human:local".into(),
+                        kind: "human".into(),
+                    },
+                    authority_grant_id: None,
+                })?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&record).map_err(|error| error.to_string())?
+                );
+            } else {
+                println!("Revoked share {}", record.id);
+                println!("Portable copies already exported remain usable.");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn share_mode_label(mode: hii_core::runtime::RuntimeShareModeV1) -> &'static str {
+    use hii_core::runtime::RuntimeShareModeV1;
+    match mode {
+        RuntimeShareModeV1::LiveReference => "live",
+        RuntimeShareModeV1::Snapshot => "snapshot",
+        RuntimeShareModeV1::Fork => "fork",
+        RuntimeShareModeV1::Publish => "publish",
+        RuntimeShareModeV1::Export => "export",
+    }
 }
 
 fn login_command(
