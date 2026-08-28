@@ -2583,6 +2583,16 @@ function cmdCheck() {
   return r.status === 0;
 }
 
+function refreshReadmeState() {
+  const script = path.join(ROOT, "scripts", "hii-readme-state.mjs");
+  const result = spawnSync(process.execPath, [script, "--write"], {
+    cwd: ROOT,
+    env: { ...process.env, HII_ROOT: ROOT },
+    stdio: "inherit"
+  });
+  return result.status === 0;
+}
+
 function runnerUsage() {
   console.error("usage: hii runner <model <doctor|start|stop|status|models|bench|logs>|init <name>|start [--once]>");
 }
@@ -2681,6 +2691,7 @@ async function cmdRunner(args) {
 }
 
 function cmdShip(args) {
+  if (!refreshReadmeState()) { console.error("ship aborted: README state refresh failed"); process.exit(1); }
   if (!cmdCheck()) { console.error("ship aborted: typecheck failed"); process.exit(1); }
   const shouldPush = args.includes("--push");
   const messageArgs = args.filter((arg) => arg !== "--push");
