@@ -174,8 +174,8 @@ export function HiiWebAccess() {
     } catch {
       setMessage(
         mode === 'signup'
-          ? 'We could not create that passkey account. Check the name and try again.'
-          : 'That passkey was not accepted.',
+          ? 'could not sign up.'
+          : 'could not log in.',
       );
     } finally {
       setBusy(false);
@@ -196,36 +196,34 @@ export function HiiWebAccess() {
       <span className={styles.wordmark}>hii</span>
 
       {ready && session.authenticated ? (
-        <section className={styles.instructions} aria-labelledby="download-heading">
+        <section className={styles.instructions} aria-label="HII download instructions">
           <header className={styles.accountLine}>
             <span>{session.handle}</span>
             <button type="button" onClick={signOut} disabled={busy}>
-              Log out
+              log out
             </button>
           </header>
-          <h1 id="download-heading">Download HII</h1>
           <ol className={styles.downloadList}>
             <li>
-              <a href="/download/windows">Download the Windows installer</a>
-              <p>Open the installer and follow the prompts. The signed macOS build is coming next.</p>
+              <a href="/download/windows">download for windows</a>
+              <p>open the installer. macOS is coming next.</p>
             </li>
             <li>
-              <strong>Launch HII</strong>
-              <p>HII opens as a native local workspace with its terminal on your machine.</p>
+              <strong>open hii</strong>
+              <p>the terminal runs natively on your machine.</p>
             </li>
             <li>
-              <strong>Choose what HII can reach</strong>
-              <p>Grant a folder only when you want HII to work with it. Your passkey does not grant machine access.</p>
+              <strong>choose access</strong>
+              <p>grant a folder only when you want hii to work with it.</p>
             </li>
           </ol>
         </section>
       ) : mode ? (
-        <section className={styles.formPanel} aria-labelledby="access-heading">
-          <h1 id="access-heading">{mode === 'login' ? 'Log in' : 'Create an account'}</h1>
+        <section className={styles.formPanel} aria-label={mode === 'login' ? 'Log in' : 'Sign up'}>
           <form onSubmit={submit}>
             {mode === 'signup' ? (
               <label>
-                Account name
+                name
                 <input
                   type="text"
                   name="handle"
@@ -240,23 +238,22 @@ export function HiiWebAccess() {
               </label>
             ) : null}
             <button type="submit" disabled={busy || (mode === 'signup' && handle.trim().length < 3)}>
-              {busy ? 'Working…' : mode === 'login' ? 'Continue with a passkey' : 'Create passkey account'}
+              {busy ? 'working…' : 'continue'}
             </button>
           </form>
           {message ? <p className={styles.message} role="status">{message}</p> : null}
-          <p className={styles.note}>No password. Your device proves it is you. Account names are public identifiers.</p>
-          <button
-            type="button"
-            className={styles.switchMode}
-            onClick={() => chooseMode(mode === 'login' ? 'signup' : 'login')}
-          >
-            {mode === 'login' ? 'Create an account' : 'Already have an account? Log in'}
-          </button>
+          <p className={styles.note}>{mode === 'login' ? 'use your passkey' : 'no password. names are public.'}</p>
+          <nav className={styles.modeLinks} aria-label="Switch account action">
+            <button type="button" aria-current={mode === 'login'} onClick={() => chooseMode('login')}>login</button>
+            <span aria-hidden="true">/</span>
+            <button type="button" aria-current={mode === 'signup'} onClick={() => chooseMode('signup')}>sign up</button>
+          </nav>
         </section>
       ) : (
         <nav className={styles.actions} aria-label="HII account access">
-          <button type="button" onClick={() => chooseMode('login')}>Log in</button>
-          <button type="button" onClick={() => chooseMode('signup')}>Create an account</button>
+          <button type="button" onClick={() => chooseMode('login')}>login</button>
+          <span aria-hidden="true">/</span>
+          <button type="button" onClick={() => chooseMode('signup')}>sign up</button>
         </nav>
       )}
     </main>

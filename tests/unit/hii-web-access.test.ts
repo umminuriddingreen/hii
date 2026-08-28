@@ -30,7 +30,8 @@ describe('HII web access gate', () => {
   it('keeps the page minimal and scrollable', () => {
     const css = readFileSync('components/auth/HiiWebAccess.module.css', 'utf8');
 
-    expect(css).toContain('--access-blue: #0066ff');
+    expect(css).toContain('--ink: #111');
+    expect(css).not.toContain('#0066ff');
     expect(css).toContain('overflow-y: auto');
     expect(css).toContain('justify-content: center');
     expect(css).not.toContain('border-radius');
