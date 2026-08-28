@@ -183,6 +183,17 @@ export type HiiVpnStatus = {
   controlPlaneReady: boolean;
   dataPlaneLive: boolean;
   relayConfigured: boolean;
+  nativeWireGuard: {
+    backend: string;
+    available: boolean;
+    configReady: boolean;
+    active: boolean;
+    interfaceName: string;
+    latestHandshakeAt?: string;
+    receivedBytes: number;
+    sentBytes: number;
+    detail: string;
+  };
   reasons: string[];
   next: string;
 };

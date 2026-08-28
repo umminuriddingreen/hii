@@ -706,7 +706,7 @@ enum LinkCommand {
         #[arg(long)]
         json: bool,
     },
-    #[command(about = "Initialize the Rust-native local VPN control plane for this HII account")]
+    #[command(about = "Initialize the HII account-bound native WireGuard control plane")]
     Init {
         #[arg(long, value_name = "ID", help = "Stable lowercase device identifier")]
         device: Option<String>,
@@ -722,6 +722,21 @@ enum LinkCommand {
     },
     #[command(about = "Print the signed public mesh profile without private key material")]
     Profile {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Write the owner-only native WireGuard configuration")]
+    Prepare {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Activate the HII mesh through the platform WireGuard runtime")]
+    Up {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Deactivate the HII WireGuard interface")]
+    Down {
         #[arg(long)]
         json: bool,
     },
@@ -1802,7 +1817,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                         );
                     } else {
                         println!(
-                            "HII VPN local control plane ready\naccount    {}\nmesh       {}\ndevice     {} ({})\naddress    {}\nphase      {:?}\ndata plane not live — no verified peer handshake",
+                            "HII native WireGuard control plane ready\naccount    {}\nmesh       {}\ndevice     {} ({})\naddress    {}\nphase      {:?}\ndata plane not live — no verified peer handshake",
                             state.account_id,
                             state.mesh_id,
                             state.local_device.display_name,
@@ -1825,12 +1840,13 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                         println!("HII VPN is not initialized.\nnext: {}", status.next);
                     } else {
                         println!(
-                            "HII VPN\naccount       {}\nmesh          {}\ncontrol plane {}\ndata plane    {}\nrelay         {}\nnext          {}",
+                            "HII native WireGuard\naccount       {}\nmesh          {}\ncontrol plane {}\nnative runtime {}\ninterface     {}\ndata plane    {}\nnext          {}",
                             status.account_id.as_deref().unwrap_or("unknown"),
                             status.mesh_id.as_deref().unwrap_or("unknown"),
                             if status.control_plane_ready { "ready" } else { "blocked" },
+                            if status.native_wireguard.available { "available" } else { "missing" },
+                            if status.native_wireguard.active { "active" } else { "inactive" },
                             if status.data_plane_live { "verified live" } else { "not live" },
-                            if status.relay_configured { "configured" } else { "not configured" },
                             status.next
                         );
                         for reason in status.reasons {
@@ -1855,6 +1871,60 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                             state.local_device.device_id,
                             state.local_device.wireguard_public_key,
                             state.phase
+                        );
+                    }
+                }
+                LinkCommand::Prepare { json } => {
+                    let identity = identity::IdentityStore::open(&paths);
+                    let native = vpn::VpnStore::open(&paths).prepare_native(&identity)?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&native)
+                                .map_err(|error| error.to_string())?
+                        );
+                    } else {
+                        println!(
+                            "Native WireGuard configuration ready\nbackend   {}\ninterface {}\nruntime   {}",
+                            native.backend,
+                            native.interface_name,
+                            if native.available { "available" } else { "missing" }
+                        );
+                    }
+                }
+                LinkCommand::Up { json } => {
+                    let identity = identity::IdentityStore::open(&paths);
+                    let native = vpn::VpnStore::open(&paths).native_up(&identity)?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&native)
+                                .map_err(|error| error.to_string())?
+                        );
+                    } else {
+                        println!(
+                            "Native WireGuard interface {} is {}.",
+                            native.interface_name,
+                            if native.active {
+                                "active"
+                            } else {
+                                "not active"
+                            }
+                        );
+                    }
+                }
+                LinkCommand::Down { json } => {
+                    let native = vpn::VpnStore::open(&paths).native_down()?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&native)
+                                .map_err(|error| error.to_string())?
+                        );
+                    } else {
+                        println!(
+                            "Native WireGuard interface {} is down.",
+                            native.interface_name
                         );
                     }
                 }

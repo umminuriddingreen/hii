@@ -162,7 +162,7 @@ fn built_ins() -> Vec<ApplicationManifest> {
             name: "HII Link".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             developer: "HII".into(),
-            summary: "Account-bound private device mesh, signed contact cards, and user-controlled communication handoff."
+            summary: "Cross-platform native WireGuard device mesh, HII account binding, signed contact cards, and user-controlled communication handoff."
                 .into(),
             icon: "person.2.wave.2".into(),
             surfaces: ApplicationSurfaces {

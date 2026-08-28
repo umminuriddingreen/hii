@@ -3,8 +3,8 @@
 //!
 //! This module owns no public relay and never claims connectivity on the basis
 //! of configuration alone. It creates the local WireGuard-compatible device
-//! identity and a signed public mesh profile. A later transport adapter must
-//! prove handshakes before promoting the mesh to `active`.
+//! identity, signs the public mesh profile with the HII account, and delegates
+//! tunnel activation and observation to the native WireGuard runtime.
 
 use crate::{config::AppPaths, identity::IdentityStore};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
@@ -16,8 +16,11 @@ use ring::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    env,
+    ffi::OsString,
     fs,
     path::{Path, PathBuf},
+    process::Command,
 };
 use uuid::Uuid;
 use x25519_dalek::{PublicKey, StaticSecret};
@@ -25,6 +28,7 @@ use zeroize::Zeroize;
 
 const SCHEMA_VERSION: u16 = 1;
 const KIND: &str = "hii.vpn.mesh/1";
+const NATIVE_INTERFACE: &str = "hii0";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -91,8 +95,24 @@ pub struct VpnStatus {
     pub control_plane_ready: bool,
     pub data_plane_live: bool,
     pub relay_configured: bool,
+    #[serde(rename = "nativeWireGuard")]
+    pub native_wireguard: NativeWireGuardStatus,
     pub reasons: Vec<String>,
     pub next: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeWireGuardStatus {
+    pub backend: String,
+    pub available: bool,
+    pub config_ready: bool,
+    pub active: bool,
+    pub interface_name: String,
+    pub latest_handshake_at: Option<DateTime<Utc>>,
+    pub received_bytes: u64,
+    pub sent_bytes: u64,
+    pub detail: String,
 }
 
 pub struct VpnStore {
@@ -112,6 +132,12 @@ impl VpnStore {
 
     pub fn private_key_path(&self) -> PathBuf {
         self.root.join("private").join("wireguard.key")
+    }
+
+    pub fn native_config_path(&self) -> PathBuf {
+        self.root
+            .join("private")
+            .join(format!("{NATIVE_INTERFACE}.conf"))
     }
 
     pub fn init(
@@ -206,6 +232,7 @@ impl VpnStore {
     }
 
     pub fn status(&self, identity: &IdentityStore) -> Result<VpnStatus, String> {
+        let native_wireguard = self.native_status();
         if !self.state_path().is_file() {
             return Ok(VpnStatus {
                 initialized: false,
@@ -217,20 +244,43 @@ impl VpnStore {
                 control_plane_ready: false,
                 data_plane_live: false,
                 relay_configured: false,
+                native_wireguard,
                 reasons: vec!["No local HII VPN mesh has been initialized.".into()],
                 next: "hii link init".into(),
             });
         }
         let state = self.load(identity)?;
-        let data_plane_live = state.phase == MeshPhase::Active
-            && state.local_device.last_verified_handshake_at.is_some();
+        let data_plane_live = native_wireguard.active
+            && native_wireguard.latest_handshake_at.is_some()
+            && !state.peers.is_empty();
         let mut reasons = Vec::new();
-        if !data_plane_live {
-            reasons.push("No verified WireGuard handshake has been recorded.".into());
+        if !native_wireguard.available {
+            reasons.push("The native WireGuard runtime is not installed.".into());
+        } else if !native_wireguard.config_ready {
+            reasons.push("The native WireGuard configuration has not been prepared.".into());
+        } else if !native_wireguard.active {
+            reasons.push(format!(
+                "The native WireGuard interface {NATIVE_INTERFACE} is not active."
+            ));
+        } else if native_wireguard.latest_handshake_at.is_none() {
+            reasons.push("WireGuard is active but no peer handshake has been observed.".into());
         }
-        if state.relay_endpoint.is_none() {
-            reasons.push("No public coordination or relay endpoint is configured.".into());
+        if state.peers.is_empty() {
+            reasons.push("No WireGuard peer has been enrolled in this HII mesh.".into());
         }
+        let next = if !native_wireguard.available {
+            native_install_hint().into()
+        } else if !native_wireguard.config_ready {
+            "hii link prepare".into()
+        } else if state.peers.is_empty() {
+            "Enroll a second HII device before activating the tunnel.".into()
+        } else if !native_wireguard.active {
+            "hii link up".into()
+        } else if native_wireguard.latest_handshake_at.is_none() {
+            "Verify the peer endpoint and wait for a native WireGuard handshake.".into()
+        } else {
+            "Native WireGuard is carrying the HII device mesh.".into()
+        };
         Ok(VpnStatus {
             initialized: true,
             account_id: Some(state.account_id.clone()),
@@ -241,11 +291,279 @@ impl VpnStore {
             control_plane_ready: state.phase != MeshPhase::Revoked,
             data_plane_live,
             relay_configured: state.relay_endpoint.is_some(),
+            native_wireguard,
             reasons,
-            next: "Configure a stable HII relay, enroll a second device, then prove a handshake."
-                .into(),
+            next,
         })
     }
+
+    pub fn prepare_native(
+        &self,
+        identity: &IdentityStore,
+    ) -> Result<NativeWireGuardStatus, String> {
+        let state = self.load(identity)?;
+        let mut key = fs::read_to_string(self.private_key_path())
+            .map_err(|error| format!("failed to read HII VPN private key: {error}"))?;
+        let mut config = render_native_config(&state, key.trim());
+        write_private(&self.native_config_path(), config.as_bytes())?;
+        key.zeroize();
+        config.zeroize();
+        ensure_owner_only(&self.native_config_path())?;
+        Ok(self.native_status())
+    }
+
+    pub fn native_up(&self, identity: &IdentityStore) -> Result<NativeWireGuardStatus, String> {
+        let state = self.load(identity)?;
+        if state.peers.is_empty() {
+            return Err("Enroll a second HII device before activating WireGuard.".into());
+        }
+        if !self.native_config_path().is_file() {
+            self.prepare_native(identity)?;
+        }
+        self.run_native_action(true)?;
+        Ok(self.native_status())
+    }
+
+    pub fn native_down(&self) -> Result<NativeWireGuardStatus, String> {
+        self.run_native_action(false)?;
+        Ok(self.native_status())
+    }
+
+    pub fn native_status(&self) -> NativeWireGuardStatus {
+        let runtime = NativeRuntime::detect();
+        let config_ready = self.native_config_path().is_file();
+        let Some(wg) = runtime.wg.as_ref() else {
+            return NativeWireGuardStatus {
+                backend: runtime.backend.into(),
+                available: false,
+                config_ready,
+                active: false,
+                interface_name: NATIVE_INTERFACE.into(),
+                latest_handshake_at: None,
+                received_bytes: 0,
+                sent_bytes: 0,
+                detail: native_install_hint().into(),
+            };
+        };
+        if runtime.control.is_none() {
+            return NativeWireGuardStatus {
+                backend: runtime.backend.into(),
+                available: false,
+                config_ready,
+                active: false,
+                interface_name: NATIVE_INTERFACE.into(),
+                latest_handshake_at: None,
+                received_bytes: 0,
+                sent_bytes: 0,
+                detail: "WireGuard inspection is available, but its native tunnel controller is missing."
+                    .into(),
+            };
+        }
+        match Command::new(wg)
+            .args(["show", NATIVE_INTERFACE, "dump"])
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                let dump = String::from_utf8_lossy(&output.stdout);
+                let observed = parse_wg_dump(&dump);
+                NativeWireGuardStatus {
+                    backend: runtime.backend.into(),
+                    available: true,
+                    config_ready,
+                    active: true,
+                    interface_name: NATIVE_INTERFACE.into(),
+                    latest_handshake_at: observed.latest_handshake_at,
+                    received_bytes: observed.received_bytes,
+                    sent_bytes: observed.sent_bytes,
+                    detail: "Native WireGuard interface is active.".into(),
+                }
+            }
+            Ok(_) => NativeWireGuardStatus {
+                backend: runtime.backend.into(),
+                available: true,
+                config_ready,
+                active: false,
+                interface_name: NATIVE_INTERFACE.into(),
+                latest_handshake_at: None,
+                received_bytes: 0,
+                sent_bytes: 0,
+                detail: "Native WireGuard is installed; the HII interface is inactive.".into(),
+            },
+            Err(error) => NativeWireGuardStatus {
+                backend: runtime.backend.into(),
+                available: false,
+                config_ready,
+                active: false,
+                interface_name: NATIVE_INTERFACE.into(),
+                latest_handshake_at: None,
+                received_bytes: 0,
+                sent_bytes: 0,
+                detail: format!("Could not inspect native WireGuard: {error}"),
+            },
+        }
+    }
+
+    fn run_native_action(&self, up: bool) -> Result<(), String> {
+        let runtime = NativeRuntime::detect();
+        let control = runtime
+            .control
+            .ok_or_else(|| native_install_hint().to_string())?;
+        let mut command = Command::new(control);
+        command.args(native_action_arguments(
+            runtime.platform,
+            up,
+            &self.native_config_path(),
+        ));
+        let output = command
+            .output()
+            .map_err(|error| format!("failed to start native WireGuard: {error}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let detail = String::from_utf8_lossy(&output.stderr);
+        let detail = detail
+            .lines()
+            .last()
+            .unwrap_or("native WireGuard command failed");
+        Err(format!("native WireGuard command failed: {detail}"))
+    }
+}
+
+struct NativeRuntime {
+    backend: &'static str,
+    platform: NativePlatform,
+    wg: Option<PathBuf>,
+    control: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativePlatform {
+    WgQuick,
+    #[cfg(any(windows, test))]
+    WindowsService,
+}
+
+impl NativeRuntime {
+    fn detect() -> Self {
+        #[cfg(windows)]
+        {
+            let install = env::var_os("ProgramFiles")
+                .map(PathBuf::from)
+                .map(|path| path.join("WireGuard"));
+            let wg = install
+                .as_ref()
+                .map(|path| path.join("wg.exe"))
+                .filter(|path| path.is_file())
+                .or_else(|| find_executable("wg.exe"));
+            let control = install
+                .map(|path| path.join("wireguard.exe"))
+                .filter(|path| path.is_file())
+                .or_else(|| find_executable("wireguard.exe"));
+            Self {
+                backend: "wireguard_windows",
+                platform: NativePlatform::WindowsService,
+                wg,
+                control,
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            Self {
+                backend: "wg_quick",
+                platform: NativePlatform::WgQuick,
+                wg: find_executable("wg"),
+                control: find_executable("wg-quick"),
+            }
+        }
+    }
+}
+
+fn native_action_arguments(platform: NativePlatform, up: bool, config: &Path) -> Vec<OsString> {
+    match (platform, up) {
+        (NativePlatform::WgQuick, true) => vec!["up".into(), config.as_os_str().into()],
+        (NativePlatform::WgQuick, false) => vec!["down".into(), config.as_os_str().into()],
+        #[cfg(any(windows, test))]
+        (NativePlatform::WindowsService, true) => {
+            vec!["/installtunnelservice".into(), config.as_os_str().into()]
+        }
+        #[cfg(any(windows, test))]
+        (NativePlatform::WindowsService, false) => {
+            vec!["/uninstalltunnelservice".into(), NATIVE_INTERFACE.into()]
+        }
+    }
+}
+
+fn find_executable(name: &str) -> Option<PathBuf> {
+    env::var_os("PATH")
+        .into_iter()
+        .flat_map(|paths| env::split_paths(&paths).collect::<Vec<_>>())
+        .map(|directory| directory.join(name))
+        .find(|path| path.is_file())
+}
+
+fn native_install_hint() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "Install native WireGuard with `brew install wireguard-tools`."
+    }
+    #[cfg(windows)]
+    {
+        "Install the official WireGuard for Windows application."
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        "Install your platform's wireguard-tools package."
+    }
+}
+
+fn render_native_config(state: &VpnMeshState, private_key: &str) -> String {
+    let mut config = format!(
+        "# Managed locally by HII for account {}\n[Interface]\nPrivateKey = {}\nAddress = {}, {}\n",
+        state.account_id, private_key, state.local_device.ipv4, state.local_device.ipv6
+    );
+    for peer in &state.peers {
+        config.push_str("\n[Peer]\n");
+        config.push_str(&format!("PublicKey = {}\n", peer.wireguard_public_key));
+        config.push_str(&format!("AllowedIPs = {}, {}\n", peer.ipv4, peer.ipv6));
+        if let Some(endpoint) = &peer.endpoint {
+            config.push_str(&format!(
+                "Endpoint = {endpoint}\nPersistentKeepalive = 25\n"
+            ));
+        }
+    }
+    config
+}
+
+#[derive(Default)]
+struct NativeObservation {
+    latest_handshake_at: Option<DateTime<Utc>>,
+    received_bytes: u64,
+    sent_bytes: u64,
+}
+
+fn parse_wg_dump(raw: &str) -> NativeObservation {
+    let mut observation = NativeObservation::default();
+    for line in raw.lines().skip(1) {
+        let fields = line.split('\t').collect::<Vec<_>>();
+        if fields.len() < 7 {
+            continue;
+        }
+        if let Ok(timestamp) = fields[4].parse::<i64>() {
+            if timestamp > 0 {
+                let candidate = DateTime::<Utc>::from_timestamp(timestamp, 0);
+                if candidate > observation.latest_handshake_at {
+                    observation.latest_handshake_at = candidate;
+                }
+            }
+        }
+        observation.received_bytes = observation
+            .received_bytes
+            .saturating_add(fields[5].parse().unwrap_or(0));
+        observation.sent_bytes = observation
+            .sent_bytes
+            .saturating_add(fields[6].parse().unwrap_or(0));
+    }
+    observation
 }
 
 fn sign_state(identity: &IdentityStore, state: &mut VpnMeshState) -> Result<(), String> {
@@ -495,7 +813,69 @@ mod tests {
         assert!(status
             .reasons
             .iter()
-            .any(|reason| reason.contains("handshake")));
+            .any(|reason| reason.contains("peer") || reason.contains("handshake")));
+    }
+
+    #[test]
+    fn native_config_is_owner_only_and_uses_the_signed_mesh_identity() {
+        let (_temp, _paths, identity, vpn) = fixture("native-config");
+        let state = vpn.init(&identity, "ummi-mac", "Ummi Mac").unwrap();
+        let native = vpn.prepare_native(&identity).unwrap();
+        let config = fs::read_to_string(vpn.native_config_path()).unwrap();
+        assert!(native.config_ready);
+        assert!(config.contains("[Interface]"));
+        assert!(config.contains(&format!(
+            "Address = {}, {}",
+            state.local_device.ipv4, state.local_device.ipv6
+        )));
+        assert!(!config.contains(&state.owner_signing_public_key));
+        assert!(!config.contains(&state.account_signature));
+    }
+
+    #[test]
+    fn native_activation_requires_an_enrolled_peer() {
+        let (_temp, _paths, identity, vpn) = fixture("native-up");
+        vpn.init(&identity, "ummi-mac", "Ummi Mac").unwrap();
+        assert!(vpn
+            .native_up(&identity)
+            .unwrap_err()
+            .contains("second HII device"));
+    }
+
+    #[test]
+    fn wireguard_dump_reports_real_handshake_and_transfer_evidence() {
+        let observed = parse_wg_dump(
+            "private\tpublic\t51820\toff\npeer\tpreshared\t198.51.100.2:51820\t10.80.0.2/32\t1720000000\t4096\t8192\t25\n",
+        );
+        assert_eq!(
+            observed.latest_handshake_at,
+            DateTime::<Utc>::from_timestamp(1_720_000_000, 0)
+        );
+        assert_eq!(observed.received_bytes, 4096);
+        assert_eq!(observed.sent_bytes, 8192);
+    }
+
+    #[test]
+    fn native_command_contract_covers_macos_linux_and_windows() {
+        let config = Path::new("mesh/hii0.conf");
+        assert_eq!(
+            native_action_arguments(NativePlatform::WgQuick, true, config),
+            vec![OsString::from("up"), config.as_os_str().into()]
+        );
+        assert_eq!(
+            native_action_arguments(NativePlatform::WindowsService, true, config),
+            vec![
+                OsString::from("/installtunnelservice"),
+                config.as_os_str().into()
+            ]
+        );
+        assert_eq!(
+            native_action_arguments(NativePlatform::WindowsService, false, config),
+            vec![
+                OsString::from("/uninstalltunnelservice"),
+                OsString::from(NATIVE_INTERFACE)
+            ]
+        );
     }
 
     #[test]

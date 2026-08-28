@@ -42,7 +42,7 @@ export function HiiLinkApp() {
 
   return (
     <section className="hii-link-app">
-      <header><div><strong>HII Link</strong><span>Private device mesh, local account, and explicit handoffs</span></div><em>LOCAL-FIRST · ACCOUNT-BOUND</em></header>
+      <header><div><strong>HII Link</strong><span>Native WireGuard mesh, local account, and explicit handoffs</span></div><em>CROSS-PLATFORM · ACCOUNT-BOUND</em></header>
       <main>
         <article>
           <span>CONTACT CARD ON THIS MAC</span>
@@ -52,11 +52,13 @@ export function HiiLinkApp() {
           <dl>
             <div><dt>Mesh</dt><dd>{vpn?.meshId ? `${vpn.meshId.slice(0, 22)}…` : 'not initialized'}</dd></div>
             <div><dt>Control plane</dt><dd>{vpn?.controlPlaneReady ? 'ready locally' : 'not ready'}</dd></div>
+            <div><dt>WireGuard</dt><dd>{vpn?.nativeWireGuard?.available ? vpn.nativeWireGuard.backend : 'runtime missing'}</dd></div>
+            <div><dt>Interface</dt><dd>{vpn?.nativeWireGuard?.active ? `${vpn.nativeWireGuard.interfaceName} active` : 'inactive'}</dd></div>
             <div><dt>Data plane</dt><dd>{vpn?.dataPlaneLive ? 'verified live' : 'not live'}</dd></div>
             <div><dt>Peers</dt><dd>{vpn?.peerCount ?? 0}</dd></div>
           </dl>
           <button type="button" disabled={!card} onClick={copyCard}>Copy contact card as JSON</button>
-          <small>{vpn?.reasons?.[0] || 'Copying is the only action here that releases the card from HII.'} The private signing and VPN keys never leave this Mac.</small>
+          <small>{vpn?.reasons?.[0] || 'Copying is the only action here that releases the card from HII.'} HII delegates packet transport to native WireGuard; private signing and VPN keys stay on the device.</small>
         </article>
         <aside>
           <span>OPEN AN APP — DO NOT SEND</span>
