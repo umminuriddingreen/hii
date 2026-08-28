@@ -9,8 +9,48 @@ export type AgentRequestV1 = {
   intent: string;
   mode?: CanvasModeId;
   workspaceRoot?: string;
+  spaceId?: string;
   contextNodeIds: string[];
-  context?: Record<string, unknown>;
+  contextPackId: string;
+  contextFingerprint: string;
+};
+
+export type ContextPackItemV1 = {
+  ref: { kind: string; id: string; scope?: string; anchor?: unknown };
+  title: string;
+  itemType: string;
+  summary: string;
+  source?: string;
+  revision?: string;
+  sha256?: string;
+  provenance: string;
+  transmissionScope: string;
+  relevanceReasons: string[];
+  estimatedTokens: number;
+  selected: boolean;
+};
+
+export type ContextPackV1 = {
+  version: 1;
+  id: string;
+  status: 'draft' | 'approved' | 'stale' | 'blocked';
+  intent: string;
+  spaceId: string;
+  workspaceRoot: string;
+  actor: RuntimeIdentityRefV1;
+  authority: string;
+  mode: CanvasModeId;
+  items: ContextPackItemV1[];
+  excluded: Array<{ ref: { kind: string; id: string }; title: string; reason: string }>;
+  sourceErrors: string[];
+  budget: { maximumTokens: number; usedTokens: number; remainingTokens: number };
+  transmissionScope: string;
+  fingerprint: string;
+  changedSincePrevious: boolean;
+  risk: { action: 'autoStart' | 'review' | 'blocked'; reasons: string[] };
+  createdAt: string;
+  approvedAt?: string;
+  approvedBy?: string;
 };
 
 export type AgentStartResult = { runId: string };
@@ -280,6 +320,61 @@ export async function revokeRuntimeShare(shareId: string): Promise<RuntimeShareR
       actor: { id: 'human:local', kind: 'human' }
     }
   });
+}
+
+export async function compileContextPack(request: {
+  intent: string;
+  mode: CanvasModeId;
+  authority: string;
+  selectedObjectIds: string[];
+  spaceId?: string;
+  workspaceRoot?: string;
+  budgetTokens?: number;
+}): Promise<ContextPackV1> {
+  const payload = {
+    version: 1,
+    spaceId: request.spaceId || 'default',
+    workspaceRoot: request.workspaceRoot,
+    intent: request.intent,
+    selectedObjectIds: request.selectedObjectIds,
+    actor: { id: 'human:local', kind: 'human' },
+    authority: request.authority,
+    mode: request.mode,
+    budgetTokens: request.budgetTokens
+  };
+  if (isTauri()) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<ContextPackV1>('runtime_context_compile_v1', { request: payload });
+  }
+  return developmentRequest<ContextPackV1>('/context/compile', {
+    method: 'POST', body: JSON.stringify(payload)
+  });
+}
+
+export async function approveContextPack(pack: ContextPackV1, policy = false): Promise<ContextPackV1> {
+  const request = {
+    version: 1,
+    packId: pack.id,
+    fingerprint: pack.fingerprint,
+    approvedBy: policy
+      ? { id: 'policy:local-readonly', kind: 'service' }
+      : { id: 'human:local', kind: 'human' }
+  };
+  if (isTauri()) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<ContextPackV1>('runtime_context_approve_v1', { request });
+  }
+  return developmentRequest<ContextPackV1>('/context/approve', {
+    method: 'POST', body: JSON.stringify(request)
+  });
+}
+
+export async function getContextPack(id: string): Promise<ContextPackV1> {
+  if (isTauri()) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<ContextPackV1>('runtime_context_get_v1', { id });
+  }
+  return developmentRequest<ContextPackV1>(`/context/${encodeURIComponent(id)}`);
 }
 
 export async function startAgent(request: AgentRequestV1): Promise<AgentStartResult> {

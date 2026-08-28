@@ -1,4 +1,7 @@
 use hii_core::{
+    context_pack::{
+        self, ContextApproveRequestV1, ContextCompileRequestV1, ContextPackV1,
+    },
     default_workspace_root,
     information::{self, CaptureResult, InformationImage, InformationSource, SearchResult},
     new_run_id, read_workspace,
@@ -10,7 +13,7 @@ use hii_core::{
 };
 use serde_json::Value;
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     env, fs,
     io::{BufRead, BufReader, Read},
     path::PathBuf,
@@ -60,6 +63,21 @@ fn runtime_space_history_v1(
     limit: Option<usize>,
 ) -> Result<Vec<hii_core::runtime::RuntimeEventV1>, String> {
     runtime_space_history(space_id, limit)
+}
+
+#[tauri::command]
+fn runtime_context_compile_v1(request: ContextCompileRequestV1) -> Result<ContextPackV1, String> {
+    context_pack::compile(&hii_core::runtime_root()?, &request)
+}
+
+#[tauri::command]
+fn runtime_context_get_v1(id: String) -> Result<ContextPackV1, String> {
+    context_pack::get(&hii_core::runtime_root()?, &id)
+}
+
+#[tauri::command]
+fn runtime_context_approve_v1(request: ContextApproveRequestV1) -> Result<ContextPackV1, String> {
+    context_pack::approve(&hii_core::runtime_root()?, &request)
 }
 
 #[tauri::command]
@@ -305,21 +323,38 @@ fn agent_start(
         return Err(format!("Unsupported HII canvas mode: {mode}"));
     }
     let read_only = matches!(mode, "plan" | "browse" | "see");
+    let pack = context_pack::require_approved(
+        &hii_core::runtime_root()?,
+        &request.context_pack_id,
+        &request.context_fingerprint,
+    )?;
+    if pack.workspace_root != root.display().to_string() {
+        return Err("The approved ContextPack belongs to a different workspace.".into());
+    }
+    if pack.space_id != request.space_id.as_deref().unwrap_or("default") {
+        return Err("The approved ContextPack belongs to a different Space.".into());
+    }
+    if pack.intent != intent || pack.mode != mode {
+        return Err("The approved ContextPack does not match this intent or mode.".into());
+    }
+    let requested_ids = request.context_node_ids.iter().cloned().collect::<BTreeSet<_>>();
+    let approved_ids = pack.items.iter().filter(|item| item.selected).map(|item| {
+        item.context_ref.id.rsplit(':').next().unwrap_or(&item.context_ref.id).to_string()
+    }).collect::<BTreeSet<_>>();
+    if requested_ids != approved_ids {
+        return Err("The approved ContextPack does not match the selected canvas objects.".into());
+    }
     let run_id = new_run_id();
-    let context = serde_json::to_string(&request.context).unwrap_or_else(|_| "null".into());
-    let selected = request.context_node_ids.join(", ");
-    let goal = if !request.context.is_null() || !selected.is_empty() {
-        format!(
-            "{intent}\n\nHII interface context (human-selected, version {}):\nselected object ids: [{}]\ncontext: {}",
-            request.version, selected, context
-        )
-    } else {
-        intent.to_owned()
-    };
+    let goal = format!("{intent}\n\n{}", context_pack::render_for_model(&pack));
     let mut command = Command::new(hii_binary(&app)?);
     command
         .args(["run", "--cwd"])
         .arg(&root)
+        .args([
+            "--no-context",
+            "--context-source",
+        ])
+        .arg(format!("hii-context-pack:{}@{}", pack.id, pack.fingerprint))
         .args([
             "--jsonl",
             "--stream",
@@ -689,6 +724,9 @@ pub fn run() {
             runtime_space_snapshot_v1,
             runtime_space_apply_v1,
             runtime_space_history_v1,
+            runtime_context_compile_v1,
+            runtime_context_get_v1,
+            runtime_context_approve_v1,
             runtime_share_create_v1,
             runtime_share_list_v1,
             runtime_share_revoke_v1,

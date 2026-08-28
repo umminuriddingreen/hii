@@ -175,6 +175,11 @@ enum Commands {
         #[command(subcommand)]
         action: ShareCommand,
     },
+    #[command(about = "Compile, inspect, approve, and search bounded Runtime context packs")]
+    Context {
+        #[command(subcommand)]
+        action: ContextCommand,
+    },
     #[command(name = "apps", about = "List, register, and launch HII applications")]
     Apps {
         #[command(subcommand)]
@@ -567,6 +572,56 @@ enum ShareCommand {
     )]
     Revoke {
         share: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ContextCommand {
+    #[command(about = "Compile a deterministic, source-linked context pack")]
+    Compile {
+        #[arg(required = true, num_args = 1..)]
+        intent: Vec<String>,
+        #[arg(long, default_value = "default")]
+        space: String,
+        #[arg(long = "selection", value_name = "OBJECT_ID")]
+        selections: Vec<String>,
+        #[arg(long, default_value = "plan")]
+        mode: String,
+        #[arg(long, default_value = "read-only")]
+        authority: String,
+        #[arg(long)]
+        budget: Option<u64>,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Inspect one frozen context pack")]
+    Show {
+        id: String,
+        #[arg(long, help = "Require a current approved fingerprint before returning")]
+        fingerprint: Option<String>,
+        #[arg(long, help = "Render only the bounded model-facing context")]
+        render: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Approve exactly one context-pack fingerprint")]
+    Approve {
+        id: String,
+        fingerprint: String,
+        #[arg(long, help = "Record a local read-only policy approval")]
+        policy: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Search only within one frozen context pack")]
+    Search {
+        id: String,
+        #[arg(required = true, num_args = 1..)]
+        query: Vec<String>,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
         #[arg(long)]
         json: bool,
     },
@@ -1499,6 +1554,10 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         }
         Some(Commands::Share { action }) => {
             share_command(action)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Context { action }) => {
+            context_command(&paths, cli.cwd, action)?;
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Apps { action }) => {
@@ -4149,10 +4208,10 @@ fn value_taking_globals() -> &'static [String] {
     })
 }
 
-fn first_command(args: &[String]) -> Option<&str> {
+fn first_command_index(args: &[String]) -> Option<usize> {
     let value_flags = value_taking_globals();
     let mut skip_value = false;
-    for arg in args {
+    for (index, arg) in args.iter().enumerate() {
         if skip_value {
             skip_value = false;
             continue;
@@ -4164,9 +4223,13 @@ fn first_command(args: &[String]) -> Option<&str> {
             }
             continue;
         }
-        return Some(arg);
+        return Some(index);
     }
     None
+}
+
+fn first_command(args: &[String]) -> Option<&str> {
+    first_command_index(args).map(|index| args[index].as_str())
 }
 
 fn public_test_slash_allowed(command: &SlashCommand) -> bool {
@@ -4208,16 +4271,37 @@ fn delegate_legacy(repo: &std::path::Path, args: &[String]) -> Option<Result<i32
 /// only the lifecycle verbs are handled natively, so this migrates one verb at
 /// a time instead of taking the whole family at once.
 fn claimed_from_legacy(args: &[String]) -> bool {
-    let mut words = args.iter().filter(|arg| !arg.starts_with('-'));
-    let first = words.next().map(String::as_str);
+    let Some(index) = first_command_index(args) else {
+        return false;
+    };
+    let first = args.get(index).map(String::as_str);
+    let value_flags = value_taking_globals();
+    let mut skip_value = false;
+    let second = args.iter().skip(index + 1).find_map(|arg| {
+        if skip_value {
+            skip_value = false;
+            return None;
+        }
+        if arg.starts_with('-') {
+            if !arg.contains('=') && value_flags.iter().any(|flag| flag == arg) {
+                skip_value = true;
+            }
+            None
+        } else {
+            Some(arg.as_str())
+        }
+    });
     if first == Some("terminal") {
         return true;
     }
     matches!(
-        (first, words.next().map(String::as_str),),
+        (first, second),
         (
             Some("skills"),
             Some("promote" | "reject" | "lifecycle" | "record-use" | "run")
+        ) | (
+            Some("context"),
+            Some("compile" | "show" | "approve" | "search")
         )
     )
 }
@@ -4228,6 +4312,7 @@ fn is_native_command(command: &str) -> bool {
         "ask"
             | "terminal"
             | "share"
+            | "context"
             | "apps"
             | "clean"
             | "run"
@@ -4389,6 +4474,151 @@ fn create_space_terminal(
             );
         } else if !open {
             println!("open: hii terminal --open {}", directory.display());
+        }
+    }
+    Ok(())
+}
+
+fn context_command(
+    paths: &AppPaths,
+    cwd: Option<PathBuf>,
+    action: ContextCommand,
+) -> Result<(), String> {
+    use hii_core::context_pack::{self, ContextApproveRequestV1, ContextCompileRequestV1};
+    match action {
+        ContextCommand::Compile {
+            intent,
+            space,
+            selections,
+            mode,
+            authority,
+            budget,
+            json,
+        } => {
+            let pack = context_pack::compile(
+                &paths.runtime,
+                &ContextCompileRequestV1 {
+                    version: 1,
+                    space_id: Some(space),
+                    workspace_root: Some(
+                        cwd.unwrap_or_else(|| paths.repo.clone())
+                            .display()
+                            .to_string(),
+                    ),
+                    intent: intent.join(" "),
+                    selected_object_ids: selections,
+                    actor: hii_core::runtime::IdentityRefV1 {
+                        id: "human:local".into(),
+                        kind: "human".into(),
+                    },
+                    authority,
+                    mode,
+                    budget_tokens: budget,
+                    previous_fingerprint: None,
+                },
+            )?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&pack).map_err(|e| e.to_string())?
+                );
+            } else {
+                println!(
+                    "{}  {:?}  {:?}  {}/{} tokens  {} items\n{}",
+                    pack.id,
+                    pack.status,
+                    pack.risk.action,
+                    pack.budget.used_tokens,
+                    pack.budget.maximum_tokens,
+                    pack.items.len(),
+                    pack.fingerprint
+                );
+            }
+        }
+        ContextCommand::Show {
+            id,
+            fingerprint,
+            render,
+            json,
+        } => {
+            let pack = if let Some(fingerprint) = fingerprint {
+                context_pack::require_approved(&paths.runtime, &id, &fingerprint)?
+            } else {
+                context_pack::get(&paths.runtime, &id)?
+            };
+            if render {
+                print!("{}", context_pack::render_for_model(&pack));
+            } else if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&pack).map_err(|e| e.to_string())?
+                );
+            } else {
+                println!(
+                    "{}  {:?}  {:?}  {}/{} tokens  {} items\n{}",
+                    pack.id,
+                    pack.status,
+                    pack.risk.action,
+                    pack.budget.used_tokens,
+                    pack.budget.maximum_tokens,
+                    pack.items.len(),
+                    pack.fingerprint
+                );
+            }
+        }
+        ContextCommand::Approve {
+            id,
+            fingerprint,
+            policy,
+            json,
+        } => {
+            let pack = context_pack::approve(
+                &paths.runtime,
+                &ContextApproveRequestV1 {
+                    version: 1,
+                    pack_id: id,
+                    fingerprint,
+                    approved_by: hii_core::runtime::IdentityRefV1 {
+                        id: if policy {
+                            "policy:local-readonly"
+                        } else {
+                            "human:local"
+                        }
+                        .into(),
+                        kind: if policy { "service" } else { "human" }.into(),
+                    },
+                },
+            )?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&pack).map_err(|e| e.to_string())?
+                );
+            } else {
+                println!("approved {} at {}", pack.id, pack.fingerprint);
+            }
+        }
+        ContextCommand::Search {
+            id,
+            query,
+            limit,
+            json,
+        } => {
+            let pack = context_pack::get(&paths.runtime, &id)?;
+            let items = context_pack::search_pack(&pack, &query.join(" "), limit);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&items).map_err(|e| e.to_string())?
+                );
+            } else {
+                for item in items {
+                    println!(
+                        "{}\t{}\t{}",
+                        item.context_ref.id, item.item_type, item.title
+                    );
+                }
+            }
         }
     }
     Ok(())
@@ -4757,6 +4987,17 @@ mod tests {
         }
         // Flags must not shift which word is read as the subcommand.
         assert!(claimed_from_legacy(&words("skills --json lifecycle")));
+    }
+
+    #[test]
+    fn context_pack_verbs_are_native_even_after_global_flag_values() {
+        let words =
+            |line: &str| -> Vec<String> { line.split_whitespace().map(str::to_string).collect() };
+        assert!(claimed_from_legacy(&words(
+            "--cwd /Users/ummi/hii context compile continue"
+        )));
+        assert!(claimed_from_legacy(&words("context show ctx_1")));
+        assert!(!claimed_from_legacy(&words("context --json")));
     }
 
     /// Subcommands are registered in two places: the clap `Commands` enum and

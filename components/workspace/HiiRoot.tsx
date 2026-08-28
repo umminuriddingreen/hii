@@ -3,13 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   acknowledgeApplicationLaunch,
+  approveContextPack,
   captureInformation,
+  compileContextPack,
   findInformation,
   listApplicationLaunchRequests,
   listApplications,
   listenAgentEvents,
   startAgent,
   type AgentEventV1,
+  type ContextPackV1,
   type HiiApplicationManifest,
   type InformationCaptureResult,
   type InformationSearchResult
@@ -78,6 +81,7 @@ type PromptState = {
   status: 'idle' | 'running' | 'completed' | 'failed';
   objectId?: string;
   conversationId?: string;
+  contextPack?: ContextPackV1;
 };
 const RESPONSE_URL = /(https?:\/\/[^\s<>()]+)/g;
 
@@ -477,8 +481,10 @@ function Prompt({
   response,
   status,
   timeline,
+  contextPack,
   onDismiss,
   onMode,
+  onApproveContext,
   onSubmit
 }: {
   anchor: Point;
@@ -488,8 +494,10 @@ function Prompt({
   response: string;
   status: 'idle' | 'running' | 'completed' | 'failed';
   timeline: ObjectConversationTurn[];
+  contextPack?: ContextPackV1;
   onDismiss: () => void;
   onMode: (mode: CanvasModeId) => void;
+  onApproveContext: () => void;
   onSubmit: (value: string) => void;
 }) {
   const [value, setValue] = useState(initialValue);
@@ -508,7 +516,7 @@ function Prompt({
       ].filter(([command]) => command.startsWith(value.trim().toLowerCase()) || value.trim() === '/')
     : [];
   const submit = () => {
-    if (value.trim() && status !== 'running') onSubmit(value.trim());
+    if (value.trim() && status !== 'running' && !contextPack) onSubmit(value.trim());
   };
   useEffect(() => { input.current?.focus(); }, []);
   const promptWidth = Math.min(640, window.innerWidth - 32);
@@ -542,6 +550,7 @@ function Prompt({
         <div className="hii-prompt-line">
           <input
             ref={input}
+            disabled={Boolean(contextPack)}
             value={value}
             onChange={(event) => setValue(event.target.value)}
             onKeyDown={(event) => {
@@ -568,10 +577,25 @@ function Prompt({
           />
         </div>
         {response && <PromptResponse value={response} running={status === 'running'} />}
+        {contextPack && (
+          <section className="hii-context-preflight" aria-label="Context review">
+            <header>
+              <strong>{contextPack.items.length} context items</strong>
+              <span>{contextPack.budget.usedTokens.toLocaleString()} / {contextPack.budget.maximumTokens.toLocaleString()} tokens</span>
+            </header>
+            <p>{contextPack.risk.reasons.join(' · ')}</p>
+            <ul>{contextPack.items.slice(0, 8).map((item) => (
+              <li key={`${item.ref.kind}:${item.ref.id}`}><b>{item.title}</b><span>{item.itemType}{item.selected ? ' · selected' : ''}</span></li>
+            ))}</ul>
+            {contextPack.excluded.length > 0 && <small>{contextPack.excluded.length} item{contextPack.excluded.length === 1 ? '' : 's'} excluded by scope, safety, or budget.</small>}
+            <button type="button" onClick={onApproveContext}>Approve this exact context and continue</button>
+            <code>{contextPack.fingerprint.slice(0, 18)}…</code>
+          </section>
+        )}
         {commands.length > 0 && <div className="hii-prompt-commands" aria-label="HII commands">{commands.map(([command, description]) => <span key={command}><b>{command}</b>{description}</span>)}</div>}
         <div className="hii-mode-strip" aria-label="Canvas interaction mode">
           <div>{canvasModes.map((item) => (
-            <button key={item.id} type="button" aria-pressed={item.id === mode} onClick={() => onMode(item.id)}>{item.label}</button>
+            <button key={item.id} type="button" disabled={Boolean(contextPack)} aria-pressed={item.id === mode} onClick={() => onMode(item.id)}>{item.label}</button>
           ))}</div>
           <small>{canvasMode(mode).description}</small>
           <kbd>⇧ Tab</kbd>
@@ -613,6 +637,10 @@ export function HiiRoot({
   const mouse = useRef<Point>({ x: 400, y: 280 });
   const activeRun = useRef<string | null>(null);
   const activeAgentTerminals = useRef(new Map<string, string>());
+  const pendingContextStart = useRef<null | {
+    pack: ContextPackV1;
+    start: (approved: ContextPackV1) => Promise<void>;
+  }>(null);
   const activeConversation = useRef<{
     runId: string;
     nodeId: string;
@@ -620,6 +648,65 @@ export function HiiRoot({
     humanTurnId: string;
     assistantText: string;
   } | null>(null);
+
+  const startWithContext = useCallback(async (
+    request: { intent: string; mode: CanvasModeId; contextNodeIds: string[] },
+    onStarted: (result: { runId: string }) => void | Promise<void>,
+    reviewAnchor: Point = mouse.current
+  ) => {
+    const authority = ['plan', 'browse', 'see'].includes(request.mode) ? 'read-only' : 'workspace';
+    const pack = await compileContextPack({
+      intent: request.intent,
+      mode: request.mode,
+      authority,
+      selectedObjectIds: request.contextNodeIds,
+      spaceId: spaceId || 'default'
+    });
+    if (pack.risk.action === 'blocked') {
+      throw new Error(pack.risk.reasons.join(' ') || 'HII blocked unsafe or missing context.');
+    }
+    const start = async (approved: ContextPackV1) => {
+      const result = await startAgent({
+        version: 1,
+        intent: request.intent,
+        mode: request.mode,
+        spaceId: spaceId || 'default',
+        contextNodeIds: request.contextNodeIds,
+        contextPackId: approved.id,
+        contextFingerprint: approved.fingerprint
+      });
+      await onStarted(result);
+    };
+    if (pack.risk.action === 'review') {
+      pendingContextStart.current = { pack, start };
+      setPrompt((current) => ({
+        anchor: current?.anchor || reviewAnchor,
+        initialValue: current?.initialValue || request.intent,
+        response: 'Review the bounded context HII will use before this run starts.',
+        status: 'idle',
+        objectId: current?.objectId,
+        conversationId: current?.conversationId,
+        contextPack: pack
+      }));
+      setPromptVisible(true);
+      return false;
+    }
+    await start(await approveContextPack(pack, true));
+    return true;
+  }, [spaceId]);
+
+  const approvePendingContext = useCallback(async () => {
+    const pending = pendingContextStart.current;
+    if (!pending) return;
+    setPrompt((current) => current ? { ...current, contextPack: undefined, response: 'Starting with the approved context…', status: 'running' } : current);
+    try {
+      const approved = await approveContextPack(pending.pack);
+      pendingContextStart.current = null;
+      await pending.start(approved);
+    } catch (error) {
+      setPrompt((current) => current ? { ...current, response: error instanceof Error ? error.message : 'HII could not approve this context.', status: 'failed' } : current);
+    }
+  }, []);
   const curationRun = useRef<{ runId: string; nodeId: string; request: string; text: string } | null>(null);
   const workspaceRef = useRef(workspace);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -782,7 +869,6 @@ export function HiiRoot({
     const contextNodeIds = Array.isArray(node.payload.contextNodeIds)
       ? node.payload.contextNodeIds.filter((id): id is string => typeof id === 'string' && id !== nodeId).slice(0, 100)
       : [];
-    const contextNodes = workspaceRef.current.nodes.filter((entry) => contextNodeIds.includes(entry.id));
     const priorLines = Array.isArray(node.payload.lines) ? node.payload.lines.map(text).filter(Boolean) : [];
     const startedAt = new Date().toISOString();
     workspaceRef.current.patchNode(nodeId, {
@@ -808,32 +894,28 @@ export function HiiRoot({
       }
     });
     try {
-      const result = await startAgent({
-        version: 1,
+      const started = await startWithContext({
         intent: modeIntent(runMode, intent),
         mode: runMode,
-        contextNodeIds,
-        context: {
-          surface: 'agent-terminal',
-          terminalNodeId: nodeId,
-          sessionId: text(node.payload.sessionId),
-          selected: contextNodes.map((entry) => ({
-            id: entry.id,
-            type: entry.type,
-            title: titleFor(entry),
-            object: entry.object,
-            payload: entry.payload
-          })),
-          terminalHistory: priorLines.slice(-40)
+        contextNodeIds
+      }, async (result) => {
+        activeAgentTerminals.current.set(result.runId, nodeId);
+        const current = workspaceRef.current.nodes.find((entry) => entry.id === nodeId);
+        if (current) {
+          workspaceRef.current.patchNode(nodeId, {
+            payload: { ...current.payload, runId: result.runId, status: 'running' },
+            object: { ...(current.object || { kind: 'terminal' as const }), runId: result.runId }
+          });
         }
       });
-      activeAgentTerminals.current.set(result.runId, nodeId);
-      const current = workspaceRef.current.nodes.find((entry) => entry.id === nodeId);
-      if (current) {
-        workspaceRef.current.patchNode(nodeId, {
-          payload: { ...current.payload, runId: result.runId },
-          object: { ...(current.object || { kind: 'terminal' as const }), runId: result.runId }
-        });
+      if (!started) {
+        const current = workspaceRef.current.nodes.find((entry) => entry.id === nodeId);
+        if (current) {
+          workspaceRef.current.patchNode(nodeId, {
+            payload: { ...current.payload, status: 'waiting_approval', job: `agent · ${runMode} · review` },
+            object: { ...(current.object || { kind: 'terminal' as const }), status: 'waiting_approval' }
+          });
+        }
       }
     } catch (error) {
       const current = workspaceRef.current.nodes.find((entry) => entry.id === nodeId);
@@ -845,7 +927,7 @@ export function HiiRoot({
         object: { ...(current.object || { kind: 'terminal' as const }), status: 'failed' }
       });
     }
-  }, [mode]);
+  }, [mode, startWithContext]);
 
   const openObjectConversation = useCallback((node: WorkspaceNode) => {
     const conversationId = text(node.payload.conversationId) || crypto.randomUUID();
@@ -998,37 +1080,34 @@ export function HiiRoot({
     setPrompt({ anchor: mouse.current, initialValue: '', response: 'Reading the active page context…', status: 'running' });
     setPromptVisible(true);
     try {
-      const result = await startAgent({
-        version: 1,
+      await startWithContext({
         intent: modeIntent(mode, `${request}\n\nActive browser page: ${url}`),
         mode,
-        contextNodeIds: [node.id],
-        context: { surface: 'native-dev-browser', url, title: titleFor(node), authority: mode === 'build' ? 'governed-write' : 'read-only' }
-      });
-      activeRun.current = result.runId;
+        contextNodeIds: [node.id]
+      }, (result) => { activeRun.current = result.runId; });
     } catch (error) {
       setPrompt((current) => current ? { ...current, response: error instanceof Error ? error.message : 'HII could not start the browser agent.', status: 'failed' } : current);
     }
-  }, [mode]);
+  }, [mode, startWithContext]);
 
   const requestCuration = useCallback(async (nodeId: string, request: string, payload: MusicPanelPayload) => {
     setPrompt({ anchor: mouse.current, initialValue: '', response: 'Preparing a curation proposal…', status: 'running' });
     setPromptVisible(true);
     try {
-      const result = await startAgent({
-        version: 1,
+      await startWithContext({
         intent: buildCurationAgentPrompt(request, payload),
-        contextNodeIds: [nodeId],
-        context: { surface: 'profile-music', proposalOnly: true }
+        mode: 'plan',
+        contextNodeIds: [nodeId]
+      }, (result) => {
+        activeRun.current = result.runId;
+        curationRun.current = { runId: result.runId, nodeId, request, text: '' };
       });
-      activeRun.current = result.runId;
-      curationRun.current = { runId: result.runId, nodeId, request, text: '' };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'HII could not start the curation agent.';
       workspaceRef.current.patchNode(nodeId, { payload: { ...payload, curationError: `${message} Nothing changed.` } });
       setPrompt((current) => current ? { ...current, response: message, status: 'failed' } : current);
     }
-  }, []);
+  }, [startWithContext]);
 
   const submit = useCallback(async (intent: string, anchor: Point, objectId?: string, conversationId?: string) => {
     const activeMode = canvasMode(mode);
@@ -1086,65 +1165,46 @@ export function HiiRoot({
         } : current);
         return;
       }
-      const result = await startAgent({
-        version: 1,
+      await startWithContext({
         intent: modeIntent(mode, intent),
         mode,
-        contextNodeIds: selected,
-        context: {
-          anchor,
-          mode,
-          conversation: objectId && conversationId ? {
-            id: conversationId,
-            objectId,
-            timeline: objectConversationTurns(
-              selectedNodes.find((node) => node.id === objectId)?.payload || {},
-              conversationId
-            ).slice(-12)
-          } : undefined,
-          selected: selectedNodes.map((node) => ({
-            id: node.id,
-            type: node.type,
-            title: titleFor(node),
-            object: node.object,
-            payload: node.payload
-          }))
-        }
-      });
-      activeRun.current = result.runId;
-      if (objectId && conversationId) {
-        const node = workspaceRef.current.nodes.find((entry) => entry.id === objectId);
-        if (node) {
-          const humanTurnId = crypto.randomUUID();
-          const turn: ObjectConversationTurn = {
-            id: humanTurnId,
-            conversationId,
-            at: new Date().toISOString(),
-            role: 'human',
-            text: intent,
-            status: 'running',
-            runId: result.runId
-          };
-          workspaceRef.current.patchNode(objectId, {
-            payload: {
-              ...node.payload,
+        contextNodeIds: selected
+      }, (result) => {
+        activeRun.current = result.runId;
+        if (objectId && conversationId) {
+          const node = workspaceRef.current.nodes.find((entry) => entry.id === objectId);
+          if (node) {
+            const humanTurnId = crypto.randomUUID();
+            const turn: ObjectConversationTurn = {
+              id: humanTurnId,
               conversationId,
-              conversationTimeline: appendObjectConversationTurn(node.payload, turn)
-            }
-          });
-          activeConversation.current = {
-            runId: result.runId,
-            nodeId: objectId,
-            conversationId,
-            humanTurnId,
-            assistantText: ''
-          };
+              at: new Date().toISOString(),
+              role: 'human',
+              text: intent,
+              status: 'running',
+              runId: result.runId
+            };
+            workspaceRef.current.patchNode(objectId, {
+              payload: {
+                ...node.payload,
+                conversationId,
+                conversationTimeline: appendObjectConversationTurn(node.payload, turn)
+              }
+            });
+            activeConversation.current = {
+              runId: result.runId,
+              nodeId: objectId,
+              conversationId,
+              humanTurnId,
+              assistantText: ''
+            };
+          }
         }
-      }
+      }, anchor);
     } catch (error) {
       setPrompt((current) => current ? { ...current, response: error instanceof Error ? error.message : 'HII could not start the model.', status: 'failed' } : current);
     }
-  }, [camera, mode, openDevBrowser, openMarketplace, openMusicPanel, selected, selectedNodes, spawnInformation, spawnSeeds]);
+  }, [camera, mode, openDevBrowser, openMarketplace, openMusicPanel, selected, spawnInformation, spawnSeeds, startWithContext]);
 
   useEffect(() => {
     if (isSpace) return;
@@ -1495,11 +1555,13 @@ export function HiiRoot({
           objectTitle={prompt.objectId ? titleFor(workspace.nodes.find((node) => node.id === prompt.objectId) || ({ type: 'context', payload: {} } as WorkspaceNode)) : undefined}
           response={prompt.response}
           status={prompt.status}
+          contextPack={prompt.contextPack}
           timeline={prompt.objectId
             ? objectConversationTurns(workspace.nodes.find((node) => node.id === prompt.objectId)?.payload || {}, prompt.conversationId)
             : []}
           onDismiss={() => setPromptVisible(false)}
           onMode={setMode}
+          onApproveContext={() => void approvePendingContext()}
           onSubmit={(value) => void submit(value, prompt.anchor, prompt.objectId, prompt.conversationId)}
         />
       )}

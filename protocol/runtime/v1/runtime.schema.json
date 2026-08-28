@@ -7,7 +7,7 @@
   "properties": {
     "version": { "const": 1 },
     "kind": {
-      "enum": ["object", "edge", "event", "identity", "grant", "capability", "run", "receipt", "spaceProjection", "shareBundle"]
+      "enum": ["object", "edge", "event", "identity", "grant", "capability", "contextPack", "run", "receipt", "spaceProjection", "shareBundle"]
     }
   },
   "$defs": {
@@ -124,6 +124,60 @@
         "failureRecovery": { "type": "object" }
       }
     },
+    "contextRef": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "scope": { "type": "string" },
+        "anchor": {}
+      },
+      "additionalProperties": false
+    },
+    "contextPackItem": {
+      "type": "object",
+      "required": ["ref", "title", "itemType", "summary", "provenance", "transmissionScope", "relevanceReasons", "estimatedTokens", "selected"],
+      "properties": {
+        "ref": { "$ref": "#/$defs/contextRef" },
+        "title": { "type": "string" },
+        "itemType": { "type": "string" },
+        "summary": { "type": "string" },
+        "source": { "type": "string" },
+        "revision": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "provenance": { "type": "string" },
+        "transmissionScope": { "type": "string" },
+        "relevanceReasons": { "type": "array", "items": { "type": "string" } },
+        "estimatedTokens": { "type": "integer", "minimum": 0 },
+        "selected": { "type": "boolean" }
+      }
+    },
+    "contextPack": {
+      "type": "object",
+      "required": ["version", "id", "status", "intent", "spaceId", "workspaceRoot", "actor", "authority", "mode", "items", "excluded", "budget", "transmissionScope", "fingerprint", "risk", "createdAt"],
+      "properties": {
+        "version": { "const": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["draft", "approved", "stale", "blocked"] },
+        "intent": { "type": "string", "minLength": 1 },
+        "spaceId": { "type": "string", "minLength": 1 },
+        "workspaceRoot": { "type": "string", "minLength": 1 },
+        "actor": { "$ref": "#/$defs/identityRef" },
+        "authority": { "type": "string" },
+        "mode": { "type": "string" },
+        "items": { "type": "array", "items": { "$ref": "#/$defs/contextPackItem" } },
+        "excluded": { "type": "array" },
+        "sourceErrors": { "type": "array", "items": { "type": "string" } },
+        "budget": { "type": "object" },
+        "transmissionScope": { "type": "string" },
+        "fingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "risk": { "type": "object" },
+        "createdAt": { "type": "string" },
+        "approvedAt": { "type": "string" },
+        "approvedBy": { "type": "string" }
+      }
+    },
     "run": {
       "type": "object",
       "required": ["version", "id", "intent", "selectedObjects", "contextPack", "capabilities", "authority", "limits", "progress", "artifacts", "verification", "status"],
@@ -132,7 +186,7 @@
         "id": { "type": "string" },
         "intent": { "type": "string" },
         "selectedObjects": { "type": "array", "items": { "type": "string" } },
-        "contextPack": {},
+        "contextPack": { "$ref": "#/$defs/contextPack" },
         "model": {},
         "capabilities": { "type": "array", "items": { "type": "string" } },
         "authority": {},

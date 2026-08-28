@@ -9,6 +9,7 @@ use std::{
 };
 use uuid::Uuid;
 
+pub mod context_pack;
 pub mod information;
 pub mod operational;
 pub mod runtime;
@@ -26,9 +27,11 @@ pub struct AgentRequestV1 {
     #[serde(default)]
     pub workspace_root: Option<String>,
     #[serde(default)]
-    pub context_node_ids: Vec<String>,
+    pub space_id: Option<String>,
     #[serde(default)]
-    pub context: Value,
+    pub context_node_ids: Vec<String>,
+    pub context_pack_id: String,
+    pub context_fingerprint: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -312,8 +315,10 @@ mod tests {
             intent: "shape this information".into(),
             mode: Some("build".into()),
             workspace_root: None,
+            space_id: Some("default".into()),
             context_node_ids: vec![],
-            context: Value::Null,
+            context_pack_id: "ctx_test".into(),
+            context_fingerprint: "sha256:test".into(),
         };
         let encoded = serde_json::to_value(request).unwrap();
         assert_eq!(encoded["version"], 1);

@@ -95,21 +95,42 @@ function cli(args) {
   });
 }
 
-function startAgent(input) {
+async function startAgent(input) {
   const id = `web-${randomUUID()}`;
   const state = { version: 1, runId: id, status: 'started', text: '', receiptPath: undefined };
   runs.set(id, state);
   const mode = normalizedMode(input);
   const readOnly = ['plan', 'browse', 'see'].includes(mode);
+  const packId = String(input.contextPackId || '');
+  const fingerprint = String(input.contextFingerprint || '');
+  if (!packId || !fingerprint) throw new Error('An approved HII ContextPack is required.');
+  const pack = JSON.parse(await cli(['context', 'show', packId, '--fingerprint', fingerprint, '--json']));
+  if (pack.status !== 'approved' || pack.fingerprint !== fingerprint) {
+    throw new Error('The HII ContextPack is not approved at the requested fingerprint.');
+  }
+  if (pack.intent !== String(input.intent || '') || pack.mode !== mode) {
+    throw new Error('The approved ContextPack does not match this intent or mode.');
+  }
+  const workspaceRoot = String(input.workspaceRoot || repo);
+  if (pack.workspaceRoot !== workspaceRoot || pack.spaceId !== String(input.spaceId || 'default')) {
+    throw new Error('The approved ContextPack belongs to a different workspace or Space.');
+  }
+  const requestedIds = [...new Set(Array.isArray(input.contextNodeIds) ? input.contextNodeIds.map(String) : [])].sort();
+  const approvedIds = pack.items.filter((item) => item.selected).map((item) => String(item.ref.id).split(':').at(-1)).sort();
+  if (JSON.stringify(requestedIds) !== JSON.stringify(approvedIds)) {
+    throw new Error('The approved ContextPack does not match the selected canvas objects.');
+  }
+  const modelContext = await cli(['context', 'show', packId, '--fingerprint', fingerprint, '--render']);
   const args = [
-    '--cwd', String(input.workspaceRoot || repo),
-    'run', '--jsonl', '--stream', '--autonomy', 'local-full',
+    '--cwd', workspaceRoot,
+    'run', '--no-context', '--context-source', `hii-context-pack:${packId}@${fingerprint}`,
+    '--jsonl', '--stream', '--autonomy', 'local-full',
     '--authority', readOnly ? 'read-only' : 'workspace'
   ];
   // A declared informational outcome requires a predeclared verification check.
   // Canvas research instead completes from source-tool evidence, which HII marks
   // incidental (not high-trust), while read-only authority still blocks mutation.
-  args.push(String(input.intent || ''));
+  args.push(`${String(input.intent || '')}\n\n${modelContext}`);
   const child = spawn(hiiBinary(), args, { cwd: repo, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
   let pending = '';
   const appendProgress = (message) => {
@@ -158,11 +179,36 @@ const server = http.createServer(async (request, response) => {
       const run = runs.get(url.pathname.slice('/agent/'.length));
       return run ? send(response, run) : send(response, { error: 'run not found' }, 404);
     }
+    if (request.method === 'GET' && url.pathname.startsWith('/context/')) {
+      const id = decodeURIComponent(url.pathname.slice('/context/'.length));
+      const output = await cli(['context', 'show', id, '--json']);
+      return send(response, JSON.parse(output));
+    }
     if (request.method !== 'POST') return send(response, { error: 'not found' }, 404);
     const input = await body(request);
     if (url.pathname === '/agent') {
       if (!String(input.intent || '').trim()) return send(response, { error: 'intent is required' }, 400);
-      return send(response, startAgent(input), 202);
+      return send(response, await startAgent(input), 202);
+    }
+    if (url.pathname === '/context/compile') {
+      const args = [
+        '--cwd', String(input.workspaceRoot || repo), 'context', 'compile',
+        '--space', String(input.spaceId || 'default'), '--mode', normalizedMode(input),
+        '--authority', String(input.authority || 'read-only'), '--json'
+      ];
+      for (const id of Array.isArray(input.selectedObjectIds) ? input.selectedObjectIds : []) {
+        args.push('--selection', String(id));
+      }
+      if (input.budgetTokens) args.push('--budget', String(input.budgetTokens));
+      args.push(String(input.intent || ''));
+      const output = await cli(args);
+      return send(response, JSON.parse(output));
+    }
+    if (url.pathname === '/context/approve') {
+      const args = ['context', 'approve', String(input.packId || ''), String(input.fingerprint || ''), '--json'];
+      if (input.approvedBy?.kind === 'service') args.push('--policy');
+      const output = await cli(args);
+      return send(response, JSON.parse(output));
     }
     if (url.pathname === '/information/capture') {
       const output = await cli(['--cwd', String(input.workspaceRoot || repo), 'info', 'capture', String(input.url || ''), '--json']);
