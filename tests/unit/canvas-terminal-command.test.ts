@@ -16,15 +16,16 @@ describe('canvas terminal command', () => {
         kind: 'terminal',
         owner: 'human',
         status: 'ready',
-        capabilityId: 'hii.terminal.observe'
+        capabilityId: 'hii.terminal.shell'
       },
       payload: {
         title: 'terminal · hii',
-        job: 'local terminal',
+        job: 'shell',
         cwd: '~/hii',
         status: 'ready',
         role: 'operator-terminal',
-        scope: 'local session · no command started'
+        terminalMode: 'shell',
+        scope: 'human-controlled local shell'
       }
     });
   });
@@ -62,6 +63,7 @@ describe('canvas terminal command', () => {
       payload: {
         title: 'agent terminal · build',
         role: 'agent-terminal',
+        terminalMode: 'agent',
         mode: 'build',
         draft: 'b',
         contextNodeIds: ['source-1']

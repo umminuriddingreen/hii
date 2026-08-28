@@ -49,22 +49,23 @@ export function terminalSeedFromCommand(value: string): NodeSeed | null {
       owner: 'human',
       status: 'ready',
       source: 'HII direct canvas terminal command',
-      capabilityId: 'hii.terminal.observe',
+      capabilityId: 'hii.terminal.shell',
       audit: [{
         ts: new Date().toISOString(),
         actor: 'human',
-        action: `created local terminal at ${cwd}`
+        action: `created explicit native shell terminal at ${cwd}`
       }]
     },
     payload: {
       title: `terminal · ${cwdLabel(cwd)}`,
-      job: 'local terminal',
+      job: 'shell',
       cwd,
       status: 'ready',
       role: 'operator-terminal',
-      scope: 'local session · no command started',
+      terminalMode: 'shell',
+      scope: 'human-controlled local shell',
       sessionId: crypto.randomUUID(),
-      lines: ['HII terminal object', 'Type an intent on the canvas to start verified work.']
+      lines: []
     }
   };
 }
@@ -98,6 +99,7 @@ export function agentTerminalSeedFromText(
       cwd: '~/hii',
       status: 'ready',
       role: 'agent-terminal',
+      terminalMode: 'agent',
       mode,
       draft: value,
       contextNodeIds,

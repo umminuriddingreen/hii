@@ -53,6 +53,7 @@ import { HiiMarketplace } from './HiiMarketplace';
 import { HiiLinkApp } from './HiiLinkApp';
 import { NodeFrame } from './NodeFrame';
 import { RegisteredApplication } from './RegisteredApplication';
+import { ShellTerminal } from './ShellTerminal';
 import { WaymarkApp } from './WaymarkApp';
 import { packagePlacementSeed, WAYMARK_PACKAGE, type HiiMarketplacePackage } from '@/lib/marketplace/catalog';
 import { useCamera } from './useCamera';
@@ -62,6 +63,7 @@ import { InkBody } from '@/components/spaces/InkBody';
 import { inkSeedFromPoints } from '@/components/spaces/ink-capture';
 import { isSpaceCanvasNode } from '@/components/spaces/space-surface';
 import { trackPointerGesture } from '@/lib/workspace/gestures';
+import { updateTerminalActivity } from '@/lib/workspace/terminal-activity';
 
 type Point = { x: number; y: number };
 export type WorkspaceProjectionRequest = {
@@ -269,8 +271,11 @@ function TerminalBody({
   const footerLabel = operatorTerminal || agentTerminal ? 'scope' : 'artifact';
   const footerValue = operatorTerminal || agentTerminal ? text(node.payload.scope) || 'local session' : artifact;
   const lines = Array.isArray(node.payload.lines) ? node.payload.lines.map(text).filter(Boolean) : [];
+  const activityLines = Array.isArray(node.payload.activityLines) ? node.payload.activityLines.map(text).filter(Boolean) : [];
+  const resultLines = Array.isArray(node.payload.resultLines) ? node.payload.resultLines.map(text).filter(Boolean) : [];
   const draft = text(node.payload.draft);
   const running = status === 'running' || status === 'queued';
+  const shellTerminal = operatorTerminal && node.payload.terminalMode === 'shell';
   return (
     <article className="hii-job-terminal" data-status={status}>
       <header>
@@ -278,9 +283,25 @@ function TerminalBody({
         <strong>{job}</strong>
         <small>{status}</small>
       </header>
-      <pre aria-label={`${job} terminal`}>
+      {shellTerminal ? (
+        <ShellTerminal
+          sessionId={text(node.payload.sessionId)}
+          cwd={cwd}
+          onState={(state) => onPayload({
+            status: state.status,
+            cwd: state.cwd || cwd,
+            error: state.error || undefined
+          })}
+        />
+      ) : <pre aria-label={`${job} terminal`}>
         <span className="hii-terminal-path">{cwd}</span>
         {lines.map((line, index) => <span key={`${line}:${index}`}>{line}</span>)}
+        {agentTerminal && activityLines.length > 0 && (
+          node.payload.activityCollapsed === true
+            ? <details className="hii-terminal-activity"><summary>{activityLines.length} activity update{activityLines.length === 1 ? '' : 's'}</summary>{activityLines.map((line, index) => <span key={`${line}:${index}`}>{line}</span>)}</details>
+            : <span className="hii-terminal-activity-live">{activityLines.at(-1)}</span>
+        )}
+        {agentTerminal && resultLines.map((line, index) => <span className="hii-terminal-result" key={`${line}:${index}`}>{line}</span>)}
         {agentTerminal ? (
           <span className="hii-terminal-command-line">
             <b>›</b>
@@ -300,7 +321,7 @@ function TerminalBody({
             {running && <i aria-hidden="true" />}
           </span>
         ) : <span className="hii-terminal-prompt"><b>›</b> <i aria-hidden="true" /></span>}
-      </pre>
+      </pre>}
       <footer><span>{footerLabel}</span><code>{footerValue}</code></footer>
     </article>
   );
@@ -770,7 +791,10 @@ export function HiiRoot({
         draft: '',
         status: 'running',
         job: `agent · ${runMode}`,
-        lines: [...priorLines, `› ${intent}`, `${canvasMode(runMode).label} agent starting…`].slice(-200)
+        lines: [...priorLines, `› ${intent}`].slice(-80),
+        activityLines: [`Preparing ${canvasMode(runMode).label.toLowerCase()} work…`],
+        resultLines: [],
+        activityCollapsed: false
       },
       object: {
         ...(node.object || { kind: 'terminal' as const }),
@@ -1139,8 +1163,7 @@ export function HiiRoot({
               : event.status === 'cancelled'
                 ? 'cancelled'
                 : 'running';
-          const lines = Array.isArray(node.payload.lines) ? node.payload.lines.map(text).filter(Boolean) : [];
-          const nextLines = event.text ? [...lines, ...event.text.split('\n').filter(Boolean)].slice(-200) : lines;
+          const activity = updateTerminalActivity(node.payload, event);
           const proofRefs = event.receiptPath
             ? [...new Set([...(node.object?.proofRefs || []), event.receiptPath])]
             : node.object?.proofRefs;
@@ -1149,7 +1172,7 @@ export function HiiRoot({
             payload: {
               ...node.payload,
               status: terminalStatus,
-              lines: nextLines,
+              ...activity,
               receiptPath: event.receiptPath || node.payload.receiptPath
             },
             object: {

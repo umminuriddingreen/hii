@@ -21,6 +21,7 @@ use std::{
 use tauri::{Emitter, Manager};
 
 mod browser;
+mod terminal;
 mod ui_channel;
 
 /// Name of the CLI executable staged into the bundle by `scripts/hii-tauri-build.mjs`.
@@ -170,6 +171,7 @@ fn emit_agent(
     app: &tauri::AppHandle,
     run_id: &str,
     status: &str,
+    kind: Option<&str>,
     text: Option<String>,
     receipt_path: Option<String>,
 ) {
@@ -179,10 +181,20 @@ fn emit_agent(
             version: CONTRACT_VERSION,
             run_id: run_id.into(),
             status: status.into(),
+            kind: kind.map(str::to_owned),
             text,
             receipt_path,
         },
     );
+}
+
+fn jsonl_user_kind(value: &Value) -> Option<&'static str> {
+    match value.get("event")?.as_str()? {
+        "run.finished" => Some("result"),
+        "run.blocked" | "run.interrupted" | "budget.exceeded" => Some("status"),
+        "tool.started" | "tool.result" => Some("activity"),
+        _ => None,
+    }
 }
 
 fn jsonl_receipt_path(value: &Value) -> Option<String> {
@@ -314,6 +326,7 @@ fn agent_start(
         &app,
         &run_id,
         "started",
+        Some("status"),
         Some(format!("Working in {}", root.display())),
         None,
     );
@@ -332,7 +345,14 @@ fn agent_start(
                         }
                     }
                     if let Some(message) = jsonl_user_message(&value) {
-                        emit_agent(&app, &run, "progress", Some(message), None);
+                        emit_agent(
+                            &app,
+                            &run,
+                            "progress",
+                            jsonl_user_kind(&value),
+                            Some(message),
+                            None,
+                        );
                     }
                 }
             }
@@ -344,7 +364,7 @@ fn agent_start(
         thread::spawn(move || {
             for line in BufReader::new(stderr).lines().map_while(Result::ok) {
                 if serde_json::from_str::<Value>(&line).is_err() && !line.trim().is_empty() {
-                    emit_agent(&app, &run, "progress", Some(line), None);
+                    emit_agent(&app, &run, "progress", Some("status"), Some(line), None);
                 }
             }
         });
@@ -364,6 +384,7 @@ fn agent_start(
                 &app_for_wait,
                 &run_for_wait,
                 "completed",
+                Some("status"),
                 Some("Agent work completed.".into()),
                 receipt_path,
             ),
@@ -371,6 +392,7 @@ fn agent_start(
                 &app_for_wait,
                 &run_for_wait,
                 "failed",
+                Some("status"),
                 Some(format!(
                     "Agent stopped with exit {}.",
                     value.code().unwrap_or(1)
@@ -381,6 +403,7 @@ fn agent_start(
                 &app_for_wait,
                 &run_for_wait,
                 "failed",
+                Some("status"),
                 Some(error.to_string()),
                 receipt_path,
             ),
@@ -415,6 +438,7 @@ fn agent_cancel(
             &app,
             &run_id,
             "cancelled",
+            Some("status"),
             Some("Agent run cancelled.".into()),
             None,
         );
@@ -607,6 +631,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(AgentProcesses::default())
+        .manage(terminal::TerminalSessions::default())
         .manage(ui_channel::ActiveBundle::default())
         // Serves an installed interface bundle out of ~/.hii/ui/bundles/<version>.
         .register_uri_scheme_protocol("hiiui", |ctx, request| {
@@ -649,6 +674,10 @@ pub fn run() {
             information_inspect,
             agent_start,
             agent_cancel,
+            terminal::terminal_start,
+            terminal::terminal_write,
+            terminal::terminal_resize,
+            terminal::terminal_stop,
             notification_list,
             notification_read,
             applications_list,

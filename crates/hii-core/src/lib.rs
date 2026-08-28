@@ -38,6 +38,8 @@ pub struct AgentEventV1 {
     pub run_id: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub receipt_path: Option<String>,

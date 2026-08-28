@@ -1,3 +1,5 @@
+@import '@xterm/xterm/css/xterm.css';
+
 :root {
   color-scheme: light;
   --field: #ffffff;
@@ -390,7 +392,16 @@ button, input, textarea { font: inherit; }
 .hii-job-terminal header strong { overflow: hidden; font-size: 11px; font-weight: 550; letter-spacing: .01em; text-overflow: ellipsis; white-space: nowrap; }
 .hii-job-terminal header small { color: #777b84; font-size: 9px; letter-spacing: .12em; text-transform: uppercase; }
 .hii-job-terminal pre { display: grid; align-content: start; gap: 7px; margin: 0; padding: 14px 16px; overflow: auto; color: #b9bdc6; font: 11px/1.45 inherit; }
+.hii-shell-terminal { min-width: 0; min-height: 0; padding: 10px 8px 7px 12px; overflow: hidden; background: #0b0c0f; }
+.hii-shell-terminal .xterm { height: 100%; padding: 0; }
+.hii-shell-terminal .xterm-viewport { scrollbar-color: #343840 transparent; scrollbar-width: thin; }
 .hii-job-terminal pre > span { display: block; }
+.hii-terminal-activity-live { color: #8f949f; }
+.hii-terminal-activity-live::before { content: '●'; margin-right: 8px; color: var(--job-accent); animation: hii-external-pulse 1.15s ease-in-out infinite; }
+.hii-terminal-activity { display: grid; gap: 5px; color: #747984; }
+.hii-terminal-activity summary { width: max-content; cursor: pointer; color: #9297a1; font-size: 10px; }
+.hii-terminal-activity span { display: block; padding-left: 12px; }
+.hii-terminal-result { color: #eef0f3; white-space: pre-wrap; }
 .hii-terminal-path { color: #6e727b; }
 .hii-terminal-prompt { display: flex !important; align-items: center; gap: 8px; color: #e9eaed; }
 .hii-terminal-prompt b { color: var(--job-accent); font-weight: 650; }
@@ -411,6 +422,7 @@ button, input, textarea { font: inherit; }
 @media (prefers-reduced-motion: reduce) {
   .hii-terminal-prompt i,
   .hii-terminal-command-line i,
+  .hii-terminal-activity-live::before,
   .hii-prompt[data-status="running"] .hii-prompt-response::after,
   .hii-prompt[data-status="running"] .hii-external-context-state i { animation: none; }
 }

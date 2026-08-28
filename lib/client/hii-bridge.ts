@@ -18,8 +18,28 @@ export type AgentEventV1 = {
   version: 1;
   runId: string;
   status: 'started' | 'progress' | 'completed' | 'failed' | 'cancelled';
+  kind?: 'activity' | 'result' | 'status';
   text?: string;
   receiptPath?: string;
+};
+
+export type TerminalOutputV1 = {
+  version: 1;
+  sessionId: string;
+  data: string;
+};
+
+export type TerminalExitV1 = {
+  version: 1;
+  sessionId: string;
+};
+
+export type TerminalStartResultV1 = {
+  version: 1;
+  sessionId: string;
+  cwd: string;
+  replay: string;
+  created: boolean;
 };
 
 export type InformationImage = {
@@ -244,6 +264,51 @@ export async function listenAgentEvents(handler: (event: AgentEventV1) => void) 
   }
   const { listen } = await import('@tauri-apps/api/event');
   return listen<AgentEventV1>('hii://agent-event', (event) => handler(event.payload));
+}
+
+export async function startTerminalSession(request: {
+  sessionId: string;
+  cwd: string;
+  cols: number;
+  rows: number;
+}): Promise<TerminalStartResultV1> {
+  if (!isTauri()) throw new Error('Native shell terminals are available in the HII desktop app.');
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<TerminalStartResultV1>('terminal_start', request);
+}
+
+export async function writeTerminalSession(sessionId: string, data: string): Promise<void> {
+  if (!isTauri()) return;
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('terminal_write', { sessionId, data });
+}
+
+export async function resizeTerminalSession(sessionId: string, cols: number, rows: number): Promise<void> {
+  if (!isTauri()) return;
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('terminal_resize', { sessionId, cols, rows });
+}
+
+export async function stopTerminalSession(sessionId: string): Promise<boolean> {
+  if (!isTauri()) return false;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<boolean>('terminal_stop', { sessionId });
+}
+
+export async function listenTerminalEvents(handlers: {
+  output: (event: TerminalOutputV1) => void;
+  exit: (event: TerminalExitV1) => void;
+}) {
+  if (!isTauri()) return () => {};
+  const { listen } = await import('@tauri-apps/api/event');
+  const [unlistenOutput, unlistenExit] = await Promise.all([
+    listen<TerminalOutputV1>('hii://terminal-output', (event) => handlers.output(event.payload)),
+    listen<TerminalExitV1>('hii://terminal-exit', (event) => handlers.exit(event.payload))
+  ]);
+  return () => {
+    unlistenOutput();
+    unlistenExit();
+  };
 }
 
 export async function listNotifications(): Promise<HiiNotification[]> {
