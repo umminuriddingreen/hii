@@ -1188,13 +1188,16 @@ fn truncate_text(value: &str, max_bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::{
         env,
         sync::atomic::{AtomicUsize, Ordering},
     };
 
+    #[cfg(unix)]
     struct TempDir(PathBuf);
 
+    #[cfg(unix)]
     impl TempDir {
         fn new(label: &str) -> Self {
             static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -1212,6 +1215,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     impl Drop for TempDir {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
