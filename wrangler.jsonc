@@ -1,27 +1,45 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "hii",
-  "main": ".svelte-kit/cloudflare/_worker.js",
+  "main": "workers/public-site/build/worker/shim.mjs",
   "compatibility_date": "2026-08-04",
   "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": true,
-  "preview_urls": true,
+  "build": {
+    "command": "sh scripts/build-public-worker.sh"
+  },
+  "workers_dev": false,
+  "preview_urls": false,
   "assets": {
-    "directory": ".svelte-kit/cloudflare",
+    "directory": "out",
     "binding": "ASSETS",
-    "not_found_handling": "none",
+    "not_found_handling": "404-page",
     "run_worker_first": true
   },
   "observability": {
     "enabled": true
   },
-  "vars": {
-    "HII_REMOTE_USER": "ummi"
-  },
+  "ratelimits": [
+    {
+      "name": "AUTH_RATE_LIMITER",
+      "namespace_id": "763841",
+      "simple": {
+        "limit": 100,
+        "period": 60
+      }
+    }
+  ],
   "r2_buckets": [
     {
       "binding": "DOWNLOADS",
       "bucket_name": "hii"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "IDENTITY",
+      "database_name": "hii-identity",
+      "database_id": "c2ca577f-cfff-493e-8e7d-0fbe64c5daf3",
+      "migrations_dir": "workers/public-site/migrations"
     }
   ],
   "routes": [

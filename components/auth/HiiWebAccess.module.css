@@ -1,9 +1,7 @@
 .access {
   --access-blue: #0066ff;
-  position: fixed;
-  inset: 0;
   min-height: 100dvh;
-  overflow: hidden;
+  overflow-y: auto;
   background: #fff;
   color: #111;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
@@ -20,33 +18,178 @@
 }
 
 .actions {
-  position: absolute;
-  left: 50%;
-  top: 50%;
+  min-height: 100dvh;
   display: flex;
+  justify-content: center;
   align-items: baseline;
   gap: clamp(24px, 4vw, 52px);
-  transform: translate(-50%, -50%);
   white-space: nowrap;
 }
 
-.actions a {
+.actions button,
+.switchMode,
+.accountLine button {
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--access-blue);
+  font: inherit;
+  cursor: pointer;
+}
+
+.actions button {
   font-size: clamp(15px, 1.4vw, 18px);
   font-weight: 450;
   line-height: 1.2;
-  text-decoration: none;
   text-underline-offset: .22em;
 }
 
-.actions a:hover,
-.actions a:focus-visible {
+.actions button:hover,
+.actions button:focus-visible,
+.switchMode:hover,
+.switchMode:focus-visible,
+.accountLine button:hover,
+.accountLine button:focus-visible {
   text-decoration: underline;
 }
 
-.actions a:focus-visible {
+.actions button:focus-visible,
+.switchMode:focus-visible,
+.accountLine button:focus-visible,
+.downloadList a:focus-visible,
+.formPanel input:focus-visible,
+.formPanel form > button:focus-visible {
   outline: 2px solid currentColor;
-  outline-offset: 5px;
+  outline-offset: 4px;
+}
+
+.formPanel,
+.instructions {
+  width: min(calc(100% - 40px), 560px);
+  margin: 0 auto;
+  padding: max(120px, 18vh) 0 72px;
+}
+
+.formPanel h1,
+.instructions h1 {
+  margin: 0 0 48px;
+  font-size: clamp(32px, 6vw, 54px);
+  font-weight: 540;
+  letter-spacing: -.055em;
+}
+
+.formPanel form {
+  display: grid;
+  gap: 30px;
+}
+
+.formPanel label {
+  display: grid;
+  gap: 9px;
+  color: #555;
+  font-size: 13px;
+}
+
+.formPanel input {
+  width: 100%;
+  padding: 8px 0 11px;
+  border: 0;
+  border-bottom: 1px solid #bbb;
+  background: transparent;
+  color: #111;
+  font: inherit;
+  font-size: 18px;
+}
+
+.formPanel form > button {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--access-blue);
+  font: inherit;
+  font-size: 17px;
+  cursor: pointer;
+}
+
+.formPanel button:disabled,
+.accountLine button:disabled {
+  cursor: default;
+  opacity: .45;
+}
+
+.message {
+  margin: 24px 0 0;
+  color: #555;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.note {
+  margin: 20px 0 0;
+  color: #777;
+  font-size: 13px;
+}
+
+.switchMode {
+  margin-top: 28px;
+  font-size: 14px;
+}
+
+.accountLine {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 56px;
+  color: #666;
+  font-size: 13px;
+}
+
+.accountLine span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.downloadList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: download-step;
+}
+
+.downloadList li {
+  position: relative;
+  padding: 24px 0 28px 44px;
+  border-top: 1px solid #ddd;
+  counter-increment: download-step;
+}
+
+.downloadList li::before {
+  position: absolute;
+  left: 0;
+  content: counter(download-step, decimal-leading-zero);
+  color: #777;
+  font-size: 12px;
+}
+
+.downloadList a,
+.downloadList strong {
+  color: var(--access-blue);
+  font-size: 17px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.downloadList a:hover {
+  text-decoration: underline;
+}
+
+.downloadList p {
+  max-width: 48ch;
+  margin: 8px 0 0;
+  color: #555;
+  font-size: 14px;
+  line-height: 1.55;
 }
 
 @media (max-width: 420px) {
@@ -55,7 +198,5 @@
     left: max(18px, env(safe-area-inset-left));
   }
 
-  .actions {
-    gap: 24px;
-  }
+  .actions { gap: 24px; }
 }
