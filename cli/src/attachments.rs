@@ -280,6 +280,7 @@ fn format_bytes(bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::os::unix::fs::symlink;
 
     fn workspace() -> PathBuf {
@@ -317,6 +318,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn blocks_escape_symlink_and_secret_paths() {
         let root = workspace();
         fs::write(root.join(".env"), "TOKEN=nope").unwrap();
