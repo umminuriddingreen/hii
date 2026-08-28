@@ -606,6 +606,7 @@ fn link_contact_card(app: tauri::AppHandle) -> Result<Value, String> {
     hii_json(&app, &["link", "card", "--json"])
 }
 
+#[cfg(target_os = "macos")]
 fn url_component(value: &str) -> String {
     value
         .bytes()
