@@ -8,9 +8,18 @@ use std::{
     sync::{Arc, Mutex},
     thread,
 };
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, State, Webview};
 
 const MAX_REPLAY_BYTES: usize = 512 * 1024;
+const TRUSTED_TERMINAL_WEBVIEW: &str = "main";
+
+fn require_trusted_terminal_webview(label: &str) -> Result<(), String> {
+    if label == TRUSTED_TERMINAL_WEBVIEW {
+        Ok(())
+    } else {
+        Err("terminal commands are restricted to the trusted HII webview".into())
+    }
+}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -136,6 +145,7 @@ fn append_replay(replay: &Arc<Mutex<String>>, data: &str) {
 
 #[tauri::command]
 pub fn terminal_start(
+    webview: Webview,
     app: AppHandle,
     sessions: State<'_, TerminalSessions>,
     session_id: String,
@@ -143,6 +153,7 @@ pub fn terminal_start(
     cols: Option<u16>,
     rows: Option<u16>,
 ) -> Result<TerminalStartResultV1, String> {
+    require_trusted_terminal_webview(webview.label())?;
     if session_id.trim().is_empty() || session_id.len() > 128 {
         return Err("terminal session id is invalid".into());
     }
@@ -247,10 +258,12 @@ pub fn terminal_start(
 
 #[tauri::command]
 pub fn terminal_write(
+    webview: Webview,
     sessions: State<'_, TerminalSessions>,
     session_id: String,
     data: String,
 ) -> Result<(), String> {
+    require_trusted_terminal_webview(webview.label())?;
     if data.len() > 1024 * 1024 {
         return Err("terminal input is too large".into());
     }
@@ -270,11 +283,13 @@ pub fn terminal_write(
 
 #[tauri::command]
 pub fn terminal_resize(
+    webview: Webview,
     sessions: State<'_, TerminalSessions>,
     session_id: String,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
+    require_trusted_terminal_webview(webview.label())?;
     let guard = sessions
         .0
         .lock()
@@ -295,9 +310,11 @@ pub fn terminal_resize(
 
 #[tauri::command]
 pub fn terminal_stop(
+    webview: Webview,
     sessions: State<'_, TerminalSessions>,
     session_id: String,
 ) -> Result<bool, String> {
+    require_trusted_terminal_webview(webview.label())?;
     sessions.remove_and_kill(&session_id)
 }
 
@@ -318,5 +335,12 @@ mod tests {
         let value = replay.lock().expect("replay");
         assert!(value.len() <= MAX_REPLAY_BYTES);
         assert!(value.is_char_boundary(0));
+    }
+
+    #[test]
+    fn terminal_commands_only_trust_the_main_webview() {
+        assert!(require_trusted_terminal_webview("main").is_ok());
+        assert!(require_trusted_terminal_webview("hii-browser-preview").is_err());
+        assert!(require_trusted_terminal_webview("main-child").is_err());
     }
 }
