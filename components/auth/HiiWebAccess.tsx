@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: LicenseRef-BSL-1.1
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { HiiRoot } from '@/components/workspace/HiiRoot';
+import { browserSpacePersistence } from '@/components/spaces/SpaceCanvas';
 import styles from './HiiWebAccess.module.css';
 
 type AccessMode = 'login' | 'signup' | null;
 
 type Session = {
   authenticated: boolean;
+  accountId?: string;
   handle?: string;
   csrfToken?: string;
 };
@@ -83,8 +86,16 @@ export function HiiWebAccess() {
   const [session, setSession] = useState<Session>({ authenticated: false });
   const [handle, setHandle] = useState('');
   const [message, setMessage] = useState('');
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [deviceMessage, setDeviceMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
+  const canvasAccountId = session.accountId ?? '';
+  const canvasAccountReady = /^[A-Za-z0-9_-]{43}$/.test(canvasAccountId);
+  const canvasPersistence = useMemo(
+    () => canvasAccountReady ? browserSpacePersistence(`account:${canvasAccountId}`) : undefined,
+    [canvasAccountId, canvasAccountReady],
+  );
 
   useEffect(() => {
     let active = true;
@@ -185,40 +196,93 @@ export function HiiWebAccess() {
   const signOut = async () => {
     if (busy || !session.csrfToken) return;
     setBusy(true);
-    await api('/api/auth/logout', {}, session.csrfToken).catch(() => undefined);
-    setSession({ authenticated: false });
-    setMode(null);
-    setBusy(false);
+    setDeviceMessage('');
+    try {
+      await api('/api/auth/logout', {}, session.csrfToken);
+      setSession({ authenticated: false });
+      setMode(null);
+      setAccountOpen(false);
+    } catch {
+      setDeviceMessage('could not log out. try again.');
+    } finally {
+      setBusy(false);
+    }
   };
+
+  const openOnAnotherDevice = async () => {
+    const share = {
+      title: 'HII',
+      text: 'Open HII and sign in with your passkey.',
+      url: window.location.origin,
+    };
+    try {
+      if (navigator.share) {
+        await navigator.share(share);
+        setDeviceMessage('sign-in link shared.');
+        return;
+      }
+      await navigator.clipboard.writeText(share.url);
+      setDeviceMessage('sign-in link copied.');
+    } catch {
+      setDeviceMessage('share cancelled.');
+    }
+  };
+
+  if (ready && session.authenticated) {
+    const accountName = session.handle ?? 'account';
+    if (!canvasAccountReady || !canvasPersistence) {
+      return (
+        <main className={styles.access}>
+          <span className={styles.wordmark}>hii</span>
+          <section className={styles.formPanel} aria-label="Account unavailable">
+            <p className={styles.message} role="alert">could not open this account.</p>
+            <button type="button" onClick={() => window.location.reload()}>retry</button>
+          </section>
+        </main>
+      );
+    }
+    return (
+      <div className={styles.canvasShell}>
+        <HiiRoot
+          surface="space"
+          spaceId={`account:${canvasAccountId}`}
+          creatorId={`account:${canvasAccountId}`}
+          persistence={canvasPersistence}
+          allowPhoto={false}
+        />
+        <header className={styles.canvasHeader} data-workspace-ui>
+          <span className={styles.canvasWordmark}>hii</span>
+          <button
+            type="button"
+            aria-expanded={accountOpen}
+            aria-controls="hii-web-account"
+            onClick={() => setAccountOpen((value) => !value)}
+          >
+            {accountName}
+          </button>
+        </header>
+        {accountOpen ? (
+          <aside id="hii-web-account" className={styles.accountPanel} data-workspace-ui aria-label="HII account">
+            <dl>
+              <div><dt>name</dt><dd>{accountName}</dd></div>
+              <div><dt>access</dt><dd>passkey</dd></div>
+              <div><dt>canvas</dt><dd>stored only in this browser</dd></div>
+            </dl>
+            <button type="button" onClick={() => void openOnAnotherDevice()}>open on another device</button>
+            <button type="button" onClick={signOut} disabled={busy}>log out</button>
+            <p role="status" aria-live="polite">{deviceMessage}</p>
+            <small>use the same passkey there. canvas sync is not enabled yet. browser storage may be cleared.</small>
+          </aside>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <main className={styles.access}>
       <span className={styles.wordmark}>hii</span>
 
-      {ready && session.authenticated ? (
-        <section className={styles.instructions} aria-label="HII download instructions">
-          <header className={styles.accountLine}>
-            <span>{session.handle}</span>
-            <button type="button" onClick={signOut} disabled={busy}>
-              log out
-            </button>
-          </header>
-          <ol className={styles.downloadList}>
-            <li>
-              <a href="/download/windows">download for windows</a>
-              <p>open the installer. macOS is coming next.</p>
-            </li>
-            <li>
-              <strong>open hii</strong>
-              <p>the terminal runs natively on your machine.</p>
-            </li>
-            <li>
-              <strong>choose access</strong>
-              <p>grant a folder only when you want hii to work with it.</p>
-            </li>
-          </ol>
-        </section>
-      ) : mode ? (
+      {mode ? (
         <section className={styles.formPanel} aria-label={mode === 'login' ? 'Log in' : 'Sign up'}>
           <form onSubmit={submit}>
             {mode === 'signup' ? (

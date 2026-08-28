@@ -64,7 +64,7 @@ import { useWorkspace, type WorkspacePersistence } from './useWorkspace';
 import { SpaceToolbar } from '@/components/spaces/SpaceToolbar';
 import { InkBody } from '@/components/spaces/InkBody';
 import { inkSeedFromPoints } from '@/components/spaces/ink-capture';
-import { isSpaceCanvasNode } from '@/components/spaces/space-surface';
+import { isSpaceCanvasNode, isSpaceCanvasNodeType } from '@/components/spaces/space-surface';
 import { trackPointerGesture } from '@/lib/workspace/gestures';
 import { updateTerminalActivity } from '@/lib/workspace/terminal-activity';
 
@@ -610,12 +610,14 @@ export function HiiRoot({
   spaceId = '',
   creatorId = 'guest:pending',
   persistence,
+  allowPhoto = true,
   projectionRequest = null
 }: {
   surface?: 'workspace' | 'space';
   spaceId?: string;
   creatorId?: string;
   persistence?: WorkspacePersistence;
+  allowPhoto?: boolean;
   projectionRequest?: WorkspaceProjectionRequest | null;
 } = {}) {
   const isSpace = surface === 'space';
@@ -734,7 +736,8 @@ export function HiiRoot({
 
   const spawnSeeds = useCallback((seeds: NodeSeed[], at: Point) => {
     const ids: string[] = [];
-    seeds.forEach((seed, index) => {
+    const acceptedSeeds = isSpace ? seeds.filter((seed) => isSpaceCanvasNodeType(seed.type)) : seeds;
+    acceptedSeeds.forEach((seed, index) => {
       const node = makeNode(seed, at.x + index * 24, at.y + index * 24, workspace.takeZ());
       if (isSpace) {
         node.spaceId = spaceId;
@@ -1414,6 +1417,7 @@ export function HiiRoot({
       const at = camera.toWorld(mouse.current.x, mouse.current.y);
       const files = clipboardFiles(transfer);
       if (files.length) {
+        if (isSpace && !allowPhoto) return;
         event.preventDefault();
         void seedsFromFiles(files).then((seeds) => spawnSeeds(directPasteSeeds(seeds), at));
         return;
@@ -1421,6 +1425,10 @@ export function HiiRoot({
       const value = transfer.getData('text/plain');
       if (!value) return;
       event.preventDefault();
+      if (isSpace) {
+        spawnSeeds([canvasTextSeed(value.slice(0, 100_000))], at);
+        return;
+      }
       if (/^https?:\/\/\S+$/i.test(value.trim())) {
         void captureInformation(value.trim())
           .then((result) => spawnInformation(directPasteSeeds(capturedInformationSeeds(result)), { x: at.x, y: at.y - 190 }))
@@ -1433,7 +1441,7 @@ export function HiiRoot({
     addEventListener('pointermove', pointermove);
     addEventListener('paste', paste);
     return () => { removeEventListener('keydown', keydown); removeEventListener('pointermove', pointermove); removeEventListener('paste', paste); };
-  }, [camera, isSpace, openDevBrowser, selected, spawnArtifactTerminals, spawnInformation, spawnSeeds, workspace]);
+  }, [allowPhoto, camera, isSpace, openDevBrowser, selected, spawnArtifactTerminals, spawnInformation, spawnSeeds, workspace]);
 
   return (
     <main
@@ -1485,6 +1493,7 @@ export function HiiRoot({
       onDrop={(event) => {
         event.preventDefault();
         setDropActive(false);
+        if (isSpace && !allowPhoto) return;
         if (Array.from(event.dataTransfer.types).includes(HII_PROJECTION_MIME)) return;
         const at = camera.toWorld(event.clientX, event.clientY);
         void seedsFromDataTransfer(event.dataTransfer)
@@ -1494,6 +1503,7 @@ export function HiiRoot({
       {!isSpace && <UpdateBanner />}
       {isSpace && <SpaceToolbar
         drawing={drawing}
+        photo={allowPhoto}
         onAddImage={() => fileInput.current?.click()}
         onAddText={() => spawnSeeds([seedFor('canvas-text', { text: 'Tap to write', name: 'Text' })], camera.centerWorld())}
         onAddSticker={() => spawnSeeds([{ ...seedFor('image', { sticker: true, emoji: '✦', name: 'Sticker' }), w: 120, h: 120 }], camera.centerWorld())}
@@ -1565,7 +1575,7 @@ export function HiiRoot({
           onSubmit={(value) => void submit(value, prompt.anchor, prompt.objectId, prompt.conversationId)}
         />
       )}
-      <input
+      {(!isSpace || allowPhoto) && <input
         ref={fileInput}
         className="hii-file-input"
         type="file"
@@ -1576,14 +1586,14 @@ export function HiiRoot({
         onChange={(event) => {
           const files = [...(event.currentTarget.files || [])];
           event.currentTarget.value = '';
-          if (!files.length) return;
+          if (!files.length || (isSpace && !allowPhoto)) return;
           if (isSpace) {
             void Promise.all(files.map((file) => seedFromFile(file, { spaceId }))).then((seeds) => spawnSeeds(seeds, camera.centerWorld()));
           } else {
             void seedsFromFiles(files).then((seeds) => spawnSeeds(seeds, camera.toWorld(mouse.current.x, mouse.current.y)));
           }
         }}
-      />
+      />}
     </main>
   );
 }

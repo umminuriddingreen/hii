@@ -92,6 +92,7 @@ struct CredentialRow {
 
 #[derive(Deserialize)]
 struct SessionRow {
+    account_id: String,
     handle: String,
     csrf_token: String,
 }
@@ -105,6 +106,8 @@ struct RateRow {
 #[serde(rename_all = "camelCase")]
 struct SessionResponse<'a> {
     authenticated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    account_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     handle: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -300,7 +303,7 @@ async fn register_finish(request: &mut Request, db: &D1Database) -> Result<Respo
         return api_error(409, "registration_failed");
     }
 
-    authenticated_response(&handle, &csrf, &session_token)
+    authenticated_response(&account_id, &handle, &csrf, &session_token)
 }
 
 async fn login_start(db: &D1Database) -> Result<Response> {
@@ -414,21 +417,22 @@ async fn login_finish(request: &mut Request, db: &D1Database) -> Result<Response
     if !session_created {
         return api_error(401, "authentication_failed");
     }
-    authenticated_response(&handle, &csrf, &session_token)
+    authenticated_response(&row.account_id, &handle, &csrf, &session_token)
 }
 
 async fn session_status(request: &Request, db: &D1Database) -> Result<Response> {
     let Some(token) = cookie(request, SESSION_COOKIE)? else {
-        return json_response(200, SessionResponse { authenticated: false, handle: None, csrf_token: None });
+        return json_response(200, SessionResponse { authenticated: false, account_id: None, handle: None, csrf_token: None });
     };
     let row = active_session(db, &token).await?;
     match row {
         Some(session) => json_response(200, SessionResponse {
             authenticated: true,
+            account_id: Some(&session.account_id),
             handle: Some(&session.handle),
             csrf_token: Some(&session.csrf_token),
         }),
-        None => json_response(200, SessionResponse { authenticated: false, handle: None, csrf_token: None }),
+        None => json_response(200, SessionResponse { authenticated: false, account_id: None, handle: None, csrf_token: None }),
     }
 }
 
@@ -443,13 +447,13 @@ async fn logout(request: &Request, db: &D1Database) -> Result<Response> {
         .bind(&[JsValue::from_str(&hash_token(&token))])?
         .run()
         .await?;
-    let mut response = json_response(200, SessionResponse { authenticated: false, handle: None, csrf_token: None })?;
+    let mut response = json_response(200, SessionResponse { authenticated: false, account_id: None, handle: None, csrf_token: None })?;
     response.headers_mut().append("Set-Cookie", &clear_session_cookie())?;
     Ok(response)
 }
 
 async fn active_session(db: &D1Database, token: &str) -> Result<Option<SessionRow>> {
-    db.prepare("SELECT a.handle, s.csrf_token FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE s.token_hash = ?1 AND s.expires_at > ?2 LIMIT 1")
+    db.prepare("SELECT a.id AS account_id, a.handle, s.csrf_token FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE s.token_hash = ?1 AND s.expires_at > ?2 LIMIT 1")
         .bind(&[
             JsValue::from_str(&hash_token(token)),
             JsValue::from_f64(now_ms() as f64),
@@ -608,9 +612,10 @@ fn clear_session_cookie() -> String {
     format!("{SESSION_COOKIE}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Strict")
 }
 
-fn authenticated_response(handle: &str, csrf: &str, token: &str) -> Result<Response> {
+fn authenticated_response(account_id: &str, handle: &str, csrf: &str, token: &str) -> Result<Response> {
     let mut response = json_response(200, SessionResponse {
         authenticated: true,
+        account_id: Some(account_id),
         handle: Some(handle),
         csrf_token: Some(csrf),
     })?;
@@ -711,7 +716,20 @@ fn valid_cli_tag(tag: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_handle, valid_cli_tag};
+    use super::{SessionResponse, normalize_handle, valid_cli_tag};
+
+    #[test]
+    fn authenticated_sessions_expose_an_opaque_canvas_scope() {
+        let value = serde_json::to_value(SessionResponse {
+            authenticated: true,
+            account_id: Some("opaque-account-id"),
+            handle: Some("ummi"),
+            csrf_token: Some("csrf"),
+        })
+        .expect("session response serializes");
+        assert_eq!(value["accountId"], "opaque-account-id");
+        assert_eq!(value["handle"], "ummi");
+    }
 
     #[test]
     fn handles_are_small_and_url_safe() {

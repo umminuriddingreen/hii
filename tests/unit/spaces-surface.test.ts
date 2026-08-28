@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SPACE_SURFACE_CAPABILITIES, isSpaceCanvasNode, spaceIdFromPathname, spaceStorageKey } from '@/components/spaces/space-surface';
+import { SPACE_SURFACE_CAPABILITIES, isSpaceCanvasNode, isSpaceCanvasNodeType, spaceIdFromPathname, spaceStorageKey } from '@/components/spaces/space-surface';
 
 describe('Spaces reduced surface', () => {
   it('recognizes a canonical Space route without changing the Workspace route', () => {
@@ -10,6 +10,10 @@ describe('Spaces reduced surface', () => {
 
   it('excludes privileged Workspace capabilities and nodes', () => {
     expect(SPACE_SURFACE_CAPABILITIES).toMatchObject({ image: true, drawing: true, terminal: false, browser: false, agents: false, receipts: false });
+    expect(isSpaceCanvasNodeType('canvas-text')).toBe(true);
+    expect(isSpaceCanvasNodeType('image')).toBe(true);
+    expect(isSpaceCanvasNodeType('link')).toBe(false);
+    expect(isSpaceCanvasNodeType('html')).toBe(false);
     expect(isSpaceCanvasNode({ type: 'image', spaceId: 'place' }, 'place')).toBe(true);
     expect(isSpaceCanvasNode({ type: 'terminal', spaceId: 'place' }, 'place')).toBe(false);
     expect(isSpaceCanvasNode({ type: 'image', spaceId: 'private-workspace' }, 'place')).toBe(false);

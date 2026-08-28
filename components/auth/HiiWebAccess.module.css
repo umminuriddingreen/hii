@@ -71,8 +71,7 @@
   outline-offset: 4px;
 }
 
-.formPanel,
-.instructions {
+.formPanel {
   width: min(calc(100% - 40px), 420px);
   margin: 0 auto;
   padding: max(110px, 32vh) 0 72px;
@@ -118,8 +117,7 @@
   cursor: pointer;
 }
 
-.formPanel button:disabled,
-.accountLine button:disabled {
+.formPanel button:disabled {
   cursor: default;
   opacity: .45;
 }
@@ -152,65 +150,118 @@
   cursor: default;
 }
 
-.accountLine {
-  display: flex;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 36px;
-  color: var(--ink);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: 10px;
+.canvasShell {
+  position: fixed;
+  inset: 0;
+  background: #fff;
+  color: #111;
 }
 
-.accountLine span {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.canvasShell :global(.hii-canvas[data-surface="space"]) {
+  background: #fff;
+  background-image: radial-gradient(circle at 1px 1px, rgba(0, 0, 0, .09) 1px, transparent 0);
+  background-size: 24px 24px;
 }
 
-.downloadList {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  counter-reset: download-step;
+.canvasShell :global(.hii-space-toolbar) {
+  border: 1px solid #d8d8d8;
+  border-radius: 0;
+  background: rgba(255, 255, 255, .96);
+  box-shadow: none;
+  color: #111;
 }
 
-.downloadList li {
-  position: relative;
-  padding: 18px 0 20px 34px;
-  border-top: 1px solid #ddd;
-  counter-increment: download-step;
-}
-
-.downloadList li::before {
-  position: absolute;
-  left: 0;
-  content: counter(download-step, decimal-leading-zero);
-  color: var(--ink);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: 9px;
-}
-
-.downloadList a,
-.downloadList strong {
-  color: var(--ink);
-  font-size: 12px;
+.canvasShell :global(.hii-space-toolbar button),
+.canvasShell :global(.hii-space-toolbar button[aria-pressed="true"]) {
+  min-height: 44px;
+  border-radius: 0;
+  background: transparent;
+  color: #111;
+  font: 10px/1 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   font-weight: 400;
-  text-decoration: none;
 }
 
-.downloadList a:hover {
+.canvasShell :global(.hii-node-touch-controls button) {
+  min-height: 44px;
+}
+
+.canvasShell :global(.hii-space-toolbar button:focus-visible),
+.canvasHeader button:focus-visible,
+.accountPanel button:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 2px;
+}
+
+.canvasHeader {
+  position: fixed;
+  z-index: 2147483600;
+  top: max(18px, env(safe-area-inset-top));
+  left: max(18px, env(safe-area-inset-left));
+  right: max(18px, env(safe-area-inset-right));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+  font: 10px/1 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.canvasWordmark {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: .08em;
+}
+
+.canvasHeader button,
+.accountPanel button {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  pointer-events: auto;
+  font: inherit;
+  cursor: pointer;
+  text-underline-offset: .22em;
+}
+
+.canvasHeader button:hover,
+.canvasHeader button:focus-visible,
+.accountPanel button:hover,
+.accountPanel button:focus-visible {
   text-decoration: underline;
 }
 
-.downloadList p {
-  max-width: 44ch;
-  margin: 5px 0 0;
-  color: var(--ink);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: 10px;
-  opacity: .62;
-  line-height: 1.45;
+.accountPanel {
+  position: fixed;
+  z-index: 2147483500;
+  top: max(68px, calc(env(safe-area-inset-top) + 50px));
+  right: max(18px, env(safe-area-inset-right));
+  width: min(250px, calc(100vw - 36px));
+  padding: 16px;
+  border: 1px solid #d8d8d8;
+  background: rgba(255, 255, 255, .98);
+  color: #111;
+  font: 10px/1.45 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 }
+
+.accountPanel dl {
+  display: grid;
+  gap: 7px;
+  margin: 0 0 15px;
+}
+
+.accountPanel dl div {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.accountPanel dt { opacity: .5; }
+.accountPanel dd { margin: 0; overflow: hidden; text-overflow: ellipsis; }
+.accountPanel button { display: block; }
+.accountPanel p { min-height: 1.45em; margin: 12px 0 0; }
+.accountPanel small { display: block; margin-top: 3px; opacity: .5; line-height: 1.45; }
 
 @media (max-width: 420px) {
   .wordmark {
