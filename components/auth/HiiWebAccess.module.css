@@ -285,17 +285,6 @@
   text-underline-offset: .22em;
 }
 
-.canvasNav {
-  position: absolute;
-  left: 50%;
-  display: flex;
-  gap: 14px;
-  transform: translateX(-50%);
-  pointer-events: auto;
-}
-
-.canvasNav button[aria-pressed="true"] { text-decoration: underline; }
-
 .canvasHeader button:hover,
 .canvasHeader button:focus-visible,
 .accountPanel button:hover,

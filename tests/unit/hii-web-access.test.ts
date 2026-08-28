@@ -45,6 +45,10 @@ describe('HII web access gate', () => {
     expect(source).toContain("setDeviceMessage('could not log out. try again.')");
     expect(source).toContain('open on another device');
     expect(source).toContain('canvas sync is not enabled yet. browser storage may be cleared.');
+    expect(source).not.toContain('aria-label="HII canvas views"');
+    expect(source).not.toContain('>chat</button>');
+    expect(source).not.toContain('>feed</button>');
+    expect(source).not.toContain('>models</button>');
     expect(source).not.toContain('href="hii://');
     expect(source).not.toContain('the terminal runs natively on your machine');
     expect(source).not.toContain('download for windows');

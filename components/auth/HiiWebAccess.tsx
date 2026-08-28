@@ -296,11 +296,6 @@ export function HiiWebAccess() {
         />
         <header className={styles.canvasHeader} data-workspace-ui>
           <span className={styles.canvasWordmark}>hii</span>
-          <nav className={styles.canvasNav} aria-label="HII canvas views">
-            <button type="button" aria-pressed={panel === 'chat'} onClick={() => setPanel((value) => value === 'chat' ? null : 'chat')}>chat</button>
-            <button type="button" aria-pressed={panel === 'feed'} onClick={() => setPanel((value) => value === 'feed' ? null : 'feed')}>feed</button>
-            <button type="button" aria-pressed={panel === 'models'} onClick={() => setPanel((value) => value === 'models' ? null : 'models')}>models</button>
-          </nav>
           <button
             type="button"
             aria-expanded={accountOpen}
