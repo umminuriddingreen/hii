@@ -16,9 +16,11 @@ use ring::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashSet,
     env,
     ffi::OsString,
     fs,
+    net::IpAddr,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -58,6 +60,10 @@ pub struct VpnDevice {
     pub ipv6: String,
     pub wireguard_public_key: String,
     pub endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listen_port: Option<u16>,
     pub status: DeviceStatus,
     pub last_verified_handshake_at: Option<DateTime<Utc>>,
 }
@@ -91,6 +97,7 @@ pub struct VpnStatus {
     pub mesh_id: Option<String>,
     pub phase: Option<MeshPhase>,
     pub local_device: Option<VpnDevice>,
+    pub peers: Vec<VpnDevice>,
     pub peer_count: usize,
     pub control_plane_ready: bool,
     pub data_plane_live: bool,
@@ -99,6 +106,20 @@ pub struct VpnStatus {
     pub native_wireguard: NativeWireGuardStatus,
     pub reasons: Vec<String>,
     pub next: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerBootstrapProfile {
+    pub schema_version: u16,
+    pub kind: String,
+    pub account_id: String,
+    pub mesh_id: String,
+    pub owner_signing_public_key: String,
+    pub target_device: VpnDevice,
+    pub mesh_peer: VpnDevice,
+    pub issued_at: DateTime<Utc>,
+    pub account_signature: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -195,6 +216,8 @@ impl VpnStore {
                 ipv6: addressing.local_ipv6,
                 wireguard_public_key: BASE64.encode(public_key.as_bytes()),
                 endpoint: None,
+                endpoint_source: None,
+                listen_port: None,
                 status: DeviceStatus::LocalReady,
                 last_verified_handshake_at: None,
             },
@@ -240,6 +263,7 @@ impl VpnStore {
                 mesh_id: None,
                 phase: None,
                 local_device: None,
+                peers: Vec::new(),
                 peer_count: 0,
                 control_plane_ready: false,
                 data_plane_live: false,
@@ -250,9 +274,15 @@ impl VpnStore {
             });
         }
         let state = self.load(identity)?;
+        let active_peers = state
+            .peers
+            .iter()
+            .filter(|peer| peer.status != DeviceStatus::Revoked)
+            .cloned()
+            .collect::<Vec<_>>();
         let data_plane_live = native_wireguard.active
             && native_wireguard.latest_handshake_at.is_some()
-            && !state.peers.is_empty();
+            && !active_peers.is_empty();
         let mut reasons = Vec::new();
         if !native_wireguard.available {
             reasons.push("The native WireGuard runtime is not installed.".into());
@@ -265,17 +295,27 @@ impl VpnStore {
         } else if native_wireguard.latest_handshake_at.is_none() {
             reasons.push("WireGuard is active but no peer handshake has been observed.".into());
         }
-        if state.peers.is_empty() {
+        if active_peers.is_empty() {
             reasons.push("No WireGuard peer has been enrolled in this HII mesh.".into());
+        }
+        if active_peers.iter().any(|peer| {
+            peer.endpoint_source
+                .as_deref()
+                .is_some_and(|source| source != "direct")
+        }) {
+            reasons.push(
+                "At least one peer uses a bootstrap endpoint; the mesh is not transport-independent yet."
+                    .into(),
+            );
         }
         let next = if !native_wireguard.available {
             native_install_hint().into()
         } else if !native_wireguard.config_ready {
             "hii link prepare".into()
-        } else if state.peers.is_empty() {
+        } else if active_peers.is_empty() {
             "Enroll a second HII device before activating the tunnel.".into()
         } else if !native_wireguard.active {
-            "hii link up".into()
+            native_activation_hint().into()
         } else if native_wireguard.latest_handshake_at.is_none() {
             "Verify the peer endpoint and wait for a native WireGuard handshake.".into()
         } else {
@@ -287,7 +327,8 @@ impl VpnStore {
             mesh_id: Some(state.mesh_id.clone()),
             phase: Some(state.phase.clone()),
             local_device: Some(state.local_device.clone()),
-            peer_count: state.peers.len(),
+            peers: active_peers.clone(),
+            peer_count: active_peers.len(),
             control_plane_ready: state.phase != MeshPhase::Revoked,
             data_plane_live,
             relay_configured: state.relay_endpoint.is_some(),
@@ -312,9 +353,191 @@ impl VpnStore {
         Ok(self.native_status())
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_peer(
+        &self,
+        identity: &IdentityStore,
+        device_id: &str,
+        display_name: &str,
+        platform: &str,
+        public_key: &str,
+        endpoint: Option<&str>,
+        endpoint_source: Option<&str>,
+        listen_port: Option<u16>,
+    ) -> Result<VpnMeshState, String> {
+        validate_device_id(device_id)?;
+        validate_display_name(display_name)?;
+        validate_platform(platform)?;
+        validate_wireguard_public_key(public_key)?;
+        if let Some(endpoint) = endpoint {
+            validate_endpoint(endpoint)?;
+        }
+        if let Some(source) = endpoint_source {
+            validate_endpoint_source(source)?;
+        }
+        if listen_port == Some(0) {
+            return Err("WireGuard listen ports must be between 1 and 65535.".into());
+        }
+        let mut state = self.load(identity)?;
+        if state.local_device.device_id == device_id
+            || state.local_device.wireguard_public_key == public_key
+        {
+            return Err("The peer conflicts with the local HII WireGuard device.".into());
+        }
+        if let Some(existing) = state
+            .peers
+            .iter_mut()
+            .find(|peer| peer.device_id == device_id)
+        {
+            if existing.wireguard_public_key == public_key
+                && existing.endpoint.as_deref() == endpoint
+                && existing.endpoint_source.as_deref() == endpoint_source
+                && existing.listen_port == listen_port
+                && existing.status != DeviceStatus::Revoked
+            {
+                return Ok(state);
+            }
+            if existing.status == DeviceStatus::Revoked {
+                existing.display_name = display_name.trim().into();
+                existing.platform = platform.into();
+                existing.wireguard_public_key = public_key.into();
+                existing.endpoint = endpoint.map(str::to_string);
+                existing.endpoint_source = endpoint_source.map(str::to_string);
+                existing.listen_port = listen_port;
+                existing.status = DeviceStatus::Pending;
+                existing.last_verified_handshake_at = None;
+                state.phase = if endpoint.is_some() {
+                    MeshPhase::EndpointConfigured
+                } else {
+                    MeshPhase::LocalReady
+                };
+                state.trust_epoch = state.trust_epoch.saturating_add(1);
+                state.updated_at = Utc::now();
+                sign_state(identity, &mut state)?;
+                write_private_json(&self.state_path(), &state)?;
+                self.prepare_native(identity)?;
+                return self.load(identity);
+            }
+            return Err("A different WireGuard peer already uses that HII device ID.".into());
+        }
+        if state
+            .peers
+            .iter()
+            .any(|peer| peer.wireguard_public_key == public_key)
+        {
+            return Err("That WireGuard public key is already enrolled.".into());
+        }
+        let (ipv4, ipv6) = allocate_peer_addresses(&state)?;
+        state.peers.push(VpnDevice {
+            device_id: device_id.into(),
+            display_name: display_name.trim().into(),
+            platform: platform.into(),
+            ipv4,
+            ipv6,
+            wireguard_public_key: public_key.into(),
+            endpoint: endpoint.map(str::to_string),
+            endpoint_source: endpoint_source.map(str::to_string),
+            listen_port,
+            status: DeviceStatus::Pending,
+            last_verified_handshake_at: None,
+        });
+        state.phase = if endpoint.is_some() {
+            MeshPhase::EndpointConfigured
+        } else {
+            MeshPhase::LocalReady
+        };
+        state.trust_epoch = state.trust_epoch.saturating_add(1);
+        state.updated_at = Utc::now();
+        sign_state(identity, &mut state)?;
+        write_private_json(&self.state_path(), &state)?;
+        self.prepare_native(identity)?;
+        self.load(identity)
+    }
+
+    pub fn revoke_peer(
+        &self,
+        identity: &IdentityStore,
+        device_id: &str,
+    ) -> Result<VpnMeshState, String> {
+        let mut state = self.load(identity)?;
+        let peer = state
+            .peers
+            .iter_mut()
+            .find(|peer| peer.device_id == device_id)
+            .ok_or_else(|| format!("No HII WireGuard peer named `{device_id}` is enrolled."))?;
+        peer.status = DeviceStatus::Revoked;
+        peer.endpoint = None;
+        peer.endpoint_source = None;
+        state.trust_epoch = state.trust_epoch.saturating_add(1);
+        state.phase = MeshPhase::LocalReady;
+        state.updated_at = Utc::now();
+        sign_state(identity, &mut state)?;
+        write_private_json(&self.state_path(), &state)?;
+        self.prepare_native(identity)?;
+        self.load(identity)
+    }
+
+    pub fn configure_local_endpoint(
+        &self,
+        identity: &IdentityStore,
+        endpoint: Option<&str>,
+        listen_port: u16,
+    ) -> Result<VpnMeshState, String> {
+        if listen_port == 0 {
+            return Err("WireGuard listen ports must be between 1 and 65535.".into());
+        }
+        if let Some(endpoint) = endpoint {
+            validate_endpoint(endpoint)?;
+        }
+        let mut state = self.load(identity)?;
+        state.local_device.endpoint = endpoint.map(str::to_string);
+        state.local_device.endpoint_source = endpoint.map(|_| "direct".into());
+        state.local_device.listen_port = Some(listen_port);
+        state.trust_epoch = state.trust_epoch.saturating_add(1);
+        state.updated_at = Utc::now();
+        sign_state(identity, &mut state)?;
+        write_private_json(&self.state_path(), &state)?;
+        self.prepare_native(identity)?;
+        self.load(identity)
+    }
+
+    pub fn peer_bootstrap_profile(
+        &self,
+        identity: &IdentityStore,
+        device_id: &str,
+    ) -> Result<PeerBootstrapProfile, String> {
+        let state = self.load(identity)?;
+        let target_device = state
+            .peers
+            .iter()
+            .find(|peer| peer.device_id == device_id && peer.status != DeviceStatus::Revoked)
+            .cloned()
+            .ok_or_else(|| {
+                format!("No active HII WireGuard peer named `{device_id}` is enrolled.")
+            })?;
+        let mut profile = PeerBootstrapProfile {
+            schema_version: SCHEMA_VERSION,
+            kind: "hii.vpn.peer-bootstrap/1".into(),
+            account_id: state.account_id,
+            mesh_id: state.mesh_id,
+            owner_signing_public_key: state.owner_signing_public_key,
+            target_device,
+            mesh_peer: state.local_device,
+            issued_at: Utc::now(),
+            account_signature: String::new(),
+        };
+        let payload = serde_json::to_vec(&profile).map_err(|error| error.to_string())?;
+        profile.account_signature = identity.sign_bytes(&payload)?.signature;
+        Ok(profile)
+    }
+
     pub fn native_up(&self, identity: &IdentityStore) -> Result<NativeWireGuardStatus, String> {
         let state = self.load(identity)?;
-        if state.peers.is_empty() {
+        if !state
+            .peers
+            .iter()
+            .any(|peer| peer.status != DeviceStatus::Revoked)
+        {
             return Err("Enroll a second HII device before activating WireGuard.".into());
         }
         if !self.native_config_path().is_file() {
@@ -425,6 +648,11 @@ impl VpnStore {
             .lines()
             .last()
             .unwrap_or("native WireGuard command failed");
+        if detail.contains("password is required") || detail.contains("must be root") {
+            return Err(
+                "native WireGuard activation requires platform administrator approval.".into(),
+            );
+        }
         Err(format!("native WireGuard command failed: {detail}"))
     }
 }
@@ -516,12 +744,34 @@ fn native_install_hint() -> &'static str {
     }
 }
 
+fn native_activation_hint() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "Approve the official WireGuard macOS VPN configuration, then activate hii0."
+    }
+    #[cfg(windows)]
+    {
+        "Run `hii link up` from an administrator-approved HII session."
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        "Run `hii link up` with network-administration authority."
+    }
+}
+
 fn render_native_config(state: &VpnMeshState, private_key: &str) -> String {
     let mut config = format!(
         "# Managed locally by HII for account {}\n[Interface]\nPrivateKey = {}\nAddress = {}, {}\n",
         state.account_id, private_key, state.local_device.ipv4, state.local_device.ipv6
     );
-    for peer in &state.peers {
+    if let Some(port) = state.local_device.listen_port {
+        config.push_str(&format!("ListenPort = {port}\n"));
+    }
+    for peer in state
+        .peers
+        .iter()
+        .filter(|peer| peer.status != DeviceStatus::Revoked)
+    {
         config.push_str("\n[Peer]\n");
         config.push_str(&format!("PublicKey = {}\n", peer.wireguard_public_key));
         config.push_str(&format!("AllowedIPs = {}, {}\n", peer.ipv4, peer.ipv6));
@@ -599,12 +849,43 @@ fn validate_state(state: &VpnMeshState) -> Result<(), String> {
     if !state.mesh_id.starts_with("mesh-") || !state.account_id.starts_with("hii-user-") {
         return Err("The HII VPN account or mesh identifier is invalid.".into());
     }
-    validate_device_id(&state.local_device.device_id)?;
-    if BASE64
-        .decode(&state.local_device.wireguard_public_key)
-        .map_or(true, |key| key.len() != 32)
-    {
-        return Err("The HII VPN WireGuard public key is invalid.".into());
+    validate_device(&state.local_device)?;
+    let mut device_ids = HashSet::from([state.local_device.device_id.as_str()]);
+    let mut public_keys = HashSet::from([state.local_device.wireguard_public_key.as_str()]);
+    let mut addresses = HashSet::from([
+        state.local_device.ipv4.as_str(),
+        state.local_device.ipv6.as_str(),
+    ]);
+    for peer in &state.peers {
+        validate_device(peer)?;
+        if !device_ids.insert(&peer.device_id) {
+            return Err("The HII VPN state contains a duplicate device ID.".into());
+        }
+        if !public_keys.insert(&peer.wireguard_public_key) {
+            return Err("The HII VPN state contains a duplicate WireGuard public key.".into());
+        }
+        if !addresses.insert(&peer.ipv4) || !addresses.insert(&peer.ipv6) {
+            return Err("The HII VPN state contains a duplicate tunnel address.".into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_device(device: &VpnDevice) -> Result<(), String> {
+    validate_device_id(&device.device_id)?;
+    validate_display_name(&device.display_name)?;
+    validate_platform(&device.platform)?;
+    validate_wireguard_public_key(&device.wireguard_public_key)?;
+    validate_tunnel_address(&device.ipv4, false)?;
+    validate_tunnel_address(&device.ipv6, true)?;
+    if let Some(endpoint) = &device.endpoint {
+        validate_endpoint(endpoint)?;
+    }
+    if let Some(source) = &device.endpoint_source {
+        validate_endpoint_source(source)?;
+    }
+    if device.listen_port == Some(0) {
+        return Err("WireGuard listen ports must be between 1 and 65535.".into());
     }
     Ok(())
 }
@@ -642,6 +923,112 @@ fn validate_device_id(value: &str) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+fn validate_display_name(value: &str) -> Result<(), String> {
+    let value = value.trim();
+    if value.chars().count() < 2
+        || value.chars().count() > 80
+        || value.chars().any(char::is_control)
+    {
+        return Err("HII VPN device names must contain 2 to 80 printable characters.".into());
+    }
+    Ok(())
+}
+
+fn validate_platform(value: &str) -> Result<(), String> {
+    if value.is_empty()
+        || value.len() > 32
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(
+            "HII VPN platforms use 1 to 32 letters, digits, hyphens, or underscores.".into(),
+        );
+    }
+    Ok(())
+}
+
+fn validate_wireguard_public_key(value: &str) -> Result<(), String> {
+    if BASE64.decode(value).map_or(true, |key| key.len() != 32) {
+        return Err("The HII VPN WireGuard public key is invalid.".into());
+    }
+    Ok(())
+}
+
+fn validate_tunnel_address(value: &str, ipv6: bool) -> Result<(), String> {
+    let (address, prefix) = value
+        .split_once('/')
+        .ok_or("HII VPN tunnel addresses require a prefix length.")?;
+    let address = address
+        .parse::<IpAddr>()
+        .map_err(|_| "The HII VPN tunnel address is invalid.")?;
+    let prefix = prefix
+        .parse::<u8>()
+        .map_err(|_| "The HII VPN tunnel prefix is invalid.")?;
+    if address.is_ipv6() != ipv6 || prefix > if ipv6 { 128 } else { 32 } {
+        return Err("The HII VPN tunnel address family or prefix is invalid.".into());
+    }
+    Ok(())
+}
+
+fn validate_endpoint(value: &str) -> Result<(), String> {
+    if value.len() > 260
+        || value.chars().any(char::is_whitespace)
+        || value.contains(['=', '#', ';'])
+    {
+        return Err("The WireGuard endpoint contains unsupported characters.".into());
+    }
+    let (host, port) = value
+        .rsplit_once(':')
+        .ok_or("WireGuard endpoints use host:port.")?;
+    if host.is_empty() || port.parse::<u16>().map_or(true, |port| port == 0) {
+        return Err("WireGuard endpoints require a host and port from 1 to 65535.".into());
+    }
+    Ok(())
+}
+
+fn validate_endpoint_source(value: &str) -> Result<(), String> {
+    if value.is_empty()
+        || value.len() > 40
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err(
+            "WireGuard endpoint sources use lowercase letters, digits, and hyphens.".into(),
+        );
+    }
+    Ok(())
+}
+
+fn allocate_peer_addresses(state: &VpnMeshState) -> Result<(String, String), String> {
+    let network = state
+        .ipv4_pool
+        .strip_suffix(".0/24")
+        .ok_or("HII VPN IPv4 pool is not a supported /24.")?;
+    let used = state
+        .peers
+        .iter()
+        .filter_map(|peer| {
+            peer.ipv4
+                .strip_prefix(&format!("{network}."))
+                .and_then(|value| value.strip_suffix("/32"))
+                .and_then(|value| value.parse::<u8>().ok())
+        })
+        .collect::<HashSet<_>>();
+    let host = (2_u8..=254)
+        .find(|host| !used.contains(host))
+        .ok_or("The HII VPN mesh has no free peer addresses.")?;
+    let prefix = state
+        .ipv6_pool
+        .strip_suffix("::/48")
+        .ok_or("HII VPN IPv6 pool is not a supported /48.")?;
+    Ok((
+        format!("{network}.{host}/32"),
+        format!("{prefix}::{host:x}/128"),
+    ))
 }
 
 fn generate_private_key() -> Result<[u8; 32], String> {
@@ -701,6 +1088,10 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))
             .map_err(|error| error.to_string())?;
+    }
+    #[cfg(windows)]
+    if path.exists() {
+        fs::remove_file(path).map_err(|error| error.to_string())?;
     }
     fs::rename(&temporary, path).map_err(|error| error.to_string())?;
     Ok(())
@@ -830,6 +1221,138 @@ mod tests {
         )));
         assert!(!config.contains(&state.owner_signing_public_key));
         assert!(!config.contains(&state.account_signature));
+    }
+
+    #[test]
+    fn peer_enrollment_updates_the_signed_mesh_and_native_configuration() {
+        let (_temp, _paths, identity, vpn) = fixture("peer-add");
+        let initial = vpn.init(&identity, "ummi-mac", "Ummi Mac").unwrap();
+        let peer_key = BASE64.encode([9_u8; 32]);
+        let state = vpn
+            .add_peer(
+                &identity,
+                "windows-pc",
+                "Windows PC",
+                "windows",
+                &peer_key,
+                Some("100.81.69.126:51820"),
+                Some("tailscale-bootstrap"),
+                Some(51820),
+            )
+            .unwrap();
+        assert_eq!(state.trust_epoch, initial.trust_epoch + 1);
+        assert_ne!(state.account_signature, initial.account_signature);
+        assert!(state.peers[0].ipv4.ends_with(".2/32"));
+        assert_eq!(state.peers[0].status, DeviceStatus::Pending);
+        assert_eq!(
+            state.peers[0].endpoint_source.as_deref(),
+            Some("tailscale-bootstrap")
+        );
+        let config = fs::read_to_string(vpn.native_config_path()).unwrap();
+        assert!(config.contains(&peer_key));
+        assert!(config.contains("Endpoint = 100.81.69.126:51820"));
+        assert!(vpn
+            .status(&identity)
+            .unwrap()
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("bootstrap endpoint")));
+    }
+
+    #[test]
+    fn peer_bootstrap_is_public_and_signed_by_the_hii_account() {
+        let (_temp, _paths, identity, vpn) = fixture("peer-bootstrap");
+        vpn.init(&identity, "ummi-mac", "Ummi Mac").unwrap();
+        vpn.add_peer(
+            &identity,
+            "windows-pc",
+            "Windows PC",
+            "windows",
+            &BASE64.encode([10_u8; 32]),
+            None,
+            None,
+            Some(51820),
+        )
+        .unwrap();
+        let profile = vpn.peer_bootstrap_profile(&identity, "windows-pc").unwrap();
+        let signature = BASE64.decode(&profile.account_signature).unwrap();
+        let public_key = BASE64.decode(&profile.owner_signing_public_key).unwrap();
+        let mut unsigned = profile.clone();
+        unsigned.account_signature.clear();
+        let payload = serde_json::to_vec(&unsigned).unwrap();
+        UnparsedPublicKey::new(&ED25519, public_key)
+            .verify(&payload, &signature)
+            .unwrap();
+        let raw = serde_json::to_string(&profile).unwrap();
+        assert!(!raw.contains("privateKey"));
+        assert_eq!(profile.target_device.device_id, "windows-pc");
+    }
+
+    #[test]
+    fn revoking_a_peer_removes_it_from_the_native_configuration() {
+        let (_temp, _paths, identity, vpn) = fixture("peer-revoke");
+        vpn.init(&identity, "ummi-mac", "Ummi Mac").unwrap();
+        let peer_key = BASE64.encode([11_u8; 32]);
+        vpn.add_peer(
+            &identity,
+            "windows-pc",
+            "Windows PC",
+            "windows",
+            &peer_key,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let state = vpn.revoke_peer(&identity, "windows-pc").unwrap();
+        assert_eq!(state.peers[0].status, DeviceStatus::Revoked);
+        assert!(!fs::read_to_string(vpn.native_config_path())
+            .unwrap()
+            .contains(&peer_key));
+        assert_eq!(vpn.status(&identity).unwrap().peer_count, 0);
+    }
+
+    #[test]
+    fn a_revoked_device_can_be_reenrolled_with_a_rotated_key() {
+        let (_temp, _paths, identity, vpn) = fixture("peer-rotate");
+        vpn.init(&identity, "ummi-mac", "Ummi Mac").unwrap();
+        vpn.add_peer(
+            &identity,
+            "windows-pc",
+            "Windows PC",
+            "windows",
+            &BASE64.encode([12_u8; 32]),
+            None,
+            None,
+            Some(51820),
+        )
+        .unwrap();
+        let revoked = vpn.revoke_peer(&identity, "windows-pc").unwrap();
+        let rotated = BASE64.encode([13_u8; 32]);
+        let state = vpn
+            .add_peer(
+                &identity,
+                "windows-pc",
+                "Windows PC",
+                "windows",
+                &rotated,
+                Some("100.81.69.126:51820"),
+                Some("tailscale-bootstrap"),
+                Some(51820),
+            )
+            .unwrap();
+        assert_eq!(state.peers.len(), 1);
+        assert_eq!(state.peers[0].wireguard_public_key, rotated);
+        assert_eq!(state.peers[0].status, DeviceStatus::Pending);
+        assert_eq!(state.trust_epoch, revoked.trust_epoch + 1);
+    }
+
+    #[test]
+    fn endpoint_validation_blocks_configuration_injection() {
+        assert!(validate_endpoint("vpn.example.com:51820").is_ok());
+        assert!(validate_endpoint("vpn.example.com:51820\nPostUp = bad").is_err());
+        assert!(validate_endpoint("vpn.example.com").is_err());
+        assert!(validate_endpoint("vpn.example.com:0").is_err());
     }
 
     #[test]

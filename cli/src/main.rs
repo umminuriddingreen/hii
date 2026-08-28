@@ -725,6 +725,20 @@ enum LinkCommand {
         #[arg(long)]
         json: bool,
     },
+    #[command(about = "Manage HII-account-approved native WireGuard peers")]
+    Peer {
+        #[command(subcommand)]
+        action: LinkPeerCommand,
+    },
+    #[command(about = "Set this device's WireGuard endpoint and listen port")]
+    Endpoint {
+        #[arg(long, value_name = "HOST:PORT")]
+        value: Option<String>,
+        #[arg(long, default_value_t = 51820)]
+        listen_port: u16,
+        #[arg(long)]
+        json: bool,
+    },
     #[command(about = "Write the owner-only native WireGuard configuration")]
     Prepare {
         #[arg(long)]
@@ -737,6 +751,41 @@ enum LinkCommand {
     },
     #[command(about = "Deactivate the HII WireGuard interface")]
     Down {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum LinkPeerCommand {
+    #[command(about = "Approve and add a native WireGuard peer to this HII account")]
+    Add {
+        #[arg(long, value_name = "ID")]
+        device: String,
+        #[arg(long, value_name = "NAME")]
+        name: String,
+        #[arg(long, value_name = "PLATFORM")]
+        platform: String,
+        #[arg(long, value_name = "BASE64")]
+        public_key: String,
+        #[arg(long, value_name = "HOST:PORT")]
+        endpoint: Option<String>,
+        #[arg(long, value_name = "SOURCE", default_value = "direct")]
+        endpoint_source: String,
+        #[arg(long, value_name = "PORT")]
+        listen_port: Option<u16>,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Revoke a peer and remove it from the native configuration")]
+    Revoke {
+        device: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Export an account-signed public bootstrap profile for one peer")]
+    Bootstrap {
+        device: String,
         #[arg(long)]
         json: bool,
     },
@@ -1871,6 +1920,119 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                             state.local_device.device_id,
                             state.local_device.wireguard_public_key,
                             state.phase
+                        );
+                    }
+                }
+                LinkCommand::Peer { action } => {
+                    let identity = identity::IdentityStore::open(&paths);
+                    let vpn = vpn::VpnStore::open(&paths);
+                    match action {
+                        LinkPeerCommand::Add {
+                            device,
+                            name,
+                            platform,
+                            public_key,
+                            endpoint,
+                            endpoint_source,
+                            listen_port,
+                            json,
+                        } => {
+                            let state = vpn.add_peer(
+                                &identity,
+                                &device,
+                                &name,
+                                &platform,
+                                &public_key,
+                                endpoint.as_deref(),
+                                endpoint.as_ref().map(|_| endpoint_source.as_str()),
+                                listen_port,
+                            )?;
+                            if json {
+                                println!(
+                                    "{}",
+                                    serde_json::to_string_pretty(&state)
+                                        .map_err(|error| error.to_string())?
+                                );
+                            } else {
+                                let peer = state
+                                    .peers
+                                    .iter()
+                                    .find(|peer| peer.device_id == device)
+                                    .ok_or(
+                                        "The enrolled WireGuard peer is missing from HII state.",
+                                    )?;
+                                println!(
+                                    "HII WireGuard peer approved\ndevice   {} ({})\nplatform {}\naddress  {}\nendpoint {}\nsource   {}\ntrust    epoch {}",
+                                    peer.display_name,
+                                    peer.device_id,
+                                    peer.platform,
+                                    peer.ipv4,
+                                    peer.endpoint.as_deref().unwrap_or("roaming/passive"),
+                                    peer.endpoint_source.as_deref().unwrap_or("none"),
+                                    state.trust_epoch
+                                );
+                            }
+                        }
+                        LinkPeerCommand::Revoke { device, json } => {
+                            let state = vpn.revoke_peer(&identity, &device)?;
+                            if json {
+                                println!(
+                                    "{}",
+                                    serde_json::to_string_pretty(&state)
+                                        .map_err(|error| error.to_string())?
+                                );
+                            } else {
+                                println!(
+                                    "HII WireGuard peer `{device}` revoked at trust epoch {}.",
+                                    state.trust_epoch
+                                );
+                            }
+                        }
+                        LinkPeerCommand::Bootstrap { device, json } => {
+                            let profile = vpn.peer_bootstrap_profile(&identity, &device)?;
+                            if json {
+                                println!(
+                                    "{}",
+                                    serde_json::to_string_pretty(&profile)
+                                        .map_err(|error| error.to_string())?
+                                );
+                            } else {
+                                println!(
+                                    "HII WireGuard bootstrap profile\naccount  {}\nmesh     {}\ntarget   {} ({})\naddress  {}\npeer     {}\nsigned   yes",
+                                    profile.account_id,
+                                    profile.mesh_id,
+                                    profile.target_device.display_name,
+                                    profile.target_device.device_id,
+                                    profile.target_device.ipv4,
+                                    profile.mesh_peer.device_id
+                                );
+                            }
+                        }
+                    }
+                }
+                LinkCommand::Endpoint {
+                    value,
+                    listen_port,
+                    json,
+                } => {
+                    let identity = identity::IdentityStore::open(&paths);
+                    let state = vpn::VpnStore::open(&paths).configure_local_endpoint(
+                        &identity,
+                        value.as_deref(),
+                        listen_port,
+                    )?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&state.local_device)
+                                .map_err(|error| error.to_string())?
+                        );
+                    } else {
+                        println!(
+                            "HII WireGuard local endpoint\ndevice      {}\nlisten port {}\nendpoint    {}",
+                            state.local_device.device_id,
+                            listen_port,
+                            state.local_device.endpoint.as_deref().unwrap_or("roaming/private")
                         );
                     }
                 }

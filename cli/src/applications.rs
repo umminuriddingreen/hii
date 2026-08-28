@@ -177,6 +177,7 @@ fn built_ins() -> Vec<ApplicationManifest> {
             capabilities: vec![
                 "hii.identity.contact-card".into(),
                 "hii.fabric.vpn.status".into(),
+                "hii.fabric.vpn.peer-management".into(),
                 "hii.communication.handoff".into(),
             ],
             built_in: true,

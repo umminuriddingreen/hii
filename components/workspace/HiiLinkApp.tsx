@@ -57,6 +57,13 @@ export function HiiLinkApp() {
             <div><dt>Data plane</dt><dd>{vpn?.dataPlaneLive ? 'verified live' : 'not live'}</dd></div>
             <div><dt>Peers</dt><dd>{vpn?.peerCount ?? 0}</dd></div>
           </dl>
+          {vpn?.peers?.map((peer) => <dl key={peer.deviceId}>
+            <div><dt>Peer</dt><dd>{peer.displayName}</dd></div>
+            <div><dt>Platform</dt><dd>{peer.platform}</dd></div>
+            <div><dt>Address</dt><dd>{peer.ipv4}</dd></div>
+            <div><dt>Endpoint</dt><dd>{peer.endpoint || 'roaming/passive'}{peer.endpointSource ? ` · ${peer.endpointSource}` : ''}</dd></div>
+            <div><dt>Trust</dt><dd>{peer.status}</dd></div>
+          </dl>)}
           <button type="button" disabled={!card} onClick={copyCard}>Copy contact card as JSON</button>
           <small>{vpn?.reasons?.[0] || 'Copying is the only action here that releases the card from HII.'} HII delegates packet transport to native WireGuard; private signing and VPN keys stay on the device.</small>
         </article>

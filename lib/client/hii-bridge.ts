@@ -176,9 +176,24 @@ export type HiiVpnStatus = {
     ipv6: string;
     wireguardPublicKey: string;
     endpoint?: string;
+    endpointSource?: string;
+    listenPort?: number;
     status: 'local_ready' | 'pending' | 'active' | 'revoked';
     lastVerifiedHandshakeAt?: string;
   };
+  peers: Array<{
+    deviceId: string;
+    displayName: string;
+    platform: string;
+    ipv4: string;
+    ipv6: string;
+    wireguardPublicKey: string;
+    endpoint?: string;
+    endpointSource?: string;
+    listenPort?: number;
+    status: 'local_ready' | 'pending' | 'active' | 'revoked';
+    lastVerifiedHandshakeAt?: string;
+  }>;
   peerCount: number;
   controlPlaneReady: boolean;
   dataPlaneLive: boolean;
