@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-BSL-1.1
-import { InfiniteCanvas } from '@/components/canvas/InfiniteCanvas';
+import { HiiWebAccess } from '@/components/auth/HiiWebAccess';
 
-export default function Home() {
-  return <InfiniteCanvas />;
+export default async function Home() {
+  if (process.env.NEXT_PUBLIC_HII_TARGET === 'desktop') {
+    const { HiiRoot } = await import('@/components/workspace/HiiRoot');
+    return <HiiRoot />;
+  }
+  return <HiiWebAccess />;
 }

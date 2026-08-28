@@ -92,12 +92,11 @@ describe('HII web access gate', () => {
     expect(css).not.toContain('#0066ff');
   });
 
-  it('mounts only the infinite canvas at the app entry', () => {
+  it('keeps the desktop entry target while using the authenticated web gate', () => {
     const page = readFileSync('app/page.tsx', 'utf8');
 
-    expect(page).toContain("import { InfiniteCanvas }");
-    expect(page).toContain('return <InfiniteCanvas />');
-    expect(page).not.toContain('HiiRoot');
-    expect(page).not.toContain('HiiWebAccess');
+    expect(page).toContain("process.env.NEXT_PUBLIC_HII_TARGET === 'desktop'");
+    expect(page).toContain("await import('@/components/workspace/HiiRoot')");
+    expect(page).toContain('return <HiiWebAccess />');
   });
 });
