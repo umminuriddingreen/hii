@@ -1,0 +1,61 @@
+.access {
+  --access-blue: #0066ff;
+  position: fixed;
+  inset: 0;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: #fff;
+  color: #111;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+}
+
+.wordmark {
+  position: absolute;
+  top: max(22px, env(safe-area-inset-top));
+  left: max(24px, env(safe-area-inset-left));
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -.045em;
+}
+
+.actions {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: flex;
+  align-items: baseline;
+  gap: clamp(24px, 4vw, 52px);
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+}
+
+.actions a {
+  color: var(--access-blue);
+  font-size: clamp(15px, 1.4vw, 18px);
+  font-weight: 450;
+  line-height: 1.2;
+  text-decoration: none;
+  text-underline-offset: .22em;
+}
+
+.actions a:hover,
+.actions a:focus-visible {
+  text-decoration: underline;
+}
+
+.actions a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 5px;
+}
+
+@media (max-width: 420px) {
+  .wordmark {
+    top: max(18px, env(safe-area-inset-top));
+    left: max(18px, env(safe-area-inset-left));
+  }
+
+  .actions {
+    gap: 24px;
+  }
+}
