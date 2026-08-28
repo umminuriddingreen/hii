@@ -64,26 +64,6 @@ impl Group {
             Group::Internal => "Internal",
         }
     }
-
-    /// A task-shaped one-liner so a catalog can be *scanned*, not read.
-    ///
-    /// A 69-command list feels complex not because any one command is hard but
-    /// because nothing tells a new user which handful they will ever open. The
-    /// header that precedes a group does exactly that: it answers "do I care
-    /// about this group at all" in a single glance. These are *descriptions* of
-    /// the groups that already exist, not new concepts.
-    pub fn intent(self) -> &'static str {
-        match self {
-            Group::Work => {
-                "get and track work: run a goal, see what is next, capture it, inspect proof"
-            }
-            Group::Context => "see and shape context: where the workspace is, what it knows",
-            Group::Infra => "the machine: models, health, systems, services, and the device mesh",
-            Group::Tools => "extend and inspect: capabilities, skills, web intent, and bridges",
-            Group::Build => "develop the HII app itself (developers)",
-            Group::Internal => "",
-        }
-    }
 }
 
 pub struct Route {
