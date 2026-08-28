@@ -132,7 +132,7 @@ button, input, textarea { font: inherit; }
 .hii-ink-canvas { display: block; width: 100%; height: 100%; pointer-events: none; }
 .hii-sticker { display: grid; width: 100%; height: 100%; place-items: center; font-size: min(18vw, 96px); line-height: 1; }
 .hii-entry-loading { position: fixed; inset: 0; background: var(--field); }
-.hii-canvas[data-surface="space"], .hii-canvas[data-surface="account"] { background-color: #f3efe4; background-image: radial-gradient(circle at 1px 1px, rgba(32, 45, 38, .14) 1px, transparent 0); background-size: 24px 24px; }
+.hii-canvas[data-surface="space"], .hii-canvas[data-surface="account"] { background: #fff; }
 .hii-space-toolbar { position: fixed; z-index: 2147482000; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 7px; max-width: calc(100vw - 24px); padding: 8px; border: 1px solid rgba(32, 45, 38, .26); border-radius: 18px; background: rgba(255, 253, 247, .94); box-shadow: 0 12px 38px rgba(35, 43, 38, .16); transform: translateX(-50%); backdrop-filter: blur(14px); }
 .hii-space-toolbar strong { padding: 0 10px 0 6px; color: #26342c; font: 10px/1 "SF Mono", ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
 .hii-space-toolbar button { min-width: 62px; min-height: 42px; padding: 0 12px; border: 0; border-radius: 12px; background: #e5e0d4; color: #26342c; font-size: 12px; font-weight: 650; }
