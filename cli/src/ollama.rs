@@ -10,11 +10,6 @@ use std::{
     time::Duration,
 };
 
-/// Model the native runner boots on when no runtime manifest names one yet.
-const NATIVE_BOOTSTRAP_MODEL: &str = "Qwen/Qwen3-4B";
-/// A first start has to fetch weights before it can listen; allow for that.
-const NATIVE_BOOTSTRAP_TIMEOUT_SECS: u64 = 45 * 60;
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
     pub role: String,
@@ -767,12 +762,22 @@ fn log_tail(log: &std::path::Path) -> String {
         .collect()
 }
 
-/// Start the HII native runner so `hii` on its own comes up with a runtime.
-/// A previous run leaves a manifest naming the model whose weights are already
-/// on disk, and serving then costs only process startup. With no manifest this
-/// is a first run: the runner is started on the bootstrap model and allowed the
-/// longer wait its weight fetch needs, with progress on stderr so the operator
-/// sees startup happening instead of a silent pause.
+/// Return the model only when a completed native-runner manifest proves that a
+/// prior explicit acquisition loaded it successfully. `pending-load` is written
+/// before Hugging Face access begins, so accepting it here would turn bare
+/// `hii` startup into implicit model acquisition.
+fn acquired_native_model(manifest: &Value) -> Option<String> {
+    let integrity = manifest.get("integrity")?.as_str()?.trim();
+    if integrity.is_empty() || integrity == "pending-load" {
+        return None;
+    }
+    let model = manifest.get("model")?.as_str()?.trim();
+    (!model.is_empty()).then(|| model.to_string())
+}
+
+/// Start HII Native only when weights were acquired explicitly beforehand.
+/// Missing, malformed, or pending manifests fail closed without spawning the
+/// runner, network access, or a model download.
 fn start_native_runner() -> Option<Ollama> {
     let native_url = "http://127.0.0.1:11435";
     let paths = crate::config::AppPaths::discover().ok()?;
@@ -781,20 +786,10 @@ fn start_native_runner() -> Option<Ollama> {
     if !binary.is_file() {
         return None;
     }
-    let manifest: Option<Value> = std::fs::read(model_home.join("runtime-manifest.json"))
+    let manifest: Value = std::fs::read(model_home.join("runtime-manifest.json"))
         .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok());
-    // The runner publishes its manifest before the weights finish loading, so a
-    // manifest still marked `pending-load` proves nothing is on disk yet: that
-    // is a first run, and it gets the first-run banner and the longer wait.
-    let warm = manifest.as_ref().is_some_and(|manifest| {
-        manifest.get("integrity").and_then(Value::as_str) != Some("pending-load")
-    });
-    let model = manifest
-        .as_ref()
-        .and_then(|manifest| manifest.get("model")?.as_str())
-        .map(str::to_string)
-        .unwrap_or_else(|| NATIVE_BOOTSTRAP_MODEL.to_string());
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())?;
+    let model = acquired_native_model(&manifest)?;
 
     let log = paths.runtime.join("logs/native-runner.log");
     if let Some(parent) = log.parent() {
@@ -811,15 +806,7 @@ fn start_native_runner() -> Option<Ollama> {
         ],
         &log,
     )?;
-    if !warm {
-        eprintln!("hii: no local runtime yet — starting HII Native on {model} (first run fetches weights).");
-    }
-    let timeout = if warm {
-        Duration::from_secs(60)
-    } else {
-        Duration::from_secs(NATIVE_BOOTSTRAP_TIMEOUT_SECS)
-    };
-    wait_ready_verbose(native_url, timeout, &log, &mut child)
+    wait_ready_verbose(native_url, Duration::from_secs(60), &log, &mut child)
         .then(|| Ollama::new(native_url.to_string()))
 }
 
@@ -1014,7 +1001,10 @@ fn format_ureq(error: ureq::Error) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{openai_messages, openai_reasoning_delta, Message, Ollama, RepetitionGuard};
+    use super::{
+        acquired_native_model, openai_messages, openai_reasoning_delta, Message, Ollama,
+        RepetitionGuard,
+    };
     use crate::attachments::ImagePayload;
     use crate::config::ModelProvider;
 
@@ -1096,5 +1086,26 @@ mod tests {
         let client = Ollama::for_mode("auto");
         assert_eq!(client.base_url(), "http://127.0.0.1:11435");
         assert_eq!(client.provider(), ModelProvider::Native);
+    }
+
+    #[test]
+    fn pending_native_manifest_never_authorizes_startup() {
+        let manifest = serde_json::json!({
+            "model": "Qwen/Qwen3-4B",
+            "integrity": "pending-load"
+        });
+        assert_eq!(acquired_native_model(&manifest), None);
+    }
+
+    #[test]
+    fn completed_native_manifest_authorizes_its_model() {
+        let manifest = serde_json::json!({
+            "model": "Qwen/Qwen3.5-35B-A3B",
+            "integrity": "sha256-inventory-proof"
+        });
+        assert_eq!(
+            acquired_native_model(&manifest).as_deref(),
+            Some("Qwen/Qwen3.5-35B-A3B")
+        );
     }
 }
