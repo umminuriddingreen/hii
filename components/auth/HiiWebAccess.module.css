@@ -1,7 +1,9 @@
 .access {
   --ink: #111;
-  min-height: 100dvh;
+  height: 100dvh;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
   background: #fff;
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
