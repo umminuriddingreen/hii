@@ -162,7 +162,7 @@ fn built_ins() -> Vec<ApplicationManifest> {
             name: "HII Link".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             developer: "HII".into(),
-            summary: "Signed contact cards and user-controlled Messages and FaceTime handoff."
+            summary: "Account-bound private device mesh, signed contact cards, and user-controlled communication handoff."
                 .into(),
             icon: "person.2.wave.2".into(),
             surfaces: ApplicationSurfaces {
@@ -176,6 +176,7 @@ fn built_ins() -> Vec<ApplicationManifest> {
             },
             capabilities: vec![
                 "hii.identity.contact-card".into(),
+                "hii.fabric.vpn.status".into(),
                 "hii.communication.handoff".into(),
             ],
             built_in: true,

@@ -53,6 +53,7 @@ mod timeline;
 mod tools;
 mod tui;
 mod usefulness;
+mod vpn;
 mod web_cmd;
 
 use agent::{AutonomyLevel, RunOptions, RunOutput};
@@ -702,6 +703,25 @@ enum ApplicationsCommand {
 enum LinkCommand {
     #[command(about = "Print the current signed HII contact card")]
     Card {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Initialize the Rust-native local VPN control plane for this HII account")]
+    Init {
+        #[arg(long, value_name = "ID", help = "Stable lowercase device identifier")]
+        device: Option<String>,
+        #[arg(long, value_name = "NAME", help = "Human-readable local device name")]
+        name: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Show truthful local control-plane and verified data-plane status")]
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Print the signed public mesh profile without private key material")]
+    Profile {
         #[arg(long)]
         json: bool,
     },
@@ -1762,6 +1782,79 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                         println!(
                             "HII contact card\nname: {}\nid: {}\npublic key: {}",
                             card.name, card.id, card.public_key
+                        );
+                    }
+                }
+                LinkCommand::Init { device, name, json } => {
+                    let identity = identity::IdentityStore::open(&paths);
+                    let account = identity.current()?.ok_or(
+                        "No local HII account. Run `hii login local --name <name>` first.",
+                    )?;
+                    let device = device.unwrap_or_else(|| format!("local-{}", env::consts::OS));
+                    let name =
+                        name.unwrap_or_else(|| format!("{} {}", account.name, env::consts::OS));
+                    let state = vpn::VpnStore::open(&paths).init(&identity, &device, &name)?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&state)
+                                .map_err(|error| error.to_string())?
+                        );
+                    } else {
+                        println!(
+                            "HII VPN local control plane ready\naccount    {}\nmesh       {}\ndevice     {} ({})\naddress    {}\nphase      {:?}\ndata plane not live — no verified peer handshake",
+                            state.account_id,
+                            state.mesh_id,
+                            state.local_device.display_name,
+                            state.local_device.device_id,
+                            state.local_device.ipv4,
+                            state.phase
+                        );
+                    }
+                }
+                LinkCommand::Status { json } => {
+                    let identity = identity::IdentityStore::open(&paths);
+                    let status = vpn::VpnStore::open(&paths).status(&identity)?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&status)
+                                .map_err(|error| error.to_string())?
+                        );
+                    } else if !status.initialized {
+                        println!("HII VPN is not initialized.\nnext: {}", status.next);
+                    } else {
+                        println!(
+                            "HII VPN\naccount       {}\nmesh          {}\ncontrol plane {}\ndata plane    {}\nrelay         {}\nnext          {}",
+                            status.account_id.as_deref().unwrap_or("unknown"),
+                            status.mesh_id.as_deref().unwrap_or("unknown"),
+                            if status.control_plane_ready { "ready" } else { "blocked" },
+                            if status.data_plane_live { "verified live" } else { "not live" },
+                            if status.relay_configured { "configured" } else { "not configured" },
+                            status.next
+                        );
+                        for reason in status.reasons {
+                            println!("note          {reason}");
+                        }
+                    }
+                }
+                LinkCommand::Profile { json } => {
+                    let identity = identity::IdentityStore::open(&paths);
+                    let state = vpn::VpnStore::open(&paths).load(&identity)?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&state)
+                                .map_err(|error| error.to_string())?
+                        );
+                    } else {
+                        println!(
+                            "HII VPN signed public profile\naccount  {}\nmesh     {}\ndevice   {}\npublic   {}\nphase    {:?}",
+                            state.account_id,
+                            state.mesh_id,
+                            state.local_device.device_id,
+                            state.local_device.wireguard_public_key,
+                            state.phase
                         );
                     }
                 }

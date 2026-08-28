@@ -163,6 +163,30 @@ export type HiiContactCard = {
   signature: string;
 };
 
+export type HiiVpnStatus = {
+  initialized: boolean;
+  accountId?: string;
+  meshId?: string;
+  phase?: 'local_ready' | 'endpoint_configured' | 'active' | 'revoked';
+  localDevice?: {
+    deviceId: string;
+    displayName: string;
+    platform: string;
+    ipv4: string;
+    ipv6: string;
+    wireguardPublicKey: string;
+    endpoint?: string;
+    status: 'local_ready' | 'pending' | 'active' | 'revoked';
+    lastVerifiedHandshakeAt?: string;
+  };
+  peerCount: number;
+  controlPlaneReady: boolean;
+  dataPlaneLive: boolean;
+  relayConfigured: boolean;
+  reasons: string[];
+  next: string;
+};
+
 export type RuntimeIdentityRefV1 = {
   id: string;
   kind: 'human' | 'device' | 'agent' | 'service' | 'space';
@@ -507,6 +531,12 @@ export async function getHiiContactCard(): Promise<HiiContactCard | null> {
   if (!isTauri()) return null;
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<HiiContactCard>('link_contact_card');
+}
+
+export async function getHiiVpnStatus(): Promise<HiiVpnStatus | null> {
+  if (!isTauri()) return null;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<HiiVpnStatus>('link_vpn_status');
 }
 
 export async function openHiiLinkHandoff(kind: 'messages' | 'facetime', recipient: string, body = ''): Promise<void> {

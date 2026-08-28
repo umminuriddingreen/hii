@@ -37,6 +37,13 @@ pub struct ContactCard {
     pub signature: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentitySignature {
+    pub public_key: String,
+    pub signature: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UnsignedContactCard<'a> {
@@ -116,19 +123,8 @@ impl IdentityStore {
         let identity = self.current()?.ok_or(
             "No local HII user yet. Run `hii login local --name <name>` before sharing a contact card.",
         )?;
-        let key_path = self.path.with_file_name("contact-ed25519.pkcs8");
-        let key_bytes = if key_path.is_file() {
-            fs::read(&key_path).map_err(|error| error.to_string())?
-        } else {
-            let generated = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new())
-                .map_err(|_| "could not generate the HII contact signing key")?;
-            write_private_bytes(&key_path, generated.as_ref())?;
-            generated.as_ref().to_vec()
-        };
-        let key_pair = Ed25519KeyPair::from_pkcs8(&key_bytes)
-            .map_err(|_| "the local HII contact signing key is invalid")?;
-        let public_key = BASE64.encode(key_pair.public_key().as_ref());
         let issued_at = Local::now();
+        let public_key = self.signing_public_key()?;
         let unsigned = UnsignedContactCard {
             schema_version: 1,
             kind: "hii.contact-card/1",
@@ -139,6 +135,7 @@ impl IdentityStore {
             issued_at,
         };
         let payload = serde_json::to_vec(&unsigned).map_err(|error| error.to_string())?;
+        let signed = self.sign_bytes(&payload)?;
         Ok(ContactCard {
             schema_version: 1,
             kind: "hii.contact-card/1".into(),
@@ -147,8 +144,34 @@ impl IdentityStore {
             email: identity.email,
             public_key,
             issued_at,
-            signature: BASE64.encode(key_pair.sign(&payload).as_ref()),
+            signature: signed.signature,
         })
+    }
+
+    pub fn sign_bytes(&self, payload: &[u8]) -> Result<IdentitySignature, String> {
+        let key_pair = self.signing_key_pair()?;
+        Ok(IdentitySignature {
+            public_key: BASE64.encode(key_pair.public_key().as_ref()),
+            signature: BASE64.encode(key_pair.sign(payload).as_ref()),
+        })
+    }
+
+    pub fn signing_public_key(&self) -> Result<String, String> {
+        Ok(BASE64.encode(self.signing_key_pair()?.public_key().as_ref()))
+    }
+
+    fn signing_key_pair(&self) -> Result<Ed25519KeyPair, String> {
+        let key_path = self.path.with_file_name("contact-ed25519.pkcs8");
+        let key_bytes = if key_path.is_file() {
+            fs::read(&key_path).map_err(|error| error.to_string())?
+        } else {
+            let generated = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new())
+                .map_err(|_| "could not generate the HII contact signing key")?;
+            write_private_bytes(&key_path, generated.as_ref())?;
+            generated.as_ref().to_vec()
+        };
+        Ed25519KeyPair::from_pkcs8(&key_bytes)
+            .map_err(|_| "the local HII contact signing key is invalid".into())
     }
 }
 

@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { getHiiContactCard, openHiiLinkHandoff, type HiiContactCard } from '@/lib/client/hii-bridge';
+import { getHiiContactCard, getHiiVpnStatus, openHiiLinkHandoff, type HiiContactCard, type HiiVpnStatus } from '@/lib/client/hii-bridge';
 
 export function HiiLinkApp() {
   const [card, setCard] = useState<HiiContactCard | null>(null);
+  const [vpn, setVpn] = useState<HiiVpnStatus | null>(null);
   const [recipient, setRecipient] = useState('');
   const [status, setStatus] = useState('Reading the local contact card…');
   const message = useMemo(() => card
@@ -12,10 +13,13 @@ export function HiiLinkApp() {
     : 'Join me on HII. I’ll send the private alpha link separately.', [card]);
 
   useEffect(() => {
-    getHiiContactCard()
-      .then((value) => {
-        setCard(value);
-        setStatus(value ? 'Contact card found on this Mac. Nothing was uploaded.' : 'No local identity found. Run: hii login local --name <name>');
+    Promise.all([getHiiContactCard(), getHiiVpnStatus()])
+      .then(([contact, mesh]) => {
+        setCard(contact);
+        setVpn(mesh);
+        setStatus(contact
+          ? `HII account and ${mesh?.controlPlaneReady ? 'local mesh' : 'contact card'} found on this Mac. Nothing was uploaded.`
+          : 'No local identity found. Run: hii login local --name <name>');
       })
       .catch((error) => setStatus(error instanceof Error ? error.message : String(error)));
   }, []);
@@ -38,15 +42,21 @@ export function HiiLinkApp() {
 
   return (
     <section className="hii-link-app">
-      <header><div><strong>Connection handoff</strong><span>Local contact card and Apple app shortcuts</span></div><em>DATA STAYS LOCAL UNTIL COPIED</em></header>
+      <header><div><strong>HII Link</strong><span>Private device mesh, local account, and explicit handoffs</span></div><em>LOCAL-FIRST · ACCOUNT-BOUND</em></header>
       <main>
         <article>
           <span>CONTACT CARD ON THIS MAC</span>
           <h2>{card?.name || 'Local identity required'}</h2>
           <p>{card?.id || 'Run hii login local, then reopen this application.'}</p>
           <dl><div><dt>Signature</dt><dd>{card ? `${card.signature.slice(0, 22)}…` : 'not available'}</dd></div><div><dt>Public key</dt><dd>{card ? `${card.publicKey.slice(0, 22)}…` : 'not available'}</dd></div></dl>
+          <dl>
+            <div><dt>Mesh</dt><dd>{vpn?.meshId ? `${vpn.meshId.slice(0, 22)}…` : 'not initialized'}</dd></div>
+            <div><dt>Control plane</dt><dd>{vpn?.controlPlaneReady ? 'ready locally' : 'not ready'}</dd></div>
+            <div><dt>Data plane</dt><dd>{vpn?.dataPlaneLive ? 'verified live' : 'not live'}</dd></div>
+            <div><dt>Peers</dt><dd>{vpn?.peerCount ?? 0}</dd></div>
+          </dl>
           <button type="button" disabled={!card} onClick={copyCard}>Copy contact card as JSON</button>
-          <small>Copying is the only action here that releases the card from HII. The private signing key never leaves this Mac.</small>
+          <small>{vpn?.reasons?.[0] || 'Copying is the only action here that releases the card from HII.'} The private signing and VPN keys never leave this Mac.</small>
         </article>
         <aside>
           <span>OPEN AN APP — DO NOT SEND</span>

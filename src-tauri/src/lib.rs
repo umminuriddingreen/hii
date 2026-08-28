@@ -641,6 +641,11 @@ fn link_contact_card(app: tauri::AppHandle) -> Result<Value, String> {
     hii_json(&app, &["link", "card", "--json"])
 }
 
+#[tauri::command]
+fn link_vpn_status(app: tauri::AppHandle) -> Result<Value, String> {
+    hii_json(&app, &["link", "status", "--json"])
+}
+
 #[cfg(target_os = "macos")]
 fn url_component(value: &str) -> String {
     value
@@ -749,6 +754,7 @@ pub fn run() {
             application_requests,
             application_acknowledge,
             link_contact_card,
+            link_vpn_status,
             link_open_handoff,
             browser::browser_navigate,
             browser::browser_action,
