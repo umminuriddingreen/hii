@@ -21,11 +21,13 @@ const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
 /// Input events are small JSON objects; anything larger is a protocol error.
 const MAX_CONTROL_BYTES: usize = 16 * 1024;
 const MAX_HOSTS_PER_ACCOUNT: i64 = 16;
+const MAX_TERMINAL_GRANT_TTL_MS: i64 = 10 * 60 * 1000;
 
 pub fn is_remote_api_path(path: &str) -> bool {
     path == "/api/remote/hosts"
         || path.starts_with("/api/remote/hosts/")
         || path == "/api/remote/view"
+        || path == "/api/remote/terminal"
 }
 
 /// True for the host socket, which authenticates with a bearer token rather
@@ -57,6 +59,41 @@ struct HostView {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateHost {
     name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateTerminalGrant {
+    cwd: String,
+    ttl_seconds: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct TerminalGrantRow {
+    host_id: String,
+}
+
+fn terminal_grant_host(path: &str) -> Option<&str> {
+    path.strip_prefix("/api/remote/hosts/")?
+        .strip_suffix("/terminal-grants")
+        .filter(|id| !id.is_empty() && !id.contains('/'))
+}
+
+fn terminal_viewer_message_allowed(tag: &str, text: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+        return false;
+    };
+    let grant = tag.trim_start_matches("terminal:");
+    let kind = value.get("t").and_then(|v| v.as_str()).unwrap_or_default();
+    let claimed = value
+        .get("grantId")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    claimed == grant
+        && matches!(
+            kind,
+            "terminal.open" | "terminal.input" | "terminal.resize" | "terminal.close"
+        )
 }
 
 fn room_name(account_id: &str, host_id: &str) -> String {
@@ -114,6 +151,36 @@ pub async fn handle_remote_api(
             return api_error(426, "upgrade_required");
         }
         let stub = room(env, &session.account_id, &host_id).await?;
+        return stub.fetch_with_request(request.clone()?).await;
+    }
+
+    if path == "/api/remote/terminal" {
+        let Some(grant_id) = url
+            .query_pairs()
+            .find(|(key, _)| key == "grant")
+            .map(|(_, value)| value.into_owned())
+        else {
+            return api_error(400, "grant_required");
+        };
+        let grant = db
+            .prepare(
+                "SELECT host_id FROM terminal_grants
+                 WHERE id = ?1 AND account_id = ?2 AND revoked_at IS NULL AND expires_at > ?3",
+            )
+            .bind(&[
+                grant_id.as_str().into(),
+                session.account_id.as_str().into(),
+                JsValue::from_f64(now_ms() as f64),
+            ])?
+            .first::<TerminalGrantRow>(None)
+            .await?;
+        let Some(grant) = grant else {
+            return api_error(404, "terminal_grant_unavailable");
+        };
+        if request.headers().get("Upgrade")?.as_deref() != Some("websocket") {
+            return api_error(426, "upgrade_required");
+        }
+        let stub = room(env, &session.account_id, &grant.host_id).await?;
         return stub.fetch_with_request(request.clone()?).await;
     }
 
@@ -181,6 +248,83 @@ pub async fn handle_remote_api(
             // The token is returned exactly once; only its hash is stored.
             json_response(201, json!({ "hostId": id, "token": token, "name": name }))
         }
+        (Method::Post, path) if terminal_grant_host(path).is_some() => {
+            let host_id = terminal_grant_host(path).unwrap_or_default();
+            let input: CreateTerminalGrant = crate::read_json(request).await?;
+            let cwd = input.cwd.trim();
+            if cwd.is_empty() || cwd.len() > 4096 || cwd.as_bytes().contains(&0) {
+                return api_error(400, "invalid_terminal_cwd");
+            }
+            let owned = db
+                .prepare("SELECT id FROM remote_hosts WHERE id = ?1 AND account_id = ?2")
+                .bind(&[host_id.into(), session.account_id.as_str().into()])?
+                .first::<serde_json::Value>(None)
+                .await?;
+            if owned.is_none() {
+                return api_error(404, "not_found");
+            }
+            let ttl_ms = input
+                .ttl_seconds
+                .unwrap_or(300)
+                .clamp(30, MAX_TERMINAL_GRANT_TTL_MS / 1000)
+                * 1000;
+            let id = random_token()?;
+            let created_at = now_ms();
+            let expires_at = created_at + ttl_ms;
+            db.prepare(
+                "INSERT INTO terminal_grants (id, account_id, host_id, cwd, created_at, expires_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )
+            .bind(&[
+                id.as_str().into(),
+                session.account_id.as_str().into(),
+                host_id.into(),
+                cwd.into(),
+                JsValue::from_f64(created_at as f64),
+                JsValue::from_f64(expires_at as f64),
+            ])?
+            .run()
+            .await?;
+            json_response(
+                201,
+                json!({
+                    "grantId": id,
+                    "hostId": host_id,
+                    "cwd": cwd,
+                    "expiresAt": expires_at,
+                    "authority": "open_terminal"
+                }),
+            )
+        }
+        (Method::Delete, path) if path.starts_with("/api/remote/terminal-grants/") => {
+            let grant_id = path.trim_start_matches("/api/remote/terminal-grants/");
+            let grant = db
+                .prepare("SELECT host_id FROM terminal_grants WHERE id = ?1 AND account_id = ?2")
+                .bind(&[grant_id.into(), session.account_id.as_str().into()])?
+                .first::<TerminalGrantRow>(None)
+                .await?;
+            db.prepare(
+                "UPDATE terminal_grants SET revoked_at = ?1
+                 WHERE id = ?2 AND account_id = ?3 AND revoked_at IS NULL",
+            )
+            .bind(&[
+                JsValue::from_f64(now_ms() as f64),
+                grant_id.into(),
+                session.account_id.as_str().into(),
+            ])?
+            .run()
+            .await?;
+            if let Some(grant) = grant
+                && let Ok(stub) = room(env, &session.account_id, &grant.host_id).await
+            {
+                let _ = stub
+                    .fetch_with_str(&format!(
+                        "https://remote.invalid/revoke-terminal?grant={grant_id}"
+                    ))
+                    .await;
+            }
+            json_response(200, json!({ "revoked": true }))
+        }
         (Method::Delete, path) => {
             let Some(host_id) = path.strip_prefix("/api/remote/hosts/") else {
                 return api_error(404, "not_found");
@@ -244,7 +388,8 @@ impl worker::DurableObject for RemoteRoom {
     }
 
     async fn fetch(&self, request: Request) -> Result<Response> {
-        let path = request.url()?.path().to_owned();
+        let url = request.url()?;
+        let path = url.path().to_owned();
         match path.as_str() {
             "/status" => {
                 let online = !self.state.get_websockets_with_tag("host").is_empty();
@@ -257,8 +402,38 @@ impl worker::DurableObject for RemoteRoom {
                 }
                 Response::from_json(&json!({ "evicted": true }))
             }
-            "/api/remote/host" | "/api/remote/view" => {
-                let role = if path == "/api/remote/host" { "host" } else { "viewer" };
+            "/revoke-terminal" => {
+                if let Some(grant) = url
+                    .query_pairs()
+                    .find(|(key, _)| key == "grant")
+                    .map(|(_, value)| value.into_owned())
+                {
+                    for socket in self
+                        .state
+                        .get_websockets_with_tag(&format!("terminal:{grant}"))
+                    {
+                        let _ = socket.close(Some(4003), Some("terminal grant revoked"));
+                    }
+                    for host in self.state.get_websockets_with_tag("host") {
+                        let _ = host.send_with_str(
+                            json!({ "t": "terminal.revoked", "grantId": grant }).to_string(),
+                        );
+                    }
+                }
+                Response::from_json(&json!({ "revoked": true }))
+            }
+            "/api/remote/host" | "/api/remote/view" | "/api/remote/terminal" => {
+                let terminal_tag = url
+                    .query_pairs()
+                    .find(|(key, _)| key == "grant")
+                    .map(|(_, value)| format!("terminal:{value}"));
+                let role = if path == "/api/remote/host" {
+                    "host"
+                } else if path == "/api/remote/terminal" {
+                    terminal_tag.as_deref().unwrap_or("terminal:invalid")
+                } else {
+                    "viewer"
+                };
                 if role == "host" {
                     // One host per room: a reconnecting agent replaces the stale socket.
                     for stale in self.state.get_websockets_with_tag("host") {
@@ -276,9 +451,15 @@ impl worker::DurableObject for RemoteRoom {
                     let _ = pair
                         .server
                         .send_with_str(json!({ "t": "room", "hostOnline": online }).to_string());
-                } else {
+                } else if role == "host" {
                     for viewer in self.state.get_websockets_with_tag("viewer") {
                         let _ = viewer.send_with_str(r#"{"t":"host-online"}"#);
+                    }
+                } else {
+                    for host in self.state.get_websockets_with_tag("host") {
+                        let _ = host.send_with_str(
+                            json!({ "t": "terminal.viewer_joined", "grantId": role.trim_start_matches("terminal:") }).to_string(),
+                        );
                     }
                 }
                 Response::from_websocket(pair.client)
@@ -293,6 +474,11 @@ impl worker::DurableObject for RemoteRoom {
         message: WebSocketIncomingMessage,
     ) -> Result<()> {
         let from_host = self.state.get_tags(&ws).iter().any(|tag| tag == "host");
+        let terminal_tag = self
+            .state
+            .get_tags(&ws)
+            .into_iter()
+            .find(|tag| tag.starts_with("terminal:"));
         match message {
             WebSocketIncomingMessage::Binary(bytes) => {
                 // Only the host sends binary; viewers sending binary are ignored.
@@ -307,9 +493,35 @@ impl worker::DurableObject for RemoteRoom {
                 if text.len() > MAX_CONTROL_BYTES {
                     return Ok(());
                 }
-                let targets = if from_host { "viewer" } else { "host" };
-                for peer in self.state.get_websockets_with_tag(targets) {
-                    let _ = peer.send_with_str(&text);
+                if let Some(tag) = terminal_tag {
+                    if !terminal_viewer_message_allowed(&tag, &text) {
+                        return Ok(());
+                    }
+                    for host in self.state.get_websockets_with_tag("host") {
+                        let _ = host.send_with_str(&text);
+                    }
+                } else if from_host {
+                    let value = serde_json::from_str::<serde_json::Value>(&text).ok();
+                    let grant = value
+                        .as_ref()
+                        .and_then(|item| item.get("grantId"))
+                        .and_then(|item| item.as_str());
+                    if let Some(grant) = grant {
+                        for viewer in self
+                            .state
+                            .get_websockets_with_tag(&format!("terminal:{grant}"))
+                        {
+                            let _ = viewer.send_with_str(&text);
+                        }
+                    } else {
+                        for viewer in self.state.get_websockets_with_tag("viewer") {
+                            let _ = viewer.send_with_str(&text);
+                        }
+                    }
+                } else {
+                    for host in self.state.get_websockets_with_tag("host") {
+                        let _ = host.send_with_str(&text);
+                    }
                 }
             }
         }
@@ -335,5 +547,46 @@ impl worker::DurableObject for RemoteRoom {
 
     async fn websocket_error(&self, _ws: WebSocket, _error: worker::Error) -> Result<()> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{terminal_grant_host, terminal_viewer_message_allowed};
+
+    #[test]
+    fn terminal_grant_path_names_exactly_one_host() {
+        assert_eq!(
+            terminal_grant_host("/api/remote/hosts/host-1/terminal-grants"),
+            Some("host-1")
+        );
+        assert_eq!(
+            terminal_grant_host("/api/remote/hosts/host-1/other/terminal-grants"),
+            None
+        );
+        assert_eq!(
+            terminal_grant_host("/api/remote/hosts//terminal-grants"),
+            None
+        );
+    }
+
+    #[test]
+    fn terminal_viewer_is_bound_to_its_grant_and_typed_messages() {
+        assert!(terminal_viewer_message_allowed(
+            "terminal:grant-1",
+            r#"{"t":"terminal.input","grantId":"grant-1","data":"aA=="}"#
+        ));
+        assert!(!terminal_viewer_message_allowed(
+            "terminal:grant-1",
+            r#"{"t":"terminal.input","grantId":"grant-2","data":"aA=="}"#
+        ));
+        assert!(!terminal_viewer_message_allowed(
+            "terminal:grant-1",
+            r#"{"t":"move","grantId":"grant-1","x":0,"y":0}"#
+        ));
+        assert!(!terminal_viewer_message_allowed(
+            "terminal:grant-1",
+            "not-json"
+        ));
     }
 }
