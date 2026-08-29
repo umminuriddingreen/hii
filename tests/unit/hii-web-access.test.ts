@@ -2,6 +2,16 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('HII web access gate', () => {
+  it('opens loopback as the bounded local owner without pretending to run a passkey ceremony', () => {
+    const source = readFileSync('components/auth/HiiWebAccess.tsx', 'utf8');
+
+    expect(source).toContain("normalized === '127.0.0.1'");
+    expect(source).toContain("normalized === 'localhost'");
+    expect(source).toContain("handle: 'local owner'");
+    expect(source).toContain('const localSession = localOwnerSession(window.location.hostname)');
+    expect(source).toContain('if (localSession)');
+  });
+
   it('starts with the HII wordmark and two account actions before the below-fold support board', () => {
     const source = readFileSync('components/auth/HiiWebAccess.tsx', 'utf8');
 

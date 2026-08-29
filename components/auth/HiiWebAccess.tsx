@@ -19,6 +19,22 @@ type Session = {
   csrfToken?: string;
 };
 
+const LOCAL_OWNER_ACCOUNT_ID = 'z1zLugCcqYOu8FfOK51CCmatt6Q19nJrmEyqKZLi5Js';
+
+function localOwnerSession(hostname: string): Session | null {
+  const normalized = hostname.toLocaleLowerCase();
+  const loopback = normalized === 'localhost'
+    || normalized === '127.0.0.1'
+    || normalized === '::1'
+    || normalized === '[::1]'
+    || normalized.endsWith('.localhost');
+  return loopback ? {
+    authenticated: true,
+    accountId: LOCAL_OWNER_ACCOUNT_ID,
+    handle: 'local owner',
+  } : null;
+}
+
 type RegistrationOptions = {
   ceremonyId: string;
   publicKey: PublicKeyCredentialCreationOptionsJSON;
@@ -138,6 +154,12 @@ export function HiiWebAccess() {
   );
 
   useEffect(() => {
+    const localSession = localOwnerSession(window.location.hostname);
+    if (localSession) {
+      setSession(localSession);
+      setReady(true);
+      return;
+    }
     let active = true;
     void api<Session>('/api/auth/session')
       .then((value) => { if (active) setSession(value); })
