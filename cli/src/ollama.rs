@@ -850,29 +850,45 @@ fn openai_reasoning_delta(delta: &Value) -> Option<&str> {
 }
 
 fn openai_messages(messages: &[Message]) -> Value {
-    Value::Array(
-        messages
-            .iter()
-            .map(|message| {
-                if message.images.is_empty() {
-                    return json!({ "role": message.role, "content": message.content });
-                }
-                let mut content = vec![json!({ "type": "text", "text": message.content })];
-                for (index, image) in message.images.iter().enumerate() {
-                    let mime = message
-                        .image_mime_types
-                        .get(index)
-                        .map(String::as_str)
-                        .unwrap_or("image/png");
-                    content.push(json!({
-                        "type": "image_url",
-                        "image_url": { "url": format!("data:{mime};base64,{image}") }
-                    }));
-                }
-                json!({ "role": message.role, "content": content })
-            })
-            .collect(),
-    )
+    // Some OpenAI-compatible chat templates (including Qwen through MLX-VLM)
+    // require exactly one system message and require it to be first. HII keeps
+    // independently managed system contexts internally so they can be replaced
+    // or removed by feature; collapse them only at the provider boundary.
+    let system = messages
+        .iter()
+        .filter(|message| message.role == "system")
+        .map(|message| message.content.trim())
+        .filter(|content| !content.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let ordered = (!system.is_empty())
+        .then(|| json!({ "role": "system", "content": system }))
+        .into_iter()
+        .chain(
+            messages
+                .iter()
+                .filter(|message| message.role != "system")
+                .map(|message| {
+                    if message.images.is_empty() {
+                        return json!({ "role": message.role, "content": message.content });
+                    }
+                    let mut content = vec![json!({ "type": "text", "text": message.content })];
+                    for (index, image) in message.images.iter().enumerate() {
+                        let mime = message
+                            .image_mime_types
+                            .get(index)
+                            .map(String::as_str)
+                            .unwrap_or("image/png");
+                        content.push(json!({
+                            "type": "image_url",
+                            "image_url": { "url": format!("data:{mime};base64,{image}") }
+                        }));
+                    }
+                    json!({ "role": message.role, "content": content })
+                }),
+        )
+        .collect();
+    Value::Array(ordered)
 }
 
 #[derive(Default)]
@@ -1067,6 +1083,25 @@ mod tests {
             value[0]["content"][1]["image_url"]["url"],
             "data:image/png;base64,aW1hZ2U="
         );
+    }
+
+    #[test]
+    fn openai_messages_merge_all_system_context_at_the_beginning() {
+        let value = openai_messages(&[
+            Message::system("primary identity"),
+            Message::user("hello"),
+            Message::system("context capsule"),
+            Message::system("active authority"),
+        ]);
+        let messages = value.as_array().expect("message array");
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(
+            messages[0]["content"],
+            "primary identity\n\ncontext capsule\n\nactive authority"
+        );
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[1]["content"], "hello");
     }
 
     #[test]

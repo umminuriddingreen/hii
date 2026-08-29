@@ -439,23 +439,11 @@ pub(crate) fn welcome_frame(
 }
 
 pub fn prompt_frame(_frame: usize) -> String {
-    let width = terminal_width().saturating_sub(4);
-    let label = " INTENT ";
-    let rule = "─".repeat(width.saturating_sub(label.chars().count() + 2));
-    format!(
-        "  {}\r\n  {} ",
-        paint(&format!("╭─{label}{rule}╮"), &[DIM, palette().primary]),
-        paint("│", &[BOLD, palette().primary])
-    )
+    format!("\r\n  {} ", paint("›", &[BOLD, palette().primary]))
 }
 
 pub fn prompt_footer() -> String {
-    let width = terminal_width().saturating_sub(4);
-    let rule = "─".repeat(width.saturating_sub(2));
-    format!(
-        "  {}",
-        paint(&format!("╰─{rule}╯"), &[DIM, palette().muted])
-    )
+    String::new()
 }
 
 fn public_command(command: &str) -> bool {
@@ -875,11 +863,13 @@ mod tests {
     }
 
     #[test]
-    fn prompt_frame_is_always_present() {
+    fn prompt_is_a_minimal_codex_style_input_line() {
         assert!(!prompt_frame(0).trim().is_empty());
         assert_eq!(prompt_frame(0), prompt_frame(99));
-        assert!(!prompt_frame(0).contains("STEER MODEL"));
-        assert!(!super::prompt_footer().contains("Enter steer"));
+        assert!(prompt_frame(0).contains('›'));
+        assert!(!prompt_frame(0).contains("INTENT"));
+        assert!(!prompt_frame(0).contains('╭'));
+        assert!(super::prompt_footer().is_empty());
     }
 
     #[test]
