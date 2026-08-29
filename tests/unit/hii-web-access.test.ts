@@ -53,15 +53,19 @@ describe('HII web access gate', () => {
     expect(source).toContain('allowPhoto');
     expect(source).toContain('/^[A-Za-z0-9_-]{43}$/.test(canvasAccountId)');
     expect(source).toContain("setDeviceMessage('could not log out. try again.')");
-    expect(source).toContain('open on another device');
-    expect(source).toContain('canvas sync is not enabled yet. browser storage may be cleared.');
+    expect(source).toContain('open on Mac');
+    expect(source).toContain('href="/download#mac"');
+    expect(source).toContain('open on Windows');
+    expect(source).toContain('href="/download#windows"');
+    expect(source).toContain('auto-synced local copies planned');
+    expect(source).toContain('this browser account stays canonical');
+    expect(source).toContain('sync is not enabled yet');
     expect(source).not.toContain('aria-label="HII canvas views"');
     expect(source).not.toContain('>chat</button>');
     expect(source).not.toContain('>feed</button>');
     expect(source).not.toContain('>models</button>');
     expect(source).not.toContain('href="hii://');
     expect(source).not.toContain('the terminal runs natively on your machine');
-    expect(source).not.toContain('download for windows');
     expect(css).toContain('.canvasShell :global(.hii-canvas[data-surface="account"])');
     expect(css).toContain('min-height: 44px');
 
@@ -113,5 +117,16 @@ describe('HII web access gate', () => {
     expect(page).toContain("process.env.NEXT_PUBLIC_HII_TARGET === 'desktop'");
     expect(page).toContain("await import('@/components/workspace/HiiRoot')");
     expect(page).toContain('return <HiiWebAccess />');
+  });
+
+  it('routes platform handoffs to a truthful planned Tauri download page', () => {
+    const download = readFileSync('app/download/page.tsx', 'utf8');
+
+    expect(download).toContain('Tauri desktop app for Mac and Windows');
+    expect(download).toContain('browser account remains the canonical data source');
+    expect(download).toContain('automatically synchronized local copy');
+    expect(download).toContain('id="mac"');
+    expect(download).toContain('id="windows"');
+    expect(download).toContain('Windows Tauri build is planned');
   });
 });

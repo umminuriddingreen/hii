@@ -247,7 +247,8 @@
 }
 
 .canvasHeader button:focus-visible,
-.accountPanel button:focus-visible {
+.accountPanel button:focus-visible,
+.platformLinks a:focus-visible {
   outline: 1px solid currentColor;
   outline-offset: 2px;
 }
@@ -289,6 +290,25 @@
 .canvasHeader button:focus-visible,
 .accountPanel button:hover,
 .accountPanel button:focus-visible {
+  text-decoration: underline;
+}
+
+.platformLinks {
+  display: grid;
+  justify-items: start;
+  margin: 0 0 5px;
+}
+
+.platformLinks a {
+  min-height: 30px;
+  color: inherit;
+  line-height: 30px;
+  text-decoration: none;
+  text-underline-offset: .22em;
+}
+
+.platformLinks a:hover,
+.platformLinks a:focus-visible {
   text-decoration: underline;
 }
 

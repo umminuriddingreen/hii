@@ -271,25 +271,6 @@ export function HiiWebAccess() {
     }
   };
 
-  const openOnAnotherDevice = async () => {
-    const share = {
-      title: 'HII',
-      text: 'Open HII and sign in with your passkey.',
-      url: window.location.origin,
-    };
-    try {
-      if (navigator.share) {
-        await navigator.share(share);
-        setDeviceMessage('sign-in link shared.');
-        return;
-      }
-      await navigator.clipboard.writeText(share.url);
-      setDeviceMessage('sign-in link copied.');
-    } catch {
-      setDeviceMessage('share cancelled.');
-    }
-  };
-
   if (ready && session.authenticated) {
     const accountName = session.handle ?? 'account';
     if (!canvasAccountReady || !canvasPersistence) {
@@ -345,11 +326,15 @@ export function HiiWebAccess() {
               <div><dt>name</dt><dd>{accountName}</dd></div>
               <div><dt>access</dt><dd>passkey</dd></div>
               <div><dt>canvas</dt><dd>stored only in this browser</dd></div>
+              <div><dt>apps</dt><dd>auto-synced local copies planned</dd></div>
             </dl>
-            <button type="button" onClick={() => void openOnAnotherDevice()}>open on another device</button>
+            <nav className={styles.platformLinks} aria-label="Open HII on a computer">
+              <a href="/download#mac">open on Mac</a>
+              <a href="/download#windows">open on Windows</a>
+            </nav>
             <button type="button" onClick={signOut} disabled={busy}>log out</button>
             <p role="status" aria-live="polite">{deviceMessage}</p>
-            <small>use the same passkey there. canvas sync is not enabled yet. browser storage may be cleared.</small>
+            <small>planned: this browser account stays canonical while each Mac or Windows app saves an automatically synchronized local copy. sync is not enabled yet.</small>
           </aside>
         ) : null}
       </div>
