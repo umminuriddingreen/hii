@@ -58,6 +58,29 @@ impl Message {
     }
 }
 
+/// Collapse HII's independently governed system contexts into the single
+/// leading system message required by OpenAI-compatible local servers.
+fn provider_messages(messages: &[Message]) -> Vec<Message> {
+    let system = messages
+        .iter()
+        .filter(|message| message.role == "system")
+        .map(|message| message.content.trim())
+        .filter(|content| !content.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let mut normalized = Vec::with_capacity(messages.len());
+    if !system.is_empty() {
+        normalized.push(Message::system(system));
+    }
+    normalized.extend(
+        messages
+            .iter()
+            .filter(|message| message.role != "system")
+            .cloned(),
+    );
+    normalized
+}
+
 #[derive(Debug, Default, Deserialize)]
 struct ResponseMessage {
     #[serde(default)]
@@ -333,10 +356,11 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         messages: &[Message],
         format: Option<Value>,
     ) -> Result<ChatResult, String> {
+        let messages = provider_messages(messages);
         let result = match self.provider {
-            ModelProvider::Ollama => self.chat_ollama(model, messages, format),
+            ModelProvider::Ollama => self.chat_ollama(model, &messages, format),
             ModelProvider::LmStudio | ModelProvider::Native | ModelProvider::RapidMlx => {
-                self.chat_openai(model, messages, format)
+                self.chat_openai(model, &messages, format)
             }
         };
         if let Ok(chat) = &result {
@@ -1018,8 +1042,8 @@ fn format_ureq(error: ureq::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        acquired_native_model, openai_messages, openai_reasoning_delta, Message, Ollama,
-        RepetitionGuard,
+        acquired_native_model, openai_messages, openai_reasoning_delta, provider_messages, Message,
+        Ollama, RepetitionGuard,
     };
     use crate::attachments::ImagePayload;
     use crate::config::ModelProvider;
@@ -1102,6 +1126,19 @@ mod tests {
         );
         assert_eq!(messages[1]["role"], "user");
         assert_eq!(messages[1]["content"], "hello");
+    }
+
+    #[test]
+    fn every_provider_receives_one_leading_system_message() {
+        let messages = provider_messages(&[
+            Message::system("primary"),
+            Message::user("hello"),
+            Message::system("late authority"),
+        ]);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, "system");
+        assert_eq!(messages[0].content, "primary\n\nlate authority");
+        assert_eq!(messages[1].role, "user");
     }
 
     #[test]

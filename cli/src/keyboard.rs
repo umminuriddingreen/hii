@@ -1,7 +1,7 @@
 //! Raw-terminal keyboard input model for the interactive REPL.
 //!
 //! The REPL wants richer control keys than a line-based `read_line` can offer:
-//! Enter submits steering for the current run, Tab queues a line for the next
+//! Enter submits steering for the current run, Shift+Tab queues a line for the next
 //! checkpoint, Esc interrupts, and Ctrl+B / Ctrl+T reach into run control. This
 //! module owns that translation and nothing else — it turns raw key presses
 //! into a high-level [`InputEvent`] the REPL can act on.
@@ -34,7 +34,7 @@ type Result<T> = std::result::Result<T, String>;
 pub enum InputEvent {
     /// Enter — submit the current line as steering/intent for the current run.
     Submit(String),
-    /// Tab — queue the current line for the next checkpoint (not submitted now).
+    /// Shift+Tab — queue the current line for the next checkpoint (not submitted now).
     Queue(String),
     /// Esc — interrupt the current run.
     Interrupt,
@@ -42,7 +42,8 @@ pub enum InputEvent {
     Background(String),
     /// Ctrl+T — show the task/status view.
     TaskView,
-    /// Shift+Tab — ask the heavy local advisor for one governed next action.
+    /// Tab — ask the heavy local advisor for one governed next action when a
+    /// command completion menu is not active.
     AutoAdvisor,
 }
 
@@ -289,7 +290,8 @@ fn apply_key(key: KeyEvent, buf: &mut String, cursor: &mut usize, keymap: &Keyma
     if key.code == KeyCode::BackTab
         || (key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::SHIFT))
     {
-        return KeyOutcome::Emit(InputEvent::AutoAdvisor);
+        *cursor = 0;
+        return KeyOutcome::Emit(InputEvent::Queue(std::mem::take(buf)));
     }
     if matches!(key.code, KeyCode::Esc)
         || matches!(key.code, KeyCode::Char('c')) && ctrl
@@ -307,6 +309,9 @@ fn apply_key(key: KeyEvent, buf: &mut String, cursor: &mut usize, keymap: &Keyma
     }
     if keymap.matches(KeyAction::Tasks, key) {
         return KeyOutcome::Emit(InputEvent::TaskView);
+    }
+    if key.code == KeyCode::Tab {
+        return KeyOutcome::Emit(InputEvent::AutoAdvisor);
     }
     match key.code {
         KeyCode::Enter => {
@@ -851,11 +856,11 @@ mod tests {
     }
 
     #[test]
-    fn tab_queues_current_line_without_losing_text() {
+    fn shift_tab_queues_current_line_without_losing_text() {
         let mut buf = String::from("deploy");
         let mut cursor = buf.len();
         assert_eq!(
-            emit(key(KeyCode::Tab), &mut buf, &mut cursor),
+            emit(key(KeyCode::BackTab), &mut buf, &mut cursor),
             Some(InputEvent::Queue("deploy".to_string()))
         );
         assert!(buf.is_empty());
@@ -887,11 +892,11 @@ mod tests {
     }
 
     #[test]
-    fn shift_tab_opens_auto_advisor() {
+    fn tab_opens_auto_advisor() {
         let mut buf = String::new();
         let mut cursor = 0;
         assert_eq!(
-            emit(key(KeyCode::BackTab), &mut buf, &mut cursor),
+            emit(key(KeyCode::Tab), &mut buf, &mut cursor),
             Some(InputEvent::AutoAdvisor)
         );
     }

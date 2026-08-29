@@ -168,7 +168,7 @@ impl Keymap {
 fn profile(name: &str) -> Result<KeymapFile, String> {
     let bindings = match name {
         "default" => [
-            ("queue", "tab"),
+            ("queue", "shift+tab"),
             ("interrupt", "escape"),
             ("background", "ctrl+b"),
             ("tasks", "ctrl+t"),
@@ -178,7 +178,7 @@ fn profile(name: &str) -> Result<KeymapFile, String> {
             ("history_down", "down"),
         ],
         "vim" => [
-            ("queue", "tab"),
+            ("queue", "shift+tab"),
             ("interrupt", "escape"),
             ("background", "ctrl+b"),
             ("tasks", "ctrl+t"),
@@ -237,7 +237,7 @@ fn validate_chord(value: &str) -> Result<(), String> {
     let value = normalize_chord(value);
     let allowed_named = matches!(
         value.as_str(),
-        "tab" | "escape" | "up" | "down" | "left" | "right" | "home" | "end"
+        "tab" | "shift+tab" | "escape" | "up" | "down" | "left" | "right" | "home" | "end"
     );
     let allowed_modified = value
         .strip_prefix("ctrl+")
@@ -248,7 +248,7 @@ fn validate_chord(value: &str) -> Result<(), String> {
     if allowed_named || allowed_modified {
         Ok(())
     } else {
-        Err("key chord must be Tab, Escape, an arrow, Home/End, Ctrl+letter, or Alt+letter".into())
+        Err("key chord must be Tab, Shift+Tab, Escape, an arrow, Home/End, Ctrl+letter, or Alt+letter".into())
     }
 }
 
@@ -257,6 +257,11 @@ fn normalize_chord(value: &str) -> String {
 }
 
 fn chord(key: KeyEvent) -> Option<String> {
+    if key.code == KeyCode::BackTab
+        || (key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::SHIFT))
+    {
+        return Some("shift+tab".into());
+    }
     let prefix = if key.modifiers.contains(KeyModifiers::CONTROL) {
         "ctrl+"
     } else if key.modifiers.contains(KeyModifiers::ALT) {

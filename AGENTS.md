@@ -117,7 +117,7 @@ Giving a task tier a `memoryGiBMax` puts an unconditional `null` match ahead of
 every size and silently resolves the whole machine to `noop`.
 
 - Do not hardcode a routing table in Rust. A future router reads the config.
-- The auto advisor (`conversation.rs::auto_advisor_suggestion`, Shift+Tab) is
+- The auto advisor (`conversation.rs::auto_advisor_suggestion`, Tab when no command completion is active) is
   the only automatic routing surface, and it only ever suggests: it renders the
   route, waits for `y`, and turns a hosted route into literal `/codex …` or
   `/claude …` text the operator runs. An unrecognised route resolves to local.

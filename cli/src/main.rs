@@ -2995,7 +2995,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             tui::system("Running queued follow-up.");
             pending
         } else if interactive {
-            // Raw-mode keyboard model: Enter=submit, Tab=queue, Esc/Ctrl+B/Ctrl+T
+            // Raw-mode keyboard model: Enter=submit, Shift+Tab=queue, Esc/Ctrl+B/Ctrl+T
             // are surfaced as events (interrupt/background/task-view meaning applies
             // during a run; at the idle prompt they are informational).
             match keyboard::read_event(
@@ -3427,7 +3427,8 @@ fn slash_help() -> String {
     } else {
         "/help                         show commands\n/providers                    show local, Codex, and Claude access\n/login codex|claude           connect an existing provider plan\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/rename <name>                name this saved session\n/copy [code|all]              copy the latest response, its last code block, or the transcript\n/status                       show session, workspace, model, and usage\n/goal [edit|pause|resume|clear] [objective]\n                               track a persistent session objective\n/plan [off|prompt]            inspect and research without changes\n/side <question>              ask without changing the main conversation\n/theme [name]                 switch the persistent visual signature\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n/model [name]                 list or switch available models\n/files                        browse files with ranger/vim keys\n/proof [run-id]               inspect execution proof\n/diff                         inspect scoped workspace changes\n/review                       review current diff for defects\n/permissions [level]          show or switch the live authority boundary\n/resume [session-id]          list or restore a prior session\n/skills                       show automatically learned skill drafts\n/agents | /ps                 show HII-managed and observed agents\n/codex <task>                 use authenticated Codex CLI\n/claude <task>                use authenticated Claude CLI\n/agent <id> status|logs|stop  manage an agent by id\n/stop <id>                    stop one managed agent\n/schedule <cron> :: <task>    create local recurring HII work\n/schedules                    list recurring HII work\n/calendar                     show the next 7 days\n/calendar add DATE [TIME] :: TITLE\n/sync calendar                sync HII schedules to Apple Calendar\n/undo                         drop the last exchange to steer away\n/fork                         snapshot this session to a resumable fork\n/teach <name>                 graduate this session into a reusable skill\n!<command>                    run a shell command directly\n/exit                         leave HII\n\nWhile running: type + Enter steers · type + Tab queues · Esc stops"
     };
-    help.replace(
+    help.replace("type + Tab queues", "type + Shift+Tab queues")
+    .replace(
         "/skills                       show automatically learned skill drafts\n",
         "/skills                       show automatically learned skill drafts\n/hooks                        inspect approved lifecycle policy\n/mcp                          show governed MCP clients\n/mcp add|refresh|show|trust   configure and discover MCP tools\n/background <task>            start one supervised local HII job\n/jobs                         list background jobs\n/job <id> status|logs|proof|cancel\n                               inspect or stop one background job\n",
     )
@@ -3447,7 +3448,7 @@ fn slash_help() -> String {
 
 fn slash_help_compact() -> String {
     "CREATE + ACT\n  Describe the outcome you want. HII can inspect, make, and verify.\n  !<command>             run a shell command directly\n  /attach <path>         add a file or image\n  /plan [prompt|off]     explore without changing anything\n\nYOUR WORK\n  /status                session, workspace, model, and usage\n  /overview              projects, context, and latest proof\n  /proof [run-id]        inspect what completed\n  /diff                   see workspace changes\n  /files                  browse and attach local files\n\nSHAPE THE SESSION\n  /model                  choose a model\n  /theme                  choose the visual signature\n  /permissions            inspect or change authority\n  /undo                   remove the last exchange\n  /new                    begin with fresh context\n  /exit                   leave HII\n\nType / to browse controls  ·  /help all for the complete reference\nWhile HII works: Enter steers  ·  Tab queues  ·  Esc stops"
-        .to_string()
+        .replace("Tab queues", "Shift+Tab queues")
 }
 
 fn public_test_slash_help() -> String {

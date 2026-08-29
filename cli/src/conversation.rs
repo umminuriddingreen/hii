@@ -357,7 +357,7 @@ impl Conversation {
             thinking_mode: match std::env::var("HII_THINKING").as_deref() {
                 Ok("off") => ThinkingMode::Off,
                 Ok("raw") | Ok("live") | Ok("detailed") => ThinkingMode::Raw,
-                _ => ThinkingMode::Compact,
+                _ => ThinkingMode::Raw,
             },
             reasoning_mode: match std::env::var("HII_REASONING").as_deref() {
                 Ok("off") => ReasoningMode::Off,
@@ -460,6 +460,7 @@ impl Conversation {
         let mut mutation_epoch = 0usize;
         let mut verified_epoch = None;
         let mut observations = HashSet::new();
+        let mut repeated_observations = HashSet::new();
         let mut steps = 0usize;
         let mut web_mutation_pending = false;
         let mut repeated_verification_failure: Option<(String, usize)> = None;
@@ -920,10 +921,7 @@ impl Conversation {
                     if io::stdout().is_terminal() {
                         crate::tui::tool_start(step, &tool, &target);
                     }
-                    let observation = matches!(
-                        tool.as_str(),
-                        "read" | "list" | "search" | "web_search" | "web_fetch"
-                    );
+                    let observation = tool_is_observation(&tool);
                     let observation_key = observation.then(|| {
                         observation_signature(
                             mutation_epoch,
@@ -938,6 +936,9 @@ impl Conversation {
                         .as_ref()
                         .is_some_and(|key| observations.contains(key))
                     {
+                        let repeated_twice = observation_key
+                            .as_ref()
+                            .is_some_and(|key| !repeated_observations.insert(key.clone()));
                         let blocked = format!(
                             "REPEATED_ACTION: this exact {tool} observation already ran after the latest workspace change. \
                              Do not repeat read/list/search. {}",
@@ -947,6 +948,28 @@ impl Conversation {
                             "convergence.repeated_action",
                             json!({ "step": step, "tool": tool, "target": target, "mutation_epoch": mutation_epoch }),
                         )?;
+                        if repeated_twice {
+                            let message = format!(
+                                "HII stopped a repeated {tool} read loop. The prior context is already available; steer the run or ask for a direct answer."
+                            );
+                            self.store.event(
+                                "model.loop_detected",
+                                json!({ "step": step, "reason": "same successful observation requested three times", "tool": tool }),
+                            )?;
+                            self.messages.push(Message::assistant(raw));
+                            self.messages.push(Message::user(blocked));
+                            self.finish_backend_run(
+                                run,
+                                run_guard,
+                                input,
+                                step,
+                                &message,
+                                BackendOutcome::incomplete(verification, hook_records),
+                            )?;
+                            self.store
+                                .event("assistant.message", json!({ "content": &message }))?;
+                            return Ok(message);
+                        }
                         self.messages.push(Message::assistant(raw));
                         self.messages.push(Message::user(blocked));
                         rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
@@ -2647,7 +2670,7 @@ impl Conversation {
                                 )?;
                             } else if self.public_test {
                                 input.write_stream(
-                                    "\nBackground child processes are unavailable in the public test. Press Tab to queue steering.\n",
+                                    "\nBackground child processes are unavailable in the public test. Press Shift+Tab to queue steering.\n",
                                 )?;
                             } else {
                                 self.pending_backgrounds.push_back(value.clone());
@@ -3321,6 +3344,13 @@ fn observation_signature(
     )
 }
 
+fn tool_is_observation(tool: &str) -> bool {
+    matches!(
+        tool,
+        "read" | "list" | "search" | "web_search" | "web_fetch"
+    ) || (crate::hii_tools::is_hii_tool(tool) && !crate::hii_tools::is_mutating(tool))
+}
+
 fn explicit_skill_signal(input: &str) -> bool {
     let input = input.to_ascii_lowercase();
     [
@@ -3693,8 +3723,8 @@ mod tests {
         plain_message, plan_tool_allowed, public_test_sensitive_shell, render_permissions,
         resumable_messages, session_authority, session_goal, session_plan_mode, session_title,
         shell_command_is_observation_only, shell_command_is_preview, shell_command_is_read_only,
-        side_context, verification_required_message, Conversation, ReasoningMode, REASONING_MODES,
-        THINKING_MODES,
+        side_context, tool_is_observation, verification_required_message, Conversation,
+        ReasoningMode, REASONING_MODES, THINKING_MODES,
     };
     use crate::contract::{Authority, Decision};
     use std::path::Path;
@@ -3751,6 +3781,13 @@ mod tests {
         let changed = observation_signature(2, "read", Some("public/index.html"), None, None, None);
         assert_eq!(first, same);
         assert_ne!(first, changed);
+    }
+
+    #[test]
+    fn hii_context_is_a_repeatable_read_observation() {
+        assert!(tool_is_observation("hii_context"));
+        assert!(tool_is_observation("caps_check"));
+        assert!(!tool_is_observation("board_write"));
     }
 
     #[test]
