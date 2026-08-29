@@ -540,6 +540,7 @@ function Prompt({
         ['/proof', 'inspect the latest receipt'],
         ['/status', 'show HII state'],
         ['/terminal [folder]', 'create a local terminal object'],
+        ['/overview', 'open local HII administration'],
         ['/browser [url]', 'open the native development browser'],
         ['/music', 'open profile playlists'],
         ['/marketplace', 'install apps, experiences, skills, and runtimes']
@@ -1200,6 +1201,10 @@ export function HiiRoot({
     } : current);
     const at = camera.toWorld(anchor.x, anchor.y);
     try {
+      if (/^\/(?:overview|admin)$/i.test(intent.trim()) && runtimeEnabled) {
+        window.location.assign('/admin');
+        return;
+      }
       const terminalSeed = terminalSeedFromCommand(intent);
       if (terminalSeed) {
         if (mode !== 'build') {

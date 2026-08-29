@@ -546,6 +546,54 @@ fn applications_list(app: tauri::AppHandle) -> Result<Value, String> {
     hii_json(&app, &["apps", "list", "--json"])
 }
 
+#[tauri::command]
+fn admin_snapshot(app: tauri::AppHandle) -> Result<Value, String> {
+    let home = hii_json(&app, &["home", "--json"])?;
+    let work = hii_json(&app, &["work", "--json"])?;
+    let proof = hii_json(&app, &["proof", "--json"]).ok();
+    let generated_at = home
+        .get("generatedAt")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    Ok(serde_json::json!({
+        "schemaVersion": 1,
+        "kind": "hii.admin.snapshot",
+        "generatedAt": generated_at,
+        "authority": "hii-cli",
+        "home": home,
+        "work": work,
+        "latestProof": proof
+    }))
+}
+
+#[tauri::command]
+fn admin_create_task(app: tauri::AppHandle, intent: String) -> Result<Value, String> {
+    let intent = validate_admin_intent(&intent)?;
+    let status = Command::new(hii_binary(&app)?)
+        .args(["task", intent])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|_| "HII could not create the assignment.".to_string())?;
+    if !status.success() {
+        return Err("HII did not accept the assignment.".into());
+    }
+    admin_snapshot(app)
+}
+
+fn validate_admin_intent(intent: &str) -> Result<&str, String> {
+    let intent = intent.trim();
+    if intent.is_empty()
+        || intent.chars().count() > 500
+        || intent.chars().any(|character| character.is_control())
+    {
+        Err("An assignment must contain 1–500 plain-text characters.".into())
+    } else {
+        Ok(intent)
+    }
+}
+
 const ECOSYSTEM_CATALOG_MAX_BYTES: u64 = 256 * 1024;
 const ECOSYSTEM_CATALOG_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -750,6 +798,8 @@ pub fn run() {
             notification_list,
             notification_read,
             applications_list,
+            admin_snapshot,
+            admin_create_task,
             ecosystem_catalog,
             application_requests,
             application_acknowledge,
@@ -784,6 +834,17 @@ mod tests {
         assert!(!error.contains(private_diagnostic));
         assert!(!error.contains("/Users/"));
         assert!(!error.contains("token="));
+    }
+
+    #[test]
+    fn admin_assignments_are_bounded_plain_text() {
+        assert_eq!(
+            validate_admin_intent("  verify HII  ").unwrap(),
+            "verify HII"
+        );
+        assert!(validate_admin_intent("").is_err());
+        assert!(validate_admin_intent("bad\ncommand").is_err());
+        assert!(validate_admin_intent(&"x".repeat(501)).is_err());
     }
 
     #[test]
