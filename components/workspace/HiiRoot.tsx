@@ -1419,6 +1419,27 @@ export function HiiRoot({
     const inField = (target: EventTarget | null) => (target as Element | null)?.closest?.('input,textarea,[contenteditable]');
     const keydown = (event: KeyboardEvent) => {
       if (inField(event.target)) return;
+      if (isAccount && isTerminalShortcut(event)) {
+        event.preventDefault();
+        onRequestDevice?.();
+        return;
+      }
+      if (isAccount && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'u') {
+        event.preventDefault();
+        fileInput.current?.click();
+        return;
+      }
+      if (isAccount && !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && event.key.toLowerCase() === 't') {
+        event.preventDefault();
+        const [id] = spawnSeeds([canvasTextSeed()], camera.centerWorld());
+        setFocusNodeId(id ?? null);
+        return;
+      }
+      if (isAccount && !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && event.key.toLowerCase() === 'd') {
+        event.preventDefault();
+        setDrawing((value) => !value);
+        return;
+      }
       if (!runtimeEnabled) {
         if ((event.key === 'Delete' || event.key === 'Backspace') && selected.length) {
           event.preventDefault();
@@ -1527,7 +1548,7 @@ export function HiiRoot({
     addEventListener('pointermove', pointermove);
     addEventListener('paste', paste);
     return () => { removeEventListener('keydown', keydown); removeEventListener('pointermove', pointermove); removeEventListener('paste', paste); };
-  }, [allowPhoto, camera, importFiles, isAccount, isSpace, isTouchCanvas, openDevBrowser, runtimeEnabled, selected, spawnArtifactTerminals, spawnInformation, spawnSeeds, workspace]);
+  }, [allowPhoto, camera, importFiles, isAccount, isSpace, isTouchCanvas, onRequestDevice, openDevBrowser, runtimeEnabled, selected, spawnArtifactTerminals, spawnInformation, spawnSeeds, workspace]);
 
   return (
     <main
@@ -1594,9 +1615,10 @@ export function HiiRoot({
       }}
     >
       {runtimeEnabled && <UpdateBanner />}
-      {isSpace && <SpaceToolbar
+      {isTouchCanvas && <SpaceToolbar
         drawing={drawing}
         photo={allowPhoto}
+        accountTools={isAccount}
         onAddImage={() => fileInput.current?.click()}
         onAddText={() => spawnSeeds([seedFor('canvas-text', { text: 'Tap to write', name: 'Text' })], camera.centerWorld())}
         onAddSticker={() => spawnSeeds([{ ...seedFor('image', { sticker: true, emoji: '✦', name: 'Sticker' }), w: 120, h: 120 }], camera.centerWorld())}

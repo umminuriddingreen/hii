@@ -74,8 +74,19 @@ describe('HII web access gate', () => {
     expect(canvas).toContain('if (!files.length || (isSpace && !allowPhoto)) return;');
     expect(canvas).toContain('canvasTextSeed(value.slice(0, 100_000))');
     expect(canvas).toContain("surface?: 'workspace' | 'space' | 'account'");
-    expect(canvas).toContain('{isSpace && <SpaceToolbar');
-    expect(canvas).not.toContain('accountTools={isAccount}');
+    expect(canvas).toContain('{isTouchCanvas && <SpaceToolbar');
+    expect(canvas).toContain('accountTools={isAccount}');
+    const toolbar = readFileSync('components/spaces/SpaceToolbar.tsx', 'utf8');
+    expect(toolbar).toContain("accountTools ? 'Upload' : 'Photo'");
+    expect(toolbar).toContain('<span>Terminal</span><kbd>Space</kbd>');
+    expect(toolbar).toContain("accountTools && <kbd>⌘U</kbd>");
+    expect(toolbar).toContain('<span>Text</span>');
+    expect(toolbar).toContain('accountTools && <kbd>T</kbd>');
+    expect(toolbar).toContain('accountTools && <kbd>D</kbd>');
+    expect(canvas).toContain('isAccount && isTerminalShortcut(event)');
+    expect(canvas).toContain("event.key.toLowerCase() === 'u'");
+    expect(canvas).toContain("event.key.toLowerCase() === 't'");
+    expect(canvas).toContain("event.key.toLowerCase() === 'd'");
     expect(canvas).toContain('fileSeeder ? fileSeeder(files) : seedsFromFiles(files)');
   });
 

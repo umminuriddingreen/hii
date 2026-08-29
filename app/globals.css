@@ -135,10 +135,11 @@ button, input, textarea { font: inherit; }
 .hii-canvas[data-surface="space"], .hii-canvas[data-surface="account"] { background: #fff; }
 .hii-space-toolbar { position: fixed; z-index: 2147482000; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 7px; max-width: calc(100vw - 24px); padding: 8px; border: 1px solid rgba(32, 45, 38, .26); border-radius: 18px; background: rgba(255, 253, 247, .94); box-shadow: 0 12px 38px rgba(35, 43, 38, .16); transform: translateX(-50%); backdrop-filter: blur(14px); }
 .hii-space-toolbar strong { padding: 0 10px 0 6px; color: #26342c; font: 10px/1 "SF Mono", ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
-.hii-space-toolbar button { min-width: 62px; min-height: 42px; padding: 0 12px; border: 0; border-radius: 12px; background: #e5e0d4; color: #26342c; font-size: 12px; font-weight: 650; }
+.hii-space-toolbar button { display: inline-flex; min-width: 62px; min-height: 42px; align-items: center; justify-content: center; gap: 8px; padding: 0 12px; border: 0; border-radius: 12px; background: #e5e0d4; color: #26342c; font-size: 12px; font-weight: 650; }
+.hii-space-toolbar button kbd { padding: 2px 4px; border: 1px solid rgba(38, 52, 44, .22); border-radius: 4px; font: 8px/1 "SF Mono", ui-monospace, monospace; opacity: .62; }
 .hii-space-toolbar button[aria-pressed="true"] { background: #26342c; color: #fffdf7; }
 .hii-account-tools { position: absolute; right: 0; bottom: calc(100% + 8px); display: grid; width: min(340px, calc(100vw - 20px)); gap: 14px; padding: 16px; border: 1px solid rgba(32, 45, 38, .26); background: rgba(255, 253, 247, .98); color: #26342c; }
-.hii-account-tools > div { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; border: 1px solid currentColor; background: currentColor; }
+.hii-account-tools > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; border: 1px solid currentColor; background: currentColor; }
 .hii-account-tools > div button { min-height: 40px; border-radius: 0; background: #fffdf7; font-size: 10px; font-weight: 400; }
 .hii-account-tools form { display: grid; grid-template-columns: minmax(0, 1fr) auto; border-bottom: 1px solid currentColor; }
 .hii-account-tools input { min-width: 0; min-height: 40px; padding: 0; border: 0; outline: 0; background: transparent; color: inherit; font: 10px/1 "SF Mono", ui-monospace, monospace; }
@@ -149,6 +150,7 @@ button, input, textarea { font: inherit; }
   .hii-space-toolbar { width: calc(100vw - 20px); justify-content: space-between; }
   .hii-space-toolbar strong { display: none; }
   .hii-space-toolbar button { min-width: 0; flex: 1; padding-inline: 8px; }
+  .hii-space-toolbar button kbd { display: none; }
 }
 .hii-source { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: 100%; height: 100%; color: inherit; }
 .hii-source header, .hii-source footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; color: var(--muted); font: 10px/1.3 "SF Mono", ui-monospace, monospace; }
