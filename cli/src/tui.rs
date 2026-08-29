@@ -423,7 +423,7 @@ pub(crate) fn welcome_frame(
     provider: &str,
     model: &str,
     greeting: &str,
-    public_test: bool,
+    _public_test: bool,
 ) -> String {
     let brand = format!(
         "{}  {}",
@@ -434,17 +434,8 @@ pub(crate) fn welcome_frame(
         &format!("{}  ·  {}  ·  {}", short_path(workspace), provider, model),
         &[DIM, palette().muted],
     );
-    let question = paint("What do you want to make, understand, or change?", &[BOLD]);
-    let guidance = paint(
-        if public_test {
-            "Type naturally  ·  / for controls"
-        } else {
-            "Type naturally  ·  / for controls  ·  /overview for context"
-        },
-        &[DIM, palette().muted],
-    );
     let greeting = paint(greeting, &[palette().secondary]);
-    format!("{brand}\n{location}\n\n{greeting}\n{question}\n{guidance}")
+    format!("{brand}\n{location}\n\n{greeting}")
 }
 
 pub fn prompt_frame(_frame: usize) -> String {
@@ -892,7 +883,7 @@ mod tests {
     }
 
     #[test]
-    fn welcome_is_compact_and_oriented_around_human_intent() {
+    fn welcome_is_compact_and_leaves_instruction_to_the_composer() {
         let rendered = welcome_frame(
             Path::new("/tmp/studio"),
             "HII Native",
@@ -901,11 +892,11 @@ mod tests {
             false,
         );
         assert!(rendered.contains("HUMAN INFORMATION INTERFACE"));
-        assert!(rendered.contains("make, understand, or change"));
         assert!(rendered.contains("HII Native"));
         assert!(rendered.contains("Welcome back"));
-        assert!(rendered.contains("/overview for context"));
-        assert_eq!(rendered.lines().count(), 6);
+        assert!(!rendered.contains("What do you want"));
+        assert!(!rendered.contains("Type naturally"));
+        assert_eq!(rendered.lines().count(), 4);
     }
 
     #[test]
