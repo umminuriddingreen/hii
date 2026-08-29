@@ -25,6 +25,15 @@ pub const MAX_FRAME_DIMENSION: u32 = 16_384;
 /// Dirty rectangles are bounded to prevent small control frames from creating
 /// unbounded downstream work.
 pub const MAX_DIRTY_RECTS: usize = 256;
+/// Terminal input is deliberately smaller than output to bound pasted commands.
+pub const MAX_TERMINAL_INPUT_BYTES: usize = 1024 * 1024;
+/// One terminal output message may carry at most four MiB.
+pub const MAX_TERMINAL_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_TERMINAL_CWD_BYTES: usize = 4096;
+pub const MIN_TERMINAL_COLS: u16 = 20;
+pub const MAX_TERMINAL_COLS: u16 = 500;
+pub const MIN_TERMINAL_ROWS: u16 = 4;
+pub const MAX_TERMINAL_ROWS: u16 = 300;
 
 const MAGIC: [u8; 4] = *b"HIIF";
 const HEADER_LEN: usize = 12;
@@ -70,6 +79,10 @@ pub enum Message {
     ServiceUnexpose(ServiceUnexpose),
     JobRequest(JobRequest),
     JobResult(JobResult),
+    TerminalOpenRequest(TerminalOpenRequest),
+    TerminalState(TerminalState),
+    TerminalData(TerminalData),
+    TerminalResize(TerminalResize),
     Error(ProtocolErrorMessage),
     ReceiptReference(ReceiptReference),
 }
@@ -79,6 +92,9 @@ impl Message {
         match self {
             Self::FileChunk(chunk) => chunk.validate(),
             Self::FrameMetadata(frame) => frame.validate(),
+            Self::TerminalOpenRequest(request) => request.validate(),
+            Self::TerminalData(data) => data.validate(),
+            Self::TerminalResize(resize) => resize.validate(),
             _ => Ok(()),
         }
     }
@@ -183,6 +199,7 @@ pub enum AuthorityAction {
     MutateClipboard,
     ExposeService,
     RunJob,
+    OpenTerminal,
 }
 
 /// A reference to authority established outside this protocol crate.
@@ -238,6 +255,7 @@ pub enum ChannelKind {
     ClipboardWrite,
     ServiceProxy,
     Jobs,
+    Terminal,
 }
 
 impl ChannelKind {
@@ -249,8 +267,125 @@ impl ChannelKind {
             Self::ClipboardWrite => Some(AuthorityAction::MutateClipboard),
             Self::ServiceProxy => Some(AuthorityAction::ExposeService),
             Self::Jobs => Some(AuthorityAction::RunJob),
+            Self::Terminal => Some(AuthorityAction::OpenTerminal),
         }
     }
+}
+
+/// Request to start one human-controlled PTY on a paired device.
+///
+/// The executor must independently verify the referenced grant, expiry, device,
+/// and working-directory scope before spawning a process.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalOpenRequest {
+    pub channel_id: ChannelId,
+    pub session_id: String,
+    pub device_id: DeviceId,
+    pub cwd: String,
+    pub cols: u16,
+    pub rows: u16,
+    pub expires_at_unix_ms: u64,
+    #[serde(default)]
+    pub authority: AuthorityContext,
+}
+
+impl TerminalOpenRequest {
+    pub fn validate(&self) -> Result<(), MessageValidationError> {
+        if self.session_id.is_empty() || self.session_id.len() > 128 {
+            return Err(MessageValidationError::InvalidTerminalSessionId);
+        }
+        if self.cwd.is_empty()
+            || self.cwd.len() > MAX_TERMINAL_CWD_BYTES
+            || self.cwd.as_bytes().contains(&0)
+        {
+            return Err(MessageValidationError::InvalidTerminalWorkingDirectory);
+        }
+        validate_terminal_size(self.cols, self.rows)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalState {
+    pub channel_id: ChannelId,
+    pub session_id: String,
+    pub status: TerminalStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalStatus {
+    PendingApproval,
+    Active,
+    Denied,
+    Exited,
+    Revoked,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalData {
+    pub channel_id: ChannelId,
+    pub session_id: String,
+    pub sequence: u64,
+    pub stream: TerminalStream,
+    #[serde(with = "serde_bytes")]
+    pub data: Vec<u8>,
+}
+
+impl TerminalData {
+    pub fn validate(&self) -> Result<(), MessageValidationError> {
+        let max = match self.stream {
+            TerminalStream::Input => MAX_TERMINAL_INPUT_BYTES,
+            TerminalStream::Output => MAX_TERMINAL_OUTPUT_BYTES,
+        };
+        if self.data.len() > max {
+            return Err(MessageValidationError::TerminalDataTooLarge {
+                actual: self.data.len(),
+                max,
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalStream {
+    Input,
+    Output,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalResize {
+    pub channel_id: ChannelId,
+    pub session_id: String,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+impl TerminalResize {
+    pub fn validate(&self) -> Result<(), MessageValidationError> {
+        validate_terminal_size(self.cols, self.rows)
+    }
+}
+
+fn validate_terminal_size(cols: u16, rows: u16) -> Result<(), MessageValidationError> {
+    if !(MIN_TERMINAL_COLS..=MAX_TERMINAL_COLS).contains(&cols)
+        || !(MIN_TERMINAL_ROWS..=MAX_TERMINAL_ROWS).contains(&rows)
+    {
+        return Err(MessageValidationError::InvalidTerminalSize { cols, rows });
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -715,6 +850,14 @@ pub enum MessageValidationError {
     DirtyRectOutOfBounds,
     #[error("frame plane layout is invalid for its format or payload")]
     InvalidFramePlaneLayout,
+    #[error("terminal session id is invalid")]
+    InvalidTerminalSessionId,
+    #[error("terminal working directory is invalid")]
+    InvalidTerminalWorkingDirectory,
+    #[error("terminal size {cols}x{rows} is outside the supported bounds")]
+    InvalidTerminalSize { cols: u16, rows: u16 },
+    #[error("terminal data is {actual} bytes; maximum is {max}")]
+    TerminalDataTooLarge { actual: usize, max: usize },
 }
 
 #[derive(Debug, Error)]

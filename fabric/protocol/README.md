@@ -3,7 +3,8 @@
 This standalone Rust crate is the first bounded control-plane substrate for
 HII's user-owned Mac/Windows machine fabric. It defines versioned message types
 and a length-delimited MessagePack frame. It does **not** connect devices,
-capture displays, inject input, expose ports, transfer files, or run jobs.
+capture displays, inject input, expose ports, transfer files, open terminals,
+or run jobs.
 
 ## Wire framing
 
@@ -41,7 +42,9 @@ adapters should reproduce these exact validation rules.
   populated authority claim must be checked against the live, unexpired,
   revocable grant on the receiving device.
 - Input injection, file mutation/transfer, clipboard mutation, service
-  exposure, and jobs require explicit authority. Service exposure uses a typed,
+  exposure, terminal opening, and jobs require explicit authority. Terminal
+  requests name one device, working directory, expiry, and bounded PTY size;
+  the device executor must still verify that exact live grant. Service exposure uses a typed,
   non-zero loopback endpoint; arbitrary or wildcard hosts are not representable
   and there is no blanket localhost exposure message.
 - Health, receipt observation, and display/audio observation are read-only at
@@ -71,7 +74,7 @@ Before this crate can carry real HII work, the parent runtime needs:
 3. per-channel state machines, quotas, timeouts, cancellation, backpressure,
    latest-frame behavior, and audit events;
 4. OS-specific Mac and Windows executors for capture, render, input, filesystem,
-   localhost proxying, and bounded jobs;
+   localhost proxying, approved PTYs, and bounded jobs;
 5. digest calculation, resumable transfer state, safe destination handling, and
    atomic finalization for files;
 6. receipts created from executor-returned evidence and exposed as durable HII

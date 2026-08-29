@@ -87,6 +87,82 @@ fn representative_data_messages_round_trip() {
 }
 
 #[test]
+fn terminal_channel_requires_explicit_authority() {
+    let denied = ChannelOpen {
+        channel_id: 9,
+        kind: ChannelKind::Terminal,
+        authority: AuthorityContext::default(),
+        options: vec![],
+    };
+    assert!(!denied.authority_claim_is_sufficient());
+
+    let allowed = ChannelOpen {
+        authority: AuthorityContext {
+            grant_id: Some("terminal-grant-1".into()),
+            actions: BTreeSet::from([AuthorityAction::OpenTerminal]),
+            user_confirmed: true,
+        },
+        ..denied
+    };
+    assert!(allowed.authority_claim_is_sufficient());
+}
+
+#[test]
+fn terminal_messages_round_trip_and_enforce_bounds() {
+    let authority = AuthorityContext {
+        grant_id: Some("terminal-grant-1".into()),
+        actions: BTreeSet::from([AuthorityAction::OpenTerminal]),
+        user_confirmed: true,
+    };
+    let request = TerminalOpenRequest {
+        channel_id: 9,
+        session_id: "terminal-session-1".into(),
+        device_id: "mac-1".into(),
+        cwd: "/Users/ummi/hii".into(),
+        cols: 120,
+        rows: 36,
+        expires_at_unix_ms: 1_700_000_600_000,
+        authority,
+    };
+    let codec = FrameCodec::default();
+    let original = envelope(Message::TerminalOpenRequest(request.clone()));
+    assert_eq!(
+        codec.decode(&codec.encode(&original).unwrap()).unwrap(),
+        original
+    );
+    assert_eq!(request.validate(), Ok(()));
+
+    let invalid_size = TerminalResize {
+        channel_id: 9,
+        session_id: request.session_id.clone(),
+        cols: MAX_TERMINAL_COLS + 1,
+        rows: 36,
+    };
+    assert_eq!(
+        invalid_size.validate(),
+        Err(MessageValidationError::InvalidTerminalSize {
+            cols: MAX_TERMINAL_COLS + 1,
+            rows: 36,
+        })
+    );
+
+    let oversized_input = TerminalData {
+        channel_id: 9,
+        session_id: request.session_id,
+        sequence: 1,
+        stream: TerminalStream::Input,
+        data: vec![0; MAX_TERMINAL_INPUT_BYTES + 1],
+    };
+    assert_eq!(
+        oversized_input.validate(),
+        Err(MessageValidationError::TerminalDataTooLarge {
+            actual: MAX_TERMINAL_INPUT_BYTES + 1,
+            max: MAX_TERMINAL_INPUT_BYTES,
+        })
+    );
+}
+
+#[test]
 fn validates_frame_clock_layout_and_dirty_rect_bounds() {
     let raw = FrameMetadata {
         channel_id: 7,
