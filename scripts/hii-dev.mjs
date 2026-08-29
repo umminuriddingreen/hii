@@ -6,7 +6,11 @@ const children = [
   spawn(process.execPath, ['scripts/hii-web-dev-runtime.mjs'], { stdio: 'inherit', env: process.env }),
   spawn('next', ['dev', '--hostname', '127.0.0.1', ...process.argv.slice(2)], {
     stdio: 'inherit',
-    env: { ...process.env, NEXT_PUBLIC_HII_TARGET: 'web' }
+    env: {
+      ...process.env,
+      HII_NEXT_DIST_DIR: process.env.HII_NEXT_DIST_DIR || '.next-web-dev',
+      NEXT_PUBLIC_HII_TARGET: 'web'
+    }
   })
 ];
 
