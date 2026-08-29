@@ -69,10 +69,8 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/theme", "visual signature"),
     ("/keymap", "keyboard profile"),
     ("/usage", "tokens and speed"),
-    ("/thinking", "thought stream"),
     ("/reasoning", "model effort"),
     ("/autonomy", "local action policy"),
-    ("/raw", "raw model stream"),
     ("/model", "choose local model"),
     ("/files", "ranger-style explorer"),
     ("/explore", "ranger-style explorer"),
@@ -655,6 +653,30 @@ pub fn tool_result(ok: bool, verification: bool) {
     ));
 }
 
+pub fn tool_output(output: &str) {
+    if output.trim().is_empty() {
+        return;
+    }
+    println!("{}", paint("  TOOL OUTPUT", &[BOLD, palette().secondary]));
+    println!("{output}");
+}
+
+pub fn model_stream_start(model: &str, phase: &str) -> String {
+    format!(
+        "{}  {}  {}",
+        paint("◇ MODEL", &[BOLD, palette().primary]),
+        paint("running", &[BOLD]),
+        paint(&format!("{model} · {phase}"), &[DIM, palette().muted])
+    )
+}
+
+pub fn model_stream_section(section: &str) -> String {
+    paint(
+        &format!("◇ {}", section.to_ascii_uppercase()),
+        &[BOLD, palette().secondary],
+    )
+}
+
 pub fn model_activity(frame: usize, phase: &str, detail: Option<&str>) -> String {
     const FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
     let phase = match phase {
@@ -766,8 +788,8 @@ pub fn error(message: &str) {
 mod tests {
     use super::{
         clear_activity_sequence, command_matches, command_menu, composer_window, model_activity,
-        overview, prompt_frame, short_path, terminal_width, theme_choices, welcome_frame,
-        workspace_state, Theme,
+        model_stream_section, model_stream_start, overview, prompt_frame, short_path,
+        terminal_width, theme_choices, welcome_frame, workspace_state, Theme,
     };
     use std::path::Path;
 
@@ -900,6 +922,16 @@ mod tests {
     }
 
     #[test]
+    fn transparent_model_stream_names_loading_and_raw_sections() {
+        let loading = model_stream_start("local-model", "thinking");
+        assert!(loading.contains("MODEL"));
+        assert!(loading.contains("running"));
+        assert!(loading.contains("local-model"));
+        assert!(model_stream_section("thinking").contains("THINKING"));
+        assert!(model_stream_section("output").contains("OUTPUT"));
+    }
+
+    #[test]
     fn collapsed_activity_clears_exactly_the_rows_it_owned() {
         assert_eq!(clear_activity_sequence(0), "");
         assert_eq!(clear_activity_sequence(2).matches("\x1b[1A").count(), 2);
@@ -934,7 +966,8 @@ mod tests {
         let matches = command_matches("/", true);
         assert!(matches.iter().any(|(command, _)| command == "/model"));
         assert!(matches.iter().any(|(command, _)| command == "/new"));
-        assert!(matches.iter().any(|(command, _)| command == "/raw"));
+        assert!(!matches.iter().any(|(command, _)| command == "/raw"));
+        assert!(!matches.iter().any(|(command, _)| command == "/thinking"));
         assert!(matches.iter().any(|(command, _)| command == "/theme"));
         assert!(matches.iter().any(|(command, _)| command == "/keymap"));
         assert!(matches.iter().any(|(command, _)| command == "/attach"));

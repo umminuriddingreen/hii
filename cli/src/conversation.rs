@@ -63,8 +63,6 @@ struct SessionUsage {
 
 #[derive(Clone, Copy)]
 enum ThinkingMode {
-    Off,
-    Compact,
     Raw,
 }
 
@@ -85,36 +83,6 @@ fn clean_final_output(message: &str, already_streamed: bool) -> String {
         String::new()
     } else {
         message.trim_end().to_string()
-    }
-}
-
-#[derive(Default)]
-struct VisibleReasoning {
-    buffer: String,
-}
-
-impl VisibleReasoning {
-    fn push(&mut self, delta: &str) -> Vec<String> {
-        self.buffer.push_str(delta);
-        let mut lines = Vec::new();
-        while let Some(index) = self.buffer.find('\n') {
-            let line = self.buffer[..index].to_string();
-            self.buffer.drain(..=index);
-            if let Some(line) = self.clean(&line) {
-                lines.push(line);
-            }
-        }
-        lines
-    }
-
-    fn finish(&mut self) -> Option<String> {
-        let line = std::mem::take(&mut self.buffer);
-        self.clean(&line)
-    }
-
-    fn clean(&mut self, value: &str) -> Option<String> {
-        let line = value.trim_end();
-        (!line.trim().is_empty()).then(|| redact_text(line))
     }
 }
 
@@ -354,11 +322,7 @@ impl Conversation {
             max_steps,
             usage: SessionUsage::default(),
             last_skill_draft: None,
-            thinking_mode: match std::env::var("HII_THINKING").as_deref() {
-                Ok("off") => ThinkingMode::Off,
-                Ok("raw") | Ok("live") | Ok("detailed") => ThinkingMode::Raw,
-                _ => ThinkingMode::Raw,
-            },
+            thinking_mode: ThinkingMode::Raw,
             reasoning_mode: match std::env::var("HII_REASONING").as_deref() {
                 Ok("off") => ReasoningMode::Off,
                 Ok("deep") => ReasoningMode::Deep,
@@ -821,9 +785,7 @@ impl Conversation {
                     }
                     if io::stdout().is_terminal() {
                         crate::tui::tool_result(ok, false);
-                        if !ok {
-                            crate::tui::tool_failure_detail(&safe_output);
-                        }
+                        crate::tui::tool_output(&safe_output);
                     }
                     let post_hooks = self.hooks.fire(
                         HookEvent::PostTool,
@@ -1214,9 +1176,7 @@ impl Conversation {
                     }
                     if io::stdout().is_terminal() {
                         crate::tui::tool_result(result.ok, result.verification || shell_evidence);
-                        if !result.ok {
-                            crate::tui::tool_failure_detail(&safe_output);
-                        }
+                        crate::tui::tool_output(&safe_output);
                     }
                     if result.verification || shell_evidence {
                         let accepted = result.ok && (!web_mutation_pending || tool == "http");
@@ -1498,11 +1458,7 @@ impl Conversation {
             ReasoningMode::Off => "off",
             ReasoningMode::Deep => "deep",
         };
-        let thinking = match self.thinking_mode {
-            ThinkingMode::Off => "off",
-            ThinkingMode::Compact => "compact",
-            ThinkingMode::Raw => "raw",
-        };
+        let thinking = "raw";
         format!(
             "{} messages · {} characters\n{}\n{}\n{}\nAttachments: {} pending · {}\nMCP: {} cached tool(s)\nMode: {}\nReasoning: {} · thinking display: {}\nAuthority: {}\nTheme: {}\nKeymap: {}\nGoal: {}\nLearning draft: {}",
             self.messages.len().saturating_sub(1),
@@ -2019,33 +1975,9 @@ impl Conversation {
     }
 
     pub fn thinking(&mut self, requested: Option<&str>) -> Result<String, String> {
-        let Some(requested) = requested else {
-            let current = match self.thinking_mode {
-                ThinkingMode::Off => "off",
-                ThinkingMode::Compact => "compact",
-                ThinkingMode::Raw => "raw",
-            };
-            if crate::picker::is_available() {
-                let choices = mode_choices(THINKING_MODES, current);
-                let Some(selected) = crate::picker::select("Select thinking activity", &choices)?
-                else {
-                    return Ok(format!("Thinking: {current}"));
-                };
-                // Re-enter with the choice so validation and the store event stay
-                // single-sourced in the argument path.
-                return self.thinking(Some(&selected));
-            }
-            return Ok(format!("Thinking: {current}\nModes: off | compact | raw"));
-        };
-        self.thinking_mode = match requested {
-            "off" => ThinkingMode::Off,
-            "compact" => ThinkingMode::Compact,
-            "raw" | "live" | "detailed" => ThinkingMode::Raw,
-            _ => return Err("thinking mode must be off, compact, or raw".into()),
-        };
-        self.store
-            .event("conversation.thinking_mode", json!({"mode": requested}))?;
-        Ok(format!("Thinking activity set to {requested}."))
+        let _ = requested;
+        self.thinking_mode = ThinkingMode::Raw;
+        Ok("Model activity is always shown as a live event stream.".into())
     }
 
     pub fn reasoning(&mut self, requested: Option<&str>) -> Result<String, String> {
@@ -2617,16 +2549,24 @@ impl Conversation {
         bounded_reasoning: bool,
     ) -> Result<ChatResult, String> {
         let started = Instant::now();
-        let mut reasoning = VisibleReasoning::default();
         let mut reasoning_started = false;
         let mut live_input = crate::keyboard::LiveInput::enter(self.keymap.clone())?;
         let interactive = io::stdout().is_terminal();
         let raw_activity = matches!(self.thinking_mode, ThinkingMode::Raw);
-        let compact_activity = matches!(self.thinking_mode, ThinkingMode::Compact);
+        let compact_activity = false;
         let mut content_started = false;
+        let mut content_heading_started = false;
         let mut reasoning_chars = 0usize;
         let mut activity_frame = 0usize;
         let mut thinking_excerpt = String::new();
+        if interactive && raw_activity {
+            let line = crate::tui::model_stream_start(&model, phase);
+            if let Some(input) = live_input.as_mut() {
+                input.write_stream(&format!("{line}\n"))?;
+            } else {
+                crate::tui::model_text(&line);
+            }
+        }
         if interactive && !raw_activity {
             if let Some(input) = live_input.as_mut() {
                 input.replace_stream_line(&crate::tui::model_activity(0, phase, None))?;
@@ -2707,13 +2647,15 @@ impl Conversation {
                             ))?;
                         }
                     } else if interactive && raw_activity {
-                        for line in reasoning.push(&delta) {
+                        if !reasoning_started {
+                            let heading = crate::tui::model_stream_section("thinking");
                             if let Some(input) = live_input.as_mut() {
-                                input.write_stream(&format!("{line}\n"))?;
-                            } else {
-                                crate::tui::model_text(&line);
+                                input.write_stream(&format!("{heading}\n"))?;
                             }
                             reasoning_started = true;
+                        }
+                        if let Some(input) = live_input.as_mut() {
+                            input.write_stream(&delta)?;
                         }
                     }
                 }
@@ -2721,6 +2663,13 @@ impl Conversation {
                     if interactive && show_content {
                         content_started = true;
                         if raw_activity {
+                            if !content_heading_started {
+                                let heading = crate::tui::model_stream_section("output");
+                                if let Some(input) = live_input.as_mut() {
+                                    input.write_stream(&format!("\n{heading}\n"))?;
+                                }
+                                content_heading_started = true;
+                            }
                             self.last_reply_streamed = true;
                             if let Some(input) = live_input.as_mut() {
                                 input.write_stream(&delta)?;
@@ -2746,16 +2695,6 @@ impl Conversation {
                 }
                 Ok(ChatStreamEvent::Done(result)) => {
                     if interactive {
-                        if raw_activity {
-                            if let Some(line) = reasoning.finish() {
-                                if let Some(input) = live_input.as_mut() {
-                                    input.write_stream(&format!("{line}\n"))?;
-                                } else {
-                                    crate::tui::model_text(&line);
-                                }
-                                reasoning_started = true;
-                            }
-                        }
                         if let Some(input) = live_input.as_mut() {
                             input.finish_stream();
                         } else if reasoning_started || content_started {
@@ -3219,6 +3158,7 @@ fn advisor_suggestion(raw: &str) -> Result<(String, String, String, String), Str
     ))
 }
 
+#[cfg(test)]
 const THINKING_MODES: &[(&str, &str)] = &[
     ("off", "no thought stream"),
     ("compact", "one-line summaries of the model's thinking"),

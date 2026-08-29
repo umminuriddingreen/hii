@@ -2956,7 +2956,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                         .into(),
                 );
             }
-            tui::system("Loading HII Native. The first model acquisition can take a while; the composer will open when the model is ready.");
+            tui::system("◇ MODEL LOADING  HII Native · acquiring the local model; live model events begin when the runner is ready.");
             let started = std::time::Instant::now();
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(1));
@@ -3441,8 +3441,8 @@ fn slash_help() -> String {
         "/theme [name]                 switch the persistent visual signature\n/keymap [default|vim]          inspect or switch keyboard profile\n/keymap bind ACTION CHORD      add a safe custom binding\n",
     )
     .replace(
-        "/thinking [mode]              off | compact | raw model stream\n",
-        "/thinking [mode]              off | compact | raw display\n/reasoning [mode]             auto | off | deep model effort\n/mode [coding|general|auto|local|private|best]\n                               choose coding behavior or provider routing\n/autonomy [local-full|approval]\n                               choose local autonomy policy\n/model save                   persist the current user-determined model\n/learn [status]               show learning memory\nAuto-compact is on by default.\n",
+        "/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n",
+        "/reasoning [mode]             auto | off | deep model effort\n/mode [coding|general|auto|local|private|best]\n                               choose coding behavior or provider routing\n/autonomy [local-full|approval]\n                               choose local autonomy policy\n/model save                   persist the current user-determined model\n/learn [status]               show learning memory\nModel activity is always shown as a live event stream.\nAuto-compact is on by default.\n",
     )
 }
 
@@ -3453,7 +3453,10 @@ fn slash_help_compact() -> String {
 
 fn public_test_slash_help() -> String {
     "/help                         show commands\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/status                       show isolated session, workspace, model, and usage\n/attach <path>                add workspace text/image context\n/attachments                  show pending context and size\n/detach [number|all]          remove pending context\n/theme [name]                 switch the terminal theme\n/keymap [default|vim]          inspect or switch keyboard profile\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw display\n/reasoning [mode]             auto | off | deep model effort\n/raw [on|off]                 toggle the raw model stream\n/model [name]                 list or switch available models\n/proof [run-id]               inspect isolated execution proof\n/permissions                  show the tester-safe authority boundary\n/undo                         drop the last exchange\n/exit                         leave HII\n\nAttachments must already exist inside this disposable workspace. Installed Mac tools are available to HII inside it. Direct shell input and deletion are unavailable."
-        .to_string()
+        .replace(
+            "/thinking [mode]              off | compact | raw display\n/reasoning [mode]             auto | off | deep model effort\n/raw [on|off]                 toggle the raw model stream\n",
+            "/reasoning [mode]             auto | off | deep model effort\nModel activity is always shown as a live event stream.\n",
+        )
 }
 
 fn lifecycle_hooks_enabled(no_hooks: bool, profile: SessionProfile) -> bool {
