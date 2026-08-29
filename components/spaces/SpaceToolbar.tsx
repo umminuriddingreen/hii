@@ -50,13 +50,13 @@ export function SpaceToolbar({
   };
 
   return <nav className="hii-space-toolbar" data-workspace-ui aria-label="Space tools" onPointerDown={(event) => event.stopPropagation()}>
-    <strong>{accountTools ? 'HII Canvas' : 'HII Space'}</strong>
-    {accountTools && <button type="button" onClick={onOpenTerminal}><span>Terminal</span><kbd>Space</kbd></button>}
-    {photo && <button type="button" onClick={onAddImage}><span>{accountTools ? 'Upload' : 'Photo'}</span>{accountTools && <kbd>⌘U</kbd>}</button>}
-    <button type="button" onClick={onAddText}><span>Text</span>{accountTools && <kbd>T</kbd>}</button>
-    {!accountTools && <button type="button" onClick={onAddSticker}>Sticker</button>}
-    <button type="button" aria-pressed={drawing} onClick={onToggleDrawing}><span>{drawing ? 'Drawing...' : 'Draw'}</span>{accountTools && <kbd>D</kbd>}</button>
-    {accountTools && <button type="button" aria-expanded={expanded} aria-controls="hii-account-tools" onClick={() => setExpanded((value) => !value)}>More</button>}
+    <strong>{accountTools ? 'hii canvas' : 'hii space'}</strong>
+    {accountTools && <button type="button" onClick={onOpenTerminal}><span>terminal</span><kbd>space</kbd></button>}
+    {photo && <button type="button" onClick={onAddImage}><span>{accountTools ? 'upload' : 'photo'}</span>{accountTools && <kbd>⌘u</kbd>}</button>}
+    <button type="button" onClick={onAddText}><span>text</span>{accountTools && <kbd>t</kbd>}</button>
+    {!accountTools && <button type="button" onClick={onAddSticker}>sticker</button>}
+    <button type="button" aria-pressed={drawing} onClick={onToggleDrawing}><span>{drawing ? 'drawing…' : 'draw'}</span>{accountTools && <kbd>d</kbd>}</button>
+    {accountTools && <button type="button" aria-expanded={expanded} aria-controls="hii-account-tools" onClick={() => setExpanded((value) => !value)}>more</button>}
     {accountTools && expanded && <section id="hii-account-tools" className="hii-account-tools" aria-label="More canvas tools">
       <div>
         <button type="button" onClick={onUndo}>undo</button>

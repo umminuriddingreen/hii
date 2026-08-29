@@ -77,12 +77,12 @@ describe('HII web access gate', () => {
     expect(canvas).toContain('{isTouchCanvas && <SpaceToolbar');
     expect(canvas).toContain('accountTools={isAccount}');
     const toolbar = readFileSync('components/spaces/SpaceToolbar.tsx', 'utf8');
-    expect(toolbar).toContain("accountTools ? 'Upload' : 'Photo'");
-    expect(toolbar).toContain('<span>Terminal</span><kbd>Space</kbd>');
-    expect(toolbar).toContain("accountTools && <kbd>⌘U</kbd>");
-    expect(toolbar).toContain('<span>Text</span>');
-    expect(toolbar).toContain('accountTools && <kbd>T</kbd>');
-    expect(toolbar).toContain('accountTools && <kbd>D</kbd>');
+    expect(toolbar).toContain("accountTools ? 'upload' : 'photo'");
+    expect(toolbar).toContain('<span>terminal</span><kbd>space</kbd>');
+    expect(toolbar).toContain("accountTools && <kbd>⌘u</kbd>");
+    expect(toolbar).toContain('<span>text</span>');
+    expect(toolbar).toContain('accountTools && <kbd>t</kbd>');
+    expect(toolbar).toContain('accountTools && <kbd>d</kbd>');
     expect(canvas).toContain('isAccount && isTerminalShortcut(event)');
     expect(canvas).toContain("event.key.toLowerCase() === 'u'");
     expect(canvas).toContain("event.key.toLowerCase() === 't'");
