@@ -410,19 +410,28 @@ pub fn overview(
 
 /// A quiet first frame for the human-facing terminal surface. It establishes
 /// place and possibility without turning startup into a dashboard.
-pub fn welcome(workspace: &Path, model: &str, public_test: bool) {
-    println!("{}", welcome_frame(workspace, model, public_test));
+pub fn welcome(workspace: &Path, provider: &str, model: &str, greeting: &str, public_test: bool) {
+    println!(
+        "{}",
+        welcome_frame(workspace, provider, model, greeting, public_test)
+    );
     println!();
 }
 
-pub(crate) fn welcome_frame(workspace: &Path, model: &str, public_test: bool) -> String {
+pub(crate) fn welcome_frame(
+    workspace: &Path,
+    provider: &str,
+    model: &str,
+    greeting: &str,
+    public_test: bool,
+) -> String {
     let brand = format!(
         "{}  {}",
         paint("HII", &[BOLD, palette().primary]),
         paint("HUMAN INFORMATION INTERFACE", &[DIM, palette().muted])
     );
     let location = paint(
-        &format!("{}  ·  {}", short_path(workspace), model),
+        &format!("{}  ·  {}  ·  {}", short_path(workspace), provider, model),
         &[DIM, palette().muted],
     );
     let question = paint("What do you want to make, understand, or change?", &[BOLD]);
@@ -434,7 +443,8 @@ pub(crate) fn welcome_frame(workspace: &Path, model: &str, public_test: bool) ->
         },
         &[DIM, palette().muted],
     );
-    format!("{brand}\n{location}\n\n{question}\n{guidance}")
+    let greeting = paint(greeting, &[palette().secondary]);
+    format!("{brand}\n{location}\n\n{greeting}\n{question}\n{guidance}")
 }
 
 pub fn prompt_frame(_frame: usize) -> String {
@@ -883,11 +893,19 @@ mod tests {
 
     #[test]
     fn welcome_is_compact_and_oriented_around_human_intent() {
-        let rendered = welcome_frame(Path::new("/tmp/studio"), "local-model", false);
+        let rendered = welcome_frame(
+            Path::new("/tmp/studio"),
+            "HII Native",
+            "local-model",
+            "Welcome back — 2 context sources loaded.",
+            false,
+        );
         assert!(rendered.contains("HUMAN INFORMATION INTERFACE"));
         assert!(rendered.contains("make, understand, or change"));
+        assert!(rendered.contains("HII Native"));
+        assert!(rendered.contains("Welcome back"));
         assert!(rendered.contains("/overview for context"));
-        assert_eq!(rendered.lines().count(), 5);
+        assert_eq!(rendered.lines().count(), 6);
     }
 
     #[test]

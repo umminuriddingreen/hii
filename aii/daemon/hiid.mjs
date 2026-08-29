@@ -998,6 +998,33 @@ function nativeRunnerBin() {
   return path.join(ROOT, "target", "debug", "hii-native-runner");
 }
 
+function ensureHiiNativeEngine() {
+  if (process.platform !== "darwin" || process.arch !== "arm64") return null;
+  const runtimeRoot = path.join(RUNTIME, "runtimes", "mlx");
+  const server = path.join(runtimeRoot, "bin", "mlx_vlm.server");
+  if (fs.existsSync(server)) return server;
+  const candidates = ["/opt/homebrew/bin/python3.12", "/opt/homebrew/bin/python3.13", "python3"];
+  const python = candidates.find((candidate) => {
+    const result = spawnSync(candidate, ["--version"], { stdio: "ignore" });
+    return result.status === 0;
+  });
+  if (!python) throw new Error("HII Native needs Python 3.12+ to prepare its MLX engine.");
+  console.log("Preparing HII Native's private Apple-Silicon runtime…");
+  let result = spawnSync(python, ["-m", "venv", runtimeRoot], { stdio: "inherit" });
+  if (result.status !== 0) throw new Error("could not create HII Native's managed MLX environment");
+  const pip = path.join(runtimeRoot, "bin", "python");
+  result = spawnSync(pip, [
+    "-m", "pip", "install", "--disable-pip-version-check",
+    "mlx-vlm==0.6.17", "jinja2==3.1.6"
+  ], {
+    stdio: "inherit"
+  });
+  if (result.status !== 0 || !fs.existsSync(server)) {
+    throw new Error("could not install HII Native's MLX-VLM engine");
+  }
+  return server;
+}
+
 function modelRuntimePid() {
   const pid = Number(fs.existsSync(MODEL_RUNTIME_PID) ? fs.readFileSync(MODEL_RUNTIME_PID, "utf8").trim() : "");
   if (!pidAlive(pid)) return null;
@@ -1018,7 +1045,7 @@ function modelRuntimeStatus() {
     ...previous,
     pid,
     endpoint: MODEL_RUNTIME_URL,
-    backend: "mistral.rs-metal",
+    backend: previous.backend || "hii-native",
     modelHome: path.join(RUNTIME, "models"),
     log: MODEL_RUNTIME_LOG,
     binary: nativeRunnerBin(),
@@ -1056,10 +1083,11 @@ async function startModelRuntime(args) {
   if (!fs.existsSync(binary)) {
     throw new Error(`native runner binary missing at ${binary}; run npm run runner:build`);
   }
+  const mlxVlm = ensureHiiNativeEngine();
   const modelIndex = args.indexOf("--model");
   const quantIndex = args.indexOf("--quant");
   const profile = consumerModelProfile();
-  const model = modelIndex >= 0 ? args[modelIndex + 1] : "Qwen/Qwen3-4B";
+  const model = modelIndex >= 0 ? args[modelIndex + 1] : profile.model;
   const quant = quantIndex >= 0 ? args[quantIndex + 1] : "4";
   if (!model) throw new Error("--model requires a model ID or local path");
   if (!quant) throw new Error("--quant requires a mistral.rs ISQ value");
@@ -1071,7 +1099,11 @@ async function startModelRuntime(args) {
     cwd: ROOT,
     detached: true,
     stdio: ["ignore", out, out],
-    env: { ...process.env, HII_RUNTIME_DIR: RUNTIME }
+    env: {
+      ...process.env,
+      HII_RUNTIME_DIR: RUNTIME,
+      ...(mlxVlm ? { HII_MLX_VLM_BIN: mlxVlm } : {})
+    }
   });
   child.unref();
   fs.closeSync(out);
@@ -1081,7 +1113,9 @@ async function startModelRuntime(args) {
     state: "starting",
     pid: child.pid,
     endpoint: MODEL_RUNTIME_URL,
-    backend: "mistral.rs-metal",
+    backend: process.platform === "darwin" && process.arch === "arm64"
+      ? "hii-native/mlx-vlm"
+      : "hii-native/mistral.rs",
     model,
     quantization: quant,
     profile,
@@ -1108,7 +1142,11 @@ function stopModelRuntime() {
     console.log("HII native runner is not running");
     return;
   }
-  process.kill(pid, "SIGTERM");
+  // The native runner owns engine children (MLX-VLM on Apple Silicon). It is
+  // launched as a detached process group, so stop the whole owned runtime and
+  // never leave a model server orphaned on the loopback port.
+  if (process.platform === "win32") process.kill(pid, "SIGTERM");
+  else process.kill(-pid, "SIGTERM");
   writeJson(MODEL_RUNTIME_STATUS, { ...modelRuntimeStatus(), state: "stopped", pid: null, stoppedAt: now() });
   event("model_runtime.stopped", {
     actor: "hii.cli", target: MODEL_RUNTIME_URL, status: "stopped", pid,
@@ -1168,7 +1206,10 @@ async function benchModelRuntime(args) {
   const wallMs = Math.round(performance.now() - started);
   const gate = safeReadJson(MODEL_PROFILES, {}).performanceGate || {};
   const completionTokens = Number(body.usage?.completion_tokens || 0);
-  const completionTokensPerSecond = Number(body.usage?.avg_compl_tok_per_sec || 0);
+  const reportedTokensPerSecond = Number(body.usage?.avg_compl_tok_per_sec || 0);
+  const completionTokensPerSecond = reportedTokensPerSecond > 0
+    ? reportedTokensPerSecond
+    : completionTokens / Math.max(wallMs / 1000, 0.001);
   const gates = {
     completion: gate.requiresCompletion !== true || completionTokens > 0,
     wall: wallMs <= Number(gate.maxWallMs || 120000),

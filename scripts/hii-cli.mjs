@@ -1062,7 +1062,7 @@ function agentCommandCatalog() {
     { command: "hii runner init <name>", purpose: "Register an owned runner and print its local token once." },
     { command: "hii runner start --once", purpose: "Heartbeat, claim one whitelisted capability job, stream logs, and exit." },
     { command: "hii runner doctor", purpose: "Inspect the native model runtime, consumer hardware tier, and privacy route." },
-    { command: "hii runner model start", purpose: "Start the HII-owned mistral.rs/Metal service with an explicit model acquisition boundary." },
+    { command: "hii runner model start", purpose: "Start HII Native with the hardware-optimized local engine and explicit model acquisition." },
     { command: "hii runner bench", purpose: "Measure an end-to-end native completion and print model usage." },
     { command: "hii jobs", purpose: "List recent local capability jobs." },
     { command: "hii jobs reconcile", purpose: "Append local reconciliation receipts for completed Claude-backed HII agent jobs." },
@@ -2174,7 +2174,13 @@ function compactWorktree(worktree) {
   return {
     clean: worktree.clean,
     counts: worktree.counts,
-    files: Array.isArray(worktree.files) ? worktree.files.slice(0, 12) : []
+    files: Array.isArray(worktree.files)
+      ? worktree.files.slice(0, 12).map(({ path: filePath, index, worktree: state }) => ({
+          path: filePath,
+          index,
+          worktree: state
+        }))
+      : []
   };
 }
 
@@ -2927,7 +2933,7 @@ usage: hii <command>
   runner init <name>  register an owned runner and print its token once
   runner start --once claim one whitelisted runner job and exit
   runner model doctor inspect native runtime, hardware tier, and privacy route
-  runner model start  start mistral.rs/Metal on 127.0.0.1:11435
+  runner model start  start HII Native on 127.0.0.1:11435
   runner model status show native runtime process, model, endpoint, and log
   runner model models list models loaded by the native runtime
   runner model bench  run a timed end-to-end completion

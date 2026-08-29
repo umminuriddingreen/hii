@@ -228,25 +228,24 @@ goal
 ```
 
 The default work and review model is resolved per provider, because model names
-are not portable between runtimes: Ollama and LM Studio default to
-`qwen3.6:35b-mlx`, HII Native to `Qwen/Qwen3.6-35B-A3B`. `--review` sends the
+are not portable between runtimes: compatibility providers retain their own
+names, while the 48 GB Apple-Silicon HII Native profile uses
+`mlx-community/Qwen3.8-27B-4bit`. `--review` sends the
 final result and proof record to that provider's review model for a stricter
-second pass; `--review-model` overrides it. Ollama remains a replaceable local
-model provider; workspace policy, tools, events, and proof belong to HII/AII.
+second pass; `--review-model` overrides it. Compatibility providers remain
+replaceable; workspace policy, tools, events, and proof belong to HII.
 
 When the operator names no model, a default that is not installed is an error
 listing what is available — HII never silently substitutes a different model,
 because the receipt would then misreport what produced the run.
 
-HII can also talk directly to its native Rust/Metal runner through the same
-OpenAI-compatible boundary. The runner lives at
-`/Users/ummi/dev/hii-native-runner` and binds to loopback port 11435 by
-default:
+HII Native binds to loopback port 11435. Its Rust supervisor owns lifecycle and
+proof; on Apple Silicon its optimized engine is MLX-VLM:
 
 ```sh
 HII_MODEL_PROVIDER=native \
 HII_MODEL_URL=http://127.0.0.1:11435 \
-hii --model Qwen/Qwen3.6-35B-A3B
+hii --model mlx-community/Qwen3.8-27B-4bit
 ```
 
 The native provider supports incremental response and reasoning streams,

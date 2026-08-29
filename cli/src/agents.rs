@@ -53,7 +53,7 @@ impl AgentManager {
         let codex = provider_status("codex")?;
         let claude = provider_status("claude")?;
         Ok(format!(
-            "local   ready · Ollama / LM Studio / HII Native\ncodex   {codex}\nclaude  {claude}\n\n/login codex  ·  /login claude"
+            "local   HII Native · hardware-optimized private runtime\ncodex   {codex}\nclaude  {claude}\n\n/login codex  ·  /login claude\nCompatibility providers remain opt-in through explicit configuration."
         ))
     }
 

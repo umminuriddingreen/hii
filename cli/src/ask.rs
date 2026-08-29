@@ -41,7 +41,11 @@ pub fn run(
         ollama.provider(),
         &models,
     )?;
-    let messages = vec![Message::system(SYSTEM_PROMPT), Message::user(prompt)];
+    let system = format!(
+        "{SYSTEM_PROMPT}\n\n{}",
+        crate::config::runtime_identity_context(ollama.provider(), &model, ollama.base_url(),)
+    );
+    let messages = vec![Message::system(system), Message::user(prompt)];
     let cancel = Cancel::new();
     let (sender, receiver) = mpsc::channel();
     let worker_ollama = ollama.clone();

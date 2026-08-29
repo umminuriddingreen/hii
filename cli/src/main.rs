@@ -350,9 +350,9 @@ enum Commands {
         )]
         json: bool,
     },
-    #[command(about = "Check Rust CLI, workspace, Git, and Ollama readiness")]
+    #[command(about = "Check CLI, workspace, Git, HII Native, and provider readiness")]
     Doctor,
-    #[command(about = "List locally installed Ollama models")]
+    #[command(about = "List models advertised by the selected local runtime")]
     Models,
     #[command(about = "Show local, Codex, and Claude account access")]
     Providers,
@@ -2916,14 +2916,65 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
 
 fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
     let workspace = workspace(cli.cwd.clone())?;
-    let mut conversation = Conversation::new(
-        paths,
-        workspace,
-        cli.model,
-        cli.max_steps,
-        cli.session_profile == SessionProfile::PublicTest,
-        lifecycle_hooks_enabled(cli.no_hooks, cli.session_profile),
-    )?;
+    let public_test = cli.session_profile == SessionProfile::PublicTest;
+    let hooks_enabled = lifecycle_hooks_enabled(cli.no_hooks, cli.session_profile);
+    let create = || {
+        Conversation::new(
+            paths.clone(),
+            workspace.clone(),
+            cli.model.clone(),
+            cli.max_steps,
+            public_test,
+            hooks_enabled,
+        )
+    };
+    let mut conversation = match create() {
+        Ok(conversation) => conversation,
+        Err(error)
+            if !public_test
+                && error.contains("cannot reach HII Native")
+                && io::stdin().is_terminal()
+                && io::stdout().is_terminal() =>
+        {
+            tui::system(
+                "Welcome to HII. HII Native is not prepared on this machine yet.\nSet up the private hardware-optimized local runtime now? [Y/n]",
+            );
+            let mut answer = String::new();
+            io::stdin()
+                .read_line(&mut answer)
+                .map_err(|read_error| read_error.to_string())?;
+            if matches!(answer.trim().to_ascii_lowercase().as_str(), "n" | "no") {
+                return Err("HII Native setup was skipped. Run `hii runner model start` when ready, or use `hii login codex|claude` for an explicit hosted provider.".into());
+            }
+            let args = ["runner", "model", "start"]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            if legacy::run(&paths.repo, &args)? != 0 {
+                return Err(
+                    "HII Native setup did not start. Run `hii runner model logs` for details."
+                        .into(),
+                );
+            }
+            tui::system("Loading HII Native. The first model acquisition can take a while; the composer will open when the model is ready.");
+            let started = std::time::Instant::now();
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                match create() {
+                    Ok(conversation) => break conversation,
+                    Err(wait_error) if started.elapsed() < std::time::Duration::from_secs(1800) => {
+                        if !wait_error.contains("cannot reach HII Native") {
+                            return Err(wait_error);
+                        }
+                    }
+                    Err(wait_error) => return Err(format!(
+                        "HII Native did not become ready within 30 minutes: {wait_error}. Run `hii runner model logs`."
+                    )),
+                }
+            }
+        }
+        Err(error) => return Err(error),
+    };
     let suppress_welcome = env::var("HII_SUPPRESS_WELCOME").ok();
     if !truthy_flag(suppress_welcome.as_deref()) {
         conversation.welcome();

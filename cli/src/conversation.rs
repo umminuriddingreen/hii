@@ -285,6 +285,13 @@ impl Conversation {
         // than read an error and retype a name from `hii models`.
         let model = match choose_model(requested, ollama.provider(), &installed) {
             Ok(model) => model,
+            Err(_error)
+                if requested.is_none()
+                    && std::env::var_os("HII_MODEL").is_none()
+                    && installed.len() == 1 =>
+            {
+                installed[0].clone()
+            }
             Err(error)
                 if requested.is_none()
                     && std::env::var_os("HII_MODEL").is_none()
@@ -321,13 +328,17 @@ impl Conversation {
             .flatten()
             .and_then(|path| std::fs::read_to_string(path).ok())
             .unwrap_or_default();
-        let mut messages = vec![Message::system(conversation_prompt(
+        let primary_prompt = conversation_prompt(
             tools.workspace(),
             max_steps,
             public_test,
             false,
             crate::agent::AutonomyLevel::LocalFull,
             &lessons,
+        );
+        let mut messages = vec![Message::system(format!(
+            "{primary_prompt}\n\n{}",
+            crate::config::runtime_identity_context(ollama.provider(), &model, ollama.base_url())
         ))];
         if !capsule.text.is_empty() {
             messages.push(Message::system(capsule.text));
@@ -1813,7 +1824,46 @@ impl Conversation {
     }
 
     pub fn welcome(&self) {
-        crate::tui::welcome(self.tools.workspace(), &self.model, self.public_test);
+        let latest = find_receipt(&self.paths.runtime, None, self.tools.workspace())
+            .ok()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|raw| serde_json::from_str::<Receipt>(&raw).ok());
+        let greeting = latest
+            .as_ref()
+            .map(|receipt| {
+                let summary = receipt
+                    .summary
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!(
+                    "Welcome back — last run: {}",
+                    crate::text::clip(&summary, 120)
+                )
+            })
+            .filter(|message| !message.ends_with(": "))
+            .unwrap_or_else(|| {
+                if self.context_source_count == 0 {
+                    "Welcome — HII is ready.".to_string()
+                } else {
+                    format!(
+                        "Welcome back — {} context source{} loaded.",
+                        self.context_source_count,
+                        if self.context_source_count == 1 {
+                            ""
+                        } else {
+                            "s"
+                        }
+                    )
+                }
+            });
+        crate::tui::welcome(
+            self.tools.workspace(),
+            self.ollama.provider_label(),
+            &self.model,
+            &greeting,
+            self.public_test,
+        );
     }
 
     pub fn overview(&self) -> String {
@@ -2058,6 +2108,7 @@ impl Conversation {
         };
         let selected = choose_model(Some(requested), self.ollama.provider(), &models)?;
         let previous = std::mem::replace(&mut self.model, selected.clone());
+        self.sync_runtime_identity()?;
         self.store.event(
             "conversation.model_changed",
             json!({ "from": previous, "to": selected }),
@@ -2076,6 +2127,7 @@ impl Conversation {
             return Ok(format!("Kept {}.", self.model));
         }
         let previous = std::mem::replace(&mut self.model, selected.clone());
+        self.sync_runtime_identity()?;
         self.store.event(
             "conversation.model_changed",
             json!({ "from": previous, "to": selected, "source": "picker" }),
@@ -2107,6 +2159,7 @@ impl Conversation {
         let model = choose_model(None, next.provider(), &models)?;
         self.ollama = next;
         self.model = model;
+        self.sync_runtime_identity()?;
         self.store.event(
             "conversation.routing_mode",
             json!({
@@ -2153,13 +2206,21 @@ impl Conversation {
             .flatten()
             .and_then(|path| std::fs::read_to_string(path).ok())
             .unwrap_or_default();
-        let next = conversation_prompt(
+        let base = conversation_prompt(
             self.tools.workspace(),
             self.max_steps,
             self.public_test,
             self.coding_mode,
             self.autonomy_level,
             &lessons,
+        );
+        let next = format!(
+            "{base}\n\n{}",
+            crate::config::runtime_identity_context(
+                self.ollama.provider(),
+                &self.model,
+                self.ollama.base_url(),
+            )
         );
         let message = self
             .messages
@@ -2168,6 +2229,10 @@ impl Conversation {
             .ok_or_else(|| "conversation system context is missing".to_string())?;
         message.content = next;
         Ok(())
+    }
+
+    fn sync_runtime_identity(&mut self) -> Result<(), String> {
+        self.refresh_primary_system_prompt()
     }
 
     pub fn proof(&self, id: Option<&str>) -> Result<String, String> {

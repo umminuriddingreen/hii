@@ -27,8 +27,8 @@
      {
        "memoryGiBMax": null,
        "name": "48gb+",
-       "localClass": "30-35B MoE (native)",
-       "model": "Qwen/Qwen3.5-35B-A3B",
+      "localClass": "27B multimodal dense (HII Native / MLX)",
+      "model": "mlx-community/Qwen3.8-27B-4bit",
        "quantization": "4"
      }
    ],

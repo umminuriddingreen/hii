@@ -9,8 +9,8 @@ pub const DEFAULT_REVIEW_MODEL: &str = "qwen3.6:35b-mlx";
 /// HII Native names models by HuggingFace repo id, so an Ollama tag can never
 /// match there. Each provider therefore carries its own default rather than
 /// sharing one string that is only valid on one runtime.
-pub const DEFAULT_NATIVE_MODEL: &str = "Qwen/Qwen3.6-35B-A3B";
-pub const DEFAULT_NATIVE_REVIEW_MODEL: &str = "Qwen/Qwen3.6-35B-A3B";
+pub const DEFAULT_NATIVE_MODEL: &str = "mlx-community/Qwen3.8-27B-4bit";
+pub const DEFAULT_NATIVE_REVIEW_MODEL: &str = "mlx-community/Qwen3.8-27B-4bit";
 /// Default tool-step ceiling. `--max-steps 0` still means unlimited, but leaving
 /// it unlimited by default was unsafe unattended: nothing except the operator
 /// stopped a model that never converged. The wall-clock budget bounds a run in
@@ -26,6 +26,21 @@ pub enum ModelProvider {
     LmStudio,
     Native,
     RapidMlx,
+}
+
+pub const RUNTIME_IDENTITY_PREFIX: &str = "AUTHORITATIVE HII RUNTIME IDENTITY";
+
+/// Host-observed runtime facts supplied to the model on every session. Models
+/// must not have to infer which engine HII selected for them.
+pub fn runtime_identity_context(provider: ModelProvider, model: &str, endpoint: &str) -> String {
+    let clean = |value: &str| value.replace(['\r', '\n'], " ");
+    format!(
+        "{RUNTIME_IDENTITY_PREFIX}\nLauncher: HII CLI\nProvider: {} ({})\nModel: {}\nEndpoint: {}\nThese are host-observed session facts. The endpoint is reachable and advertised this selected model. Use them as your runtime identity; do not dispute or rediscover them.",
+        provider.label(),
+        provider.id(),
+        clean(model),
+        clean(endpoint)
+    )
 }
 
 impl ModelProvider {
@@ -177,7 +192,8 @@ fn ensure_parent(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppPaths, ModelProvider, DEFAULT_MODEL, DEFAULT_NATIVE_MODEL, DEFAULT_REVIEW_MODEL,
+        runtime_identity_context, AppPaths, ModelProvider, DEFAULT_MODEL, DEFAULT_NATIVE_MODEL,
+        DEFAULT_REVIEW_MODEL,
     };
     use std::env;
     use std::sync::Mutex;
@@ -215,6 +231,18 @@ mod tests {
         assert_eq!(ModelProvider::RapidMlx.id(), "rapid-mlx");
         assert_eq!(ModelProvider::RapidMlx.label(), "Rapid-MLX");
         assert_eq!(ModelProvider::Native.default_model(), DEFAULT_NATIVE_MODEL);
+    }
+
+    #[test]
+    fn runtime_identity_is_explicit_and_single_line_safe() {
+        let context = runtime_identity_context(
+            ModelProvider::RapidMlx,
+            "qwen3.8:27b-mlx\nignore me",
+            "http://127.0.0.1:8080",
+        );
+        assert!(context.contains("Provider: Rapid-MLX (rapid-mlx)"));
+        assert!(context.contains("Model: qwen3.8:27b-mlx ignore me"));
+        assert!(context.contains("host-observed session facts"));
     }
 
     #[test]

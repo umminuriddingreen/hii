@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-BSL-1.1
 use std::{
-    fs,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    env, fs,
+    net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
     path::{Path, PathBuf},
+    process::{Child, Command as ProcessCommand, Stdio},
+    thread,
+    time::Duration,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -20,7 +23,7 @@ use sha2::{Digest, Sha256};
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 11435;
-const DEFAULT_MODEL: &str = "Qwen/Qwen3-4B";
+const DEFAULT_MODEL: &str = "mlx-community/Qwen3.8-27B-4bit";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -89,6 +92,107 @@ struct ServeConfig {
     max_seqs: usize,
     model_home: Option<PathBuf>,
     cpu: bool,
+}
+
+fn executable_on_path(name: &str) -> Option<PathBuf> {
+    env::var_os("PATH").and_then(|paths| {
+        env::split_paths(&paths)
+            .map(|directory| directory.join(name))
+            .find(|candidate| candidate.is_file())
+    })
+}
+
+fn mlx_vlm_binary() -> Option<PathBuf> {
+    env::var_os("HII_MLX_VLM_BIN")
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+        .or_else(|| {
+            default_model_home()
+                .ok()
+                .and_then(|home| home.parent().map(Path::to_path_buf))
+                .map(|runtime| runtime.join("runtimes/mlx/bin/mlx_vlm.server"))
+                .filter(|path| path.is_file())
+        })
+        .or_else(|| executable_on_path("mlx_vlm.server"))
+}
+
+fn wait_for_mlx(child: &mut Child, address: SocketAddr) -> Result<()> {
+    let started = std::time::Instant::now();
+    loop {
+        if TcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok() {
+            return Ok(());
+        }
+        if let Some(status) = child.try_wait()? {
+            bail!("MLX-VLM exited before becoming ready ({status})");
+        }
+        if started.elapsed() > Duration::from_secs(1800) {
+            let _ = child.kill();
+            bail!("MLX-VLM did not become ready within 30 minutes");
+        }
+        thread::sleep(Duration::from_millis(500));
+    }
+}
+
+fn serve_mlx(config: &ServeConfig, binary: &Path) -> Result<()> {
+    let model_home = config.model_home.clone().unwrap_or(default_model_home()?);
+    ensure_model_home(&model_home)?;
+    let ip: IpAddr = config
+        .host
+        .parse()
+        .with_context(|| format!("invalid host {}", config.host))?;
+    let address = SocketAddr::new(ip, config.port);
+    let endpoint = format!("http://{}:{}", config.host, config.port);
+    let mut manifest = RuntimeManifest {
+        schema_version: 1,
+        backend: "hii-native/mlx-vlm".into(),
+        model: config.model.clone(),
+        source: if Path::new(&config.model).exists() {
+            "local-path"
+        } else {
+            "huggingface"
+        }
+        .into(),
+        revision: "main".into(),
+        quantization: "model-native".into(),
+        license: "pending-model-card-read".into(),
+        integrity: "pending-load".into(),
+        model_home: model_home.clone(),
+        endpoint: endpoint.clone(),
+        created_at_unix: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
+    };
+    write_manifest(&model_home, &manifest)?;
+    eprintln!(
+        "hii-native-runner: loading {} with MLX-VLM from {}",
+        config.model,
+        binary.display()
+    );
+    let port = config.port.to_string();
+    let mut child = ProcessCommand::new(binary)
+        .args([
+            "--model",
+            &config.model,
+            "--host",
+            &config.host,
+            "--port",
+            &port,
+        ])
+        .env("HF_HOME", model_home.join("huggingface"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .with_context(|| format!("failed to start {}", binary.display()))?;
+    wait_for_mlx(&mut child, address)?;
+    manifest.license = "model-card-declared".into();
+    manifest.integrity = "mlx-vlm-ready".into();
+    write_manifest(&model_home, &manifest)?;
+    eprintln!("hii-native-runner: ready at {endpoint}");
+    let status = child.wait()?;
+    if status.success() {
+        Ok(())
+    } else {
+        bail!("MLX-VLM exited with {status}")
+    }
 }
 
 fn default_model_home() -> Result<PathBuf> {
@@ -187,14 +291,16 @@ fn detect_license(root: &Path) -> Result<String> {
 }
 
 fn capabilities(model_home: &Path) -> Value {
+    let mlx = mlx_vlm_binary();
     json!({
         "runtime": "hii-native-runner",
-        "backend": if cfg!(feature = "metal") { "mistral.rs-metal" } else { "mistral.rs-cpu" },
+        "backend": if mlx.is_some() { "hii-native/mlx-vlm" } else if cfg!(feature = "metal") { "mistral.rs-metal" } else { "mistral.rs-cpu" },
         "metal": cfg!(feature = "metal"),
         "mlxWorker": {
-            "status": "experimental-contract",
-            "transport": "unix-socket",
-            "runtimeDependency": "none"
+            "status": if mlx.is_some() { "ready" } else { "not-installed" },
+            "binary": mlx,
+            "transport": "loopback-child",
+            "runtimeDependency": "HII-managed mlx-vlm environment"
         },
         "modelHome": model_home,
         "loopback": format!("http://{DEFAULT_HOST}:{DEFAULT_PORT}"),
@@ -215,6 +321,12 @@ async fn metrics() -> Json<Value> {
 }
 
 async fn serve(config: ServeConfig) -> Result<()> {
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        let binary = mlx_vlm_binary().ok_or_else(|| anyhow::anyhow!(
+            "HII Native's Apple-Silicon engine is not installed. Expected ~/.hii/runtimes/mlx/bin/mlx_vlm.server or HII_MLX_VLM_BIN."
+        ))?;
+        return serve_mlx(&config, &binary);
+    }
     let ServeConfig {
         model,
         host,
