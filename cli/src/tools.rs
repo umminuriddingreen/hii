@@ -13,6 +13,13 @@ use url::Url;
 const MAX_OUTPUT_BYTES: usize = 96 * 1024;
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct WebSearchResult {
+    pub title: String,
+    pub url: String,
+    pub snippet: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ToolResult {
     pub ok: bool,
@@ -249,11 +256,33 @@ impl Toolbelt {
     /// network shell. Results are intentionally compact and retain their source
     /// URLs so the model can cite what it used.
     pub fn web_search(&self, query: &str) -> ToolResult {
+        tool_result(
+            self.web_search_results(query).map(|results| {
+                results
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, result)| {
+                        format!(
+                            "{}. {}\n   {}\n   {}",
+                            index + 1,
+                            result.title,
+                            result.url,
+                            result.snippet
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
+            }),
+            false,
+        )
+    }
+
+    pub fn web_search_results(&self, query: &str) -> Result<Vec<WebSearchResult>, String> {
         let query = query.trim();
         if query.is_empty() {
-            return tool_result(Err("web search query cannot be empty".into()), false);
+            return Err("web search query cannot be empty".into());
         }
-        let result = (|| {
+        (|| {
             let searxng = std::env::var("HII_SEARXNG_URL")
                 .ok()
                 .filter(|value| {
@@ -315,14 +344,13 @@ impl Toolbelt {
             }
             Ok(results
                 .into_iter()
-                .enumerate()
-                .map(|(index, (title, url, snippet))| {
-                    format!("{}. {}\n   {}\n   {}", index + 1, title, url, snippet)
+                .map(|(title, url, snippet)| WebSearchResult {
+                    title,
+                    url,
+                    snippet,
                 })
-                .collect::<Vec<_>>()
-                .join("\n\n"))
-        })();
-        tool_result(result, false)
+                .collect())
+        })()
     }
 
     /// Fetch one public page selected from research results. This is a bounded
