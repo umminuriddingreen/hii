@@ -591,35 +591,12 @@ pub fn queued() {
     );
 }
 
-pub fn steered() {
-    println!(
-        "\n  {} {}",
-        paint("↳ STEER", &[palette().primary]),
-        paint("applies before the next action", &[DIM, palette().muted])
-    );
-}
-
 pub fn idle_background() {
     println!(
         "  {} {}",
         paint("◇ BACKGROUND", &[palette().primary]),
         paint("type a task, then press Ctrl+B", &[DIM, palette().muted])
     );
-}
-
-pub fn stage(label: &str, message: &str) {
-    activity_line(&format!(
-        "{}  {}",
-        paint("◐", &[palette().primary]),
-        paint(
-            &format!(
-                "{}  {}",
-                label.to_ascii_lowercase(),
-                crate::text::clip_line(message, terminal_width().saturating_sub(22))
-            ),
-            &[DIM, palette().muted]
-        )
-    ));
 }
 
 pub fn tool_start(step: usize, tool: &str, target: &str) {
@@ -755,12 +732,11 @@ pub fn system(message: &str) {
 pub fn error(message: &str) {
     finish_activity();
     println!();
-    let label = if message.starts_with("Response interrupted") {
-        "! INTERRUPTED"
-    } else {
-        "! LOCAL PROBLEM"
-    };
-    println!("  {}  {}", paint(label, &[BOLD, palette().error]), message);
+    println!(
+        "  {}  {}",
+        paint("! LOCAL PROBLEM", &[BOLD, palette().error]),
+        message
+    );
     println!();
 }
 

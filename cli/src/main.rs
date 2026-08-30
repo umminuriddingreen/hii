@@ -3294,7 +3294,9 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             }
             Err(error) => {
                 tui::finish_activity();
-                tui::error(&error)
+                if error != conversation::OPERATOR_INTERRUPTED {
+                    tui::error(&error);
+                }
             }
         }
     }

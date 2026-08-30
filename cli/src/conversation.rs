@@ -74,6 +74,7 @@ enum ReasoningMode {
 }
 
 const STEERING_RESTART: &str = "operator steered model activity";
+pub(crate) const OPERATOR_INTERRUPTED: &str = "operator interrupted model activity";
 const REASONING_BUDGET_RETRY: &str = "adaptive reasoning budget ended";
 const ADAPTIVE_REASONING_MAX_CHARS: usize = 4_096;
 const ADAPTIVE_REASONING_MAX_TIME: Duration = Duration::from_secs(12);
@@ -429,10 +430,6 @@ impl Conversation {
         let mut web_mutation_pending = false;
         let mut repeated_verification_failure: Option<(String, usize)> = None;
         let mut rejected_actions = RejectedActionGuard::default();
-        if io::stdout().is_terminal() {
-            crate::tui::stage("UNDERSTOOD", input);
-        }
-
         loop {
             if self.max_steps > 0 && steps >= self.max_steps {
                 break;
@@ -468,19 +465,7 @@ impl Conversation {
                     steps = steps.saturating_sub(1);
                     continue;
                 }
-                Err(error) if error == "operator interrupted model activity" => {
-                    return Err(
-                        if mutation_epoch > 0 && verified_epoch == Some(mutation_epoch) {
-                            "Response interrupted. The verified artifact remains live in the preview."
-                            .into()
-                        } else if mutation_epoch > 0 {
-                            "Response interrupted. Created work remains in the workspace; the last verified preview is unchanged."
-                            .into()
-                        } else {
-                            "Response interrupted before any workspace change.".into()
-                        },
-                    );
-                }
+                Err(error) if error == OPERATOR_INTERRUPTED => return Err(error),
                 Err(error) => return Err(error),
             };
             if let Some(steering) = self.steering.take() {
@@ -2576,7 +2561,6 @@ impl Conversation {
                         crate::keyboard::InputEvent::Submit(value) if !value.trim().is_empty() => {
                             self.steering = Some(value);
                             input.finish_stream();
-                            crate::tui::steered();
                             self.cancel.cancel(CancelReason::Client);
                             return Err(STEERING_RESTART.into());
                         }
@@ -2590,7 +2574,7 @@ impl Conversation {
                                 print!("\x1b[2K\r");
                             }
                             self.cancel.cancel(CancelReason::Interrupt);
-                            return Err("operator interrupted model activity".into());
+                            return Err(OPERATOR_INTERRUPTED.into());
                         }
                         crate::keyboard::InputEvent::TaskView => {
                             input.write_stream(&format!("\n{}\n", self.task_view()))?;
