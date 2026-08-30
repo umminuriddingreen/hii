@@ -9,6 +9,7 @@ use std::{
 };
 use uuid::Uuid;
 
+pub mod adaptive;
 pub mod context_pack;
 pub mod information;
 pub mod operational;

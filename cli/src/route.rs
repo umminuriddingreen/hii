@@ -317,6 +317,18 @@ pub const ROUTES: &[Route] = &[
         "plan, price, triage, and govern projects",
     ),
     native(
+        "thread",
+        Extended,
+        Work,
+        "create and resume objective threads",
+    ),
+    native(
+        "interact",
+        Extended,
+        Work,
+        "record one provider-neutral interaction proposal",
+    ),
+    native(
         "schedule",
         Extended,
         Infra,

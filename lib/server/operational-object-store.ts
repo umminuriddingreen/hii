@@ -133,11 +133,17 @@ function migrate(db: DatabaseSync) {
   addColumn(db, 'operational_operations', 'operation_hash', 'TEXT');
   addColumn(db, 'operational_operations', 'provenance_class', 'TEXT');
   addColumn(db, 'operational_operations', 'authority_json', "TEXT NOT NULL DEFAULT '{}'");
+  addColumn(db, 'operational_operations', 'interaction_id', 'TEXT');
+  addColumn(db, 'operational_operations', 'interaction_sequence', 'INTEGER');
+  addColumn(db, 'operational_operations', 'causation_event_id', 'TEXT');
 
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_operational_operations_idempotency
       ON operational_operations(space_id, idempotency_key)
       WHERE idempotency_key IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_operational_operations_interaction_sequence
+      ON operational_operations(interaction_id, interaction_sequence)
+      WHERE interaction_id IS NOT NULL AND interaction_sequence IS NOT NULL;
     INSERT OR IGNORE INTO schema_migrations(version) VALUES ('operational-objects-v2-versioned-mutations');
   `);
 }
@@ -498,6 +504,9 @@ type OperationRow = {
   operation_hash: string | null;
   provenance_class: string | null;
   authority_json: string | null;
+  interaction_id: string | null;
+  interaction_sequence: number | null;
+  causation_event_id: string | null;
   created_at: string;
 };
 
@@ -567,6 +576,9 @@ export function toOperationalOperation(row: OperationRow): OperationalOperation 
     operationHash: row.operation_hash,
     provenanceClass: (row.provenance_class as ProvenanceClass) ?? null,
     authority: parseRecord(row.authority_json ?? '{}'),
+    interactionId: row.interaction_id,
+    interactionSequence: row.interaction_sequence,
+    causationEventId: row.causation_event_id,
     createdAt: row.created_at
   };
 }

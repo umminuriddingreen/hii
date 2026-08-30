@@ -117,6 +117,10 @@ export type OperationalOperation = {
   operationHash: string | null;
   provenanceClass: ProvenanceClass | null;
   authority: Record<string, unknown>;
+  /** Indexed identity for proposal/policy/execution event reconstruction. */
+  interactionId: string | null;
+  interactionSequence: number | null;
+  causationEventId: string | null;
   createdAt: string;
 };
 

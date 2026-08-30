@@ -523,6 +523,33 @@ enum Commands {
         #[command(subcommand)]
         action: ProjectCommand,
     },
+    #[command(about = "Create, activate, and reconstruct objective threads")]
+    #[command(hide = true)]
+    Thread {
+        #[command(subcommand)]
+        action: ThreadCommand,
+    },
+    #[command(about = "Record one provider-neutral interaction proposal")]
+    #[command(hide = true)]
+    Interact {
+        #[arg(long)]
+        project: String,
+        #[arg(long)]
+        thread: String,
+        #[arg(long)]
+        interaction: Option<String>,
+        #[arg(
+            long,
+            value_name = "JSON",
+            help = "Exactly one InteractionProposalV1 JSON object"
+        )]
+        proposal: String,
+        #[arg(
+            long,
+            help = "Emit the resulting event and regenerated snapshot as JSON lines"
+        )]
+        jsonl: bool,
+    },
     #[command(about = "Manage local recurring HII work through cron")]
     #[command(hide = true)]
     Schedule {
@@ -1029,6 +1056,15 @@ enum ServiceCommand {
 
 #[derive(Subcommand, Debug)]
 enum ProjectCommand {
+    #[command(about = "Bind a computational project root to HII authority")]
+    Bind {
+        #[arg(default_value = ".")]
+        root: PathBuf,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     #[command(about = "Create a governed project using the architecture delivery profile")]
     Create {
         #[arg(required = true, num_args = 1..)]
@@ -1077,6 +1113,14 @@ enum ProjectCommand {
     },
     #[command(alias = "ls", about = "List local HII projects")]
     List {
+        #[arg(long, help = "Preserve the prior detailed delivery-project listing")]
+        delivery: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Revalidate filesystem and optional Git identity")]
+    Validate {
+        id: String,
         #[arg(long)]
         json: bool,
     },
@@ -1304,6 +1348,39 @@ enum ProjectCommand {
     )]
     Advance {
         id: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ThreadCommand {
+    Create {
+        #[arg(long)]
+        project: String,
+        #[arg(required=true,num_args=1..)]
+        objective: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(alias = "ls")]
+    List {
+        #[arg(long)]
+        project: String,
+        #[arg(long)]
+        json: bool,
+    },
+    Activate {
+        #[arg(long)]
+        project: String,
+        thread: String,
+        #[arg(long)]
+        json: bool,
+    },
+    Show {
+        thread: String,
+        #[arg(long)]
+        project: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -2605,6 +2682,20 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 Ok(())
             };
             match action {
+                ProjectCommand::Bind { root, name, json } => {
+                    let binding = hii_core::adaptive::bind(&paths.runtime, &root, name.as_deref())?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&binding).map_err(|e| e.to_string())?
+                        );
+                    } else {
+                        println!(
+                            "{}  {}  {}",
+                            binding.id, binding.validation_status, binding.canonical_root
+                        );
+                    }
+                }
                 ProjectCommand::Create {
                     name,
                     project_type,
@@ -2641,23 +2732,56 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     )?;
                     render_project(&project, json)?;
                 }
-                ProjectCommand::List { json } => {
+                ProjectCommand::List { delivery, json } => {
                     let projects = project::list(&paths.runtime)?;
+                    if delivery {
+                        if json {
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(&projects)
+                                    .map_err(|error| error.to_string())?
+                            );
+                        } else if projects.is_empty() {
+                            println!(
+                                "No HII delivery projects yet. Run `hii project create <name>`. "
+                            );
+                        } else {
+                            for project in projects {
+                                println!(
+                                    "{:<28} {:<10} {:<28} {}",
+                                    project.id, project.status, project.current_phase, project.name
+                                );
+                            }
+                        }
+                        return Ok(ExitCode::SUCCESS);
+                    }
+                    let bound = hii_core::adaptive::projects(&paths.runtime)?;
+                    if json {
+                        let rows = bound.into_iter().map(|value| serde_json::to_value(value).unwrap()).chain(projects.into_iter().map(|value| serde_json::json!({"kind":"deliveryProfileProject","project":value}))).collect::<Vec<_>>();
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&rows).map_err(|e| e.to_string())?
+                        );
+                    } else if projects.is_empty() && bound.is_empty() {
+                        println!("No HII projects yet. Run `hii project bind <root>`. ");
+                    } else {
+                        for p in bound {
+                            println!("{:<38} {:<18} {}", p.id, p.validation_status, p.name);
+                        }
+                        for p in projects {
+                            println!("{:<38} {:<18} {}", p.id, "delivery-profile", p.name);
+                        }
+                    }
+                }
+                ProjectCommand::Validate { id, json } => {
+                    let binding = hii_core::adaptive::validate(&paths.runtime, &id)?;
                     if json {
                         println!(
                             "{}",
-                            serde_json::to_string_pretty(&projects)
-                                .map_err(|error| error.to_string())?
+                            serde_json::to_string_pretty(&binding).map_err(|e| e.to_string())?
                         );
-                    } else if projects.is_empty() {
-                        println!("No HII projects yet. Run `hii project create <name>`. ");
                     } else {
-                        for project in projects {
-                            println!(
-                                "{:<28} {:<10} {:<28} {}",
-                                project.id, project.status, project.current_phase, project.name
-                            );
-                        }
+                        println!("{}  {}", binding.id, binding.validation_status);
                     }
                 }
                 ProjectCommand::Show { id, json } => {
@@ -2926,6 +3050,141 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     render_project(&project::advance(&paths.runtime, &id)?, json)?;
                 }
             }
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Thread { action }) => {
+            match action {
+                ThreadCommand::Create {
+                    project,
+                    objective,
+                    json,
+                } => {
+                    let t = hii_core::adaptive::create_thread(
+                        &paths.runtime,
+                        &project,
+                        &objective.join(" "),
+                    )?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&t).map_err(|e| e.to_string())?
+                        )
+                    } else {
+                        println!("{}  {}", t.id, t.objective)
+                    }
+                }
+                ThreadCommand::List { project, json } => {
+                    let ts = hii_core::adaptive::threads(&paths.runtime, &project)?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&ts).map_err(|e| e.to_string())?
+                        )
+                    } else {
+                        for t in ts {
+                            println!("{}  {:<8} {}", t.id, t.status, t.objective)
+                        }
+                    }
+                }
+                ThreadCommand::Activate {
+                    project,
+                    thread,
+                    json,
+                } => {
+                    let f = hii_core::adaptive::activate_thread(&paths.runtime, &project, &thread)?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&f).map_err(|e| e.to_string())?
+                        )
+                    } else {
+                        println!("foreground  {}", f.foreground_thread_id)
+                    }
+                }
+                ThreadCommand::Show {
+                    thread,
+                    project,
+                    json,
+                } => {
+                    let t = hii_core::adaptive::thread(&paths.runtime, &thread)?;
+                    let p = project.unwrap_or_else(|| t.project_id.clone());
+                    let s = hii_core::adaptive::snapshot(&paths.runtime, &p, &t.id)?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&s).map_err(|e| e.to_string())?
+                        )
+                    } else {
+                        println!(
+                            "{}\n{}\nevents  {}",
+                            s.thread.objective,
+                            s.thread.status,
+                            s.interaction_events.len()
+                        )
+                    }
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Interact {
+            project,
+            thread,
+            interaction,
+            proposal,
+            jsonl,
+        }) => {
+            let proposal: hii_core::adaptive::InteractionProposalV1 =
+                serde_json::from_str(&proposal)
+                    .map_err(|e| format!("invalid InteractionProposalV1: {e}"))?;
+            let interaction_id = interaction.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            let (kind, text) = match &proposal {
+                hii_core::adaptive::InteractionProposalV1::Respond { text } => {
+                    ("interaction.respond", Some(text.clone()))
+                }
+                hii_core::adaptive::InteractionProposalV1::Capability { .. } => {
+                    ("interaction.capability.proposed", None)
+                }
+                hii_core::adaptive::InteractionProposalV1::Ask { text } => {
+                    ("interaction.ask", Some(text.clone()))
+                }
+                hii_core::adaptive::InteractionProposalV1::Finish { summary } => {
+                    ("interaction.finish", Some(summary.clone()))
+                }
+            };
+            let event = hii_core::adaptive::append_event(
+                &paths.runtime,
+                hii_core::adaptive::InteractionEventV1 {
+                    schema_version: 1,
+                    id: String::new(),
+                    interaction_id: interaction_id.clone(),
+                    project_id: project.clone(),
+                    thread_id: thread.clone(),
+                    run_id: None,
+                    sequence: 0,
+                    timestamp: String::new(),
+                    kind: kind.into(),
+                    text,
+                    payload: serde_json::to_value(&proposal).map_err(|e| e.to_string())?,
+                    causation_event_id: None,
+                },
+                &format!("interaction:{interaction_id}:proposal"),
+            )?;
+            let snapshot = hii_core::adaptive::snapshot(&paths.runtime, &project, &thread)?;
+            if jsonl {
+                println!(
+                    "{}",
+                    serde_json::to_string(&event).map_err(|e| e.to_string())?
+                );
+                println!(
+                    "{}",
+                    serde_json::to_string(&snapshot).map_err(|e| e.to_string())?
+                )
+            } else {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&snapshot).map_err(|e| e.to_string())?
+                )
+            };
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::ToolsManifest) => {
