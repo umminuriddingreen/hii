@@ -442,7 +442,9 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         let content = message["content"].as_str().unwrap_or_default().to_string();
         // Reasoning arrives under a provider-specific key on the message, the
         // same set the streaming path already handles.
-        let thinking = openai_reasoning_delta(message).unwrap_or_default().to_string();
+        let thinking = openai_reasoning_delta(message)
+            .unwrap_or_default()
+            .to_string();
         // Prefer what the backend reports; otherwise time the call here. Without
         // a first-token signal the whole call counts as completion time.
         let (prompt_duration_ms, completion_duration_ms, total_duration_ms) =
@@ -702,7 +704,8 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             if let Some(value) = value.get("usage") {
                 usage.prompt_tokens = value["prompt_tokens"].as_u64().unwrap_or(0);
                 usage.completion_tokens = value["completion_tokens"].as_u64().unwrap_or(0);
-                reported_durations = reported_durations.or_else(|| openai_reported_durations(value));
+                reported_durations =
+                    reported_durations.or_else(|| openai_reported_durations(value));
             }
         }
         // Prefer backend-reported timing; otherwise treat time-to-first-token as
@@ -1110,7 +1113,8 @@ mod tests {
 
     #[test]
     fn reasoning_is_read_from_a_completed_message_not_only_a_stream_delta() {
-        let message = serde_json::json!({ "content": "done", "reasoning_content": "weighing options" });
+        let message =
+            serde_json::json!({ "content": "done", "reasoning_content": "weighing options" });
         assert_eq!(openai_reasoning_delta(&message), Some("weighing options"));
         let plain = serde_json::json!({ "content": "done" });
         assert_eq!(openai_reasoning_delta(&plain), None);

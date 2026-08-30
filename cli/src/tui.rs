@@ -860,9 +860,9 @@ pub fn error(message: &str) {
 mod tests {
     use super::{
         active_run_frame, active_run_progress_frame, clear_activity_sequence, command_matches,
-        command_menu, composer_window,
-        model_activity, overview, prompt_frame, short_path, terminal_width, theme_choices,
-        user_turn_frame, welcome_frame, workspace_state, ActiveRunView, Theme,
+        command_menu, composer_window, model_activity, overview, prompt_frame, short_path,
+        terminal_width, theme_choices, user_turn_frame, welcome_frame, workspace_state,
+        ActiveRunView, Theme,
     };
     use std::path::Path;
 

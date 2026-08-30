@@ -466,7 +466,10 @@ pub fn record_semantic_item(
     if !SEMANTIC_ITEM_KINDS.contains(&item_kind) {
         return Err(format!("unknown semantic item kind: {item_kind}"));
     }
-    if !matches!(provenance_class, PROVENANCE_INFERRED | PROVENANCE_USER_CONFIRMED) {
+    if !matches!(
+        provenance_class,
+        PROVENANCE_INFERRED | PROVENANCE_USER_CONFIRMED
+    ) {
         return Err(format!("unknown provenance class: {provenance_class}"));
     }
     if let Some(superseded) = supersedes {

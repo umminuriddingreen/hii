@@ -1,7 +1,6 @@
 use crate::{
     agent::{
-        choose_model, execute_tool, parse_action_with_repair, Action,
-        RejectedActionGuard,
+        choose_model, execute_tool, parse_action_with_repair, Action, RejectedActionGuard,
         MODEL_LOOP_DETECTED_MESSAGE,
     },
     attachments::AttachmentQueue,
@@ -3540,19 +3539,28 @@ mod durable_meaning_tests {
         let runtime = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();
 
-        let (project, thread) =
-            bind_objective_thread(runtime.path(), workspace.path(), "make the dashboard legible")
-                .unwrap();
-        let (again_project, again_thread) =
-            bind_objective_thread(runtime.path(), workspace.path(), "make the dashboard legible")
-                .unwrap();
+        let (project, thread) = bind_objective_thread(
+            runtime.path(),
+            workspace.path(),
+            "make the dashboard legible",
+        )
+        .unwrap();
+        let (again_project, again_thread) = bind_objective_thread(
+            runtime.path(),
+            workspace.path(),
+            "make the dashboard legible",
+        )
+        .unwrap();
         assert_eq!((&project, &thread), (&again_project, &again_thread));
 
         let (other_project, other_thread) =
             bind_objective_thread(runtime.path(), workspace.path(), "something else entirely")
                 .unwrap();
         assert_eq!(project, other_project, "one workspace binds one project");
-        assert_ne!(thread, other_thread, "a different request opens its own thread");
+        assert_ne!(
+            thread, other_thread,
+            "a different request opens its own thread"
+        );
     }
 
     /// What the operator says has to outlive the model's next re-reading of it.
@@ -3643,8 +3651,14 @@ mod durable_meaning_tests {
             None,
             "a confirmed objective must not silently erase the projection"
         );
-        assert_eq!(supersession_target("constraint", false, Some("item-1")), None);
-        assert_eq!(supersession_target("objectiveProjection", false, None), None);
+        assert_eq!(
+            supersession_target("constraint", false, Some("item-1")),
+            None
+        );
+        assert_eq!(
+            supersession_target("objectiveProjection", false, None),
+            None
+        );
     }
 }
 
@@ -4169,17 +4183,17 @@ mod tests {
         assert!(last_code_block("no fences at all here").is_none());
     }
 
-    use crate::agent::parse_action;
     use super::{
         activity_excerpt, advisor_suggestion, authority_decision, clean_final_output,
         conversation_prompt, mode_choices, model_event_kind, needs_verification,
-        observation_signature, plain_message, plan_tool_allowed,
-        public_test_sensitive_shell, render_permissions, resumable_messages, session_authority,
-        session_flow, session_goal, session_plan_mode, session_title,
-        shell_command_is_observation_only, shell_command_is_preview, shell_command_is_read_only,
-        side_context, tool_is_observation, verification_required_message, Conversation,
-        ModelContentProjection, ReasoningMode, REASONING_MODES, THINKING_MODES,
+        observation_signature, plain_message, plan_tool_allowed, public_test_sensitive_shell,
+        render_permissions, resumable_messages, session_authority, session_flow, session_goal,
+        session_plan_mode, session_title, shell_command_is_observation_only,
+        shell_command_is_preview, shell_command_is_read_only, side_context, tool_is_observation,
+        verification_required_message, Conversation, ModelContentProjection, ReasoningMode,
+        REASONING_MODES, THINKING_MODES,
     };
+    use crate::agent::parse_action;
     use crate::contract::{Authority, Decision};
     use std::path::Path;
 
@@ -4424,7 +4438,10 @@ mod tests {
             crate::agent::AutonomyLevel::LocalFull,
             "",
         );
-        assert!(prompt.contains("\"type\":\"final\""), "prompt must show a final action");
+        assert!(
+            prompt.contains("\"type\":\"final\""),
+            "prompt must show a final action"
+        );
         assert!(prompt.contains("|final|") || prompt.contains("|final\""));
     }
 

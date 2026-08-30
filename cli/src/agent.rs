@@ -2365,8 +2365,7 @@ pub(crate) fn parse_action_with_repair(
         Ok(value) => value,
         Err(original_error) => {
             let repaired = escape_literal_control_chars_in_json_strings(candidate);
-            let value =
-                serde_json::from_str(&repaired).map_err(|_| original_error.to_string())?;
+            let value = serde_json::from_str(&repaired).map_err(|_| original_error.to_string())?;
             repair = Some(ActionRepair::EscapedControlChars);
             value
         }
@@ -2795,16 +2794,16 @@ mod tests {
         let (_, clean) = parse_action_with_repair(r#"{"type":"list"}"#).unwrap();
         assert_eq!(clean, None);
 
-        let (_, fenced) =
-            parse_action_with_repair("```json\n{\"type\":\"list\"}\n```").unwrap();
+        let (_, fenced) = parse_action_with_repair("```json\n{\"type\":\"list\"}\n```").unwrap();
         assert_eq!(fenced, Some(ActionRepair::Unwrapped));
         assert_eq!(fenced.unwrap().label(), "unwrapped");
 
         // A literal newline inside a JSON string: the single most common way a
         // compact local model misses the protocol while still meaning an action.
-        let (_, escaped) =
-            parse_action_with_repair("{\"type\":\"write\",\"path\":\"a.txt\",\"content\":\"one\ntwo\"}")
-                .unwrap();
+        let (_, escaped) = parse_action_with_repair(
+            "{\"type\":\"write\",\"path\":\"a.txt\",\"content\":\"one\ntwo\"}",
+        )
+        .unwrap();
         assert_eq!(escaped, Some(ActionRepair::EscapedControlChars));
     }
 
