@@ -13,6 +13,7 @@ use crate::{
     runlog::{Delta, Event, Feedback, Human, Journal, OutputMode, StreamPolicy},
     tools::{ToolResult, Toolbelt},
 };
+use hii_core::adaptive::InteractionProposalV1;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -209,6 +210,56 @@ pub(crate) struct FlowProjection {
 }
 
 impl Action {
+    /// The same choice, in the durable interaction vocabulary.
+    ///
+    /// [`Action`] and `InteractionProposalV1` describe one thing — the model
+    /// proposes to talk, to use a capability, to ask, or to finish — and were
+    /// written twice. Converting rather than adding a third model is what lets
+    /// a conversation turn be recorded against an objective thread.
+    ///
+    /// `Ask` has no counterpart here: this action surface has no way to pause
+    /// for an answer, so a question arrives as a `Message` and reads as
+    /// `Respond`. Closing that gap is a change to the loop, not to this map.
+    pub(crate) fn as_proposal(&self) -> InteractionProposalV1 {
+        match self {
+            Self::Message { message, .. } => InteractionProposalV1::Respond {
+                text: message.clone(),
+            },
+            Self::Final { summary, .. } => InteractionProposalV1::Finish {
+                summary: summary.clone(),
+            },
+            Self::Tool {
+                tool,
+                path,
+                query,
+                command,
+                content,
+                url,
+                ..
+            } => InteractionProposalV1::Capability {
+                phase: capability_phase(tool).into(),
+                capability_id: tool.clone(),
+                input: json!({
+                    "path": path,
+                    "query": query,
+                    "command": command,
+                    "content": content,
+                    "url": url,
+                }),
+            },
+            Self::McpCall {
+                server,
+                tool,
+                arguments,
+                ..
+            } => InteractionProposalV1::Capability {
+                phase: "act".into(),
+                capability_id: format!("mcp:{server}:{tool}"),
+                input: arguments.clone(),
+            },
+        }
+    }
+
     pub(crate) fn flow(&self) -> Option<&FlowProjection> {
         match self {
             Self::Tool { flow, .. }
@@ -216,6 +267,22 @@ impl Action {
             | Self::Message { flow, .. }
             | Self::McpCall { flow, .. } => flow.as_ref(),
         }
+    }
+}
+
+/// Which phase of an interaction a tool belongs to.
+///
+/// Mirrors the observation/mutation split the loop already enforces: `verify`
+/// is the only action that can produce proof, reads never change anything, and
+/// everything else is a mutation.
+fn capability_phase(tool: &str) -> &'static str {
+    match tool {
+        "verify" => "verify",
+        "read" | "list" | "search" | "web_search" | "web_fetch" => "observe",
+        other if crate::hii_tools::is_hii_tool(other) && !crate::hii_tools::is_mutating(other) => {
+            "observe"
+        }
+        _ => "act",
     }
 }
 

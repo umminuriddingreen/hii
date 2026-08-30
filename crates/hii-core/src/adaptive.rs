@@ -56,6 +56,51 @@ pub struct ProjectForegroundStateV1 {
     pub updated_at: String,
 }
 
+/// An interpreted claim about a thread: a decision, constraint, finding, failed
+/// approach, question, rationale, or next action.
+///
+/// Separate from [`InteractionEventV1`] on purpose. Events are deterministic
+/// facts about what happened; semantic items are meaning laid over them, and
+/// meaning is replaceable. A model may write one whenever it re-reads the
+/// situation; when the operator states something themselves it supersedes the
+/// inferred item, so a correction is not overwritten by the next projection.
+///
+/// Semantic interpretation never changes execution facts and never counts as
+/// proof.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticItemV1 {
+    pub schema_version: u8,
+    pub kind: String,
+    pub id: String,
+    pub project_id: String,
+    pub thread_id: String,
+    /// What sort of claim this is.
+    pub item_kind: String,
+    pub text: String,
+    /// `inferred` for a model's reading, `userConfirmed` for the operator's.
+    pub provenance_class: String,
+    /// Item this one replaces, when it is a correction rather than an addition.
+    pub supersedes: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Claim types a semantic item may carry.
+pub const SEMANTIC_ITEM_KINDS: &[&str] = &[
+    "decision",
+    "constraint",
+    "finding",
+    "failedApproach",
+    "question",
+    "rationale",
+    "nextAction",
+    "objectiveProjection",
+];
+
+pub const PROVENANCE_INFERRED: &str = "inferred";
+pub const PROVENANCE_USER_CONFIRMED: &str = "userConfirmed";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InteractionEventV1 {
@@ -101,6 +146,8 @@ pub struct ThreadSnapshotV1 {
     pub thread: ObjectiveThreadV1,
     pub foreground: bool,
     pub interaction_events: Vec<InteractionEventV1>,
+    /// Interpretation still standing, superseded items removed.
+    pub semantic_items: Vec<SemanticItemV1>,
     pub next_sequence: u64,
 }
 
@@ -395,6 +442,98 @@ pub fn append_event(
     Ok(event)
 }
 
+/// Record an interpretation of a thread.
+///
+/// `supersedes` names the item this one replaces. An operator statement may
+/// supersede a model's; the reverse is refused, so a confirmed item cannot be
+/// quietly overwritten by the next projection.
+pub fn record_semantic_item(
+    runtime: &Path,
+    project_id: &str,
+    thread_id: &str,
+    item_kind: &str,
+    text: &str,
+    provenance_class: &str,
+    supersedes: Option<&str>,
+) -> Result<SemanticItemV1, String> {
+    let t = thread(runtime, thread_id)?;
+    if t.project_id != project_id {
+        return Err("thread belongs to another project".into());
+    }
+    if text.trim().is_empty() {
+        return Err("semantic item text cannot be empty".into());
+    }
+    if !SEMANTIC_ITEM_KINDS.contains(&item_kind) {
+        return Err(format!("unknown semantic item kind: {item_kind}"));
+    }
+    if !matches!(provenance_class, PROVENANCE_INFERRED | PROVENANCE_USER_CONFIRMED) {
+        return Err(format!("unknown provenance class: {provenance_class}"));
+    }
+    if let Some(superseded) = supersedes {
+        let existing = semantic_items(runtime, thread_id)?
+            .into_iter()
+            .find(|item| item.id == superseded)
+            .ok_or_else(|| format!("superseded item not found: {superseded}"))?;
+        if existing.provenance_class == PROVENANCE_USER_CONFIRMED
+            && provenance_class == PROVENANCE_INFERRED
+        {
+            return Err("an inferred item cannot supersede a user-confirmed one".into());
+        }
+    }
+    let timestamp = now();
+    let item = SemanticItemV1 {
+        schema_version: 1,
+        kind: "semanticItem".into(),
+        id: Uuid::new_v4().to_string(),
+        project_id: project_id.to_string(),
+        thread_id: thread_id.to_string(),
+        item_kind: item_kind.to_string(),
+        text: text.trim().to_string(),
+        provenance_class: provenance_class.to_string(),
+        supersedes: supersedes.map(str::to_owned),
+        created_at: timestamp.clone(),
+        updated_at: timestamp.clone(),
+    };
+    upsert(
+        &connection(runtime)?,
+        &object_id("semantic", &item.id),
+        "adaptive-semantic-item",
+        &item,
+        &timestamp,
+    )?;
+    Ok(item)
+}
+
+/// Every semantic item recorded against a thread, superseded ones included.
+pub fn semantic_items(runtime: &Path, thread_id: &str) -> Result<Vec<SemanticItemV1>, String> {
+    let mut items: Vec<SemanticItemV1> = values(&connection(runtime)?, "adaptive-semantic-item")?
+        .into_iter()
+        .filter_map(|v| serde_json::from_value(v).ok())
+        .filter(|item: &SemanticItemV1| item.thread_id == thread_id)
+        .collect();
+    items.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
+    Ok(items)
+}
+
+/// The interpretation still standing: items nothing has superseded.
+///
+/// Deterministic given the same records, so a snapshot regenerates identically.
+pub fn effective_semantic_items(
+    runtime: &Path,
+    thread_id: &str,
+) -> Result<Vec<SemanticItemV1>, String> {
+    let items = semantic_items(runtime, thread_id)?;
+    let superseded: std::collections::HashSet<&str> = items
+        .iter()
+        .filter_map(|item| item.supersedes.as_deref())
+        .collect();
+    Ok(items
+        .iter()
+        .filter(|item| !superseded.contains(item.id.as_str()))
+        .cloned()
+        .collect())
+}
+
 pub fn snapshot(
     runtime: &Path,
     project_id: &str,
@@ -419,6 +558,7 @@ pub fn snapshot(
         .max()
         .unwrap_or(0)
         + 1;
+    let semantic_items = effective_semantic_items(runtime, &t.id)?;
     Ok(ThreadSnapshotV1 {
         schema_version: 1,
         kind: "threadSnapshot".into(),
@@ -426,6 +566,7 @@ pub fn snapshot(
         thread: t,
         foreground: fg,
         interaction_events: events,
+        semantic_items,
         next_sequence,
     })
 }
@@ -459,6 +600,128 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    fn thread_fixture(runtime: &Path, root: &Path) -> (ProjectBindingV1, ObjectiveThreadV1) {
+        let project = bind(runtime, root, None).unwrap();
+        let thread = create_thread(runtime, &project.id, "Build a personal dashboard").unwrap();
+        (project, thread)
+    }
+
+    #[test]
+    fn a_user_confirmed_item_supersedes_the_model_reading_it_replaces() {
+        let runtime = Temp::new();
+        let root = Temp::new();
+        let (project, thread) = thread_fixture(&runtime.0, &root.0);
+
+        let inferred = record_semantic_item(
+            &runtime.0,
+            &project.id,
+            &thread.id,
+            "objectiveProjection",
+            "Organizing active projects.",
+            PROVENANCE_INFERRED,
+            None,
+        )
+        .unwrap();
+        let confirmed = record_semantic_item(
+            &runtime.0,
+            &project.id,
+            &thread.id,
+            "objectiveProjection",
+            "Prioritizing school over HII.",
+            PROVENANCE_USER_CONFIRMED,
+            Some(&inferred.id),
+        )
+        .unwrap();
+
+        let effective = effective_semantic_items(&runtime.0, &thread.id).unwrap();
+        assert_eq!(effective.len(), 1);
+        assert_eq!(effective[0].id, confirmed.id);
+        // Both are kept; only the standing reading changes.
+        assert_eq!(semantic_items(&runtime.0, &thread.id).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_model_reading_cannot_overwrite_what_the_operator_stated() {
+        let runtime = Temp::new();
+        let root = Temp::new();
+        let (project, thread) = thread_fixture(&runtime.0, &root.0);
+        let confirmed = record_semantic_item(
+            &runtime.0,
+            &project.id,
+            &thread.id,
+            "constraint",
+            "Keep it to one page.",
+            PROVENANCE_USER_CONFIRMED,
+            None,
+        )
+        .unwrap();
+        let refused = record_semantic_item(
+            &runtime.0,
+            &project.id,
+            &thread.id,
+            "constraint",
+            "Two pages is fine.",
+            PROVENANCE_INFERRED,
+            Some(&confirmed.id),
+        );
+        assert!(refused.is_err(), "inferred must not supersede confirmed");
+        let effective = effective_semantic_items(&runtime.0, &thread.id).unwrap();
+        assert_eq!(effective.len(), 1);
+        assert_eq!(effective[0].text, "Keep it to one page.");
+    }
+
+    #[test]
+    fn a_snapshot_carries_standing_interpretation_and_regenerates_identically() {
+        let runtime = Temp::new();
+        let root = Temp::new();
+        let (project, thread) = thread_fixture(&runtime.0, &root.0);
+        record_semantic_item(
+            &runtime.0,
+            &project.id,
+            &thread.id,
+            "decision",
+            "Start with the schedule section.",
+            PROVENANCE_INFERRED,
+            None,
+        )
+        .unwrap();
+        let first = snapshot(&runtime.0, &project.id, &thread.id).unwrap();
+        let second = snapshot(&runtime.0, &project.id, &thread.id).unwrap();
+        assert_eq!(first.semantic_items.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&first).unwrap(),
+            serde_json::to_value(&second).unwrap(),
+            "snapshot must regenerate deterministically"
+        );
+    }
+
+    #[test]
+    fn semantic_items_reject_unknown_kinds_and_provenance() {
+        let runtime = Temp::new();
+        let root = Temp::new();
+        let (project, thread) = thread_fixture(&runtime.0, &root.0);
+        assert!(record_semantic_item(
+            &runtime.0,
+            &project.id,
+            &thread.id,
+            "vibe",
+            "text",
+            PROVENANCE_INFERRED,
+            None
+        )
+        .is_err());
+        assert!(record_semantic_item(
+            &runtime.0,
+            &project.id,
+            &thread.id,
+            "finding",
+            "text",
+            "guessed",
+            None
+        )
+        .is_err());
     }
 
     #[test]

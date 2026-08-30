@@ -1,6 +1,6 @@
 use crate::{
     agent::{
-        choose_model, execute_tool, parse_action, parse_action_with_repair, Action,
+        choose_model, execute_tool, parse_action_with_repair, Action,
         RejectedActionGuard,
         MODEL_LOOP_DETECTED_MESSAGE,
     },
@@ -26,7 +26,7 @@ use serde_json::json;
 use std::{
     collections::{HashSet, VecDeque},
     io::{self, IsTerminal, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::mpsc,
     thread,
@@ -271,6 +271,12 @@ pub struct Conversation {
     thinking_mode: ThinkingMode,
     /// Most recent objective projection, reused when a step omits one.
     last_flow: Option<crate::agent::FlowProjection>,
+    /// Durable objective thread this session is speaking into, when one could
+    /// be resolved. `None` leaves the session working exactly as before.
+    thread: Option<(String, String)>,
+    /// Standing projection item, so the next one supersedes it rather than
+    /// piling up.
+    last_projection_item: Option<String>,
     /// No projection is available for the current step, so Flow view would show
     /// nothing at all. Tool lines come back rather than leaving a blank screen.
     flow_blind: bool,
@@ -392,6 +398,8 @@ impl Conversation {
             last_skill_draft: None,
             thinking_mode: ThinkingMode::Flow,
             last_flow: None,
+            thread: None,
+            last_projection_item: None,
             flow_blind: true,
             reasoning_mode: match std::env::var("HII_REASONING").as_deref() {
                 Ok("off") => ReasoningMode::Off,
@@ -547,6 +555,9 @@ impl Conversation {
                     "conversation.steered",
                     json!({ "content": redact_text(&steering), "step": step }),
                 )?;
+                // A correction outranks the model's next projection instead of
+                // being replaced by it.
+                self.record_meaning("constraint", &steering, true);
                 continue;
             }
             let parsed = parse_action_with_repair(&raw);
@@ -675,8 +686,10 @@ impl Conversation {
                         crate::tui::activity_item(step, &flow.current);
                     }
                 }
+                self.record_meaning("objectiveProjection", &flow.current, false);
                 self.last_flow = Some(flow);
             }
+            self.record_proposal(&action, step);
             match action {
                 Action::Message { message, .. } => {
                     if needs_verification(mutation_epoch, verified_epoch) {
@@ -2134,12 +2147,112 @@ impl Conversation {
         .into())
     }
 
-    pub fn begin_flow(&self, objective: &str) -> Result<(), String> {
+    /// Resolve the durable project and objective thread for this turn.
+    ///
+    /// Best effort by design: the adaptive graph is newer than this loop, and a
+    /// session must still work when it is unavailable. Failures are recorded
+    /// and the conversation proceeds on its own record.
+    fn resolve_thread(&mut self, objective: &str) {
+        match self.bind_thread(objective) {
+            Ok(thread) => self.thread = Some(thread),
+            Err(error) => {
+                self.thread = None;
+                let _ = self
+                    .store
+                    .event("flow.thread_unavailable", json!({ "error": error }));
+            }
+        }
+        self.last_projection_item = None;
+    }
+
+    fn bind_thread(&self, objective: &str) -> Result<(String, String), String> {
+        bind_objective_thread(&self.paths.runtime, self.tools.workspace(), objective)
+    }
+
+    /// Record an interpretation against the active thread, if there is one.
+    fn record_meaning(&mut self, item_kind: &str, text: &str, confirmed: bool) {
+        let Some((project_id, thread_id)) = self.thread.clone() else {
+            return;
+        };
+        let provenance = if confirmed {
+            hii_core::adaptive::PROVENANCE_USER_CONFIRMED
+        } else {
+            hii_core::adaptive::PROVENANCE_INFERRED
+        };
+        let supersedes =
+            supersession_target(item_kind, confirmed, self.last_projection_item.as_deref())
+                .map(str::to_string);
+        match hii_core::adaptive::record_semantic_item(
+            &self.paths.runtime,
+            &project_id,
+            &thread_id,
+            item_kind,
+            text,
+            provenance,
+            supersedes.as_deref(),
+        ) {
+            Ok(item) => {
+                if item_kind == "objectiveProjection" {
+                    self.last_projection_item = Some(item.id);
+                }
+            }
+            Err(error) => {
+                let _ = self
+                    .store
+                    .event("flow.meaning_unrecorded", json!({ "error": error }));
+            }
+        }
+    }
+
+    /// Record what the model proposed as a durable interaction event.
+    fn record_proposal(&self, action: &crate::agent::Action, step: usize) {
+        let Some((project_id, thread_id)) = self.thread.clone() else {
+            return;
+        };
+        let proposal = action.as_proposal();
+        let interaction_id = format!("{}:{}", self.store.id, thread_id);
+        let event = hii_core::adaptive::InteractionEventV1 {
+            schema_version: 1,
+            id: String::new(),
+            interaction_id: interaction_id.clone(),
+            project_id,
+            thread_id,
+            run_id: None,
+            sequence: 0,
+            timestamp: String::new(),
+            kind: match &proposal {
+                hii_core::adaptive::InteractionProposalV1::Respond { .. } => "interaction.respond",
+                hii_core::adaptive::InteractionProposalV1::Capability { .. } => {
+                    "interaction.capability"
+                }
+                hii_core::adaptive::InteractionProposalV1::Ask { .. } => "interaction.ask",
+                hii_core::adaptive::InteractionProposalV1::Finish { .. } => "interaction.finish",
+            }
+            .into(),
+            text: None,
+            payload: serde_json::to_value(&proposal).unwrap_or_default(),
+            causation_event_id: None,
+        };
+        if let Err(error) = hii_core::adaptive::append_event(
+            &self.paths.runtime,
+            event,
+            &format!("{interaction_id}:{step}"),
+        ) {
+            let _ = self
+                .store
+                .event("flow.proposal_unrecorded", json!({ "error": error }));
+        }
+    }
+
+    pub fn begin_flow(&mut self, objective: &str) -> Result<(), String> {
         let title = crate::text::clip_line(objective.trim(), 72);
         let goal = objective.trim();
         let current = "Understanding what belongs here.";
         let next = "Choose the first useful change.";
         self.store.event("flow.started", json!({"objective":redact_text(objective),"title":title,"goal":goal,"current":current,"next":next}))?;
+        self.resolve_thread(objective);
+        // The operator's own words are the one reading nothing may overwrite.
+        self.record_meaning("objectiveProjection", goal, true);
         if self.shows_flow() {
             crate::tui::active_run(&crate::tui::ActiveRunView {
                 title: &title,
@@ -3362,6 +3475,179 @@ fn advisor_suggestion(raw: &str) -> Result<(String, String, String, String), Str
     ))
 }
 
+/// Resolve the durable project and objective thread for a request.
+///
+/// Continuing the *same* objective is the whole point: reopening HII and asking
+/// for the same thing must land on the thread that already carries its meaning,
+/// not open a second one that starts from nothing. A different request opens its
+/// own thread; a closed thread is never resumed.
+fn bind_objective_thread(
+    runtime: &Path,
+    workspace: &Path,
+    objective: &str,
+) -> Result<(String, String), String> {
+    let canonical = std::fs::canonicalize(workspace)
+        .map_err(|error| error.to_string())?
+        .display()
+        .to_string();
+    let project = match hii_core::adaptive::projects(runtime)?
+        .into_iter()
+        .find(|project| project.canonical_root == canonical)
+    {
+        Some(project) => project,
+        None => hii_core::adaptive::bind(runtime, workspace, None)?,
+    };
+    let existing = hii_core::adaptive::threads(runtime, &project.id)?
+        .into_iter()
+        .find(|thread| thread.objective == objective.trim() && thread.status != "closed");
+    let thread = match existing {
+        Some(thread) => thread,
+        None => hii_core::adaptive::create_thread(runtime, &project.id, objective)?,
+    };
+    hii_core::adaptive::activate_thread(runtime, &project.id, &thread.id)?;
+    Ok((project.id, thread.id))
+}
+
+/// Which earlier item, if any, a newly recorded one replaces.
+///
+/// Only the model's own reading of the objective supersedes its predecessor —
+/// otherwise the projection accumulates one stale copy per action. Anything the
+/// operator states stands alongside what came before, because a constraint is
+/// not a correction of the last constraint. Nothing the operator states is ever
+/// superseded here; `record_semantic_item` refuses that at the storage layer.
+fn supersession_target<'a>(
+    item_kind: &str,
+    confirmed: bool,
+    last_projection: Option<&'a str>,
+) -> Option<&'a str> {
+    if item_kind == "objectiveProjection" && !confirmed {
+        last_projection
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod durable_meaning_tests {
+    use super::{bind_objective_thread, supersession_target};
+    use hii_core::adaptive;
+
+    /// Reopening HII and asking for the same thing must continue the thread that
+    /// already carries its meaning. This is the acceptance condition the whole
+    /// adaptive graph exists for: no re-explanation across sessions.
+    #[test]
+    fn the_same_objective_continues_its_thread_across_sessions() {
+        let runtime = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+
+        let (project, thread) =
+            bind_objective_thread(runtime.path(), workspace.path(), "make the dashboard legible")
+                .unwrap();
+        let (again_project, again_thread) =
+            bind_objective_thread(runtime.path(), workspace.path(), "make the dashboard legible")
+                .unwrap();
+        assert_eq!((&project, &thread), (&again_project, &again_thread));
+
+        let (other_project, other_thread) =
+            bind_objective_thread(runtime.path(), workspace.path(), "something else entirely")
+                .unwrap();
+        assert_eq!(project, other_project, "one workspace binds one project");
+        assert_ne!(thread, other_thread, "a different request opens its own thread");
+    }
+
+    /// What the operator says has to outlive the model's next re-reading of it.
+    /// The projection replaces only itself; the constraint stays standing.
+    #[test]
+    fn a_steer_survives_the_projections_that_follow_it() {
+        let runtime = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let (project, thread) =
+            bind_objective_thread(runtime.path(), workspace.path(), "make it legible").unwrap();
+
+        let record = |kind: &str, text: &str, confirmed: bool, last: Option<&str>| {
+            let provenance = if confirmed {
+                adaptive::PROVENANCE_USER_CONFIRMED
+            } else {
+                adaptive::PROVENANCE_INFERRED
+            };
+            adaptive::record_semantic_item(
+                runtime.path(),
+                &project,
+                &thread,
+                kind,
+                text,
+                provenance,
+                supersession_target(kind, confirmed, last),
+            )
+            .unwrap()
+        };
+
+        let first = record("objectiveProjection", "reading the code", false, None);
+        record("constraint", "do not touch the live site", true, None);
+        let second = record(
+            "objectiveProjection",
+            "editing the code",
+            false,
+            Some(first.id.as_str()),
+        );
+
+        let effective = adaptive::effective_semantic_items(runtime.path(), &thread).unwrap();
+        let texts: Vec<&str> = effective.iter().map(|item| item.text.as_str()).collect();
+        assert!(
+            texts.contains(&"do not touch the live site"),
+            "the operator's constraint was superseded: {texts:?}"
+        );
+        assert!(texts.contains(&"editing the code"));
+        assert!(
+            !texts.contains(&"reading the code"),
+            "a stale projection is still standing: {texts:?}"
+        );
+        assert_eq!(second.supersedes.as_deref(), Some(first.id.as_str()));
+    }
+
+    /// A snapshot has to carry standing meaning, or `hii thread show` reports a
+    /// thread that knows nothing about what was decided in it.
+    #[test]
+    fn a_thread_snapshot_carries_standing_meaning() {
+        let runtime = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let (project, thread) =
+            bind_objective_thread(runtime.path(), workspace.path(), "make it legible").unwrap();
+        adaptive::record_semantic_item(
+            runtime.path(),
+            &project,
+            &thread,
+            "decision",
+            "measure the loop before narrating it",
+            adaptive::PROVENANCE_USER_CONFIRMED,
+            None,
+        )
+        .unwrap();
+
+        let snapshot = adaptive::snapshot(runtime.path(), &project, &thread).unwrap();
+        assert_eq!(snapshot.semantic_items.len(), 1);
+        assert_eq!(
+            snapshot.semantic_items[0].text,
+            "measure the loop before narrating it"
+        );
+    }
+
+    #[test]
+    fn only_an_inferred_projection_replaces_its_predecessor() {
+        assert_eq!(
+            supersession_target("objectiveProjection", false, Some("item-1")),
+            Some("item-1")
+        );
+        assert_eq!(
+            supersession_target("objectiveProjection", true, Some("item-1")),
+            None,
+            "a confirmed objective must not silently erase the projection"
+        );
+        assert_eq!(supersession_target("constraint", false, Some("item-1")), None);
+        assert_eq!(supersession_target("objectiveProjection", false, None), None);
+    }
+}
+
 #[cfg(test)]
 const THINKING_MODES: &[(&str, &str)] = &[
     (
@@ -3883,10 +4169,11 @@ mod tests {
         assert!(last_code_block("no fences at all here").is_none());
     }
 
+    use crate::agent::parse_action;
     use super::{
         activity_excerpt, advisor_suggestion, authority_decision, clean_final_output,
         conversation_prompt, mode_choices, model_event_kind, needs_verification,
-        observation_signature, parse_action, plain_message, plan_tool_allowed,
+        observation_signature, plain_message, plan_tool_allowed,
         public_test_sensitive_shell, render_permissions, resumable_messages, session_authority,
         session_flow, session_goal, session_plan_mode, session_title,
         shell_command_is_observation_only, shell_command_is_preview, shell_command_is_read_only,
