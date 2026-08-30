@@ -13,7 +13,7 @@ describe("native consumer model profiles", () => {
     [8, "8gb", "Qwen/Qwen3-4B"],
     [16, "16gb", "Qwen/Qwen3-8B"],
     [24, "24-32gb", "Qwen/Qwen3-14B"],
-    [48, "48gb+", "Qwen/Qwen3.5-35B-A3B"]
+    [48, "48gb+", "mlx-community/Qwen3.8-27B-4bit"]
   ])("maps %i GiB to %s", (memoryGiB, tier, model) => {
     expect(selectConsumerModelProfile(profiles, memoryGiB)).toMatchObject({ tier, model });
   });

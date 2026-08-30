@@ -7,7 +7,7 @@ use std::{
     io::{BufRead, BufReader},
     net::ToSocketAddrs,
     sync::mpsc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -429,6 +429,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         if format.is_some() {
             body["response_format"] = json!({ "type": "json_object" });
         }
+        let started = Instant::now();
         let value: Value = self
             .agent
             .post(&format!("{}/v1/chat/completions", self.base_url))
@@ -436,20 +437,26 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             .map_err(format_ureq)?
             .into_json()
             .map_err(|error| format!("invalid chat response: {error}"))?;
-        let content = value["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        let message = &value["choices"][0]["message"];
+        let content = message["content"].as_str().unwrap_or_default().to_string();
+        // Reasoning arrives under a provider-specific key on the message, the
+        // same set the streaming path already handles.
+        let thinking = openai_reasoning_delta(message).unwrap_or_default().to_string();
+        // Prefer what the backend reports; otherwise time the call here. Without
+        // a first-token signal the whole call counts as completion time.
+        let (prompt_duration_ms, completion_duration_ms, total_duration_ms) =
+            openai_reported_durations(&value["usage"]).unwrap_or((0, elapsed_ms, elapsed_ms));
         let usage = ChatUsage {
             prompt_tokens: value["usage"]["prompt_tokens"].as_u64().unwrap_or(0),
             completion_tokens: value["usage"]["completion_tokens"].as_u64().unwrap_or(0),
-            prompt_duration_ms: 0,
-            completion_duration_ms: 0,
-            total_duration_ms: 0,
+            prompt_duration_ms,
+            completion_duration_ms,
+            total_duration_ms,
         };
         Ok(ChatResult {
             content,
-            thinking: String::new(),
+            thinking,
             usage,
         })
     }
@@ -625,6 +632,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         if json_format {
             body["response_format"] = json!({ "type": "json_object" });
         }
+        let started = Instant::now();
         let response = match self
             .agent
             .post(&format!("{}/v1/chat/completions", self.base_url))
@@ -641,6 +649,8 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         let mut content = String::new();
         let mut thinking = String::new();
         let mut usage = ChatUsage::default();
+        let mut reported_durations = None;
+        let mut first_token_at = None;
         let mut content_repetition = RepetitionGuard::default();
         for line in BufReader::new(response.into_reader()).lines() {
             if cancel.is_cancelled() {
@@ -673,10 +683,12 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             };
             let delta = &value["choices"][0]["delta"];
             if let Some(text) = openai_reasoning_delta(delta) {
+                first_token_at.get_or_insert_with(Instant::now);
                 thinking.push_str(text);
                 let _ = sender.send(ChatStreamEvent::Thinking(text.to_string()));
             }
             if let Some(text) = delta["content"].as_str().filter(|text| !text.is_empty()) {
+                first_token_at.get_or_insert_with(Instant::now);
                 if content_repetition.observe(text) {
                     let _ = sender.send(ChatStreamEvent::Done(Err(
                         "MODEL LOOP DETECTED — the current generation repeated the same substantial block three times. The session is preserved; revise or retry the request."
@@ -690,8 +702,21 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             if let Some(value) = value.get("usage") {
                 usage.prompt_tokens = value["prompt_tokens"].as_u64().unwrap_or(0);
                 usage.completion_tokens = value["completion_tokens"].as_u64().unwrap_or(0);
+                reported_durations = reported_durations.or_else(|| openai_reported_durations(value));
             }
         }
+        // Prefer backend-reported timing; otherwise treat time-to-first-token as
+        // prompt evaluation and the remainder as completion.
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        let (prompt_ms, completion_ms, total_ms) = reported_durations.unwrap_or_else(|| {
+            let prompt_ms = first_token_at
+                .map(|at: Instant| at.duration_since(started).as_millis() as u64)
+                .unwrap_or(0);
+            (prompt_ms, elapsed_ms.saturating_sub(prompt_ms), elapsed_ms)
+        });
+        usage.prompt_duration_ms = prompt_ms;
+        usage.completion_duration_ms = completion_ms;
+        usage.total_duration_ms = total_ms;
         let result = ChatResult {
             content,
             thinking,
@@ -865,6 +890,23 @@ fn endpoint_ready(base_url: &str) -> bool {
     addresses.next().is_some_and(|address| {
         std::net::TcpStream::connect_timeout(&address, Duration::from_millis(120)).is_ok()
     })
+}
+
+/// Durations an OpenAI-compatible backend reported itself, in milliseconds.
+/// Ollama-style backends report nanoseconds here; HII Native and LM Studio
+/// report nothing, which is why callers fall back to client-side wall clock.
+fn openai_reported_durations(usage: &Value) -> Option<(u64, u64, u64)> {
+    let prompt = usage["prompt_eval_duration"].as_u64();
+    let completion = usage["eval_duration"].as_u64();
+    let total = usage["total_duration"].as_u64();
+    if prompt.is_none() && completion.is_none() && total.is_none() {
+        return None;
+    }
+    Some((
+        prompt.unwrap_or(0) / 1_000_000,
+        completion.unwrap_or(0) / 1_000_000,
+        total.unwrap_or(0) / 1_000_000,
+    ))
 }
 
 fn openai_reasoning_delta(delta: &Value) -> Option<&str> {
@@ -1042,11 +1084,51 @@ fn format_ureq(error: ureq::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        acquired_native_model, openai_messages, openai_reasoning_delta, provider_messages, Message,
-        Ollama, RepetitionGuard,
+        acquired_native_model, openai_messages, openai_reasoning_delta, openai_reported_durations,
+        provider_messages, ChatUsage, Message, Ollama, RepetitionGuard,
     };
     use crate::attachments::ImagePayload;
     use crate::config::ModelProvider;
+
+    #[test]
+    fn reported_durations_are_absent_for_backends_that_do_not_time_themselves() {
+        // HII Native and LM Studio return a usage block with tokens only, which
+        // is why every session since the native default went to zero timings.
+        let usage = serde_json::json!({ "prompt_tokens": 11070, "completion_tokens": 11 });
+        assert_eq!(openai_reported_durations(&usage), None);
+    }
+
+    #[test]
+    fn reported_durations_convert_provider_nanoseconds_to_milliseconds() {
+        let usage = serde_json::json!({
+            "prompt_eval_duration": 2_000_000u64,
+            "eval_duration": 8_000_000u64,
+            "total_duration": 10_000_000u64,
+        });
+        assert_eq!(openai_reported_durations(&usage), Some((2, 8, 10)));
+    }
+
+    #[test]
+    fn reasoning_is_read_from_a_completed_message_not_only_a_stream_delta() {
+        let message = serde_json::json!({ "content": "done", "reasoning_content": "weighing options" });
+        assert_eq!(openai_reasoning_delta(&message), Some("weighing options"));
+        let plain = serde_json::json!({ "content": "done" });
+        assert_eq!(openai_reasoning_delta(&plain), None);
+    }
+
+    #[test]
+    fn wall_clock_timing_makes_throughput_reportable() {
+        // The fallback attributes the untimed call to completion so
+        // tokens_per_second stops reading 0.0 on the native path.
+        let usage = ChatUsage {
+            prompt_tokens: 11_070,
+            completion_tokens: 20,
+            prompt_duration_ms: 0,
+            completion_duration_ms: 2_000,
+            total_duration_ms: 2_000,
+        };
+        assert_eq!(usage.tokens_per_second(), 10.0);
+    }
 
     #[test]
     fn detects_three_substantial_repeated_blocks() {
