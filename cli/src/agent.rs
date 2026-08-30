@@ -2252,6 +2252,35 @@ fn repeats_passing_verification(
 }
 
 pub(crate) fn parse_action(raw: &str) -> Result<Action, String> {
+    parse_action_with_repair(raw).map(|(action, _)| action)
+}
+
+/// What had to be adjusted before a raw model response parsed as an action.
+///
+/// The repairs themselves are deliberate — compact local models fence their
+/// JSON and emit literal newlines inside strings — but absorbing them silently
+/// hid how often the action protocol is missed at all. Reported so the record
+/// can show it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ActionRepair {
+    /// Wrapped in a code fence, or surrounded by prose.
+    Unwrapped,
+    /// Contained literal control characters inside JSON strings.
+    EscapedControlChars,
+}
+
+impl ActionRepair {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Unwrapped => "unwrapped",
+            Self::EscapedControlChars => "escaped-control-chars",
+        }
+    }
+}
+
+pub(crate) fn parse_action_with_repair(
+    raw: &str,
+) -> Result<(Action, Option<ActionRepair>), String> {
     let trimmed = raw.trim();
     let candidate = if trimmed.starts_with("```") {
         trimmed
@@ -2264,11 +2293,15 @@ pub(crate) fn parse_action(raw: &str) -> Result<Action, String> {
     } else {
         trimmed
     };
+    let mut repair = (candidate != trimmed).then_some(ActionRepair::Unwrapped);
     let mut value: serde_json::Value = match serde_json::from_str(candidate) {
         Ok(value) => value,
         Err(original_error) => {
             let repaired = escape_literal_control_chars_in_json_strings(candidate);
-            serde_json::from_str(&repaired).map_err(|_| original_error.to_string())?
+            let value =
+                serde_json::from_str(&repaired).map_err(|_| original_error.to_string())?;
+            repair = Some(ActionRepair::EscapedControlChars);
+            value
         }
     };
     let action_type = value
@@ -2304,7 +2337,7 @@ pub(crate) fn parse_action(raw: &str) -> Result<Action, String> {
     }
     let action = serde_json::from_value(value).map_err(|error| error.to_string())?;
     validate_action_fields(&action)?;
-    Ok(action)
+    Ok((action, repair))
 }
 
 /// Reject incomplete calls before they consume a tool step. Compact models
@@ -2687,6 +2720,25 @@ mod tests {
     fn parses_json_action() {
         let action = parse_action(r#"{"type":"tool","tool":"list","reason":"inspect"}"#).unwrap();
         assert!(matches!(action, Action::Tool { tool, .. } if tool == "list"));
+    }
+
+    #[test]
+    fn parsing_reports_the_repair_it_had_to_apply() {
+        use super::{parse_action_with_repair, ActionRepair};
+        let (_, clean) = parse_action_with_repair(r#"{"type":"list"}"#).unwrap();
+        assert_eq!(clean, None);
+
+        let (_, fenced) =
+            parse_action_with_repair("```json\n{\"type\":\"list\"}\n```").unwrap();
+        assert_eq!(fenced, Some(ActionRepair::Unwrapped));
+        assert_eq!(fenced.unwrap().label(), "unwrapped");
+
+        // A literal newline inside a JSON string: the single most common way a
+        // compact local model misses the protocol while still meaning an action.
+        let (_, escaped) =
+            parse_action_with_repair("{\"type\":\"write\",\"path\":\"a.txt\",\"content\":\"one\ntwo\"}")
+                .unwrap();
+        assert_eq!(escaped, Some(ActionRepair::EscapedControlChars));
     }
 
     #[test]

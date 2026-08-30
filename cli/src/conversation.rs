@@ -1,6 +1,7 @@
 use crate::{
     agent::{
-        choose_model, execute_tool, parse_action, Action, RejectedActionGuard,
+        choose_model, execute_tool, parse_action, parse_action_with_repair, Action,
+        RejectedActionGuard,
         MODEL_LOOP_DETECTED_MESSAGE,
     },
     attachments::AttachmentQueue,
@@ -520,10 +521,19 @@ impl Conversation {
                 )?;
                 continue;
             }
-            let parsed_action = parse_action(&raw);
+            let parsed = parse_action_with_repair(&raw);
+            let repair = parsed.as_ref().ok().and_then(|(_, repair)| *repair);
+            let parsed_action = parsed.map(|(action, _)| action);
             self.store.event(
                 model_event_kind(&raw, &parsed_action),
-                json!({ "step": step, "content": redact_text(&raw) }),
+                json!({
+                    "step": step,
+                    "content": redact_text(&raw),
+                    // Present only when the response did not arrive as a clean
+                    // action, so the rate of protocol misses is visible in the
+                    // record instead of being absorbed by the repair path.
+                    "repaired": repair.map(crate::agent::ActionRepair::label)
+                }),
             )?;
             if rejected_actions.would_loop(&raw, mutation_epoch, verified_epoch) {
                 let message = if mutation_epoch > 0 && verified_epoch == Some(mutation_epoch) {
