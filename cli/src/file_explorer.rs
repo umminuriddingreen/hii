@@ -115,14 +115,8 @@ impl BrowserState {
                 self.parent()?;
                 Ok(BrowserAction::Continue)
             }
-            KeyCode::Right | KeyCode::Enter | KeyCode::Char('l') => {
-                self.open_selected()?;
-                Ok(BrowserAction::Continue)
-            }
-            KeyCode::Char('a') => self
-                .selected_path()
-                .map(BrowserAction::Attach)
-                .ok_or_else(|| "nothing selected".into()),
+            KeyCode::Right | KeyCode::Enter | KeyCode::Char('l') => self.open_selected(),
+            KeyCode::Char('a') => self.attach_selected(),
             KeyCode::Char('e') => {
                 self.edit_selected()?;
                 Ok(BrowserAction::Continue)
@@ -190,17 +184,29 @@ impl BrowserState {
             .map(|entry| entry.path.clone())
     }
 
-    fn open_selected(&mut self) -> Result<()> {
+    fn open_selected(&mut self) -> Result<BrowserAction> {
         let Some(entry) = self.entries.get(self.selected) else {
-            return Ok(());
+            return Ok(BrowserAction::Continue);
         };
         if entry.is_dir {
             self.cwd = entry.path.clone();
             self.entries = read_entries(&self.cwd)?;
             self.selected = 0;
             self.scroll = 0;
+            Ok(BrowserAction::Continue)
+        } else {
+            Ok(BrowserAction::Attach(entry.path.clone()))
         }
-        Ok(())
+    }
+
+    fn attach_selected(&self) -> Result<BrowserAction> {
+        let Some(entry) = self.entries.get(self.selected) else {
+            return Err("nothing selected".into());
+        };
+        if entry.is_dir {
+            return Ok(BrowserAction::Continue);
+        }
+        Ok(BrowserAction::Attach(entry.path.clone()))
     }
 
     fn parent(&mut self) -> Result<()> {
@@ -226,16 +232,21 @@ impl BrowserState {
         let Some(path) = self.selected_path() else {
             return Ok(());
         };
+        if path.is_dir() {
+            return Ok(());
+        }
         terminal::disable_raw_mode().map_err(|error| error.to_string())?;
         execute!(io::stdout(), cursor::Show).map_err(|error| error.to_string())?;
         let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".into());
-        let status = Command::new(editor)
+        let editor_result = Command::new(editor)
             .arg(&path)
             .status()
             .map_err(|error| error.to_string());
-        execute!(io::stdout(), cursor::Hide).map_err(|error| error.to_string())?;
-        terminal::enable_raw_mode().map_err(|error| error.to_string())?;
-        status?;
+        let cursor_result = execute!(io::stdout(), cursor::Hide).map_err(|error| error.to_string());
+        let raw_mode_result = terminal::enable_raw_mode().map_err(|error| error.to_string());
+        editor_result?;
+        cursor_result?;
+        raw_mode_result?;
         self.entries = read_entries(&self.cwd)?;
         Ok(())
     }
@@ -271,6 +282,8 @@ fn compare_entries(left: &Entry, right: &Entry) -> Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::KeyEvent;
+    use std::fs;
 
     #[test]
     fn entries_sort_directories_first_then_names() {
@@ -301,5 +314,41 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["app", "Cargo.toml", "z.txt"]
         );
+    }
+
+    #[test]
+    fn enter_opens_directories_and_attaches_files() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join("folder")).unwrap();
+        fs::write(temp.path().join("note.txt"), "hello").unwrap();
+        let mut state = BrowserState::new(temp.path()).unwrap();
+        let root = temp.path().canonicalize().unwrap();
+
+        assert!(matches!(
+            state.handle_key(KeyEvent::from(KeyCode::Enter)).unwrap(),
+            BrowserAction::Continue
+        ));
+        assert_eq!(state.cwd, root.join("folder"));
+
+        state.parent().unwrap();
+        state.selected = 1;
+        assert!(matches!(
+            state.handle_key(KeyEvent::from(KeyCode::Enter)).unwrap(),
+            BrowserAction::Attach(path) if path == root.join("note.txt")
+        ));
+    }
+
+    #[test]
+    fn attach_key_does_not_attach_directories() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join("folder")).unwrap();
+        let mut state = BrowserState::new(temp.path()).unwrap();
+
+        assert!(matches!(
+            state
+                .handle_key(KeyEvent::from(KeyCode::Char('a')))
+                .unwrap(),
+            BrowserAction::Continue
+        ));
     }
 }
