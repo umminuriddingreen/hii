@@ -674,6 +674,7 @@ export function HiiRoot({
   const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [promptVisible, setPromptVisible] = useState(false);
   const [drawing, setDrawing] = useState(false);
+  const [canvasCommandsOpen, setCanvasCommandsOpen] = useState(false);
   const [, setToolMessage] = useState('');
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [dropActive, setDropActive] = useState(false);
@@ -797,6 +798,11 @@ export function HiiRoot({
     setSelected(ids);
     return ids;
   }, [creatorId, isAccount, isSpace, isTouchCanvas, spaceId, workspace]);
+
+  const spawnCenteredSeed = useCallback((seed: NodeSeed) => {
+    const center = camera.centerWorld();
+    return spawnSeeds([seed], { x: center.x - seed.w / 2, y: center.y - seed.h / 2 });
+  }, [camera, spawnSeeds]);
 
   const importFiles = useCallback(async (files: File[], at: Point, direct = false) => {
     try {
@@ -1431,13 +1437,35 @@ export function HiiRoot({
       }
       if (isAccount && !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && event.key.toLowerCase() === 't') {
         event.preventDefault();
-        const [id] = spawnSeeds([canvasTextSeed()], camera.centerWorld());
+        const [id] = spawnCenteredSeed(canvasTextSeed());
+        setFocusNodeId(id ?? null);
+        return;
+      }
+      if (isAccount && !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        const [id] = spawnCenteredSeed(seedFor('note', { content: '', name: 'Note' }));
         setFocusNodeId(id ?? null);
         return;
       }
       if (isAccount && !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && event.key.toLowerCase() === 'd') {
         event.preventDefault();
         setDrawing((value) => !value);
+        return;
+      }
+      if (isAccount && !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && event.key === '0') {
+        event.preventDefault();
+        camera.reset();
+        return;
+      }
+      if (isAccount && !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && event.key === '?') {
+        event.preventDefault();
+        setCanvasCommandsOpen((open) => !open);
+        return;
+      }
+      if (isAccount && event.key === 'Escape') {
+        setDrawing(false);
+        setCanvasCommandsOpen(false);
+        setSelected([]);
         return;
       }
       if (!runtimeEnabled) {
@@ -1548,7 +1576,7 @@ export function HiiRoot({
     addEventListener('pointermove', pointermove);
     addEventListener('paste', paste);
     return () => { removeEventListener('keydown', keydown); removeEventListener('pointermove', pointermove); removeEventListener('paste', paste); };
-  }, [allowPhoto, camera, importFiles, isAccount, isSpace, isTouchCanvas, onRequestDevice, openDevBrowser, runtimeEnabled, selected, spawnArtifactTerminals, spawnInformation, spawnSeeds, workspace]);
+  }, [allowPhoto, camera, importFiles, isAccount, isSpace, isTouchCanvas, onRequestDevice, openDevBrowser, runtimeEnabled, selected, spawnArtifactTerminals, spawnCenteredSeed, spawnInformation, spawnSeeds, workspace]);
 
   return (
     <main
@@ -1619,13 +1647,22 @@ export function HiiRoot({
         drawing={drawing}
         photo={allowPhoto}
         accountTools={isAccount}
+        commandsOpen={isAccount ? canvasCommandsOpen : undefined}
         onAddImage={() => fileInput.current?.click()}
-        onAddText={() => spawnSeeds([seedFor('canvas-text', { text: 'Tap to write', name: 'Text' })], camera.centerWorld())}
-        onAddSticker={() => spawnSeeds([{ ...seedFor('image', { sticker: true, emoji: '✦', name: 'Sticker' }), w: 120, h: 120 }], camera.centerWorld())}
+        onAddText={() => {
+          const [id] = spawnCenteredSeed(seedFor('canvas-text', { text: '', name: 'Text' }));
+          setFocusNodeId(id ?? null);
+        }}
+        onAddNote={() => {
+          const [id] = spawnCenteredSeed(seedFor('note', { content: '', name: 'Note' }));
+          setFocusNodeId(id ?? null);
+        }}
+        onAddSticker={() => spawnCenteredSeed({ ...seedFor('image', { sticker: true, emoji: '✦', name: 'Sticker' }), w: 120, h: 120 })}
         onOpenTerminal={onRequestDevice}
         onUndo={workspace.undo}
         onRedo={workspace.redo}
         onResetView={camera.reset}
+        onCommandsOpenChange={setCanvasCommandsOpen}
         onToggleDrawing={() => setDrawing((value) => !value)}
       />}
       {runtimeEnabled && workspace.nodes.some((node) => node.type === 'app') && <div className="hii-app-dock" onPointerDown={(event) => event.stopPropagation()}>

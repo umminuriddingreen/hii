@@ -49,6 +49,7 @@ describe('HII web access gate', () => {
   it('opens the canonical HII canvas immediately after authentication', () => {
     const source = readFileSync('components/auth/HiiWebAccess.tsx', 'utf8');
     const css = readFileSync('components/auth/HiiWebAccess.module.css', 'utf8');
+    const globalCss = readFileSync('app/globals.css', 'utf8');
 
     expect(source).toContain('surface="account"');
     expect(source).toContain('spaceId={`account:${canvasAccountId}`}');
@@ -86,17 +87,23 @@ describe('HII web access gate', () => {
     expect(canvas).toContain('{isTouchCanvas && <SpaceToolbar');
     expect(canvas).toContain('accountTools={isAccount}');
     const toolbar = readFileSync('components/spaces/SpaceToolbar.tsx', 'utf8');
-    expect(toolbar).toContain("accountTools ? 'upload' : 'photo'");
-    expect(toolbar).toContain('<span>terminal</span><kbd>space</kbd>');
-    expect(toolbar).toContain("accountTools && <kbd>⌘u</kbd>");
-    expect(toolbar).toContain('<span>text</span>');
-    expect(toolbar).toContain('accountTools && <kbd>t</kbd>');
-    expect(toolbar).toContain('accountTools && <kbd>d</kbd>');
+    expect(toolbar).toContain('hii-canvas-command-trigger');
+    expect(toolbar).toContain('hii-canvas-touch-tools');
+    expect(toolbar).toContain('<span>commands</span><kbd>?</kbd>');
+    expect(toolbar).toContain('<dt>space</dt><dd>device terminal</dd>');
+    expect(toolbar).toContain('<dt>n</dt><dd>note</dd>');
+    expect(toolbar).toContain('onAddNote');
     expect(canvas).toContain('isAccount && isTerminalShortcut(event)');
     expect(canvas).toContain("event.key.toLowerCase() === 'u'");
     expect(canvas).toContain("event.key.toLowerCase() === 't'");
     expect(canvas).toContain("event.key.toLowerCase() === 'd'");
+    expect(canvas).toContain("event.key.toLowerCase() === 'n'");
+    expect(canvas).toContain("event.key === '0'");
+    expect(canvas).toContain("event.key === '?'");
+    expect(canvas).toContain('commandsOpen={isAccount ? canvasCommandsOpen : undefined}');
     expect(canvas).toContain('fileSeeder ? fileSeeder(files) : seedsFromFiles(files)');
+    expect(globalCss).toContain('.hii-space-toolbar[data-account-tools="true"] .hii-canvas-command-trigger');
+    expect(globalCss).toContain('.hii-space-toolbar[data-account-tools="true"] .hii-canvas-touch-tools');
   });
 
   it('keeps imported canvas assets local to the authenticated browser device', () => {
