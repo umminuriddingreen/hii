@@ -451,6 +451,23 @@ pub fn redact_text(value: &str) -> String {
 
 /// Every receipt recorded for `workspace`, newest first.
 pub fn receipts_for_workspace(runtime: &Path, workspace: &Path) -> Vec<(PathBuf, Receipt)> {
+    receipts_for_workspace_bounded(runtime, workspace, usize::MAX, u64::MAX)
+}
+
+/// Newest receipts for `workspace`, with bounded count and per-file size.
+///
+/// Startup context only needs a handful of recent receipts. Keeping that path
+/// bounded prevents one historical receipt with oversized captured output from
+/// delaying every interactive session.
+pub fn receipts_for_workspace_bounded(
+    runtime: &Path,
+    workspace: &Path,
+    limit: usize,
+    max_bytes: u64,
+) -> Vec<(PathBuf, Receipt)> {
+    if limit == 0 {
+        return Vec::new();
+    }
     let runs = runtime.join("runs").join("cli");
     let mut paths = fs::read_dir(runs)
         .into_iter()
@@ -464,20 +481,30 @@ pub fn receipts_for_workspace(runtime: &Path, workspace: &Path) -> Vec<(PathBuf,
     let canonical = workspace
         .canonicalize()
         .unwrap_or_else(|_| workspace.to_path_buf());
-    paths
-        .into_iter()
-        .filter_map(|path| {
+    let mut receipts = Vec::with_capacity(limit.min(paths.len()));
+    for path in paths {
+        let Some((path, receipt)) = (|| {
+            if fs::metadata(&path).ok()?.len() > max_bytes {
+                return None;
+            }
             let raw = fs::read_to_string(&path).ok()?;
             let receipt = serde_json::from_str::<Receipt>(&raw).ok()?;
             Some((path, receipt))
-        })
-        .filter(|(_, receipt)| {
-            Path::new(&receipt.workspace)
-                .canonicalize()
-                .unwrap_or_else(|_| PathBuf::from(&receipt.workspace))
-                == canonical
-        })
-        .collect()
+        })() else {
+            continue;
+        };
+        if Path::new(&receipt.workspace)
+            .canonicalize()
+            .unwrap_or_else(|_| PathBuf::from(&receipt.workspace))
+            == canonical
+        {
+            receipts.push((path, receipt));
+            if receipts.len() == limit {
+                break;
+            }
+        }
+    }
+    receipts
 }
 
 fn newest_run_id(runtime: &Path) -> Option<String> {
@@ -623,6 +650,25 @@ mod tests {
         let dir = runtime.join("runs").join("cli").join(id);
         fs::create_dir_all(&dir).expect("create run dir");
         write_receipt(&dir, runtime, id, &sample(id, workspace)).expect("write receipt");
+    }
+
+    #[test]
+    fn bounded_workspace_receipts_skip_oversized_history_and_stop_at_limit() {
+        let runtime = TempDir::new("bounded-runtime");
+        let workspace = TempDir::new("bounded-workspace");
+        record_run(&runtime.0, "run-a", &workspace.0);
+        record_run(&runtime.0, "run-b", &workspace.0);
+        record_run(&runtime.0, "run-c", &workspace.0);
+        fs::write(
+            runtime.0.join("runs/cli/run-c/receipt.json"),
+            vec![b'x'; 4096],
+        )
+        .expect("write oversized receipt");
+
+        let receipts = receipts_for_workspace_bounded(&runtime.0, &workspace.0, 1, 2048);
+
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].1.id, "run-b");
     }
 
     /// The silent-wrong-answer bug: a run in workspace A must never answer a

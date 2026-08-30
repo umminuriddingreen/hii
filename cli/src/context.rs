@@ -7,7 +7,7 @@
 
 use crate::{
     board::Board,
-    receipt::{receipts_for_workspace, redact_text, Receipt},
+    receipt::{receipts_for_workspace_bounded, redact_text, Receipt},
     timeline,
 };
 use serde_json::Value;
@@ -18,6 +18,8 @@ const MAX_GIT_CHARS: usize = 8_000;
 const MAX_HISTORY: usize = 3;
 const MAX_PROFILE_CHARS: usize = 8_000;
 const MAX_SHARED_STATE_CHARS: usize = 8_000;
+const MAX_CONTEXT_RECEIPT_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_CONTEXT_RECEIPTS_SCANNED: usize = 32;
 
 #[derive(Debug, Default)]
 pub struct ContextCapsule {
@@ -305,18 +307,22 @@ fn command(workspace: &Path, args: &[&str]) -> Option<String> {
 /// from this workspace. Unfinished receipts preserve the user's intent across
 /// process restarts but are explicitly labelled unverified in the capsule.
 fn recent_receipts(runtime: &Path, workspace: &Path) -> Vec<Receipt> {
-    receipts_for_workspace(runtime, workspace)
-        .into_iter()
-        .map(|(_, receipt)| receipt)
-        .filter(|receipt| {
-            receipt.finished_at_unix_ms > 0
-                && receipt.status != "running"
-                && ((receipt.status == "completed"
-                    && receipt.verification.iter().any(|item| item.ok))
-                    || receipt.status != "completed")
-        })
-        .take(MAX_HISTORY)
-        .collect()
+    receipts_for_workspace_bounded(
+        runtime,
+        workspace,
+        MAX_CONTEXT_RECEIPTS_SCANNED,
+        MAX_CONTEXT_RECEIPT_BYTES,
+    )
+    .into_iter()
+    .map(|(_, receipt)| receipt)
+    .filter(|receipt| {
+        receipt.finished_at_unix_ms > 0
+            && receipt.status != "running"
+            && ((receipt.status == "completed" && receipt.verification.iter().any(|item| item.ok))
+                || receipt.status != "completed")
+    })
+    .take(MAX_HISTORY)
+    .collect()
 }
 
 #[cfg(test)]
