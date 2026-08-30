@@ -457,6 +457,27 @@ button, input, textarea { font: inherit; }
 .hii-shell-terminal { min-width: 0; min-height: 0; padding: 10px 8px 7px 12px; overflow: hidden; background: #0b0c0f; }
 .hii-shell-terminal .xterm { height: 100%; padding: 0; }
 .hii-shell-terminal .xterm-viewport { scrollbar-color: #343840 transparent; scrollbar-width: thin; }
+.hii-terminal-close,
+.hii-terminal-resize {
+  position: absolute;
+  z-index: 10;
+  border: 0;
+  background: transparent;
+  color: #777b84;
+  opacity: 0;
+  transition: color 120ms ease, opacity 120ms ease;
+}
+.hii-node[data-node-type="terminal"]:hover .hii-terminal-close,
+.hii-node[data-node-type="terminal"]:hover .hii-terminal-resize,
+.hii-node[data-node-type="terminal"][data-selected="true"] .hii-terminal-close,
+.hii-node[data-node-type="terminal"][data-selected="true"] .hii-terminal-resize { opacity: 1; }
+.hii-terminal-close { top: 7px; right: 9px; width: 22px; height: 22px; cursor: pointer; font: 16px/20px "SF Mono", ui-monospace, monospace; }
+.hii-terminal-close:hover,
+.hii-terminal-close:focus-visible { color: #ff958f; outline: 0; }
+.hii-terminal-resize { right: 3px; bottom: 3px; width: 18px; height: 18px; cursor: nwse-resize; touch-action: none; }
+.hii-terminal-resize::after { content: ''; position: absolute; right: 2px; bottom: 2px; width: 7px; height: 7px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; }
+.hii-terminal-resize:hover,
+.hii-terminal-resize:focus-visible { color: #dfe1e5; outline: 0; }
 .hii-job-terminal pre > span { display: block; }
 .hii-terminal-activity-live { color: #8f949f; }
 .hii-terminal-activity-live::before { content: '●'; margin-right: 8px; color: var(--job-accent); animation: hii-external-pulse 1.15s ease-in-out infinite; }

@@ -13,13 +13,6 @@ use url::Url;
 const MAX_OUTPUT_BYTES: usize = 96 * 1024;
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct WebSearchResult {
-    pub title: String,
-    pub url: String,
-    pub snippet: String,
-}
-
 #[derive(Debug, Serialize)]
 pub struct ToolResult {
     pub ok: bool,
@@ -252,66 +245,20 @@ impl Toolbelt {
         tool_result(self.search_native(query, &base), false)
     }
 
-    /// Search the public web without giving the model a general-purpose
-    /// network shell. Results are intentionally compact and retain their source
-    /// URLs so the model can cite what it used.
+    /// Hand web discovery to HII's native WebView. The CLI does not scrape a
+    /// search engine or pretend that an HTTP parser observed a browser.
     pub fn web_search(&self, query: &str) -> ToolResult {
-        tool_result(
-            self.web_search_results(query).map(|results| {
-                results
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, result)| {
-                        format!(
-                            "{}. {}\n   {}\n   {}",
-                            index + 1,
-                            result.title,
-                            result.url,
-                            result.snippet
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n\n")
-            }),
-            false,
-        )
-    }
-
-    pub fn web_search_results(&self, query: &str) -> Result<Vec<WebSearchResult>, String> {
         let query = query.trim();
         if query.is_empty() {
-            return Err("web search query cannot be empty".into());
+            return tool_result(Err("web search query cannot be empty".into()), false);
         }
-        (|| {
-            let search = |candidate: &str| -> Result<Vec<(String, String, String)>, String> {
-                let override_url = std::env::var("HII_WEB_SEARCH_URL").ok();
-                let url = native_web_search_url(candidate, override_url.as_deref());
-                let response = self
-                    .ollama_http
-                    .get(&url)
-                    .set("User-Agent", "HII/0.1 (+native bounded web search)")
-                    .call()
-                    .map_err(|error| format!("native web search failed: {error}"))?;
-                Ok(parse_web_results(&bounded_response_text(response)?, 12))
-            };
-            let mut results = search(query)?;
-            if results.is_empty() {
-                if let Some(relaxed) = relaxed_web_query(query) {
-                    results = search(&relaxed)?;
-                }
-            }
-            if results.is_empty() {
-                return Err("native web search returned no readable results".into());
-            }
-            Ok(results
-                .into_iter()
-                .map(|(title, url, snippet)| WebSearchResult {
-                    title,
-                    url,
-                    snippet,
-                })
-                .collect())
-        })()
+        tool_result(
+            Ok(format!(
+                "NATIVE_WEBVIEW_REQUIRED\nquery: {query}\nnavigation: {}\nOpen this search in HII's native browser, choose a source, then use web_fetch on the selected page URL.",
+                webview_search_url(query)
+            )),
+            false,
+        )
     }
 
     /// Fetch one public page selected from research results. This is a bounded
@@ -701,25 +648,11 @@ impl Toolbelt {
     }
 }
 
-fn relaxed_web_query(query: &str) -> Option<String> {
-    let relaxed = query
-        .split_whitespace()
-        .filter(|part| !part.to_ascii_lowercase().starts_with("site:"))
-        .map(|part| part.trim_matches(|character| character == '"' || character == '\''))
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
-    (relaxed != query && !relaxed.is_empty()).then_some(relaxed)
-}
-
-fn native_web_search_url(query: &str, override_url: Option<&str>) -> String {
-    let encoded = crate::text::percent_encode_query(query);
-    override_url
-        .filter(|value| {
-            value.starts_with("http://127.0.0.1:") || value.starts_with("http://localhost:")
-        })
-        .map(|value| format!("{}?q={encoded}", value.trim_end_matches('/')))
-        .unwrap_or_else(|| format!("https://html.duckduckgo.com/html/?q={encoded}"))
+fn webview_search_url(query: &str) -> String {
+    format!(
+        "https://www.google.com/search?q={}",
+        crate::text::percent_encode_query(query)
+    )
 }
 
 fn bounded_response_text(response: ureq::Response) -> Result<String, String> {
@@ -730,40 +663,6 @@ fn bounded_response_text(response: ureq::Response) -> Result<String, String> {
         .read_to_end(&mut bytes)
         .map_err(|error| error.to_string())?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
-}
-
-fn parse_web_results(html: &str, limit: usize) -> Vec<(String, String, String)> {
-    let anchor = regex::Regex::new(
-        r#"(?s)<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>"#,
-    )
-    .expect("valid result regex");
-    let snippet = regex::Regex::new(
-        r#"(?s)<(?:a|div)[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</(?:a|div)>"#,
-    )
-    .expect("valid snippet regex");
-    let mut snippets = snippet
-        .captures_iter(html)
-        .filter_map(|capture| capture.get(1))
-        .map(|value| clean_html(value.as_str()));
-    anchor
-        .captures_iter(html)
-        .take(limit)
-        .filter_map(|capture| {
-            let url = decode_entities(capture.get(1)?.as_str());
-            let url = extract_duckduckgo_target(&url);
-            let title = clean_html(capture.get(2)?.as_str());
-            let summary = snippets.next().unwrap_or_default();
-            Some((title, url, summary))
-        })
-        .collect()
-}
-
-fn clean_html(value: &str) -> String {
-    let tags = regex::Regex::new(r"(?s)<[^>]+>").expect("valid tag regex");
-    decode_entities(tags.replace_all(value, " ").trim())
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 fn readable_html(value: &str) -> String {
@@ -886,38 +785,6 @@ fn decode_entities(value: &str) -> String {
         .replace("&lt;", "<")
         .replace("&gt;", ">")
         .replace("&nbsp;", " ")
-}
-
-fn extract_duckduckgo_target(url: &str) -> String {
-    let Some(encoded) = url
-        .split("uddg=")
-        .nth(1)
-        .and_then(|tail| tail.split('&').next())
-    else {
-        return url.to_string();
-    };
-    percent_decode(encoded).unwrap_or_else(|| url.to_string())
-}
-
-fn percent_decode(value: &str) -> Option<String> {
-    let bytes = value.as_bytes();
-    let mut output = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%' {
-            let hex = std::str::from_utf8(bytes.get(index + 1..index + 3)?).ok()?;
-            output.push(u8::from_str_radix(hex, 16).ok()?);
-            index += 3;
-        } else {
-            output.push(if bytes[index] == b'+' {
-                b' '
-            } else {
-                bytes[index]
-            });
-            index += 1;
-        }
-    }
-    String::from_utf8(output).ok()
 }
 
 /// Whether ripgrep is on `PATH`. Cached for the process so repeated `list`/

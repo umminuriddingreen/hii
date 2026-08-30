@@ -6,7 +6,6 @@ import {
   approveContextPack,
   captureInformation,
   compileContextPack,
-  findInformation,
   listApplicationLaunchRequests,
   listApplications,
   listenAgentEvents,
@@ -14,9 +13,9 @@ import {
   type AgentEventV1,
   type ContextPackV1,
   type HiiApplicationManifest,
-  type InformationCaptureResult,
-  type InformationSearchResult
+  type InformationCaptureResult
 } from '@/lib/client/hii-bridge';
+import { browserNavigationTarget } from '@/lib/workspace/browser-target';
 import { canvasTextSeed, canvasTextSize, clipboardFiles, directPasteSeeds, makeNode, nodeSeedFromResourceProjection, seedFor, seedFromFile, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
 import { HII_PROJECTION_MIME, type ProjectionIntent, type ResourceProjectionSeed } from '@/lib/ecosystem/contracts';
 import {
@@ -207,32 +206,6 @@ function capturedInformationSeeds(result: InformationCaptureResult): NodeSeed[] 
     }
   }));
   return [sourceSeed, ...imageSeeds];
-}
-
-function discoveredInformationSeed(result: InformationSearchResult): NodeSeed {
-  return {
-    type: 'link',
-    w: 420,
-    h: 220,
-    object: {
-      kind: 'source',
-      owner: 'hii',
-      status: result.id ? 'ready' : 'proposed',
-      source: result.url,
-      capabilityId: 'hii.information.find',
-      proofRefs: result.contentHash ? [`sha256:${result.contentHash}`] : undefined,
-      audit: [{ ts: result.capturedAt || new Date().toISOString(), actor: 'hii', action: result.id ? 'retrieved captured information' : 'discovered source candidate' }]
-    },
-    payload: {
-      infoId: result.id,
-      title: result.title,
-      url: result.url,
-      excerpt: result.excerpt,
-      siteName: result.siteName,
-      capturedAt: result.capturedAt,
-      contentHash: result.contentHash
-    }
-  };
 }
 
 /**
@@ -542,6 +515,7 @@ function Prompt({
         ['/status', 'show HII state'],
         ['/terminal [folder]', 'create a local terminal object'],
         ['/browser [url]', 'open the native development browser'],
+        ['/search <query>', 'search inside the native webview'],
         ['/music', 'open profile playlists'],
         ['/marketplace', 'install apps, experiences, skills, and runtimes']
       ].filter(([command]) => command.startsWith(value.trim().toLowerCase()) || value.trim() === '/')
@@ -1184,7 +1158,7 @@ export function HiiRoot({
   }, [camera, workspace]);
 
   const openDevBrowser = useCallback((at: Point, requestedUrl?: string) => {
-    const url = requestedUrl && /^https?:\/\//i.test(requestedUrl) ? requestedUrl : 'https://developer.mozilla.org';
+    const url = browserNavigationTarget(requestedUrl || '') || 'https://developer.mozilla.org';
     const seed: NodeSeed = {
       type: 'browser',
       w: 1120,
@@ -1268,7 +1242,7 @@ export function HiiRoot({
         setPromptVisible(false);
         return;
       }
-      const browserCommand = intent.match(/^\/?browser(?:\s+(https?:\/\/\S+))?$/i);
+      const browserCommand = intent.match(/^\/?(?:browser|search)(?:\s+(.+))?$/i);
       if (canMutateCanvas(mode) && browserCommand) {
         openDevBrowser(at, browserCommand[1]);
         setPrompt(null);
@@ -1283,14 +1257,9 @@ export function HiiRoot({
       }
       const discovery = intent.match(/^(?:find|research|look up|search for)\s+(.+)$/i);
       if (canMutateCanvas(mode) && discovery) {
-        const results = await findInformation(discovery[1], { web: true, limit: 8 });
-        spawnInformation(results.map(discoveredInformationSeed), at);
-        const links = results.map((result) => `${result.title}\n${result.url}`).join('\n');
-        setPrompt((current) => current ? {
-          ...current,
-          response: `External context loaded · ${results.length} source candidate${results.length === 1 ? '' : 's'}.${links ? `\n${links}` : ''}`,
-          status: 'completed'
-        } : current);
+        openDevBrowser(at, discovery[1]);
+        setPrompt(null);
+        setPromptVisible(false);
         return;
       }
       await startWithContext({

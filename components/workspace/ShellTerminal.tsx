@@ -32,9 +32,10 @@ export function ShellTerminal({
     let fit: import('@xterm/addon-fit').FitAddon | undefined;
 
     const setup = async () => {
-      const [{ Terminal }, { FitAddon }] = await Promise.all([
+      const [{ Terminal }, { FitAddon }, { WebLinksAddon }] = await Promise.all([
         import('@xterm/xterm'),
-        import('@xterm/addon-fit')
+        import('@xterm/addon-fit'),
+        import('@xterm/addon-web-links')
       ]);
       if (disposed) return;
       terminal = new Terminal({
@@ -42,6 +43,10 @@ export function ShellTerminal({
         convertEol: false,
         cursorBlink: true,
         cursorStyle: 'bar',
+        cursorInactiveStyle: 'outline',
+        macOptionIsMeta: true,
+        rightClickSelectsWord: true,
+        smoothScrollDuration: 80,
         fontFamily: '"SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace',
         fontSize: 11,
         lineHeight: 1.35,
@@ -63,6 +68,7 @@ export function ShellTerminal({
       });
       fit = new FitAddon();
       terminal.loadAddon(fit);
+      terminal.loadAddon(new WebLinksAddon());
       terminal.open(element);
       fit.fit();
 

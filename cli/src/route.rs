@@ -395,12 +395,7 @@ pub const ROUTES: &[Route] = &[
         Infra,
         "turn an idea into a local offer brief",
     ),
-    delegated(
-        "objects",
-        Extended,
-        Infra,
-        "the governed object interface",
-    ),
+    delegated("objects", Extended, Infra, "the governed object interface"),
     delegated("object", Extended, Infra, "alias for `objects`"),
     delegated("sdk", Extended, Tools, "SDK contract smoke check"),
     delegated("console", Extended, Tools, "open a console surface"),

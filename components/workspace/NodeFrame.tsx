@@ -83,6 +83,23 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConv
       style={{ transform: workspaceNodeTransform(node), width: node.w, height: node.h, zIndex: Math.round(node.z) }}
     >
       <span className="hii-node-caption">{title}</span>
+      {node.type === 'terminal' && <>
+        <button
+          type="button"
+          className="hii-terminal-close"
+          aria-label={`Close ${title}`}
+          title="Close terminal"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={onErase}
+        >×</button>
+        <button
+          type="button"
+          className="hii-terminal-resize"
+          aria-label={`Resize ${title}`}
+          title="Drag to resize terminal"
+          onPointerDown={(event) => beginGesture(event, true)}
+        />
+      </>}
       {touchControls && selected && <div className="hii-node-touch-controls" data-workspace-ui>
         {onShare && <button type="button" className="hii-node-share" aria-label={`Share ${title}`} onPointerDown={(event) => event.stopPropagation()} onClick={onShare}>Share</button>}
         <button type="button" className="hii-node-delete" aria-label={`Delete ${title}`} onPointerDown={(event) => event.stopPropagation()} onClick={onErase}>Delete</button>

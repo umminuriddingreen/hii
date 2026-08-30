@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { browserTargetKind, normalizedBrowserUrl } from '@/lib/workspace/browser-target';
+import { browserNavigationTarget, browserTargetKind, normalizedBrowserUrl } from '@/lib/workspace/browser-target';
 
 describe('HII interactive browser targets', () => {
   it('defaults bare localhost services to http', () => {
@@ -17,5 +17,12 @@ describe('HII interactive browser targets', () => {
     expect(browserTargetKind('http://[::1]:3000')).toBe('local-service');
     expect(browserTargetKind('https://humaninformationinterface.com')).toBe('website');
     expect(browserTargetKind('not a url')).toBe('invalid');
+  });
+
+  it('turns non-URL input into a search inside the native webview', () => {
+    expect(browserNavigationTarget('local first human interface')).toBe(
+      'https://www.google.com/search?q=local%20first%20human%20interface'
+    );
+    expect(browserNavigationTarget('file:///tmp/private')).toBeNull();
   });
 });

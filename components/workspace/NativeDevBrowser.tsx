@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { captureInformation, type InformationCaptureResult } from '@/lib/client/hii-bridge';
-import { browserTargetKind, normalizedBrowserUrl } from '@/lib/workspace/browser-target';
+import { browserNavigationTarget, browserTargetKind, normalizedBrowserUrl } from '@/lib/workspace/browser-target';
 
 type Props = {
   nodeId: string;
@@ -17,7 +17,7 @@ function isTauri() {
 }
 
 export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture }: Props) {
-  const initial = normalizedBrowserUrl(initialUrl || '') || 'https://developer.mozilla.org/';
+  const initial = browserNavigationTarget(initialUrl || '') || 'https://developer.mozilla.org/';
   const [url, setUrl] = useState(initial);
   const [draftUrl, setDraftUrl] = useState(initial);
   const [history, setHistory] = useState([initial]);
@@ -93,7 +93,7 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
   }, [historyIndex, onUrl]);
 
   const navigate = async (nextValue = draftUrl) => {
-    const next = normalizedBrowserUrl(nextValue);
+    const next = browserNavigationTarget(nextValue);
     if (!next) { setStatus('error'); return; }
     commitUrl(next);
     setStatus('loading');
@@ -151,7 +151,7 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
         <button type="button" title="Reload" onClick={() => void action('reload')}>↻</button>
         <form onSubmit={(event) => { event.preventDefault(); void navigate(); }}>
           <span aria-hidden="true">⌁</span>
-          <input value={draftUrl} onChange={(event) => setDraftUrl(event.target.value)} aria-label="URL" spellCheck={false} />
+          <input value={draftUrl} onChange={(event) => setDraftUrl(event.target.value)} aria-label="URL or search" spellCheck={false} />
         </form>
         <a className="hii-browser-open" href={url} target="_blank" rel="noreferrer">Open ↗</a>
         <button type="button" className="hii-browser-capture" onClick={() => void capture()}>{status === 'captured' ? 'Captured' : 'Capture'}</button>

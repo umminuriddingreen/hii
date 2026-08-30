@@ -16,6 +16,14 @@ export function normalizedBrowserUrl(value: string) {
   }
 }
 
+export function browserNavigationTarget(value: string) {
+  const normalized = normalizedBrowserUrl(value);
+  if (normalized) return normalized;
+  const query = value.trim();
+  if (!query || /^[a-z][a-z0-9+.-]*:/i.test(query)) return null;
+  return `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+}
+
 export function browserTargetKind(value: string) {
   const normalized = normalizedBrowserUrl(value);
   if (!normalized) return 'invalid' as const;
