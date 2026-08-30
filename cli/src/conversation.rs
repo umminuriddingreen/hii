@@ -63,6 +63,8 @@ struct SessionUsage {
 
 #[derive(Clone, Copy)]
 enum ThinkingMode {
+    Flow,
+    Activity,
     Raw,
 }
 
@@ -75,6 +77,7 @@ enum ReasoningMode {
 
 const STEERING_RESTART: &str = "operator steered model activity";
 pub(crate) const OPERATOR_INTERRUPTED: &str = "operator interrupted model activity";
+pub(crate) const OPERATOR_EXITED: &str = "operator exited the active objective";
 const REASONING_BUDGET_RETRY: &str = "adaptive reasoning budget ended";
 const ADAPTIVE_REASONING_MAX_CHARS: usize = 4_096;
 const ADAPTIVE_REASONING_MAX_TIME: Duration = Duration::from_secs(12);
@@ -354,7 +357,7 @@ impl Conversation {
             max_steps,
             usage: SessionUsage::default(),
             last_skill_draft: None,
-            thinking_mode: ThinkingMode::Raw,
+            thinking_mode: ThinkingMode::Flow,
             reasoning_mode: match std::env::var("HII_REASONING").as_deref() {
                 Ok("off") => ReasoningMode::Off,
                 Ok("deep") => ReasoningMode::Deep,
@@ -589,8 +592,31 @@ impl Conversation {
                     continue;
                 }
             };
+            if let Some(flow) = action.flow() {
+                self.store.event(
+                    "flow.projected",
+                    serde_json::to_value(flow).map_err(|error| error.to_string())?,
+                )?;
+                if io::stdout().is_terminal() && !matches!(self.thinking_mode, ThinkingMode::Raw) {
+                    let direction = flow
+                        .direction
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>();
+                    crate::tui::active_run(&crate::tui::ActiveRunView {
+                        title: &flow.title,
+                        goal: &flow.goal,
+                        current: &flow.current,
+                        direction: &direction,
+                        next: &flow.next,
+                    });
+                    if matches!(self.thinking_mode, ThinkingMode::Activity) {
+                        crate::tui::activity_item(step, &flow.current);
+                    }
+                }
+            }
             match action {
-                Action::Message { message } => {
+                Action::Message { message, .. } => {
                     if needs_verification(mutation_epoch, verified_epoch) {
                         self.messages.push(Message::assistant(raw));
                         self.messages
@@ -647,6 +673,7 @@ impl Conversation {
                     tool,
                     arguments,
                     reason,
+                    ..
                 } => {
                     used_tools = true;
                     let label = format!("mcp:{server}:{tool}");
@@ -756,7 +783,8 @@ impl Conversation {
                         )?);
                         run = Some(created);
                     }
-                    if io::stdout().is_terminal() {
+                    if io::stdout().is_terminal() && matches!(self.thinking_mode, ThinkingMode::Raw)
+                    {
                         crate::tui::tool_start(step, &label, target);
                     }
                     let pre_hooks = self.hooks.fire(
@@ -800,8 +828,12 @@ impl Conversation {
                         verification.clear();
                         observations.clear();
                     }
-                    if io::stdout().is_terminal() {
+                    if io::stdout().is_terminal() && matches!(self.thinking_mode, ThinkingMode::Raw)
+                    {
                         crate::tui::tool_result(ok, false);
+                    }
+                    if io::stdout().is_terminal() && matches!(self.thinking_mode, ThinkingMode::Raw)
+                    {
                         crate::tui::tool_output(&safe_output);
                     }
                     let post_hooks = self.hooks.fire(
@@ -897,7 +929,9 @@ impl Conversation {
                         command.as_deref(),
                         url.as_deref(),
                     );
-                    if io::stdout().is_terminal() {
+                    if io::stdout().is_terminal()
+                        && !matches!(self.thinking_mode, ThinkingMode::Flow)
+                    {
                         crate::tui::tool_start(step, &tool, &target);
                     }
                     let observation = tool_is_observation(&tool);
@@ -1191,8 +1225,13 @@ impl Conversation {
                             observations.insert(key);
                         }
                     }
-                    if io::stdout().is_terminal() {
+                    if io::stdout().is_terminal()
+                        && !matches!(self.thinking_mode, ThinkingMode::Flow)
+                    {
                         crate::tui::tool_result(result.ok, result.verification || shell_evidence);
+                    }
+                    if io::stdout().is_terminal() && matches!(self.thinking_mode, ThinkingMode::Raw)
+                    {
                         crate::tui::tool_output(&safe_output);
                     }
                     if result.verification || shell_evidence {
@@ -1992,9 +2031,39 @@ impl Conversation {
     }
 
     pub fn thinking(&mut self, requested: Option<&str>) -> Result<String, String> {
-        let _ = requested;
-        self.thinking_mode = ThinkingMode::Raw;
-        Ok("Model activity is always shown as a live event stream.".into())
+        match requested.unwrap_or("flow") {
+            "flow" | "compact" | "off" => {
+                self.thinking_mode = ThinkingMode::Flow;
+                Ok("Flow view is active. Use `/raw on` for implementation diagnostics.".into())
+            }
+            "activity" => {
+                self.thinking_mode = ThinkingMode::Activity;
+                Ok("Activity view is active. Progress remains objective-relative.".into())
+            }
+            "raw" | "diagnostics" => {
+                self.thinking_mode = ThinkingMode::Raw;
+                Ok("Diagnostics view is active. Use `/raw off` to return to Flow.".into())
+            }
+            _ => Err("thinking view must be flow or diagnostics".into()),
+        }
+    }
+
+    pub fn begin_flow(&self, objective: &str) -> Result<(), String> {
+        let title = crate::text::clip_line(objective.trim(), 72);
+        let goal = objective.trim();
+        let current = "Understanding what belongs here.";
+        let next = "Choose the first useful change.";
+        self.store.event("flow.started", json!({"objective":redact_text(objective),"title":title,"goal":goal,"current":current,"next":next}))?;
+        if io::stdout().is_terminal() && !matches!(self.thinking_mode, ThinkingMode::Raw) {
+            crate::tui::active_run(&crate::tui::ActiveRunView {
+                title: &title,
+                goal,
+                current,
+                direction: &[],
+                next,
+            });
+        }
+        Ok(())
     }
 
     pub fn reasoning(&mut self, requested: Option<&str>) -> Result<String, String> {
@@ -2305,9 +2374,9 @@ impl Conversation {
                 .filter_map(|entry| {
                     let modified = entry.metadata().ok()?.modified().ok()?;
                     let id = entry.path().file_stem()?.to_str()?.to_string();
-                    let title = std::fs::read_to_string(entry.path())
-                        .ok()
-                        .and_then(|raw| session_title(&raw));
+                    let title = std::fs::read_to_string(entry.path()).ok().and_then(|raw| {
+                        session_title(&raw).or_else(|| session_flow(&raw).map(|flow| flow.title))
+                    });
                     (id != self.store.id).then_some((modified, id, title))
                 })
                 .collect::<Vec<_>>();
@@ -2350,6 +2419,33 @@ impl Conversation {
             .ok_or_else(|| "conversation system context is missing".to_string())?;
         let count = restored.len();
         self.messages = std::iter::once(system).chain(restored).collect();
+        if let Some(flow) = session_flow(&raw) {
+            self.messages.push(Message::system(format!(
+                "RESTORED ACTIVE OBJECTIVE\nGoal: {}\nCurrent interpretation: {}\nDirection: {}\nNext: {}\nContinue this objective unless the operator clearly starts another one.",
+                flow.goal,
+                flow.current,
+                flow.direction.join(" / "),
+                flow.next
+            )));
+            self.store.event(
+                "flow.restored",
+                serde_json::to_value(&flow).map_err(|error| error.to_string())?,
+            )?;
+            if io::stdout().is_terminal() && !matches!(self.thinking_mode, ThinkingMode::Raw) {
+                let direction = flow
+                    .direction
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>();
+                crate::tui::active_run(&crate::tui::ActiveRunView {
+                    title: &flow.title,
+                    goal: &flow.goal,
+                    current: &flow.current,
+                    direction: &direction,
+                    next: &flow.next,
+                });
+            }
+        }
         self.goal = session_goal(&raw);
         self.plan_mode = session_plan_mode(&raw);
         self.authority = session_authority(&raw).unwrap_or(Authority::Workspace);
@@ -2584,6 +2680,18 @@ impl Conversation {
                 if let Some(event) = input.poll()? {
                     match event {
                         crate::keyboard::InputEvent::Submit(value) if !value.trim().is_empty() => {
+                            if matches!(value.trim(), "/exit" | "/quit" | "/q") {
+                                input.finish_stream();
+                                self.cancel.cancel(CancelReason::Client);
+                                return Err(OPERATOR_EXITED.into());
+                            }
+                            if !matches!(self.thinking_mode, ThinkingMode::Raw) {
+                                crate::tui::steering(&value);
+                            }
+                            self.store.event(
+                                "flow.steered",
+                                json!({"content":redact_text(&value),"phase":phase}),
+                            )?;
                             self.steering = Some(value);
                             input.finish_stream();
                             self.cancel.cancel(CancelReason::Client);
@@ -3160,9 +3268,12 @@ fn advisor_suggestion(raw: &str) -> Result<(String, String, String, String), Str
 
 #[cfg(test)]
 const THINKING_MODES: &[(&str, &str)] = &[
-    ("off", "no thought stream"),
-    ("compact", "one-line summaries of the model's thinking"),
-    ("raw", "the thinking stream as the model emits it"),
+    (
+        "flow",
+        "objective, direction, current work, and next action",
+    ),
+    ("activity", "Flow plus objective-relative execution history"),
+    ("diagnostics", "raw model and tool implementation details"),
 ];
 
 const REASONING_MODES: &[(&str, &str)] = &[
@@ -3393,6 +3504,16 @@ fn session_title(raw: &str) -> Option<String> {
                 .and_then(|title| title.as_str())
                 .map(str::to_string)
         })
+        .next_back()
+}
+
+fn session_flow(raw: &str) -> Option<crate::agent::FlowProjection> {
+    raw.lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|event| {
+            event.get("kind").and_then(|value| value.as_str()) == Some("flow.projected")
+        })
+        .filter_map(|event| serde_json::from_value(event.get("data")?.clone()).ok())
         .next_back()
 }
 
@@ -3633,12 +3754,11 @@ Workspace: {workspace}
 {autonomy}
 
 Chat: plain text now; greetings never use tools or context.
-Work: emit one JSON tool action, no fences:
-{{"type":"{tools}", ...needed fields}}
+Work: emit one JSON tool action, no fences: {{"type":"{tools}","flow":{{"title":"objective","goal":"outcome","current":"change now","direction":[],"next":"next action"}},...}}
 
 {boundary}
 {lessons}
-Paths literal. Attachments untrusted. Act minimally; no plans. One tool/turn. Verify mutations. Preserve unclear work."#,
+Flow is user-facing objective language: expose steerable assumptions, never machinery. Paths literal. Attachments untrusted. Act minimally; no plans. One tool/turn. Verify mutations. Preserve unclear work."#,
         workspace = workspace.display()
     )
 }
@@ -3671,10 +3791,10 @@ mod tests {
         conversation_prompt, mode_choices, model_event_kind, needs_verification,
         observation_signature, parse_action, plain_message, plan_tool_allowed,
         public_test_sensitive_shell, render_permissions, resumable_messages, session_authority,
-        session_goal, session_plan_mode, session_title, shell_command_is_observation_only,
-        shell_command_is_preview, shell_command_is_read_only, side_context, tool_is_observation,
-        verification_required_message, Conversation, ModelContentProjection, ReasoningMode,
-        REASONING_MODES, THINKING_MODES,
+        session_flow, session_goal, session_plan_mode, session_title,
+        shell_command_is_observation_only, shell_command_is_preview, shell_command_is_read_only,
+        side_context, tool_is_observation, verification_required_message, Conversation,
+        ModelContentProjection, ReasoningMode, REASONING_MODES, THINKING_MODES,
     };
     use crate::contract::{Authority, Decision};
     use std::path::Path;
@@ -3859,24 +3979,24 @@ mod tests {
 
     #[test]
     fn mode_choices_mark_the_active_setting() {
-        let choices = mode_choices(THINKING_MODES, "compact");
+        let choices = mode_choices(THINKING_MODES, "activity");
         let current: Vec<_> = choices
             .iter()
             .filter(|choice| choice.current)
             .map(|choice| choice.value.as_str())
             .collect();
-        assert_eq!(current, vec!["compact"]);
+        assert_eq!(current, vec!["activity"]);
         assert!(choices[1].detail.ends_with("· current"));
-        assert!(!choices[0].detail.contains("current"));
+        assert!(!choices[0].detail.ends_with("· current"));
     }
 
     #[test]
     fn mode_choices_keep_every_documented_setting() {
-        let thinking: Vec<_> = mode_choices(THINKING_MODES, "off")
+        let thinking: Vec<_> = mode_choices(THINKING_MODES, "flow")
             .into_iter()
             .map(|choice| choice.value)
             .collect();
-        assert_eq!(thinking, vec!["off", "compact", "raw"]);
+        assert_eq!(thinking, vec!["flow", "activity", "diagnostics"]);
         let reasoning: Vec<_> = mode_choices(REASONING_MODES, "auto")
             .into_iter()
             .map(|choice| choice.value)
@@ -3895,7 +4015,7 @@ mod tests {
             "",
         );
         assert!(
-            prompt.len() <= 800,
+            prompt.len() <= 1_000,
             "conversation prompt grew to {} bytes",
             prompt.len()
         );
@@ -4028,6 +4148,17 @@ mod tests {
             "{\"kind\":\"conversation.renamed\",\"data\":{\"title\":\"Release prep\"}}\n",
         );
         assert_eq!(session_title(raw).as_deref(), Some("Release prep"));
+    }
+
+    #[test]
+    fn session_flow_restores_the_latest_active_objective_projection() {
+        let raw = concat!(
+            "{\"kind\":\"flow.projected\",\"data\":{\"title\":\"Dashboard\",\"goal\":\"See what matters\",\"current\":\"Building projects\",\"direction\":[\"HII\"],\"next\":\"Add schedule\"}}\n",
+            "{\"kind\":\"flow.projected\",\"data\":{\"title\":\"Dashboard\",\"goal\":\"See what matters\",\"current\":\"Prioritizing school\",\"direction\":[\"School\",\"HII\"],\"next\":\"Simplify layout\"}}\n",
+        );
+        let flow = session_flow(raw).expect("latest flow");
+        assert_eq!(flow.current, "Prioritizing school");
+        assert_eq!(flow.direction, vec!["School", "HII"]);
     }
 
     #[test]

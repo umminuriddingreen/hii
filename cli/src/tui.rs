@@ -667,6 +667,83 @@ fn activity_line(line: &str) {
     ACTIVITY_ROWS.fetch_add(1, Ordering::Relaxed);
 }
 
+pub fn user_turn(message: &str) {
+    finish_activity();
+    println!("{}", user_turn_frame(message));
+}
+
+fn user_turn_frame(message: &str) -> String {
+    format!(
+        "\n{}\n{}\n",
+        paint("› YOU", &[BOLD, palette().primary]),
+        message
+    )
+}
+
+pub struct ActiveRunView<'a> {
+    pub title: &'a str,
+    pub goal: &'a str,
+    pub current: &'a str,
+    pub direction: &'a [&'a str],
+    pub next: &'a str,
+}
+
+pub fn active_run(view: &ActiveRunView<'_>) {
+    finish_activity();
+    println!("{}", active_run_frame(view));
+}
+
+fn active_run_frame(view: &ActiveRunView<'_>) -> String {
+    let mut rows = vec![
+        String::new(),
+        paint(view.title, &[BOLD, palette().primary]),
+        paint("Creating", &[DIM, palette().muted]),
+        String::new(),
+        paint("Goal", &[BOLD]),
+        view.goal.to_string(),
+        String::new(),
+        paint("Currently", &[BOLD]),
+        view.current.to_string(),
+    ];
+    if !view.direction.is_empty() {
+        rows.extend([String::new(), paint("Direction", &[BOLD])]);
+        rows.extend(view.direction.iter().map(|item| format!("• {item}")));
+    }
+    rows.extend([
+        String::new(),
+        paint("Next", &[BOLD]),
+        view.next.to_string(),
+        String::new(),
+        paint("You can steer at any time.", &[DIM, palette().muted]),
+        String::new(),
+    ]);
+    rows.join("\n")
+}
+
+pub fn steering(message: &str) {
+    finish_activity();
+    println!(
+        "{}  {message}",
+        paint("↳ STEERING", &[BOLD, palette().warning])
+    );
+    println!(
+        "{}",
+        paint(
+            "Reworking the active objective around this.",
+            &[DIM, palette().muted]
+        )
+    );
+    println!();
+}
+
+pub fn activity_item(step: usize, current: &str) {
+    activity_line(&format!(
+        "{}  {}",
+        paint(&format!("{step:02} →"), &[BOLD, palette().secondary]),
+        current
+    ));
+}
+
 pub fn finish_activity() {
     let rows = ACTIVITY_ROWS.swap(0, Ordering::Relaxed);
     if rows == 0 || !io::stdout().is_terminal() {
@@ -743,9 +820,9 @@ pub fn error(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        clear_activity_sequence, command_matches, command_menu, composer_window, model_activity,
-        overview, prompt_frame, short_path, terminal_width, theme_choices, welcome_frame,
-        workspace_state, Theme,
+        active_run_frame, clear_activity_sequence, command_matches, command_menu, composer_window,
+        model_activity, overview, prompt_frame, short_path, terminal_width, theme_choices,
+        user_turn_frame, welcome_frame, workspace_state, ActiveRunView, Theme,
     };
     use std::path::Path;
 
@@ -882,6 +959,27 @@ mod tests {
         assert_eq!(clear_activity_sequence(0), "");
         assert_eq!(clear_activity_sequence(2).matches("\x1b[1A").count(), 2);
         assert_eq!(clear_activity_sequence(2).matches("\x1b[2K").count(), 2);
+    }
+
+    #[test]
+    fn flow_frames_keep_intent_and_direction_out_of_transient_activity() {
+        let human = user_turn_frame("Fix this\nand verify it");
+        let run = active_run_frame(&ActiveRunView {
+            title: "Personal Dashboard",
+            goal: "See what matters right now.",
+            current: "Organizing active projects.",
+            direction: &["HII", "School"],
+            next: "Add schedule.",
+        });
+        assert!(human.contains("› YOU"));
+        assert!(human.contains("Fix this\nand verify it"));
+        assert!(run.contains("Personal Dashboard"));
+        assert!(run.contains("Currently"));
+        assert!(run.contains("• School"));
+        assert!(run.contains("You can steer at any time."));
+        assert!(!human.contains("\x1b[1A"));
+        assert!(!run.contains("tool_call"));
+        assert!(!run.contains("\x1b[1A"));
     }
 
     #[test]

@@ -13,7 +13,7 @@ use crate::{
     runlog::{Delta, Event, Feedback, Human, Journal, OutputMode, StreamPolicy},
     tools::{ToolResult, Toolbelt},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeSet, HashSet},
@@ -153,6 +153,8 @@ fn push_feedback(messages: &mut Vec<Message>, feedback: Feedback) {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum Action {
     Tool {
+        #[serde(default)]
+        flow: Option<FlowProjection>,
         tool: String,
         path: Option<String>,
         query: Option<String>,
@@ -172,21 +174,49 @@ pub(crate) enum Action {
         limit: Option<usize>,
     },
     Final {
+        #[serde(default)]
+        flow: Option<FlowProjection>,
         summary: String,
         #[serde(default)]
         verification: Vec<String>,
         next: Option<String>,
     },
     Message {
+        #[serde(default)]
+        flow: Option<FlowProjection>,
         message: String,
     },
     McpCall {
+        #[serde(default)]
+        flow: Option<FlowProjection>,
         server: String,
         tool: String,
         #[serde(default)]
         arguments: Value,
         reason: Option<String>,
     },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FlowProjection {
+    pub title: String,
+    pub goal: String,
+    pub current: String,
+    #[serde(default)]
+    pub direction: Vec<String>,
+    pub next: String,
+}
+
+impl Action {
+    pub(crate) fn flow(&self) -> Option<&FlowProjection> {
+        match self {
+            Self::Tool { flow, .. }
+            | Self::Final { flow, .. }
+            | Self::Message { flow, .. }
+            | Self::McpCall { flow, .. } => flow.as_ref(),
+        }
+    }
 }
 
 pub(crate) const MODEL_LOOP_DETECTED_MESSAGE: &str =
@@ -735,6 +765,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 replace_all,
                 offset,
                 limit,
+                ..
             } => {
                 let (tool, rerouted_public_http) = route_public_http(tool, url.as_deref());
                 if repeats_passing_verification(
@@ -1050,6 +1081,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 tool,
                 arguments,
                 reason,
+                ..
             } => {
                 let label = reason
                     .as_deref()
@@ -1239,6 +1271,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 summary,
                 verification: claimed,
                 next,
+                ..
             } => {
                 if final_requires_model_verification(
                     !options.verify.is_empty(),
@@ -1284,7 +1317,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 final_next = next;
                 break;
             }
-            Action::Message { message } => {
+            Action::Message { message, .. } => {
                 let feedback = journal.feedback(
                     Event::new("model.message").data(json!({ "step": steps })),
                     format!(
@@ -2654,6 +2687,15 @@ mod tests {
     fn parses_json_action() {
         let action = parse_action(r#"{"type":"tool","tool":"list","reason":"inspect"}"#).unwrap();
         assert!(matches!(action, Action::Tool { tool, .. } if tool == "list"));
+    }
+
+    #[test]
+    fn action_carries_a_replaceable_semantic_flow_projection() {
+        let action = parse_action(r#"{"type":"skill_search","query":"dashboard","flow":{"title":"Personal Dashboard","goal":"See what matters now","current":"Choosing the dashboard structure","direction":["HII","School"],"next":"Build the first visible section"}}"#).unwrap();
+        let flow = action.flow().expect("flow projection");
+        assert_eq!(flow.title, "Personal Dashboard");
+        assert_eq!(flow.direction, vec!["HII", "School"]);
+        assert!(!format!("{} {}", flow.current, flow.next).contains("skill_search"));
     }
 
     #[test]
