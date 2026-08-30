@@ -92,8 +92,13 @@ describe('HII web access gate', () => {
     expect(toolbar).toContain('aria-label="Canvas commands"');
     expect(toolbar).toContain('<span aria-hidden="true">?</span>');
     expect(toolbar).not.toContain("accountTools ? 'hii canvas' : 'hii space'");
-    expect(toolbar).toContain('<dt>space</dt><dd>device terminal</dd>');
-    expect(toolbar).toContain('<dt>n</dt><dd>note</dd>');
+    expect(toolbar).toContain("label: 'Devices & models', shortcut: 'Space'");
+    expect(toolbar).toContain("label: 'Add note', shortcut: 'N'");
+    expect(toolbar).toContain('aria-label="Search canvas commands"');
+    expect(toolbar).toContain('hii-canvas-command-list');
+    expect(toolbar).toContain('hii-canvas-touch-link');
+    expect(toolbar).not.toContain('device terminal');
+    expect(toolbar).not.toContain('double-click for text');
     expect(toolbar).toContain('onAddNote');
     expect(canvas).toContain('isAccount && isTerminalShortcut(event)');
     expect(canvas).toContain("event.key.toLowerCase() === 'u'");
@@ -103,9 +108,17 @@ describe('HII web access gate', () => {
     expect(canvas).toContain("event.key === '0'");
     expect(canvas).toContain("event.key === '?'");
     expect(canvas).toContain('commandsOpen={isAccount ? canvasCommandsOpen : undefined}');
+    expect(canvas).toContain('fitWorkspaceViewport');
+    expect(canvas).toContain('hii-canvas-feedback');
+    expect(canvas).toContain("setToolMessage('Opened devices & models.')");
+    expect(canvas).toContain('onAddLink={(url) =>');
     expect(canvas).toContain('fileSeeder ? fileSeeder(files) : seedsFromFiles(files)');
     expect(globalCss).toContain('.hii-space-toolbar[data-account-tools="true"] .hii-canvas-command-trigger');
     expect(globalCss).toContain('.hii-space-toolbar[data-account-tools="true"] .hii-canvas-touch-tools');
+    expect(globalCss).toContain('@media (min-width: 561px) and (hover: hover) and (pointer: fine)');
+    expect(globalCss).toContain('.hii-node[data-node-type="note"]');
+    expect(globalCss).toContain('background: rgba(255, 255, 255, .99)');
+    expect(css).toContain('@media (max-width: 560px)');
   });
 
   it('keeps imported canvas assets local to the authenticated browser device', () => {

@@ -404,7 +404,7 @@
 .modelState p { margin: 0 0 14px; }
 .modelState small + p { margin-top: 34px; }
 
-@media (max-width: 420px) {
+@media (max-width: 560px) {
   .wordmark {
     top: max(18px, env(safe-area-inset-top));
     left: max(18px, env(safe-area-inset-left));

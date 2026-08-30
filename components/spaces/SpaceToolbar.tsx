@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useMemo, useState } from 'react';
 
 export function SpaceToolbar({
   drawing,
@@ -16,7 +16,10 @@ export function SpaceToolbar({
   onOpenTerminal,
   onUndo,
   onRedo,
-  onResetView,
+  onFitView,
+  onDeleteSelection,
+  onShareSelection,
+  selectionCount = 0,
   onCommandsOpenChange,
   onToggleDrawing
 }: {
@@ -33,18 +36,45 @@ export function SpaceToolbar({
   onOpenTerminal?: () => void;
   onUndo?: () => void;
   onRedo?: () => void;
-  onResetView?: () => void;
+  onFitView?: () => void;
+  onDeleteSelection?: () => void;
+  onShareSelection?: () => void;
+  selectionCount?: number;
   onCommandsOpenChange?: (open: boolean) => void;
   onToggleDrawing: () => void;
 }) {
   const [localExpanded, setLocalExpanded] = useState(false);
+  const [query, setQuery] = useState('');
   const [url, setUrl] = useState('');
   const [message, setMessage] = useState('');
   const expanded = commandsOpen ?? localExpanded;
   const setExpanded = (open: boolean) => {
     setLocalExpanded(open);
+    if (!open) setQuery('');
     onCommandsOpenChange?.(open);
   };
+
+  const run = (action?: () => void) => {
+    action?.();
+    setExpanded(false);
+  };
+
+  const commands = useMemo(() => [
+    { label: 'Add text', shortcut: 'T', keywords: 'write type', action: onAddText },
+    { label: 'Add note', shortcut: 'N', keywords: 'sticky write', action: onAddNote },
+    { label: drawing ? 'Stop drawing' : 'Draw', shortcut: 'D', keywords: 'ink pen', action: onToggleDrawing },
+    ...(photo ? [{ label: 'Add file', shortcut: '⌘U', keywords: 'upload image media document', action: onAddImage }] : []),
+    { label: 'Fit canvas', shortcut: '0', keywords: 'view zoom show all', action: onFitView },
+    { label: 'Undo', shortcut: '⌘Z', keywords: 'back history', action: onUndo },
+    { label: 'Redo', shortcut: '⇧⌘Z', keywords: 'forward history', action: onRedo },
+    { label: 'Devices & models', shortcut: 'Space', keywords: 'computer terminal local model', action: onOpenTerminal },
+    ...(selectionCount ? [{ label: `Delete selected (${selectionCount})`, shortcut: 'Delete', keywords: 'remove selection', action: onDeleteSelection }] : []),
+    ...(selectionCount === 1 && onShareSelection ? [{ label: 'Share selected', shortcut: '', keywords: 'publish feed', action: onShareSelection }] : [])
+  ], [drawing, onAddImage, onAddNote, onAddText, onDeleteSelection, onFitView, onOpenTerminal, onRedo, onShareSelection, onToggleDrawing, onUndo, photo, selectionCount]);
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleCommands = normalizedQuery
+    ? commands.filter((command) => `${command.label} ${command.shortcut} ${command.keywords}`.toLowerCase().includes(normalizedQuery))
+    : commands;
 
   const addLink = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -67,7 +97,7 @@ export function SpaceToolbar({
         <span aria-hidden="true">?</span>
       </button>
       <div className="hii-canvas-touch-tools">
-        {photo && <button type="button" onClick={onAddImage}>media</button>}
+        {photo && <button type="button" onClick={onAddImage}>file</button>}
         <button type="button" onClick={onAddText}>text</button>
         <button type="button" onClick={onAddNote}>note</button>
         <button type="button" aria-pressed={drawing} onClick={onToggleDrawing}>{drawing ? 'drawing…' : 'draw'}</button>
@@ -79,31 +109,27 @@ export function SpaceToolbar({
       <button type="button" onClick={onAddSticker}>sticker</button>
       <button type="button" aria-pressed={drawing} onClick={onToggleDrawing}>{drawing ? 'drawing…' : 'draw'}</button>
     </>}
-    {accountTools && expanded && <section id="hii-account-tools" className="hii-account-tools" aria-label="More canvas tools">
-      <dl className="hii-canvas-shortcuts" aria-label="Canvas keyboard commands">
-        <div><dt>space</dt><dd>device terminal</dd></div>
-        <div><dt>t</dt><dd>text</dd></div>
-        <div><dt>n</dt><dd>note</dd></div>
-        <div><dt>d</dt><dd>draw</dd></div>
-        <div><dt>⌘u</dt><dd>media or file</dd></div>
-        <div><dt>⌘z</dt><dd>undo</dd></div>
-        <div><dt>⇧⌘z</dt><dd>redo</dd></div>
-        <div><dt>0</dt><dd>reset view</dd></div>
-        <div><dt>delete</dt><dd>remove selected</dd></div>
-        <div><dt>esc</dt><dd>leave tool</dd></div>
-      </dl>
+    {accountTools && expanded && <section id="hii-account-tools" className="hii-account-tools" aria-label="Canvas commands">
+      <form className="hii-canvas-command-search" onSubmit={(event) => { event.preventDefault(); run(visibleCommands[0]?.action); }}>
+        <input aria-label="Search canvas commands" autoComplete="off" autoFocus placeholder="Search commands" value={query} onChange={(event) => setQuery(event.target.value)} />
+      </form>
+      <ul className="hii-canvas-command-list">
+        {visibleCommands.map((command) => <li key={`${command.label}:${command.shortcut}`}><button type="button" onClick={() => run(command.action)}>
+          <span>{command.label}</span>{command.shortcut && <kbd>{command.shortcut}</kbd>}
+        </button></li>)}
+        {!visibleCommands.length && <li><small>No matching command.</small></li>}
+      </ul>
       <div className="hii-canvas-touch-secondary">
         <button type="button" onClick={onUndo}>undo</button>
         <button type="button" onClick={onRedo}>redo</button>
-        <button type="button" onClick={onResetView}>reset view</button>
-        <button type="button" onClick={onOpenTerminal}>devices</button>
+        <button type="button" onClick={onFitView}>fit canvas</button>
+        <button type="button" onClick={onOpenTerminal}>devices &amp; models</button>
       </div>
-      <form onSubmit={addLink}>
+      <form className="hii-canvas-touch-link" onSubmit={addLink}>
         <input aria-label="Web address" inputMode="url" autoCapitalize="none" autoCorrect="off" placeholder="https://" value={url} onChange={(event) => setUrl(event.target.value)} required />
         <button type="submit">add link</button>
       </form>
       {(message || status) && <small role="status">{message || status}</small>}
-      <small>double-click for text. paste or drop anything. drag to move; option-drag to resize. files stay on this device.</small>
     </section>}
   </nav>;
 }

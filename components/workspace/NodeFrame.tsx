@@ -70,6 +70,7 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConv
       ref={frame}
       className="hii-node"
       data-node-id={node.id}
+      data-node-type={node.type}
       data-selected={selected}
       data-chromeless={chromeless || undefined}
       data-window-state={node.type === 'app' ? windowState : undefined}

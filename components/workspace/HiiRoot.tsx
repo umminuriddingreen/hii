@@ -67,6 +67,7 @@ import { inkSeedFromPoints } from '@/components/spaces/ink-capture';
 import { isAccountCanvasNode, isAccountCanvasNodeType, isSpaceCanvasNode, isSpaceCanvasNodeType } from '@/components/spaces/space-surface';
 import { trackPointerGesture } from '@/lib/workspace/gestures';
 import { updateTerminalActivity } from '@/lib/workspace/terminal-activity';
+import { fitWorkspaceViewport } from '@/lib/workspace/viewport';
 
 type Point = { x: number; y: number };
 export type WorkspaceProjectionRequest = {
@@ -663,7 +664,8 @@ export function HiiRoot({
   const isTouchCanvas = isSpace || isAccount;
   const runtimeEnabled = !isTouchCanvas;
   const save = useRef<() => void>(() => {});
-  const camera = useCamera(() => save.current());
+  const settleCamera = useCallback(() => save.current(), []);
+  const camera = useCamera(settleCamera);
   const workspace = useWorkspace(camera.getViewport, undefined, persistence);
   const [selected, setSelected] = useState<string[]>([]);
   const [mode, setMode] = useState<CanvasModeId>(() => {
@@ -675,7 +677,7 @@ export function HiiRoot({
   const [promptVisible, setPromptVisible] = useState(false);
   const [drawing, setDrawing] = useState(false);
   const [canvasCommandsOpen, setCanvasCommandsOpen] = useState(false);
-  const [, setToolMessage] = useState('');
+  const [toolMessage, setToolMessage] = useState('');
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [dropActive, setDropActive] = useState(false);
   const [devFixtureState, setDevFixtureState] = useState<'normal' | 'minimized' | 'maximized'>('normal');
@@ -776,7 +778,7 @@ export function HiiRoot({
 
   useEffect(() => {
     if (workspace.initialViewport) camera.setViewport(workspace.initialViewport);
-  }, [camera, workspace.initialViewport]);
+  }, [camera.setViewport, workspace.initialViewport]);
 
   const spawnSeeds = useCallback((seeds: NodeSeed[], at: Point) => {
     const ids: string[] = [];
@@ -808,7 +810,7 @@ export function HiiRoot({
     try {
       const seeds = await (fileSeeder ? fileSeeder(files) : seedsFromFiles(files));
       spawnSeeds(direct ? directPasteSeeds(seeds) : seeds, at);
-      setToolMessage('');
+      setToolMessage(`Added ${seeds.length} file${seeds.length === 1 ? '' : 's'}.`);
     } catch (error) {
       const code = error instanceof Error ? error.message : '';
       setToolMessage(code === 'canvas_asset_batch_too_many'
@@ -901,6 +903,45 @@ export function HiiRoot({
         : workspace.nodes,
     [isAccount, isSpace, spaceId, workspace.nodes]
   );
+
+  const fitCanvas = useCallback(() => {
+    const viewport = camera.viewportRef.current;
+    const fitted = fitWorkspaceViewport(visibleNodes, {
+      width: viewport?.clientWidth || window.innerWidth,
+      height: viewport?.clientHeight || window.innerHeight
+    });
+    if (fitted) {
+      camera.setViewport(fitted);
+      setToolMessage(`Fit ${visibleNodes.length} object${visibleNodes.length === 1 ? '' : 's'} to the canvas.`);
+    } else {
+      camera.reset();
+      setToolMessage('Canvas view reset.');
+    }
+  }, [camera, visibleNodes]);
+
+  const toggleDrawing = useCallback(() => {
+    setDrawing((current) => {
+      const next = !current;
+      setToolMessage(next ? 'Drawing on · drag anywhere · Esc to stop.' : 'Drawing off.');
+      return next;
+    });
+  }, []);
+
+  const deleteSelection = useCallback(() => {
+    if (!selected.length) return;
+    selected.forEach(workspace.removeNode);
+    setToolMessage(`Deleted ${selected.length} object${selected.length === 1 ? '' : 's'}.`);
+    setSelected([]);
+  }, [selected, workspace]);
+
+  const shareSelection = useCallback(() => {
+    if (!onShareNode || selected.length !== 1) return;
+    const node = workspace.nodes.find((entry) => entry.id === selected[0]);
+    if (!node) return;
+    onShareNode(node);
+    setCanvasCommandsOpen(false);
+    setToolMessage('Opened sharing for the selected object.');
+  }, [onShareNode, selected, workspace.nodes]);
 
   const spawnInformation = useCallback((seeds: NodeSeed[], at: Point) => {
     const ids = seeds.map((seed, index) => {
@@ -1424,37 +1465,47 @@ export function HiiRoot({
   useEffect(() => {
     const inField = (target: EventTarget | null) => (target as Element | null)?.closest?.('input,textarea,[contenteditable]');
     const keydown = (event: KeyboardEvent) => {
+      if (isAccount && canvasCommandsOpen && event.key === 'Escape') {
+        event.preventDefault();
+        setCanvasCommandsOpen(false);
+        setToolMessage('Commands closed.');
+        return;
+      }
       if (inField(event.target)) return;
       if (isAccount && isTerminalShortcut(event)) {
         event.preventDefault();
         onRequestDevice?.();
+        setToolMessage('Opened devices & models.');
         return;
       }
       if (isAccount && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'u') {
         event.preventDefault();
         fileInput.current?.click();
+        setToolMessage('Choose a file to add.');
         return;
       }
       if (isAccount && !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && event.key.toLowerCase() === 't') {
         event.preventDefault();
         const [id] = spawnCenteredSeed(canvasTextSeed());
         setFocusNodeId(id ?? null);
+        setToolMessage('Text added.');
         return;
       }
       if (isAccount && !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && event.key.toLowerCase() === 'n') {
         event.preventDefault();
         const [id] = spawnCenteredSeed(seedFor('note', { content: '', name: 'Note' }));
         setFocusNodeId(id ?? null);
+        setToolMessage('Note added.');
         return;
       }
       if (isAccount && !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && event.key.toLowerCase() === 'd') {
         event.preventDefault();
-        setDrawing((value) => !value);
+        toggleDrawing();
         return;
       }
       if (isAccount && !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && event.key === '0') {
         event.preventDefault();
-        camera.reset();
+        fitCanvas();
         return;
       }
       if (isAccount && !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && event.key === '?') {
@@ -1466,17 +1517,27 @@ export function HiiRoot({
         setDrawing(false);
         setCanvasCommandsOpen(false);
         setSelected([]);
+        setToolMessage('Selection and active tool cleared.');
         return;
       }
       if (!runtimeEnabled) {
         if ((event.key === 'Delete' || event.key === 'Backspace') && selected.length) {
           event.preventDefault();
-          selected.forEach(workspace.removeNode);
-          setSelected([]);
+          deleteSelection();
         }
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
           event.preventDefault();
           event.shiftKey ? workspace.redo() : workspace.undo();
+        }
+        if (selected.length && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+          event.preventDefault();
+          const step = event.shiftKey ? 10 : 1;
+          for (const id of selected) {
+            const node = workspace.nodes.find((entry) => entry.id === id);
+            if (!node) continue;
+            workspace.patchNode(node.id, { x: node.x + (event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0), y: node.y + (event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0) });
+          }
+          setToolMessage(`Moved ${selected.length} object${selected.length === 1 ? '' : 's'} ${step} point${step === 1 ? '' : 's'}.`);
         }
         return;
       }
@@ -1576,7 +1637,13 @@ export function HiiRoot({
     addEventListener('pointermove', pointermove);
     addEventListener('paste', paste);
     return () => { removeEventListener('keydown', keydown); removeEventListener('pointermove', pointermove); removeEventListener('paste', paste); };
-  }, [allowPhoto, camera, importFiles, isAccount, isSpace, isTouchCanvas, onRequestDevice, openDevBrowser, runtimeEnabled, selected, spawnArtifactTerminals, spawnCenteredSeed, spawnInformation, spawnSeeds, workspace]);
+  }, [allowPhoto, camera, canvasCommandsOpen, deleteSelection, fitCanvas, importFiles, isAccount, isSpace, isTouchCanvas, onRequestDevice, openDevBrowser, runtimeEnabled, selected, spawnArtifactTerminals, spawnCenteredSeed, spawnInformation, spawnSeeds, toggleDrawing, workspace]);
+
+  const canvasFeedback = toolMessage || (drawing
+    ? 'Drawing on · drag anywhere · Esc to stop.'
+    : selected.length
+      ? `${selected.length} selected · drag to move · option-drag to resize · Delete to remove.`
+      : '');
 
   return (
     <main
@@ -1596,6 +1663,7 @@ export function HiiRoot({
       onPointerDown={(event) => {
         if ((event.target as Element).closest('[data-node-id],input,textarea,audio,video,a')) return;
         setSelected([]);
+        setToolMessage('');
         setPromptVisible(false);
         if (isTouchCanvas && drawing) {
           event.preventDefault();
@@ -1648,23 +1716,33 @@ export function HiiRoot({
         photo={allowPhoto}
         accountTools={isAccount}
         commandsOpen={isAccount ? canvasCommandsOpen : undefined}
-        onAddImage={() => fileInput.current?.click()}
+        selectionCount={selected.length}
+        onAddImage={() => { fileInput.current?.click(); setToolMessage('Choose a file to add.'); }}
         onAddText={() => {
           const [id] = spawnCenteredSeed(seedFor('canvas-text', { text: '', name: 'Text' }));
           setFocusNodeId(id ?? null);
+          setToolMessage('Text added.');
         }}
         onAddNote={() => {
           const [id] = spawnCenteredSeed(seedFor('note', { content: '', name: 'Note' }));
           setFocusNodeId(id ?? null);
+          setToolMessage('Note added.');
+        }}
+        onAddLink={(url) => {
+          spawnCenteredSeed(accountLinkSeed(url));
+          setToolMessage('Link added.');
         }}
         onAddSticker={() => spawnCenteredSeed({ ...seedFor('image', { sticker: true, emoji: '✦', name: 'Sticker' }), w: 120, h: 120 })}
-        onOpenTerminal={onRequestDevice}
-        onUndo={workspace.undo}
-        onRedo={workspace.redo}
-        onResetView={camera.reset}
+        onOpenTerminal={() => { onRequestDevice?.(); setToolMessage('Opened devices & models.'); }}
+        onUndo={() => { workspace.undo(); setToolMessage('Undid the last canvas change.'); }}
+        onRedo={() => { workspace.redo(); setToolMessage('Redid the last canvas change.'); }}
+        onFitView={fitCanvas}
+        onDeleteSelection={deleteSelection}
+        onShareSelection={onShareNode ? shareSelection : undefined}
         onCommandsOpenChange={setCanvasCommandsOpen}
-        onToggleDrawing={() => setDrawing((value) => !value)}
+        onToggleDrawing={toggleDrawing}
       />}
+      {isAccount && canvasFeedback && <div className="hii-canvas-feedback" role="status" aria-live="polite">{canvasFeedback}</div>}
       {runtimeEnabled && workspace.nodes.some((node) => node.type === 'app') && <div className="hii-app-dock" onPointerDown={(event) => event.stopPropagation()}>
         <button onClick={tileApps}>Tile apps</button>
         {workspace.nodes.filter((node) => node.type === 'app').map((node) => <button key={node.id} data-active={selected.includes(node.id) || undefined} onClick={() => {
@@ -1689,7 +1767,7 @@ export function HiiRoot({
             selected={selected.includes(node.id)}
             title={titleFor(node)}
             getZoom={() => camera.cam.current.z}
-            onSelect={() => { setSelected([node.id]); workspace.bringToFront(node.id); }}
+            onSelect={() => { setSelected([node.id]); setToolMessage(''); workspace.bringToFront(node.id); }}
             onOpenConversation={() => { if (runtimeEnabled) openObjectConversation(node); }}
             onCommit={(patch) => workspace.patchNode(node.id, patch)}
             onWindowAction={(action) => appWindowAction(node, action)}
