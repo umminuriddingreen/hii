@@ -145,10 +145,11 @@ def build_prompts() -> List[Dict[str, Any]]:
         {
             "id": "completion-stream",
             "stream": True,
+            "max_tokens": 192,
             "messages": [
                 {
                     "role": "user",
-                    "content": "Reply with exactly: benchmark ok",
+                    "content": "Write the integers 1 through 64, one per line, with no commentary.",
                 }
             ],
             "tools": None,
@@ -277,62 +278,47 @@ def read_streaming(
     try:
         with urllib.request.urlopen(request, timeout=timeout_s) as response:
             http_status = response.status
-            buffer = response.read().decode("utf-8", errors="replace")
+            # Consume SSE incrementally. `response.read()` hides actual TTFT by
+            # buffering the entire completion before timestamps are sampled.
+            for raw_bytes in response:
+                raw_line = raw_bytes.decode("utf-8", errors="replace").strip()
+                if not raw_line:
+                    continue
+                raw_data = raw_line[5:].strip() if raw_line.startswith("data:") else raw_line
+                if raw_data == "[DONE]":
+                    continue
+                try:
+                    chunk = json.loads(raw_data)
+                except json.JSONDecodeError:
+                    continue
+                if chunk.get("object") == "error":
+                    error = chunk.get("error", {}).get("message", "error payload")
+                    continue
+                chunk_choices = chunk.get("choices") or []
+                if isinstance(chunk_choices, list):
+                    for choice in chunk_choices:
+                        if not isinstance(choice, dict):
+                            continue
+                        delta = choice.get("delta") or {}
+                        if not isinstance(delta, dict):
+                            continue
+                        delta_content = delta.get("content") or ""
+                        delta_tools = delta.get("tool_calls") or []
+                        if delta_content:
+                            content.append(str(delta_content))
+                        if delta_tools:
+                            if isinstance(delta_tools, list):
+                                tool_calls.extend(tc for tc in delta_tools if isinstance(tc, dict))
+                            elif isinstance(delta_tools, dict):
+                                tool_calls.append(delta_tools)
+                        if first_token_ms is None and (delta_content or delta_tools):
+                            first_token_ms = now_ms() - start
+                        choices.append(choice)
+                chunk_usage = chunk.get("usage")
+                if chunk_usage is not None:
+                    usage = chunk_usage
     except Exception as ex:
         error = str(ex)
-        return {
-            "error": error,
-            "status": None,
-            "ttft_ms": None,
-            "latency_ms": None,
-            "choices": choices,
-            "usage": usage,
-            "content": "",
-            "tool_calls": [],
-            "first_token_ms": None,
-            "stream_complete": False,
-        }
-
-    lines = [line.strip() for line in buffer.splitlines() if line.strip()]
-    for raw_line in lines:
-        if raw_line.startswith("data:"):
-            raw_data = raw_line[5:].strip()
-        else:
-            raw_data = raw_line
-        if raw_data == "[DONE]":
-            continue
-        try:
-            chunk = json.loads(raw_data)
-        except json.JSONDecodeError:
-            continue
-        if chunk.get("object") == "error":
-            error = chunk.get("error", {}).get("message", "error payload")
-            continue
-        chunk_choices = chunk.get("choices") or []
-        if isinstance(chunk_choices, list):
-            for choice in chunk_choices:
-                if not isinstance(choice, dict):
-                    continue
-                delta = choice.get("delta") or {}
-                if not isinstance(delta, dict):
-                    continue
-                delta_content = delta.get("content") or ""
-                delta_tools = delta.get("tool_calls") or []
-                if delta_content:
-                    content.append(str(delta_content))
-                if delta_tools:
-                    if isinstance(delta_tools, list):
-                        for tc in delta_tools:
-                            if isinstance(tc, dict):
-                                tool_calls.append(tc)
-                    elif isinstance(delta_tools, dict):
-                        tool_calls.append(delta_tools)
-                if (not first_token_ms) and (delta_content or delta_tools):
-                    first_token_ms = now_ms() - start
-                choices.append(choice)
-        chunk_usage = chunk.get("usage")
-        if chunk_usage is not None:
-            usage = chunk_usage
     if first_token_ms is None:
         first_token_ms = None
     latency_ms = now_ms() - start
@@ -421,6 +407,11 @@ def call_once(target: Target, scenario: Dict[str, Any], timeout_s: float, pid: O
         "messages": scenario["messages"],
         "stream": bool(scenario["stream"]),
     }
+    if scenario.get("max_tokens") is not None:
+        payload["max_tokens"] = scenario["max_tokens"]
+        payload["temperature"] = 0
+    if scenario["stream"]:
+        payload["stream_options"] = {"include_usage": True}
     if scenario.get("tools"):
         payload["tools"] = scenario["tools"]
         payload["tool_choice"] = "auto"
@@ -486,8 +477,11 @@ def call_once(target: Target, scenario: Dict[str, Any], timeout_s: float, pid: O
         derived_tokens = estimate_tokens(content)
 
     tps = None
-    if latency_ms and latency_ms > 0 and derived_tokens is not None:
-        tps = derived_tokens / (latency_ms / 1000.0)
+    decode_ms = latency_ms
+    if scenario["stream"] and ttft_ms is not None and latency_ms is not None:
+        decode_ms = max(latency_ms - ttft_ms, 0.001)
+    if decode_ms and decode_ms > 0 and derived_tokens is not None:
+        tps = derived_tokens / (decode_ms / 1000.0)
 
     ended = utcnow_iso()
 

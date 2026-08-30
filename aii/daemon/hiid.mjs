@@ -1071,6 +1071,11 @@ async function printModelRuntimeStatus() {
   console.log(JSON.stringify(status, null, 2));
 }
 
+function cliOption(args, name, fallback = null) {
+  const index = args.indexOf(name);
+  return index >= 0 && args[index + 1] !== undefined ? args[index + 1] : fallback;
+}
+
 async function startModelRuntime(args) {
   ensureDirs();
   const existing = modelRuntimePid();
@@ -1092,8 +1097,16 @@ async function startModelRuntime(args) {
   if (!model) throw new Error("--model requires a model ID or local path");
   if (!quant) throw new Error("--quant requires a mistral.rs ISQ value");
   const out = fs.openSync(MODEL_RUNTIME_LOG, "a");
+  const forwarded = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--model" || args[index] === "--quant") {
+      index += 1;
+      continue;
+    }
+    forwarded.push(args[index]);
+  }
   const child = spawn(binary, [
-    "serve", "--model", model, "--quant", quant,
+    "serve", "--model", model, "--quant", quant, ...forwarded,
     "--model-home", path.join(RUNTIME, "models")
   ], {
     cwd: ROOT,
@@ -1118,6 +1131,18 @@ async function startModelRuntime(args) {
       : "hii-native/mistral.rs",
     model,
     quantization: quant,
+    performance: {
+      automaticPrefixCache: !forwarded.includes("--no-apc"),
+      prefillStepSize: Number(cliOption(forwarded, "--prefill-step-size", 2048)),
+      maxConcurrentSequences: Number(cliOption(forwarded, "--max-num-seqs", 1)),
+      visionCacheSize: Number(cliOption(forwarded, "--vision-cache-size", 2)),
+      kvBits: forwarded.includes("--kv-bits")
+        ? Number(cliOption(forwarded, "--kv-bits"))
+        : null,
+      draftModel: forwarded.includes("--draft-model")
+        ? cliOption(forwarded, "--draft-model")
+        : null
+    },
     profile,
     modelHome: path.join(RUNTIME, "models"),
     log: MODEL_RUNTIME_LOG,
@@ -1210,10 +1235,15 @@ async function benchModelRuntime(args) {
   const completionTokensPerSecond = reportedTokensPerSecond > 0
     ? reportedTokensPerSecond
     : completionTokens / Math.max(wallMs / 1000, 0.001);
+  // A tiny exact-output smoke mostly measures prompt evaluation and request
+  // overhead. Do not label that as failed decode throughput when the backend
+  // omits native timing; use openai_endpoint_benchmark.py for a long decode.
+  const throughputMeasured = reportedTokensPerSecond > 0 || completionTokens >= 16;
   const gates = {
     completion: gate.requiresCompletion !== true || completionTokens > 0,
     wall: wallMs <= Number(gate.maxWallMs || 120000),
-    throughput: completionTokensPerSecond >= Number(gate.minCompletionTokensPerSecond || 8)
+    throughput: !throughputMeasured
+      || completionTokensPerSecond >= Number(gate.minCompletionTokensPerSecond || 8)
   };
   const ok = Object.values(gates).every(Boolean);
   console.log(JSON.stringify({
@@ -1221,6 +1251,7 @@ async function benchModelRuntime(args) {
     gates,
     thresholds: gate,
     wallMs,
+    throughputMeasured,
     model: status.model,
     usage: body.usage || null,
     output: body.choices?.[0]?.message?.content || ""

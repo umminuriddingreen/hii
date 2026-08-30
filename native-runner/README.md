@@ -38,3 +38,20 @@ pinned engine only after the operator accepts first-run setup or explicitly
 runs `hii runner model start`. Ollama and LM Studio are compatibility adapters,
 never implicit dependencies. Hosted Codex and Claude remain explicit login and
 transmission routes.
+
+The Rust runner remains the lifecycle and policy boundary while inference runs
+in a separate long-lived worker. Its interactive defaults favor one foreground
+user: automatic prefix caching is enabled with a bounded 256-block pool,
+prefill uses 2048-token steps, concurrent decode is limited to one sequence,
+and the unused vision-feature cache is kept small. These are overrideable:
+
+```sh
+hii runner model start --prefill-step-size 4096 --max-num-seqs 1
+hii runner model start --max-kv-size 8192 --kv-bits 8
+hii runner model start --draft-model /path/to/already-acquired-drafter
+hii runner model start --no-apc
+```
+
+KV quantization and speculative decoding are opt-in because either can reduce
+throughput for an incompatible model or short context. Supplying a draft model
+never authorizes HII to acquire it automatically.

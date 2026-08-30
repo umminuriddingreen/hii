@@ -395,6 +395,13 @@ pub const ROUTES: &[Route] = &[
         Infra,
         "turn an idea into a local offer brief",
     ),
+    delegated(
+        "objects",
+        Extended,
+        Infra,
+        "the governed object interface",
+    ),
+    delegated("object", Extended, Infra, "alias for `objects`"),
     delegated("sdk", Extended, Tools, "SDK contract smoke check"),
     delegated("console", Extended, Tools, "open a console surface"),
     delegated(
@@ -607,6 +614,44 @@ mod tests {
                 listing.contains(route.name),
                 "`{}` routes but `hii help --all` never names it",
                 route.name
+            );
+        }
+    }
+
+    /// The listing is only complete if the table is. Both surfaces are read
+    /// directly so a command added to either one without a route fails here
+    /// rather than becoming reachable-but-undocumented (or, for the Node
+    /// surface, unreachable: an unrouted name is parsed as prose, not a
+    /// command). `objects` was both for as long as the table was hand-checked.
+    #[test]
+    fn every_reachable_command_has_a_route() {
+        let names: HashSet<&str> = ROUTES.iter().map(|route| route.name).collect();
+
+        let node = include_str!("../../scripts/hii-cli.mjs");
+        for line in node.lines() {
+            let Some(rest) = line.trim().strip_prefix("case \"") else {
+                continue;
+            };
+            let Some(name) = rest.split('"').next() else {
+                continue;
+            };
+            // `--help`/`-h` are flags the Node surface also answers to, not commands.
+            if name.starts_with('-') {
+                continue;
+            }
+            assert!(
+                names.contains(name),
+                "the Node surface answers `hii {name}` but ROUTES never names it, so it is \
+                 neither delegated nor listed in `hii help --all`"
+            );
+        }
+
+        for sub in <crate::Cli as clap::CommandFactory>::command().get_subcommands() {
+            let name = sub.get_name();
+            assert!(
+                names.contains(name),
+                "clap parses `hii {name}` but ROUTES never names it, so `hii help --all` \
+                 never mentions it"
             );
         }
     }

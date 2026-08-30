@@ -54,6 +54,31 @@ enum Command {
         uqff: Option<String>,
         #[arg(long, default_value_t = 4)]
         max_seqs: usize,
+        /// Tokens processed per prompt-prefill step by the MLX worker.
+        #[arg(long, default_value_t = 2048)]
+        prefill_step_size: usize,
+        /// Maximum concurrent MLX sequences. One favors interactive latency.
+        #[arg(long, default_value_t = 1)]
+        max_num_seqs: usize,
+        /// Number of cached vision feature sets. Text-first HII keeps this small.
+        #[arg(long, default_value_t = 2)]
+        vision_cache_size: usize,
+        /// Disable automatic prefix caching for repeated HII context.
+        #[arg(long, default_value_t = false)]
+        no_apc: bool,
+        /// Bounded APC pool size; blocks are 16 tokens in MLX-VLM.
+        #[arg(long, default_value_t = 256)]
+        apc_num_blocks: usize,
+        /// Optional rotating KV-cache limit in tokens.
+        #[arg(long)]
+        max_kv_size: Option<usize>,
+        /// Optional KV-cache quantization bit width. Off by default because it
+        /// can reduce short-context decode throughput.
+        #[arg(long)]
+        kv_bits: Option<f32>,
+        /// Explicitly acquired speculative drafter model or local path.
+        #[arg(long)]
+        draft_model: Option<String>,
         #[arg(long)]
         model_home: Option<PathBuf>,
         #[arg(long)]
@@ -90,6 +115,14 @@ struct ServeConfig {
     quant: String,
     uqff: Option<String>,
     max_seqs: usize,
+    prefill_step_size: usize,
+    max_num_seqs: usize,
+    vision_cache_size: usize,
+    apc: bool,
+    apc_num_blocks: usize,
+    max_kv_size: Option<usize>,
+    kv_bits: Option<f32>,
+    draft_model: Option<String>,
     model_home: Option<PathBuf>,
     cpu: bool,
 }
@@ -166,17 +199,11 @@ fn serve_mlx(config: &ServeConfig, binary: &Path) -> Result<()> {
         config.model,
         binary.display()
     );
-    let port = config.port.to_string();
-    let mut child = ProcessCommand::new(binary)
-        .args([
-            "--model",
-            &config.model,
-            "--host",
-            &config.host,
-            "--port",
-            &port,
-        ])
+    let mut command = mlx_command(config, binary);
+    let mut child = command
         .env("HF_HOME", model_home.join("huggingface"))
+        .env("APC_ENABLED", if config.apc { "1" } else { "0" })
+        .env("APC_NUM_BLOCKS", config.apc_num_blocks.to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -193,6 +220,33 @@ fn serve_mlx(config: &ServeConfig, binary: &Path) -> Result<()> {
     } else {
         bail!("MLX-VLM exited with {status}")
     }
+}
+
+fn mlx_command(config: &ServeConfig, binary: &Path) -> ProcessCommand {
+    let mut command = ProcessCommand::new(binary);
+    command
+        .arg("--model")
+        .arg(&config.model)
+        .arg("--host")
+        .arg(&config.host)
+        .arg("--port")
+        .arg(config.port.to_string())
+        .arg("--prefill-step-size")
+        .arg(config.prefill_step_size.to_string())
+        .arg("--max-num-seqs")
+        .arg(config.max_num_seqs.to_string())
+        .arg("--vision-cache-size")
+        .arg(config.vision_cache_size.to_string());
+    if let Some(value) = config.max_kv_size {
+        command.args(["--max-kv-size", &value.to_string()]);
+    }
+    if let Some(value) = config.kv_bits {
+        command.args(["--kv-bits", &value.to_string()]);
+    }
+    if let Some(model) = &config.draft_model {
+        command.args(["--draft-model", model]);
+    }
+    command
 }
 
 fn default_model_home() -> Result<PathBuf> {
@@ -304,9 +358,22 @@ fn capabilities(model_home: &Path) -> Value {
         },
         "modelHome": model_home,
         "loopback": format!("http://{DEFAULT_HOST}:{DEFAULT_PORT}"),
-        "protocol": ["GET /health", "GET /v1/models", "POST /v1/chat/completions", "GET /v1/hii/metrics"],
+        "protocol": if mlx.is_some() {
+            json!(["GET /health", "GET /v1/models", "POST /v1/chat/completions"])
+        } else {
+            json!(["GET /health", "GET /v1/models", "POST /v1/chat/completions", "GET /v1/hii/metrics"])
+        },
         "defaultModel": DEFAULT_MODEL,
         "defaultQuantization": "4",
+        "performanceDefaults": {
+            "automaticPrefixCache": true,
+            "apcBlocks": 256,
+            "prefillStepSize": 2048,
+            "maxConcurrentSequences": 1,
+            "visionCacheSize": 2,
+            "kvQuantization": "off",
+            "speculativeDraft": "explicit-only"
+        },
         "modelAcquisition": "explicit-on-start"
     })
 }
@@ -336,6 +403,7 @@ async fn serve(config: ServeConfig) -> Result<()> {
         max_seqs,
         model_home: requested_home,
         cpu,
+        ..
     } = config;
     let ip: IpAddr = host
         .parse()
@@ -445,6 +513,14 @@ async fn main() -> Result<()> {
             quant,
             uqff,
             max_seqs,
+            prefill_step_size,
+            max_num_seqs,
+            vision_cache_size,
+            no_apc,
+            apc_num_blocks,
+            max_kv_size,
+            kv_bits,
+            draft_model,
             model_home,
             cpu,
         } => {
@@ -455,6 +531,14 @@ async fn main() -> Result<()> {
                 quant,
                 uqff,
                 max_seqs,
+                prefill_step_size,
+                max_num_seqs,
+                vision_cache_size,
+                apc: !no_apc,
+                apc_num_blocks,
+                max_kv_size,
+                kv_bits,
+                draft_model,
                 model_home,
                 cpu,
             })
@@ -484,6 +568,45 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_serve_config() -> ServeConfig {
+        ServeConfig {
+            model: "local/model".into(),
+            host: DEFAULT_HOST.into(),
+            port: DEFAULT_PORT,
+            quant: "4".into(),
+            uqff: None,
+            max_seqs: 4,
+            prefill_step_size: 2048,
+            max_num_seqs: 1,
+            vision_cache_size: 2,
+            apc: true,
+            apc_num_blocks: 256,
+            max_kv_size: None,
+            kv_bits: None,
+            draft_model: None,
+            model_home: None,
+            cpu: false,
+        }
+    }
+
+    #[test]
+    fn mlx_worker_is_tuned_for_one_interactive_user() {
+        let command = mlx_command(&test_serve_config(), Path::new("mlx_vlm.server"));
+        let args = command
+            .get_args()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--prefill-step-size", "2048"]));
+        assert!(args.windows(2).any(|pair| pair == ["--max-num-seqs", "1"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--vision-cache-size", "2"]));
+        assert!(!args.iter().any(|arg| arg == "--kv-bits"));
+        assert!(!args.iter().any(|arg| arg == "--draft-model"));
+    }
 
     #[test]
     fn model_home_is_isolated_from_ollama_storage() {
