@@ -249,6 +249,12 @@ pub const ROUTES: &[Route] = &[
     ),
     native("systems", Extended, Infra, "manage enrolled Macs and PCs"),
     native(
+        "network",
+        Extended,
+        Infra,
+        "operate HII-owned device networking",
+    ),
+    native(
         "ecosystem",
         Extended,
         Infra,

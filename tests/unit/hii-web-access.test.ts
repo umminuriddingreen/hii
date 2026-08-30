@@ -37,6 +37,15 @@ describe('HII web access gate', () => {
     expect(source).not.toContain('type="password"');
   });
 
+  it('accepts an identity-bound HII Network session before the hosted account adapter', () => {
+    const source = readFileSync('components/auth/HiiWebAccess.tsx', 'utf8');
+
+    expect(source).toContain("fetch('/hii/network/session'");
+    expect(source).toContain("credentials: 'same-origin'");
+    expect(source).toContain('networkSession ?? api<Session>');
+    expect(source).not.toContain("normalized.endsWith('.local')");
+  });
+
   it('opens the canonical HII canvas immediately after authentication', () => {
     const source = readFileSync('components/auth/HiiWebAccess.tsx', 'utf8');
     const css = readFileSync('components/auth/HiiWebAccess.module.css', 'utf8');

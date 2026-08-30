@@ -32,6 +32,7 @@ mod learning;
 mod legacy;
 mod mcp;
 mod mcp_client;
+mod network;
 mod notification;
 mod ollama;
 mod paste;
@@ -411,6 +412,12 @@ enum Commands {
     Ecosystem {
         #[command(subcommand)]
         action: EcosystemCommand,
+    },
+    #[command(about = "Operate HII-owned device networking and browser pairing")]
+    #[command(hide = true)]
+    Network {
+        #[command(subcommand)]
+        action: NetworkCommand,
     },
     #[command(about = "Run a bounded command against an enrolled system")]
     #[command(hide = true)]
@@ -1354,6 +1361,61 @@ enum EcosystemCommand {
 }
 
 #[derive(Subcommand, Debug)]
+enum NetworkCommand {
+    #[command(about = "Create or inspect the private HII development certificate")]
+    Certificate {
+        #[command(subcommand)]
+        action: NetworkCertificateCommand,
+    },
+    #[command(about = "Create one short-lived browser pairing URL")]
+    Pair {
+        #[arg(long, default_value_t = 300, value_name = "SECONDS")]
+        ttl: u64,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Start the private HII HTTPS gateway in the background")]
+    Start {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Run the HII HTTPS gateway in the foreground", hide = true)]
+    Serve,
+    #[command(about = "Stop the owned HII HTTPS gateway")]
+    Stop {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Show configured routes without inferring connectivity")]
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Check certificates, local canvas, and route configuration")]
+    Doctor {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum NetworkCertificateCommand {
+    #[command(about = "Create a removable 30-day development trust profile")]
+    Create {
+        #[arg(
+            long = "host",
+            value_name = "HOST",
+            help = "Additional DNS name or IP; repeatable"
+        )]
+        hosts: Vec<String>,
+        #[arg(long, default_value_t = 7443)]
+        port: u16,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum OnCommand {
     #[command(about = "Run a shell command on an enrolled executor")]
     Run {
@@ -2158,6 +2220,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 Err("`hii ecosystem catalog` requires --json".to_string())
             }
         },
+        Some(Commands::Network { action }) => network_command(&paths, action),
         Some(Commands::On { system, action }) => on_command(&paths, &system, action),
         Some(Commands::Board { action }) => board_command(&paths, cli.cwd, action),
         Some(Commands::Discover { action }) => {
@@ -3923,6 +3986,169 @@ fn save_systems(paths: &AppPaths, registry: &SystemsRegistry) -> Result<(), Stri
     let raw = serde_json::to_string_pretty(registry).map_err(|error| error.to_string())?;
     fs::write(&path, format!("{raw}\n"))
         .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+fn network_command(paths: &AppPaths, action: NetworkCommand) -> Result<ExitCode, String> {
+    match action {
+        NetworkCommand::Certificate {
+            action: NetworkCertificateCommand::Create { hosts, port, json },
+        } => {
+            let config = network::create_certificate(paths, &hosts, port)?;
+            let profile = network::network_root(paths).join("hii-network.mobileconfig");
+            let report = serde_json::json!({
+                "configured": true,
+                "nodeId": config.node_id,
+                "lanUrls": config.lan_urls,
+                "profile": profile,
+                "expiresAtUnix": config.certificate_not_after_unix,
+                "next": "Install and trust the profile on the owner-controlled iPhone, then run `hii network start`."
+            });
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?
+                );
+            } else {
+                println!("HII Network certificate ready");
+                for url in report["lanUrls"].as_array().into_iter().flatten() {
+                    if let Some(url) = url.as_str() {
+                        println!("  {url}");
+                    }
+                }
+                println!("profile  {}", profile.display());
+                println!("next     install and trust the profile, then `hii network start`");
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        NetworkCommand::Pair { ttl, json } => {
+            let report = network::create_pairing(paths, ttl)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?
+                );
+            } else {
+                println!("HII browser pairing");
+                println!(
+                    "{}",
+                    report["url"].as_str().unwrap_or("pairing URL unavailable")
+                );
+                println!("expires  {}", report["expiresAtUnix"]);
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        NetworkCommand::Start { json } => {
+            let pid = network::start(paths)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({ "started": true, "pid": pid })
+                    )
+                    .map_err(|error| error.to_string())?
+                );
+            } else {
+                println!("started HII Network pid={pid}");
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        NetworkCommand::Serve => {
+            network::serve(paths)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        NetworkCommand::Stop { json } => {
+            let stopped = network::stop(paths)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({ "stopped": stopped }))
+                        .map_err(|error| error.to_string())?
+                );
+            } else if stopped {
+                println!("stopped HII Network");
+            } else {
+                println!("HII Network is not running");
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        NetworkCommand::Status { json } => {
+            let report = network::status(paths);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?
+                );
+            } else {
+                println!("HII Network");
+                println!("configured  {}", report["configured"]);
+                println!("running     {}", report["running"]);
+                println!(
+                    "truth       {}",
+                    report["transportTruth"].as_str().unwrap_or("unknown")
+                );
+                println!(
+                    "lan         {}",
+                    report["routes"]["lan"].as_array().map_or(0, Vec::len)
+                );
+                println!(
+                    "internet    {}",
+                    report["routes"]["directInternet"]
+                        .as_array()
+                        .map_or(0, Vec::len)
+                );
+                println!(
+                    "tailscale   {}",
+                    report["routes"]["tailscale"].as_array().map_or(0, Vec::len)
+                );
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        NetworkCommand::Doctor { json } => {
+            let report = network::doctor(paths);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?
+                );
+            } else {
+                println!("HII Network doctor");
+                println!("configured   {}", report["configured"]);
+                println!(
+                    "canvas       {}",
+                    if report["upstreamReady"] == true {
+                        "ready"
+                    } else {
+                        "offline"
+                    }
+                );
+                println!(
+                    "LAN route    {}",
+                    if report["lanCandidatePresent"] == true {
+                        "configured"
+                    } else {
+                        "missing"
+                    }
+                );
+                println!(
+                    "internet     {}",
+                    if report["directInternetConfigured"] == true {
+                        "configured, unproven"
+                    } else {
+                        "not configured"
+                    }
+                );
+                println!(
+                    "Tailscale    {}",
+                    if report["tailscaleConfigured"] == true {
+                        "configured, optional"
+                    } else {
+                        "not configured"
+                    }
+                );
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+    }
 }
 
 fn systems_command(paths: &AppPaths, action: Option<SystemsCommand>) -> Result<ExitCode, String> {

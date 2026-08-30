@@ -153,10 +153,13 @@ The machine-fabric source is deliberately split into bounded pieces:
 - `fabric/windows-receiver`: bounded Windows frame/session and D3D11 receiver
   boundaries.
 
-These are foundations, not a working cross-device product. There is currently
-no proven secure transport binding the pieces, no verified physical iPhone
-replica, no proven Mac-to-Windows frame presentation, and no proven remote
-input, file transfer, localhost proxy, or compute-routing loop.
+These remain foundations rather than a complete cross-device product. The Rust
+CLI now provides a private HTTPS/WSS browser gateway with short-lived,
+single-use pairing, browser-held device keys, hash-only sessions, and bounded
+fabric-frame validation. Its loopback transport is tested, but physical iPhone
+pairing, Internet traversal, replication, terminal transport, Mac-to-Windows
+presentation, remote input, file transfer, and compute routing are not yet
+proven.
 
 ## Architecture
 
@@ -219,6 +222,23 @@ Run the web access surface and its local development adapter:
 ```sh
 npm run dev
 ```
+
+To open that same local canvas from an owner-controlled iPhone without a cloud
+deployment, create a removable development trust profile, start the gateway,
+and issue a one-time pairing URL:
+
+```sh
+hii network certificate create
+hii network start
+hii network pair
+```
+
+Install and explicitly trust the generated profile only on your own test
+device. `hii network status`, `hii network doctor`, and `hii network stop`
+report and control the owned local gateway. Tailscale is optional; configured
+LAN, public, and VPN addresses are routes under the same HII identity rather
+than separate authority systems. Direct Internet reachability is not inferred
+until a public IPv6 path or router mapping is independently proven.
 
 Run the desktop-target Next.js surface on loopback port 3042:
 

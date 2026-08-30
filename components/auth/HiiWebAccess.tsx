@@ -35,6 +35,20 @@ function localOwnerSession(hostname: string): Session | null {
   } : null;
 }
 
+async function networkOwnerSession(): Promise<Session | null> {
+  try {
+    const response = await fetch('/hii/network/session', {
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+    if (!response.ok) return null;
+    const session = await response.json() as Session;
+    return session.authenticated ? session : null;
+  } catch {
+    return null;
+  }
+}
+
 type RegistrationOptions = {
   ceremonyId: string;
   publicKey: PublicKeyCredentialCreationOptionsJSON;
@@ -161,7 +175,8 @@ export function HiiWebAccess() {
       return;
     }
     let active = true;
-    void api<Session>('/api/auth/session')
+    void networkOwnerSession()
+      .then((networkSession) => networkSession ?? api<Session>('/api/auth/session'))
       .then((value) => { if (active) setSession(value); })
       .catch(() => { if (active) setSession({ authenticated: false }); })
       .finally(() => { if (active) setReady(true); });
