@@ -3555,11 +3555,10 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             }
             Err(error) => {
                 tui::finish_activity();
-                if error == conversation::OPERATOR_EXITED {
-                    break;
-                }
-                if error != conversation::OPERATOR_INTERRUPTED {
-                    tui::error(&error);
+                match conversation::operator_stop(&error) {
+                    Some(conversation::OperatorStop::Exited) => break,
+                    Some(conversation::OperatorStop::Interrupted) => {}
+                    None => tui::error(&error),
                 }
             }
         }

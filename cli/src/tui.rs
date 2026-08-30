@@ -693,18 +693,57 @@ pub fn active_run(view: &ActiveRunView<'_>) {
     println!("{}", active_run_frame(view));
 }
 
+/// Is this the same objective as the one already on screen?
+///
+/// Title, goal and direction are the standing header; `current` and `next` are
+/// expected to move every step and do not make it a new objective.
+pub fn same_objective(
+    previous: &crate::agent::FlowProjection,
+    next: &crate::agent::FlowProjection,
+) -> bool {
+    previous.title == next.title
+        && previous.goal == next.goal
+        && previous.direction == next.direction
+}
+
+/// Advance an objective already on screen.
+///
+/// Reprinting the header, the direction list and the steer hint on every action
+/// is the wall of text the objective view exists to remove, so only the two
+/// lines that actually moved are printed.
+pub fn active_run_progress(view: &ActiveRunView<'_>) {
+    finish_activity();
+    println!("{}", active_run_progress_frame(view));
+}
+
+fn active_run_progress_frame(view: &ActiveRunView<'_>) -> String {
+    [
+        String::new(),
+        paint("Currently", &[BOLD]),
+        view.current.to_string(),
+        String::new(),
+        paint("Next", &[BOLD]),
+        view.next.to_string(),
+        String::new(),
+    ]
+    .join("\n")
+}
+
 fn active_run_frame(view: &ActiveRunView<'_>) -> String {
     let mut rows = vec![
         String::new(),
         paint(view.title, &[BOLD, palette().primary]),
         paint("Creating", &[DIM, palette().muted]),
-        String::new(),
-        paint("Goal", &[BOLD]),
-        view.goal.to_string(),
+    ];
+    // An empty goal means the title already says it; do not print it twice.
+    if !view.goal.is_empty() {
+        rows.extend([String::new(), paint("Goal", &[BOLD]), view.goal.to_string()]);
+    }
+    rows.extend([
         String::new(),
         paint("Currently", &[BOLD]),
         view.current.to_string(),
-    ];
+    ]);
     if !view.direction.is_empty() {
         rows.extend([String::new(), paint("Direction", &[BOLD])]);
         rows.extend(view.direction.iter().map(|item| format!("• {item}")));
@@ -820,7 +859,8 @@ pub fn error(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        active_run_frame, clear_activity_sequence, command_matches, command_menu, composer_window,
+        active_run_frame, active_run_progress_frame, clear_activity_sequence, command_matches,
+        command_menu, composer_window,
         model_activity, overview, prompt_frame, short_path, terminal_width, theme_choices,
         user_turn_frame, welcome_frame, workspace_state, ActiveRunView, Theme,
     };
@@ -959,6 +999,60 @@ mod tests {
         assert_eq!(clear_activity_sequence(0), "");
         assert_eq!(clear_activity_sequence(2).matches("\x1b[1A").count(), 2);
         assert_eq!(clear_activity_sequence(2).matches("\x1b[2K").count(), 2);
+    }
+
+    #[test]
+    fn advancing_an_objective_reprints_only_what_moved() {
+        // Reprinting the header on every action is the wall of text the
+        // objective view exists to remove.
+        let view = ActiveRunView {
+            title: "Personal Dashboard",
+            goal: "See what matters right now.",
+            current: "Adding the schedule section.",
+            direction: &["HII", "School"],
+            next: "Wire the data source.",
+        };
+        let progress = active_run_progress_frame(&view);
+        assert!(progress.contains("Adding the schedule section."));
+        assert!(progress.contains("Wire the data source."));
+        assert!(!progress.contains("Personal Dashboard"));
+        assert!(!progress.contains("• School"));
+        assert!(!progress.contains("You can steer at any time."));
+    }
+
+    #[test]
+    fn an_objective_that_only_advances_is_still_the_same_objective() {
+        let projection = |current: &str, title: &str| crate::agent::FlowProjection {
+            title: title.into(),
+            goal: "See what matters right now.".into(),
+            current: current.into(),
+            direction: vec!["HII".into()],
+            next: "next".into(),
+        };
+        assert!(super::same_objective(
+            &projection("organizing", "Personal Dashboard"),
+            &projection("adding schedule", "Personal Dashboard"),
+        ));
+        assert!(!super::same_objective(
+            &projection("organizing", "Personal Dashboard"),
+            &projection("organizing", "Course Planner"),
+        ));
+    }
+
+    #[test]
+    fn the_opening_frame_states_the_objective_once() {
+        // The request is already echoed above this frame; a title plus an
+        // identical goal would print it three times.
+        let frame = active_run_frame(&ActiveRunView {
+            title: "Create a personal dashboard for us",
+            goal: "",
+            current: "Understanding what belongs here.",
+            direction: &[],
+            next: "Choose the first useful change.",
+        });
+        assert!(frame.contains("Create a personal dashboard for us"));
+        assert!(!frame.contains("Goal"));
+        assert!(frame.contains("Currently"));
     }
 
     #[test]

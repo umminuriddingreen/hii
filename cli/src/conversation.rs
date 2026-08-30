@@ -79,6 +79,27 @@ enum ReasoningMode {
 const STEERING_RESTART: &str = "operator steered model activity";
 pub(crate) const OPERATOR_INTERRUPTED: &str = "operator interrupted model activity";
 pub(crate) const OPERATOR_EXITED: &str = "operator exited the active objective";
+
+/// A turn that ended by the operator's hand rather than by failing.
+///
+/// Both travel as `Err` so they unwind the loop, but neither is an error to
+/// report: one returns to the prompt, the other leaves. Classified here so
+/// callers do not compare error strings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OperatorStop {
+    /// Return to the prompt with the session intact.
+    Interrupted,
+    /// Leave HII.
+    Exited,
+}
+
+pub(crate) fn operator_stop(error: &str) -> Option<OperatorStop> {
+    match error {
+        OPERATOR_INTERRUPTED => Some(OperatorStop::Interrupted),
+        OPERATOR_EXITED => Some(OperatorStop::Exited),
+        _ => None,
+    }
+}
 const REASONING_BUDGET_RETRY: &str = "adaptive reasoning budget ended";
 const ADAPTIVE_REASONING_MAX_CHARS: usize = 4_096;
 /// Bound on reasoning kept in the conversation record.
@@ -248,6 +269,11 @@ pub struct Conversation {
     usage: SessionUsage,
     last_skill_draft: Option<String>,
     thinking_mode: ThinkingMode,
+    /// Most recent objective projection, reused when a step omits one.
+    last_flow: Option<crate::agent::FlowProjection>,
+    /// No projection is available for the current step, so Flow view would show
+    /// nothing at all. Tool lines come back rather than leaving a blank screen.
+    flow_blind: bool,
     reasoning_mode: ReasoningMode,
     action_failures: usize,
     force_action_once: bool,
@@ -365,6 +391,8 @@ impl Conversation {
             usage: SessionUsage::default(),
             last_skill_draft: None,
             thinking_mode: ThinkingMode::Flow,
+            last_flow: None,
+            flow_blind: true,
             reasoning_mode: match std::env::var("HII_REASONING").as_deref() {
                 Ok("off") => ReasoningMode::Off,
                 Ok("deep") => ReasoningMode::Deep,
@@ -613,23 +641,41 @@ impl Conversation {
                     "flow.projected",
                     serde_json::to_value(flow).map_err(|error| error.to_string())?,
                 )?;
-                if io::stdout().is_terminal() && !matches!(self.thinking_mode, ThinkingMode::Raw) {
+            }
+            // A step may omit its projection; carrying the last one forward keeps
+            // the objective on screen instead of blanking it mid-run.
+            let projected = action.flow().cloned().or_else(|| self.last_flow.clone());
+            self.flow_blind = projected.is_none();
+            if let Some(flow) = projected {
+                if self.shows_flow() {
                     let direction = flow
                         .direction
                         .iter()
                         .map(String::as_str)
                         .collect::<Vec<_>>();
-                    crate::tui::active_run(&crate::tui::ActiveRunView {
+                    let view = crate::tui::ActiveRunView {
                         title: &flow.title,
                         goal: &flow.goal,
                         current: &flow.current,
                         direction: &direction,
                         next: &flow.next,
-                    });
+                    };
+                    // Reprint the whole frame only when the objective itself
+                    // changes; otherwise advance the two lines that moved.
+                    if self
+                        .last_flow
+                        .as_ref()
+                        .is_some_and(|previous| crate::tui::same_objective(previous, &flow))
+                    {
+                        crate::tui::active_run_progress(&view);
+                    } else {
+                        crate::tui::active_run(&view);
+                    }
                     if matches!(self.thinking_mode, ThinkingMode::Activity) {
                         crate::tui::activity_item(step, &flow.current);
                     }
                 }
+                self.last_flow = Some(flow);
             }
             match action {
                 Action::Message { message, .. } => {
@@ -799,8 +845,7 @@ impl Conversation {
                         )?);
                         run = Some(created);
                     }
-                    if io::stdout().is_terminal() && matches!(self.thinking_mode, ThinkingMode::Raw)
-                    {
+                    if self.shows_tool_lines() {
                         crate::tui::tool_start(step, &label, target);
                     }
                     let pre_hooks = self.hooks.fire(
@@ -844,12 +889,10 @@ impl Conversation {
                         verification.clear();
                         observations.clear();
                     }
-                    if io::stdout().is_terminal() && matches!(self.thinking_mode, ThinkingMode::Raw)
-                    {
+                    if self.shows_tool_lines() {
                         crate::tui::tool_result(ok, false);
                     }
-                    if io::stdout().is_terminal() && matches!(self.thinking_mode, ThinkingMode::Raw)
-                    {
+                    if self.shows_tool_output() {
                         crate::tui::tool_output(&safe_output);
                     }
                     let post_hooks = self.hooks.fire(
@@ -945,9 +988,7 @@ impl Conversation {
                         command.as_deref(),
                         url.as_deref(),
                     );
-                    if io::stdout().is_terminal()
-                        && !matches!(self.thinking_mode, ThinkingMode::Flow)
-                    {
+                    if self.shows_tool_lines() {
                         crate::tui::tool_start(step, &tool, &target);
                     }
                     let observation = tool_is_observation(&tool);
@@ -1241,13 +1282,10 @@ impl Conversation {
                             observations.insert(key);
                         }
                     }
-                    if io::stdout().is_terminal()
-                        && !matches!(self.thinking_mode, ThinkingMode::Flow)
-                    {
+                    if self.shows_tool_lines() {
                         crate::tui::tool_result(result.ok, result.verification || shell_evidence);
                     }
-                    if io::stdout().is_terminal() && matches!(self.thinking_mode, ThinkingMode::Raw)
-                    {
+                    if self.shows_tool_output() {
                         crate::tui::tool_output(&safe_output);
                     }
                     if result.verification || shell_evidence {
@@ -2046,22 +2084,54 @@ impl Conversation {
         skills::list(&self.paths)
     }
 
-    pub fn thinking(&mut self, requested: Option<&str>) -> Result<String, String> {
-        match requested.unwrap_or("flow") {
-            "flow" | "compact" | "off" => {
-                self.thinking_mode = ThinkingMode::Flow;
-                Ok("Flow view is active. Use `/raw on` for implementation diagnostics.".into())
-            }
-            "activity" => {
-                self.thinking_mode = ThinkingMode::Activity;
-                Ok("Activity view is active. Progress remains objective-relative.".into())
-            }
-            "raw" | "diagnostics" => {
-                self.thinking_mode = ThinkingMode::Raw;
-                Ok("Diagnostics view is active. Use `/raw off` to return to Flow.".into())
-            }
-            _ => Err("thinking view must be flow or diagnostics".into()),
+    /// Do tool call and result lines belong on screen?
+    ///
+    /// Flow shows objective language only — unless nothing has projected one,
+    /// in which case the tool lines are all there is to show.
+    fn shows_tool_lines(&self) -> bool {
+        io::stdout().is_terminal()
+            && (!matches!(self.thinking_mode, ThinkingMode::Flow) || self.flow_blind)
+    }
+
+    /// Does raw tool output belong on screen? Diagnostics only.
+    fn shows_tool_output(&self) -> bool {
+        io::stdout().is_terminal() && matches!(self.thinking_mode, ThinkingMode::Raw)
+    }
+
+    /// Does the objective frame belong on screen? Everything but Diagnostics.
+    fn shows_flow(&self) -> bool {
+        io::stdout().is_terminal() && !matches!(self.thinking_mode, ThinkingMode::Raw)
+    }
+
+    fn thinking_mode_for(requested: &str) -> Option<ThinkingMode> {
+        match requested {
+            // `off` predates these views and still means "show me the least":
+            // Flow is that, and there is no view with nothing in it.
+            "flow" | "compact" | "off" => Some(ThinkingMode::Flow),
+            "activity" => Some(ThinkingMode::Activity),
+            "raw" | "diagnostics" => Some(ThinkingMode::Raw),
+            _ => None,
         }
+    }
+
+    pub fn thinking(&mut self, requested: Option<&str>) -> Result<String, String> {
+        let requested = requested.unwrap_or("flow");
+        let Some(mode) = Self::thinking_mode_for(requested) else {
+            return Err(format!(
+                "unknown thinking view {requested:?}; choose flow, activity, or diagnostics"
+            ));
+        };
+        self.thinking_mode = mode;
+        Ok(match mode {
+            ThinkingMode::Flow => {
+                "Flow view is active — objective only. Use `/raw on` for implementation diagnostics."
+            }
+            ThinkingMode::Activity => {
+                "Activity view is active. Progress remains objective-relative."
+            }
+            ThinkingMode::Raw => "Diagnostics view is active. Use `/raw off` to return to Flow.",
+        }
+        .into())
     }
 
     pub fn begin_flow(&self, objective: &str) -> Result<(), String> {
@@ -2070,10 +2140,13 @@ impl Conversation {
         let current = "Understanding what belongs here.";
         let next = "Choose the first useful change.";
         self.store.event("flow.started", json!({"objective":redact_text(objective),"title":title,"goal":goal,"current":current,"next":next}))?;
-        if io::stdout().is_terminal() && !matches!(self.thinking_mode, ThinkingMode::Raw) {
+        if self.shows_flow() {
             crate::tui::active_run(&crate::tui::ActiveRunView {
                 title: &title,
-                goal,
+                // Before the model projects one, the objective is the title —
+                // repeating it as the goal would print the request three times,
+                // counting the echo just above.
+                goal: "",
                 current,
                 direction: &[],
                 next,
@@ -4026,6 +4099,28 @@ mod tests {
             .map(|choice| choice.value)
             .collect();
         assert_eq!(reasoning, vec!["auto", "off", "deep"]);
+    }
+
+    #[test]
+    fn operator_stops_are_classified_rather_than_string_matched() {
+        use super::{operator_stop, OperatorStop, OPERATOR_EXITED, OPERATOR_INTERRUPTED};
+        assert_eq!(
+            operator_stop(OPERATOR_INTERRUPTED),
+            Some(OperatorStop::Interrupted)
+        );
+        assert_eq!(operator_stop(OPERATOR_EXITED), Some(OperatorStop::Exited));
+        assert_eq!(operator_stop("disk full"), None);
+    }
+
+    #[test]
+    fn every_thinking_view_is_reachable_and_unknown_views_name_the_choices() {
+        for view in ["flow", "compact", "off", "activity", "raw", "diagnostics"] {
+            assert!(
+                Conversation::thinking_mode_for(view).is_some(),
+                "{view} should select a view"
+            );
+        }
+        assert!(Conversation::thinking_mode_for("sideways").is_none());
     }
 
     #[test]
