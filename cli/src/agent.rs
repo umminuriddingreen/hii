@@ -1085,7 +1085,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     String::new()
                 };
                 let route_hint = if rerouted_public_http {
-                    "\n\nHII ROUTE: this public URL was read with web_fetch. Use web_search for broader SearxNG discovery; http remains reserved for localhost verification."
+                    "\n\nHII ROUTE: this public URL was read with web_fetch. Use web_search for broader native discovery; http remains reserved for localhost verification."
                 } else {
                     ""
                 };

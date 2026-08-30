@@ -1273,7 +1273,7 @@ impl Conversation {
                     let mut repair_hint = String::new();
                     if rerouted_public_http {
                         repair_hint.push_str(
-                            "\n\nHII ROUTE: this public URL was read with web_fetch. Use web_search for broader SearxNG discovery; http remains reserved for localhost verification.",
+                            "\n\nHII ROUTE: this public URL was read with web_fetch. Use web_search for broader native discovery; http remains reserved for localhost verification.",
                         );
                     }
                     if !result.ok {

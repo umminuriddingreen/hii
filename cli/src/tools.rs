@@ -283,64 +283,25 @@ impl Toolbelt {
             return Err("web search query cannot be empty".into());
         }
         (|| {
-            let searxng = std::env::var("HII_SEARXNG_URL")
-                .ok()
-                .filter(|value| {
-                    value.starts_with("http://127.0.0.1:") || value.starts_with("http://localhost:")
-                })
-                .unwrap_or_else(|| "http://127.0.0.1:8888".into());
-            let searxng = if searxng.trim_end_matches('/').ends_with("/search") {
-                searxng
-            } else {
-                format!("{}/search", searxng.trim_end_matches('/'))
-            };
-            let search_searxng = |candidate: &str| {
-                self.ollama_http
-                    .post(&searxng)
-                    .set("User-Agent", "HII/0.1 (+local SearxNG agent search)")
-                    .send_form(&[
-                        ("q", candidate),
-                        ("language", "auto"),
-                        ("safesearch", "0"),
-                        ("category_general", "1"),
-                    ])
-                    .ok()
-                    .and_then(|response| bounded_response_text(response).ok())
-                    .map(|html| parse_web_results(&html, 12))
-                    .unwrap_or_default()
-            };
-            let mut searx_results = search_searxng(query);
-            if searx_results.is_empty() {
-                if let Some(relaxed) = relaxed_web_query(query) {
-                    searx_results = search_searxng(&relaxed);
-                }
-            }
-            let results = if searx_results.is_empty() {
-                let url = std::env::var("HII_WEB_SEARCH_URL")
-                    .ok()
-                    .filter(|value| {
-                        value.starts_with("http://127.0.0.1:")
-                            || value.starts_with("http://localhost:")
-                    })
-                    .map(|value| format!("{value}?q={}", crate::text::percent_encode_query(query)))
-                    .unwrap_or_else(|| {
-                        format!(
-                            "https://html.duckduckgo.com/html/?q={}",
-                            crate::text::percent_encode_query(query)
-                        )
-                    });
+            let search = |candidate: &str| -> Result<Vec<(String, String, String)>, String> {
+                let override_url = std::env::var("HII_WEB_SEARCH_URL").ok();
+                let url = native_web_search_url(candidate, override_url.as_deref());
                 let response = self
                     .ollama_http
                     .get(&url)
-                    .set("User-Agent", "HII/0.1 (+agent web-search fallback)")
+                    .set("User-Agent", "HII/0.1 (+native bounded web search)")
                     .call()
-                    .map_err(|error| format!("web search failed: {error}"))?;
-                parse_web_results(&bounded_response_text(response)?, 12)
-            } else {
-                searx_results
+                    .map_err(|error| format!("native web search failed: {error}"))?;
+                Ok(parse_web_results(&bounded_response_text(response)?, 12))
             };
+            let mut results = search(query)?;
             if results.is_empty() {
-                return Err("web search returned no readable results".into());
+                if let Some(relaxed) = relaxed_web_query(query) {
+                    results = search(&relaxed)?;
+                }
+            }
+            if results.is_empty() {
+                return Err("native web search returned no readable results".into());
             }
             Ok(results
                 .into_iter()
@@ -751,6 +712,16 @@ fn relaxed_web_query(query: &str) -> Option<String> {
     (relaxed != query && !relaxed.is_empty()).then_some(relaxed)
 }
 
+fn native_web_search_url(query: &str, override_url: Option<&str>) -> String {
+    let encoded = crate::text::percent_encode_query(query);
+    override_url
+        .filter(|value| {
+            value.starts_with("http://127.0.0.1:") || value.starts_with("http://localhost:")
+        })
+        .map(|value| format!("{}?q={encoded}", value.trim_end_matches('/')))
+        .unwrap_or_else(|| format!("https://html.duckduckgo.com/html/?q={encoded}"))
+}
+
 fn bounded_response_text(response: ureq::Response) -> Result<String, String> {
     let mut bytes = Vec::new();
     response
@@ -762,34 +733,6 @@ fn bounded_response_text(response: ureq::Response) -> Result<String, String> {
 }
 
 fn parse_web_results(html: &str, limit: usize) -> Vec<(String, String, String)> {
-    let article =
-        regex::Regex::new(r#"(?s)<article[^>]*class="[^"]*\bresult\b[^"]*"[^>]*>(.*?)</article>"#)
-            .expect("valid SearxNG result regex");
-    let searx_anchor = regex::Regex::new(r#"(?s)<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>"#)
-        .expect("valid SearxNG anchor regex");
-    let searx_snippet = regex::Regex::new(
-        r#"(?s)<(?:p|div|span)[^>]*class="[^"]*(?:content|description)[^"]*"[^>]*>(.*?)</(?:p|div|span)>"#,
-    )
-    .expect("valid SearxNG snippet regex");
-    let searx_results = article
-        .captures_iter(html)
-        .filter_map(|capture| capture.get(1))
-        .filter_map(|body| {
-            let anchor = searx_anchor.captures(body.as_str())?;
-            let url = decode_entities(anchor.get(1)?.as_str());
-            let title = clean_html(anchor.get(2)?.as_str());
-            let summary = searx_snippet
-                .captures(body.as_str())
-                .and_then(|capture| capture.get(1))
-                .map(|snippet| clean_html(snippet.as_str()))
-                .unwrap_or_default();
-            Some((title, url, summary))
-        })
-        .take(limit)
-        .collect::<Vec<_>>();
-    if !searx_results.is_empty() {
-        return searx_results;
-    }
     let anchor = regex::Regex::new(
         r#"(?s)<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>"#,
     )
@@ -1708,7 +1651,7 @@ mod tests {
     }
 
     #[test]
-    fn relaxes_search_syntax_for_one_bounded_searxng_retry() {
+    fn relaxes_search_syntax_for_one_bounded_native_retry() {
         assert_eq!(
             super::relaxed_web_query("\"local-first software\" site:wikipedia.org").as_deref(),
             Some("local-first software")
@@ -1717,21 +1660,18 @@ mod tests {
     }
 
     #[test]
-    fn parses_searxng_web_results() {
-        let html = r#"
-          <article class="result result-default">
-            <h3><a href="https://example.com/context">External context</a></h3>
-            <p class="content">A private metasearch result with useful context.</p>
-          </article>
-        "#;
-        let results = super::parse_web_results(html, 12);
+    fn native_search_defaults_to_direct_https_and_bounds_overrides() {
         assert_eq!(
-            results,
-            vec![(
-                "External context".into(),
-                "https://example.com/context".into(),
-                "A private metasearch result with useful context.".into()
-            )]
+            native_web_search_url("local first", None),
+            "https://html.duckduckgo.com/html/?q=local+first"
+        );
+        assert_eq!(
+            native_web_search_url("hii", Some("http://127.0.0.1:9000/search/")),
+            "http://127.0.0.1:9000/search?q=hii"
+        );
+        assert!(
+            native_web_search_url("hii", Some("https://untrusted.example/search"))
+                .starts_with("https://html.duckduckgo.com/")
         );
     }
 
