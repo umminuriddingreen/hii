@@ -622,10 +622,6 @@ pub fn stage(label: &str, message: &str) {
     ));
 }
 
-pub fn model_text(message: &str) {
-    println!("{message}");
-}
-
 pub fn tool_start(step: usize, tool: &str, target: &str) {
     activity_line(&format!(
         "{}  {}  {}",
@@ -659,22 +655,6 @@ pub fn tool_output(output: &str) {
     }
     println!("{}", paint("  TOOL OUTPUT", &[BOLD, palette().secondary]));
     println!("{output}");
-}
-
-pub fn model_stream_start(model: &str, phase: &str) -> String {
-    format!(
-        "{}  {}  {}",
-        paint("◇ MODEL", &[BOLD, palette().primary]),
-        paint("running", &[BOLD]),
-        paint(&format!("{model} · {phase}"), &[DIM, palette().muted])
-    )
-}
-
-pub fn model_stream_section(section: &str) -> String {
-    paint(
-        &format!("◇ {}", section.to_ascii_uppercase()),
-        &[BOLD, palette().secondary],
-    )
 }
 
 pub fn model_activity(frame: usize, phase: &str, detail: Option<&str>) -> String {
@@ -788,8 +768,8 @@ pub fn error(message: &str) {
 mod tests {
     use super::{
         clear_activity_sequence, command_matches, command_menu, composer_window, model_activity,
-        model_stream_section, model_stream_start, overview, prompt_frame, short_path,
-        terminal_width, theme_choices, welcome_frame, workspace_state, Theme,
+        overview, prompt_frame, short_path, terminal_width, theme_choices, welcome_frame,
+        workspace_state, Theme,
     };
     use std::path::Path;
 
@@ -919,16 +899,6 @@ mod tests {
         assert!(first.contains("detail"));
         assert_ne!(first, second);
         assert!(first.chars().count() <= terminal_width() + 10);
-    }
-
-    #[test]
-    fn transparent_model_stream_names_loading_and_raw_sections() {
-        let loading = model_stream_start("local-model", "thinking");
-        assert!(loading.contains("MODEL"));
-        assert!(loading.contains("running"));
-        assert!(loading.contains("local-model"));
-        assert!(model_stream_section("thinking").contains("THINKING"));
-        assert!(model_stream_section("output").contains("OUTPUT"));
     }
 
     #[test]
