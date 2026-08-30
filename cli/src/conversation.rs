@@ -80,6 +80,12 @@ pub(crate) const OPERATOR_INTERRUPTED: &str = "operator interrupted model activi
 pub(crate) const OPERATOR_EXITED: &str = "operator exited the active objective";
 const REASONING_BUDGET_RETRY: &str = "adaptive reasoning budget ended";
 const ADAPTIVE_REASONING_MAX_CHARS: usize = 4_096;
+/// Bound on reasoning kept in the conversation record.
+///
+/// Separate from [`ADAPTIVE_REASONING_MAX_CHARS`], which bounds generation: a
+/// turn can legitimately reason past the budget, and the record needs enough of
+/// it to replay the turn rather than summarize it.
+const MODEL_THINKING_RECORD_MAX_CHARS: usize = 16_384;
 const ADAPTIVE_REASONING_MAX_TIME: Duration = Duration::from_secs(12);
 
 fn clean_final_output(message: &str, already_streamed: bool) -> String {
@@ -2825,7 +2831,10 @@ impl Conversation {
                             "completion_duration_ms": result.usage.completion_duration_ms,
                             "total_duration_ms": result.usage.total_duration_ms,
                             "tokens_per_second": result.usage.tokens_per_second(),
-                            "thinking_chars": reasoning_chars
+                            // Non-streaming providers deliver reasoning on the
+                            // completed message, so the streamed delta count is
+                            // zero even when the turn reasoned.
+                            "thinking_chars": reasoning_chars.max(result.thinking.chars().count())
                         }),
                     )?;
                     if !result.thinking.is_empty() {
@@ -2834,7 +2843,11 @@ impl Conversation {
                             json!({
                                 "model": model,
                                 "phase": phase,
-                                "content": redact_text(&result.thinking)
+                                "content": crate::text::clip_hard(
+                                    &redact_text(&result.thinking),
+                                    MODEL_THINKING_RECORD_MAX_CHARS,
+                                ),
+                                "chars": result.thinking.chars().count()
                             }),
                         )?;
                     }
@@ -3726,9 +3739,9 @@ fn conversation_prompt(
         "Prior state: hii_context only when asked. Deletion approval.".into()
     };
     let tools = if public_test {
-        crate::acp::action_tool_names(false).join("|")
+        crate::acp::action_type_names(false).join("|")
     } else {
-        crate::acp::action_tool_names(true).join("|")
+        crate::acp::action_type_names(true).join("|")
     };
     let lessons = if lessons.trim().is_empty() {
         String::new()
@@ -3755,6 +3768,7 @@ Workspace: {workspace}
 
 Chat: plain text now; greetings never use tools or context.
 Work: emit one JSON tool action, no fences: {{"type":"{tools}","flow":{{"title":"objective","goal":"outcome","current":"change now","direction":[],"next":"next action"}},...}}
+Finish: {{"type":"final","summary":"result","verification":["checks run"],"next":null}}
 
 {boundary}
 {lessons}
@@ -4005,6 +4019,24 @@ mod tests {
     }
 
     #[test]
+    fn conversation_prompt_shows_the_model_how_to_finish() {
+        // 0 of 87 recorded sessions ever reached a `final`: Action::Final was
+        // handled, and the JSON schema allowed it, but the prompt never named
+        // it — and the native provider takes `response_format: json_object`
+        // rather than a schema, so the prompt is the only signal that lands.
+        let prompt = conversation_prompt(
+            Path::new("/workspace"),
+            12,
+            false,
+            false,
+            crate::agent::AutonomyLevel::LocalFull,
+            "",
+        );
+        assert!(prompt.contains("\"type\":\"final\""), "prompt must show a final action");
+        assert!(prompt.contains("|final|") || prompt.contains("|final\""));
+    }
+
+    #[test]
     fn conversation_prompt_stays_lean() {
         let prompt = conversation_prompt(
             Path::new("/workspace"),
@@ -4014,8 +4046,12 @@ mod tests {
             crate::agent::AutonomyLevel::LocalFull,
             "",
         );
+        // Raised from 1_000 to fit the completion contract. No interactive
+        // session had ever reached a `final` because the prompt never showed
+        // one; that line is load-bearing, so it buys the extra bytes. The flow
+        // block is the next place to trim if this needs to come back down.
         assert!(
-            prompt.len() <= 1_000,
+            prompt.len() <= 1_100,
             "conversation prompt grew to {} bytes",
             prompt.len()
         );

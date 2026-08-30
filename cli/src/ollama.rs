@@ -994,8 +994,8 @@ impl RepetitionGuard {
 }
 
 fn action_schema() -> Value {
-    let mut action_types = crate::acp::action_tool_names(true);
-    action_types.extend(["mcp_call", "final", "message"]);
+    let mut action_types = crate::acp::action_type_names(true);
+    action_types.push("mcp_call");
     json!({
         "type": "object",
         "required": ["type"],

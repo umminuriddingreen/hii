@@ -270,6 +270,25 @@ pub fn action_tool_names(include_hii: bool) -> Vec<&'static str> {
         .collect()
 }
 
+/// Actions that end or continue the exchange rather than touching anything.
+///
+/// Deliberately outside [`TOOLS`]: the manifest describes capabilities, and a
+/// downstream MCP client has no use for "the agent decided it was done".
+pub const CONTROL_ACTIONS: &[&str] = &["final", "message"];
+
+/// Every `"type"` an action may carry — tools plus control actions.
+///
+/// The prompt and the JSON schema have to offer the same set. A backend that
+/// does not honor a schema constraint leaves the prompt as the model's only
+/// signal — HII Native accepts `response_format: json_object` and nothing more —
+/// so a `final` present only in the schema is a `final` the model never learns
+/// about, and the session can never complete.
+pub fn action_type_names(include_hii: bool) -> Vec<&'static str> {
+    let mut names = action_tool_names(include_hii);
+    names.extend_from_slice(CONTROL_ACTIONS);
+    names
+}
+
 pub fn input_schema(name: &str) -> Value {
     let object = |properties: Value, required: Value| json!({ "type": "object", "properties": properties, "required": required });
     let string = json!({ "type": "string" });
@@ -520,6 +539,29 @@ fn rpc_error(id: Value, code: i64, message: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_prompt_offers_the_same_action_types_the_schema_does() {
+        // A `final` that exists only in the JSON schema is invisible to any
+        // backend that does not honor schema constraints, which is why no
+        // interactive session had ever reached one.
+        let names = super::action_type_names(true);
+        assert!(names.contains(&"final"), "final must be offered: {names:?}");
+        assert!(names.contains(&"message"));
+        assert!(names.contains(&"read"));
+    }
+
+    #[test]
+    fn control_actions_stay_out_of_the_published_tool_manifest() {
+        let manifest = super::manifest();
+        let tools = manifest["tools"].as_array().expect("tools");
+        for control in super::CONTROL_ACTIONS {
+            assert!(
+                !tools.iter().any(|tool| tool["name"] == *control),
+                "{control} is not a capability and must not be advertised as a tool"
+            );
+        }
+    }
 
     #[test]
     fn manifest_lists_every_tool_with_fields() {
