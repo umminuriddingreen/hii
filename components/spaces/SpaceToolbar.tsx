@@ -61,10 +61,10 @@ export function SpaceToolbar({
   };
 
   return <nav className="hii-space-toolbar" data-account-tools={accountTools || undefined} data-workspace-ui aria-label={accountTools ? 'Canvas tools' : 'Space tools'} onPointerDown={(event) => event.stopPropagation()}>
-    <strong>{accountTools ? 'hii canvas' : 'hii space'}</strong>
+    {!accountTools && <strong>hii space</strong>}
     {accountTools ? <>
-      <button className="hii-canvas-command-trigger" type="button" aria-expanded={expanded} aria-controls="hii-account-tools" onClick={() => setExpanded(!expanded)}>
-        <span>commands</span><kbd>?</kbd>
+      <button className="hii-canvas-command-trigger" type="button" aria-label="Canvas commands" aria-expanded={expanded} aria-controls="hii-account-tools" onClick={() => setExpanded(!expanded)}>
+        <span aria-hidden="true">?</span>
       </button>
       <div className="hii-canvas-touch-tools">
         {photo && <button type="button" onClick={onAddImage}>media</button>}

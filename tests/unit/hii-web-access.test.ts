@@ -89,7 +89,9 @@ describe('HII web access gate', () => {
     const toolbar = readFileSync('components/spaces/SpaceToolbar.tsx', 'utf8');
     expect(toolbar).toContain('hii-canvas-command-trigger');
     expect(toolbar).toContain('hii-canvas-touch-tools');
-    expect(toolbar).toContain('<span>commands</span><kbd>?</kbd>');
+    expect(toolbar).toContain('aria-label="Canvas commands"');
+    expect(toolbar).toContain('<span aria-hidden="true">?</span>');
+    expect(toolbar).not.toContain("accountTools ? 'hii canvas' : 'hii space'");
     expect(toolbar).toContain('<dt>space</dt><dd>device terminal</dd>');
     expect(toolbar).toContain('<dt>n</dt><dd>note</dd>');
     expect(toolbar).toContain('onAddNote');

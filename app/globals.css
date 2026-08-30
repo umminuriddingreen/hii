@@ -142,6 +142,8 @@ button, input, textarea { font: inherit; }
 .hii-space-toolbar button:focus-visible { outline: 1px solid #111; outline-offset: -3px; }
 .hii-space-toolbar button kbd { font: 8px/1 "SF Mono", ui-monospace, monospace; opacity: .45; }
 .hii-space-toolbar button[aria-pressed="true"] { background: #111; color: #fff; }
+.hii-canvas-command-trigger { width: 44px; min-width: 44px !important; padding: 0 !important; font-size: 14px !important; }
+.hii-canvas-command-trigger[aria-expanded="true"] { background: #111; color: #fff; }
 .hii-canvas-touch-tools { display: contents; }
 .hii-space-toolbar[data-account-tools="true"] .hii-canvas-touch-tools { display: none; }
 .hii-account-tools { position: absolute; right: 0; bottom: calc(100% + 8px); display: grid; width: min(340px, calc(100vw - 20px)); gap: 14px; padding: 16px; border: 1px solid rgba(32, 45, 38, .26); background: rgba(255, 253, 247, .98); color: #26342c; }
