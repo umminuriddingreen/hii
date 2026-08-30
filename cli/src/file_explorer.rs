@@ -1,7 +1,7 @@
 use std::{
     cmp::Ordering,
     fs,
-    io::{self, IsTerminal, Write},
+    io::{self, IsTerminal, Read, Write},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -127,34 +127,109 @@ impl BrowserState {
 
     fn draw(&mut self) -> Result<()> {
         let (columns, rows) = terminal::size().map_err(|error| error.to_string())?;
-        let height = usize::from(rows).saturating_sub(4).max(1);
+        let height = usize::from(rows).saturating_sub(3).max(1);
         self.keep_selected_visible(height);
+        let frame = self.render_frame(usize::from(columns), usize::from(rows))?;
         let mut out = io::stdout();
         execute!(out, cursor::MoveTo(0, 0), terminal::Clear(ClearType::All))
             .map_err(|error| error.to_string())?;
-        writeln!(out, "HII files  {}", self.cwd.display()).map_err(|error| error.to_string())?;
-        writeln!(
-            out,
-            "j/k move  h parent  l/enter open  a attach  e vim  g/G top/bottom  q close"
-        )
-        .map_err(|error| error.to_string())?;
-        let width = usize::from(columns).saturating_sub(4).max(16);
-        for (row, entry) in self
-            .entries
+        write!(out, "{frame}").map_err(|error| error.to_string())?;
+        out.flush().map_err(|error| error.to_string())
+    }
+
+    fn render_frame(&self, columns: usize, rows: usize) -> Result<String> {
+        let width = columns.max(24);
+        let height = rows.saturating_sub(3).max(1);
+        let mut frame = String::new();
+        frame.push_str(&crate::text::clip(&self.cwd.display().to_string(), width));
+        frame.push('\n');
+        frame.push_str(&crate::text::clip(
+            "j/k move  h/l browse  enter attach  e edit  q close",
+            width,
+        ));
+        frame.push('\n');
+
+        if width < 60 {
+            for line in self.current_lines(height, width) {
+                frame.push_str(&line);
+                frame.push('\n');
+            }
+            return Ok(frame);
+        }
+
+        let parent_width = width / 4;
+        let current_width = width * 2 / 5;
+        let preview_width = width.saturating_sub(parent_width + current_width + 6);
+        let parent = self.parent_lines(height, parent_width)?;
+        let current = self.current_lines(height, current_width);
+        let preview = self.preview_lines(height, preview_width)?;
+        for row in 0..height {
+            frame.push_str(&pad(
+                parent.get(row).map(String::as_str).unwrap_or(""),
+                parent_width,
+            ));
+            frame.push_str(" | ");
+            frame.push_str(&pad(
+                current.get(row).map(String::as_str).unwrap_or(""),
+                current_width,
+            ));
+            frame.push_str(" | ");
+            frame.push_str(&crate::text::clip(
+                preview.get(row).map(String::as_str).unwrap_or(""),
+                preview_width,
+            ));
+            frame.push('\n');
+        }
+        Ok(frame)
+    }
+
+    fn current_lines(&self, height: usize, width: usize) -> Vec<String> {
+        if self.entries.is_empty() {
+            return vec!["  empty".into()];
+        }
+        self.entries
             .iter()
             .enumerate()
             .skip(self.scroll)
             .take(height)
-        {
-            let marker = if row == self.selected { ">" } else { " " };
-            let suffix = if entry.is_dir { "/" } else { "" };
-            let name = crate::text::clip(&format!("{}{}", entry.name, suffix), width);
-            writeln!(out, "{marker} {name}").map_err(|error| error.to_string())?;
+            .map(|(row, entry)| {
+                let marker = if row == self.selected { ">" } else { " " };
+                let suffix = if entry.is_dir { "/" } else { "" };
+                crate::text::clip(&format!("{marker} {}{suffix}", entry.name), width)
+            })
+            .collect()
+    }
+
+    fn parent_lines(&self, height: usize, width: usize) -> Result<Vec<String>> {
+        let Some(parent) = self.cwd.parent() else {
+            return Ok(Vec::new());
+        };
+        Ok(read_entries(parent)?
+            .into_iter()
+            .take(height)
+            .map(|entry| {
+                let marker = if entry.path == self.cwd { ">" } else { " " };
+                let suffix = if entry.is_dir { "/" } else { "" };
+                crate::text::clip(&format!("{marker} {}{suffix}", entry.name), width)
+            })
+            .collect())
+    }
+
+    fn preview_lines(&self, height: usize, width: usize) -> Result<Vec<String>> {
+        let Some(entry) = self.entries.get(self.selected) else {
+            return Ok(Vec::new());
+        };
+        if entry.is_dir {
+            return Ok(read_entries(&entry.path)?
+                .into_iter()
+                .take(height)
+                .map(|child| {
+                    let suffix = if child.is_dir { "/" } else { "" };
+                    crate::text::clip(&format!("  {}{suffix}", child.name), width)
+                })
+                .collect());
         }
-        if self.entries.is_empty() {
-            writeln!(out, "  empty directory").map_err(|error| error.to_string())?;
-        }
-        out.flush().map_err(|error| error.to_string())
+        preview_file(&entry.path, height, width)
     }
 
     fn move_selection(&mut self, delta: isize) {
@@ -279,6 +354,29 @@ fn compare_entries(left: &Entry, right: &Entry) -> Ordering {
         .then_with(|| left.name.cmp(&right.name))
 }
 
+fn pad(value: &str, width: usize) -> String {
+    let clipped = crate::text::clip(value, width);
+    format!("{clipped:<width$}")
+}
+
+fn preview_file(path: &Path, height: usize, width: usize) -> Result<Vec<String>> {
+    const PREVIEW_BYTES: u64 = 16 * 1024;
+    let mut bytes = Vec::new();
+    fs::File::open(path)
+        .map_err(|error| error.to_string())?
+        .take(PREVIEW_BYTES)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    let Ok(text) = std::str::from_utf8(&bytes) else {
+        return Ok(vec!["  binary file".into()]);
+    };
+    Ok(text
+        .lines()
+        .take(height)
+        .map(|line| crate::text::clip(line, width))
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,5 +448,30 @@ mod tests {
                 .unwrap(),
             BrowserAction::Continue
         ));
+    }
+
+    #[test]
+    fn wide_frame_has_parent_current_and_preview_panes() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("note.txt"), "first line\nsecond line").unwrap();
+        let state = BrowserState::new(temp.path()).unwrap();
+
+        let frame = state.render_frame(100, 12).unwrap();
+
+        assert!(frame.contains(" | > note.txt"));
+        assert!(frame.contains(" | first line"));
+        assert_eq!(frame.lines().count(), 11);
+    }
+
+    #[test]
+    fn narrow_frame_falls_back_to_the_current_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("note.txt"), "hello").unwrap();
+        let state = BrowserState::new(temp.path()).unwrap();
+
+        let frame = state.render_frame(48, 8).unwrap();
+
+        assert!(frame.contains("> note.txt"));
+        assert!(!frame.contains(" | "));
     }
 }
