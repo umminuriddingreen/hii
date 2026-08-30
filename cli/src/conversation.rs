@@ -2555,17 +2555,14 @@ impl Conversation {
         let raw_activity = matches!(self.thinking_mode, ThinkingMode::Raw);
         let compact_activity = false;
         let mut content_started = false;
-        let mut content_heading_started = false;
         let mut reasoning_chars = 0usize;
         let mut activity_frame = 0usize;
         let mut thinking_excerpt = String::new();
         if interactive && raw_activity {
-            let line = crate::tui::model_stream_start(&model, phase);
-            if let Some(input) = live_input.as_mut() {
-                input.write_stream(&format!("{line}\n"))?;
-            } else {
-                crate::tui::model_text(&line);
-            }
+            // The provider stream is the interface. Remove transient routing
+            // and activity rows before the first delta, then write only bytes
+            // the model emitted—no MODEL/THINKING/OUTPUT wrappers.
+            crate::tui::finish_activity();
         }
         if interactive && !raw_activity {
             if let Some(input) = live_input.as_mut() {
@@ -2647,15 +2644,12 @@ impl Conversation {
                             ))?;
                         }
                     } else if interactive && raw_activity {
-                        if !reasoning_started {
-                            let heading = crate::tui::model_stream_section("thinking");
-                            if let Some(input) = live_input.as_mut() {
-                                input.write_stream(&format!("{heading}\n"))?;
-                            }
-                            reasoning_started = true;
-                        }
+                        reasoning_started = true;
                         if let Some(input) = live_input.as_mut() {
                             input.write_stream(&delta)?;
+                        } else {
+                            print!("{delta}");
+                            let _ = io::stdout().flush();
                         }
                     }
                 }
@@ -2663,13 +2657,6 @@ impl Conversation {
                     if interactive && show_content {
                         content_started = true;
                         if raw_activity {
-                            if !content_heading_started {
-                                let heading = crate::tui::model_stream_section("output");
-                                if let Some(input) = live_input.as_mut() {
-                                    input.write_stream(&format!("\n{heading}\n"))?;
-                                }
-                                content_heading_started = true;
-                            }
                             self.last_reply_streamed = true;
                             if let Some(input) = live_input.as_mut() {
                                 input.write_stream(&delta)?;
