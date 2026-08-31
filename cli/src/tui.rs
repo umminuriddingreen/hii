@@ -486,6 +486,14 @@ pub fn command_matches(input: &str, public_test: bool) -> Vec<(String, String)> 
         .filter(|(command, _)| command[1..].contains(&query))
         .map(|(command, description)| (command.to_string(), description.to_string()))
         .collect::<Vec<_>>();
+    if !public_test {
+        matches.extend(
+            crate::slash_registry::controls()
+                .into_iter()
+                .filter(|entry| entry.name.to_ascii_lowercase().contains(&query))
+                .map(|entry| (format!("/{}", entry.name), entry.description)),
+        );
+    }
     matches.sort_by_key(|(command, _)| !command[1..].starts_with(&query));
     matches
 }

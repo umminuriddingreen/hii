@@ -213,6 +213,7 @@ pub const ROUTES: &[Route] = &[
         Infra,
         "open or inspect the installed HII desktop app",
     ),
+    delegated("slash", Core, Infra, "hot-reload CLI-backed slash controls"),
     native(
         "providers",
         Core,

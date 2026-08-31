@@ -49,6 +49,7 @@ mod service;
 mod skill_lifecycle;
 mod skill_runtime;
 mod skills;
+mod slash_registry;
 mod store;
 mod stream;
 #[cfg(feature = "preview")]
@@ -3458,6 +3459,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 conversation.keymap_command(requested.as_deref())
             }
             Some(SlashCommand::Model(model)) => conversation.model(model.as_deref()),
+            Some(SlashCommand::DynamicControl(args)) => legacy::output(&paths.repo, &args),
             Some(SlashCommand::Files) => match file_explorer::browse(conversation.workspace())? {
                 Some(path) => conversation.attach(&path.display().to_string()),
                 None => Ok("File explorer closed.".into()),
@@ -3587,6 +3589,7 @@ enum SlashCommand {
     Theme(Option<String>),
     Keymap(Option<String>),
     Model(Option<String>),
+    DynamicControl(Vec<String>),
     Files,
     Proof(Option<String>),
     Diff,
@@ -3745,7 +3748,9 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
             parse_calendar_add(rest).unwrap_or_else(|| SlashCommand::Unknown(input.into()))
         }
         "/sync" if rest == "calendar" => SlashCommand::SyncCalendar,
-        _ => SlashCommand::Unknown(input.to_string()),
+        _ => slash_registry::resolve(command, rest)
+            .map(SlashCommand::DynamicControl)
+            .unwrap_or_else(|| SlashCommand::Unknown(input.to_string())),
     })
 }
 

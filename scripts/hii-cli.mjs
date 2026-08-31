@@ -43,6 +43,7 @@ const HII_KNOWLEDGE_DB = path.join(RUNTIME, "hii.db");
 const WEB_RUNTIME_DIR = path.join(RUNTIME, "web");
 const WEB_PID = path.join(WEB_RUNTIME_DIR, "web.pid");
 const WEB_LOG = path.join(WEB_RUNTIME_DIR, "web.log");
+const SLASH_REGISTRY = path.join(RUNTIME, "cli", "slash-commands.json");
 const DAEMON_STATUS = path.join(RUNTIME, "daemon", "status.json");
 const DAEMON_INSTANCES = path.join(RUNTIME, "daemon", "instances.json");
 const CLI_RUNS = path.join(RUNTIME, "runs", "cli");
@@ -195,6 +196,68 @@ function cmdApp(args) {
     console.log(JSON.stringify({ installed: fs.existsSync(app), running: result.status === 0, pid: result.stdout.trim() || null, app }, null, 2));
   } else {
     throw new Error("usage: hii app <open|status>");
+  }
+}
+
+function slashDefaults() {
+  return [
+    { name: "backend", description: "manage HII Native models", argvPrefix: ["model"] },
+    { name: "open", description: "launch HII app, web, or site", argvPrefix: ["open"] },
+    { name: "ui", description: "control app and web surfaces", argvPrefix: ["ui"] }
+  ];
+}
+
+function readSlashRegistry() {
+  try {
+    const value = JSON.parse(fs.readFileSync(SLASH_REGISTRY, "utf8"));
+    return Array.isArray(value) ? value : [];
+  } catch { return []; }
+}
+
+function writeSlashRegistry(entries) {
+  fs.mkdirSync(path.dirname(SLASH_REGISTRY), { recursive: true });
+  const temp = `${SLASH_REGISTRY}.tmp-${process.pid}`;
+  fs.writeFileSync(temp, `${JSON.stringify(entries, null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(temp, SLASH_REGISTRY);
+}
+
+function cmdSlash(args) {
+  const sub = args[0] || "list";
+  if (sub === "sync") {
+    const current = readSlashRegistry();
+    for (const entry of slashDefaults()) {
+      const index = current.findIndex((item) => item.name === entry.name);
+      if (index >= 0) current[index] = entry;
+      else current.push(entry);
+    }
+    writeSlashRegistry(current);
+    console.log(`Slash controls hot-reloaded: ${SLASH_REGISTRY}`);
+  } else if (sub === "list") {
+    console.log(JSON.stringify({ path: SLASH_REGISTRY, controls: readSlashRegistry() }, null, 2));
+  } else if (sub === "add") {
+    const name = String(args[1] || "").replace(/^\//, "");
+    const marker = args.indexOf("--description");
+    const argvPrefix = args.slice(2, marker >= 0 ? marker : undefined);
+    const description = marker >= 0 ? args.slice(marker + 1).join(" ").trim() : "HII CLI control";
+    if (!/^[a-z][a-z0-9-]*$/.test(name) || argvPrefix.length === 0) {
+      throw new Error("usage: hii slash add <name> <cli argv prefix...> [--description text]");
+    }
+    const current = readSlashRegistry().filter((entry) => entry.name !== name);
+    current.push({ name, description, argvPrefix });
+    writeSlashRegistry(current);
+    console.log(`/${name} is available now; no HII restart required`);
+  } else if (sub === "remove") {
+    const name = String(args[1] || "").replace(/^\//, "");
+    const current = readSlashRegistry();
+    if (!current.some((entry) => entry.name === name)) throw new Error(`/${name} is not registered`);
+    if (!args.includes("--yes")) {
+      console.log(`Preview: remove /${name}\nApply: hii slash remove ${name} --yes`);
+      return;
+    }
+    writeSlashRegistry(current.filter((entry) => entry.name !== name));
+    console.log(`/${name} removed; no HII restart required`);
+  } else {
+    throw new Error("usage: hii slash <sync|list|add|remove>");
   }
 }
 
@@ -1323,6 +1386,10 @@ function agentCommandCatalog() {
     { command: "hii ui web logs", purpose: "Inspect the CLI-owned web runtime log." },
     { command: "hii ui web stop", purpose: "Stop only the web process group owned by this CLI." },
     { command: "hii ui app status", purpose: "Show whether the desktop bundle is installed and currently running." },
+    { command: "hii slash list", purpose: "Show hot-reloaded CLI-backed slash controls and their registry path." },
+    { command: "hii slash sync", purpose: "Publish HII's model and UI controls into the live slash menu." },
+    { command: "hii slash add <name> <prefix>", purpose: "Add a CLI-backed slash control immediately, without restarting HII." },
+    { command: "hii slash remove <name>", purpose: "Preview removal; add --yes to hot-remove the control." },
     { command: "hii daemon start", purpose: "Start hiid, the local HII daemon instance supervisor." },
     { command: "hii daemon status", purpose: "Show hiid health, runtime path, instance count, and autonomy boundary." },
     { command: "hii feed --follow", purpose: "Read the daemon action feed for live HII work." },
@@ -2675,6 +2742,7 @@ function cmdHelp(topic) {
   console.log("  hii open app|web|site       launch the desktop, local web, or canonical website");
   console.log("  hii ui web start|status     control the CLI-owned local web runtime");
   console.log("  hii ui app status           inspect the installed desktop app");
+  console.log("  hii slash add|list|remove   hot-update slash controls without restarting HII");
   console.log("\n  Boundary: HII captures intent and proof locally. Execution remains explicitly\n  operator-controlled; shipping, pushing, publishing, and payment are never implicit.\n");
 }
 
@@ -3148,6 +3216,16 @@ switch (cmd) {
       console.error(error instanceof Error ? error.message : String(error));
       process.exit(1);
     });
+    break;
+  case "slash":
+    if (rest.includes("--help") || rest.includes("-h")) {
+      cmdHelp("slash");
+      break;
+    }
+    try { cmdSlash(rest); } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
     break;
   case "space": {
     const { cmdSpace } = await import("./hii-space.mjs");

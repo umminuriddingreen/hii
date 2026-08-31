@@ -130,6 +130,28 @@ pub fn run(repo: &Path, args: &[String]) -> Result<i32, String> {
     Ok(status.code().unwrap_or(1))
 }
 
+/// Run a delegated command for an interactive slash command and return the
+/// rendered result to the conversation instead of writing around the TUI.
+pub fn output(repo: &Path, args: &[String]) -> Result<String, String> {
+    let script = entrypoint(repo);
+    if !script.is_file() {
+        return Err("This HII build does not include the local control surface.".into());
+    }
+    let result = Command::new("node")
+        .arg(script)
+        .args(args)
+        .current_dir(repo)
+        .env("HII_RUST_CLI", "1")
+        .output()
+        .map_err(|error| format!("failed to start compatibility command: {error}"))?;
+    let stdout = String::from_utf8_lossy(&result.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&result.stderr).trim().to_string();
+    if !result.status.success() {
+        return Err(if stderr.is_empty() { stdout } else { stderr });
+    }
+    Ok(if stdout.is_empty() { stderr } else { stdout })
+}
+
 /// The command the user actually typed, for an error that names it.
 fn first_word(args: &[String]) -> &str {
     args.iter()
