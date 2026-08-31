@@ -19,11 +19,12 @@ type NodeFrameProps = {
   children: React.ReactNode;
 };
 
-const INTERACTIVE = 'button,input,textarea,select,iframe,video,audio,embed,a,[contenteditable]';
+const INTERACTIVE = 'button,input,textarea,select,iframe,video,audio,embed,a,[contenteditable],.xterm';
 
 export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConversation, onCommit, onWindowAction, onErase, onShare, touchControls, chromeless, children }: NodeFrameProps) {
   const frame = useRef<HTMLDivElement | null>(null);
-  const windowState = node.type === 'app' && typeof node.payload.windowState === 'string' ? node.payload.windowState : 'normal';
+  const windowed = node.type === 'app' || node.type === 'terminal';
+  const windowState = windowed && typeof node.payload.windowState === 'string' ? node.payload.windowState : 'normal';
 
   const beginGesture = (event: React.PointerEvent, forceResize = false) => {
     if (event.button !== 0) return;
@@ -73,25 +74,48 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConv
       data-node-type={node.type}
       data-selected={selected}
       data-chromeless={chromeless || undefined}
-      data-window-state={node.type === 'app' ? windowState : undefined}
+      data-window-state={windowed ? windowState : undefined}
       onPointerDown={pointerDown}
       onDoubleClick={(event) => {
         event.stopPropagation();
+        if ((event.target as Element).closest(INTERACTIVE)) return;
         event.preventDefault();
+        if (node.type === 'terminal' && (event.target as Element).closest('.hii-job-terminal header')) {
+          onWindowAction?.(windowState === 'maximized' ? 'restore' : 'maximize');
+          return;
+        }
         onOpenConversation();
       }}
       style={{ transform: workspaceNodeTransform(node), width: node.w, height: node.h, zIndex: Math.round(node.z) }}
     >
       <span className="hii-node-caption">{title}</span>
       {node.type === 'terminal' && <>
-        <button
-          type="button"
-          className="hii-terminal-close"
-          aria-label={`Close ${title}`}
-          title="Close terminal"
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={onErase}
-        >×</button>
+        <div className="hii-terminal-window-controls" role="group" aria-label={`${title} window controls`}>
+          <button
+            type="button"
+            className="hii-terminal-close"
+            aria-label={`Close ${title}`}
+            title="Close terminal"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={onErase}
+          />
+          <button
+            type="button"
+            className="hii-terminal-minimize"
+            aria-label={windowState === 'minimized' ? `Restore ${title}` : `Minimize ${title}`}
+            title={windowState === 'minimized' ? 'Restore terminal' : 'Minimize terminal'}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => onWindowAction?.(windowState === 'minimized' ? 'restore' : 'minimize')}
+          />
+          <button
+            type="button"
+            className="hii-terminal-maximize"
+            aria-label={windowState === 'maximized' ? `Restore ${title}` : `Maximize ${title}`}
+            title={windowState === 'maximized' ? 'Restore terminal' : 'Maximize terminal'}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => onWindowAction?.(windowState === 'maximized' ? 'restore' : 'maximize')}
+          />
+        </div>
         <button
           type="button"
           className="hii-terminal-resize"

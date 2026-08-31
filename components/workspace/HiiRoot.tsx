@@ -12,6 +12,7 @@ import {
   listenAgentEvents,
   readAgentHome,
   startAgent,
+  stopTerminalSession,
   type AgentEventV1,
   type ContextPackV1,
   type HiiApplicationManifest,
@@ -276,6 +277,7 @@ function TerminalBody({
   const cwd = text(node.payload.cwd) || '~/hii';
   const artifact = text(node.payload.artifact) || 'artifact pending';
   const status = text(node.payload.status) || 'ready';
+  const title = text(node.payload.title) || job;
   const operatorTerminal = node.payload.role === 'operator-terminal';
   const agentTerminal = node.payload.role === 'agent-terminal';
   const footerLabel = operatorTerminal || agentTerminal ? 'scope' : 'artifact';
@@ -287,10 +289,12 @@ function TerminalBody({
   const running = status === 'running' || status === 'queued';
   const shellTerminal = operatorTerminal && node.payload.terminalMode === 'shell';
   return (
-    <article className="hii-job-terminal" data-status={status}>
+    <article className="hii-job-terminal" data-status={status} data-kind={shellTerminal ? 'shell' : agentTerminal ? 'agent' : 'job'}>
       <header>
-        <span className="hii-terminal-lamp" aria-hidden="true" />
-        <strong>{job}</strong>
+        {shellTerminal
+          ? <span className="hii-terminal-folder" aria-hidden="true" />
+          : <span className="hii-terminal-lamp" aria-hidden="true" />}
+        <strong>{shellTerminal ? title : job}</strong>
         <small>{status}</small>
       </header>
       {shellTerminal ? (
@@ -332,7 +336,7 @@ function TerminalBody({
           </span>
         ) : <span className="hii-terminal-prompt"><b>›</b> <i aria-hidden="true" /></span>}
       </pre>}
-      <footer><span>{footerLabel}</span><code>{footerValue}</code></footer>
+      {!shellTerminal && <footer><span>{footerLabel}</span><code>{footerValue}</code></footer>}
     </article>
   );
 }
@@ -903,12 +907,23 @@ export function HiiRoot({
     });
   }, []);
 
+  const removeWorkspaceNode = useCallback((node: WorkspaceNode) => {
+    const sessionId = text(node.payload.sessionId);
+    if (node.type === 'terminal' && node.payload.terminalMode === 'shell' && sessionId) {
+      void stopTerminalSession(sessionId).catch(() => undefined);
+    }
+    workspace.removeNode(node.id);
+  }, [workspace]);
+
   const deleteSelection = useCallback(() => {
     if (!selected.length) return;
-    selected.forEach(workspace.removeNode);
+    selected.forEach((id) => {
+      const node = workspace.nodes.find((entry) => entry.id === id);
+      if (node) removeWorkspaceNode(node);
+    });
     setToolMessage(`Deleted ${selected.length} object${selected.length === 1 ? '' : 's'}.`);
     setSelected([]);
-  }, [selected, workspace]);
+  }, [removeWorkspaceNode, selected, workspace.nodes]);
 
   const shareSelection = useCallback(() => {
     if (!onShareNode || selected.length !== 1) return;
@@ -1117,13 +1132,17 @@ export function HiiRoot({
     return spawnSeeds([placement], { x: at.x - 540, y: at.y - 360 })[0];
   }, [camera, spawnSeeds]);
 
-  const appWindowAction = useCallback((node: WorkspaceNode, action: 'minimize' | 'maximize' | 'restore') => {
-    if (node.type !== 'app') return;
+  const windowAction = useCallback((node: WorkspaceNode, action: 'minimize' | 'maximize' | 'restore') => {
+    if (node.type !== 'app' && node.type !== 'terminal') return;
     const prior = node.payload.restoreBounds && typeof node.payload.restoreBounds === 'object'
       ? node.payload.restoreBounds as { x?: number; y?: number; w?: number; h?: number }
       : null;
+    const restoreBounds = prior || { x: node.x, y: node.y, w: node.w, h: node.h };
     if (action === 'minimize') {
-      workspace.patchNode(node.id, { payload: { ...node.payload, windowState: 'minimized' } });
+      workspace.patchNode(node.id, {
+        ...(node.type === 'terminal' ? { h: 42 } : {}),
+        payload: { ...node.payload, windowState: 'minimized', restoreBounds }
+      });
       return;
     }
     if (action === 'maximize') {
@@ -1131,13 +1150,16 @@ export function HiiRoot({
       const bottomRight = camera.toWorld(window.innerWidth - 16, window.innerHeight - 16);
       workspace.patchNode(node.id, {
         x: topLeft.x, y: topLeft.y, w: bottomRight.x - topLeft.x, h: bottomRight.y - topLeft.y,
-        payload: { ...node.payload, windowState: 'maximized', restoreBounds: { x: node.x, y: node.y, w: node.w, h: node.h } }
+        payload: { ...node.payload, windowState: 'maximized', restoreBounds }
       });
       workspace.bringToFront(node.id);
       return;
     }
     workspace.patchNode(node.id, {
-      x: prior?.x ?? node.x, y: prior?.y ?? node.y, w: prior?.w ?? 1080, h: prior?.h ?? 720,
+      x: prior?.x ?? node.x,
+      y: prior?.y ?? node.y,
+      w: prior?.w ?? (node.type === 'terminal' ? 860 : 1080),
+      h: prior?.h ?? (node.type === 'terminal' ? 480 : 720),
       payload: { ...node.payload, windowState: 'normal', restoreBounds: undefined }
     });
   }, [camera, workspace]);
@@ -1560,7 +1582,7 @@ export function HiiRoot({
         openDevBrowser(camera.toWorld(mouse.current.x, mouse.current.y));
         return;
       }
-      if ((event.key === 'Delete' || event.key === 'Backspace') && selected.length) { event.preventDefault(); selected.forEach(workspace.removeNode); setSelected([]); return; }
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selected.length) { event.preventDefault(); deleteSelection(); return; }
       if (selected.length === 1 && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
         event.preventDefault();
         const node = workspace.nodes.find((entry) => entry.id === selected[0]);
@@ -1746,8 +1768,8 @@ export function HiiRoot({
             onSelect={() => { setSelected([node.id]); setToolMessage(''); workspace.bringToFront(node.id); }}
             onOpenConversation={() => { if (runtimeEnabled) openObjectConversation(node); }}
             onCommit={(patch) => workspace.patchNode(node.id, patch)}
-            onWindowAction={(action) => appWindowAction(node, action)}
-            onErase={() => { workspace.removeNode(node.id); setSelected((ids) => ids.filter((id) => id !== node.id)); }}
+            onWindowAction={(action) => windowAction(node, action)}
+            onErase={() => { removeWorkspaceNode(node); setSelected((ids) => ids.filter((id) => id !== node.id)); }}
             onShare={onShareNode && (isAccount || (isSpace && isSpaceCanvasNode(node, spaceId))) ? () => onShareNode(node) : undefined}
             touchControls={isTouchCanvas}
             chromeless={node.payload.canvasPresentation === 'direct-paste' || node.type === 'canvas-text' || node.type === 'ink' || node.type === 'image'}

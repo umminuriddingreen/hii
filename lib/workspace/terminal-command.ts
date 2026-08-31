@@ -42,8 +42,8 @@ export function terminalSeedFromCommand(value: string): NodeSeed | null {
   const cwd = cleanCwd(match[1]);
   return {
     type: 'terminal',
-    w: 620,
-    h: 320,
+    w: 860,
+    h: 480,
     object: {
       kind: 'terminal',
       owner: 'human',
@@ -63,6 +63,7 @@ export function terminalSeedFromCommand(value: string): NodeSeed | null {
       status: 'ready',
       role: 'operator-terminal',
       terminalMode: 'shell',
+      windowState: 'normal',
       scope: 'human-controlled local shell',
       sessionId: crypto.randomUUID(),
       lines: []

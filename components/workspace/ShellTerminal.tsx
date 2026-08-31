@@ -47,13 +47,13 @@ export function ShellTerminal({
         macOptionIsMeta: true,
         rightClickSelectsWord: true,
         smoothScrollDuration: 80,
-        fontFamily: '"SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace',
-        fontSize: 11,
-        lineHeight: 1.35,
+        fontFamily: '"Berkeley Mono", "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace',
+        fontSize: 12,
+        lineHeight: 1.38,
         scrollback: 5000,
         theme: {
-          background: '#0b0c0f',
-          foreground: '#d8dae0',
+          background: '#050505',
+          foreground: '#e8e8e8',
           cursor: '#f4f5f7',
           selectionBackground: '#343942',
           black: '#17191e',
@@ -70,7 +70,12 @@ export function ShellTerminal({
       terminal.loadAddon(fit);
       terminal.loadAddon(new WebLinksAddon());
       terminal.open(element);
-      fit.fit();
+      const fitVisibleTerminal = () => {
+        if (!terminal || !fit || element.clientWidth < 120 || element.clientHeight < 60) return false;
+        fit.fit();
+        return true;
+      };
+      fitVisibleTerminal();
 
       cleanupEvents = await listenTerminalEvents({
         output(event) {
@@ -88,8 +93,7 @@ export function ShellTerminal({
         });
       });
       observer = new ResizeObserver(() => {
-        if (!terminal || !fit) return;
-        fit.fit();
+        if (!terminal || !fit || !fitVisibleTerminal()) return;
         void resizeTerminalSession(sessionId, terminal.cols, terminal.rows);
       });
       observer.observe(element);

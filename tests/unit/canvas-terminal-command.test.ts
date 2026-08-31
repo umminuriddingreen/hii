@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   agentTerminalSeedFromText,
@@ -10,8 +12,8 @@ describe('canvas terminal command', () => {
   it('creates a governed terminal object at the default HII folder', () => {
     expect(terminalSeedFromCommand('/terminal')).toMatchObject({
       type: 'terminal',
-      w: 620,
-      h: 320,
+      w: 860,
+      h: 480,
       object: {
         kind: 'terminal',
         owner: 'human',
@@ -25,6 +27,7 @@ describe('canvas terminal command', () => {
         status: 'ready',
         role: 'operator-terminal',
         terminalMode: 'shell',
+        windowState: 'normal',
         scope: 'human-controlled local shell'
       }
     });
@@ -77,5 +80,30 @@ describe('canvas terminal command', () => {
     expect(isDirectCanvasTyping({ ...key, metaKey: true })).toBe(false);
     expect(isDirectCanvasTyping({ ...key, key: 'Enter' })).toBe(false);
     expect(isDirectCanvasTyping({ ...key, key: ' ' })).toBe(false);
+  });
+
+  it('renders functional macOS-style terminal window controls inside the canvas node', () => {
+    const frame = readFileSync(resolve(process.cwd(), 'components/workspace/NodeFrame.tsx'), 'utf8');
+    expect(frame).toContain('className="hii-terminal-window-controls"');
+    expect(frame).toContain('role="group"');
+    expect(frame).toContain('aria-label={`Close ${title}`}');
+    expect(frame).toContain('aria-label={windowState === \'minimized\' ? `Restore ${title}` : `Minimize ${title}`}');
+    expect(frame).toContain('aria-label={windowState === \'maximized\' ? `Restore ${title}` : `Maximize ${title}`}');
+    expect(frame).toContain('className="hii-terminal-resize"');
+    expect(frame).toContain("onWindowAction?.(windowState === 'maximized' ? 'restore' : 'maximize')");
+  });
+
+  it('keeps the terminal chrome visibly tied to the reference palette', () => {
+    const css = readFileSync(resolve(process.cwd(), 'app/globals.css'), 'utf8');
+    expect(css).toContain('.hii-terminal-close { background: #ff5f57; }');
+    expect(css).toContain('.hii-terminal-minimize { background: #febc2e; }');
+    expect(css).toContain('.hii-terminal-maximize { background: #28c840; }');
+    expect(css).toContain('.hii-job-terminal[data-kind="shell"]');
+  });
+
+  it('stops a native shell session when its terminal node is deleted', () => {
+    const root = readFileSync(resolve(process.cwd(), 'components/workspace/HiiRoot.tsx'), 'utf8');
+    expect(root).toContain('stopTerminalSession(sessionId)');
+    expect(root).toContain('onErase={() => { removeWorkspaceNode(node);');
   });
 });
