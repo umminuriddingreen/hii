@@ -1,6 +1,5 @@
 use serde::Deserialize;
 use std::{fs, path::Path, process::Command, time::Duration};
-use url::Url;
 
 const DEFAULT_MIN_STARS: u64 = 250;
 const MAX_RESULTS: usize = 10;
@@ -184,98 +183,11 @@ fn safe_dir_name(value: &str) -> String {
     }
 }
 
-fn search_public_web(query: &str, allowed_domains: Option<&[&str]>) -> Result<String, String> {
-    let url = format!(
-        "https://html.duckduckgo.com/html/?q={}",
+fn search_public_web(query: &str, _allowed_domains: Option<&[&str]>) -> Result<String, String> {
+    Ok(format!(
+        "NATIVE_WEBVIEW_REQUIRED\nquery: {query}\nnavigation: https://www.google.com/search?q={}\nOpen the search in HII's native browser and review the source before installing anything.",
         crate::text::percent_encode_query(query)
-    );
-    let response = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(20))
-        .redirects(0)
-        .build()
-        .get(&url)
-        .set("User-Agent", "HII/0.1 (+capability discovery)")
-        .call()
-        .map_err(|error| format!("public web search failed: {error}"))?;
-    let html = response
-        .into_string()
-        .map_err(|error| format!("public web search response was not readable: {error}"))?;
-    let mut results = parse_web_results(&html, MAX_RESULTS * 2);
-    if let Some(allowed_domains) = allowed_domains {
-        results.retain(|(_, url, _)| {
-            Url::parse(url)
-                .ok()
-                .and_then(|url| url.domain().map(str::to_string))
-                .is_some_and(|domain| allowed_domains.iter().any(|allowed| domain == *allowed))
-        });
-        results.truncate(MAX_RESULTS);
-    }
-    if results.is_empty() {
-        return Ok(format!("No public web results found for `{query}`."));
-    }
-    Ok(results
-        .into_iter()
-        .enumerate()
-        .map(|(index, (title, url, snippet))| {
-            format!("{}. {}\n   {}\n   {}", index + 1, title, url, snippet)
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n"))
-}
-
-fn parse_web_results(html: &str, limit: usize) -> Vec<(String, String, String)> {
-    let anchor = regex::Regex::new(
-        r#"(?s)<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>"#,
-    )
-    .expect("valid result regex");
-    let snippet = regex::Regex::new(
-        r#"(?s)<(?:a|div)[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</(?:a|div)>"#,
-    )
-    .expect("valid snippet regex");
-    let mut snippets = snippet
-        .captures_iter(html)
-        .filter_map(|capture| capture.get(1))
-        .map(|value| clean_html(value.as_str()));
-    anchor
-        .captures_iter(html)
-        .take(limit)
-        .filter_map(|capture| {
-            let url = extract_duckduckgo_target(&clean_html(capture.get(1)?.as_str()));
-            let title = clean_html(capture.get(2)?.as_str());
-            let summary = snippets.next().unwrap_or_default();
-            Some((title, url, summary))
-        })
-        .collect()
-}
-
-fn extract_duckduckgo_target(value: &str) -> String {
-    let absolute = if value.starts_with("//") {
-        format!("https:{value}")
-    } else {
-        value.to_string()
-    };
-    Url::parse(&absolute)
-        .ok()
-        .and_then(|url| {
-            (url.domain() == Some("duckduckgo.com")).then(|| {
-                url.query_pairs()
-                    .find_map(|(key, value)| (key == "uddg").then(|| value.into_owned()))
-            })?
-        })
-        .unwrap_or_else(|| value.to_string())
-}
-
-fn clean_html(value: &str) -> String {
-    let tags = regex::Regex::new(r"(?s)<[^>]+>").expect("valid tag regex");
-    tags.replace_all(value, " ")
-        .replace("&amp;", "&")
-        .replace("&quot;", "\"")
-        .replace("&#x27;", "'")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -322,18 +234,9 @@ mod tests {
     }
 
     #[test]
-    fn parses_duckduckgo_results() {
-        let html = r#"
-        <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Ftool">Example <b>Result</b></a>
-        <a class="result__snippet">Useful &amp; compact</a>
-        "#;
-        assert_eq!(
-            parse_web_results(html, 1),
-            vec![(
-                "Example Result".into(),
-                "https://example.com/tool".into(),
-                "Useful & compact".into()
-            )]
-        );
+    fn public_discovery_hands_off_to_the_native_webview() {
+        let result = search_web("local first tools").unwrap();
+        assert!(result.contains("NATIVE_WEBVIEW_REQUIRED"));
+        assert!(result.contains("https://www.google.com/search?q=local+first+tools"));
     }
 }

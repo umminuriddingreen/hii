@@ -655,16 +655,6 @@ fn webview_search_url(query: &str) -> String {
     )
 }
 
-fn bounded_response_text(response: ureq::Response) -> Result<String, String> {
-    let mut bytes = Vec::new();
-    response
-        .into_reader()
-        .take(MAX_OUTPUT_BYTES as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|error| error.to_string())?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
-}
-
 fn readable_html(value: &str) -> String {
     let primary = regex::Regex::new(r"(?is)<(?:main|article)\b[^>]*>(.*?)</(?:main|article)>")
         .expect("valid primary-content regex");
@@ -1505,41 +1495,20 @@ mod tests {
     }
 
     #[test]
-    fn parses_cited_web_results() {
-        let html = r#"
-          <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fguide">A &amp; B Guide</a>
-          <a class="result__snippet">A concise <b>verified</b> answer.</a>
-        "#;
-        let results = super::parse_web_results(html, 8);
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].0, "A & B Guide");
-        assert_eq!(results[0].1, "https://example.com/guide");
-        assert_eq!(results[0].2, "A concise verified answer.");
-    }
-
-    #[test]
-    fn relaxes_search_syntax_for_one_bounded_native_retry() {
+    fn web_search_hands_queries_to_the_native_webview() {
         assert_eq!(
-            super::relaxed_web_query("\"local-first software\" site:wikipedia.org").as_deref(),
-            Some("local-first software")
+            webview_search_url("local first"),
+            "https://www.google.com/search?q=local+first"
         );
-        assert_eq!(super::relaxed_web_query("local-first software"), None);
-    }
-
-    #[test]
-    fn native_search_defaults_to_direct_https_and_bounds_overrides() {
-        assert_eq!(
-            native_web_search_url("local first", None),
-            "https://html.duckduckgo.com/html/?q=local+first"
-        );
-        assert_eq!(
-            native_web_search_url("hii", Some("http://127.0.0.1:9000/search/")),
-            "http://127.0.0.1:9000/search?q=hii"
-        );
-        assert!(
-            native_web_search_url("hii", Some("https://untrusted.example/search"))
-                .starts_with("https://html.duckduckgo.com/")
-        );
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        let result = tools.web_search("local first");
+        assert!(result.ok);
+        assert!(result.output.contains("NATIVE_WEBVIEW_REQUIRED"));
+        assert!(result
+            .output
+            .contains("https://www.google.com/search?q=local+first"));
+        let _ = fs::remove_dir_all(path);
     }
 
     #[test]

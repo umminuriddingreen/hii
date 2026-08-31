@@ -45,7 +45,6 @@ mod route;
 mod run_context;
 mod runlog;
 mod schedule;
-mod search_panel;
 mod service;
 mod skill_lifecycle;
 mod skill_runtime;
@@ -3463,9 +3462,6 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 Some(path) => conversation.attach(&path.display().to_string()),
                 None => Ok("File explorer closed.".into()),
             },
-            Some(SlashCommand::Search(query)) => {
-                search_panel::search(conversation.workspace(), &query)
-            }
             Some(SlashCommand::Proof(id)) => conversation.proof(id.as_deref()),
             Some(SlashCommand::Diff) => conversation.diff(),
             Some(SlashCommand::Review) => conversation.review(),
@@ -3592,7 +3588,6 @@ enum SlashCommand {
     Keymap(Option<String>),
     Model(Option<String>),
     Files,
-    Search(String),
     Proof(Option<String>),
     Diff,
     Review,
@@ -3679,7 +3674,6 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         "/model" => SlashCommand::Model(argument),
         "/models" if rest.is_empty() => SlashCommand::Model(None),
         "/files" | "/explore" if rest.is_empty() => SlashCommand::Files,
-        "/search" | "/web" if !rest.is_empty() => SlashCommand::Search(rest.to_string()),
         "/proof" => SlashCommand::Proof(argument),
         "/diff" if argument.is_none() => SlashCommand::Diff,
         "/review" if argument.is_none() => SlashCommand::Review,
@@ -3775,10 +3769,6 @@ fn slash_help() -> String {
         "/theme [name]                 switch the persistent visual signature\n/keymap [default|vim]          inspect or switch keyboard profile\n/keymap bind ACTION CHORD      add a safe custom binding\n",
     )
     .replace(
-        "/files                        browse files with ranger/vim keys\n",
-        "/files                        browse files with ranger/vim keys\n/search <query>               search the web in an inline source panel\n",
-    )
-    .replace(
         "/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n",
         "/thinking [mode]              flow | activity | diagnostics\n/raw [on|off]                 toggle diagnostics\n/reasoning [mode]             auto | off | deep model effort\n/mode [coding|general|auto|local|private|best]\n                               choose coding behavior or provider routing\n/autonomy [local-full|approval]\n                               choose local autonomy policy\n/model save                   persist the current user-determined model\n/learn [status]               show learning memory\nFlow is the default; Activity and Diagnostics are optional.\nAuto-compact is on by default.\n",
     )
@@ -3787,10 +3777,6 @@ fn slash_help() -> String {
 fn slash_help_compact() -> String {
     "CREATE + ACT\n  Describe the outcome you want. HII can inspect, make, and verify.\n  !<command>             run a shell command directly\n  /attach <path>         add a file or image\n  /plan [prompt|off]     explore without changing anything\n\nYOUR WORK\n  /status                session, workspace, model, and usage\n  /overview              projects, context, and latest proof\n  /proof [run-id]        inspect what completed\n  /diff                   see workspace changes\n  /files                  browse and attach local files\n\nSHAPE THE SESSION\n  /model                  choose a model\n  /theme                  choose the visual signature\n  /permissions            inspect or change authority\n  /undo                   remove the last exchange\n  /new                    begin with fresh context\n  /exit                   leave HII\n\nType / to browse controls  ·  /help all for the complete reference\nWhile HII works: Enter steers  ·  Tab queues  ·  Esc stops"
         .replace("Tab queues", "Shift+Tab queues")
-        .replace(
-            "  /files                  browse and attach local files\n",
-            "  /files                  browse and attach local files\n  /search <query>         search and inspect web sources\n",
-        )
 }
 
 fn public_test_slash_help() -> String {
@@ -3798,10 +3784,6 @@ fn public_test_slash_help() -> String {
         .replace(
             "/thinking [mode]              off | compact | raw display\n/reasoning [mode]             auto | off | deep model effort\n/raw [on|off]                 toggle the raw model stream\n",
             "/thinking [mode]              flow | activity | diagnostics\n/reasoning [mode]             auto | off | deep model effort\n/raw [on|off]                 toggle diagnostics\n",
-        )
-        .replace(
-            "/proof [run-id]               inspect isolated execution proof\n",
-            "/search <query>               search and inspect web sources\n/proof [run-id]               inspect isolated execution proof\n",
         )
 }
 
@@ -5171,7 +5153,6 @@ fn public_test_slash_allowed(command: &SlashCommand) -> bool {
             | SlashCommand::Theme(_)
             | SlashCommand::Keymap(_)
             | SlashCommand::Model(_)
-            | SlashCommand::Search(_)
             | SlashCommand::Proof(_)
             | SlashCommand::Permissions(None)
             | SlashCommand::Undo
@@ -6459,10 +6440,6 @@ mod tests {
             Some(SlashCommand::Providers)
         );
         assert_eq!(parse_slash_command("/diff"), Some(SlashCommand::Diff));
-        assert_eq!(
-            parse_slash_command("/search local first interfaces"),
-            Some(SlashCommand::Search("local first interfaces".into()))
-        );
         assert_eq!(parse_slash_command("/review"), Some(SlashCommand::Review));
         assert_eq!(
             parse_slash_command("/side explain this diff"),
