@@ -19,7 +19,9 @@ export function UpdateBanner() {
 
   if (dismissed) return null;
   if (state.status === 'idle' || state.status === 'checking') return null;
-  if (state.status === 'unsupported' || state.status === 'current') return null;
+  // An unreachable release feed should never cover the canvas with an error.
+  // Updates are optional background hygiene; the current app remains usable.
+  if (state.status === 'unsupported' || state.status === 'current' || state.status === 'failed') return null;
 
   return (
     <aside className="hii-update-banner" data-workspace-ui role="status" onPointerDown={(event) => event.stopPropagation()}>
@@ -30,10 +32,6 @@ export function UpdateBanner() {
       </>}
       {state.status === 'downloading' && <span>Downloading HII {state.version} · {state.percent}%</span>}
       {state.status === 'ready' && <span>HII {state.version} is ready. Restarting…</span>}
-      {state.status === 'failed' && <>
-        <span>Update failed: {state.message}</span>
-        <button type="button" className="hii-update-dismiss" onClick={() => setDismissed(true)}>Dismiss</button>
-      </>}
     </aside>
   );
 }
