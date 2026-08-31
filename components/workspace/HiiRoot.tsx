@@ -70,6 +70,7 @@ import { isAccountCanvasNode, isAccountCanvasNodeType, isSpaceCanvasNode, isSpac
 import { trackPointerGesture } from '@/lib/workspace/gestures';
 import { updateTerminalActivity } from '@/lib/workspace/terminal-activity';
 import { fitWorkspaceViewport } from '@/lib/workspace/viewport';
+import { browserCanvasAssetUrl } from '@/lib/web/canvas-assets';
 
 type Point = { x: number; y: number };
 export type WorkspaceProjectionRequest = {
@@ -396,16 +397,15 @@ function CanvasEditor({
  * A stored document on the canvas. PDFs render in the webview's own viewer,
  * which scrolls page to page inside the node instead of showing a metadata card.
  */
-function DocumentBody({ url, name, kind }: { url: string; name: string; kind: string }) {
-  const [failed, setFailed] = useState(false);
+function DocumentBody({ url, name, kind, onError }: { url: string; name: string; kind: string; onError: () => void }) {
   const isPdf = kind === 'pdf' || /\.pdf(\?|#|$)/i.test(url);
 
-  if (isPdf && !failed) {
+  if (isPdf) {
     return (
-      <object className="hii-node-document" data={url} type="application/pdf" aria-label={name}>
-        {/* Rendered only when the webview declines to embed the PDF itself. */}
-        <iframe className="hii-node-document" src={url} title={name} onError={() => setFailed(true)} />
-      </object>
+      <div className="hii-node-document-shell">
+        <iframe className="hii-node-document" src={url} title={name} onError={onError} />
+        <a className="hii-node-document-open" href={url} target="_blank" rel="noreferrer">open PDF ↗</a>
+      </div>
     );
   }
   return (
@@ -414,6 +414,69 @@ function DocumentBody({ url, name, kind }: { url: string; name: string; kind: st
       <a href={url} target="_blank" rel="noreferrer">Open document</a>
     </div>
   );
+}
+
+function AssetFailure({ name, state, onRetry }: { name: string; state: 'loading' | 'missing' | 'failed'; onRetry: () => void }) {
+  return <div className="hii-node-asset-state" data-state={state}>
+    <strong>{state === 'loading' ? 'opening' : 'could not open'} {name}</strong>
+    {state !== 'loading' ? <button type="button" onClick={onRetry}>try again</button> : null}
+  </div>;
+}
+
+/** Media URLs created by browsers do not survive a page reload. Resolve the
+ * persisted account-owned Blob whenever this node mounts, even if its saved
+ * payload still contains an old blob URL. */
+function AssetNodeBody({ node }: { node: WorkspaceNode }) {
+  const initialUrl = text(node.payload.url);
+  const assetId = text(node.payload.browserAssetId);
+  const name = text(node.payload.name) || text(node.payload.title) || node.type;
+  const [url, setUrl] = useState(initialUrl);
+  const [state, setState] = useState<'loading' | 'ready' | 'missing' | 'failed'>(initialUrl ? 'ready' : 'loading');
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!assetId) {
+      setUrl(initialUrl);
+      setState(initialUrl ? 'ready' : 'missing');
+      return;
+    }
+    let active = true;
+    let ownedUrl = '';
+    setState('loading');
+    void browserCanvasAssetUrl(assetId).then((resolved) => {
+      if (!active) {
+        if (resolved) URL.revokeObjectURL(resolved);
+        return;
+      }
+      if (!resolved) {
+        setUrl('');
+        setState('missing');
+        return;
+      }
+      ownedUrl = resolved;
+      setUrl(resolved);
+      setState('ready');
+    }).catch(() => {
+      if (active) setState('failed');
+    });
+    return () => {
+      active = false;
+      if (ownedUrl) URL.revokeObjectURL(ownedUrl);
+    };
+  }, [assetId, attempt, initialUrl]);
+
+  if (!url || state !== 'ready') {
+    return <AssetFailure name={name} state={state === 'ready' ? 'missing' : state} onRetry={() => setAttempt((value) => value + 1)} />;
+  }
+  const fail = () => setState('failed');
+  if (node.type === 'image') return <img className="hii-node-image" src={url} alt={name} draggable={false} onError={fail} />;
+  if (node.type === 'document') return <DocumentBody url={url} name={name} kind={text(node.payload.kind)} onError={fail} />;
+  if (node.type === 'media') {
+    return node.payload.kind === 'audio'
+      ? <audio className="hii-node-video" src={url} controls preload="metadata" onError={fail} />
+      : <video className="hii-node-video" src={url} controls preload="metadata" playsInline onError={fail} />;
+  }
+  return <AssetFailure name={name} state="failed" onRetry={() => setAttempt((value) => value + 1)} />;
 }
 
 function NodeBody({
@@ -460,13 +523,7 @@ function NodeBody({
   if (node.type === 'html') return <iframe className="hii-html" srcDoc={text(payload.srcdoc)} title={name} sandbox="allow-forms allow-scripts" />;
   if (node.type === 'ink') return <InkBody node={node} />;
   if (node.type === 'image' && payload.sticker === true) return <div className="hii-sticker" role="img" aria-label={name}>{text(payload.emoji) || '✦'}</div>;
-  if (node.type === 'image' && url) return <img className="hii-node-image" src={url} alt={name} draggable={false} />;
-  if (node.type === 'document' && url) return <DocumentBody url={url} name={name} kind={text(payload.kind)} />;
-  if (node.type === 'media' && url) {
-    return payload.kind === 'audio'
-      ? <audio className="hii-node-video" src={url} controls />
-      : <video className="hii-node-video" src={url} controls />;
-  }
+  if (node.type === 'image' || node.type === 'document' || node.type === 'media') return <AssetNodeBody node={node} />;
   if (node.type === 'note' || node.type === 'canvas-text') {
     return (
       <CanvasEditor

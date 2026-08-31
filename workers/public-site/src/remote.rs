@@ -27,6 +27,7 @@ pub fn is_remote_api_path(path: &str) -> bool {
     path == "/api/remote/hosts"
         || path.starts_with("/api/remote/hosts/")
         || path == "/api/remote/view"
+        || path == "/api/remote/chat"
         || path == "/api/remote/terminal"
 }
 
@@ -96,6 +97,18 @@ fn terminal_viewer_message_allowed(tag: &str, text: &str) -> bool {
         )
 }
 
+fn chat_viewer_message_allowed(text: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+        return false;
+    };
+    let kind = value.get("t").and_then(|v| v.as_str()).unwrap_or_default();
+    let request_id = value
+        .get("requestId")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    !request_id.is_empty() && request_id.len() <= 128 && matches!(kind, "chat.run" | "chat.cancel")
+}
+
 fn room_name(account_id: &str, host_id: &str) -> String {
     format!("remote:{account_id}:{host_id}")
 }
@@ -131,7 +144,7 @@ pub async fn handle_remote_api(
     let path = url.path().to_owned();
     let db = env.d1("IDENTITY")?;
 
-    if path == "/api/remote/view" {
+    if path == "/api/remote/view" || path == "/api/remote/chat" {
         let Some(host_id) = url
             .query_pairs()
             .find(|(key, _)| key == "host")
@@ -422,7 +435,10 @@ impl worker::DurableObject for RemoteRoom {
                 }
                 Response::from_json(&json!({ "revoked": true }))
             }
-            "/api/remote/host" | "/api/remote/view" | "/api/remote/terminal" => {
+            "/api/remote/host"
+            | "/api/remote/view"
+            | "/api/remote/chat"
+            | "/api/remote/terminal" => {
                 let terminal_tag = url
                     .query_pairs()
                     .find(|(key, _)| key == "grant")
@@ -431,6 +447,8 @@ impl worker::DurableObject for RemoteRoom {
                     "host"
                 } else if path == "/api/remote/terminal" {
                     terminal_tag.as_deref().unwrap_or("terminal:invalid")
+                } else if path == "/api/remote/chat" {
+                    "chat"
                 } else {
                     "viewer"
                 };
@@ -451,9 +469,17 @@ impl worker::DurableObject for RemoteRoom {
                     let _ = pair
                         .server
                         .send_with_str(json!({ "t": "room", "hostOnline": online }).to_string());
+                } else if role == "chat" {
+                    let online = !self.state.get_websockets_with_tag("host").is_empty();
+                    let _ = pair.server.send_with_str(
+                        json!({ "t": "chat.room", "hostOnline": online }).to_string(),
+                    );
                 } else if role == "host" {
                     for viewer in self.state.get_websockets_with_tag("viewer") {
                         let _ = viewer.send_with_str(r#"{"t":"host-online"}"#);
+                    }
+                    for chat in self.state.get_websockets_with_tag("chat") {
+                        let _ = chat.send_with_str(r#"{"t":"chat.host-online"}"#);
                     }
                 } else {
                     for host in self.state.get_websockets_with_tag("host") {
@@ -479,6 +505,7 @@ impl worker::DurableObject for RemoteRoom {
             .get_tags(&ws)
             .into_iter()
             .find(|tag| tag.starts_with("terminal:"));
+        let from_chat = self.state.get_tags(&ws).iter().any(|tag| tag == "chat");
         match message {
             WebSocketIncomingMessage::Binary(bytes) => {
                 // Only the host sends binary; viewers sending binary are ignored.
@@ -500,13 +527,29 @@ impl worker::DurableObject for RemoteRoom {
                     for host in self.state.get_websockets_with_tag("host") {
                         let _ = host.send_with_str(&text);
                     }
+                } else if from_chat {
+                    if !chat_viewer_message_allowed(&text) {
+                        return Ok(());
+                    }
+                    for host in self.state.get_websockets_with_tag("host") {
+                        let _ = host.send_with_str(&text);
+                    }
                 } else if from_host {
                     let value = serde_json::from_str::<serde_json::Value>(&text).ok();
+                    let kind = value
+                        .as_ref()
+                        .and_then(|item| item.get("t"))
+                        .and_then(|item| item.as_str())
+                        .unwrap_or_default();
                     let grant = value
                         .as_ref()
                         .and_then(|item| item.get("grantId"))
                         .and_then(|item| item.as_str());
-                    if let Some(grant) = grant {
+                    if kind.starts_with("chat.") {
+                        for viewer in self.state.get_websockets_with_tag("chat") {
+                            let _ = viewer.send_with_str(&text);
+                        }
+                    } else if let Some(grant) = grant {
                         for viewer in self
                             .state
                             .get_websockets_with_tag(&format!("terminal:{grant}"))
@@ -541,6 +584,9 @@ impl worker::DurableObject for RemoteRoom {
             for viewer in self.state.get_websockets_with_tag("viewer") {
                 let _ = viewer.send_with_str(r#"{"t":"host-offline"}"#);
             }
+            for chat in self.state.get_websockets_with_tag("chat") {
+                let _ = chat.send_with_str(r#"{"t":"chat.host-offline"}"#);
+            }
         }
         Ok(())
     }
@@ -552,7 +598,9 @@ impl worker::DurableObject for RemoteRoom {
 
 #[cfg(test)]
 mod tests {
-    use super::{terminal_grant_host, terminal_viewer_message_allowed};
+    use super::{
+        chat_viewer_message_allowed, terminal_grant_host, terminal_viewer_message_allowed,
+    };
 
     #[test]
     fn terminal_grant_path_names_exactly_one_host() {
@@ -587,6 +635,22 @@ mod tests {
         assert!(!terminal_viewer_message_allowed(
             "terminal:grant-1",
             "not-json"
+        ));
+    }
+
+    #[test]
+    fn chat_viewer_can_only_request_or_cancel_a_bounded_chat_turn() {
+        assert!(chat_viewer_message_allowed(
+            r#"{"t":"chat.run","requestId":"turn-1","prompt":"hi"}"#
+        ));
+        assert!(chat_viewer_message_allowed(
+            r#"{"t":"chat.cancel","requestId":"turn-1"}"#
+        ));
+        assert!(!chat_viewer_message_allowed(
+            r#"{"t":"terminal.open","requestId":"turn-1"}"#
+        ));
+        assert!(!chat_viewer_message_allowed(
+            r#"{"t":"chat.run","requestId":""}"#
         ));
     }
 }

@@ -314,14 +314,17 @@ export function HiiWebAccess() {
         />
         <header className={styles.canvasHeader} data-workspace-ui>
           <span className={styles.canvasWordmark}>hii</span>
-          <button
-            type="button"
-            aria-expanded={accountOpen}
-            aria-controls="hii-web-account"
-            onClick={() => setAccountOpen((value) => !value)}
-          >
-            {accountName}
-          </button>
+          <nav aria-label="HII account actions">
+            <button type="button" onClick={() => { setPanel('say-hi'); setAccountOpen(false); }}>say hi</button>
+            <button
+              type="button"
+              aria-expanded={accountOpen}
+              aria-controls="hii-web-account"
+              onClick={() => setAccountOpen((value) => !value)}
+            >
+              {accountName}
+            </button>
+          </nav>
         </header>
         {panel ? <HiiWebPanel
           panel={panel}
@@ -329,6 +332,7 @@ export function HiiWebAccess() {
           csrfToken={session.csrfToken ?? ''}
           shareNode={shareNode}
           onClose={() => { setPanel(null); setShareNode(null); }}
+          onPanel={(nextPanel) => setPanel(nextPanel)}
           onImport={(item: FeedItem) => {
             setCanvasImport({ id: crypto.randomUUID(), seed: nodeSeedFromFeedSnapshot(item) });
             setPanel(null);
@@ -341,15 +345,17 @@ export function HiiWebAccess() {
               <div><dt>name</dt><dd>{accountName}</dd></div>
               <div><dt>access</dt><dd>passkey</dd></div>
               <div><dt>canvas</dt><dd>stored only in this browser</dd></div>
-              <div><dt>apps</dt><dd>auto-synced local copies planned</dd></div>
+              <div><dt>computer</dt><dd>live through HII Chat</dd></div>
             </dl>
             <nav className={styles.platformLinks} aria-label="Open HII on a computer">
+              <button type="button" onClick={() => { setPanel('say-hi'); setAccountOpen(false); }}>say hi</button>
+              <button type="button" onClick={() => { setPanel('models'); setAccountOpen(false); }}>devices &amp; local intelligence</button>
               <a href="/download#mac">open on Mac</a>
               <a href="/download#windows">open on Windows</a>
             </nav>
             <button type="button" onClick={signOut} disabled={busy}>log out</button>
             <p role="status" aria-live="polite">{deviceMessage}</p>
-            <small>planned: this browser account stays canonical while each Mac or Windows app saves an automatically synchronized local copy. sync is not enabled yet.</small>
+            <small>canvas media stays on this browser. paired computer screens and HII answers stream live through an outbound, revocable link.</small>
           </aside>
         ) : null}
       </div>

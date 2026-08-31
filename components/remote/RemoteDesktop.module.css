@@ -6,6 +6,17 @@
   color: #e8eaed;
 }
 
+.embedded {
+  min-height: 0;
+  height: min(820px, calc(100dvh - 140px));
+  border: 1px solid #d8d8d8;
+}
+
+.embeddedGate {
+  min-height: 260px;
+  padding: 2rem 1.5rem;
+}
+
 .bar {
   display: flex;
   align-items: center;
@@ -34,6 +45,7 @@
 
 .bar button,
 .select,
+.sourceSelect,
 .hosts button {
   background: #15171c;
   color: #e8eaed;
@@ -43,6 +55,8 @@
   font: inherit;
   cursor: pointer;
 }
+
+.sourceSelect { max-width: min(34vw, 280px); }
 .bar button:hover, .hosts button:hover { border-color: #3a404b; }
 .hosts button:disabled { opacity: 0.4; cursor: not-allowed; }
 
@@ -69,13 +83,47 @@
 
 .canvas {
   max-width: 100%;
-  max-height: calc(100vh - 5rem);
+  max-height: calc(100vh - 13rem);
   outline: none;
   cursor: none;
   touch-action: none;
   image-rendering: auto;
   background: #000;
 }
+
+.typer {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: .6rem;
+  width: min(100%, 980px);
+  margin-top: .6rem;
+  color: #c8ccd2;
+  font: .78rem/1.35 ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+.typer label { align-self: center; white-space: nowrap; }
+.typer textarea {
+  min-height: 52px;
+  max-height: 150px;
+  resize: vertical;
+  padding: .55rem .65rem;
+  border: 1px solid #2a2f38;
+  border-radius: 7px;
+  background: #101216;
+  color: #f0f1f3;
+  font: inherit;
+}
+.typer div { display: flex; gap: .4rem; }
+.typer button {
+  min-height: 40px;
+  border: 1px solid #2a2f38;
+  border-radius: 6px;
+  background: #171a20;
+  color: #f0f1f3;
+  font: inherit;
+}
+.typer button:disabled { opacity: .4; }
 
 .hint { margin: 0.4rem 0 0; color: #6f757f; font-size: 0.75rem; }
 
@@ -132,3 +180,14 @@
 }
 
 .gate { padding: 4rem 1.5rem; max-width: 32rem; margin: 0 auto; text-align: center; }
+
+@media (max-width: 760px) {
+  .bar { flex-wrap: wrap; }
+  .bar .spacer { display: none; }
+  .sourceSelect { order: 8; max-width: 100%; flex: 1 1 100%; }
+  .surface { justify-content: flex-start; padding-bottom: max(.6rem, env(safe-area-inset-bottom)); }
+  .canvas { max-height: 56dvh; }
+  .typer { grid-template-columns: 1fr; align-items: stretch; }
+  .typer label { display: none; }
+  .typer div { justify-content: flex-end; }
+}

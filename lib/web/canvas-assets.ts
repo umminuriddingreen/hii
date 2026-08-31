@@ -19,8 +19,28 @@ type BrowserCanvasAsset = {
   size: number;
   lastModified: number;
   sha256: string;
-  bytes: ArrayBuffer;
+  /** New records store a Blob so video and PDF readers can seek without first
+   * reconstructing the whole file. `bytes` keeps earlier records readable. */
+  blob?: Blob;
+  bytes?: ArrayBuffer;
 };
+
+const MIME_BY_EXTENSION: Record<string, string> = {
+  gif: 'image/gif', heic: 'image/heic', heif: 'image/heif', jpeg: 'image/jpeg', jpg: 'image/jpeg',
+  mov: 'video/quicktime', mp4: 'video/mp4', m4v: 'video/x-m4v', webm: 'video/webm',
+  pdf: 'application/pdf', png: 'image/png', svg: 'image/svg+xml', webp: 'image/webp',
+};
+
+function assetMime(name: string, mime: string) {
+  if (mime && mime !== 'application/octet-stream') return mime;
+  const extension = name.split('.').pop()?.toLowerCase() ?? '';
+  return MIME_BY_EXTENSION[extension] ?? 'application/octet-stream';
+}
+
+function assetBlob(asset: BrowserCanvasAsset) {
+  if (asset.blob instanceof Blob) return asset.blob;
+  return new Blob(asset.bytes ? [asset.bytes] : [], { type: assetMime(asset.name, asset.mime) });
+}
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -67,7 +87,7 @@ async function prepareAsset(accountId: string, file: File): Promise<BrowserCanva
     size: file.size,
     lastModified: file.lastModified,
     sha256,
-    bytes,
+    blob: file.slice(0, file.size, assetMime(file.name, file.type)),
   };
   return asset;
 }
@@ -90,9 +110,11 @@ async function readAsset(accountId: string, id: string) {
   return asset?.accountId === accountId ? asset : undefined;
 }
 
-function withAsset(seed: NodeSeed, asset: BrowserCanvasAsset): NodeSeed {
+function withAsset(seed: NodeSeed, asset: BrowserCanvasAsset, file: File): NodeSeed {
   const viewable = ['image', 'document', 'media', 'model', 'cad'].includes(seed.type);
-  const url = viewable ? URL.createObjectURL(new Blob([asset.bytes], { type: asset.mime || 'application/octet-stream' })) : undefined;
+  // The original File is the most reliable first-render source in mobile
+  // Safari. Reloads resolve a fresh URL from the stored Blob below.
+  const url = viewable ? URL.createObjectURL(file) : undefined;
   return {
     ...seed,
     object: {
@@ -112,7 +134,7 @@ function withAsset(seed: NodeSeed, asset: BrowserCanvasAsset): NodeSeed {
       browserAssetId: asset.id,
       path: `indexeddb:${asset.id}`,
       name: asset.name,
-      mime: asset.mime,
+      mime: assetMime(asset.name, asset.mime),
       size: asset.size,
       sha256: asset.sha256,
       ephemeral: false,
@@ -129,10 +151,10 @@ export async function browserCanvasSeedsFromFiles(accountId: string, files: File
       prepareAsset(accountId, file),
       seedFromFile(file, { store: false }),
     ]);
-    return { asset, seed };
+    return { asset, seed, file };
   }));
   await storeAssets(prepared.map(({ asset }) => asset));
-  return prepared.map(({ asset, seed }) => withAsset(seed, asset));
+  return prepared.map(({ asset, seed, file }) => withAsset(seed, asset, file));
 }
 
 async function hydrateNode(accountId: string, node: WorkspaceNode): Promise<WorkspaceNode> {
@@ -151,10 +173,22 @@ async function hydrateNode(accountId: string, node: WorkspaceNode): Promise<Work
     ...node,
     payload: {
       ...node.payload,
-      ...(viewable ? { url: URL.createObjectURL(new Blob([asset.bytes], { type: asset.mime || 'application/octet-stream' })) } : {}),
+      ...(viewable ? { url: URL.createObjectURL(assetBlob(asset)) } : {}),
+      mime: assetMime(asset.name, asset.mime),
       assetState: 'ready',
     },
   };
+}
+
+/** Resolve a fresh, reload-safe object URL for a browser-owned canvas asset.
+ * The opaque account prefix on the asset id is revalidated before IndexedDB
+ * access, so a node cannot ask for another account's bytes. */
+export async function browserCanvasAssetUrl(assetId: string): Promise<string | null> {
+  const separator = assetId.indexOf(':');
+  const accountId = separator > 0 ? assetId.slice(0, separator) : '';
+  if (!ACCOUNT_ID.test(accountId)) return null;
+  const asset = await readAsset(accountId, assetId).catch(() => undefined);
+  return asset ? URL.createObjectURL(assetBlob(asset)) : null;
 }
 
 export async function hydrateBrowserCanvasAssets(accountId: string, document: WorkspaceDoc): Promise<WorkspaceDoc> {

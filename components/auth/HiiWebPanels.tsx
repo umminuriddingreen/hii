@@ -6,8 +6,10 @@ import type { WorkspaceNode } from '@/lib/workspace/types';
 import { decryptChatMessage, encryptChatMessage, ensureLocalChatDevice, type ChatDevice, type ChatEnvelope, type LocalChatDevice } from '@/lib/web/chat-crypto';
 import { feedSnapshotFromNode, type FeedItem, type FeedSnapshot } from '@/lib/web/feed-contract';
 import styles from './HiiWebAccess.module.css';
+import { RemoteDesktop } from '@/components/remote/RemoteDesktop';
+import { LocalHiiChat } from '@/components/remote/LocalHiiChat';
 
-export type WebPanel = 'chat' | 'feed' | 'models';
+export type WebPanel = 'chat' | 'feed' | 'models' | 'say-hi';
 
 type Conversation = {
   id: string;
@@ -168,11 +170,20 @@ function ChatPanel({ accountId, csrfToken }: { accountId: string; csrfToken: str
   </>;
 }
 
-export function HiiWebPanel({ panel, accountId, csrfToken, shareNode, onClose, onImport }: { panel: WebPanel; accountId: string; csrfToken: string; shareNode: WorkspaceNode | null; onClose: () => void; onImport: (item: FeedItem) => void }) {
+export function HiiWebPanel({ panel, accountId, csrfToken, shareNode, onClose, onImport, onPanel }: { panel: WebPanel; accountId: string; csrfToken: string; shareNode: WorkspaceNode | null; onClose: () => void; onImport: (item: FeedItem) => void; onPanel: (panel: WebPanel) => void }) {
   return <aside className={styles.webPanel} aria-label={`HII ${panel}`} data-workspace-ui>
-    <header><span>{panel}</span><button type="button" onClick={onClose}>close</button></header>
+    <header><span>{panel === 'say-hi' ? 'say hi' : panel}</span><button type="button" onClick={onClose}>close</button></header>
     {panel === 'feed' ? <FeedPanel csrfToken={csrfToken} shareNode={shareNode} onImport={onImport} /> : null}
     {panel === 'chat' ? <ChatPanel accountId={accountId} csrfToken={csrfToken} /> : null}
-    {panel === 'models' ? <section className={styles.modelState}><p>HII Native</p><small>Rust · mistral.rs · Metal</small><p>connect a trusted HII device to use its models here.</p><button type="button" disabled>pairing bridge in progress</button><small>Safari never connects to an exposed model port. cloud fallback is off.</small></section> : null}
+    {panel === 'say-hi' ? <LocalHiiChat onOpenDevices={() => onPanel('models')} /> : null}
+    {panel === 'models' ? <>
+      <section className={styles.modelState}>
+        <p>Devices &amp; local intelligence</p>
+        <small>browser-canonical HII · authenticated outbound local link</small>
+        <p>Pair this Mac once, then select the Codex application window and use HII typer from any signed-in browser.</p>
+        <small>The browser never receives a raw local port or unrestricted shell. Each paired host is revocable.</small>
+      </section>
+      <RemoteDesktop embedded preferredBundleIdentifier="com.openai.codex" />
+    </> : null}
   </aside>;
 }

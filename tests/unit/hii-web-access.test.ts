@@ -67,9 +67,8 @@ describe('HII web access gate', () => {
     expect(source).toContain('href="/download#mac"');
     expect(source).toContain('open on Windows');
     expect(source).toContain('href="/download#windows"');
-    expect(source).toContain('auto-synced local copies planned');
-    expect(source).toContain('this browser account stays canonical');
-    expect(source).toContain('sync is not enabled yet');
+    expect(source).toContain('live through HII Chat');
+    expect(source).toContain('paired computer screens and HII answers stream live');
     expect(source).not.toContain('aria-label="HII canvas views"');
     expect(source).not.toContain('>chat</button>');
     expect(source).not.toContain('>feed</button>');

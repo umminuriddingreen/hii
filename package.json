@@ -5,6 +5,7 @@
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
   "scripts": {
+    "prebuild": "node scripts/build-hii-chat-bundle.mjs",
     "fabric:protocol:check": "cargo fmt --manifest-path fabric/protocol/Cargo.toml -- --check && cargo test --locked --manifest-path fabric/protocol/Cargo.toml && cargo clippy --locked --manifest-path fabric/protocol/Cargo.toml --all-targets -- -D warnings",
     "fabric:windows-receiver:check": "cargo fmt --manifest-path fabric/windows-receiver/Cargo.toml -- --check && cargo test --locked --manifest-path fabric/windows-receiver/Cargo.toml && cargo clippy --locked --manifest-path fabric/windows-receiver/Cargo.toml --all-targets -- -D warnings",
     "fabric:macos-capture:check": "swift test --package-path fabric/macos-capture && swift build -c release --package-path fabric/macos-capture",

@@ -30,6 +30,15 @@ type Screen = { x: number; y: number; width: number; height: number; scale: numb
 
 type Quality = { fps: number; quality: number; maxWidth: number };
 
+type Source = {
+  id: string;
+  kind: 'display' | 'application';
+  label: string;
+  application?: string;
+  bundleIdentifier?: string | null;
+  screen: Screen;
+};
+
 const QUALITY_PRESETS: Record<string, Quality> = {
   smooth: { fps: 30, quality: 9, maxWidth: 1280 },
   balanced: { fps: 24, quality: 6, maxWidth: 1600 },
@@ -45,7 +54,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return payload;
 }
 
-export function RemoteDesktop() {
+export function RemoteDesktop({ embedded = false, preferredBundleIdentifier }: { embedded?: boolean; preferredBundleIdentifier?: string }) {
   const [session, setSession] = useState<Session | null>(null);
   const [hosts, setHosts] = useState<Host[]>([]);
   const [activeHost, setActiveHost] = useState<Host | null>(null);
@@ -57,6 +66,9 @@ export function RemoteDesktop() {
   const [preset, setPreset] = useState<keyof typeof QUALITY_PRESETS>('balanced');
   const [stats, setStats] = useState({ fps: 0, kbps: 0 });
   const [captureKeys, setCaptureKeys] = useState(true);
+  const [sources, setSources] = useState<Source[]>([]);
+  const [activeSourceId, setActiveSourceId] = useState('');
+  const [typerText, setTyperText] = useState('');
 
   const socketRef = useRef<WebSocket | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -64,6 +76,7 @@ export function RemoteDesktop() {
   const frameUrlRef = useRef<string | null>(null);
   const meterRef = useRef({ frames: 0, bytes: 0, since: Date.now() });
   const clickRef = useRef({ time: 0, x: 0, y: 0, count: 0 });
+  const preferredSourceSelectedRef = useRef(false);
 
   useEffect(() => {
     api<Session>('/api/auth/session')
@@ -110,6 +123,7 @@ export function RemoteDesktop() {
   const disconnect = useCallback(() => {
     socketRef.current?.close();
     socketRef.current = null;
+    preferredSourceSelectedRef.current = false;
     setActiveHost(null);
     setScreen(null);
     setStatus('idle');
@@ -154,7 +168,21 @@ export function RemoteDesktop() {
         }
         if (message.t === 'hello') {
           setScreen((message.screen as Screen) ?? null);
+          const source = message.source as { id?: string } | undefined;
+          if (source?.id) setActiveSourceId(source.id);
           setStatus('connected');
+        } else if (message.t === 'sources') {
+          const nextSources = Array.isArray(message.sources) ? message.sources as Source[] : [];
+          setSources(nextSources);
+          if (typeof message.activeSourceId === 'string') setActiveSourceId(message.activeSourceId);
+          const preferred = preferredSourceSelectedRef.current
+            ? undefined
+            : nextSources.find((source) => source.bundleIdentifier === preferredBundleIdentifier);
+          if (preferred) {
+            preferredSourceSelectedRef.current = true;
+            setActiveSourceId(preferred.id);
+            socket.send(JSON.stringify({ t: 'source', id: preferred.id }));
+          }
         } else if (message.t === 'host-offline') {
           setStatus('host offline');
         } else if (message.t === 'host-online') {
@@ -171,7 +199,7 @@ export function RemoteDesktop() {
       });
       socket.addEventListener('error', () => setError('connection_failed'));
     },
-    [disconnect, drawFrame],
+    [disconnect, drawFrame, preferredBundleIdentifier],
   );
 
   useEffect(() => () => socketRef.current?.close(), []);
@@ -315,17 +343,27 @@ export function RemoteDesktop() {
     }
   }, [send]);
 
+  const sendTyper = useCallback((withReturn: boolean) => {
+    if (!typerText) return;
+    send({ t: 'text', s: typerText.slice(0, 4096) });
+    if (withReturn) {
+      send({ t: 'key', code: 'Enter', down: true });
+      send({ t: 'key', code: 'Enter', down: false });
+    }
+    setTyperText('');
+  }, [send, typerText]);
+
   const setupCommand = useMemo(
     () =>
       issuedToken
-        ? `sh ~/hii/remote/host/install.sh ${issuedToken.token}`
+        ? 'curl -fsSL https://humaninformationinterface.com/hii-chat/install.sh | sh'
         : null,
     [issuedToken],
   );
 
   if (session && !session.authenticated) {
     return (
-      <main className={styles.gate}>
+      <main className={`${styles.gate} ${embedded ? styles.embeddedGate : ''}`}>
         <h1>Remote desktop</h1>
         <p>Sign in to your HII account to reach your paired machines.</p>
         <a className={styles.primary} href="/">Sign in</a>
@@ -334,7 +372,7 @@ export function RemoteDesktop() {
   }
 
   return (
-    <main className={styles.shell}>
+    <main className={`${styles.shell} ${embedded ? styles.embedded : ''}`}>
       <header className={styles.bar}>
         <span className={styles.brand}>HII / Remote</span>
         <span className={styles.status} data-state={status}>{status}</span>
@@ -352,6 +390,19 @@ export function RemoteDesktop() {
               <option value="balanced">Balanced</option>
               <option value="sharp">Sharp</option>
             </select>
+            <select
+              className={styles.sourceSelect}
+              value={activeSourceId}
+              onChange={(event) => {
+                setActiveSourceId(event.target.value);
+                send({ t: 'source', id: event.target.value });
+              }}
+              aria-label="Stream source"
+            >
+              {!sources.length ? <option value="">Current display</option> : null}
+              {sources.map((source) => <option key={source.id} value={source.id}>{source.label}</option>)}
+            </select>
+            <button type="button" onClick={() => send({ t: 'sources-refresh' })}>Refresh apps</button>
             <button type="button" onClick={() => setCaptureKeys((value) => !value)}>
               {captureKeys ? 'Keys: host' : 'Keys: browser'}
             </button>
@@ -385,6 +436,21 @@ export function RemoteDesktop() {
               {activeHost.name} · {screen.width}×{screen.height} · shift+esc releases keyboard
             </p>
           ) : null}
+          <form className={styles.typer} onSubmit={(event) => { event.preventDefault(); sendTyper(true); }}>
+            <label htmlFor="hii-remote-typer">HII typer</label>
+            <textarea
+              id="hii-remote-typer"
+              value={typerText}
+              onChange={(event) => setTyperText(event.target.value)}
+              placeholder="Type into the selected app…"
+              maxLength={4096}
+              enterKeyHint="send"
+            />
+            <div>
+              <button type="button" disabled={!typerText} onClick={() => sendTyper(false)}>Type</button>
+              <button type="submit" disabled={!typerText}>Type + Return</button>
+            </div>
+          </form>
         </div>
       ) : (
         <section className={styles.hosts}>
@@ -422,10 +488,14 @@ export function RemoteDesktop() {
           </div>
           {setupCommand ? (
             <div className={styles.token}>
-              <p>Run this once on the machine you want to reach. The token is shown only now.</p>
+              <p>Run this once on the Mac you want to reach, then paste the pairing token when asked. The token is shown only now and stays out of shell history.</p>
               <code>{setupCommand}</code>
               <button type="button" onClick={() => navigator.clipboard?.writeText(setupCommand)}>
-                Copy
+                Copy installer
+              </button>
+              <code>{issuedToken?.token}</code>
+              <button type="button" onClick={() => navigator.clipboard?.writeText(issuedToken?.token ?? '')}>
+                Copy pairing token
               </button>
             </div>
           ) : null}

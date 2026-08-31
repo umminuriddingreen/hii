@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "version": "1.115726541204598788",
+  "files": {
+    "hii-remote-host.mjs": "d98e44ce5ec259790a63fd8104437409122bdd605a77708526446ff0a20f6285",
+    "remote-source.mjs": "f4f3e33f023cbda57df8fca36f47dfd5c732eee7986b4e02a4cb2b1496f5e5aa",
+    "hii-remote-input.swift": "31a935ec5d36e39ed23777290997740426e02ae16c3a1369a149c627561e3e3a",
+    "install-local.sh": "258fb17d2ff04ddd41cfc0c837cfc468bcc7d47cc718efb8ff0d948217edd47e",
+    "update.sh": "9147160137bbf4de320c8e031c31b838b8cb02d387c78f8f5cda1ae22d9bcbe1"
+  }
+}
