@@ -1,6 +1,7 @@
 'use client';
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { APPLICATION_POLL_INTERVAL_MS, shouldSkipApplicationPoll } from '@/lib/workspace/application-poll';
 import {
   acknowledgeApplicationLaunch,
   approveContextPack,
@@ -927,7 +928,7 @@ export function HiiRoot({
     if (!runtimeEnabled || !workspace.ready) return;
     let cancelled = false;
     const poll = async () => {
-      if (cancelled || document.hidden || applicationPollActive.current) return;
+      if (shouldSkipApplicationPoll({ cancelled, hidden: document.hidden, inFlight: applicationPollActive.current })) return;
       applicationPollActive.current = true;
       try {
         if (!applicationCatalog.current.size) {
@@ -970,7 +971,7 @@ export function HiiRoot({
       }
     };
     void poll();
-    const timer = window.setInterval(() => void poll(), 4000);
+    const timer = window.setInterval(() => void poll(), APPLICATION_POLL_INTERVAL_MS);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [camera, runtimeEnabled, spawnSeeds, workspace.ready]);
 
