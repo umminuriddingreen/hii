@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // HII CLI — single current entrypoint for the Human Information Interface.
 // Installed via ~/bin/hii.
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -40,6 +40,9 @@ const HII_SCHEDULES = path.join(RUNTIME, "schedules", "schedules.json");
 const HII_SKILL_INDEX = path.join(RUNTIME, "skills", "_index.json");
 const HERMES_SKILLS = path.join(os.homedir(), ".hermes", "skills");
 const HII_KNOWLEDGE_DB = path.join(RUNTIME, "hii.db");
+const WEB_RUNTIME_DIR = path.join(RUNTIME, "web");
+const WEB_PID = path.join(WEB_RUNTIME_DIR, "web.pid");
+const WEB_LOG = path.join(WEB_RUNTIME_DIR, "web.log");
 const DAEMON_STATUS = path.join(RUNTIME, "daemon", "status.json");
 const DAEMON_INSTANCES = path.join(RUNTIME, "daemon", "instances.json");
 const CLI_RUNS = path.join(RUNTIME, "runs", "cli");
@@ -92,6 +95,118 @@ function cleanEnvValue(value) {
 function appBaseUrl() {
   const env = readEnvFile();
   return cleanEnvValue(process.env.NEXT_PUBLIC_BASE_URL || env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
+}
+
+function localWebUrl() {
+  return cleanEnvValue(process.env.HII_WEB_URL || "http://127.0.0.1:3000").replace(/\/$/, "");
+}
+
+function ownedWebPid() {
+  const pid = Number(fs.existsSync(WEB_PID) ? fs.readFileSync(WEB_PID, "utf8").trim() : "");
+  if (!Number.isInteger(pid) || pid <= 1) return null;
+  try { process.kill(pid, 0); } catch { return null; }
+  const observed = spawnSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" });
+  return observed.status === 0 && observed.stdout.includes("hii-dev.mjs") ? pid : null;
+}
+
+async function webReady() {
+  try {
+    const response = await fetch(localWebUrl(), { signal: AbortSignal.timeout(750) });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+function startWeb() {
+  const existing = ownedWebPid();
+  if (existing) return existing;
+  fs.mkdirSync(WEB_RUNTIME_DIR, { recursive: true });
+  const out = fs.openSync(WEB_LOG, "a");
+  const child = spawn(process.execPath, [path.join(ROOT, "scripts", "hii-dev.mjs")], {
+    cwd: ROOT,
+    detached: true,
+    stdio: ["ignore", out, out],
+    env: { ...process.env, HII_NEXT_DIST_DIR: ".next-web-cli" }
+  });
+  child.unref();
+  fs.closeSync(out);
+  fs.writeFileSync(WEB_PID, `${child.pid}\n`, { mode: 0o600 });
+  return child.pid;
+}
+
+async function waitForWeb(timeoutMs = 120000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await webReady()) return;
+    const pid = ownedWebPid();
+    if (!pid) throw new Error(`HII web exited during startup; inspect ${WEB_LOG}`);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error(`HII web did not become ready; inspect ${WEB_LOG}`);
+}
+
+function openUrl(target) {
+  const result = spawnSync("open", [target], { stdio: "inherit" });
+  if (result.status !== 0) throw new Error(`could not open ${target}`);
+}
+
+async function cmdWeb(args) {
+  const sub = args[0] || "status";
+  if (sub === "start") {
+    const pid = startWeb();
+    await waitForWeb();
+    console.log(JSON.stringify({ ok: true, state: "ready", pid, url: localWebUrl(), log: WEB_LOG }, null, 2));
+  } else if (sub === "open") {
+    const pid = startWeb();
+    await waitForWeb();
+    openUrl(localWebUrl());
+    console.log(JSON.stringify({ ok: true, state: "opened", pid, url: localWebUrl(), log: WEB_LOG }, null, 2));
+  } else if (sub === "status") {
+    console.log(JSON.stringify({
+      state: await webReady() ? "ready" : ownedWebPid() ? "starting" : "stopped",
+      pid: ownedWebPid(), url: localWebUrl(), log: WEB_LOG
+    }, null, 2));
+  } else if (sub === "logs") {
+    const lines = Number(args[1] || 80);
+    if (!fs.existsSync(WEB_LOG)) throw new Error("HII web has no log yet");
+    console.log(fs.readFileSync(WEB_LOG, "utf8").split("\n").slice(-lines).join("\n"));
+  } else if (sub === "stop") {
+    const pid = ownedWebPid();
+    if (!pid) return console.log("HII web is not running");
+    process.kill(-pid, "SIGTERM");
+    fs.rmSync(WEB_PID, { force: true });
+    console.log(`stopped HII web pid=${pid}`);
+  } else {
+    throw new Error("usage: hii web <open|start|status|logs|stop>");
+  }
+}
+
+function cmdApp(args) {
+  const sub = args[0] || "open";
+  const app = "/Applications/HII.app";
+  if (sub === "open") {
+    if (!fs.existsSync(app)) throw new Error(`HII app is not installed at ${app}`);
+    const result = spawnSync("open", ["-a", app], { stdio: "inherit" });
+    if (result.status !== 0) throw new Error("could not open the HII app");
+    console.log(`opened ${app}`);
+  } else if (sub === "status") {
+    const result = spawnSync("pgrep", ["-x", "HII"], { encoding: "utf8" });
+    console.log(JSON.stringify({ installed: fs.existsSync(app), running: result.status === 0, pid: result.stdout.trim() || null, app }, null, 2));
+  } else {
+    throw new Error("usage: hii app <open|status>");
+  }
+}
+
+async function cmdOpen(args) {
+  const target = args[0] || "app";
+  if (target === "app" || target === "desktop") return cmdApp(["open"]);
+  if (target === "web") return cmdWeb(["open"]);
+  if (target === "site") {
+    openUrl(appBaseUrl());
+    return console.log(`opened ${appBaseUrl()}`);
+  }
+  throw new Error("usage: hii open <app|web|site>");
 }
 
 function runnerToken() {
@@ -1193,6 +1308,21 @@ function agentCommandCatalog() {
     { command: "hii loop once", purpose: "Propose the next user-proxy plan locally; do not act until y/n approval." },
     { command: "hii loop note <note>", purpose: "Add user notes to steer the persistent loop." },
     { command: "hii loop decide <yes|no>", purpose: "Approve or reject the latest proposed plan." },
+    { command: "hii model search <query>", purpose: "Discover MLX-ready Hugging Face models; defaults to mlx-community." },
+    { command: "hii model install <org/model>", purpose: "Explicitly download and verify weights in HII Native's private cache." },
+    { command: "hii model installed", purpose: "List locally installed HII Native model weights and disk usage." },
+    { command: "hii model use <org/model>", purpose: "Switch the HII Native backend and project the active choice into Pi." },
+    { command: "hii model status", purpose: "Show backend, active model, endpoint, process, performance settings, and logs." },
+    { command: "hii model bench", purpose: "Run HII's bounded end-to-end completion benchmark against the active model." },
+    { command: "hii model remove <org/model>", purpose: "Preview removal; add --yes only when the displayed target is correct." },
+    { command: "hii open app", purpose: "Launch the installed HII desktop application." },
+    { command: "hii open web", purpose: "Start HII's CLI-owned local web runtime and open it in the browser." },
+    { command: "hii open site", purpose: "Open the configured canonical website without starting a local runtime." },
+    { command: "hii ui web status", purpose: "Show the local web process, URL, state, and log coordinate." },
+    { command: "hii ui web start", purpose: "Start the local web runtime and wait until it is ready." },
+    { command: "hii ui web logs", purpose: "Inspect the CLI-owned web runtime log." },
+    { command: "hii ui web stop", purpose: "Stop only the web process group owned by this CLI." },
+    { command: "hii ui app status", purpose: "Show whether the desktop bundle is installed and currently running." },
     { command: "hii daemon start", purpose: "Start hiid, the local HII daemon instance supervisor." },
     { command: "hii daemon status", purpose: "Show hiid health, runtime path, instance count, and autonomy boundary." },
     { command: "hii feed --follow", purpose: "Read the daemon action feed for live HII work." },
@@ -2541,6 +2671,10 @@ function cmdHelp(topic) {
   console.log("  hii board | jobs | context  detailed state surfaces");
   console.log("  hii codex run <prompt>      managed run through HII daemon");
   console.log("  hii skill report            write a post-verification action receipt");
+  console.log("  hii model ...               discover, install, switch, benchmark, or remove local models");
+  console.log("  hii open app|web|site       launch the desktop, local web, or canonical website");
+  console.log("  hii ui web start|status     control the CLI-owned local web runtime");
+  console.log("  hii ui app status           inspect the installed desktop app");
   console.log("\n  Boundary: HII captures intent and proof locally. Execution remains explicitly\n  operator-controlled; shipping, pushing, publishing, and payment are never implicit.\n");
 }
 
@@ -2763,7 +2897,7 @@ function refreshReadmeState() {
 }
 
 function runnerUsage() {
-  console.error("usage: hii runner <model <doctor|start|stop|status|models|bench|logs>|init <name>|start [--once]>");
+  console.error("usage: hii model <search|install|installed|use|status|start|stop|models|bench|logs|remove>");
 }
 
 async function cmdRunner(args) {
@@ -2977,6 +3111,44 @@ switch (cmd) {
   case "daemon": cmdDaemon(rest); break;
   case "instances": cmdInstances(rest); break;
   case "feed": cmdFeed(rest); break;
+  case "model":
+    if (rest.includes("--help") || rest.includes("-h")) cmdHelp("model");
+    else nodeScript(HIID, ["model-runtime", ...(rest.length ? rest : ["status"])]);
+    break;
+  case "ui": {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      cmdHelp("ui");
+      break;
+    }
+    const surface = rest[0];
+    const action = rest.slice(1);
+    const operation = surface === "web"
+      ? cmdWeb(action)
+      : surface === "app" || surface === "desktop"
+        ? Promise.resolve(cmdApp(action))
+        : Promise.reject(new Error("usage: hii ui <web|app> <open|start|status|logs|stop>"));
+    operation.catch((error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    });
+    break;
+  }
+  case "app":
+    try { cmdApp(rest); } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+    break;
+  case "open":
+    if (rest.includes("--help") || rest.includes("-h")) {
+      cmdHelp("open");
+      break;
+    }
+    cmdOpen(rest).catch((error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    });
+    break;
   case "space": {
     const { cmdSpace } = await import("./hii-space.mjs");
     process.exit(cmdSpace(rest));
@@ -3095,12 +3267,20 @@ usage: hii <command>
   skill doctor        validate registry, bundles, receipts, and legacy count
   runner init <name>  register an owned runner and print its token once
   runner start --once claim one whitelisted runner job and exit
-  runner model doctor inspect native runtime, hardware tier, and privacy route
-  runner model start  start HII Native on 127.0.0.1:11435
-  runner model status show native runtime process, model, endpoint, and log
-  runner model models list models loaded by the native runtime
-  runner model bench  run a timed end-to-end completion
-  runner model stop   stop the HII-owned native model runtime
+  model search <query> discover MLX models on Hugging Face
+  model install <id>  download and verify a model in HII's private cache
+  model installed     list models installed for HII Native
+  model use <id>      activate an installed model and update Pi
+  model status|models inspect the active HII Native backend
+  model bench|logs    benchmark or inspect the active backend
+  model start|stop    control the HII-owned model runtime
+  model remove <id>   preview removal; add --yes to apply
+  open app            launch the installed HII desktop app
+  open web            start and open HII's local web instance
+  open site           open the configured canonical HII website
+  ui app status       inspect the installed desktop app
+  ui web start|status control or inspect the local web instance
+  ui web logs|stop    inspect logs or stop the CLI-owned web instance
   check               typecheck (the inner fix loop)
   ship [message]      typecheck -> local commit only
   ship --push [msg]   explicit external push to origin

@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: LicenseRef-BSL-1.1
 
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const nextBin = fileURLToPath(new URL('../node_modules/.bin/next', import.meta.url));
 
 const children = [
   spawn(process.execPath, ['scripts/hii-web-dev-runtime.mjs'], { stdio: 'inherit', env: process.env }),
-  spawn('next', ['dev', '--hostname', '127.0.0.1', ...process.argv.slice(2)], {
+  spawn(nextBin, ['dev', '--hostname', '127.0.0.1', ...process.argv.slice(2)], {
     stdio: 'inherit',
     env: {
       ...process.env,
@@ -20,6 +23,11 @@ function stop(signal = 'SIGTERM') {
 
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => stop(signal));
 for (const child of children) {
+  child.on('error', (error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+    stop();
+  });
   child.on('exit', (code) => {
     if (code && code !== 0) process.exitCode = code;
     stop();

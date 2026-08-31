@@ -189,6 +189,30 @@ pub const ROUTES: &[Route] = &[
         Infra,
         "list locally installed Ollama models",
     ),
+    delegated(
+        "model",
+        Core,
+        Infra,
+        "fully manage the HII Native model backend",
+    ),
+    delegated(
+        "open",
+        Core,
+        Infra,
+        "open the HII desktop app, local web, or canonical site",
+    ),
+    delegated(
+        "ui",
+        Core,
+        Infra,
+        "control HII desktop and local web surfaces",
+    ),
+    delegated(
+        "app",
+        Core,
+        Infra,
+        "open or inspect the installed HII desktop app",
+    ),
     native(
         "providers",
         Core,

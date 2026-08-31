@@ -42,6 +42,8 @@ const MODEL_RUNTIME_PID = path.join(MODEL_RUNTIME_DIR, "runner.pid");
 const MODEL_RUNTIME_STATUS = path.join(MODEL_RUNTIME_DIR, "status.json");
 const MODEL_RUNTIME_LOG = path.join(MODEL_RUNTIME_DIR, "runner.log");
 const MODEL_RUNTIME_URL = "http://127.0.0.1:11435";
+const MODEL_HOME = path.join(RUNTIME, "models");
+const HF_CACHE = path.join(MODEL_HOME, "huggingface", "hub");
 const MODEL_PROFILES = path.join(ROOT, "config", "native-model-profiles.json");
 const CONTEXT_DB = path.join(RUNTIME, "hii.db");
 const OWNED_PATTERNS = [
@@ -1025,12 +1027,26 @@ function ensureHiiNativeEngine() {
   return server;
 }
 
+function modelRuntimeProcess() {
+  const recorded = Number(fs.existsSync(MODEL_RUNTIME_PID) ? fs.readFileSync(MODEL_RUNTIME_PID, "utf8").trim() : "");
+  const observed = spawnSync("ps", ["-axo", "pid=,pgid=,command="], { encoding: "utf8" });
+  if (observed.status !== 0) return null;
+  const mlxServer = path.join(RUNTIME, "runtimes", "mlx", "bin", "mlx_vlm.server");
+  const rows = observed.stdout.split("\n").map((line) => {
+    const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
+    return match ? { pid: Number(match[1]), pgid: Number(match[2]), command: match[3] } : null;
+  }).filter(Boolean);
+  const owned = rows.find((row) => row.pid === recorded
+    && row.command.includes(path.basename(nativeRunnerBin())))
+    || rows.find((row) => row.command.includes(mlxServer)
+      && row.command.includes("--host 127.0.0.1")
+      && row.command.includes("--port 11435"));
+  if (owned && owned.pid !== recorded) fs.writeFileSync(MODEL_RUNTIME_PID, String(owned.pid));
+  return owned || null;
+}
+
 function modelRuntimePid() {
-  const pid = Number(fs.existsSync(MODEL_RUNTIME_PID) ? fs.readFileSync(MODEL_RUNTIME_PID, "utf8").trim() : "");
-  if (!pidAlive(pid)) return null;
-  const observed = spawnSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" });
-  if (observed.status !== 0 || !observed.stdout.includes(path.basename(nativeRunnerBin()))) return null;
-  return pid;
+  return modelRuntimeProcess()?.pid || null;
 }
 
 function consumerModelProfile(memoryGiB = totalMemoryGiB()) {
@@ -1074,6 +1090,149 @@ async function printModelRuntimeStatus() {
 function cliOption(args, name, fallback = null) {
   const index = args.indexOf(name);
   return index >= 0 && args[index + 1] !== undefined ? args[index + 1] : fallback;
+}
+
+function requireHuggingFaceModel(value, command) {
+  const model = String(value || "").trim();
+  if (!/^[\w.-]+\/[\w./-]+$/.test(model)) {
+    throw new Error(`usage: hii model ${command} <hugging-face-org/model>`);
+  }
+  return model;
+}
+
+function hf(args, options = {}) {
+  const result = spawnSync("hf", args, { encoding: "utf8", ...options });
+  if (result.error?.code === "ENOENT") {
+    throw new Error("Hugging Face CLI is missing; install `hf` before managing HII Native models");
+  }
+  if (result.status !== 0) {
+    if (options.stdio === "inherit") process.exitCode = result.status || 1;
+    throw new Error((result.stderr || result.stdout || "Hugging Face command failed").trim());
+  }
+  return result;
+}
+
+function cachedModelPath(model) {
+  return path.join(HF_CACHE, `models--${model.replaceAll("/", "--")}`);
+}
+
+function modelIsInstalled(model) {
+  const root = cachedModelPath(model);
+  return fs.existsSync(path.join(root, "refs")) || fs.existsSync(path.join(root, "snapshots"));
+}
+
+function syncPiModel(model, makeDefault) {
+  const piDir = path.join(os.homedir(), ".pi", "agent");
+  const modelsPath = path.join(piDir, "models.json");
+  const settingsPath = path.join(piDir, "settings.json");
+  if (!fs.existsSync(piDir)) return { configured: false, reason: "Pi is not installed" };
+  const config = safeReadJson(modelsPath, { providers: {} });
+  config.providers ||= {};
+  const provider = config.providers["hii-native"] ||= {
+    api: "openai-completions",
+    apiKey: "hii-local",
+    baseUrl: `${MODEL_RUNTIME_URL}/v1`,
+    compat: { supportsDeveloperRole: false, supportsReasoningEffort: false },
+    models: []
+  };
+  provider.baseUrl = `${MODEL_RUNTIME_URL}/v1`;
+  provider.models ||= [];
+  if (!provider.models.some((entry) => entry.id === model)) {
+    provider.models.push({
+      id: model,
+      name: `${model} (HII Native MLX)`,
+      input: ["text"],
+      reasoning: false,
+      contextWindow: 262144,
+      maxTokens: 16384
+    });
+  }
+  writeJson(modelsPath, config);
+  if (makeDefault) {
+    const settings = safeReadJson(settingsPath, {});
+    settings.defaultProvider = "hii-native";
+    settings.defaultModel = model;
+    writeJson(settingsPath, settings);
+  }
+  return { configured: true, provider: "hii-native", default: makeDefault };
+}
+
+function searchModels(args) {
+  const query = args.filter((arg) => !arg.startsWith("--")).join(" ").trim();
+  if (!query) throw new Error("usage: hii model search <query> [--all-authors]");
+  const command = ["models", "list", "--search", query, "--limit", "20", "--human-readable"];
+  if (!args.includes("--all-authors")) command.push("--author", "mlx-community");
+  const result = hf(command);
+  process.stdout.write(result.stdout);
+}
+
+function installModel(args) {
+  const model = requireHuggingFaceModel(args[0], "install");
+  fs.mkdirSync(HF_CACHE, { recursive: true });
+  hf(["download", model, "--cache-dir", HF_CACHE], { stdio: "inherit" });
+  hf(["cache", "verify", model, "--cache-dir", HF_CACHE], { stdio: "inherit" });
+  const pi = syncPiModel(model, false);
+  event("model_runtime.model_installed", {
+    actor: "hii.cli", target: model, status: "verified", text: `Installed ${model} in HII Native's model cache`
+  });
+  console.log(JSON.stringify({ ok: true, model, cache: HF_CACHE, verified: true, pi }, null, 2));
+}
+
+function listInstalledModels() {
+  fs.mkdirSync(HF_CACHE, { recursive: true });
+  const result = hf(["cache", "list", "--cache-dir", HF_CACHE]);
+  process.stdout.write(result.stdout);
+}
+
+async function waitForModelRuntime(timeoutMs = 30 * 60 * 1000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${MODEL_RUNTIME_URL}/health`, { signal: AbortSignal.timeout(1000) });
+      if (response.ok) return;
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  throw new Error("HII Native did not become ready within 30 minutes; run `hii model logs`");
+}
+
+async function waitForModelRuntimeStopped(timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!modelRuntimeProcess()) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error("HII Native did not stop within 30 seconds; inspect `hii model status` and `hii model logs`");
+}
+
+async function useModel(args) {
+  const model = requireHuggingFaceModel(args[0], "use");
+  if (!modelIsInstalled(model)) {
+    throw new Error(`${model} is not installed; run: hii model install ${model}`);
+  }
+  if (modelRuntimePid()) {
+    stopModelRuntime();
+    await waitForModelRuntimeStopped();
+  }
+  await startModelRuntime(["--model", model]);
+  await waitForModelRuntime();
+  const pi = syncPiModel(model, true);
+  console.log(JSON.stringify({ ok: true, active: model, endpoint: MODEL_RUNTIME_URL, pi }, null, 2));
+}
+
+function removeModel(args) {
+  const model = requireHuggingFaceModel(args[0], "remove");
+  const active = modelRuntimeStatus().model === model && Boolean(modelRuntimePid());
+  if (active) throw new Error(`${model} is active; choose another model or run \`hii model stop\` first`);
+  if (!modelIsInstalled(model)) throw new Error(`${model} is not installed in HII Native`);
+  if (!args.includes("--yes")) {
+    console.log(JSON.stringify({ ok: true, dryRun: true, model, path: cachedModelPath(model), apply: `hii model remove ${model} --yes` }, null, 2));
+    return;
+  }
+  hf(["cache", "rm", `model/${model}`, "--cache-dir", HF_CACHE, "--yes"], { stdio: "inherit" });
+  event("model_runtime.model_removed", {
+    actor: "hii.cli", target: model, status: "removed", text: `Removed ${model} from HII Native's model cache`
+  });
 }
 
 async function startModelRuntime(args) {
@@ -1161,8 +1320,8 @@ async function startModelRuntime(args) {
 }
 
 function stopModelRuntime() {
-  const pid = modelRuntimePid();
-  if (!pid) {
+  const owned = modelRuntimeProcess();
+  if (!owned) {
     writeJson(MODEL_RUNTIME_STATUS, { ...modelRuntimeStatus(), state: "stopped", pid: null, stoppedAt: now() });
     console.log("HII native runner is not running");
     return;
@@ -1170,14 +1329,14 @@ function stopModelRuntime() {
   // The native runner owns engine children (MLX-VLM on Apple Silicon). It is
   // launched as a detached process group, so stop the whole owned runtime and
   // never leave a model server orphaned on the loopback port.
-  if (process.platform === "win32") process.kill(pid, "SIGTERM");
-  else process.kill(-pid, "SIGTERM");
+  if (process.platform === "win32") process.kill(owned.pid, "SIGTERM");
+  else process.kill(-owned.pgid, "SIGTERM");
   writeJson(MODEL_RUNTIME_STATUS, { ...modelRuntimeStatus(), state: "stopped", pid: null, stoppedAt: now() });
   event("model_runtime.stopped", {
-    actor: "hii.cli", target: MODEL_RUNTIME_URL, status: "stopped", pid,
+    actor: "hii.cli", target: MODEL_RUNTIME_URL, status: "stopped", pid: owned.pid,
     text: "Stopped HII native model runtime"
   });
-  console.log(`stopped HII native runner pid=${pid}`);
+  console.log(`stopped HII native runner pid=${owned.pid}`);
 }
 
 function doctorModelRuntime() {
@@ -1271,7 +1430,12 @@ async function cmdModelRuntime(args) {
   else if (sub === "models") await listModelRuntimeModels();
   else if (sub === "bench") await benchModelRuntime(args.slice(1));
   else if (sub === "logs") tailFile(MODEL_RUNTIME_LOG, Number(args[1] || 80));
-  else throw new Error("usage: hiid model-runtime <start|stop|status|doctor|models|bench|logs>");
+  else if (sub === "search") searchModels(args.slice(1));
+  else if (sub === "install") installModel(args.slice(1));
+  else if (sub === "installed") listInstalledModels();
+  else if (sub === "use") await useModel(args.slice(1));
+  else if (sub === "remove") removeModel(args.slice(1));
+  else throw new Error("usage: hii model <search|install|installed|use|status|start|stop|models|bench|logs|remove>");
 }
 
 function runningDaemonPids() {
