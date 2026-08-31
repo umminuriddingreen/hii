@@ -148,6 +148,42 @@ describe('public web surface', () => {
     });
   });
 
+  describe('operator surface', () => {
+    const worker = read('workers/public-site/src/admin.rs');
+
+    it('is kept out of the index and out of the sitemap', () => {
+      expect(read('app/admin/page.tsx')).toMatch(/robots:\s*\{\s*index:\s*false/);
+      expect([robots().rules].flat()[0].disallow).toContain('/admin');
+      expect(PUBLIC_ROUTES).not.toContain('/admin');
+      expect(sitemap().map((entry) => entry.url).join(' ')).not.toContain('/admin');
+    });
+
+    it('grants access from a secret, so a D1 write cannot escalate anyone', () => {
+      expect(worker).toContain('HII_ADMIN_HANDLES');
+      expect(worker).toContain('env.secret');
+      // Privilege is configuration, not data: no admin column is read from D1.
+      expect(worker).not.toMatch(/is_admin\s*(BOOLEAN|INTEGER)|\bis_admin\s*=|role\s*=\s*'admin'/);
+      expect(worker).not.toMatch(/SELECT[^;]*\badmin\b[^;]*FROM/i);
+    });
+
+    it('answers a non-operator with 404, never 403, so the route stays unadmitted', () => {
+      expect(worker).toMatch(/if !is_operator[\s\S]{0,120}api_error\(404, "not_found"\)/);
+      expect(worker).not.toContain('403');
+    });
+
+    it('denies access when the secret is unset rather than defaulting open', () => {
+      expect(worker).toMatch(/let Ok\(configured\) = env\.secret[\s\S]{0,80}return false/);
+    });
+
+    it('reads only records the service already keeps, and reports no ids', () => {
+      expect(worker).toContain('FROM accounts');
+      // Account ids are auth material; the roster identifies people by handle.
+      expect(worker).not.toMatch(/SELECT a\.id\b/);
+      expect(worker).not.toContain('credential_json');
+      expect(worker).not.toContain('token_hash');
+    });
+  });
+
   describe('keyboard entry', () => {
     it('offers a skip link ahead of the canvas chrome', () => {
       expect(read('app/layout.tsx')).toContain('hii-skip-link');

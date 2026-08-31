@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod admin;
 mod chat;
 mod device;
 mod feed;
@@ -211,6 +212,11 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
                 .unwrap_or(api_error(404, "not_found")?);
                 return secure_no_store(response);
             }
+            if admin::is_admin_api_path(&path) {
+                return secure_no_store(
+                    admin::handle_admin_api(request, env, &db, &session).await?,
+                );
+            }
             if device::is_account_device_path(&path) {
                 return secure_no_store(
                     device::handle_account_device_api(request, &db, &session).await?,
@@ -265,16 +271,17 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
         return secure_no_store(api_error(405, "method_not_allowed")?);
     }
 
-    if let Some(platform) = path.strip_prefix("/download/") {
-        if matches!(platform, "windows" | "macos") {
-            let Some(token) = cookie(request, SESSION_COOKIE)? else {
-                return secure_no_store(api_error(401, "authentication_required")?);
-            };
-            if active_session(&db, &token).await?.is_none() {
-                return secure_no_store(api_error(401, "authentication_required")?);
-            }
-            return secure_no_store(download_desktop(request, env, platform).await?);
+    if let Some(platform) = path
+        .strip_prefix("/download/")
+        .filter(|platform| matches!(*platform, "windows" | "macos"))
+    {
+        let Some(token) = cookie(request, SESSION_COOKIE)? else {
+            return secure_no_store(api_error(401, "authentication_required")?);
+        };
+        if active_session(&db, &token).await?.is_none() {
+            return secure_no_store(api_error(401, "authentication_required")?);
         }
+        return secure_no_store(download_desktop(request, env, platform).await?);
     }
 
     if let Some(asset) = path.strip_prefix("/cli/releases/latest/") {
