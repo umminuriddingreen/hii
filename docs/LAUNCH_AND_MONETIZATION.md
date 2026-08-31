@@ -80,6 +80,30 @@ Candidate price: $2,500–$10,000 per implementation.
 
 Only offer after three workflows have been repeated across multiple users with stable permission boundaries, support documentation, and measurable time saved.
 
+## Long-term economic alignment
+
+The founder beta sells one verified outcome. The later HII Network should keep
+the same alignment at platform scale: HII earns only after a human, creator,
+provider, or organization receives value.
+
+The user-owned personal foundation remains free: identity, local state,
+portable memory, local objects and receipts, free publication, and direct
+peer-to-peer communication where infrastructure permits. HII does not sell
+behavioral profiles or optimize an advertising feed.
+
+Candidate paid responsibilities include managed encrypted sync and recovery,
+hosted relays and media delivery, scheduled automation, compute and rendering,
+team governance, creator/community services, support, and verified commerce.
+Marketplace or transaction fees apply only to value-bearing exchanges; free
+objects remain free to publish and use under their licenses. Exact future
+prices and take rates remain unlaunched hypotheses until external usage proves
+the responsibility and economics.
+
+The long-term north-star metric is **weekly verified value flows per active
+human**, not time in app, feed depth, notifications opened, or personal data
+collected. See
+[`HII_USER_OWNED_NETWORK.md`](HII_USER_OWNED_NETWORK.md).
+
 ## Funnel
 
 The launch site has two paths:

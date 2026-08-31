@@ -35,6 +35,21 @@ capture or create objects
 → remember, share, remix, export, or promote
 ```
 
+The loop compounds for the user:
+
+```text
+scoped human activity
+→ useful user-owned context
+→ increasingly valuable verified outputs
+→ corrections, preferences, memory, and reusable capability
+→ better future context and action for the same human
+```
+
+HII may process interaction signals at high velocity, but raw behavioral
+exhaust does not silently become permanent memory. Durable memory is selective,
+source-linked, confidence-bearing, correctable, deletable, and useful to a
+named human objective. Perception is evidence, never authority.
+
 ## Architecture laws
 
 1. Harness writes through Runtime commands and capabilities, never directly to
@@ -54,6 +69,13 @@ capture or create objects
 13. No feature creates an incompatible object store or execution system.
 14. Features are object types, views, capabilities, Network services, or Runtime
     invariants—not new top-level products.
+15. HII helps people do work through their existing tools; it does not require
+    every activity to remain inside an HII-owned application.
+16. Social feeds, profiles, messages, calls, listings, and marketplaces are
+    projections or services over the same user-owned Objects, Events,
+    Identities, Grants, and Receipts.
+17. HII must not monetize surveillance, compulsive attention, or artificial
+    lock-in. It earns from optional responsibility and value-bearing activity.
 
 ## Product character
 
@@ -70,6 +92,25 @@ capture or create objects
   gains authority.
 - Finished structured artifacts—not screenshots of chats—are the primary unit
   of sharing and distribution.
+
+## Social and economic alignment
+
+The long-term Network is an object network: a profile is an Identity/Space
+projection, a post is a published Object, a feed is a view of signed
+publication Events, a share is a Grant, a remix is a provenance-linked fork,
+and a sale is an Offer plus entitlement and Receipt.
+
+The personal foundation remains local-first, portable, provider-neutral, and
+useful without payment. HII may charge when it takes an optional ongoing
+responsibility—managed sync, relay, recovery, automation, compute, governance,
+support, or commerce—or when it facilitates an exchange that creates value for
+the participants first. Time in app, feed depth, and data collected are not
+success metrics. The long-term north star is weekly verified value flows per
+active human.
+
+The complete founder direction, safety boundary, and staged acceptance gates
+are defined in
+[`HII_USER_OWNED_NETWORK.md`](HII_USER_OWNED_NETWORK.md).
 
 ## Feature rule
 

@@ -2,8 +2,8 @@
 
 **Founder:** Ummi Nuriddin Green  
 **Status:** Founder-level product and architecture context  
-**Version:** 1.2
-**Date:** 2026-08-18
+**Version:** 1.3
+**Date:** 2026-08-30
 
 This document gives implementation agents one coherent account of what HII
 means, what is being shipped now, what belongs later, and how work must be
@@ -39,6 +39,17 @@ deterministic runtime and authority boundary. The Knowledge Workspace and
 Context Dock become the durable context and memory foundation for this surface.
 The Mac/Windows machine fabric is a primary product direction, but it is not
 implemented or verified merely because the direction is documented.
+
+**Founder direction, 2026-08-30:** HII should eventually become a user-owned
+information and capability network: people cultivate portable personal agents,
+publish typed objects and Spaces, follow people and objects, communicate, remix
+with provenance, and exchange artifacts, capabilities, computation, and real
+goods. HII processes legitimate user context at high velocity so outputs can
+compound in value for that user; it does not turn raw behavior into a
+surveillance profile. This is the platform direction, not a claim that the
+social graph, public feed, messaging, calls, moderation, or commerce loop is
+implemented. See
+[`HII_USER_OWNED_NETWORK.md`](HII_USER_OWNED_NETWORK.md).
 
 ## Authority and use
 
@@ -95,10 +106,12 @@ human intent
 → reusable capability
 ```
 
-HII is not a chatbot, model wrapper, terminal skin, marketplace, or collection
-of unrelated tools. Internally, the sharp metaphor is a **control plane for
-artificial labor**: it gives agents assignments, context, boundaries, tools,
-status, proof, review, memory, and handoffs.
+HII is not a chatbot, model wrapper, terminal skin, marketplace by itself, or
+collection of unrelated tools. A future marketplace is one Network service
+over the same user-owned objects and authority contracts, not the definition of
+the product. Internally, the sharp metaphor is a **control plane for artificial
+labor**: it gives agents assignments, context, boundaries, tools, status,
+proof, review, memory, and handoffs.
 
 The equally important human-facing metaphor is:
 
@@ -178,6 +191,21 @@ re-explaining project history, preserve why decisions were made, coordinate
 agents as workers, review evidence before trusting completion, maintain
 continuity across machines and conversations, and turn repeated success into
 reusable capability.
+
+The interaction model should write useful context at the speed of work:
+
+```text
+scoped activity and information
+→ ephemeral interpretation
+→ meaningful event or durable object only when justified
+→ bounded context for the current objective
+→ verified output
+→ user correction and compounding memory
+```
+
+Mass-speed context processing is not mass retention. Private and excluded
+activity remains unobserved; transient attention can be discarded; durable
+memory stays user-owned, minimal, provenance-bearing, and correctable.
 
 The ideal daily question is:
 
@@ -551,7 +579,8 @@ Do not expand the current release into:
 - blanket email, message, calendar, photo, health, or financial ingestion;
 - a full personal ontology or life-data harvester;
 - unrestricted autonomous agents or unrestricted shell MCP tools;
-- cloud collaboration, mobile, social networking, or broad web crawling;
+- cloud collaboration, mobile, a full social network implementation, or broad
+  web crawling before the local object-to-artifact loop is dependable;
 - a marketplace, payments, credits expansion, runner exchange, or
   third-party decentralized compute system;
 - a geometry compiler, CAD replacement, or fabrication marketplace;
@@ -666,8 +695,19 @@ execution → proof → memory loop?
 HII coordinate the right data and capability across their own devices, while
 showing what crossed the link, what changed, and what proof came back?
 
+**User-owned Network:** Can useful objects, relationships, communication, and
+value move between people while identity, provenance, authority, portability,
+and economic benefit remain aligned with the humans who created them?
+
+**Economic alignment:** Does HII earn because a verified value flow benefited
+a human, creator, provider, or organization first—rather than because it
+captured attention, sold behavioral data, or made departure difficult?
+
 ## Final principle
 
 > HII should not give an agent more data. It should give the agent the smallest
 > verified context required to act correctly, govern the work through explicit
 > capabilities, and give the human proof of what happened.
+
+> HII should process context at the speed of human work while preserving only
+> what serves the human with consent, provenance, correction, and control.

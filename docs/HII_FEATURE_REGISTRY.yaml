@@ -29,6 +29,9 @@ features:
 
   - { id: object.universal-save, name: Universal Save, classification: capability, product: harness, status: next }
   - { id: object.message, name: Message and correspondence, classification: object_type, product: space, status: next }
+  - { id: object.profile, name: Human agent creator and organization profile, classification: object_type, product: space, status: later }
+  - { id: object.publication, name: Published object with audience rights and lineage, classification: object_type, product: space, status: later }
+  - { id: object.offer, name: Offer listing license and entitlement, classification: object_type, product: space, status: later }
   - { id: object.decision, name: Reviewed decision lifecycle, classification: object_type, product: space, status: next }
   - { id: object.web-page, name: Source-linked webpage, classification: object_type, product: space, status: next }
   - { id: object.geometry, name: Geometry and CAD artifact, classification: object_type, product: space, status: later }
@@ -49,6 +52,10 @@ features:
   - { id: network.snapshot-fork-export, name: Snapshot fork and export, classification: network_service, product: network, status: now }
   - { id: network.direct-relay, name: Direct connection with encrypted relay fallback, classification: network_service, product: network, status: now }
   - { id: network.messages, name: DMs and permissioned object streams, classification: network_service, product: network, status: later }
+  - { id: network.social-graph, name: Follow block mute and relationship graph, classification: network_service, product: network, status: later }
+  - { id: network.realtime-calls, name: Permissioned voice video and screen sessions, classification: network_service, product: network, status: later }
+  - { id: network.federation, name: Public social protocol adapters, classification: network_service, product: network, status: later }
+  - { id: network.moderation, name: Reporting moderation provenance and abuse controls, classification: network_service, product: network, status: later }
   - { id: network.physical-space, name: QR and place-linked Spaces, classification: network_service, product: network, status: later }
   - { id: network.publication, name: Public links discovery and creator pages, classification: network_service, product: network, status: later }
   - { id: network.marketplace, name: Capability and artifact marketplace, classification: network_service, product: network, status: later }

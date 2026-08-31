@@ -10,7 +10,7 @@ const legacySdkRoute = readFileSync(resolve(root, 'src/routes/(app)/docs/hii-sdk
 
 describe('HII web documentation', () => {
   it('compiles every canonical repository document into a stable route', () => {
-    expect(hiiDocsCatalog).toHaveLength(16);
+    expect(hiiDocsCatalog).toHaveLength(17);
     expect(new Set(hiiDocsCatalog.map((doc) => doc.slug)).size).toBe(hiiDocsCatalog.length);
     for (const entry of hiiDocsCatalog) {
       expect(readHiiDoc(entry.slug)?.markdown.length).toBeGreaterThan(100);

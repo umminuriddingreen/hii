@@ -7,6 +7,7 @@ import capabilityTerminal from '../../docs/capability-terminal-v1.md?raw';
 import codexIntegration from '../../docs/codex-app-server-integration.md?raw';
 import sparkAgents from '../../docs/codex-spark-agents-plan.md?raw';
 import masterContext from '../../docs/HII_AII_MASTER_CONTEXT.md?raw';
+import userOwnedNetwork from '../../docs/HII_USER_OWNED_NETWORK.md?raw';
 import brandDna from '../../docs/hii-brand-dna-v0.1.md?raw';
 import sdkContracts from '../../docs/hii-sdk-contracts.md?raw';
 import install from '../../docs/INSTALL.md?raw';
@@ -27,6 +28,7 @@ export type HiiDocEntry = {
 export const hiiDocsCatalog: HiiDocEntry[] = [
   { slug:'overview', title:'HII overview', description:'Product definition, coordinates, development, and verification.', section:'Start here', source:'README.md', status:'canonical' },
   { slug:'master-context', title:'HII / AII master context', description:'Founder thesis, system boundary, product scope, and definition of done.', section:'Start here', source:'docs/HII_AII_MASTER_CONTEXT.md', status:'canonical' },
+  { slug:'user-owned-network', title:'User-owned network', description:'Compounding interaction, social objects, identity, communication, commerce, and aligned economics.', section:'Start here', source:'docs/HII_USER_OWNED_NETWORK.md', status:'canonical' },
   { slug:'launch', title:'Launch and monetization', description:'Founder-beta offer, activation event, economics, and launch gates.', section:'Start here', source:'docs/LAUNCH_AND_MONETIZATION.md', status:'current' },
   { slug:'install', title:'Install HII on Mac', description:'Signed application and local bootstrap instructions.', section:'Use HII', source:'docs/INSTALL.md', status:'release-gated' },
   { slug:'agent-access', title:'Agent access', description:'The safe, canonical way for agents to inspect and operate HII.', section:'Use HII', source:'docs/agent-access.md', status:'current' },
@@ -53,6 +55,7 @@ const compiledMarkdown: Record<string, string> = {
   'docs/codex-app-server-integration.md': codexIntegration,
   'docs/codex-spark-agents-plan.md': sparkAgents,
   'docs/HII_AII_MASTER_CONTEXT.md': masterContext,
+  'docs/HII_USER_OWNED_NETWORK.md': userOwnedNetwork,
   'docs/hii-brand-dna-v0.1.md': brandDna,
   'docs/hii-sdk-contracts.md': sdkContracts,
   'docs/INSTALL.md': install,

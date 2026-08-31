@@ -24,6 +24,7 @@ human intent
 
 The product direction is defined by
 [the HII master context](docs/HII_AII_MASTER_CONTEXT.md),
+[the user-owned Network direction](docs/HII_USER_OWNED_NETWORK.md),
 [ADR 004: CLI-First HII Runtime](docs/decisions/004-cli-first-hii-runtime.md),
 and
 [ADR 005: One Surface over the User's Systems and Data](docs/decisions/005-one-surface-machine-fabric.md).
