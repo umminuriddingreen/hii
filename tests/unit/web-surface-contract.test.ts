@@ -125,6 +125,24 @@ describe('public web surface', () => {
       expect(headers).toMatch(/\/opengraph-image\n\s+Content-Type: image\/png/);
     });
 
+    it('lets canvas assets render, which are blob: URLs from IndexedDB', () => {
+      // Every preview type failed in production while these were missing: images
+      // were blocked by img-src, PDFs by frame-src, and audio/video fell through
+      // to default-src. Dev serves no CSP, so none of it showed up locally.
+      const csp = /Content-Security-Policy:\s*(.+)/.exec(headers)?.[1] ?? '';
+      const directive = (name: string) =>
+        csp.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${name} `)) ?? '';
+      expect(directive('img-src'), 'image nodes').toContain('blob:');
+      expect(directive('media-src'), 'audio and video nodes').toContain('blob:');
+      expect(directive('frame-src'), 'PDF nodes').toContain('blob:');
+    });
+
+    it('still refuses plugin content and cross-origin framing of itself', () => {
+      expect(headers).toContain("object-src 'none'");
+      expect(headers).toContain("frame-ancestors 'none'");
+      expect(headers).toContain("base-uri 'none'");
+    });
+
     it('caches fingerprinted assets immutably', () => {
       expect(headers).toMatch(/\/_next\/static\/\*\n\s+Cache-Control: public, max-age=31536000, immutable/);
     });
