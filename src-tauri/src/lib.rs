@@ -546,6 +546,11 @@ fn applications_list(app: tauri::AppHandle) -> Result<Value, String> {
     hii_json(&app, &["apps", "list", "--json"])
 }
 
+#[tauri::command]
+fn agent_home(app: tauri::AppHandle) -> Result<Value, String> {
+    hii_json(&app, &["home", "--json"])
+}
+
 const ECOSYSTEM_CATALOG_MAX_BYTES: u64 = 256 * 1024;
 const ECOSYSTEM_CATALOG_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -750,6 +755,7 @@ pub fn run() {
             notification_list,
             notification_read,
             applications_list,
+            agent_home,
             ecosystem_catalog,
             application_requests,
             application_acknowledge,

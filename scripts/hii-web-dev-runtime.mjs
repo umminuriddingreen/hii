@@ -175,6 +175,10 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'GET' && url.pathname === '/health') {
       return send(response, { ok: true, binary: hiiBinary(), purpose: 'browser hot-reload transport only' });
     }
+    if (request.method === 'GET' && url.pathname === '/home') {
+      const output = await cli(['home', '--json']);
+      return send(response, JSON.parse(output));
+    }
     if (request.method === 'GET' && url.pathname.startsWith('/agent/')) {
       const run = runs.get(url.pathname.slice('/agent/'.length));
       return run ? send(response, run) : send(response, { error: 'run not found' }, 404);

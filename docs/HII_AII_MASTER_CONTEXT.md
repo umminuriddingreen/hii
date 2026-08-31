@@ -51,6 +51,16 @@ social graph, public feed, messaging, calls, moderation, or commerce loop is
 implemented. See
 [`HII_USER_OWNED_NETWORK.md`](HII_USER_OWNED_NETWORK.md).
 
+**Founder direction, 2026-08-30 — white-box HII:** HII is an inspectable
+personal information processor, not a black-box assistant. Every meaningful
+operational transition should expose the input, approved context, explicit
+interpretation, proposed action, authority, tools, execution, verification,
+receipt, provenance, retained state, history, and available user control. This
+does not mean exposing private chain-of-thought or raw neural internals. It means
+exposing the operational facts a person needs to understand, interrupt,
+correct, undo, or trust the system. The canonical state contract is documented
+in [`HII_WHITE_BOX.md`](HII_WHITE_BOX.md).
+
 ## Authority and use
 
 Agents must distinguish four levels of truth:

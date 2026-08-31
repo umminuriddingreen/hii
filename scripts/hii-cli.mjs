@@ -40,6 +40,9 @@ const HII_SCHEDULES = path.join(RUNTIME, "schedules", "schedules.json");
 const HII_SKILL_INDEX = path.join(RUNTIME, "skills", "_index.json");
 const HERMES_SKILLS = path.join(os.homedir(), ".hermes", "skills");
 const HII_KNOWLEDGE_DB = path.join(RUNTIME, "hii.db");
+const DAEMON_STATUS = path.join(RUNTIME, "daemon", "status.json");
+const DAEMON_INSTANCES = path.join(RUNTIME, "daemon", "instances.json");
+const CLI_RUNS = path.join(RUNTIME, "runs", "cli");
 const HIID = path.join(ROOT, "aii", "daemon", "hiid.mjs");
 const HII_TUI = path.join(ROOT, "scripts", "hii-tui.mjs");
 const CODEX_APP_SERVER_PROBE = path.join(ROOT, "scripts", "hii-codex-app-server-probe.mjs");
@@ -188,6 +191,15 @@ function readJsonArray(file) {
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
+  }
+}
+
+function readJsonObject(file) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
   }
 }
 
@@ -451,6 +463,144 @@ function runtimePointers() {
     fileExistsSummary(path.join(RUNTIME, "skills", "actions.jsonl")),
     fileExistsSummary(path.join(RUNTIME, "skills", "registry.json"))
   ];
+}
+
+function processIsLive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function countBy(items, key) {
+  return items.reduce((counts, item) => {
+    const value = String(item?.[key] || "unknown");
+    counts[value] = (counts[value] || 0) + 1;
+    return counts;
+  }, {});
+}
+
+function receiptStateSummary() {
+  try {
+    const receipts = fs.readdirSync(CLI_RUNS, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(CLI_RUNS, entry.name, "receipt.json"))
+      .filter((file) => fs.existsSync(file))
+      .map((file) => fileExistsSummary(file))
+      .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+    return { path: CLI_RUNS, count: receipts.length, latestAt: receipts[0]?.updatedAt || null };
+  } catch {
+    return { path: CLI_RUNS, count: 0, latestAt: null };
+  }
+}
+
+function activeStatePayload(context) {
+  const observedAt = context.generatedAt;
+  const tasks = context.localState.boardTasks;
+  const activeJobs = context.localState.recentJobs.filter((job) =>
+    ["queued", "running", "working", "attention"].includes(String(job.status).toLowerCase())
+  );
+  const daemon = readJsonObject(DAEMON_STATUS);
+  const instanceDocument = readJsonObject(DAEMON_INSTANCES);
+  const instances = Array.isArray(instanceDocument?.instances) ? instanceDocument.instances : [];
+  const activeInstances = instances
+    .filter((instance) => ["queued", "running", "working", "attention"].includes(String(instance?.status).toLowerCase()))
+    .map((instance) => ({ ...instance, live: instance.pid == null ? null : processIsLive(instance.pid) }));
+  const ownedInstances = activeInstances.filter((instance) => instance.owned === true);
+  const observedProcesses = activeInstances.filter((instance) => instance.type === "process" && instance.owned !== true);
+  const partialCapabilities = context.capabilities.filter((capability) => capability.status === "partial");
+  const readyCapabilities = context.capabilities.filter((capability) => capability.status === "ready");
+  const receipts = receiptStateSummary();
+  const pointers = runtimePointers();
+  const eventPointers = pointers.filter((pointer) => pointer.exists && /(?:events|actions|bridge|notes|decisions).*\.(?:jsonl|json)$/i.test(pointer.path));
+  const latestEventAt = eventPointers.map((pointer) => pointer.updatedAt).filter(Boolean).sort().at(-1) || null;
+  const domains = [
+    {
+      id: "workspace", state: context.git.worktree.clean ? "idle" : "active", visibility: "observed",
+      source: "git status", updatedAt: observedAt,
+      basis: context.git.worktree.clean ? "No uncommitted files." : `${context.git.worktree.counts.total} uncommitted file change(s).`,
+      counts: context.git.worktree.counts
+    },
+    {
+      id: "work", state: tasks.byLane.doing ? "active" : tasks.byLane.blocked ? "attention" : tasks.open ? "ready" : "idle", visibility: "observed",
+      source: tasks.path, updatedAt: tasks.recent.map((task) => task.updatedAt).filter(Boolean).sort().at(-1) || null,
+      basis: `${tasks.byLane.doing || 0} doing, ${tasks.byLane.blocked || 0} blocked, ${tasks.open} open.`, counts: tasks.byLane
+    },
+    {
+      id: "agents", state: activeJobs.length || ownedInstances.some((instance) => instance.type === "codex-run") ? "active" : "idle", visibility: "observed",
+      source: LOCAL_CAPABILITY_JOBS, updatedAt: context.localState.capabilityJobs.updatedAt || null,
+      basis: `${activeJobs.length} bounded job(s); ${ownedInstances.filter((instance) => instance.type === "codex-run").length} managed agent run(s).`,
+      counts: { boundedJobs: activeJobs.length, managedRuns: ownedInstances.filter((instance) => instance.type === "codex-run").length }
+    },
+    {
+      id: "systems", state: activeInstances.length ? "active" : daemon ? "idle" : "offline", visibility: daemon ? "observed" : "unavailable",
+      source: DAEMON_INSTANCES, updatedAt: instanceDocument?.updatedAt || daemon?.updatedAt || null,
+      basis: daemon ? `${activeInstances.length} live or reported instance(s), including ${observedProcesses.length} observed process(es).` : "The HII daemon has not published system state.",
+      counts: { active: activeInstances.length, owned: ownedInstances.length, observed: observedProcesses.length, byType: countBy(activeInstances, "type") }
+    },
+    {
+      id: "context", state: context.localState.personalContext.knowledge.exists ? "ready" : "unknown", visibility: "observed",
+      source: HII_KNOWLEDGE_DB, updatedAt: context.localState.personalContext.knowledge.updatedAt || null,
+      basis: context.localState.personalContext.knowledge.exists ? "Canonical local knowledge store is present." : "Canonical local knowledge store was not found.",
+      counts: { bytes: context.localState.personalContext.knowledge.bytes || 0, skills: context.localState.personalContext.skills.hii.indexed }
+    },
+    {
+      id: "capabilities", state: partialCapabilities.length ? "partial" : "ready", visibility: "observed",
+      source: CAPABILITY_REGISTRY, updatedAt: fileExistsSummary(CAPABILITY_REGISTRY).updatedAt || null,
+      basis: `${readyCapabilities.length} ready; ${partialCapabilities.length} partial.`, counts: { ready: readyCapabilities.length, partial: partialCapabilities.length }
+    },
+    {
+      id: "authority", state: daemon?.policy ? "ready" : "partial", visibility: daemon?.policy ? "observed" : "partial",
+      source: DAEMON_STATUS, updatedAt: daemon?.updatedAt || null,
+      basis: daemon?.policy ? `${daemon.policy.autonomous?.length || 0} local action class(es); ${daemon.policy.approvalRequired?.length || 0} approval-gated class(es).` : "No current daemon policy snapshot is available.",
+      counts: { autonomous: daemon?.policy?.autonomous?.length || 0, approvalRequired: daemon?.policy?.approvalRequired?.length || 0 }
+    },
+    {
+      id: "evidence", state: receipts.count ? "ready" : "unknown", visibility: "observed",
+      source: receipts.path, updatedAt: receipts.latestAt,
+      basis: receipts.count ? `${receipts.count} CLI receipt(s); latest receipt timestamp is exposed.` : "No CLI receipts were found.", counts: { receipts: receipts.count }
+    },
+    {
+      id: "events", state: eventPointers.length ? "active" : "unknown", visibility: "observed",
+      source: RUNTIME, updatedAt: latestEventAt,
+      basis: `${eventPointers.length} observable event or activity ledger(s).`, counts: { ledgers: eventPointers.length }
+    }
+  ];
+  const coverage = {
+    registeredDomains: domains.length,
+    observed: domains.filter((domain) => domain.visibility === "observed").length,
+    partial: domains.filter((domain) => domain.visibility === "partial").length,
+    unavailable: domains.filter((domain) => domain.visibility === "unavailable").length,
+    exclusions: [
+      "private or unregistered activity",
+      "sources outside approved scopes",
+      "raw model internals or private chain-of-thought",
+      "remote devices without authenticated transport and a live executor"
+    ]
+  };
+  return {
+    schemaVersion: 1,
+    kind: "hii.active-state",
+    model: "white-box operational state",
+    observedAt,
+    claim: "All state HII is registered, permitted, and able to observe; unknown and excluded state stays explicit.",
+    transition: "input -> context -> interpretation -> proposal -> authority -> action -> verification -> receipt",
+    coverage,
+    domains,
+    activeInstances: activeInstances
+      .sort((a, b) => Number(b.owned === true) - Number(a.owned === true) || String(a.type).localeCompare(String(b.type)))
+      .slice(0, 8)
+      .map((instance) => ({
+        id: String(instance.id || "unknown"), type: String(instance.type || "unknown"), status: String(instance.status || "unknown"),
+        owned: instance.owned === true, live: instance.live, pid: Number.isInteger(instance.pid) ? instance.pid : null,
+        title: redactText(instance.title || "").replace(/\s+/g, " ").slice(0, 120),
+        coordinate: instance.coordinate ? redactText(instance.coordinate).slice(0, 180) : null,
+        heartbeatAt: instance.heartbeatAt || null
+      }))
+  };
 }
 
 function staleLegacyRuntimeProbe() {
@@ -1160,7 +1310,7 @@ function agentHomePayload() {
     ["queued", "running", "working", "attention"].includes(job.status)
   );
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     kind: "hii.agent.home",
     generatedAt: context.generatedAt,
     identity: context.identity,
@@ -1175,6 +1325,7 @@ function agentHomePayload() {
       activeJobs
     },
     context: context.localState.personalContext,
+    activeState: activeStatePayload(context),
     capabilities: context.capabilities
       .filter((capability) => capability.status === "ready" || capability.status === "partial")
       .map((capability) => ({ id: capability.id, status: capability.status })),
@@ -1193,6 +1344,7 @@ function agentHomePayload() {
 }
 
 function agentHomeBriefPayload(payload = agentHomePayload()) {
+  const domains = payload.activeState.domains;
   return {
     kind: "hii.agent.home.brief",
     repo: payload.identity.repo,
@@ -1201,6 +1353,10 @@ function agentHomeBriefPayload(payload = agentHomePayload()) {
     changes: payload.workspace.changes.total,
     openTasks: payload.work.board.open,
     activeJobs: payload.work.activeJobs.length,
+    activeInstances: payload.activeState.activeInstances.length,
+    activeDomains: domains.filter((domain) => domain.state === "active").map((domain) => domain.id),
+    attentionDomains: domains.filter((domain) => ["attention", "partial", "offline", "unknown"].includes(domain.state)).map((domain) => domain.id),
+    observedDomains: payload.activeState.coverage.observed,
     capabilities: payload.capabilities.length,
     nextActions: payload.nextActions.map((action) => ({
       score: action.score,

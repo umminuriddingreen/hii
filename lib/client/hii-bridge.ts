@@ -269,6 +269,51 @@ export type RuntimeShareRecordV1 = {
   revokedAt?: string;
 };
 
+export type ActiveStateDomainV1 = {
+  id: string;
+  state: 'active' | 'attention' | 'ready' | 'idle' | 'partial' | 'offline' | 'unknown';
+  visibility: 'observed' | 'partial' | 'unavailable';
+  source: string;
+  updatedAt?: string | null;
+  basis: string;
+  counts: Record<string, unknown>;
+};
+
+export type AgentHomeV2 = {
+  schemaVersion: 2;
+  kind: 'hii.agent.home';
+  generatedAt: string;
+  activeState: {
+    schemaVersion: 1;
+    kind: 'hii.active-state';
+    model: 'white-box operational state';
+    observedAt: string;
+    claim: string;
+    transition: string;
+    coverage: { registeredDomains: number; observed: number; partial: number; unavailable: number; exclusions: string[] };
+    domains: ActiveStateDomainV1[];
+    activeInstances: Array<{ id: string; type: string; status: string; owned: boolean; live: boolean | null; title: string; coordinate: string | null; heartbeatAt: string | null }>;
+  };
+};
+
+export function formatActiveState(home: AgentHomeV2) {
+  const state = home.activeState;
+  const domains = state.domains.map((domain) => `${domain.id.toUpperCase()} · ${domain.state}\n${domain.basis}\nsource: ${domain.source}`);
+  const instances = state.activeInstances.slice(0, 8).map((instance) =>
+    `${instance.owned ? 'owned' : 'observed'} · ${instance.type} · ${instance.status}${instance.live === false ? ' · stale PID' : ''} · ${instance.title || instance.id}`
+  );
+  return [
+    `HII ACTIVE STATE · ${new Date(state.observedAt).toLocaleString()}`,
+    state.claim,
+    `coverage: ${state.coverage.observed}/${state.coverage.registeredDomains} observed · ${state.coverage.partial} partial · ${state.coverage.unavailable} unavailable`,
+    '',
+    ...domains,
+    ...(instances.length ? ['', 'ACTIVE INSTANCES', ...instances] : []),
+    '',
+    `Not visible: ${state.coverage.exclusions.join('; ')}.`
+  ].join('\n');
+}
+
 function developmentRuntime() {
   if (typeof window === 'undefined') return 'http://127.0.0.1:3043';
   const port = Number(window.location.port);
@@ -296,6 +341,14 @@ async function developmentRequest<T>(path: string, init?: RequestInit): Promise<
 
 function isTauri() {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+export async function readAgentHome(): Promise<AgentHomeV2> {
+  if (isTauri()) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<AgentHomeV2>('agent_home');
+  }
+  return developmentRequest<AgentHomeV2>('/home');
 }
 
 export async function readWorkspace(): Promise<WorkspaceDoc> {

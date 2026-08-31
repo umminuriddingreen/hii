@@ -6,9 +6,11 @@ import {
   approveContextPack,
   captureInformation,
   compileContextPack,
+  formatActiveState,
   listApplicationLaunchRequests,
   listApplications,
   listenAgentEvents,
+  readAgentHome,
   startAgent,
   type AgentEventV1,
   type ContextPackV1,
@@ -1240,6 +1242,11 @@ export function HiiRoot({
       if (canMutateCanvas(mode) && /^(?:\/marketplace|\/market|marketplace|open (?:the )?market(?:place)?)$/i.test(intent)) {
         openMarketplace(at);
         setPromptVisible(false);
+        return;
+      }
+      if (/^\/?(?:status|state)$/i.test(intent)) {
+        const home = await readAgentHome();
+        setPrompt((current) => current ? { ...current, response: formatActiveState(home), status: 'completed' } : current);
         return;
       }
       const browserCommand = intent.match(/^\/?(?:browser|search)(?:\s+(.+))?$/i);
