@@ -19,8 +19,8 @@ type BrowserCanvasAsset = {
   size: number;
   lastModified: number;
   sha256: string;
-  /** New records store a Blob so video and PDF readers can seek without first
-   * reconstructing the whole file. `bytes` keeps earlier records readable. */
+  /** ArrayBuffer is the WebKit-safe durable form. `blob` keeps the short-lived
+   * production records written by the previous release readable. */
   blob?: Blob;
   bytes?: ArrayBuffer;
 };
@@ -37,9 +37,12 @@ function assetMime(name: string, mime: string) {
   return MIME_BY_EXTENSION[extension] ?? 'application/octet-stream';
 }
 
-function assetBlob(asset: BrowserCanvasAsset) {
-  if (asset.blob instanceof Blob) return asset.blob;
-  return new Blob(asset.bytes ? [asset.bytes] : [], { type: assetMime(asset.name, asset.mime) });
+async function assetBlob(asset: BrowserCanvasAsset) {
+  // WebKit can reject Blobs nested inside IndexedDB records. ArrayBuffer is the
+  // durable format; old Blob records are read back into bytes before a fresh
+  // view URL is created so existing failed nodes can recover.
+  const bytes = asset.bytes ?? (asset.blob instanceof Blob ? await asset.blob.arrayBuffer() : new ArrayBuffer(0));
+  return new Blob([bytes], { type: assetMime(asset.name, asset.mime) });
 }
 
 function openDatabase(): Promise<IDBDatabase> {
@@ -87,7 +90,7 @@ async function prepareAsset(accountId: string, file: File): Promise<BrowserCanva
     size: file.size,
     lastModified: file.lastModified,
     sha256,
-    blob: file.slice(0, file.size, assetMime(file.name, file.type)),
+    bytes,
   };
   return asset;
 }
@@ -137,6 +140,7 @@ function withAsset(seed: NodeSeed, asset: BrowserCanvasAsset, file: File): NodeS
       mime: assetMime(asset.name, asset.mime),
       size: asset.size,
       sha256: asset.sha256,
+      assetState: 'fresh',
       ephemeral: false,
     },
   };
@@ -169,11 +173,12 @@ async function hydrateNode(accountId: string, node: WorkspaceNode): Promise<Work
     };
   }
   const viewable = ['image', 'document', 'media', 'model', 'cad'].includes(node.type);
+  const blob = viewable ? await assetBlob(asset) : null;
   return {
     ...node,
     payload: {
       ...node.payload,
-      ...(viewable ? { url: URL.createObjectURL(assetBlob(asset)) } : {}),
+      ...(blob ? { url: URL.createObjectURL(blob) } : {}),
       mime: assetMime(asset.name, asset.mime),
       assetState: 'ready',
     },
@@ -188,7 +193,7 @@ export async function browserCanvasAssetUrl(assetId: string): Promise<string | n
   const accountId = separator > 0 ? assetId.slice(0, separator) : '';
   if (!ACCOUNT_ID.test(accountId)) return null;
   const asset = await readAsset(accountId, assetId).catch(() => undefined);
-  return asset ? URL.createObjectURL(assetBlob(asset)) : null;
+  return asset ? URL.createObjectURL(await assetBlob(asset)) : null;
 }
 
 export async function hydrateBrowserCanvasAssets(accountId: string, document: WorkspaceDoc): Promise<WorkspaceDoc> {

@@ -6,13 +6,15 @@ describe('browser canvas media contract', () => {
   const canvas = readFileSync('components/workspace/HiiRoot.tsx', 'utf8');
   const css = readFileSync('app/globals.css', 'utf8');
 
-  it('persists seekable blobs and can replace stale object URLs after reload', () => {
-    expect(assets).toContain('blob?: Blob');
+  it('persists WebKit-safe bytes and can replace stale object URLs after reload', () => {
+    expect(assets).toContain('bytes?: ArrayBuffer');
+    expect(assets).toContain('bytes,');
     expect(assets).toContain('browserCanvasAssetUrl');
     expect(assets).toContain('asset?.accountId === accountId');
     expect(assets).toContain("URL.createObjectURL(file)");
     expect(canvas).toContain('browserCanvasAssetUrl(assetId)');
     expect(canvas).toContain('URL.revokeObjectURL');
+    expect(canvas).toContain("assetState === 'fresh' || assetState === 'ready'");
   });
 
   it('renders mobile-safe image, video, audio, and PDF viewers with recovery', () => {

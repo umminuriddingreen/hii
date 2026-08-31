@@ -424,17 +424,27 @@ function AssetFailure({ name, state, onRetry }: { name: string; state: 'loading'
 }
 
 /** Media URLs created by browsers do not survive a page reload. Resolve the
- * persisted account-owned Blob whenever this node mounts, even if its saved
- * payload still contains an old blob URL. */
+ * persisted account-owned bytes whenever a node has not already been hydrated
+ * with a fresh URL. */
 function AssetNodeBody({ node }: { node: WorkspaceNode }) {
   const initialUrl = text(node.payload.url);
   const assetId = text(node.payload.browserAssetId);
+  const assetState = text(node.payload.assetState);
   const name = text(node.payload.name) || text(node.payload.title) || node.type;
   const [url, setUrl] = useState(initialUrl);
   const [state, setState] = useState<'loading' | 'ready' | 'missing' | 'failed'>(initialUrl ? 'ready' : 'loading');
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    // Fresh imports already have the original File URL, and hydration has
+    // already produced a new URL for ready records. Re-reading IndexedDB here
+    // races that valid source on iOS Safari and can replace it with a URL the
+    // image decoder refuses.
+    if (initialUrl && (assetState === 'fresh' || assetState === 'ready')) {
+      setUrl(initialUrl);
+      setState('ready');
+      return;
+    }
     if (!assetId) {
       setUrl(initialUrl);
       setState(initialUrl ? 'ready' : 'missing');
@@ -463,7 +473,7 @@ function AssetNodeBody({ node }: { node: WorkspaceNode }) {
       active = false;
       if (ownedUrl) URL.revokeObjectURL(ownedUrl);
     };
-  }, [assetId, attempt, initialUrl]);
+  }, [assetId, assetState, attempt, initialUrl]);
 
   if (!url || state !== 'ready') {
     return <AssetFailure name={name} state={state === 'ready' ? 'missing' : state} onRetry={() => setAttempt((value) => value + 1)} />;
