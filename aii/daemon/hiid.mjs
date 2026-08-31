@@ -41,6 +41,7 @@ const MODEL_RUNTIME_DIR = path.join(RUNTIME, "model-runtime");
 const MODEL_RUNTIME_PID = path.join(MODEL_RUNTIME_DIR, "runner.pid");
 const MODEL_RUNTIME_STATUS = path.join(MODEL_RUNTIME_DIR, "status.json");
 const MODEL_RUNTIME_LOG = path.join(MODEL_RUNTIME_DIR, "runner.log");
+const MODEL_BENCHMARKS = path.join(MODEL_RUNTIME_DIR, "benchmarks.json");
 const MODEL_RUNTIME_URL = "http://127.0.0.1:11435";
 const MODEL_HOME = path.join(RUNTIME, "models");
 const HF_CACHE = path.join(MODEL_HOME, "huggingface", "hub");
@@ -1121,6 +1122,90 @@ function modelIsInstalled(model) {
   return fs.existsSync(path.join(root, "refs")) || fs.existsSync(path.join(root, "snapshots"));
 }
 
+function modelSelectionCatalog() {
+  const manifest = safeReadJson(MODEL_PROFILES, {});
+  return Array.isArray(manifest.selectionCatalog) ? manifest.selectionCatalog : [];
+}
+
+function resolveModelSelection(value, command) {
+  const requested = String(value || "").trim();
+  const selected = modelSelectionCatalog().find((entry) =>
+    entry.model === requested || (entry.aliases || []).includes(requested.toLowerCase())
+  );
+  return requireHuggingFaceModel(selected?.model || requested, command);
+}
+
+function modelBenchmarkResults() {
+  return safeReadJson(MODEL_BENCHMARKS, { schemaVersion: 1, results: {} });
+}
+
+function modelRecommendations() {
+  const memoryGiB = totalMemoryGiB();
+  const status = modelRuntimeStatus();
+  const benchmarks = modelBenchmarkResults().results || {};
+  return {
+    schemaVersion: 1,
+    objective: "utility-per-wait",
+    advisoryOnly: true,
+    hardware: {
+      platform: process.platform,
+      arch: process.arch,
+      chip: os.cpus()[0]?.model || "unknown",
+      memoryGiB
+    },
+    activeModel: status.pid ? status.model || null : null,
+    choices: modelSelectionCatalog().map((entry, index) => {
+      const benchmark = benchmarks[entry.model] || null;
+      return {
+        rank: index + 1,
+        ...entry,
+        fits: memoryGiB >= Number(entry.minimumMemoryGiB || 0),
+        installed: modelIsInstalled(entry.model),
+        active: Boolean(status.pid && status.model === entry.model),
+        benchmark: benchmark ? {
+          completionTokensPerSecond: benchmark.completionTokensPerSecond,
+          throughputMeasured: benchmark.throughputMeasured,
+          wallMs: benchmark.wallMs,
+          measuredAt: benchmark.measuredAt
+        } : null,
+        commands: {
+          install: `hii model install ${entry.aliases?.[0] || entry.model}`,
+          use: `hii model use ${entry.aliases?.[0] || entry.model}`,
+          benchmark: "hii model bench"
+        }
+      };
+    })
+  };
+}
+
+function printModelRecommendations(args = []) {
+  const report = modelRecommendations();
+  if (args.includes("--json")) {
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+  console.log(`HII model guide — ${report.hardware.chip} · ${report.hardware.memoryGiB} GiB`);
+  console.log("Optimized for utility per wait. Advisory only: nothing is downloaded or switched here.\n");
+  for (const choice of report.choices) {
+    const state = [
+      choice.active ? "active" : null,
+      choice.installed ? "installed" : "not installed",
+      choice.fits ? "fits" : `needs ${choice.minimumMemoryGiB}+ GiB`
+    ].filter(Boolean).join(" · ");
+    const measured = choice.benchmark?.throughputMeasured
+      ? ` · measured ${choice.benchmark.completionTokensPerSecond} tok/s`
+      : choice.benchmark?.wallMs ? ` · smoke ${choice.benchmark.wallMs} ms` : "";
+    console.log(`${choice.rank}. ${choice.role} [${(choice.aliases || [])[0] || choice.model}]`);
+    console.log(`   ${choice.model}`);
+    console.log(`   ${choice.bestFor}`);
+    console.log(`   ${choice.speed} · ${choice.quality} · ~${choice.estimatedDiskGiB} GiB disk · ${(choice.capabilities || []).join(", ")}`);
+    console.log(`   ${state}${measured}`);
+    console.log(`   ${choice.installed ? "Use" : "Install"}: ${choice.installed ? choice.commands.use : choice.commands.install}\n`);
+  }
+  console.log("Explore more MLX models: hii model search <query>");
+  console.log("Machine-readable view: hii model recommend --json");
+}
+
 function syncPiModel(model, makeDefault) {
   const piDir = path.join(os.homedir(), ".pi", "agent");
   const modelsPath = path.join(piDir, "models.json");
@@ -1169,7 +1254,7 @@ function searchModels(args) {
 }
 
 function installModel(args) {
-  const model = requireHuggingFaceModel(args[0], "install");
+  const model = resolveModelSelection(args[0], "install");
   fs.mkdirSync(HF_CACHE, { recursive: true });
   hf(["download", model, "--cache-dir", HF_CACHE], { stdio: "inherit" });
   hf(["cache", "verify", model, "--cache-dir", HF_CACHE], { stdio: "inherit" });
@@ -1208,7 +1293,7 @@ async function waitForModelRuntimeStopped(timeoutMs = 30000) {
 }
 
 async function useModel(args) {
-  const model = requireHuggingFaceModel(args[0], "use");
+  const model = resolveModelSelection(args[0], "use");
   if (!modelIsInstalled(model)) {
     throw new Error(`${model} is not installed; run: hii model install ${model}`);
   }
@@ -1223,7 +1308,7 @@ async function useModel(args) {
 }
 
 function removeModel(args) {
-  const model = requireHuggingFaceModel(args[0], "remove");
+  const model = resolveModelSelection(args[0], "remove");
   const active = modelRuntimeStatus().model === model && Boolean(modelRuntimePid());
   if (active) throw new Error(`${model} is active; choose another model or run \`hii model stop\` first`);
   if (!modelIsInstalled(model)) throw new Error(`${model} is not installed in HII Native`);
@@ -1357,7 +1442,7 @@ function doctorModelRuntime() {
       binary,
       fix: "npm run runner:build"
     },
-    routing: ["native", "ollama", "approved-hosted"],
+    routing: ["hii-native", "approved-hosted"],
     privacy: "Hosted transmission requires an explicit provider action or approved escalation."
   };
   console.log(JSON.stringify(report, null, 2));
@@ -1407,7 +1492,7 @@ async function benchModelRuntime(args) {
       || completionTokensPerSecond >= Number(gate.minCompletionTokensPerSecond || 8)
   };
   const ok = Object.values(gates).every(Boolean);
-  console.log(JSON.stringify({
+  const report = {
     ok,
     gates,
     thresholds: gate,
@@ -1416,13 +1501,21 @@ async function benchModelRuntime(args) {
     completionTokensPerSecond: Number(completionTokensPerSecond.toFixed(1)),
     model: status.model,
     usage: body.usage || null,
-    output: body.choices?.[0]?.message?.content || ""
-  }, null, 2));
+    output: body.choices?.[0]?.message?.content || "",
+    measuredAt: now(),
+    hardware: { platform: process.platform, arch: process.arch, memoryGiB: totalMemoryGiB() }
+  };
+  const benchmarkStore = modelBenchmarkResults();
+  benchmarkStore.schemaVersion = 1;
+  benchmarkStore.results ||= {};
+  benchmarkStore.results[status.model] = report;
+  writeJson(MODEL_BENCHMARKS, benchmarkStore);
+  console.log(JSON.stringify(report, null, 2));
   if (!ok) process.exitCode = 1;
 }
 
 async function cmdModelRuntime(args) {
-  const sub = args[0] || "status";
+  const sub = args[0] || "recommend";
   if (sub === "start") {
     if (!currentDaemonPid()) startDaemon();
     await startModelRuntime(args.slice(1));
@@ -1437,8 +1530,9 @@ async function cmdModelRuntime(args) {
   else if (sub === "install") installModel(args.slice(1));
   else if (sub === "installed") listInstalledModels();
   else if (sub === "use") await useModel(args.slice(1));
+  else if (sub === "recommend" || sub === "choose") printModelRecommendations(args.slice(1));
   else if (sub === "remove") removeModel(args.slice(1));
-  else throw new Error("usage: hii model <search|install|installed|use|status|start|stop|models|bench|logs|remove>");
+  else throw new Error("usage: hii model <recommend|search|install|installed|use|status|start|stop|models|bench|logs|remove>");
 }
 
 function runningDaemonPids() {

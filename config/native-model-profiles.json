@@ -69,6 +69,42 @@
       "description": "Operator-invoked only, through /codex or /claude. Never entered automatically."
     }
   ],
+  "selectionCatalogDoc": "Curated HII Native choices for explicit operator selection. This catalog recommends but never downloads, starts, switches, or routes a model by itself.",
+  "selectionCatalog": [
+    {
+      "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+      "aliases": ["recommended", "default", "fast"],
+      "role": "Fast default",
+      "bestFor": "Everyday chat, tool use, and responsive interaction",
+      "speed": "fastest",
+      "quality": "everyday",
+      "minimumMemoryGiB": 8,
+      "estimatedDiskGiB": 2.3,
+      "capabilities": ["chat", "tools"]
+    },
+    {
+      "model": "mlx-community/Qwen3.5-9B-MLX-4bit",
+      "aliases": ["balanced", "9b"],
+      "role": "Balanced local",
+      "bestFor": "Stronger everyday reasoning and vision without 27B latency",
+      "speed": "fast",
+      "quality": "strong",
+      "minimumMemoryGiB": 16,
+      "estimatedDiskGiB": 6,
+      "capabilities": ["chat", "tools", "vision"]
+    },
+    {
+      "model": "mlx-community/Qwen3.8-27B-4bit",
+      "aliases": ["quality", "deliberate", "strongest"],
+      "role": "Strongest local",
+      "bestFor": "Hard reasoning and work where quality matters more than latency",
+      "speed": "deliberate",
+      "quality": "highest local",
+      "minimumMemoryGiB": 24,
+      "estimatedDiskGiB": 16.1,
+      "capabilities": ["chat", "tools", "vision"]
+    }
+  ],
   "routing": {
     "auto": [
       "mlx-community/Qwen3-4B-Instruct-2507-4bit",
@@ -107,7 +143,7 @@
   },
   "hostedTransmission": "explicit-only",
   "metadata": {
-    "updated": "2026-08-31T21:53:01Z",
-    "reason": "Use llmfit-selected Qwen3 4B as the low-latency HII Native MLX default; retain 27B as an explicit deliberate model."
+    "updated": "2026-08-31T22:18:00Z",
+    "reason": "Make model selection a native HII experience: curated, hardware-aware, benchmark-backed, and explicitly operator-controlled."
   }
 }

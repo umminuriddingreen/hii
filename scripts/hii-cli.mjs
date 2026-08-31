@@ -1371,6 +1371,7 @@ function agentCommandCatalog() {
     { command: "hii loop once", purpose: "Propose the next user-proxy plan locally; do not act until y/n approval." },
     { command: "hii loop note <note>", purpose: "Add user notes to steer the persistent loop." },
     { command: "hii loop decide <yes|no>", purpose: "Approve or reject the latest proposed plan." },
+    { command: "hii model recommend", purpose: "Compare HII-curated local models against this machine, installed state, and measured speed." },
     { command: "hii model search <query>", purpose: "Discover MLX-ready Hugging Face models; defaults to mlx-community." },
     { command: "hii model install <org/model>", purpose: "Explicitly download and verify weights in HII Native's private cache." },
     { command: "hii model installed", purpose: "List locally installed HII Native model weights and disk usage." },
@@ -3181,7 +3182,7 @@ switch (cmd) {
   case "feed": cmdFeed(rest); break;
   case "model":
     if (rest.includes("--help") || rest.includes("-h")) cmdHelp("model");
-    else nodeScript(HIID, ["model-runtime", ...(rest.length ? rest : ["status"])]);
+    else nodeScript(HIID, ["model-runtime", ...(rest.length ? rest : ["recommend"])]);
     break;
   case "ui": {
     if (rest.includes("--help") || rest.includes("-h")) {
@@ -3345,10 +3346,11 @@ usage: hii <command>
   skill doctor        validate registry, bundles, receipts, and legacy count
   runner init <name>  register an owned runner and print its token once
   runner start --once claim one whitelisted runner job and exit
+  model [recommend]    compare curated choices for this machine
   model search <query> discover MLX models on Hugging Face
   model install <id>  download and verify a model in HII's private cache
   model installed     list models installed for HII Native
-  model use <id>      activate an installed model and update Pi
+  model use <id|alias> activate an installed model and update Pi
   model status|models inspect the active HII Native backend
   model bench|logs    benchmark or inspect the active backend
   model start|stop    control the HII-owned model runtime

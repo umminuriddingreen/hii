@@ -32,6 +32,17 @@ describe("native consumer model profiles", () => {
       requiresCompletion: true
     });
   });
+
+  it("offers explicit HII-owned model choices without an external recommender", () => {
+    const manifest = JSON.parse(fs.readFileSync(profiles, "utf8"));
+    expect(manifest.selectionCatalog).toEqual(expect.arrayContaining([
+      expect.objectContaining({ aliases: expect.arrayContaining(["fast"]), speed: "fastest" }),
+      expect.objectContaining({ aliases: expect.arrayContaining(["balanced"]), model: "mlx-community/Qwen3.5-9B-MLX-4bit" }),
+      expect.objectContaining({ aliases: expect.arrayContaining(["quality"]), quality: "highest local" })
+    ]));
+    expect(manifest.selectionCatalogDoc).toContain("never downloads");
+    expect(JSON.stringify(manifest)).not.toContain("llmfit");
+  });
 });
 
 describe("HII model management CLI", () => {
@@ -41,6 +52,10 @@ describe("HII model management CLI", () => {
     expect(search).toContain('"models", "list", "--search"');
     expect(search).not.toContain('"--human-readable"');
     expect(source).toContain("completionTokensPerSecond: Number(completionTokensPerSecond.toFixed(1))");
+    expect(source).toContain('const sub = args[0] || "recommend"');
+    expect(source).toContain('else if (sub === "recommend" || sub === "choose")');
+    expect(source).toContain("benchmarkStore.results[status.model] = report");
+    expect(source).toContain('routing: ["hii-native", "approved-hosted"]');
   });
 
   it("defaults conversation UX to the direct model and tool stream", () => {
