@@ -1,3 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <rect width="1024" height="1024" fill="#fff"/>
+  <rect width="1024" height="1024" rx="224" fill="#FFFFFF"/>
+  <text
+    x="512"
+    y="548"
+    fill="#111111"
+    font-family="Helvetica, 'Helvetica Neue', Arial, sans-serif"
+    font-size="400"
+    font-weight="700"
+    letter-spacing="-34"
+    text-anchor="middle"
+    dominant-baseline="middle"
+  >hii</text>
 </svg>
