@@ -1868,7 +1868,7 @@ export function HiiRoot({
         </section>
       )}
       <div ref={camera.worldRef} className="hii-world">
-        {visibleNodes.filter((node) => node.type !== 'intent').map((node) => (
+        {visibleNodes.map((node) => (
           <NodeFrame
             key={node.id}
             node={node}

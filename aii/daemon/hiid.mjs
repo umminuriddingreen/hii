@@ -1160,7 +1160,9 @@ function syncPiModel(model, makeDefault) {
 function searchModels(args) {
   const query = args.filter((arg) => !arg.startsWith("--")).join(" ").trim();
   if (!query) throw new Error("usage: hii model search <query> [--all-authors]");
-  const command = ["models", "list", "--search", query, "--limit", "20", "--human-readable"];
+  // hf 1.0+ rejects --human-readable when listing model repositories. The
+  // default table remains readable and compatible with the current Hub CLI.
+  const command = ["models", "list", "--search", query, "--limit", "20"];
   if (!args.includes("--all-authors")) command.push("--author", "mlx-community");
   const result = hf(command);
   process.stdout.write(result.stdout);
@@ -1411,6 +1413,7 @@ async function benchModelRuntime(args) {
     thresholds: gate,
     wallMs,
     throughputMeasured,
+    completionTokensPerSecond: Number(completionTokensPerSecond.toFixed(1)),
     model: status.model,
     usage: body.usage || null,
     output: body.choices?.[0]?.message?.content || ""

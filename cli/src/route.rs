@@ -185,9 +185,9 @@ pub const ROUTES: &[Route] = &[
     ),
     native(
         "models",
-        Core,
+        Extended,
         Infra,
-        "list locally installed Ollama models",
+        "compatibility listing for provider-advertised models",
     ),
     delegated(
         "model",
@@ -203,13 +203,13 @@ pub const ROUTES: &[Route] = &[
     ),
     delegated(
         "ui",
-        Core,
+        Extended,
         Infra,
         "control HII desktop and local web surfaces",
     ),
     delegated(
         "app",
-        Core,
+        Extended,
         Infra,
         "open or inspect the installed HII desktop app",
     ),

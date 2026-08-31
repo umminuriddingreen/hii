@@ -395,7 +395,9 @@ impl Conversation {
             max_steps,
             usage: SessionUsage::default(),
             last_skill_draft: None,
-            thinking_mode: ThinkingMode::Flow,
+            // The primary CLI view is the run itself: provider-emitted model
+            // tokens plus explicit tool calls, results, and receipts.
+            thinking_mode: ThinkingMode::Raw,
             last_flow: None,
             thread: None,
             last_projection_item: None,
@@ -2105,12 +2107,12 @@ impl Conversation {
             && (!matches!(self.thinking_mode, ThinkingMode::Flow) || self.flow_blind)
     }
 
-    /// Does raw tool output belong on screen? Diagnostics only.
+    /// Does raw tool output belong on screen? Stream view only.
     fn shows_tool_output(&self) -> bool {
         io::stdout().is_terminal() && matches!(self.thinking_mode, ThinkingMode::Raw)
     }
 
-    /// Does the objective frame belong on screen? Everything but Diagnostics.
+    /// Does the objective frame belong on screen? Everything but Stream.
     fn shows_flow(&self) -> bool {
         io::stdout().is_terminal() && !matches!(self.thinking_mode, ThinkingMode::Raw)
     }
@@ -2121,27 +2123,27 @@ impl Conversation {
             // Flow is that, and there is no view with nothing in it.
             "flow" | "compact" | "off" => Some(ThinkingMode::Flow),
             "activity" => Some(ThinkingMode::Activity),
-            "raw" | "diagnostics" => Some(ThinkingMode::Raw),
+            "raw" | "stream" | "diagnostics" => Some(ThinkingMode::Raw),
             _ => None,
         }
     }
 
     pub fn thinking(&mut self, requested: Option<&str>) -> Result<String, String> {
-        let requested = requested.unwrap_or("flow");
+        let requested = requested.unwrap_or("stream");
         let Some(mode) = Self::thinking_mode_for(requested) else {
             return Err(format!(
-                "unknown thinking view {requested:?}; choose flow, activity, or diagnostics"
+                "unknown thinking view {requested:?}; choose stream, flow, or activity"
             ));
         };
         self.thinking_mode = mode;
         Ok(match mode {
             ThinkingMode::Flow => {
-                "Flow view is active — objective only. Use `/raw on` for implementation diagnostics."
+                "Flow view is active — objective projection only. Use `/raw on` for the direct model and tool stream."
             }
             ThinkingMode::Activity => {
                 "Activity view is active. Progress remains objective-relative."
             }
-            ThinkingMode::Raw => "Diagnostics view is active. Use `/raw off` to return to Flow.",
+            ThinkingMode::Raw => "Stream view is active: model tokens, tool calls, results, and receipts. Use `/raw off` for the objective projection.",
         }
         .into())
     }
@@ -4415,7 +4417,15 @@ mod tests {
 
     #[test]
     fn every_thinking_view_is_reachable_and_unknown_views_name_the_choices() {
-        for view in ["flow", "compact", "off", "activity", "raw", "diagnostics"] {
+        for view in [
+            "flow",
+            "compact",
+            "off",
+            "activity",
+            "raw",
+            "stream",
+            "diagnostics",
+        ] {
             assert!(
                 Conversation::thinking_mode_for(view).is_some(),
                 "{view} should select a view"

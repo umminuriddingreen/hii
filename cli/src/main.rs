@@ -100,7 +100,7 @@ struct Cli {
         long,
         global = true,
         value_name = "MODEL",
-        help = "Ollama model for the work loop"
+        help = "Local model ID for the HII work loop"
     )]
     model: Option<String>,
 
@@ -355,6 +355,7 @@ enum Commands {
     #[command(about = "Check CLI, workspace, Git, HII Native, and provider readiness")]
     Doctor,
     #[command(about = "List models advertised by the selected local runtime")]
+    #[command(hide = true)]
     Models,
     #[command(about = "Show local, Codex, and Claude account access")]
     Providers,
@@ -3775,7 +3776,7 @@ fn slash_help() -> String {
     )
     .replace(
         "/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n",
-        "/thinking [mode]              flow | activity | diagnostics\n/raw [on|off]                 toggle diagnostics\n/reasoning [mode]             auto | off | deep model effort\n/mode [coding|general|auto|local|private|best]\n                               choose coding behavior or provider routing\n/autonomy [local-full|approval]\n                               choose local autonomy policy\n/model save                   persist the current user-determined model\n/learn [status]               show learning memory\nFlow is the default; Activity and Diagnostics are optional.\nAuto-compact is on by default.\n",
+        "/thinking [mode]              stream | flow | activity\n/raw [on|off]                 toggle the direct model and tool stream\n/reasoning [mode]             auto | off | deep model effort\n/mode [coding|general|auto|local|private|best]\n                               choose coding behavior or provider routing\n/autonomy [local-full|approval]\n                               choose local autonomy policy\n/model save                   persist the current user-determined model\n/learn [status]               show learning memory\nStream is the default; Flow and Activity are optional projections.\nAuto-compact is on by default.\n",
     )
 }
 

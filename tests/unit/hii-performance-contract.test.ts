@@ -33,5 +33,6 @@ describe('HII performance contract', () => {
     expect(source).toContain('objectiveSeedFromText(event.key, { mode, contextNodeIds: selected })');
     expect(source).toContain('aria-label="Persistent objective"');
     expect(source).not.toContain('agentTerminalSeedFromText(event.key');
+    expect(source).not.toContain("visibleNodes.filter((node) => node.type !== 'intent')");
   });
 });

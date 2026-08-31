@@ -27,11 +27,10 @@
     {
       "memoryGiBMax": null,
       "name": "48gb+",
-      "localClass": "27B multimodal dense (HII Native / MLX)",
-      "model": "mlx-community/Qwen3.8-27B-4bit",
+      "localClass": "4B instruction model (HII Native / MLX fast path)",
+      "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
       "quantization": "4",
-      "native_model": "mlx-community/Qwen3.8-27B-4bit",
-      "ollama_tag": "qwen3.8:27b-mlx",
+      "native_model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
       "backend": "mlx"
     }
   ],
@@ -46,20 +45,20 @@
     },
     {
       "tier": 1,
-      "name": "subconscious-35b-a3b",
-      "localClass": "30-35B MoE — Default Worker / Subconscious",
-      "model": "Qwen/Qwen3.6:35b-a3b",
+      "name": "fast-4b-local",
+      "localClass": "4B Dense — Default Fast Worker",
+      "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
       "quantization": "4",
-      "description": "The default worker for 80-90% of agent work."
+      "description": "The default HII Native MLX worker for low-latency interaction and tool routing."
     },
     {
       "tier": 2,
       "name": "deliberate-27b-dense",
       "localClass": "27B Dense — Deliberate Reasoning Brain (MLX)",
-      "model": "qwen3.8:27b-mlx",
-      "quantization": "nvfp4",
-      "description": "Difficult reasoning, when tier 1 fails or reports low confidence. Active on the MLX backend: served by Ollama (127.0.0.1:11434) and by the hii-native MLX-VLM engine (127.0.0.1:11435) as mlx-community/Qwen3.8-27B-4bit.",
-      "provider": "ollama",
+      "model": "mlx-community/Qwen3.8-27B-4bit",
+      "quantization": "4",
+      "description": "Difficult reasoning, when tier 1 fails or reports low confidence. Explicitly selectable through the HII Native MLX engine.",
+      "provider": "hii-native",
       "backend": "mlx"
     },
     {
@@ -72,16 +71,16 @@
   ],
   "routing": {
     "auto": [
-      "qwen3.8:27b-mlx",
+      "mlx-community/Qwen3-4B-Instruct-2507-4bit",
       "hii-native"
     ],
     "local": [
-      "qwen3.8:27b-mlx",
+      "mlx-community/Qwen3-4B-Instruct-2507-4bit",
       "deliberate-27b-dense",
       "hii-native"
     ],
     "private": [
-      "qwen3.8:27b-mlx",
+      "mlx-community/Qwen3-4B-Instruct-2507-4bit",
       "deliberate-27b-dense",
       "hii-native"
     ],
@@ -91,13 +90,13 @@
     ],
     "tiers": {
       "0": "Deterministic — no LLM, tool routing only",
-      "1": "qwen3.8:27b-mlx (default worker on the MLX backend — 80–90% of agent work)",
-      "2": "qwen3.8:27b-mlx, extended (deliberate reasoning brain — difficult reasoning when tier-1 fails or reports low confidence)",
+      "1": "Qwen3-4B-Instruct-2507-4bit (default low-latency HII Native MLX worker)",
+      "2": "Qwen3.8-27B-4bit (explicit deliberate reasoning model)",
       "3": "cloud only — when local models fail, task is extremely consequential, or explicitly requested"
     },
     "mlxBACKEND": {
-      "tag": "qwen3.8:27b-mlx",
-      "engine": "MLX via Ollama on 127.0.0.1:11434; also hii-native MLX-VLM on 127.0.0.1:11435 (mlx-community/Qwen3.8-27B-4bit)",
+      "tag": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+      "engine": "HII Native MLX-VLM on 127.0.0.1:11435",
       "status": "hii runner model status"
     }
   },
@@ -108,7 +107,7 @@
   },
   "hostedTransmission": "explicit-only",
   "metadata": {
-    "updated": "2026-08-30T23:55:00Z",
-    "reason": "Configure qwen3.8:27b-mlx on the MLX backend as active local worker + 27B deliberate reasoning model."
+    "updated": "2026-08-31T21:53:01Z",
+    "reason": "Use llmfit-selected Qwen3 4B as the low-latency HII Native MLX default; retain 27B as an explicit deliberate model."
   }
 }

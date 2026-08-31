@@ -105,7 +105,7 @@ export function objectiveSeedFromText(
       contextCount: contextNodeIds.length,
       authority: `${mode} authority`,
       sessionId: crypto.randomUUID(),
-      output: 'Persistent objective · Return reviews context and starts work.'
+      output: ''
     }
   };
 }
