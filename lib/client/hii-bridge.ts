@@ -291,6 +291,7 @@ export type AgentHomeV2 = {
     claim: string;
     transition: string;
     coverage: { registeredDomains: number; observed: number; partial: number; unavailable: number; exclusions: string[] };
+    activeInstanceProjection: { total: number; returned: number; truncated: boolean; inspectCommand: string };
     domains: ActiveStateDomainV1[];
     activeInstances: Array<{ id: string; type: string; status: string; owned: boolean; live: boolean | null; title: string; coordinate: string | null; heartbeatAt: string | null }>;
   };
@@ -306,6 +307,7 @@ export function formatActiveState(home: AgentHomeV2) {
     `HII ACTIVE STATE · ${new Date(state.observedAt).toLocaleString()}`,
     state.claim,
     `coverage: ${state.coverage.observed}/${state.coverage.registeredDomains} observed · ${state.coverage.partial} partial · ${state.coverage.unavailable} unavailable`,
+    `instances: ${state.activeInstanceProjection.total} active · ${state.activeInstanceProjection.returned} shown${state.activeInstanceProjection.truncated ? ` · inspect all with ${state.activeInstanceProjection.inspectCommand}` : ''}`,
     '',
     ...domains,
     ...(instances.length ? ['', 'ACTIVE INSTANCES', ...instances] : []),

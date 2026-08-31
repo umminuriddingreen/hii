@@ -21,6 +21,7 @@ describe('white-box active state', () => {
           unavailable: 0,
           exclusions: ['private activity']
         },
+        activeInstanceProjection: { total: 2, returned: 1, truncated: true, inspectCommand: 'hii instances list' },
         domains: [{
           id: 'systems',
           state: 'active',
@@ -41,6 +42,7 @@ describe('white-box active state', () => {
     expect(output).toContain('SYSTEMS · active');
     expect(output).toContain('source: /runtime/instances.json');
     expect(output).toContain('coverage: 1/1 observed');
+    expect(output).toContain('instances: 2 active · 1 shown · inspect all with hii instances list');
     expect(output).toContain('owned · agent · running · hiid');
     expect(output).toContain('Not visible: private activity.');
   });

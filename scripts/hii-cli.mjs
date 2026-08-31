@@ -589,6 +589,12 @@ function activeStatePayload(context) {
     claim: "All state HII is registered, permitted, and able to observe; unknown and excluded state stays explicit.",
     transition: "input -> context -> interpretation -> proposal -> authority -> action -> verification -> receipt",
     coverage,
+    activeInstanceProjection: {
+      total: activeInstances.length,
+      returned: Math.min(activeInstances.length, 8),
+      truncated: activeInstances.length > 8,
+      inspectCommand: "hii instances list"
+    },
     domains,
     activeInstances: activeInstances
       .sort((a, b) => Number(b.owned === true) - Number(a.owned === true) || String(a.type).localeCompare(String(b.type)))
@@ -1353,7 +1359,8 @@ function agentHomeBriefPayload(payload = agentHomePayload()) {
     changes: payload.workspace.changes.total,
     openTasks: payload.work.board.open,
     activeJobs: payload.work.activeJobs.length,
-    activeInstances: payload.activeState.activeInstances.length,
+    activeInstances: payload.activeState.activeInstanceProjection.total,
+    activeInstanceSample: payload.activeState.activeInstanceProjection.returned,
     activeDomains: domains.filter((domain) => domain.state === "active").map((domain) => domain.id),
     attentionDomains: domains.filter((domain) => ["attention", "partial", "offline", "unknown"].includes(domain.state)).map((domain) => domain.id),
     observedDomains: payload.activeState.coverage.observed,
