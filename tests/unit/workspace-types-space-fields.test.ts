@@ -69,12 +69,12 @@ describe('WorkspaceNode Space fields', () => {
 
   it('applies rotation after translation and keeps it during a drag transform', () => {
     const node = { ...legacyNode, rotation: 35 } as WorkspaceNode;
-    expect(workspaceNodeTransform(node)).toBe('translate(12px, 24px) rotate(35deg)');
+    expect(workspaceNodeTransform(node)).toBe('translate3d(12px, 24px, 0) rotate(35deg)');
     expect(workspaceNodeTransform({ ...node, x: 90, y: 120 })).toBe(
-      'translate(90px, 120px) rotate(35deg)'
+      'translate3d(90px, 120px, 0) rotate(35deg)'
     );
     expect(workspaceNodeTransform({ ...node, rotation: Number.NaN })).toBe(
-      'translate(12px, 24px) rotate(0deg)'
+      'translate3d(12px, 24px, 0) rotate(0deg)'
     );
   });
 });

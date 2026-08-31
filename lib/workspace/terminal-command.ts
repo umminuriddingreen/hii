@@ -71,19 +71,19 @@ export function terminalSeedFromCommand(value: string): NodeSeed | null {
   };
 }
 
-/** Create the terminal-shaped draft used when the human starts typing directly on the canvas. */
-export function agentTerminalSeedFromText(
+/** Create the persistent objective draft used when the human starts typing directly on the canvas. */
+export function objectiveSeedFromText(
   value: string,
   options: { mode?: string; contextNodeIds?: string[] } = {}
 ): NodeSeed {
   const mode = options.mode || 'build';
   const contextNodeIds = [...new Set(options.contextNodeIds || [])].slice(0, 100);
   return {
-    type: 'terminal',
+    type: 'intent',
     w: 620,
-    h: 320,
+    h: 280,
     object: {
-      kind: 'terminal',
+      kind: 'intent',
       owner: 'human',
       status: 'ready',
       source: 'HII direct canvas typing',
@@ -91,24 +91,21 @@ export function agentTerminalSeedFromText(
       audit: [{
         ts: new Date().toISOString(),
         actor: 'human',
-        action: 'started a direct-typing agent terminal'
+        action: 'created a persistent objective draft'
       }]
     },
     payload: {
-      title: `agent terminal · ${mode}`,
-      job: `agent · ${mode}`,
-      cwd: '~/hii',
+      title: `objective · ${mode}`,
       status: 'ready',
-      role: 'agent-terminal',
-      terminalMode: 'agent',
+      role: 'agent-objective',
       mode,
       draft: value,
+      text: '',
       contextNodeIds,
-      scope: contextNodeIds.length
-        ? `${mode} authority · ${contextNodeIds.length} selected object${contextNodeIds.length === 1 ? '' : 's'}`
-        : `${mode} authority · canvas`,
+      contextCount: contextNodeIds.length,
+      authority: `${mode} authority`,
       sessionId: crypto.randomUUID(),
-      lines: ['Direct canvas intent · Return binds and starts an agent.']
+      output: 'Persistent objective · Return reviews context and starts work.'
     }
   };
 }

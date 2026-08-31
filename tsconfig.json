@@ -35,7 +35,8 @@
     "components/**/*.tsx",
     "lib/**/*.ts",
     ".next/types/**/*.ts",
-    ".next-web-dev/types/**/*.ts"
+    ".next-web-dev/types/**/*.ts",
+    ".next-desktop-playwright/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

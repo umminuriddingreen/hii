@@ -29,6 +29,11 @@ button, input, textarea { font: inherit; }
 .hii-intent-state { align-self: start; overflow: hidden; color: var(--muted); font-size: 11px; line-height: 1.4; white-space: pre-wrap; }
 .hii-intent-object footer { align-self: end; padding-top: 8px; border-top: 1px solid var(--faint); }
 .hii-intent-object footer code { max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hii-objective-compose { display: grid; align-content: start; gap: 7px; margin: 12px 0 8px; }
+.hii-objective-compose input { width: 100%; border: 0; border-bottom: 1px solid var(--line); padding: 3px 0 9px; outline: 0; background: transparent; color: var(--ink); font: 540 18px/1.3 var(--sans); }
+.hii-objective-compose input::placeholder { color: color-mix(in srgb, var(--muted) 72%, transparent); }
+.hii-objective-compose input:focus { border-bottom-color: var(--ink); }
+.hii-objective-compose small { color: var(--muted); font: 9px/1.35 "SF Mono", ui-monospace, monospace; letter-spacing: .02em; }
 .hii-node[data-chromeless='true'] { border: 0; background: transparent; box-shadow: none; }
 .hii-node[data-chromeless='true'] .hii-node-image { width: 100%; height: 100%; border-radius: 0; }
 ::selection { background: var(--ink); color: var(--field); }
@@ -85,6 +90,17 @@ button, input, textarea { font: inherit; }
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06);
   cursor: grab;
   contain: content;
+}
+
+.hii-node:not([data-node-type="terminal"]):not([data-node-type="browser"]):not([data-node-type="app"]) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 480px auto 320px;
+}
+
+.hii-deferred-surface {
+  width: 100%;
+  height: 100%;
+  background: var(--surface);
 }
 
 .hii-node:active { cursor: grabbing; }

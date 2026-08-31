@@ -171,7 +171,7 @@ export type WorkspaceNode = {
 /** Canonical CSS transform used for both rendering and in-progress dragging. */
 export function workspaceNodeTransform(node: Pick<WorkspaceNode, 'x' | 'y' | 'rotation'>) {
   const rotation = typeof node.rotation === 'number' && Number.isFinite(node.rotation) ? node.rotation : 0;
-  return `translate(${node.x}px, ${node.y}px) rotate(${rotation}deg)`;
+  return `translate3d(${node.x}px, ${node.y}px, 0) rotate(${rotation}deg)`;
 }
 
 export type WorkspaceViewport = { x: number; y: number; zoom: number };

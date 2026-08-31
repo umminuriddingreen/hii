@@ -15,7 +15,6 @@ type LinkedIdentity = { handle: string; deviceName: string };
 
 export function DesktopHiiAccess() {
   const [linked, setLinked] = useState(false);
-  const [ready, setReady] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<NativeAccountWorkspace[]>([]);
   const [active, setActive] = useState('local');
@@ -38,8 +37,7 @@ export function DesktopHiiAccess() {
         setLinked(status.linked);
         if (status.linked) await refresh();
       })
-      .catch(() => setMessage('could not inspect account synchronization.'))
-      .finally(() => setReady(true));
+      .catch(() => setMessage('could not inspect account synchronization.'));
   }, [refresh]);
 
   const persistence = useMemo(
@@ -65,8 +63,6 @@ export function DesktopHiiAccess() {
       setBusy(false);
     }
   };
-
-  if (!ready) return <main className={styles.loading} id="hii-main">opening HII…</main>;
 
   return <div className={styles.shell}>
     <HiiRoot

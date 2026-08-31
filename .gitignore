@@ -46,3 +46,5 @@ life/
 
 # SwiftPM build output for the macOS menu bar app (macos/).
 /macos/.build/
+/.next-desktop-perf/
+/.next-desktop-playwright/

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  agentTerminalSeedFromText,
+  objectiveSeedFromText,
   isDirectCanvasTyping,
   isTerminalShortcut,
   terminalSeedFromCommand
@@ -55,23 +55,28 @@ describe('canvas terminal command', () => {
     expect(isTerminalShortcut({ ...key, code: 'KeyA' })).toBe(false);
   });
 
-  it('turns direct canvas typing into an agent-bound terminal draft', () => {
-    expect(agentTerminalSeedFromText('b', { mode: 'build', contextNodeIds: ['source-1', 'source-1'] })).toMatchObject({
-      type: 'terminal',
+  it('turns direct canvas typing into a persistent objective draft', () => {
+    expect(objectiveSeedFromText('b', { mode: 'build', contextNodeIds: ['source-1', 'source-1'] })).toMatchObject({
+      type: 'intent',
       object: {
-        kind: 'terminal',
+        kind: 'intent',
         status: 'ready',
         capabilityId: 'hii.agent.workspace_run'
       },
       payload: {
-        title: 'agent terminal · build',
-        role: 'agent-terminal',
-        terminalMode: 'agent',
+        title: 'objective · build',
+        role: 'agent-objective',
         mode: 'build',
         draft: 'b',
         contextNodeIds: ['source-1']
       }
     });
+  });
+
+  it('routes direct workspace typing through the governed objective object', () => {
+    const root = readFileSync(resolve(process.cwd(), 'components/workspace/HiiRoot.tsx'), 'utf8');
+    expect(root).toContain('objectiveSeedFromText(event.key, { mode, contextNodeIds: selected })');
+    expect(root).not.toContain('spawnSeeds([canvasTextSeed(event.key)], at)');
   });
 
   it('recognizes plain typed text without capturing shortcuts', () => {
