@@ -1,6 +1,15 @@
+// SPDX-License-Identifier: LicenseRef-BSL-1.1
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: 'Download',
+  description: 'Install the native HII canvas for Mac and Windows.',
+  alternates: { canonical: '/download' }
+};
+
 export default function DownloadPage() {
   return (
-    <main className="public-home">
+    <main className="public-home" id="hii-main">
       <p className="public-name">HII / Download</p>
       <h1>HII for your computer.</h1>
       <p>The native HII canvas is planned as a Tauri desktop app for Mac and Windows.</p>

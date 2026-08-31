@@ -47,7 +47,7 @@ function AuthBoundary({
   const access = ecosystemAccessState(session);
   const [code, setCode] = useState('');
   return (
-    <main className={styles.authBoundary} data-auth-state={session.state}>
+    <main className={styles.authBoundary} data-auth-state={session.state} id="hii-main">
       <section className={styles.authCard}>
         <div className={styles.authMark} aria-hidden="true"><span /><span /><span /></div>
         <p className={styles.eyebrow}>Human Information Interface</p>
@@ -160,7 +160,7 @@ export function HiiAppShell(props: HiiAppShellProps) {
   if (props.session.state !== 'authenticated') return <AuthBoundary {...props} />;
   const { owner } = props.session;
   return (
-    <main className={styles.shell} data-connectivity={props.sync.connectivity}>
+    <main className={styles.shell} data-connectivity={props.sync.connectivity} id="hii-main">
       <div className={styles.canvasStage}>{props.children}</div>
       <header className={styles.topbar}>
         <div className={styles.wordmark}><b>HII</b><span>your information surface</span></div>

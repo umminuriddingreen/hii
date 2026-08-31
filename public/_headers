@@ -1,8 +1,28 @@
 /*
   Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; frame-src 'none'; worker-src 'none'; manifest-src 'self'; upgrade-insecure-requests
+  Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Resource-Policy: same-origin
-  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), hid=()
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), hid=(), interest-cohort=()
   Referrer-Policy: no-referrer
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
+
+# Next generates the share card as an extensionless route. With nosniff set
+# globally, the type has to be stated or scrapers refuse to render the card.
+/opengraph-image
+  Content-Type: image/png
+  Cache-Control: public, max-age=86400
+
+# Next.js fingerprints everything under /_next/static, so it is safe to cache forever.
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/brand/*
+  Cache-Control: public, max-age=86400
+
+/marketing/*
+  Cache-Control: public, max-age=86400
+
+/manifest.webmanifest
+  Cache-Control: public, max-age=3600

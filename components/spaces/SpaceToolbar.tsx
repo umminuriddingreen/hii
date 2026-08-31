@@ -17,6 +17,8 @@ export function SpaceToolbar({
   onUndo,
   onRedo,
   onFitView,
+  onZoomIn,
+  onZoomOut,
   onDeleteSelection,
   onShareSelection,
   selectionCount = 0,
@@ -37,6 +39,8 @@ export function SpaceToolbar({
   onUndo?: () => void;
   onRedo?: () => void;
   onFitView?: () => void;
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
   onDeleteSelection?: () => void;
   onShareSelection?: () => void;
   selectionCount?: number;
@@ -65,12 +69,14 @@ export function SpaceToolbar({
     { label: drawing ? 'Stop drawing' : 'Draw', shortcut: 'D', keywords: 'ink pen', action: onToggleDrawing },
     ...(photo ? [{ label: 'Add file', shortcut: '⌘U', keywords: 'upload image media document', action: onAddImage }] : []),
     { label: 'Fit canvas', shortcut: '0', keywords: 'view zoom show all', action: onFitView },
+    ...(onZoomIn ? [{ label: 'Zoom in', shortcut: '⌘=', keywords: 'view closer magnify scale', action: onZoomIn }] : []),
+    ...(onZoomOut ? [{ label: 'Zoom out', shortcut: '⌘−', keywords: 'view wider shrink scale', action: onZoomOut }] : []),
     { label: 'Undo', shortcut: '⌘Z', keywords: 'back history', action: onUndo },
     { label: 'Redo', shortcut: '⇧⌘Z', keywords: 'forward history', action: onRedo },
     { label: 'Devices & models', shortcut: 'Space', keywords: 'computer terminal local model', action: onOpenTerminal },
     ...(selectionCount ? [{ label: `Delete selected (${selectionCount})`, shortcut: 'Delete', keywords: 'remove selection', action: onDeleteSelection }] : []),
     ...(selectionCount === 1 && onShareSelection ? [{ label: 'Share selected', shortcut: '', keywords: 'publish feed', action: onShareSelection }] : [])
-  ], [drawing, onAddImage, onAddNote, onAddText, onDeleteSelection, onFitView, onOpenTerminal, onRedo, onShareSelection, onToggleDrawing, onUndo, photo, selectionCount]);
+  ], [drawing, onAddImage, onAddNote, onAddText, onDeleteSelection, onFitView, onOpenTerminal, onRedo, onShareSelection, onToggleDrawing, onUndo, onZoomIn, onZoomOut, photo, selectionCount]);
   const normalizedQuery = query.trim().toLowerCase();
   const visibleCommands = normalizedQuery
     ? commands.filter((command) => `${command.label} ${command.shortcut} ${command.keywords}`.toLowerCase().includes(normalizedQuery))

@@ -656,6 +656,51 @@ button, input, textarea { font: inherit; }
 .public-home nav { display: flex; gap: 24px; margin-top: 48px; }
 .public-home a { color: inherit; text-underline-offset: 5px; }
 
+/* Keyboard entry point. Visually hidden until focused, then lands as the first
+   thing on the page — required because the canvas surfaces put many controls
+   ahead of primary content in DOM order. */
+.hii-skip-link {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2147483200;
+  padding: 10px 16px;
+  border: 1px solid var(--ink);
+  border-radius: 0 0 8px 0;
+  background: var(--field);
+  color: var(--ink);
+  font: 13px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  text-decoration: none;
+  transform: translateY(-110%);
+}
+.hii-skip-link:focus-visible { transform: translateY(0); }
+
+.public-home .public-detail {
+  max-width: 44rem;
+  margin: 20px 0 0;
+  color: var(--muted);
+  font: 12px/1.5 "SF Mono", ui-monospace, monospace;
+  letter-spacing: .04em;
+}
+.public-home .public-detail code { font: inherit; user-select: all; }
+
+.public-home .public-action {
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  padding: 6px 14px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.public-home .public-action:hover { background: var(--ink); color: var(--field); }
+
+.public-home a:focus-visible,
+.public-home .public-action:focus-visible {
+  outline: 2px solid var(--selection);
+  outline-offset: 3px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }

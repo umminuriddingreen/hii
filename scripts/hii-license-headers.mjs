@@ -32,6 +32,12 @@ const targets = [
   ['server.mjs', BSL],
   ['app/layout.tsx', BSL],
   ['app/page.tsx', BSL],
+  ['app/error.tsx', BSL],
+  ['app/global-error.tsx', BSL],
+  ['app/not-found.tsx', BSL],
+  ['app/robots.ts', BSL],
+  ['app/sitemap.ts', BSL],
+  ['lib/site.ts', BSL],
   ['lib/server/support.ts', BSL],
   ['lib/capabilities/types.ts', APACHE],
   ['extensions/hii-stream-mcp/src/index.ts', APACHE]

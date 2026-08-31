@@ -66,7 +66,7 @@ export function DesktopHiiAccess() {
     }
   };
 
-  if (!ready) return <main className={styles.loading}>opening HII…</main>;
+  if (!ready) return <main className={styles.loading} id="hii-main">opening HII…</main>;
 
   return <div className={styles.shell}>
     <HiiRoot

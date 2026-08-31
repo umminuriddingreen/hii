@@ -487,7 +487,7 @@ export function HiiWebAccess() {
     const accountName = session.handle ?? 'account';
     if (!canvasAccountReady || !canvasPersistence || (accountSync && (!activeWorkspace || workspaceBusy && !workspaces.length))) {
       return (
-        <main className={styles.access}>
+        <main className={styles.access} id="hii-main">
           <span className={styles.wordmark}>hii</span>
           <section className={styles.formPanel} aria-label="Account unavailable">
             <p className={styles.message} role="status">
@@ -617,7 +617,7 @@ export function HiiWebAccess() {
   }
 
   return (
-    <main className={styles.access}>
+    <main className={styles.access} id="hii-main">
       <span className={styles.wordmark}>hii</span>
 
       {mode ? (

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef } from 'react';
+import { trackPointerGesture } from '../../lib/workspace/gestures';
 import type { WorkspaceViewport } from '../../lib/workspace/types';
 
 export type Camera = { x: number; y: number; z: number };
@@ -8,8 +9,84 @@ export type ScreenPoint = { x: number; y: number };
 
 const GRID = 32;
 
+/** Shared zoom limits. Every path that changes `z` clamps through `clampZoom`. */
+export const ZOOM_MIN = 0.05;
+export const ZOOM_MAX = 8;
+
+/** Keyboard pan distance in screen pixels, and its coarse (shift) multiplier. */
+export const KEY_PAN_STEP = 64;
+export const KEY_PAN_COARSE = 4;
+/** Keyboard zoom ratio per press. */
+export const KEY_ZOOM_STEP = 1.2;
+
+export function clampZoom(z: number) {
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
+}
+
+/**
+ * Wheel deltas are only pixels when `deltaMode` says so. Firefox reports lines
+ * for many mice and pages for some trackpads, so an un-normalized handler pans
+ * and zooms roughly two orders of magnitude too slowly there. The remote desktop
+ * surface already normalizes this; the canvas is the surface that matters most.
+ */
+export function normalizeWheelDelta(event: Pick<WheelEvent, 'deltaX' | 'deltaY' | 'deltaMode'>): {
+  dx: number;
+  dy: number;
+} {
+  const factor = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1;
+  return { dx: event.deltaX * factor, dy: event.deltaY * factor };
+}
+
+/**
+ * Scale about a fixed screen point, keeping the world coordinate under `focus`
+ * exactly where it is. Shared by wheel zoom, pinch, and keyboard zoom so all
+ * three agree on the anchor and the limits.
+ */
+export function cameraForZoom(origin: Camera, focus: ScreenPoint, factor: number): Camera {
+  const z = clampZoom(origin.z * factor);
+  const k = z / origin.z;
+  return { x: focus.x - (focus.x - origin.x) * k, y: focus.y - (focus.y - origin.y) * k, z };
+}
+
+/**
+ * Keyboard intent for the camera.
+ *
+ * A spatial canvas whose viewport only moves under a pointer is unreachable for
+ * anyone driving it from the keyboard: content parked off-screen cannot be
+ * brought into view at all. Arrows pan only when nothing is selected, so they
+ * still nudge a selected object first; zoom uses the platform-standard
+ * modifier pair, which also keeps it clear of direct canvas typing.
+ */
+export type CameraKeyIntent =
+  | { kind: 'pan'; dx: number; dy: number }
+  | { kind: 'zoom'; factor: number }
+  | null;
+
+export function cameraKeyIntent(
+  event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'metaKey' | 'ctrlKey' | 'altKey'>,
+  hasSelection: boolean
+): CameraKeyIntent {
+  if (event.altKey) return null;
+  const accel = event.metaKey || event.ctrlKey;
+  if (accel) {
+    if (event.key === '=' || event.key === '+') return { kind: 'zoom', factor: KEY_ZOOM_STEP };
+    if (event.key === '-' || event.key === '_') return { kind: 'zoom', factor: 1 / KEY_ZOOM_STEP };
+    return null;
+  }
+  if (hasSelection) return null;
+  const step = KEY_PAN_STEP * (event.shiftKey ? KEY_PAN_COARSE : 1);
+  switch (event.key) {
+    // The camera translates the world, so panning the view right moves it left.
+    case 'ArrowRight': return { kind: 'pan', dx: -step, dy: 0 };
+    case 'ArrowLeft': return { kind: 'pan', dx: step, dy: 0 };
+    case 'ArrowDown': return { kind: 'pan', dx: 0, dy: -step };
+    case 'ArrowUp': return { kind: 'pan', dx: 0, dy: step };
+    default: return null;
+  }
+}
+
 export function cameraForPinch(origin: Camera, startMidpoint: ScreenPoint, currentMidpoint: ScreenPoint, startDistance: number, currentDistance: number): Camera {
-  const z = Math.min(8, Math.max(0.05, origin.z * currentDistance / Math.max(1, startDistance)));
+  const z = clampZoom(origin.z * currentDistance / Math.max(1, startDistance));
   const worldX = (startMidpoint.x - origin.x) / origin.z;
   const worldY = (startMidpoint.y - origin.y) / origin.z;
   return { x: currentMidpoint.x - worldX * z, y: currentMidpoint.y - worldY * z, z };
@@ -88,15 +165,12 @@ export function useCamera(onSettle?: () => void) {
       if (!e.ctrlKey && !e.metaKey && (e.target as Element).closest('.scroll, .xterm, iframe')) return;
       e.preventDefault();
       const c = cam.current;
+      const { dx, dy } = normalizeWheelDelta(e);
       if (e.ctrlKey || e.metaKey) {
-        const z = Math.min(8, Math.max(0.05, c.z * Math.exp(-e.deltaY * 0.01)));
-        const k = z / c.z;
-        c.x = e.clientX - (e.clientX - c.x) * k;
-        c.y = e.clientY - (e.clientY - c.y) * k;
-        c.z = z;
+        cam.current = cameraForZoom(c, { x: e.clientX, y: e.clientY }, Math.exp(-dy * 0.01));
       } else {
-        c.x -= e.deltaX;
-        c.y -= e.deltaY;
+        c.x -= dx;
+        c.y -= dy;
       }
       commit();
     };
@@ -107,23 +181,52 @@ export function useCamera(onSettle?: () => void) {
   const panStart = useCallback(
     (e: React.PointerEvent) => {
       if (e.button !== 0) return;
-      const sx = e.clientX;
-      const sy = e.clientY;
-      const ox = cam.current.x;
-      const oy = cam.current.y;
+      const origin = { x: cam.current.x, y: cam.current.y };
       document.documentElement.setAttribute('data-workspace-dragging', '1');
-      const move = (ev: PointerEvent) => {
-        cam.current.x = ox + ev.clientX - sx;
-        cam.current.y = oy + ev.clientY - sy;
-        commit();
+      const release = () => document.documentElement.removeAttribute('data-workspace-dragging');
+      // Shared gesture core: batches to a frame, ignores other pointers, and —
+      // unlike the hand-rolled listeners this replaces — always tears down, so an
+      // interrupted pan (system gesture, window blur) cannot leave a live
+      // `pointermove` listener dragging the camera forever.
+      trackPointerGesture(e.nativeEvent, {
+        onMove: ({ dx, dy }) => {
+          cam.current.x = origin.x + dx;
+          cam.current.y = origin.y + dy;
+          commit();
+        },
+        onEnd: release,
+        // An interrupted pan keeps the view where the person already moved it.
+        // Reverting to the origin would be correct for dragging an object and
+        // wrong for a viewport: the movement so far was deliberate and seen.
+        onCancel: release
+      });
+    },
+    [commit]
+  );
+
+  /** Pan by a screen-space offset. The keyboard path into the camera. */
+  const panBy = useCallback(
+    (dx: number, dy: number) => {
+      cam.current.x += dx;
+      cam.current.y += dy;
+      commit();
+    },
+    [commit]
+  );
+
+  /**
+   * Zoom about a screen point, defaulting to the centre of the viewport — the
+   * only anchor a keyboard user can be said to be pointing at.
+   */
+  const zoomBy = useCallback(
+    (factor: number, focus?: ScreenPoint) => {
+      const rect = viewportRef.current?.getBoundingClientRect();
+      const anchor = focus ?? {
+        x: rect ? rect.left + rect.width / 2 : window.innerWidth / 2,
+        y: rect ? rect.top + rect.height / 2 : window.innerHeight / 2
       };
-      const up = () => {
-        document.documentElement.removeAttribute('data-workspace-dragging');
-        removeEventListener('pointermove', move);
-        removeEventListener('pointerup', up);
-      };
-      addEventListener('pointermove', move);
-      addEventListener('pointerup', up);
+      cam.current = cameraForZoom(cam.current, anchor, factor);
+      commit();
     },
     [commit]
   );
@@ -173,5 +276,5 @@ export function useCamera(onSettle?: () => void) {
     return true;
   }, [commit]);
 
-  return { viewportRef, worldRef, cam, toWorld, centerWorld, reset, setViewport, getViewport, panStart, touchStart };
+  return { viewportRef, worldRef, cam, toWorld, centerWorld, reset, setViewport, getViewport, panStart, panBy, zoomBy, touchStart };
 }

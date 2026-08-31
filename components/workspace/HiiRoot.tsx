@@ -61,7 +61,7 @@ import { RegisteredApplication } from './RegisteredApplication';
 import { ShellTerminal } from './ShellTerminal';
 import { WaymarkApp } from './WaymarkApp';
 import { packagePlacementSeed, WAYMARK_PACKAGE, type HiiMarketplacePackage } from '@/lib/marketplace/catalog';
-import { useCamera } from './useCamera';
+import { KEY_ZOOM_STEP, cameraKeyIntent, useCamera } from './useCamera';
 import { useWorkspace, type WorkspacePersistence } from './useWorkspace';
 import { SpaceToolbar } from '@/components/spaces/SpaceToolbar';
 import { InkBody } from '@/components/spaces/InkBody';
@@ -1585,6 +1585,20 @@ export function HiiRoot({
         setToolMessage('Selection and active tool cleared.');
         return;
       }
+      // Camera keys run ahead of both branches: with nothing selected the arrows
+      // move the viewport, so off-screen work is reachable without a pointer.
+      const cameraKey = cameraKeyIntent(event, selected.length > 0);
+      if (cameraKey) {
+        event.preventDefault();
+        if (cameraKey.kind === 'pan') {
+          camera.panBy(cameraKey.dx, cameraKey.dy);
+          setToolMessage('Moved the view.');
+        } else {
+          camera.zoomBy(cameraKey.factor);
+          setToolMessage(`Zoomed ${cameraKey.factor > 1 ? 'in' : 'out'} to ${Math.round(camera.cam.current.z * 100)}%.`);
+        }
+        return;
+      }
       if (!runtimeEnabled) {
         if ((event.key === 'Delete' || event.key === 'Backspace') && selected.length) {
           event.preventDefault();
@@ -1802,6 +1816,8 @@ export function HiiRoot({
         onUndo={() => { workspace.undo(); setToolMessage('Undid the last canvas change.'); }}
         onRedo={() => { workspace.redo(); setToolMessage('Redid the last canvas change.'); }}
         onFitView={fitCanvas}
+        onZoomIn={() => camera.zoomBy(KEY_ZOOM_STEP)}
+        onZoomOut={() => camera.zoomBy(1 / KEY_ZOOM_STEP)}
         onDeleteSelection={deleteSelection}
         onShareSelection={onShareNode ? shareSelection : undefined}
         onCommandsOpenChange={setCanvasCommandsOpen}
