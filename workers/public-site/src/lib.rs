@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
 
 mod chat;
+mod device;
 mod feed;
 mod remote;
+mod workspace;
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use passkey_rp::{
@@ -150,10 +152,18 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
         if remote::is_remote_host_socket(&path) {
             return remote::handle_host_socket(request, env).await;
         }
+        if device::is_native_device_path(&path) {
+            if request.headers().get("origin")?.is_some() {
+                return secure_no_store(api_error(403, "native_device_required")?);
+            }
+            return secure_no_store(device::handle_native_device_api(request, &db).await?);
+        }
         if matches!(method, Method::Post | Method::Delete) && !origin_allowed(request)? {
             return secure_no_store(api_error(403, "cross_origin_denied")?);
         }
         if path.starts_with("/api/chat")
+            || device::is_account_device_path(&path)
+            || workspace::is_workspace_api_path(&path)
             || feed::is_feed_api_path(&path)
             || remote::is_remote_api_path(&path)
         {
@@ -166,6 +176,10 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
             if matches!(method, Method::Post | Method::Delete) {
                 let action = if path.starts_with("/api/chat") {
                     "chat-write"
+                } else if device::is_account_device_path(&path) {
+                    "device-write"
+                } else if workspace::is_workspace_api_path(&path) {
+                    "workspace-write"
                 } else if remote::is_remote_api_path(&path) {
                     "remote-write"
                 } else {
@@ -196,6 +210,16 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
                 .await?
                 .unwrap_or(api_error(404, "not_found")?);
                 return secure_no_store(response);
+            }
+            if device::is_account_device_path(&path) {
+                return secure_no_store(
+                    device::handle_account_device_api(request, &db, &session).await?,
+                );
+            }
+            if workspace::is_workspace_api_path(&path) {
+                return secure_no_store(
+                    workspace::handle_workspace_api(request, &db, &session).await?,
+                );
             }
             let actor =
                 feed::FeedActor::new(&session.account_id, &session.handle, &session.csrf_token);

@@ -345,6 +345,48 @@
 .accountPanel p { min-height: 1.45em; margin: 12px 0 0; }
 .accountPanel small { display: block; margin-top: 3px; opacity: .5; line-height: 1.45; }
 
+.workspaceControls {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 12px 0;
+  border-block: 1px solid #e4e4e4;
+}
+
+.workspaceControls label,
+.workspaceControls form,
+.workspaceControls div {
+  display: grid;
+  gap: 6px;
+}
+
+.workspaceControls input,
+.workspaceControls select {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 8px;
+  border: 1px solid #cfcfcf;
+  border-radius: 0;
+  background: #fff;
+  color: #111;
+  font: inherit;
+}
+
+.workspaceControls code {
+  overflow-wrap: anywhere;
+  padding: 8px;
+  border: 1px solid #111;
+  background: #f7f7f7;
+  user-select: all;
+}
+
+.workspaceControls span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .webPanel {
   position: fixed;
   z-index: 2147483400;

@@ -6,6 +6,21 @@ import { HiiRoot } from '@/components/workspace/HiiRoot';
 import { browserSpacePersistence } from '@/components/spaces/SpaceCanvas';
 import type { WorkspaceNode } from '@/lib/workspace/types';
 import { browserCanvasSeedsFromFiles, hydrateBrowserCanvasAssets } from '@/lib/web/canvas-assets';
+import {
+  AccountWorkspacePersistence,
+  createAccountDeviceLinkCode,
+  createAccountWorkspace,
+  createWorkspaceShareCode,
+  listAccountDevices,
+  listAccountWorkspaces,
+  listWorkspaceMembers,
+  redeemWorkspaceShareCode,
+  revokeAccountDevice,
+  revokeWorkspaceMember,
+  type AccountDevice,
+  type AccountWorkspaceMember,
+  type AccountWorkspaceSummary
+} from '@/lib/web/account-workspace';
 import { nodeSeedFromFeedSnapshot, type FeedItem } from '@/lib/web/feed-contract';
 import { HiiWebPanel, type WebPanel } from './HiiWebPanels';
 import styles from './HiiWebAccess.module.css';
@@ -17,6 +32,7 @@ type Session = {
   accountId?: string;
   handle?: string;
   csrfToken?: string;
+  source?: 'account' | 'network' | 'local';
 };
 
 const LOCAL_OWNER_ACCOUNT_ID = 'z1zLugCcqYOu8FfOK51CCmatt6Q19nJrmEyqKZLi5Js';
@@ -32,6 +48,7 @@ function localOwnerSession(hostname: string): Session | null {
     authenticated: true,
     accountId: LOCAL_OWNER_ACCOUNT_ID,
     handle: 'local owner',
+    source: 'local',
   } : null;
 }
 
@@ -154,13 +171,35 @@ export function HiiWebAccess() {
   const [panel, setPanel] = useState<WebPanel | null>(null);
   const [shareNode, setShareNode] = useState<WorkspaceNode | null>(null);
   const [canvasImport, setCanvasImport] = useState<{ id: string; seed: ReturnType<typeof nodeSeedFromFeedSnapshot> } | null>(null);
+  const [workspaces, setWorkspaces] = useState<AccountWorkspaceSummary[]>([]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
+  const [workspaceBusy, setWorkspaceBusy] = useState(false);
+  const [workspaceName, setWorkspaceName] = useState('');
+  const [workspaceMessage, setWorkspaceMessage] = useState('');
+  const [shareCode, setShareCode] = useState('');
+  const [redeemCode, setRedeemCode] = useState('');
+  const [accountDevices, setAccountDevices] = useState<AccountDevice[]>([]);
+  const [appLinkCode, setAppLinkCode] = useState('');
+  const [workspaceMembers, setWorkspaceMembers] = useState<AccountWorkspaceMember[]>([]);
   const canvasAccountId = session.accountId ?? '';
   const canvasAccountReady = /^[A-Za-z0-9_-]{43}$/.test(canvasAccountId);
+  const accountSync = session.source === 'account' && Boolean(session.csrfToken);
+  const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? null;
+  const canvasSpaceId = activeWorkspace?.id ?? `account:${canvasAccountId}`;
   const canvasPersistence = useMemo(
-    () => canvasAccountReady
-      ? browserSpacePersistence(`account:${canvasAccountId}`, (document) => hydrateBrowserCanvasAssets(canvasAccountId, document))
-      : undefined,
-    [canvasAccountId, canvasAccountReady],
+    () => !canvasAccountReady
+      ? undefined
+      : accountSync && activeWorkspace
+        ? new AccountWorkspacePersistence(
+            activeWorkspace.id,
+            session.csrfToken ?? '',
+            (document) => hydrateBrowserCanvasAssets(canvasAccountId, document)
+          )
+        : browserSpacePersistence(
+            `account:${canvasAccountId}`,
+            (document) => hydrateBrowserCanvasAssets(canvasAccountId, document)
+          ),
+    [accountSync, activeWorkspace, canvasAccountId, canvasAccountReady, session.csrfToken],
   );
   const canvasFileSeeder = useCallback(
     (files: File[]) => browserCanvasSeedsFromFiles(canvasAccountId, files),
@@ -176,12 +215,168 @@ export function HiiWebAccess() {
     }
     let active = true;
     void networkOwnerSession()
-      .then((networkSession) => networkSession ?? api<Session>('/api/auth/session'))
+      .then(async (networkSession) => networkSession
+        ? { ...networkSession, source: 'network' as const }
+        : { ...(await api<Session>('/api/auth/session')), source: 'account' as const })
       .then((value) => { if (active) setSession(value); })
       .catch(() => { if (active) setSession({ authenticated: false }); })
       .finally(() => { if (active) setReady(true); });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => () => {
+    if (canvasPersistence instanceof AccountWorkspacePersistence) canvasPersistence.dispose();
+  }, [canvasPersistence]);
+
+  const refreshWorkspaces = useCallback(async (preferredId = '') => {
+    if (!accountSync || !session.csrfToken) return;
+    setWorkspaceBusy(true);
+    setWorkspaceMessage('');
+    try {
+      let next = await listAccountWorkspaces();
+      if (!next.length) {
+        const created = await createAccountWorkspace(`${session.handle ?? 'My'} HII`, session.csrfToken);
+        next = [created];
+      }
+      setWorkspaces(next);
+      setActiveWorkspaceId((current) => {
+        const requested = preferredId || current;
+        return next.some((workspace) => workspace.id === requested) ? requested : next[0]?.id ?? '';
+      });
+    } catch {
+      setWorkspaceMessage('could not synchronize account workspaces.');
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  }, [accountSync, session.csrfToken, session.handle]);
+
+  const refreshDevices = useCallback(async () => {
+    if (!accountSync) return;
+    try {
+      setAccountDevices(await listAccountDevices());
+    } catch {
+      setWorkspaceMessage('could not load linked apps.');
+    }
+  }, [accountSync]);
+
+  const refreshMembers = useCallback(async () => {
+    if (!accountSync || !activeWorkspace || !['owner', 'admin'].includes(activeWorkspace.role)) {
+      setWorkspaceMembers([]);
+      return;
+    }
+    try {
+      setWorkspaceMembers(await listWorkspaceMembers(activeWorkspace.id));
+    } catch {
+      setWorkspaceMessage('could not load workspace members.');
+    }
+  }, [accountSync, activeWorkspace]);
+
+  useEffect(() => {
+    if (!accountSync) {
+      setWorkspaces([]);
+      setActiveWorkspaceId('');
+      return;
+    }
+    void refreshWorkspaces();
+    void refreshDevices();
+  }, [accountSync, refreshDevices, refreshWorkspaces]);
+
+  useEffect(() => {
+    setShareCode('');
+    void refreshMembers();
+  }, [activeWorkspaceId, refreshMembers]);
+
+  const createWorkspace = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!session.csrfToken || !workspaceName.trim() || workspaceBusy) return;
+    setWorkspaceBusy(true);
+    setWorkspaceMessage('');
+    try {
+      const created = await createAccountWorkspace(workspaceName, session.csrfToken);
+      setWorkspaceName('');
+      await refreshWorkspaces(created.id);
+      setWorkspaceMessage(`${created.name} is ready.`);
+    } catch {
+      setWorkspaceMessage('could not create that workspace.');
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const issueStudioCode = async () => {
+    if (!session.csrfToken || !activeWorkspace || workspaceBusy) return;
+    setWorkspaceBusy(true);
+    setWorkspaceMessage('');
+    try {
+      const issued = await createWorkspaceShareCode(activeWorkspace.id, session.csrfToken, 'admin');
+      setShareCode(issued.code);
+      setWorkspaceMessage('single-use studio admin code ready for 15 minutes.');
+    } catch {
+      setWorkspaceMessage('could not create a studio admin code.');
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const redeemStudioCode = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!session.csrfToken || !redeemCode.trim() || workspaceBusy) return;
+    setWorkspaceBusy(true);
+    setWorkspaceMessage('');
+    try {
+      const granted = await redeemWorkspaceShareCode(redeemCode, session.csrfToken);
+      setRedeemCode('');
+      await refreshWorkspaces(granted.id);
+      setWorkspaceMessage(`admin access granted to ${granted.name}.`);
+    } catch {
+      setWorkspaceMessage('that share code is invalid, expired, or already used.');
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const issueAppLinkCode = async () => {
+    if (!session.csrfToken || workspaceBusy) return;
+    setWorkspaceBusy(true);
+    setWorkspaceMessage('');
+    try {
+      const issued = await createAccountDeviceLinkCode(session.csrfToken);
+      setAppLinkCode(issued.code);
+      setWorkspaceMessage('single-use app link code ready for 15 minutes.');
+    } catch {
+      setWorkspaceMessage('could not create an app link code.');
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const revokeDevice = async (deviceId: string) => {
+    if (!session.csrfToken || workspaceBusy) return;
+    setWorkspaceBusy(true);
+    setWorkspaceMessage('');
+    try {
+      await revokeAccountDevice(deviceId, session.csrfToken);
+      await refreshDevices();
+      setWorkspaceMessage('app workspace access revoked.');
+    } catch {
+      setWorkspaceMessage('could not revoke that app.');
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const revokeMember = async (accountId: string) => {
+    if (!session.csrfToken || !activeWorkspace || activeWorkspace.role !== 'owner' || workspaceBusy) return;
+    setWorkspaceBusy(true);
+    setWorkspaceMessage('');
+    try {
+      await revokeWorkspaceMember(activeWorkspace.id, accountId, session.csrfToken);
+      await refreshMembers();
+      setWorkspaceMessage('workspace access revoked.');
+    } catch {
+      setWorkspaceMessage('could not revoke that workspace member.');
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
 
   const chooseMode = (nextMode: Exclude<AccessMode, null>) => {
     setMode(nextMode);
@@ -236,7 +431,7 @@ export function HiiWebAccess() {
           ceremonyId: options.ceremonyId,
           credential: registrationCredential(credential),
         });
-        setSession(next);
+        setSession({ ...next, source: 'account' });
       } else {
         const options = await api<LoginOptions>('/api/auth/login/start', {});
         const publicKey: PublicKeyCredentialRequestOptions = {
@@ -257,7 +452,7 @@ export function HiiWebAccess() {
           ceremonyId: options.ceremonyId,
           credential: loginCredential(credential),
         });
-        setSession(next);
+        setSession({ ...next, source: 'account' });
       }
     } catch {
       setMessage(
@@ -279,6 +474,8 @@ export function HiiWebAccess() {
       setSession({ authenticated: false });
       setMode(null);
       setAccountOpen(false);
+      setWorkspaces([]);
+      setActiveWorkspaceId('');
     } catch {
       setDeviceMessage('could not log out. try again.');
     } finally {
@@ -288,12 +485,16 @@ export function HiiWebAccess() {
 
   if (ready && session.authenticated) {
     const accountName = session.handle ?? 'account';
-    if (!canvasAccountReady || !canvasPersistence) {
+    if (!canvasAccountReady || !canvasPersistence || (accountSync && (!activeWorkspace || workspaceBusy && !workspaces.length))) {
       return (
         <main className={styles.access}>
           <span className={styles.wordmark}>hii</span>
           <section className={styles.formPanel} aria-label="Account unavailable">
-            <p className={styles.message} role="alert">could not open this account.</p>
+            <p className={styles.message} role="status">
+              {accountSync && workspaceBusy
+                ? 'opening your account-owned workspace.'
+                : 'could not open this account.'}
+            </p>
             <button type="button" onClick={() => window.location.reload()}>retry</button>
           </section>
         </main>
@@ -303,7 +504,7 @@ export function HiiWebAccess() {
       <div className={styles.canvasShell}>
         <HiiRoot
           surface="account"
-          spaceId={`account:${canvasAccountId}`}
+          spaceId={canvasSpaceId}
           creatorId={`account:${canvasAccountId}`}
           persistence={canvasPersistence}
           allowPhoto
@@ -315,6 +516,7 @@ export function HiiWebAccess() {
         <header className={styles.canvasHeader} data-workspace-ui>
           <span className={styles.canvasWordmark}>hii</span>
           <nav aria-label="HII account actions">
+            <button type="button" onClick={() => { setPanel('chat'); setAccountOpen(false); }}>social</button>
             <button type="button" onClick={() => { setPanel('say-hi'); setAccountOpen(false); }}>say hi</button>
             <button
               type="button"
@@ -344,10 +546,62 @@ export function HiiWebAccess() {
             <dl>
               <div><dt>name</dt><dd>{accountName}</dd></div>
               <div><dt>access</dt><dd>passkey</dd></div>
-              <div><dt>canvas</dt><dd>stored only in this browser</dd></div>
+              <div><dt>canvas</dt><dd>{accountSync ? 'account synchronized' : 'stored on this device'}</dd></div>
               <div><dt>computer</dt><dd>live through HII Chat</dd></div>
             </dl>
+            {accountSync ? <section className={styles.workspaceControls} aria-label="Business workspaces">
+              <label>
+                workspace
+                <select value={activeWorkspaceId} onChange={(event) => setActiveWorkspaceId(event.target.value)}>
+                  {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>
+                    {workspace.name} · {workspace.role}
+                  </option>)}
+                </select>
+              </label>
+              <form onSubmit={createWorkspace}>
+                <input value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} placeholder="new business workspace" maxLength={80} />
+                <button type="submit" disabled={workspaceBusy || !workspaceName.trim()}>create</button>
+              </form>
+              {activeWorkspace?.role === 'owner' ? <button type="button" disabled={workspaceBusy} onClick={() => void issueStudioCode()}>
+                create studio admin code
+              </button> : null}
+              {shareCode ? <div>
+                <code>{shareCode}</code>
+                <button type="button" onClick={() => navigator.clipboard?.writeText(shareCode)}>copy once</button>
+              </div> : null}
+              {workspaceMembers.length ? <div>
+                <small>workspace members</small>
+                {workspaceMembers.map((member) => <span key={member.accountId}>
+                  {member.handle} · {member.role}
+                  {activeWorkspace?.role === 'owner' && member.role !== 'owner' ? <button
+                    type="button"
+                    disabled={workspaceBusy}
+                    onClick={() => void revokeMember(member.accountId)}
+                  >revoke</button> : null}
+                </span>)}
+              </div> : null}
+              <form onSubmit={redeemStudioCode}>
+                <input value={redeemCode} onChange={(event) => setRedeemCode(event.target.value)} placeholder="redeem workspace share code" maxLength={96} />
+                <button type="submit" disabled={workspaceBusy || !redeemCode.trim()}>redeem</button>
+              </form>
+              <button type="button" disabled={workspaceBusy} onClick={() => void issueAppLinkCode()}>
+                link an installed HII app
+              </button>
+              {appLinkCode ? <div>
+                <code>{appLinkCode}</code>
+                <button type="button" onClick={() => navigator.clipboard?.writeText(appLinkCode)}>copy once</button>
+              </div> : null}
+              {accountDevices.length ? <div>
+                <small>linked apps</small>
+                {accountDevices.map((device) => <span key={device.id}>
+                  {device.name}
+                  <button type="button" disabled={workspaceBusy} onClick={() => void revokeDevice(device.id)}>revoke</button>
+                </span>)}
+              </div> : null}
+              <p role="status" aria-live="polite">{workspaceMessage}</p>
+            </section> : null}
             <nav className={styles.platformLinks} aria-label="Open HII on a computer">
+              <button type="button" onClick={() => { setPanel('chat'); setAccountOpen(false); }}>open HII Social</button>
               <button type="button" onClick={() => { setPanel('say-hi'); setAccountOpen(false); }}>say hi</button>
               <button type="button" onClick={() => { setPanel('models'); setAccountOpen(false); }}>devices &amp; local intelligence</button>
               <a href="/download#mac">open on Mac</a>
@@ -355,7 +609,7 @@ export function HiiWebAccess() {
             </nav>
             <button type="button" onClick={signOut} disabled={busy}>log out</button>
             <p role="status" aria-live="polite">{deviceMessage}</p>
-            <small>canvas media stays on this browser. paired computer screens and HII answers stream live through an outbound, revocable link.</small>
+            <small>{accountSync ? 'workspace objects synchronize through your account. media bytes remain on the importing browser until private asset sync is enabled.' : 'canvas media stays on this browser.'} paired computer screens and HII answers stream live through an outbound, revocable link.</small>
           </aside>
         ) : null}
       </div>

@@ -24,6 +24,7 @@ use std::{
 };
 use tauri::{Emitter, Manager};
 
+mod account_sync;
 mod browser;
 mod terminal;
 mod ui_channel;
@@ -742,6 +743,11 @@ pub fn run() {
             runtime_share_revoke_v1,
             workspace_read,
             workspace_write,
+            account_sync::account_sync_status,
+            account_sync::account_sync_link,
+            account_sync::account_workspace_list,
+            account_sync::account_workspace_read,
+            account_sync::account_workspace_write,
             workspace_asset_store,
             information_capture,
             information_find,

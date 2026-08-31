@@ -1,0 +1,25 @@
+.shell { position: fixed; inset: 0; background: #fff; color: #111; }
+.loading { display: grid; min-height: 100vh; place-items: center; font: 12px/1.4 ui-monospace, Menlo, monospace; }
+.header { position: fixed; z-index: 2147483600; top: 18px; right: 18px; left: 18px; display: flex; align-items: center; justify-content: space-between; pointer-events: none; font: 10px/1 ui-monospace, Menlo, monospace; }
+.header > span { font: 500 12px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; letter-spacing: .08em; }
+.header nav { display: flex; align-items: center; gap: 16px; pointer-events: auto; }
+.header select { min-height: 32px; padding: 0 7px; border: 1px solid #d2d2d2; border-radius: 0; background: rgba(255,255,255,.96); color: inherit; font: inherit; }
+.header button,
+.panel button { min-height: 36px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; text-underline-offset: .22em; }
+.header button:hover,
+.header button:focus-visible,
+.panel button:hover,
+.panel button:focus-visible { text-decoration: underline; }
+.panel { position: fixed; z-index: 2147483500; top: 64px; right: 18px; width: min(280px, calc(100vw - 36px)); padding: 16px; border: 1px solid #d8d8d8; background: rgba(255,255,255,.98); font: 10px/1.5 ui-monospace, Menlo, monospace; }
+.panel dl { display: grid; gap: 7px; margin: 0 0 14px; }
+.panel dl div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; }
+.panel dt { opacity: .5; }
+.panel dd { margin: 0; overflow-wrap: anywhere; }
+.panel form,
+.panel label { display: grid; gap: 6px; }
+.panel form { gap: 10px; }
+.panel input { min-height: 36px; padding: 6px 8px; border: 1px solid #ccc; border-radius: 0; font: inherit; }
+.panel small { display: block; margin-top: 8px; opacity: .55; }
+.panel ol { padding-left: 18px; }
+.panel p { min-height: 1.5em; }
+.srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }

@@ -172,7 +172,7 @@ function ChatPanel({ accountId, csrfToken }: { accountId: string; csrfToken: str
 
 export function HiiWebPanel({ panel, accountId, csrfToken, shareNode, onClose, onImport, onPanel }: { panel: WebPanel; accountId: string; csrfToken: string; shareNode: WorkspaceNode | null; onClose: () => void; onImport: (item: FeedItem) => void; onPanel: (panel: WebPanel) => void }) {
   return <aside className={styles.webPanel} aria-label={`HII ${panel}`} data-workspace-ui>
-    <header><span>{panel === 'say-hi' ? 'say hi' : panel}</span><button type="button" onClick={onClose}>close</button></header>
+    <header><span>{panel === 'say-hi' ? 'say hi' : panel === 'chat' ? 'HII Social' : panel}</span><button type="button" onClick={onClose}>close</button></header>
     {panel === 'feed' ? <FeedPanel csrfToken={csrfToken} shareNode={shareNode} onImport={onImport} /> : null}
     {panel === 'chat' ? <ChatPanel accountId={accountId} csrfToken={csrfToken} /> : null}
     {panel === 'say-hi' ? <LocalHiiChat onOpenDevices={() => onPanel('models')} /> : null}

@@ -42,7 +42,8 @@ describe('HII web access gate', () => {
 
     expect(source).toContain("fetch('/hii/network/session'");
     expect(source).toContain("credentials: 'same-origin'");
-    expect(source).toContain('networkSession ?? api<Session>');
+    expect(source).toContain("source: 'network' as const");
+    expect(source).toContain("source: 'account' as const");
     expect(source).not.toContain("normalized.endsWith('.local')");
   });
 
@@ -52,14 +53,15 @@ describe('HII web access gate', () => {
     const globalCss = readFileSync('app/globals.css', 'utf8');
 
     expect(source).toContain('surface="account"');
-    expect(source).toContain('spaceId={`account:${canvasAccountId}`}');
+    expect(source).toContain('spaceId={canvasSpaceId}');
     expect(source).toContain('creatorId={`account:${canvasAccountId}`}');
     expect(source).toContain('persistence={canvasPersistence}');
-    expect(source).toContain('browserSpacePersistence(`account:${canvasAccountId}`');
+    expect(source).toContain(': browserSpacePersistence(');
+    expect(source).toContain('`account:${canvasAccountId}`');
     expect(source).toContain('hydrateBrowserCanvasAssets(canvasAccountId, document)');
     expect(source).toContain('fileSeeder={canvasFileSeeder}');
     expect(source).toContain("onRequestDevice={() => setPanel('models')}");
-    expect(source).toContain('stored only in this browser');
+    expect(source).toContain("accountSync ? 'account synchronized' : 'stored on this device'");
     expect(source).toContain('allowPhoto');
     expect(source).toContain('/^[A-Za-z0-9_-]{43}$/.test(canvasAccountId)');
     expect(source).toContain("setDeviceMessage('could not log out. try again.')");
@@ -120,6 +122,22 @@ describe('HII web access gate', () => {
     expect(css).toContain('@media (max-width: 560px)');
   });
 
+  it('synchronizes account-owned business workspaces and supports bounded studio access', () => {
+    const source = readFileSync('components/auth/HiiWebAccess.tsx', 'utf8');
+    const adapter = readFileSync('lib/web/account-workspace.ts', 'utf8');
+    const worker = readFileSync('workers/public-site/src/workspace.rs', 'utf8');
+
+    expect(source).toContain('new AccountWorkspacePersistence(');
+    expect(source).toContain('createWorkspaceShareCode(activeWorkspace.id');
+    expect(source).toContain('redeemWorkspaceShareCode(redeemCode');
+    expect(source).toContain("setSession({ ...next, source: 'account' })");
+    expect(adapter).toContain('rebaseWorkspaceDoc(document, first.document, base)');
+    expect(adapter).toContain("'X-HII-CSRF': this.csrfToken");
+    expect(worker).toContain('let code_hash = hash_token(code);');
+    expect(worker).toContain('current_access.role != "owner"');
+    expect(worker).toContain("'workspace.member.revoked'");
+  });
+
   it('keeps imported canvas assets local to the authenticated browser device', () => {
     const source = readFileSync('lib/web/canvas-assets.ts', 'utf8');
 
@@ -156,7 +174,10 @@ describe('HII web access gate', () => {
     const page = readFileSync('app/page.tsx', 'utf8');
 
     expect(page).toContain("process.env.NEXT_PUBLIC_HII_TARGET === 'desktop'");
-    expect(page).toContain("await import('@/components/workspace/HiiRoot')");
+    expect(page).toContain("await import('@/components/desktop/DesktopHiiAccess')");
+    const desktop = readFileSync('components/desktop/DesktopHiiAccess.tsx', 'utf8');
+    expect(desktop).toContain('<HiiRoot');
+    expect(desktop).toContain('new NativeAccountWorkspacePersistence(active)');
     expect(page).toContain('return <HiiWebAccess />');
   });
 
