@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   objectiveSeedFromText,
+  isAssistantShortcut,
   isDirectCanvasTyping,
   isTerminalShortcut,
   terminalSeedFromCommand
@@ -53,6 +54,26 @@ describe('canvas terminal command', () => {
     expect(isTerminalShortcut({ ...key, shiftKey: true })).toBe(false);
     expect(isTerminalShortcut({ ...key, repeat: true })).toBe(false);
     expect(isTerminalShortcut({ ...key, code: 'KeyA' })).toBe(false);
+  });
+
+  it('summons the contextual HII assistant with Command-Space only', () => {
+    const key = { code: 'Space', altKey: false, ctrlKey: false, metaKey: true, shiftKey: false, repeat: false };
+    expect(isAssistantShortcut(key)).toBe(true);
+    expect(isAssistantShortcut({ ...key, metaKey: false, altKey: true })).toBe(true);
+    expect(isAssistantShortcut({ ...key, metaKey: false })).toBe(false);
+    expect(isAssistantShortcut({ ...key, ctrlKey: true })).toBe(false);
+    expect(isAssistantShortcut({ ...key, altKey: true })).toBe(false);
+    expect(isAssistantShortcut({ ...key, shiftKey: true })).toBe(false);
+    expect(isAssistantShortcut({ ...key, repeat: true })).toBe(false);
+  });
+
+  it('renders Command-Space assistance as a dedicated canvas state panel', () => {
+    const root = readFileSync(resolve(process.cwd(), 'components/workspace/HiiRoot.tsx'), 'utf8');
+    const css = readFileSync(resolve(process.cwd(), 'app/globals.css'), 'utf8');
+    expect(root).toContain("presentation === 'floating'");
+    expect(root).toContain('isAssistantShortcut(event)');
+    expect(root).toContain('selectedCount={selected.length}');
+    expect(css).toContain('.hii-assistant-terminal-shell');
   });
 
   it('turns direct canvas typing into a persistent objective draft', () => {

@@ -13,7 +13,7 @@ describe("native consumer model profiles", () => {
     [8, "8gb", "Qwen/Qwen3-4B"],
     [16, "16gb", "Qwen/Qwen3-8B"],
     [24, "24-32gb", "Qwen/Qwen3-14B"],
-    [48, "48gb+", "mlx-community/Qwen3-4B-Instruct-2507-4bit"]
+    [48, "48gb+", "mlx-community/Qwen3.5-35B-A3B-4bit"]
   ])("maps %i GiB to %s", (memoryGiB, tier, model) => {
     expect(selectConsumerModelProfile(profiles, memoryGiB)).toMatchObject({ tier, model });
   });
@@ -56,6 +56,7 @@ describe("HII model management CLI", () => {
     expect(source).toContain('else if (sub === "recommend" || sub === "choose")');
     expect(source).toContain("benchmarkStore.results[status.model] = report");
     expect(source).toContain('routing: ["hii-native", "approved-hosted"]');
+    expect(source).toContain('status.loadedModel = health.loaded_model || health.model');
   });
 
   it("defaults conversation UX to the direct model and tool stream", () => {

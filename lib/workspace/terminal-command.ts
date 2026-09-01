@@ -14,6 +14,15 @@ export function isTerminalShortcut(event: Pick<KeyboardEvent, 'altKey' | 'code' 
     && !event.repeat;
 }
 
+/** Command-Space summons HII when available; Option-Space works with stock Spotlight settings. */
+export function isAssistantShortcut(event: Pick<KeyboardEvent, 'altKey' | 'code' | 'ctrlKey' | 'metaKey' | 'repeat' | 'shiftKey'>) {
+  return event.code === 'Space'
+    && !event.ctrlKey
+    && !event.shiftKey
+    && !event.repeat
+    && ((event.metaKey && !event.altKey) || (event.altKey && !event.metaKey));
+}
+
 export function isDirectCanvasTyping(event: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'key' | 'metaKey'>) {
   return !event.altKey
     && !event.ctrlKey

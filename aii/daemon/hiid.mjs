@@ -1080,6 +1080,10 @@ async function printModelRuntimeStatus() {
     try {
       const response = await fetch(`${MODEL_RUNTIME_URL}/health`, { signal: AbortSignal.timeout(500) });
       status.state = response.ok ? "ready" : "starting";
+      if (response.ok) {
+        const health = await response.json().catch(() => ({}));
+        status.loadedModel = health.loaded_model || health.model || status.loadedModel || null;
+      }
     } catch {
       status.state = "starting";
     }

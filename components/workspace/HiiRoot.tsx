@@ -41,6 +41,7 @@ import {
 } from '@/lib/workspace/music-playlists';
 import {
   objectiveSeedFromText,
+  isAssistantShortcut,
   isDirectCanvasTyping,
   isTerminalShortcut,
   terminalSeedFromCommand
@@ -592,6 +593,9 @@ function Prompt({
   status,
   timeline,
   contextPack,
+  presentation = 'floating',
+  workspaceLabel = 'HII workspace',
+  selectedCount = 0,
   onDismiss,
   onMode,
   onApproveContext,
@@ -609,6 +613,9 @@ function Prompt({
   onMode: (mode: CanvasModeId) => void;
   onApproveContext: () => void;
   onSubmit: (value: string) => void;
+  presentation?: 'floating' | 'terminal';
+  workspaceLabel?: string;
+  selectedCount?: number;
 }) {
   const [value, setValue] = useState(initialValue);
   const input = useRef<HTMLInputElement | null>(null);
@@ -630,16 +637,25 @@ function Prompt({
     if (value.trim() && status !== 'running' && !contextPack) onSubmit(value.trim());
   };
   useEffect(() => { input.current?.focus(); }, []);
+  const floating = presentation === 'floating';
   const promptWidth = Math.min(640, window.innerWidth - 32);
   const promptLeft = Math.max(16, Math.min(anchor.x - 14, window.innerWidth - promptWidth - 16));
   const promptTop = Math.max(16, Math.min(anchor.y + 14, window.innerHeight - 90));
   return (
     <div
-      className="hii-prompt-shell"
-      style={{ left: promptLeft, top: promptTop }}
+      className={floating ? 'hii-prompt-shell' : 'hii-assistant-terminal-shell'}
+      style={floating ? { left: promptLeft, top: promptTop } : undefined}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <form className="hii-prompt" data-mode={mode} data-status={status} onSubmit={(event) => { event.preventDefault(); submit(); }}>
+      <form className="hii-prompt" data-mode={mode} data-status={status} data-presentation={presentation} onSubmit={(event) => { event.preventDefault(); submit(); }}>
+        {!floating && (
+          <header className="hii-assistant-terminal-context">
+            <strong>HII</strong>
+            <span>{workspaceLabel}</span>
+            <span>{selectedCount ? `${selectedCount} selected` : 'whole workspace'}</span>
+            <kbd>⌘ Space · ⌥ Space</kbd>
+          </header>
+        )}
         {objectTitle && (
           <div className="hii-prompt-context">
             <span>Conversation with</span>
@@ -681,7 +697,9 @@ function Prompt({
                 submit();
               }
             }}
-            placeholder={response ? `Continue in ${canvasMode(mode).label} mode…` : `${canvasMode(mode).label}: ${canvasMode(mode).description}`}
+            placeholder={!floating
+              ? (response ? 'Continue with HII…' : 'What do you need help with?')
+              : (response ? `Continue in ${canvasMode(mode).label} mode…` : `${canvasMode(mode).label}: ${canvasMode(mode).description}`)}
             aria-label="Tell HII what should happen"
             autoComplete="off"
             spellCheck
@@ -755,6 +773,7 @@ export function HiiRoot({
   });
   const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [promptVisible, setPromptVisible] = useState(false);
+  const [promptPresentation, setPromptPresentation] = useState<'floating' | 'terminal'>('floating');
   const [drawing, setDrawing] = useState(false);
   const [canvasCommandsOpen, setCanvasCommandsOpen] = useState(false);
   const [toolMessage, setToolMessage] = useState('');
@@ -1174,6 +1193,7 @@ export function HiiRoot({
       objectId: node.id,
       conversationId
     });
+    setPromptPresentation('floating');
     setPromptVisible(true);
   }, [camera, workspace]);
 
@@ -1559,6 +1579,22 @@ export function HiiRoot({
   useEffect(() => {
     const inField = (target: EventTarget | null) => (target as Element | null)?.closest?.('input,textarea,[contenteditable]');
     const keydown = (event: KeyboardEvent) => {
+      if (runtimeEnabled && isAssistantShortcut(event)) {
+        event.preventDefault();
+        if (promptVisible && promptPresentation === 'terminal') {
+          setPromptVisible(false);
+          return;
+        }
+        setPrompt((current) => ({
+          anchor: mouse.current,
+          initialValue: '',
+          response: current?.response || '',
+          status: current?.status || 'idle'
+        }));
+        setPromptPresentation('terminal');
+        setPromptVisible(true);
+        return;
+      }
       if (isAccount && canvasCommandsOpen && event.key === 'Escape') {
         event.preventDefault();
         setCanvasCommandsOpen(false);
@@ -1678,6 +1714,7 @@ export function HiiRoot({
           response: current?.response || '',
           status: current?.status || 'idle'
         }));
+        setPromptPresentation('floating');
         setPromptVisible(true);
         return;
       }
@@ -1744,7 +1781,7 @@ export function HiiRoot({
     addEventListener('pointermove', pointermove);
     addEventListener('paste', paste);
     return () => { removeEventListener('keydown', keydown); removeEventListener('pointermove', pointermove); removeEventListener('paste', paste); };
-  }, [allowPhoto, camera, canvasCommandsOpen, deleteSelection, fitCanvas, importFiles, isAccount, isSpace, isTouchCanvas, mode, onRequestDevice, openDevBrowser, runtimeEnabled, selected, spawnArtifactTerminals, spawnCenteredSeed, spawnInformation, spawnSeeds, toggleDrawing, workspace]);
+  }, [allowPhoto, camera, canvasCommandsOpen, deleteSelection, fitCanvas, importFiles, isAccount, isSpace, isTouchCanvas, mode, onRequestDevice, openDevBrowser, promptPresentation, promptVisible, runtimeEnabled, selected, spawnArtifactTerminals, spawnCenteredSeed, spawnInformation, spawnSeeds, toggleDrawing, workspace]);
 
   const canvasFeedback = toolMessage || (drawing
     ? 'Drawing on · drag anywhere · Esc to stop.'
@@ -1910,6 +1947,9 @@ export function HiiRoot({
           response={prompt.response}
           status={prompt.status}
           contextPack={prompt.contextPack}
+          presentation={promptPresentation}
+          workspaceLabel={spaceId ? `workspace · ${spaceId}` : 'working in ~/hii'}
+          selectedCount={selected.length}
           timeline={prompt.objectId
             ? objectConversationTurns(workspace.nodes.find((node) => node.id === prompt.objectId)?.payload || {}, prompt.conversationId)
             : []}

@@ -285,6 +285,33 @@ button, input, textarea { font: inherit; }
   width: min(640px, calc(100vw - 32px));
 }
 
+.hii-assistant-terminal-shell {
+  position: fixed;
+  z-index: 2147483000;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  max-height: min(46vh, 520px);
+  overflow: auto;
+  border-top: 1px solid var(--ink);
+  background: var(--field);
+}
+
+.hii-assistant-terminal-context {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--faint);
+  color: var(--muted);
+  font: 9px/1.2 "SF Mono", ui-monospace, monospace;
+}
+.hii-assistant-terminal-context strong { color: var(--ink); font-weight: 600; letter-spacing: .08em; }
+.hii-assistant-terminal-context span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hii-assistant-terminal-context kbd { color: var(--muted); font: inherit; }
+
 .hii-prompt {
   width: 100%;
   border: 1px solid var(--ink);
@@ -293,6 +320,9 @@ button, input, textarea { font: inherit; }
   color: var(--ink);
   box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.08);
 }
+.hii-prompt[data-presentation="terminal"] { border: 0; box-shadow: none; }
+.hii-prompt[data-presentation="terminal"] .hii-prompt-line { min-height: 58px; }
+.hii-prompt[data-presentation="terminal"] .hii-mode-strip { padding-inline: 16px; }
 
 .hii-prompt-context {
   display: grid;

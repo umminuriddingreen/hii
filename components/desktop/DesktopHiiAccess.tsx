@@ -16,6 +16,7 @@ type LinkedIdentity = { handle: string; deviceName: string };
 export function DesktopHiiAccess() {
   const [linked, setLinked] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(true);
   const [workspaces, setWorkspaces] = useState<NativeAccountWorkspace[]>([]);
   const [active, setActive] = useState('local');
   const [identity, setIdentity] = useState<LinkedIdentity | null>(null);
@@ -47,6 +48,16 @@ export function DesktopHiiAccess() {
 
   useEffect(() => () => persistence?.dispose(), [persistence]);
 
+  useEffect(() => {
+    const toggleWorkspaces = (event: KeyboardEvent) => {
+      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.code !== 'Digit1' || event.repeat) return;
+      event.preventDefault();
+      setWorkspaceOpen((value) => !value);
+    };
+    window.addEventListener('keydown', toggleWorkspaces);
+    return () => window.removeEventListener('keydown', toggleWorkspaces);
+  }, []);
+
   const link = async (event: FormEvent) => {
     event.preventDefault();
     if (!code.trim() || !deviceName.trim() || busy) return;
@@ -64,7 +75,7 @@ export function DesktopHiiAccess() {
     }
   };
 
-  return <div className={styles.shell}>
+  return <div className={styles.shell} data-workspace-open={workspaceOpen || undefined}>
     <HiiRoot
       key={active}
       spaceId={active === 'local' ? '' : active}
@@ -72,22 +83,25 @@ export function DesktopHiiAccess() {
       persistence={persistence}
     />
     <header className={styles.header} data-workspace-ui>
-      <span>hii</span>
+      <button type="button" aria-label="Toggle workspaces" aria-expanded={workspaceOpen} onClick={() => setWorkspaceOpen((value) => !value)}>hii</button>
       <nav>
-        {linked ? <label>
-          <span className={styles.srOnly}>workspace</span>
-          <select value={active} onChange={(event) => setActive(event.target.value)}>
-            <option value="local">this Mac · local</option>
-            {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>
-              {workspace.name} · {workspace.role}
-            </option>)}
-          </select>
-        </label> : null}
         <button type="button" aria-expanded={accountOpen} onClick={() => setAccountOpen((value) => !value)}>
           {identity?.handle ?? 'account sync'}
         </button>
       </nav>
     </header>
+    {workspaceOpen ? <aside className={styles.workspacePanel} data-workspace-ui aria-label="Workspaces">
+      <header><strong>Workspaces</strong><kbd>⌘ 1</kbd></header>
+      <nav aria-label="Available workspaces">
+        <button type="button" data-active={active === 'local' || undefined} onClick={() => setActive('local')}>
+          <span>this Mac</span><small>local canvas</small>
+        </button>
+        {workspaces.map((workspace) => <button type="button" key={workspace.id} data-active={active === workspace.id || undefined} onClick={() => setActive(workspace.id)}>
+          <span>{workspace.name}</span><small>{workspace.role}</small>
+        </button>)}
+      </nav>
+      <footer><span>Canvas</span><small>⌘ Space · ⌥ Space</small></footer>
+    </aside> : null}
     {accountOpen ? <aside className={styles.panel} data-workspace-ui aria-label="HII account synchronization">
       {linked ? <>
         <dl>

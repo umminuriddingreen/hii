@@ -1,7 +1,7 @@
 .shell { position: fixed; inset: 0; background: #fff; color: #111; }
 .loading { display: grid; min-height: 100vh; place-items: center; font: 12px/1.4 ui-monospace, Menlo, monospace; }
 .header { position: fixed; z-index: 2147483600; top: 18px; right: 18px; left: 18px; display: flex; align-items: center; justify-content: space-between; pointer-events: none; font: 10px/1 ui-monospace, Menlo, monospace; }
-.header > span { font: 500 12px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; letter-spacing: .08em; }
+.header > button:first-child { pointer-events: auto; font: 600 12px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; letter-spacing: .08em; }
 .header nav { display: flex; align-items: center; gap: 16px; pointer-events: auto; }
 .header select { min-height: 32px; padding: 0 7px; border: 1px solid #d2d2d2; border-radius: 0; background: rgba(255,255,255,.96); color: inherit; font: inherit; }
 .header button,
@@ -11,6 +11,23 @@
 .panel button:hover,
 .panel button:focus-visible { text-decoration: underline; }
 .panel { position: fixed; z-index: 2147483500; top: 64px; right: 18px; width: min(280px, calc(100vw - 36px)); padding: 16px; border: 1px solid #d8d8d8; background: rgba(255,255,255,.98); font: 10px/1.5 ui-monospace, Menlo, monospace; }
+.workspacePanel { position: fixed; z-index: 2147483400; inset: 0 auto 0 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: 232px; padding-top: 54px; border-right: 1px solid #dededb; background: #f5f5f2; font: 10px/1.35 ui-monospace, Menlo, monospace; }
+.workspacePanel > header,
+.workspacePanel > footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 42px; padding: 0 14px; border-bottom: 1px solid #dededb; }
+.workspacePanel > header strong { font-weight: 600; }
+.workspacePanel kbd,
+.workspacePanel small { color: rgba(17,17,17,.48); font: inherit; }
+.workspacePanel nav { display: grid; align-content: start; overflow: auto; }
+.workspacePanel nav button { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; min-height: 42px; padding: 0 14px; border: 0; border-bottom: 1px solid rgba(17,17,17,.06); background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.workspacePanel nav button:hover,
+.workspacePanel nav button:focus-visible,
+.workspacePanel nav button[data-active] { background: #fff; outline: 0; }
+.workspacePanel nav button[data-active] { box-shadow: inset 2px 0 #111; }
+.workspacePanel nav button span,
+.workspacePanel nav button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspacePanel > footer { border-top: 1px solid #dededb; border-bottom: 0; }
+.shell[data-workspace-open] :global(.hii-canvas) { left: 232px; }
+.shell[data-workspace-open] :global(.hii-assistant-terminal-shell) { left: 232px; }
 .panel dl { display: grid; gap: 7px; margin: 0 0 14px; }
 .panel dl div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; }
 .panel dt { opacity: .5; }
