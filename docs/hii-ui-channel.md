@@ -30,11 +30,14 @@ npm run ui:live:off    # back to the installed/baked interface
 export TAURI_SIGNING_PRIVATE_KEY=...            # the desktop updater key
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=...
 npm run ui:release -- --version 0.1.4 --base-url https://<host>/ui
+npm run ui:publish
 ```
 
 That builds `out/`, zips it, signs it, and writes `dist/ui/ui-latest.json`.
-Upload the zip and `ui-latest.json` to the base URL. Installed apps polling that
-endpoint pick the release up — no rebuild, no reinstall, no notarization.
+`ui:publish` refuses unsigned bundles and uploads the zip plus manifest to HII's
+canonical R2-backed endpoint at `https://humaninformationinterface.com/ui/`.
+Installed apps polling that endpoint pick the release up — no rebuild, no
+reinstall, no notarization.
 
 ## Wiring an app to the channel
 

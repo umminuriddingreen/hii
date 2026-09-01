@@ -1,0 +1,19 @@
+{
+  "clients": {
+    "codex": {
+      "role": "canvas-operator",
+      "restricted_tools": [],
+      "max_params_per_call": 64
+    },
+    "pi": {
+      "role": "canvas-operator",
+      "restricted_tools": [],
+      "max_params_per_call": 64
+    }
+  },
+  "defaults": {
+    "role": "reader",
+    "restricted_tools": [],
+    "max_params_per_call": 64
+  }
+}

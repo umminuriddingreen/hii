@@ -3273,10 +3273,6 @@ switch (cmd) {
     break;
   }
   case "bridge": cmdBridge(rest); break;
-  case "mcp": {
-    const r = spawnSync(codexBin(), ["mcp", ...(rest.length ? rest : ["list"])], { stdio: "inherit" });
-    process.exit(r.status ?? 1);
-  }
   case "codex": cmdCodex(rest); break;
   case "legacy":
     console.error(`HII is now a single current surface at ${ROOT}. Migrate needed legacy behavior into the current repo instead of running ~/hii-old.`);
@@ -3379,6 +3375,6 @@ usage: hii <command>
   codex schema pin    generate the versioned Codex v2 protocol contract
   codex threads [--limit n] [--cwd path] [--search text] [--json]
                       list Codex threads through the read-only app-server path
-  mcp [args]          codex mcp passthrough (default: list)`);
+  mcp                 serve HII tools and the canonical canvas over stdio`);
     process.exit(cmd ? 1 : 0);
 }

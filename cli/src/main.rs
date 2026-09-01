@@ -570,12 +570,8 @@ enum Commands {
         #[command(subcommand)]
         action: ToolsCommand,
     },
-    #[command(
-        name = "mcp-serve",
-        about = "Serve the tool surface as an MCP server over stdio (JSON-RPC 2.0, line-delimited)"
-    )]
-    #[command(hide = true)]
-    McpServe {
+    #[command(about = "Serve HII's governed tools and canonical canvas over MCP stdio")]
+    Mcp {
         #[arg(
             long,
             value_name = "LEVEL",
@@ -3194,7 +3190,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Tools { action }) => tools_command(&paths, action),
-        Some(Commands::McpServe {
+        Some(Commands::Mcp {
             authority,
             client_identity,
         }) => {
@@ -5783,7 +5779,7 @@ fn resolve_authority(
         return Ok(Authority::Yolo);
     }
     // HII_YOLO used to escalate every command in the process, including
-    // `mcp-serve` and `acp-serve`. An ambient environment variable should not
+    // `mcp` and `acp-serve`. An ambient environment variable should not
     // silently grant unbounded authority to a server a client is driving, so it
     // is honored only where the operator invoked the work directly.
     if context == AuthorityContext::Operator

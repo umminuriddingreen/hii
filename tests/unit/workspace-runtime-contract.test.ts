@@ -23,6 +23,12 @@ describe('canvas Runtime boundary', () => {
     expect(hook).not.toContain('revision: before.revision + 1');
   });
 
+  it('refreshes external Runtime Space mutations without racing local saves', () => {
+    expect(hook).toContain('window.setInterval(() => void refresh(), 750)');
+    expect(hook).toContain('source.revision <= current.current.revision');
+    expect(hook).toContain('saveTimer.current || saveInFlight.current');
+  });
+
   it('publishes all foundational protocol definitions', () => {
     for (const name of ['object', 'edge', 'event', 'identityRef', 'grant', 'capability', 'run', 'receipt']) {
       expect(schema.$defs[name]).toBeDefined();

@@ -151,6 +151,34 @@ const TOOLS: &[ToolSpec] = &[
         "repo/runtime context snapshot",
     ),
     tool(
+        "canvas_list",
+        "hii",
+        Reach::Hii,
+        false,
+        "list the canonical HII canvas objects with stable ids and geometry",
+    ),
+    tool(
+        "canvas_read",
+        "hii",
+        Reach::Hii,
+        false,
+        "read one canonical HII canvas object by stable id",
+    ),
+    tool(
+        "canvas_add",
+        "hii",
+        Reach::Hii,
+        true,
+        "add a bounded editable object to the canonical HII canvas",
+    ),
+    tool(
+        "canvas_update",
+        "hii",
+        Reach::Hii,
+        true,
+        "move, resize, rename, or update one canonical HII canvas object",
+    ),
+    tool(
         "info_find",
         "hii",
         Reach::Hii,
@@ -332,6 +360,49 @@ pub fn input_schema(name: &str) -> Value {
             }),
             json!(["system", "kind"]),
         ),
+        "canvas_list" => object(
+            json!({ "spaceId": string, "limit": integer }),
+            json!([]),
+        ),
+        "canvas_read" => object(
+            json!({ "spaceId": string, "objectId": string }),
+            json!(["objectId"]),
+        ),
+        "canvas_add" => object(
+            json!({
+                "spaceId": string,
+                "idempotencyKey": string,
+                "authorityGrantId": string,
+                "type": { "type": "string", "enum": ["note", "canvas-text", "image", "link", "document", "frame"] },
+                "title": string,
+                "content": string,
+                "url": string,
+                "x": { "type": "number" },
+                "y": { "type": "number" },
+                "width": { "type": "number" },
+                "height": { "type": "number" },
+                "payload": { "type": "object" }
+            }),
+            json!(["idempotencyKey", "type"]),
+        ),
+        "canvas_update" => object(
+            json!({
+                "spaceId": string,
+                "idempotencyKey": string,
+                "authorityGrantId": string,
+                "objectId": string,
+                "title": string,
+                "content": string,
+                "url": string,
+                "x": { "type": "number" },
+                "y": { "type": "number" },
+                "width": { "type": "number" },
+                "height": { "type": "number" },
+                "rotation": { "type": "number" },
+                "payload": { "type": "object" }
+            }),
+            json!(["idempotencyKey", "objectId"]),
+        ),
         "object_read" => object(
             json!({ "grant": string, "object": string }),
             json!(["grant", "object"]),
@@ -354,6 +425,15 @@ pub fn output_schema(name: &str) -> Option<Value> {
                 "status": { "type": "string" },
                 "next": { "type": "string" },
                 "receipt": { "type": "object" }
+            }
+        })),
+        "canvas_list" | "canvas_read" | "canvas_add" | "canvas_update" => Some(json!({
+            "type": "object",
+            "properties": {
+                "spaceId": { "type": "string" },
+                "sequence": { "type": "integer" },
+                "object": { "type": "object" },
+                "objects": { "type": "array" }
             }
         })),
         _ => None,
@@ -426,7 +506,7 @@ pub fn is_known_tool(name: &str) -> bool {
 /// `mcp_call` is part of the agent's action surface but dispatches to an
 /// operator-configured downstream server, which the stdio MCP server does not
 /// proxy. It is listed in the manifest — the manifest describes what the agent
-/// can do — and excluded from what `hii mcp-serve` advertises.
+/// can do — and excluded from what `hii mcp` advertises.
 pub fn is_directly_executable(name: &str) -> bool {
     TOOLS
         .iter()

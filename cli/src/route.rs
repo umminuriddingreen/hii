@@ -430,7 +430,6 @@ pub const ROUTES: &[Route] = &[
         Tools,
         "message Codex through the local bridge",
     ),
-    delegated("mcp", Extended, Tools, "Codex MCP passthrough"),
     delegated(
         "codex",
         Extended,
@@ -454,10 +453,10 @@ pub const ROUTES: &[Route] = &[
         "print the tool capability manifest as JSON",
     ),
     native(
-        "mcp-serve",
+        "mcp",
         Extended,
-        Internal,
-        "serve the tool surface as an MCP server",
+        Tools,
+        "serve HII tools and the canonical canvas over MCP",
     ),
     native(
         "acp-serve",

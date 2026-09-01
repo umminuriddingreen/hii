@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { SidebarSimple } from '@phosphor-icons/react';
 import { HiiRoot } from '@/components/workspace/HiiRoot';
 import {
   accountSyncStatus,
@@ -16,7 +17,7 @@ type LinkedIdentity = { handle: string; deviceName: string };
 export function DesktopHiiAccess() {
   const [linked, setLinked] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
-  const [workspaceOpen, setWorkspaceOpen] = useState(true);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<NativeAccountWorkspace[]>([]);
   const [active, setActive] = useState('local');
   const [identity, setIdentity] = useState<LinkedIdentity | null>(null);
@@ -83,10 +84,13 @@ export function DesktopHiiAccess() {
       persistence={persistence}
     />
     <header className={styles.header} data-workspace-ui>
-      <button type="button" aria-label="Toggle workspaces" aria-expanded={workspaceOpen} onClick={() => setWorkspaceOpen((value) => !value)}>hii</button>
+      <div className={styles.boardIdentity}>
+        <button type="button" aria-label="Toggle workspaces" aria-expanded={workspaceOpen} onClick={() => setWorkspaceOpen((value) => !value)}><SidebarSimple size={20} /></button>
+        <strong>HII</strong>
+      </div>
       <nav>
         <button type="button" aria-expanded={accountOpen} onClick={() => setAccountOpen((value) => !value)}>
-          {identity?.handle ?? 'account sync'}
+          {identity?.handle ?? 'account'}
         </button>
       </nav>
     </header>

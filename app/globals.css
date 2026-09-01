@@ -77,6 +77,63 @@ button, input, textarea { font: inherit; }
   will-change: transform;
 }
 
+.hii-freeform-chrome { display: contents; }
+.hii-freeform-tools,
+.hii-freeform-zoom,
+.hii-freeform-state {
+  position: fixed;
+  z-index: 2147482500;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 42px;
+  margin: 0;
+  padding: 4px;
+  border: 0;
+  border-radius: 16px;
+  background: rgba(248, 248, 248, .88);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, .09), inset 0 0 0 1px rgba(255,255,255,.6);
+  backdrop-filter: blur(26px) saturate(1.45);
+}
+.hii-freeform-tools { top: 12px; left: 50%; transform: translateX(-50%); }
+.hii-freeform-zoom { left: 16px; bottom: 14px; }
+.hii-freeform-state { right: 16px; bottom: 14px; }
+.hii-freeform-tools button,
+.hii-freeform-zoom button,
+.hii-freeform-state button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: #4f4f4f;
+  cursor: pointer;
+}
+.hii-freeform-tools button:hover,
+.hii-freeform-tools button:focus-visible,
+.hii-freeform-zoom button:hover,
+.hii-freeform-zoom button:focus-visible,
+.hii-freeform-state button:hover,
+.hii-freeform-state button:focus-visible,
+.hii-freeform-tools button[aria-pressed="true"] {
+  background: rgba(0,0,0,.075);
+  color: #111;
+  outline: 0;
+}
+.hii-freeform-tools > span,
+.hii-freeform-zoom > i { width: 1px; height: 22px; margin: 0 3px; background: rgba(0,0,0,.09); }
+.hii-freeform-zoom output { min-width: 46px; color: #4f4f4f; font-size: 12px; font-weight: 600; text-align: center; }
+.hii-freeform-state > span { display: flex; min-width: 34px; height: 34px; align-items: center; justify-content: center; gap: 4px; color: #4f4f4f; font-size: 11px; }
+
+@media (max-width: 760px) {
+  .hii-freeform-tools { top: auto; right: 12px; bottom: 12px; left: 12px; justify-content: center; transform: none; }
+  .hii-freeform-zoom,
+  .hii-freeform-state { display: none; }
+}
+
 .hii-node {
   position: absolute;
   left: 0;
@@ -311,6 +368,13 @@ button, input, textarea { font: inherit; }
 .hii-assistant-terminal-context strong { color: var(--ink); font-weight: 600; letter-spacing: .08em; }
 .hii-assistant-terminal-context span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hii-assistant-terminal-context kbd { color: var(--muted); font: inherit; }
+.hii-assistant-choices { display: grid; border-bottom: 1px solid var(--faint); }
+.hii-assistant-choices button { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 42px; padding: 0 16px; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.hii-assistant-choices button:hover,
+.hii-assistant-choices button:focus-visible { background: var(--ink); color: var(--field); outline: 0; }
+.hii-assistant-choices small { color: var(--muted); font: 9px/1.2 "SF Mono", ui-monospace, monospace; }
+.hii-assistant-choices button:hover small,
+.hii-assistant-choices button:focus-visible small { color: inherit; opacity: .64; }
 
 .hii-prompt {
   width: 100%;

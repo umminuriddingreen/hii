@@ -118,9 +118,10 @@ operational objects, runtime events, authority, receipts, and projections.
 schema. The Tauri commands and local development adapter bridge the workspace
 to those contracts.
 
-`hii mcp-serve` exposes the bounded HII tool surface over stdio. It is an agent
-adapter over the local runtime, not the canonical canvas database, a remote
-device transport, or proof that every visual action is agent-addressable.
+`hii mcp` exposes HII's governed tool surface and canonical canvas operations
+over stdio. Canvas mutations use the same Runtime Space apply path and receipts
+as the Mac app; client ACLs bound which tools each agent may call. See
+[`docs/hii-mcp.md`](docs/hii-mcp.md).
 
 ### 4. Knowledge and Context Dock foundations
 

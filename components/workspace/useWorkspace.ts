@@ -35,24 +35,31 @@ export function useWorkspace(
   const [initialViewport, setInitialViewport] = useState<WorkspaceViewport | null>(null);
   const current = useRef(document);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveInFlight = useRef(false);
   const past = useRef<WorkspaceNode[][]>([]);
   const future = useRef<WorkspaceNode[][]>([]);
   current.current = document;
 
   const persist = useCallback(async () => {
     const next = { ...current.current, viewport: getViewport(), updatedAt: new Date().toISOString() };
+    saveInFlight.current = true;
     try {
       const saved = await (persistence?.write(next) ?? writeWorkspace(next));
       current.current = saved;
       setDocument(saved);
     } catch {
       // The next mutation retries. The in-memory canvas remains usable.
+    } finally {
+      saveInFlight.current = false;
     }
   }, [getViewport, persistence]);
 
   const scheduleSave = useCallback(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(persist, 180);
+    saveTimer.current = setTimeout(() => {
+      saveTimer.current = null;
+      void persist();
+    }, 180);
   }, [persist]);
 
   useEffect(() => {
@@ -70,6 +77,24 @@ export function useWorkspace(
     current.current = loaded;
     setDocument(loaded);
   }), [bootstrap, persistence]);
+
+  useEffect(() => {
+    if (persistence) return;
+    let disposed = false;
+    const refresh = async () => {
+      if (saveTimer.current || saveInFlight.current) return;
+      try {
+        const source = await readWorkspace();
+        if (disposed || source.revision <= current.current.revision) return;
+        current.current = source;
+        setDocument(source);
+      } catch {
+        // The native canvas remains usable while the next poll retries.
+      }
+    };
+    const timer = window.setInterval(() => void refresh(), 750);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [persistence]);
 
   const mutate = useCallback((change: (nodes: WorkspaceNode[]) => WorkspaceNode[]) => {
     setDocument((before) => {

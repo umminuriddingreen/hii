@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canMutateCanvas, canvasMode, canvasModes, modeIntent, nextCanvasMode, type CanvasModeId } from '../../lib/workspace/canvas-modes';
+import { canMutateCanvas, canvasMode, canvasModes, modeIntent, nextCanvasMode, presentationRequest, type CanvasModeId } from '../../lib/workspace/canvas-modes';
 
 describe('canvas interaction modes', () => {
   it('cycles through every mode and returns to build', () => {
@@ -30,5 +30,23 @@ describe('canvas interaction modes', () => {
     expect(prompt).toContain('local SearxNG');
     expect(prompt).toContain('web_fetch');
     expect(prompt).toContain('Keep source URLs visible');
+  });
+
+  it('makes presentation creation an explicit workspace mode', () => {
+    expect(canvasMode('show')).toMatchObject({ label: 'Present', verb: 'compose', authority: 'workspace' });
+    const prompt = modeIntent('show', 'turn the selected references into a short deck');
+    expect(prompt).toContain('create a real presentation artifact');
+    expect(prompt).toContain('selected canvas objects');
+    expect(prompt).toContain('place the finished artifact back in the workspace');
+  });
+
+  it('routes the presentation command through selected or workspace context', () => {
+    expect(presentationRequest('/presentation editorial and minimal', 3)).toEqual({
+      mode: 'show',
+      intent: 'editorial and minimal'
+    });
+    expect(presentationRequest('/presentation', 3)?.intent).toContain('selected canvas objects');
+    expect(presentationRequest('/presentation', 0)?.intent).toContain('current workspace');
+    expect(presentationRequest('make a note', 0)).toBeNull();
   });
 });

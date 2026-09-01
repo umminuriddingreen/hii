@@ -7,6 +7,10 @@
 //! the compatibility layer); they are local-first and carry no network effect.
 
 use crate::tools::ToolResult;
+use hii_core::{
+    runtime::{IdentityRefV1, RuntimeSpaceApplyV1},
+    runtime_space_apply, runtime_space_snapshot,
+};
 use serde_json::Value;
 use std::{
     path::Path,
@@ -17,6 +21,10 @@ use std::{
 /// toolbelt. Kept in one place so the schema, dispatcher, and docs agree.
 pub const HII_TOOLS: &[&str] = &[
     "hii_context",
+    "canvas_list",
+    "canvas_read",
+    "canvas_add",
+    "canvas_update",
     "info_find",
     "info_capture",
     "og_next",
@@ -42,17 +50,30 @@ pub fn is_hii_tool(tool: &str) -> bool {
 pub fn is_mutating(tool: &str) -> bool {
     matches!(
         tool,
-        "info_capture" | "board_write" | "schedule_write" | "bridge_send"
+        "info_capture" | "board_write" | "schedule_write" | "bridge_send" | "canvas_add" | "canvas_update"
     )
 }
 
 /// Dispatch an HII tool. `repo` is the HII repository root; `query` carries the
 /// tool's single free-text argument (a task title, search term, or message).
 pub fn execute(repo: &Path, tool: &str, arguments: Option<&Value>) -> ToolResult {
+    execute_as(repo, tool, arguments, "hii-agent")
+}
+
+pub fn execute_as(
+    repo: &Path,
+    tool: &str,
+    arguments: Option<&Value>,
+    actor_id: &str,
+) -> ToolResult {
     let arg = argument_text(arguments).unwrap_or_default();
     let arg = arg.trim();
     let result = match tool {
         "hii_context" => hii(repo, &["context", "--json"]).and_then(compact_context),
+        "canvas_list" => canvas_list(arguments),
+        "canvas_read" => canvas_read(arguments),
+        "canvas_add" => canvas_add(arguments, actor_id),
+        "canvas_update" => canvas_update(arguments, actor_id),
         "info_find" => {
             if arg.is_empty() {
                 Err("info_find needs a search query".to_string())
@@ -156,6 +177,194 @@ pub fn execute(repo: &Path, tool: &str, arguments: Option<&Value>) -> ToolResult
             output,
             verification: false,
         },
+    }
+}
+
+fn canvas_snapshot(arguments: Option<&Value>) -> Result<hii_core::runtime::RuntimeSpaceSnapshotV1, String> {
+    runtime_space_snapshot(argument_field(arguments, "spaceId").filter(|value| !value.trim().is_empty()))
+}
+
+fn canvas_list(arguments: Option<&Value>) -> Result<String, String> {
+    let snapshot = canvas_snapshot(arguments)?;
+    let limit = arguments
+        .and_then(|value| value.get("limit"))
+        .and_then(Value::as_u64)
+        .unwrap_or(200)
+        .clamp(1, 500) as usize;
+    let objects = snapshot
+        .document
+        .get("nodes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(limit)
+        .cloned()
+        .collect::<Vec<_>>();
+    serde_json::to_string(&serde_json::json!({
+        "spaceId": snapshot.space_id,
+        "sequence": snapshot.sequence,
+        "objects": objects
+    }))
+    .map_err(|error| error.to_string())
+}
+
+fn canvas_read(arguments: Option<&Value>) -> Result<String, String> {
+    let id = required_argument(arguments, "objectId")?;
+    let snapshot = canvas_snapshot(arguments)?;
+    let object = snapshot
+        .document
+        .get("nodes")
+        .and_then(Value::as_array)
+        .and_then(|nodes| nodes.iter().find(|node| node.get("id").and_then(Value::as_str) == Some(id.as_str())))
+        .cloned()
+        .ok_or_else(|| format!("canvas object not found: {id}"))?;
+    serde_json::to_string(&serde_json::json!({
+        "spaceId": snapshot.space_id,
+        "sequence": snapshot.sequence,
+        "object": object
+    }))
+    .map_err(|error| error.to_string())
+}
+
+fn canvas_add(arguments: Option<&Value>, actor_id: &str) -> Result<String, String> {
+    let kind = required_argument(arguments, "type")?;
+    if !matches!(kind.as_str(), "note" | "canvas-text" | "image" | "link" | "document" | "frame") {
+        return Err(format!("canvas_add type is not allowed: {kind}"));
+    }
+    let mut snapshot = canvas_snapshot(arguments)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let id = format!("mcp-{}", uuid::Uuid::new_v4());
+    let next_z = snapshot.document.get("nextZ").and_then(Value::as_u64).unwrap_or(1) + 1;
+    let count = snapshot.document.get("nodes").and_then(Value::as_array).map_or(0, Vec::len) as f64;
+    let mut payload = arguments
+        .and_then(|value| value.get("payload"))
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    copy_string_argument(arguments, "title", &mut payload, "title");
+    copy_string_argument(arguments, "content", &mut payload, if kind == "canvas-text" { "text" } else { "content" });
+    copy_string_argument(arguments, "url", &mut payload, "url");
+    let node = serde_json::json!({
+        "id": id,
+        "type": kind,
+        "x": bounded_number(arguments, "x", 80.0 + (count % 6.0) * 48.0, -100_000.0, 100_000.0),
+        "y": bounded_number(arguments, "y", 80.0 + (count % 5.0) * 42.0, -100_000.0, 100_000.0),
+        "w": bounded_number(arguments, "width", 360.0, 80.0, 4096.0),
+        "h": bounded_number(arguments, "height", 240.0, 60.0, 4096.0),
+        "z": next_z,
+        "rotation": 0,
+        "createdAt": now,
+        "updatedAt": now,
+        "object": {
+            "kind": if kind == "frame" { "scene" } else { "artifact" },
+            "owner": actor_id,
+            "status": "ready",
+            "source": "hii mcp",
+            "capabilityId": "hii.workspace.creative_canvas",
+            "audit": [{ "ts": now, "actor": "agent", "action": "added object through hii mcp" }]
+        },
+        "payload": payload
+    });
+    snapshot.document["revision"] = Value::from(snapshot.sequence);
+    snapshot.document["updatedAt"] = Value::from(now);
+    snapshot.document["nextZ"] = Value::from(next_z);
+    snapshot.document["nodes"]
+        .as_array_mut()
+        .ok_or_else(|| "canvas nodes are unavailable".to_string())?
+        .push(node.clone());
+    apply_canvas(snapshot, arguments, actor_id, node)
+}
+
+fn canvas_update(arguments: Option<&Value>, actor_id: &str) -> Result<String, String> {
+    let id = required_argument(arguments, "objectId")?;
+    let mut snapshot = canvas_snapshot(arguments)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let node = snapshot
+        .document
+        .get_mut("nodes")
+        .and_then(Value::as_array_mut)
+        .and_then(|nodes| nodes.iter_mut().find(|node| node.get("id").and_then(Value::as_str) == Some(id.as_str())))
+        .ok_or_else(|| format!("canvas object not found: {id}"))?;
+    for (argument, field, fallback, min, max) in [
+        ("x", "x", 0.0, -100_000.0, 100_000.0),
+        ("y", "y", 0.0, -100_000.0, 100_000.0),
+        ("width", "w", 360.0, 80.0, 4096.0),
+        ("height", "h", 240.0, 60.0, 4096.0),
+        ("rotation", "rotation", 0.0, -360.0, 360.0),
+    ] {
+        if arguments.and_then(|value| value.get(argument)).is_some() {
+            node[field] = serde_json::json!(bounded_number(arguments, argument, fallback, min, max));
+        }
+    }
+    let content_field = if node.get("type").and_then(Value::as_str) == Some("canvas-text") { "text" } else { "content" };
+    let payload = node
+        .get_mut("payload")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| "canvas object payload is unavailable".to_string())?;
+    if let Some(patch) = arguments.and_then(|value| value.get("payload")).and_then(Value::as_object) {
+        for (key, value) in patch { payload.insert(key.clone(), value.clone()); }
+    }
+    copy_string_argument(arguments, "title", payload, "title");
+    copy_string_argument(arguments, "content", payload, content_field);
+    copy_string_argument(arguments, "url", payload, "url");
+    node["updatedAt"] = Value::from(now.clone());
+    let updated = node.clone();
+    snapshot.document["revision"] = Value::from(snapshot.sequence);
+    snapshot.document["updatedAt"] = Value::from(now);
+    apply_canvas(snapshot, arguments, actor_id, updated)
+}
+
+fn apply_canvas(
+    snapshot: hii_core::runtime::RuntimeSpaceSnapshotV1,
+    arguments: Option<&Value>,
+    actor_id: &str,
+    object: Value,
+) -> Result<String, String> {
+    let applied = runtime_space_apply(RuntimeSpaceApplyV1 {
+        version: 1,
+        space_id: Some(snapshot.space_id.clone()),
+        expected_sequence: snapshot.sequence,
+        actor: IdentityRefV1 { id: format!("mcp:{actor_id}"), kind: "agent".into() },
+        authority_grant_id: Some(
+            argument_field(arguments, "authorityGrantId")
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| format!("mcp-acl:{actor_id}:canvas-operator")),
+        ),
+        run_id: None,
+        idempotency_key: required_argument(arguments, "idempotencyKey")?,
+        document: snapshot.document,
+    })?;
+    serde_json::to_string(&serde_json::json!({
+        "spaceId": applied.space_id,
+        "sequence": applied.sequence,
+        "object": object
+    }))
+    .map_err(|error| error.to_string())
+}
+
+fn required_argument(arguments: Option<&Value>, field: &str) -> Result<String, String> {
+    argument_field(arguments, field)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("{field} is required"))
+}
+
+fn bounded_number(arguments: Option<&Value>, field: &str, fallback: f64, min: f64, max: f64) -> f64 {
+    arguments
+        .and_then(|value| value.get(field))
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite())
+        .unwrap_or(fallback)
+        .clamp(min, max)
+}
+
+fn copy_string_argument(
+    arguments: Option<&Value>,
+    source: &str,
+    target: &mut serde_json::Map<String, Value>,
+    destination: &str,
+) {
+    if let Some(value) = argument_field(arguments, source) {
+        target.insert(destination.into(), Value::from(value.chars().take(100_000).collect::<String>()));
     }
 }
 

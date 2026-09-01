@@ -73,7 +73,8 @@ impl AclConfig {
         let role = self.resolve_role(identity);
 
         let role_allows = match role.role.as_str() {
-            "reader" => matches!(tool_name, "read" | "list" | "search" | "http"),
+            "reader" => is_reader_tool(tool_name),
+            "canvas-operator" => is_reader_tool(tool_name) || matches!(tool_name, "canvas_add" | "canvas_update"),
             "operator" | "service" => true,
             _ => false,
         };
@@ -108,6 +109,30 @@ impl AclConfig {
 
         Ok(())
     }
+}
+
+fn is_reader_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "read"
+            | "list"
+            | "search"
+            | "http"
+            | "hii_context"
+            | "canvas_list"
+            | "canvas_read"
+            | "info_find"
+            | "og_next"
+            | "caps_check"
+            | "board_read"
+            | "skill_search"
+            | "schedule_read"
+            | "system_status"
+            | "system_observe"
+            | "object_list"
+            | "object_read"
+            | "bridge_read"
+    )
 }
 
 /// A single violation type that gets returned from ACL checks.
@@ -182,5 +207,24 @@ mod tests {
             },
         );
         assert!(cfg.check_acl("mystery", "read").is_err());
+    }
+
+    #[test]
+    fn canvas_operator_is_bounded_to_canvas_mutation() {
+        let mut cfg = AclConfig::load_default();
+        cfg.clients.insert(
+            "codex".into(),
+            ClientRole {
+                role: "canvas-operator".into(),
+                restricted_tools: vec![],
+                max_params_per_call: 64,
+            },
+        );
+        assert!(cfg.check_acl("codex", "canvas_add").is_ok());
+        assert!(cfg.check_acl("codex", "canvas_update").is_ok());
+        assert!(cfg.check_acl("codex", "canvas_read").is_ok());
+        assert!(cfg.check_acl("codex", "write").is_err());
+        assert!(cfg.check_acl("codex", "shell").is_err());
+        assert!(cfg.check_acl("codex", "board_write").is_err());
     }
 }

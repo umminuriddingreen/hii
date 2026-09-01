@@ -288,6 +288,10 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
         return secure_no_store(download_cli(request, env, asset).await?);
     }
 
+    if let Some(asset) = path.strip_prefix("/ui/") {
+        return secure(download_ui(request, env, asset).await?);
+    }
+
     env.assets("ASSETS")?.fetch_request(request.clone()?).await
 }
 
@@ -877,6 +881,46 @@ async fn download_cli(request: &Request, env: &Env, asset: &str) -> Result<Respo
     downloadable(request, object, asset, None)
 }
 
+async fn download_ui(request: &Request, env: &Env, asset: &str) -> Result<Response> {
+    if !valid_ui_asset(asset) {
+        return api_error(404, "ui_release_not_found");
+    }
+    let bucket = env.bucket("DOWNLOADS")?;
+    let Some(object) = bucket.get(format!("ui/{asset}")).execute().await? else {
+        return api_error(404, "ui_release_not_found");
+    };
+    let size = object.size();
+    let etag = object.http_etag();
+    let mut response = if request.method() == Method::Head {
+        Response::empty()?
+    } else {
+        let body = object
+            .body()
+            .ok_or_else(|| worker::Error::RustError("UI release body unavailable".into()))?;
+        Response::from_body(body.response_body()?)?
+    };
+    let headers = response.headers_mut();
+    headers.set("Content-Length", &size.to_string())?;
+    headers.set("ETag", &etag)?;
+    if asset.ends_with(".json") {
+        headers.set("Content-Type", "application/json; charset=utf-8")?;
+        headers.set("Cache-Control", "no-store")?;
+    } else {
+        headers.set("Content-Type", "application/zip")?;
+        headers.set("Cache-Control", "public, max-age=31536000, immutable")?;
+    }
+    Ok(response)
+}
+
+fn valid_ui_asset(asset: &str) -> bool {
+    asset == "ui-latest.json"
+        || (asset.starts_with("hii-ui-")
+            && asset.ends_with(".zip")
+            && asset
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')))
+}
+
 fn downloadable(
     request: &Request,
     object: worker::Object,
@@ -921,7 +965,7 @@ fn valid_cli_tag(tag: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{SessionResponse, normalize_handle, valid_cli_tag};
+    use super::{SessionResponse, normalize_handle, valid_cli_tag, valid_ui_asset};
 
     #[test]
     fn authenticated_sessions_expose_an_opaque_canvas_scope() {
@@ -952,5 +996,14 @@ mod tests {
         assert!(valid_cli_tag("cli-v1.2.3"));
         assert!(!valid_cli_tag("cli-v1.2.3/../../secret"));
         assert!(!valid_cli_tag("v1.2.3"));
+    }
+
+    #[test]
+    fn ui_channel_serves_only_the_manifest_and_versioned_archives() {
+        assert!(valid_ui_asset("ui-latest.json"));
+        assert!(valid_ui_asset("hii-ui-0.1.1-ui.1.zip"));
+        assert!(!valid_ui_asset("hii-ui-latest.json"));
+        assert!(!valid_ui_asset("../ui-latest.json"));
+        assert!(!valid_ui_asset("hii-ui-../../secret.zip"));
     }
 }

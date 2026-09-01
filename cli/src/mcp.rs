@@ -5,7 +5,7 @@
 //! Framing is **line-delimited**: exactly one JSON object per `\n`-terminated
 //! line in, one per line out. Line framing (rather than `Content-Length`) is
 //! chosen for readability and trivial shell testing:
-//! `printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | hii mcp-serve`.
+//! `printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | hii mcp`.
 //!
 //! The tool catalog is [`crate::acp::manifest`] — the single source of truth —
 //! and calls dispatch to the real `tools.rs` / `hii_tools.rs` handlers (no tool
@@ -240,6 +240,13 @@ fn tools_call(
         .as_str()
         .ok_or((-32602, "tools/call requires a string `name`".to_string()))?;
 
+    if matches!(name, "canvas_add" | "canvas_update") && client_identity == "anonymous" {
+        return Err((
+            AUTHORITY_DENIED,
+            "canvas mutation requires a configured --client-identity".to_string(),
+        ));
+    }
+
     // ACL enforcement — per-client governance gate runs before authority.
     if let Some(acl) = acl_config {
         let param_count = params["arguments"].as_object().map_or(0, |args| args.len());
@@ -284,7 +291,7 @@ fn tools_call(
     let is_hii = hii_tools::is_hii_tool(name);
 
     let result = if is_hii {
-        hii_tools::execute(repo, name, Some(args))
+        hii_tools::execute_as(repo, name, Some(args), client_identity)
     } else if acp::is_directly_executable(name) {
         execute_tool(
             tools,
@@ -361,6 +368,9 @@ mod tests {
             .all(|spec| spec["name"].is_string() && spec["inputSchema"]["type"] == "object"));
         // mcp_call is an agent action, not something this server can proxy.
         assert!(!specs.iter().any(|spec| spec["name"] == "mcp_call"));
+        for name in ["canvas_list", "canvas_read", "canvas_add", "canvas_update"] {
+            assert!(specs.iter().any(|spec| spec["name"] == name), "missing {name}");
+        }
     }
 
     #[test]

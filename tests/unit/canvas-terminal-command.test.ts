@@ -74,6 +74,8 @@ describe('canvas terminal command', () => {
     expect(root).toContain('isAssistantShortcut(event)');
     expect(root).toContain('selectedCount={selected.length}');
     expect(css).toContain('.hii-assistant-terminal-shell');
+    expect(root).toContain('Make presentation');
+    expect(root).toContain("setValue('/presentation ')");
   });
 
   it('turns direct canvas typing into a persistent objective draft', () => {

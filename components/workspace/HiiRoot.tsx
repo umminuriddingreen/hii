@@ -1,6 +1,20 @@
 'use client';
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  CheckCircle,
+  CornersOut,
+  ListBullets,
+  Minus,
+  Note as NoteIcon,
+  Paperclip,
+  PencilSimple,
+  Plus,
+  PresentationChart,
+  Shapes,
+  Sparkle,
+  TextT
+} from '@phosphor-icons/react';
 import { APPLICATION_POLL_INTERVAL_MS, shouldSkipApplicationPoll } from '@/lib/workspace/application-poll';
 import {
   acknowledgeApplicationLaunch,
@@ -30,6 +44,7 @@ import {
   isCanvasMode,
   modeIntent,
   nextCanvasMode,
+  presentationRequest,
   type CanvasModeId
 } from '@/lib/workspace/canvas-modes';
 import {
@@ -79,6 +94,68 @@ type Point = { x: number; y: number };
 
 function DeferredSurface({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<div className="hii-deferred-surface" aria-label="Opening HII surface" />}>{children}</Suspense>;
+}
+
+function CanvasChrome({
+  drawing,
+  selectionCount,
+  onAddNote,
+  onAddText,
+  onAddFrame,
+  onAddFile,
+  onDraw,
+  onPresentation,
+  onAsk,
+  onActivity,
+  onZoomOut,
+  onZoomIn,
+  onFit
+}: {
+  drawing: boolean;
+  selectionCount: number;
+  onAddNote: () => void;
+  onAddText: () => void;
+  onAddFrame: () => void;
+  onAddFile: () => void;
+  onDraw: () => void;
+  onPresentation: () => void;
+  onAsk: () => void;
+  onActivity: () => void;
+  onZoomOut: () => void;
+  onZoomIn: () => void;
+  onFit: () => void;
+}) {
+  const tool = (label: string, shortcut: string, icon: React.ReactNode, action: () => void, pressed?: boolean) => (
+    <button type="button" aria-label={`${label}${shortcut ? ` · ${shortcut}` : ''}`} title={`${label}${shortcut ? ` · ${shortcut}` : ''}`} aria-pressed={pressed} onClick={action}>
+      {icon}
+    </button>
+  );
+  return <div className="hii-freeform-chrome" data-workspace-ui onPointerDown={(event) => event.stopPropagation()}>
+    <nav className="hii-freeform-tools" aria-label="Canvas tools">
+      {tool('Add note', 'N', <NoteIcon size={20} />, onAddNote)}
+      {tool('Add text', 'T', <TextT size={20} />, onAddText)}
+      {tool('Add frame', 'F', <Shapes size={20} />, onAddFrame)}
+      {tool('Add file', '⌘U', <Paperclip size={20} />, onAddFile)}
+      {tool(drawing ? 'Stop drawing' : 'Draw', 'D', <PencilSimple size={20} />, onDraw, drawing)}
+      <span aria-hidden="true" />
+      {tool('Make presentation', '', <PresentationChart size={20} />, onPresentation)}
+      {tool('Ask HII', '⌘Space', <Sparkle size={20} weight="fill" />, onAsk)}
+    </nav>
+    <nav className="hii-freeform-zoom" aria-label="Canvas view">
+      {tool('Zoom out', '⌘−', <Minus size={18} />, onZoomOut)}
+      <output aria-label="Canvas zoom">100%</output>
+      {tool('Zoom in', '⌘+', <Plus size={18} />, onZoomIn)}
+      <i aria-hidden="true" />
+      {tool('Fit canvas', '0', <CornersOut size={18} />, onFit)}
+    </nav>
+    <nav className="hii-freeform-state" aria-label="Canvas state">
+      {tool('Activity and proof', '⌘2', <ListBullets size={19} />, onActivity)}
+      <span aria-label={selectionCount ? `${selectionCount} selected` : 'Canvas synchronized'}>
+        <CheckCircle size={19} weight={selectionCount ? 'fill' : 'regular'} />
+        {selectionCount ? selectionCount : null}
+      </span>
+    </nav>
+  </div>;
 }
 export type WorkspaceProjectionRequest = {
   id: string;
@@ -625,6 +702,7 @@ function Prompt({
         ['/claude <task>', 'run with Claude'],
         ['/model [name]', 'choose a local model'],
         ['/proof', 'inspect the latest receipt'],
+        ['/presentation [direction]', 'make an editable presentation from this context'],
         ['/status', 'show HII state'],
         ['/terminal [folder]', 'create a local terminal object'],
         ['/browser [url]', 'open the native development browser'],
@@ -655,6 +733,18 @@ function Prompt({
             <span>{selectedCount ? `${selectedCount} selected` : 'whole workspace'}</span>
             <kbd>⌘ Space · ⌥ Space</kbd>
           </header>
+        )}
+        {!floating && !response && !contextPack && (
+          <div className="hii-assistant-choices" aria-label="Create from this workspace">
+            <button type="button" onClick={() => {
+              onMode('show');
+              setValue('/presentation ');
+              requestAnimationFrame(() => input.current?.focus());
+            }}>
+              <span>Make presentation</span>
+              <small>{selectedCount ? `from ${selectedCount} selected` : 'from this workspace'}</small>
+            </button>
+          </div>
         )}
         {objectTitle && (
           <div className="hii-prompt-context">
@@ -1351,11 +1441,15 @@ export function HiiRoot({
   }, [startWithContext]);
 
   const submit = useCallback(async (intent: string, anchor: Point, objectId?: string, conversationId?: string) => {
-    const activeMode = canvasMode(mode);
+    const presentation = presentationRequest(intent, selected.length);
+    const requestMode: CanvasModeId = presentation?.mode || mode;
+    const requestIntent = presentation?.intent || intent;
+    const activeMode = canvasMode(requestMode);
+    if (presentation) setMode('show');
     setPrompt((current) => current ? {
       ...current,
-      initialValue: intent,
-      response: mode === 'browse' ? 'Searching external context…' : `${activeMode.label} mode · ${activeMode.verb}…`,
+      initialValue: requestIntent,
+      response: requestMode === 'browse' ? 'Searching external context…' : `${activeMode.label} mode · ${activeMode.verb}…`,
       status: 'running'
     } : current);
     const at = camera.toWorld(anchor.x, anchor.y);
@@ -1407,8 +1501,8 @@ export function HiiRoot({
         return;
       }
       await startWithContext({
-        intent: modeIntent(mode, intent),
-        mode,
+        intent: modeIntent(requestMode, requestIntent),
+        mode: requestMode,
         contextNodeIds: selected
       }, (result) => {
         activeRun.current = result.runId;
@@ -1789,6 +1883,40 @@ export function HiiRoot({
       ? `${selected.length} selected · drag to move · option-drag to resize · Delete to remove.`
       : '');
 
+  const openAssistantPanel = useCallback((initialValue = '') => {
+    setPromptPresentation('terminal');
+    setPrompt({
+      anchor: { x: window.innerWidth / 2, y: window.innerHeight - 72 },
+      initialValue,
+      response: '',
+      status: 'idle'
+    });
+    setPromptVisible(true);
+  }, []);
+
+  const openPresentationPanel = useCallback(() => {
+    setMode('show');
+    openAssistantPanel('/presentation ');
+  }, [openAssistantPanel]);
+
+  const openActivityPanel = useCallback(() => {
+    setPromptPresentation('terminal');
+    setPrompt({
+      anchor: { x: window.innerWidth / 2, y: window.innerHeight - 72 },
+      initialValue: '',
+      response: 'Reading HII activity and proof…',
+      status: 'running'
+    });
+    setPromptVisible(true);
+    void readAgentHome()
+      .then((home) => setPrompt((current) => current ? { ...current, response: formatActiveState(home), status: 'completed' } : current))
+      .catch((error) => setPrompt((current) => current ? {
+        ...current,
+        response: error instanceof Error ? error.message : 'HII could not read activity.',
+        status: 'failed'
+      } : current));
+  }, []);
+
   return (
     <main
       ref={camera.viewportRef}
@@ -1855,6 +1983,27 @@ export function HiiRoot({
       }}
     >
       {runtimeEnabled && <UpdateBanner />}
+      {runtimeEnabled && <CanvasChrome
+        drawing={drawing}
+        selectionCount={selected.length}
+        onAddNote={() => {
+          const [id] = spawnCenteredSeed(seedFor('note', { content: '', name: 'Note' }));
+          setFocusNodeId(id ?? null);
+        }}
+        onAddText={() => {
+          const [id] = spawnCenteredSeed(canvasTextSeed());
+          setFocusNodeId(id ?? null);
+        }}
+        onAddFrame={() => spawnCenteredSeed({ ...seedFor('frame', { title: 'Frame' }), w: 720, h: 480 })}
+        onAddFile={() => fileInput.current?.click()}
+        onDraw={toggleDrawing}
+        onPresentation={openPresentationPanel}
+        onAsk={() => openAssistantPanel()}
+        onActivity={openActivityPanel}
+        onZoomOut={() => camera.zoomBy(1 / KEY_ZOOM_STEP)}
+        onZoomIn={() => camera.zoomBy(KEY_ZOOM_STEP)}
+        onFit={fitCanvas}
+      />}
       {isTouchCanvas && <SpaceToolbar
         drawing={drawing}
         photo={allowPhoto}
