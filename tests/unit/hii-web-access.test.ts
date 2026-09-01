@@ -177,6 +177,10 @@ describe('HII web access gate', () => {
     expect(page).toContain("await import('@/components/desktop/DesktopHiiAccess')");
     const desktop = readFileSync('components/desktop/DesktopHiiAccess.tsx', 'utf8');
     expect(desktop).toContain('<HiiRoot');
+    expect(desktop).toContain('persistentChrome={false}');
+    expect(desktop).not.toContain('<header className={styles.header}');
+    const canvas = readFileSync('components/workspace/HiiRoot.tsx', 'utf8');
+    expect(canvas).toContain("persistentChrome || node.type !== 'terminal'");
     expect(desktop).toContain('new NativeAccountWorkspacePersistence(active)');
     expect(page).toContain('return <HiiWebAccess />');
   });

@@ -821,6 +821,7 @@ export function HiiRoot({
   creatorId = 'guest:pending',
   persistence,
   allowPhoto = true,
+  persistentChrome = true,
   onShareNode,
   onRequestDevice,
   fileSeeder,
@@ -832,6 +833,7 @@ export function HiiRoot({
   creatorId?: string;
   persistence?: WorkspacePersistence;
   allowPhoto?: boolean;
+  persistentChrome?: boolean;
   onShareNode?: (node: WorkspaceNode) => void;
   onRequestDevice?: () => void;
   fileSeeder?: (files: File[]) => Promise<NodeSeed[]>;
@@ -1080,8 +1082,12 @@ export function HiiRoot({
       ? workspace.nodes.filter((node) => isSpaceCanvasNode(node, spaceId))
       : isAccount
         ? workspace.nodes.filter((node) => isAccountCanvasNode(node, spaceId))
-        : workspace.nodes).filter((node) => node.payload.terminalPresentation !== 'docked' && node.payload.terminalPresentation !== 'hidden'),
-    [isAccount, isSpace, spaceId, workspace.nodes]
+        : workspace.nodes).filter((node) =>
+          (persistentChrome || node.type !== 'terminal')
+          && node.payload.terminalPresentation !== 'docked'
+          && node.payload.terminalPresentation !== 'hidden'
+        ),
+    [isAccount, isSpace, persistentChrome, spaceId, workspace.nodes]
   );
 
   const fitCanvas = useCallback(() => {
@@ -2023,8 +2029,8 @@ export function HiiRoot({
         }
       }}
     >
-      {runtimeEnabled && <UpdateBanner />}
-      {runtimeEnabled && <CanvasChrome
+      {runtimeEnabled && persistentChrome && <UpdateBanner />}
+      {runtimeEnabled && persistentChrome && <CanvasChrome
         drawing={drawing}
         selectionCount={selected.length}
         onAddNote={() => {
@@ -2081,7 +2087,7 @@ export function HiiRoot({
         onToggleDrawing={toggleDrawing}
       />}
       {isAccount && canvasFeedback && <div className="hii-canvas-feedback" role="status" aria-live="polite">{canvasFeedback}</div>}
-      {runtimeEnabled && workspace.nodes.some((node) => node.type === 'app') && <div className="hii-app-dock" onPointerDown={(event) => event.stopPropagation()}>
+      {runtimeEnabled && persistentChrome && workspace.nodes.some((node) => node.type === 'app') && <div className="hii-app-dock" onPointerDown={(event) => event.stopPropagation()}>
         <button onClick={tileApps}>Tile apps</button>
         {workspace.nodes.filter((node) => node.type === 'app').map((node) => <button key={node.id} data-active={selected.includes(node.id) || undefined} onClick={() => {
           if (node.payload.windowState === 'minimized') workspace.patchNode(node.id, { payload: { ...node.payload, windowState: 'normal' } });
@@ -2130,7 +2136,7 @@ export function HiiRoot({
           </NodeFrame>
         ))}
       </div>
-      {runtimeEnabled && workspaceTerminal?.payload.terminalPresentation === 'docked' && (
+      {runtimeEnabled && persistentChrome && workspaceTerminal?.payload.terminalPresentation === 'docked' && (
         <aside className="hii-docked-terminal" data-workspace-ui onPointerDown={(event) => event.stopPropagation()}>
           <div className="hii-docked-terminal-actions">
             <button type="button" data-tooltip="Move to canvas · ⌘⇧T" aria-label="Move terminal to canvas" onClick={() => ensureWorkspaceTerminal('canvas')}><CornersOut size={16} /></button>
