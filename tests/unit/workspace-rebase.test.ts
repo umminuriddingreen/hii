@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { rebaseWorkspaceDoc } from '../../lib/workspace/rebase';
+import { rebaseWorkspaceDoc, reconcileWorkspaceSave } from '../../lib/workspace/rebase';
 import type { WorkspaceDoc, WorkspaceNode } from '../../lib/workspace/types';
 
 const node = (id: string, updatedAt: string, extra: Partial<WorkspaceNode> = {}): WorkspaceNode => ({
@@ -29,6 +29,23 @@ const doc = (revision: number, nodes: WorkspaceNode[], overrides: Partial<Worksp
 const ids = (result: WorkspaceDoc) => result.nodes.map((n) => n.id).sort();
 
 describe('workspace save-conflict rebase', () => {
+  it('does not let a completed save erase text typed while it was in flight', () => {
+    const submitted = doc(4, [node('note', '2026-01-01T00:01:00.000Z', { payload: { content: 'h' } })]);
+    const saved = doc(5, [node('note', '2026-01-01T00:01:00.000Z', { payload: { content: 'h' } })]);
+    const local = doc(4, [node('note', '2026-01-01T00:02:00.000Z', { payload: { content: 'hello' } })]);
+
+    const reconciled = reconcileWorkspaceSave(local, saved, submitted, true);
+
+    expect(reconciled.revision).toBe(5);
+    expect(reconciled.nodes[0].payload.content).toBe('hello');
+  });
+
+  it('accepts the saved document when no newer local typing exists', () => {
+    const submitted = doc(4, [node('note', '2026-01-01T00:01:00.000Z', { payload: { content: 'hello' } })]);
+    const saved = doc(5, [node('note', '2026-01-01T00:01:00.000Z', { payload: { content: 'hello' } })]);
+    expect(reconcileWorkspaceSave(submitted, saved, submitted, false)).toBe(saved);
+  });
+
   it('keeps both sides work when two clients add different nodes', () => {
     const base = doc(4, [node('shared', '2026-01-01T00:00:00.000Z')]);
     const local = doc(4, [node('shared', '2026-01-01T00:00:00.000Z'), node('mine', '2026-01-01T00:05:00.000Z')]);

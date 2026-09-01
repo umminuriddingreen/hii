@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { readWorkspace, writeWorkspace } from '@/lib/client/hii-bridge';
+import { reconcileWorkspaceSave } from '@/lib/workspace/rebase';
 import { emptyWorkspace, type WorkspaceDoc, type WorkspaceNode, type WorkspaceViewport } from '@/lib/workspace/types';
 
 export type WorkspaceApi = {
@@ -34,33 +35,53 @@ export function useWorkspace(
   const [ready, setReady] = useState(false);
   const [initialViewport, setInitialViewport] = useState<WorkspaceViewport | null>(null);
   const current = useRef(document);
+  const mutationVersion = useRef(0);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveInFlight = useRef(false);
+  const saveQueued = useRef(false);
+  const persistRef = useRef<() => Promise<void>>(async () => undefined);
   const past = useRef<WorkspaceNode[][]>([]);
   const future = useRef<WorkspaceNode[][]>([]);
   current.current = document;
 
   const persist = useCallback(async () => {
+    if (saveInFlight.current) {
+      saveQueued.current = true;
+      return;
+    }
+    const submittedVersion = mutationVersion.current;
     const next = { ...current.current, viewport: getViewport(), updatedAt: new Date().toISOString() };
     saveInFlight.current = true;
     try {
       const saved = await (persistence?.write(next) ?? writeWorkspace(next));
-      current.current = saved;
-      setDocument(saved);
+      const changedWhileSaving = mutationVersion.current !== submittedVersion;
+      const reconciled = reconcileWorkspaceSave(current.current, saved, next, changedWhileSaving);
+      current.current = reconciled;
+      setDocument(reconciled);
+      if (changedWhileSaving) saveQueued.current = true;
     } catch {
       // The next mutation retries. The in-memory canvas remains usable.
     } finally {
       saveInFlight.current = false;
+      if (saveQueued.current) {
+        saveQueued.current = false;
+        if (saveTimer.current) clearTimeout(saveTimer.current);
+        saveTimer.current = setTimeout(() => {
+          saveTimer.current = null;
+          void persistRef.current();
+        }, 180);
+      }
     }
   }, [getViewport, persistence]);
+  persistRef.current = persist;
 
   const scheduleSave = useCallback(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       saveTimer.current = null;
-      void persist();
+      void persistRef.current();
     }, 180);
-  }, [persist]);
+  }, []);
 
   useEffect(() => {
     (persistence?.read() ?? readWorkspace()).then((source) => {
@@ -98,6 +119,7 @@ export function useWorkspace(
 
   const mutate = useCallback((change: (nodes: WorkspaceNode[]) => WorkspaceNode[]) => {
     setDocument((before) => {
+      mutationVersion.current += 1;
       past.current.push(before.nodes);
       if (past.current.length > 80) past.current.shift();
       future.current = [];

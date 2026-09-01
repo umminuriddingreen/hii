@@ -67,6 +67,25 @@ export function rebaseWorkspaceDoc(
 }
 
 /**
+ * Reconcile a completed save without letting its older snapshot erase edits
+ * made while the request was in flight.
+ *
+ * When nothing changed locally, the server response is authoritative. When
+ * typing continued, treat the submitted document as the common base and carry
+ * the newer local text onto the server's advanced revision.
+ */
+export function reconcileWorkspaceSave(
+  local: WorkspaceDoc,
+  saved: WorkspaceDoc,
+  submitted: WorkspaceDoc,
+  changedWhileSaving: boolean
+) {
+  return changedWhileSaving
+    ? rebaseWorkspaceDoc(local, saved, submitted)
+    : saved;
+}
+
+/**
  * Connectors merge by the same delete-aware rule as nodes, then drop any whose
  * endpoints did not survive the node merge.
  */

@@ -86,9 +86,15 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConv
         }
         onOpenConversation();
       }}
-      style={{ transform: workspaceNodeTransform(node), width: node.w, height: node.h, zIndex: Math.round(node.z) }}
+      style={{
+        transform: workspaceNodeTransform(node),
+        width: node.w,
+        height: node.h,
+        zIndex: Math.round(node.z),
+        outline: node.type === 'image' ? 'none' : undefined
+      }}
     >
-      <span className="hii-node-caption">{title}</span>
+      {node.type !== 'image' && <span className="hii-node-caption">{title}</span>}
       {node.type === 'terminal' && <>
         <div className="hii-terminal-window-controls" role="group" aria-label={`${title} window controls`}>
           <button
