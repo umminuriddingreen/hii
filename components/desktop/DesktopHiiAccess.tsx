@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import { SidebarSimple } from '@phosphor-icons/react';
+import { SidebarSimple, UserCircle } from '@phosphor-icons/react';
 import { HiiRoot } from '@/components/workspace/HiiRoot';
 import {
   accountSyncStatus,
@@ -85,13 +85,10 @@ export function DesktopHiiAccess() {
     />
     <header className={styles.header} data-workspace-ui>
       <div className={styles.boardIdentity}>
-        <button type="button" aria-label="Toggle workspaces" aria-expanded={workspaceOpen} onClick={() => setWorkspaceOpen((value) => !value)}><SidebarSimple size={20} /></button>
-        <strong>HII</strong>
+        <button type="button" title="HII workspaces · ⌘1" aria-label="Toggle HII workspaces" aria-expanded={workspaceOpen} onClick={() => setWorkspaceOpen((value) => !value)}><SidebarSimple size={19} /></button>
       </div>
       <nav>
-        <button type="button" aria-expanded={accountOpen} onClick={() => setAccountOpen((value) => !value)}>
-          {identity?.handle ?? 'account'}
-        </button>
+        <button type="button" title={identity?.handle ?? 'HII account'} aria-label="HII account" aria-expanded={accountOpen} onClick={() => setAccountOpen((value) => !value)}><UserCircle size={20} /></button>
       </nav>
     </header>
     {workspaceOpen ? <aside className={styles.workspacePanel} data-workspace-ui aria-label="Workspaces">

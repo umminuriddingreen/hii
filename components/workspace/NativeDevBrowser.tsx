@@ -10,13 +10,14 @@ type Props = {
   onUrl: (url: string) => void;
   onAgent: (request: string) => void;
   onCapture: (result: InformationCaptureResult) => void;
+  onOpenObject?: (url: string) => void;
 };
 
 function isTauri() {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture }: Props) {
+export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture, onOpenObject }: Props) {
   const initial = browserNavigationTarget(initialUrl || '') || 'https://developer.mozilla.org/';
   const [url, setUrl] = useState(initial);
   const [draftUrl, setDraftUrl] = useState(initial);
@@ -26,7 +27,7 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
   const [status, setStatus] = useState<'loading' | 'ready' | 'captured' | 'error'>('loading');
   const [request, setRequest] = useState('');
   const [device, setDevice] = useState<'responsive' | 'desktop' | 'mobile'>('responsive');
-  const [showAgent, setShowAgent] = useState(true);
+  const [showAgent, setShowAgent] = useState(false);
   const viewport = useRef<HTMLDivElement | null>(null);
   const webview = useRef<import('@tauri-apps/api/webview').Webview | null>(null);
   const label = `hii-browser-${nodeId.replace(/[^a-zA-Z0-9-]/g, '-')}`;
@@ -138,13 +139,6 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
 
   return (
     <article className="hii-dev-browser" data-device={device} data-agent={showAgent || undefined} data-target={targetKind}>
-      <header className="hii-browser-tabs">
-        <div><i aria-hidden="true" /><strong>{new URL(normalizedBrowserUrl(url) || 'https://developer.mozilla.org').hostname}</strong><small>{targetKind === 'local-service' ? 'local service' : isTauri() ? 'native webview' : 'interactive web'}</small></div>
-        <div className="hii-browser-view-actions">
-          <button type="button" onClick={cycleDevice}>{device === 'responsive' ? 'Fluid' : device === 'desktop' ? '1280 px' : '390 px'}</button>
-          <button type="button" onClick={() => setShowAgent((current) => !current)}>{showAgent ? 'Hide agent' : 'Show agent'}</button>
-        </div>
-      </header>
       <nav className="hii-browser-nav" aria-label="Browser controls">
         <button type="button" title="Back" disabled={!isTauri() && historyIndex === 0} onClick={() => void action('back')}>←</button>
         <button type="button" title="Forward" disabled={!isTauri() && historyIndex >= history.length - 1} onClick={() => void action('forward')}>→</button>
@@ -153,8 +147,10 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
           <span aria-hidden="true">⌁</span>
           <input value={draftUrl} onChange={(event) => setDraftUrl(event.target.value)} aria-label="URL or search" spellCheck={false} />
         </form>
-        <a className="hii-browser-open" href={url} target="_blank" rel="noreferrer">Open ↗</a>
-        <button type="button" className="hii-browser-capture" onClick={() => void capture()}>{status === 'captured' ? 'Captured' : 'Capture'}</button>
+        <button type="button" title="View size" onClick={cycleDevice}>{device === 'responsive' ? '↔' : device === 'desktop' ? '▭' : '▯'}</button>
+        <button type="button" title="Ask HII about this page" onClick={() => setShowAgent((current) => !current)}>✦</button>
+        {onOpenObject && <button type="button" title="Duplicate page as canvas object" onClick={() => onOpenObject(url)}>＋</button>}
+        <button type="button" className="hii-browser-capture" title="Capture source" onClick={() => void capture()}>{status === 'captured' ? '✓' : '↓'}</button>
       </nav>
       <section className="hii-browser-workarea">
         <div ref={viewport} className="hii-browser-viewport">

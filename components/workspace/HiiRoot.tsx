@@ -4,6 +4,8 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import {
   CheckCircle,
   CornersOut,
+  DotsThree,
+  Globe,
   ListBullets,
   Minus,
   Note as NoteIcon,
@@ -13,6 +15,7 @@ import {
   PresentationChart,
   Shapes,
   Sparkle,
+  TerminalWindow,
   TextT
 } from '@phosphor-icons/react';
 import { APPLICATION_POLL_INTERVAL_MS, shouldSkipApplicationPoll } from '@/lib/workspace/application-poll';
@@ -24,6 +27,7 @@ import {
   formatActiveState,
   listApplicationLaunchRequests,
   listApplications,
+  findInformation,
   listenAgentEvents,
   readAgentHome,
   startAgent,
@@ -55,7 +59,6 @@ import {
   type MusicPanelPayload
 } from '@/lib/workspace/music-playlists';
 import {
-  objectiveSeedFromText,
   isAssistantShortcut,
   isDirectCanvasTyping,
   isTerminalShortcut,
@@ -105,6 +108,8 @@ function CanvasChrome({
   onAddFile,
   onDraw,
   onPresentation,
+  onSearch,
+  onTerminal,
   onAsk,
   onActivity,
   onZoomOut,
@@ -119,41 +124,44 @@ function CanvasChrome({
   onAddFile: () => void;
   onDraw: () => void;
   onPresentation: () => void;
+  onSearch: () => void;
+  onTerminal: () => void;
   onAsk: () => void;
   onActivity: () => void;
   onZoomOut: () => void;
   onZoomIn: () => void;
   onFit: () => void;
 }) {
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const tool = (label: string, shortcut: string, icon: React.ReactNode, action: () => void, pressed?: boolean) => (
-    <button type="button" aria-label={`${label}${shortcut ? ` · ${shortcut}` : ''}`} title={`${label}${shortcut ? ` · ${shortcut}` : ''}`} aria-pressed={pressed} onClick={action}>
+    <button type="button" data-tooltip={`${label}${shortcut ? ` · ${shortcut}` : ''}`} aria-label={`${label}${shortcut ? ` · ${shortcut}` : ''}`} aria-pressed={pressed} onClick={action}>
       {icon}
     </button>
   );
   return <div className="hii-freeform-chrome" data-workspace-ui onPointerDown={(event) => event.stopPropagation()}>
     <nav className="hii-freeform-tools" aria-label="Canvas tools">
-      {tool('Add note', 'N', <NoteIcon size={20} />, onAddNote)}
-      {tool('Add text', 'T', <TextT size={20} />, onAddText)}
-      {tool('Add frame', 'F', <Shapes size={20} />, onAddFrame)}
-      {tool('Add file', '⌘U', <Paperclip size={20} />, onAddFile)}
-      {tool(drawing ? 'Stop drawing' : 'Draw', 'D', <PencilSimple size={20} />, onDraw, drawing)}
-      <span aria-hidden="true" />
-      {tool('Make presentation', '', <PresentationChart size={20} />, onPresentation)}
-      {tool('Ask HII', '⌘Space', <Sparkle size={20} weight="fill" />, onAsk)}
-    </nav>
-    <nav className="hii-freeform-zoom" aria-label="Canvas view">
-      {tool('Zoom out', '⌘−', <Minus size={18} />, onZoomOut)}
-      <output aria-label="Canvas zoom">100%</output>
-      {tool('Zoom in', '⌘+', <Plus size={18} />, onZoomIn)}
-      <i aria-hidden="true" />
-      {tool('Fit canvas', '0', <CornersOut size={18} />, onFit)}
-    </nav>
-    <nav className="hii-freeform-state" aria-label="Canvas state">
-      {tool('Activity and proof', '⌘2', <ListBullets size={19} />, onActivity)}
-      <span aria-label={selectionCount ? `${selectionCount} selected` : 'Canvas synchronized'}>
-        <CheckCircle size={19} weight={selectionCount ? 'fill' : 'regular'} />
-        {selectionCount ? selectionCount : null}
-      </span>
+      {tool(toolsOpen ? 'Hide tools' : 'Show tools', '', <Plus size={20} />, () => { setToolsOpen((value) => !value); setMoreOpen(false); }, toolsOpen)}
+      {toolsOpen && <>
+        {tool('Add note', 'N', <NoteIcon size={20} />, onAddNote)}
+        {tool('Add text', 'T', <TextT size={20} />, onAddText)}
+        {tool('Add frame', 'F', <Shapes size={20} />, onAddFrame)}
+        {tool('Add file', '⌘U', <Paperclip size={20} />, onAddFile)}
+        {tool(drawing ? 'Stop drawing' : 'Draw', 'D', <PencilSimple size={20} />, onDraw, drawing)}
+        {tool('More', '', <DotsThree size={22} weight="bold" />, () => setMoreOpen((value) => !value), moreOpen)}
+      </>}
+      {moreOpen && <menu className="hii-freeform-more" aria-label="More canvas actions">
+        <button type="button" onClick={onTerminal}><TerminalWindow size={17} />Terminal <kbd>⌘ Space</kbd></button>
+        <button type="button" onClick={onSearch}><Globe size={17} />Web search</button>
+        <button type="button" onClick={onPresentation}><PresentationChart size={17} />Presentation</button>
+        <button type="button" onClick={onAsk}><Sparkle size={17} />Ask HII <kbd>⌘ K</kbd></button>
+        <button type="button" onClick={onActivity}><ListBullets size={17} />Activity & proof <kbd>⌘ 2</kbd></button>
+        <hr />
+        <button type="button" onClick={onZoomOut}><Minus size={17} />Zoom out <kbd>⌘ −</kbd></button>
+        <button type="button" onClick={onZoomIn}><Plus size={17} />Zoom in <kbd>⌘ +</kbd></button>
+        <button type="button" onClick={onFit}><CornersOut size={17} />Fit canvas <kbd>0</kbd></button>
+        {selectionCount > 0 && <output><CheckCircle size={16} weight="fill" />{selectionCount} selected</output>}
+      </menu>}
     </nav>
   </div>;
 }
@@ -301,7 +309,7 @@ function capturedInformationSeeds(result: InformationCaptureResult): NodeSeed[] 
  * Keep their source data intact, but project them as durable information
  * objects instead of asking the user to operate an embedded browser.
  */
-function SourceBody({ node }: { node: WorkspaceNode }) {
+function SourceBody({ node, onOpen }: { node: WorkspaceNode; onOpen: (url: string) => void }) {
   const payload = node.payload;
   const url = text(payload.url);
   const title = text(payload.title) || text(payload.name) || hostFor(url) || 'Web source';
@@ -321,7 +329,7 @@ function SourceBody({ node }: { node: WorkspaceNode }) {
       </div>
       <footer>
         <span>{provenance}</span>
-        {/^https?:\/\//i.test(url) && <a href={url} target="_blank" rel="noreferrer">Open source ↗</a>}
+        {/^https?:\/\//i.test(url) && <button type="button" onClick={() => onOpen(url)}>Open</button>}
       </footer>
     </article>
   );
@@ -413,6 +421,7 @@ function TerminalBody({
         <ShellTerminal
           sessionId={text(node.payload.sessionId)}
           cwd={cwd}
+          entry={node.payload.terminalEntry === 'shell' ? 'shell' : 'hii'}
           onState={(state) => onPayload({
             status: state.status,
             cwd: state.cwd || cwd,
@@ -610,7 +619,8 @@ function NodeBody({
   onInstallPackage,
   onCurationRequest,
   onBrowserAgent,
-  onBrowserCapture
+  onBrowserCapture,
+  onOpenBrowser
 }: {
   node: WorkspaceNode;
   autoFocus?: boolean;
@@ -622,6 +632,7 @@ function NodeBody({
   onCurationRequest: (request: string, payload: MusicPanelPayload) => void;
   onBrowserAgent: (request: string) => void;
   onBrowserCapture: (result: InformationCaptureResult) => void;
+  onOpenBrowser: (url: string) => void;
 }) {
   const payload = node.payload;
   const content = text(payload.content) || text(payload.text) || text(payload.output) || text(payload.summary);
@@ -629,9 +640,9 @@ function NodeBody({
   const name = text(payload.name) || text(payload.title) || node.type;
 
   if (node.type === 'browser' && payload.surface === 'native-dev-browser') {
-    return <DeferredSurface><NativeDevBrowser nodeId={node.id} initialUrl={url} onUrl={(nextUrl) => onPayload({ url: nextUrl, title: hostFor(nextUrl) })} onAgent={onBrowserAgent} onCapture={onBrowserCapture} /></DeferredSurface>;
+    return <DeferredSurface><NativeDevBrowser nodeId={node.id} initialUrl={url} onUrl={(nextUrl) => onPayload({ url: nextUrl, title: hostFor(nextUrl) })} onAgent={onBrowserAgent} onCapture={onBrowserCapture} onOpenObject={onOpenBrowser} /></DeferredSurface>;
   }
-  if (node.type === 'browser' || node.type === 'link') return <SourceBody node={node} />;
+  if (node.type === 'browser' || node.type === 'link') return <SourceBody node={node} onOpen={onOpenBrowser} />;
   if (node.type === 'terminal') return <TerminalBody node={node} onPayload={onPayload} onAgentSubmit={onAgentSubmit} />;
   if (node.type === 'intent') return <RequestBody node={node} onPayload={onPayload} onAgentSubmit={onAgentSubmit} />;
   if (node.type === 'surface' && payload.surface === 'profile-music') {
@@ -695,6 +706,7 @@ function Prompt({
   selectedCount?: number;
 }) {
   const [value, setValue] = useState(initialValue);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const input = useRef<HTMLInputElement | null>(null);
   const commands = value.startsWith('/')
     ? [
@@ -726,26 +738,6 @@ function Prompt({
       onPointerDown={(event) => event.stopPropagation()}
     >
       <form className="hii-prompt" data-mode={mode} data-status={status} data-presentation={presentation} onSubmit={(event) => { event.preventDefault(); submit(); }}>
-        {!floating && (
-          <header className="hii-assistant-terminal-context">
-            <strong>HII</strong>
-            <span>{workspaceLabel}</span>
-            <span>{selectedCount ? `${selectedCount} selected` : 'whole workspace'}</span>
-            <kbd>⌘ Space · ⌥ Space</kbd>
-          </header>
-        )}
-        {!floating && !response && !contextPack && (
-          <div className="hii-assistant-choices" aria-label="Create from this workspace">
-            <button type="button" onClick={() => {
-              onMode('show');
-              setValue('/presentation ');
-              requestAnimationFrame(() => input.current?.focus());
-            }}>
-              <span>Make presentation</span>
-              <small>{selectedCount ? `from ${selectedCount} selected` : 'from this workspace'}</small>
-            </button>
-          </div>
-        )}
         {objectTitle && (
           <div className="hii-prompt-context">
             <span>Conversation with</span>
@@ -765,6 +757,7 @@ function Prompt({
           </ol>
         )}
         <div className="hii-prompt-line">
+          <button type="button" className="hii-prompt-options-toggle" aria-label="HII options" aria-expanded={optionsOpen} onClick={() => setOptionsOpen((open) => !open)}><DotsThree size={20} weight="bold" /></button>
           <input
             ref={input}
             disabled={Boolean(contextPack)}
@@ -787,14 +780,19 @@ function Prompt({
                 submit();
               }
             }}
-            placeholder={!floating
-              ? (response ? 'Continue with HII…' : 'What do you need help with?')
-              : (response ? `Continue in ${canvasMode(mode).label} mode…` : `${canvasMode(mode).label}: ${canvasMode(mode).description}`)}
+            placeholder={response ? 'Continue…' : 'Ask HII'}
             aria-label="Tell HII what should happen"
             autoComplete="off"
             spellCheck
           />
         </div>
+        {optionsOpen && <div className="hii-prompt-options" aria-label="HII context and modes">
+          <header><span>{workspaceLabel}</span><small>{selectedCount ? `${selectedCount} selected` : 'whole workspace'}</small></header>
+          <div>{canvasModes.map((item) => (
+            <button key={item.id} type="button" disabled={Boolean(contextPack)} aria-pressed={item.id === mode} onClick={() => onMode(item.id)}>{item.label}</button>
+          ))}</div>
+          <small>{canvasMode(mode).description} · ⇧ Tab cycles modes</small>
+        </div>}
         {response && <PromptResponse value={response} running={status === 'running'} />}
         {contextPack && (
           <section className="hii-context-preflight" aria-label="Context review">
@@ -812,13 +810,6 @@ function Prompt({
           </section>
         )}
         {commands.length > 0 && <div className="hii-prompt-commands" aria-label="HII commands">{commands.map(([command, description]) => <span key={command}><b>{command}</b>{description}</span>)}</div>}
-        <div className="hii-mode-strip" aria-label="Canvas interaction mode">
-          <div>{canvasModes.map((item) => (
-            <button key={item.id} type="button" disabled={Boolean(contextPack)} aria-pressed={item.id === mode} onClick={() => onMode(item.id)}>{item.label}</button>
-          ))}</div>
-          <small>{canvasMode(mode).description}</small>
-          <kbd>⇧ Tab</kbd>
-        </div>
       </form>
     </div>
   );
@@ -1085,11 +1076,11 @@ export function HiiRoot({
   }, [camera, runtimeEnabled, spawnSeeds, workspace.ready]);
 
   const visibleNodes = useMemo(
-    () => isSpace
+    () => (isSpace
       ? workspace.nodes.filter((node) => isSpaceCanvasNode(node, spaceId))
       : isAccount
         ? workspace.nodes.filter((node) => isAccountCanvasNode(node, spaceId))
-        : workspace.nodes,
+        : workspace.nodes).filter((node) => node.payload.terminalPresentation !== 'docked' && node.payload.terminalPresentation !== 'hidden'),
     [isAccount, isSpace, spaceId, workspace.nodes]
   );
 
@@ -1155,38 +1146,82 @@ export function HiiRoot({
     return ids;
   }, [workspace]);
 
-  const spawnArtifactTerminals = useCallback((at: Point) => {
-    const origin = camera.toWorld(at.x, at.y);
-    const groupId = crypto.randomUUID();
-    const jobs = [
-      { job: 'compose', artifact: 'artifacts/visual/concept.svg', status: 'ready', lines: ['$ hii artifact compose --visual', 'context staged · awaiting intent'] },
-      { job: 'render', artifact: 'artifacts/visual/render.webp', status: 'queued', lines: ['$ hii artifact render --watch', 'linked to compose output'] },
-      { job: 'verify', artifact: 'artifacts/visual/receipt.json', status: 'queued', lines: ['$ hii proof --artifact render.webp', 'verification follows render'] }
-    ];
-    const ids = jobs.map((job, index) => {
-      const node = makeNode(seedFor('terminal', {
-        ...job,
-        title: `${job.job} · ${job.artifact.split('/').at(-1)}`,
-        cwd: '~/hii',
-        groupId,
-        role: 'visual-artifact-job'
-      }), origin.x + index * 46, origin.y + index * 150, workspace.takeZ());
-      node.w = 620;
-      node.h = 270;
-      node.object = {
-        kind: 'terminal',
-        owner: 'hii',
-        status: job.status === 'ready' ? 'ready' : 'queued',
-        source: 'HII visual artifact terminal loom',
-        parentId: groupId,
-        proofRefs: [job.artifact],
-        audit: [{ ts: new Date().toISOString(), actor: 'human', action: `created ${job.job} terminal for ${job.artifact}` }]
-      };
-      workspace.addNode(node);
-      return node.id;
-    });
-    setSelected(ids);
-  }, [camera, workspace]);
+  const workspaceTerminal = useMemo(() => workspace.nodes.find((node) =>
+    node.type === 'terminal'
+    && node.payload.role === 'operator-terminal'
+    && (node.payload.singletonKey === 'workspace-terminal' || node.payload.terminalMode === 'shell')
+  ), [workspace.nodes]);
+
+  const ensureWorkspaceTerminal = useCallback((presentation: 'canvas' | 'docked' = 'docked', requestedSeed?: NodeSeed) => {
+    const existing = workspace.nodes.find((node) =>
+      node.type === 'terminal'
+      && node.payload.role === 'operator-terminal'
+      && (node.payload.singletonKey === 'workspace-terminal' || node.payload.terminalMode === 'shell')
+    );
+    if (existing) {
+      workspace.patchNode(existing.id, { payload: {
+        ...existing.payload,
+        singletonKey: 'workspace-terminal',
+        terminalEntry: 'hii',
+        terminalPresentation: presentation,
+        windowState: 'normal'
+      } });
+      setSelected(presentation === 'canvas' ? [existing.id] : []);
+      workspace.bringToFront(existing.id);
+      return existing.id;
+    }
+    const seed = requestedSeed || terminalSeedFromCommand('/terminal');
+    if (!seed) return null;
+    seed.payload = { ...seed.payload, terminalPresentation: presentation, singletonKey: 'workspace-terminal', terminalEntry: 'hii' };
+    const at = camera.toWorld(window.innerWidth / 2 - 430, window.innerHeight / 2 - 240);
+    const [id] = spawnSeeds([seed], at);
+    setSelected(presentation === 'canvas' && id ? [id] : []);
+    return id || null;
+  }, [camera, spawnSeeds, workspace]);
+
+  useEffect(() => {
+    if (!workspace.ready || !workspaceTerminal) return;
+    const operatorTerminals = workspace.nodes.filter((node) => node.type === 'terminal' && node.payload.role === 'operator-terminal' && node.payload.terminalMode === 'shell');
+    workspace.patchNode(workspaceTerminal.id, { payload: {
+      ...workspaceTerminal.payload,
+      title: `HII · ${text(workspaceTerminal.payload.cwd).replace(/\/$/, '').split('/').filter(Boolean).at(-1) || 'workspace'}`,
+      singletonKey: 'workspace-terminal',
+      terminalEntry: 'hii',
+      terminalPresentation: workspaceTerminal.payload.terminalPresentation || 'canvas'
+    } });
+    for (const legacy of operatorTerminals) {
+      if (legacy.id === workspaceTerminal.id || legacy.payload.terminalPresentation === 'hidden') continue;
+      workspace.patchNode(legacy.id, { payload: { ...legacy.payload, terminalPresentation: 'hidden', supersededBy: workspaceTerminal.id } });
+    }
+  // Normalize legacy terminal nodes once when a persisted workspace arrives.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace.ready, workspaceTerminal?.id]);
+
+  const searchWeb = useCallback(async (query: string, at: Point) => {
+    const results = await findInformation(query, { web: true, limit: 8 });
+    const seeds = results.map<NodeSeed>((result) => ({
+      type: 'link',
+      w: 420,
+      h: 250,
+      object: {
+        kind: 'source', owner: 'hii', status: 'ready', source: result.url,
+        capabilityId: 'hii.information.find',
+        audit: [{ ts: new Date().toISOString(), actor: 'hii', action: `found web source for ${query}` }]
+      },
+      payload: {
+        infoId: result.id,
+        title: result.title,
+        url: result.url,
+        excerpt: result.excerpt,
+        siteName: result.siteName,
+        contentHash: result.contentHash,
+        capturedAt: result.capturedAt,
+        query
+      }
+    }));
+    if (seeds.length) spawnInformation(seeds, at);
+    return results.length;
+  }, [spawnInformation]);
 
   const selectedNodes = useMemo(() => workspace.nodes.filter((node) => selected.includes(node.id)), [selected, workspace.nodes]);
 
@@ -1460,7 +1495,7 @@ export function HiiRoot({
           setPrompt((current) => current ? { ...current, response: 'Terminal objects are created in Build mode. Switch to Build, then run this command again.', status: 'failed' } : current);
           return;
         }
-        spawnSeeds([terminalSeed], at);
+        ensureWorkspaceTerminal('canvas', terminalSeed);
         setPrompt(null);
         setPromptVisible(false);
         return;
@@ -1480,11 +1515,17 @@ export function HiiRoot({
         setPrompt((current) => current ? { ...current, response: formatActiveState(home), status: 'completed' } : current);
         return;
       }
-      const browserCommand = intent.match(/^\/?(?:browser|search)(?:\s+(.+))?$/i);
+      const browserCommand = intent.match(/^\/?browser(?:\s+(.+))?$/i);
       if (canMutateCanvas(mode) && browserCommand) {
         openDevBrowser(at, browserCommand[1]);
         setPrompt(null);
         setPromptVisible(false);
+        return;
+      }
+      const searchCommand = intent.match(/^\/?search(?:\s+(.+))?$/i);
+      if (canMutateCanvas(mode) && searchCommand?.[1]) {
+        const count = await searchWeb(searchCommand[1], at);
+        setPrompt((current) => current ? { ...current, response: `Placed ${count} source${count === 1 ? '' : 's'} on the canvas.`, status: 'completed' } : current);
         return;
       }
       if (canMutateCanvas(mode) && /^https?:\/\/\S+$/i.test(intent)) {
@@ -1495,9 +1536,8 @@ export function HiiRoot({
       }
       const discovery = intent.match(/^(?:find|research|look up|search for)\s+(.+)$/i);
       if (canMutateCanvas(mode) && discovery) {
-        openDevBrowser(at, discovery[1]);
-        setPrompt(null);
-        setPromptVisible(false);
+        const count = await searchWeb(discovery[1], at);
+        setPrompt((current) => current ? { ...current, response: `Placed ${count} source${count === 1 ? '' : 's'} on the canvas.`, status: 'completed' } : current);
         return;
       }
       await startWithContext({
@@ -1539,7 +1579,7 @@ export function HiiRoot({
     } catch (error) {
       setPrompt((current) => current ? { ...current, response: error instanceof Error ? error.message : 'HII could not start the model.', status: 'failed' } : current);
     }
-  }, [camera, mode, openDevBrowser, openMarketplace, openMusicPanel, selected, spawnInformation, spawnSeeds, startWithContext]);
+  }, [camera, ensureWorkspaceTerminal, mode, openDevBrowser, openMarketplace, openMusicPanel, searchWeb, selected, spawnInformation, startWithContext]);
 
   useEffect(() => {
     if (!runtimeEnabled) return;
@@ -1675,18 +1715,12 @@ export function HiiRoot({
     const keydown = (event: KeyboardEvent) => {
       if (runtimeEnabled && isAssistantShortcut(event)) {
         event.preventDefault();
-        if (promptVisible && promptPresentation === 'terminal') {
-          setPromptVisible(false);
+        if (workspaceTerminal?.payload.terminalPresentation === 'docked') {
+          workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, terminalPresentation: 'hidden' } });
           return;
         }
-        setPrompt((current) => ({
-          anchor: mouse.current,
-          initialValue: '',
-          response: current?.response || '',
-          status: current?.status || 'idle'
-        }));
-        setPromptPresentation('terminal');
-        setPromptVisible(true);
+        ensureWorkspaceTerminal('docked');
+        setPromptVisible(false);
         return;
       }
       if (isAccount && canvasCommandsOpen && event.key === 'Escape') {
@@ -1794,8 +1828,8 @@ export function HiiRoot({
       if (event.key === 'Escape') { setPromptVisible(false); setSelected([]); return; }
       if (isTerminalShortcut(event)) {
         event.preventDefault();
-        const terminalSeed = terminalSeedFromCommand('/terminal');
-        if (terminalSeed) spawnSeeds([terminalSeed], camera.toWorld(mouse.current.x, mouse.current.y));
+        const presentation = workspaceTerminal?.payload.terminalPresentation === 'canvas' ? 'docked' : 'canvas';
+        ensureWorkspaceTerminal(presentation);
         setPromptVisible(false);
         return;
       }
@@ -1815,7 +1849,8 @@ export function HiiRoot({
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'u') { event.preventDefault(); fileInput.current?.click(); return; }
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 't') {
         event.preventDefault();
-        spawnArtifactTerminals(mouse.current);
+        const presentation = workspaceTerminal?.payload.terminalPresentation === 'canvas' ? 'docked' : 'canvas';
+        ensureWorkspaceTerminal(presentation);
         return;
       }
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'b') {
@@ -1835,7 +1870,8 @@ export function HiiRoot({
       if (isDirectCanvasTyping(event)) {
         event.preventDefault();
         const at = camera.toWorld(mouse.current.x, mouse.current.y);
-        spawnSeeds([objectiveSeedFromText(event.key, { mode, contextNodeIds: selected })], at);
+        const [id] = spawnSeeds([canvasTextSeed(event.key)], at);
+        setFocusNodeId(id ?? null);
         setPromptVisible(false);
       }
     };
@@ -1875,7 +1911,7 @@ export function HiiRoot({
     addEventListener('pointermove', pointermove);
     addEventListener('paste', paste);
     return () => { removeEventListener('keydown', keydown); removeEventListener('pointermove', pointermove); removeEventListener('paste', paste); };
-  }, [allowPhoto, camera, canvasCommandsOpen, deleteSelection, fitCanvas, importFiles, isAccount, isSpace, isTouchCanvas, mode, onRequestDevice, openDevBrowser, promptPresentation, promptVisible, runtimeEnabled, selected, spawnArtifactTerminals, spawnCenteredSeed, spawnInformation, spawnSeeds, toggleDrawing, workspace]);
+  }, [allowPhoto, camera, canvasCommandsOpen, deleteSelection, ensureWorkspaceTerminal, fitCanvas, importFiles, isAccount, isSpace, isTouchCanvas, mode, onRequestDevice, openDevBrowser, runtimeEnabled, selected, spawnCenteredSeed, spawnInformation, spawnSeeds, toggleDrawing, workspace, workspaceTerminal]);
 
   const canvasFeedback = toolMessage || (drawing
     ? 'Drawing on · drag anywhere · Esc to stop.'
@@ -1897,6 +1933,11 @@ export function HiiRoot({
   const openPresentationPanel = useCallback(() => {
     setMode('show');
     openAssistantPanel('/presentation ');
+  }, [openAssistantPanel]);
+
+  const openSearchPanel = useCallback(() => {
+    setMode('browse');
+    openAssistantPanel('/search ');
   }, [openAssistantPanel]);
 
   const openActivityPanel = useCallback(() => {
@@ -1998,6 +2039,8 @@ export function HiiRoot({
         onAddFile={() => fileInput.current?.click()}
         onDraw={toggleDrawing}
         onPresentation={openPresentationPanel}
+        onSearch={openSearchPanel}
+        onTerminal={() => ensureWorkspaceTerminal('docked')}
         onAsk={() => openAssistantPanel()}
         onActivity={openActivityPanel}
         onZoomOut={() => camera.zoomBy(1 / KEY_ZOOM_STEP)}
@@ -2082,10 +2125,20 @@ export function HiiRoot({
               onCurationRequest={(request, payload) => void requestCuration(node.id, request, payload)}
               onBrowserAgent={(request) => void requestBrowserAgent(node, request)}
               onBrowserCapture={(result) => spawnInformation(capturedInformationSeeds(result), { x: node.x + node.w + 40, y: node.y })}
+              onOpenBrowser={(url) => openDevBrowser({ x: node.x + node.w + 40, y: node.y }, url)}
             />
           </NodeFrame>
         ))}
       </div>
+      {runtimeEnabled && workspaceTerminal?.payload.terminalPresentation === 'docked' && (
+        <aside className="hii-docked-terminal" data-workspace-ui onPointerDown={(event) => event.stopPropagation()}>
+          <div className="hii-docked-terminal-actions">
+            <button type="button" data-tooltip="Move to canvas · ⌘⇧T" aria-label="Move terminal to canvas" onClick={() => ensureWorkspaceTerminal('canvas')}><CornersOut size={16} /></button>
+            <button type="button" data-tooltip="Hide · ⌘Space" aria-label="Hide terminal" onClick={() => workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, terminalPresentation: 'hidden' } })}>×</button>
+          </div>
+          <TerminalBody node={workspaceTerminal} onPayload={(patch) => workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, ...patch } })} onAgentSubmit={(intent) => void startObjectiveAgent(workspaceTerminal.id, intent)} />
+        </aside>
+      )}
       {runtimeEnabled && promptVisible && prompt && (
         <Prompt
           key={`${prompt.anchor.x}:${prompt.anchor.y}:${prompt.initialValue}`}

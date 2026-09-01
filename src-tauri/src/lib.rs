@@ -178,7 +178,7 @@ fn workspace_asset_store(name: String, mime: String, bytes: Vec<u8>) -> Result<V
 /// against a local `cargo build`, not a distribution mechanism — when they were
 /// the only candidates, the app launched fine for anyone and then failed at the
 /// first agent run with "could not locate its Rust CLI".
-fn hii_binary(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn hii_binary(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     if let Some(path) = env::var_os("HII_CLI_BIN") {
         return Ok(PathBuf::from(path));
     }

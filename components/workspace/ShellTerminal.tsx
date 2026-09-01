@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   listenTerminalEvents,
   resizeTerminalSession,
@@ -11,13 +11,18 @@ import {
 export function ShellTerminal({
   sessionId,
   cwd,
+  entry = 'hii',
   onState
 }: {
   sessionId: string;
   cwd: string;
+  entry?: 'hii' | 'shell';
   onState: (state: { status: 'running' | 'stopped' | 'failed'; cwd?: string; error?: string }) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<import('@xterm/xterm').Terminal | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const onStateRef = useRef(onState);
   onStateRef.current = onState;
 
@@ -70,6 +75,7 @@ export function ShellTerminal({
       terminal.loadAddon(fit);
       terminal.loadAddon(new WebLinksAddon());
       terminal.open(element);
+      terminalRef.current = terminal;
       const fitVisibleTerminal = () => {
         if (!terminal || !fit || element.clientWidth < 120 || element.clientHeight < 60) return false;
         fit.fit();
@@ -103,7 +109,8 @@ export function ShellTerminal({
           sessionId,
           cwd,
           cols: terminal.cols,
-          rows: terminal.rows
+          rows: terminal.rows,
+          entry
         });
         if (disposed) return;
         if (started.replay) terminal.write(started.replay);
@@ -123,8 +130,39 @@ export function ShellTerminal({
       cleanupEvents();
       cleanupData.dispose();
       terminal?.dispose();
+      terminalRef.current = null;
     };
-  }, [cwd, sessionId]);
+  }, [cwd, entry, sessionId]);
 
-  return <div ref={host} className="hii-shell-terminal" aria-label={`Shell terminal in ${cwd}`} />;
+  const find = (direction: 1 | -1 = 1) => {
+    const terminal = terminalRef.current;
+    if (!terminal || !query) return;
+    const lines = Array.from({ length: terminal.buffer.active.length }, (_, index) => terminal.buffer.active.getLine(index)?.translateToString(true) || '');
+    const start = Math.max(0, terminal.buffer.active.viewportY + (direction > 0 ? 0 : terminal.rows));
+    const order = direction > 0
+      ? [...lines.keys()].slice(start).concat([...lines.keys()].slice(0, start))
+      : [...lines.keys()].reverse().filter((index) => index <= start).concat([...lines.keys()].reverse().filter((index) => index > start));
+    const row = order.find((index) => lines[index].toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+    if (row === undefined) return;
+    const column = lines[row].toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
+    terminal.select(column, row, query.length);
+    terminal.scrollToLine(row);
+  };
+
+  return <div className="hii-shell-terminal-shell" onKeyDown={(event) => {
+    if (!(event.metaKey || event.ctrlKey)) return;
+    if (event.key.toLowerCase() === 'f') { event.preventDefault(); setSearchOpen(true); }
+    if (event.key.toLowerCase() === 'c' && terminalRef.current?.hasSelection()) { event.preventDefault(); void navigator.clipboard.writeText(terminalRef.current.getSelection()); }
+    if (event.key.toLowerCase() === 'v') { event.preventDefault(); void navigator.clipboard.readText().then((value) => writeTerminalSession(sessionId, value)); }
+    if (event.key === '+' || event.key === '=') { event.preventDefault(); const terminal = terminalRef.current; if (terminal) terminal.options.fontSize = Math.min(24, Number(terminal.options.fontSize || 12) + 1); }
+    if (event.key === '-') { event.preventDefault(); const terminal = terminalRef.current; if (terminal) terminal.options.fontSize = Math.max(9, Number(terminal.options.fontSize || 12) - 1); }
+  }}>
+    {searchOpen && <form className="hii-terminal-find" onSubmit={(event) => { event.preventDefault(); find(1); }}>
+      <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setSearchOpen(false); }} placeholder="Find" aria-label="Find terminal text" />
+      <button type="button" aria-label="Previous match" onClick={() => find(-1)}>↑</button>
+      <button type="submit" aria-label="Next match">↓</button>
+      <button type="button" aria-label="Close find" onClick={() => setSearchOpen(false)}>×</button>
+    </form>}
+    <div ref={host} className="hii-shell-terminal" aria-label={`HII terminal in ${cwd}`} />
+  </div>;
 }

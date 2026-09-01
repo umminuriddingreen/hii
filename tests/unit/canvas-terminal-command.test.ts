@@ -22,12 +22,15 @@ describe('canvas terminal command', () => {
         capabilityId: 'hii.terminal.shell'
       },
       payload: {
-        title: 'terminal · hii',
+        title: 'HII · hii',
         job: 'shell',
         cwd: '~/hii',
         status: 'ready',
         role: 'operator-terminal',
         terminalMode: 'shell',
+        terminalEntry: 'hii',
+        terminalPresentation: 'canvas',
+        singletonKey: 'workspace-terminal',
         windowState: 'normal',
         scope: 'human-controlled local shell'
       }
@@ -37,7 +40,7 @@ describe('canvas terminal command', () => {
   it('uses the optional folder without executing it', () => {
     const seed = terminalSeedFromCommand('/terminal /Users/ummi/hii-newest');
     expect(seed?.payload).toMatchObject({
-      title: 'terminal · hii-newest',
+      title: 'HII · hii-newest',
       cwd: '/Users/ummi/hii-newest'
     });
   });
@@ -47,13 +50,13 @@ describe('canvas terminal command', () => {
     expect(terminalSeedFromCommand('build the app')).toBeNull();
   });
 
-  it('opens from bare Space without capturing modifiers or key repeat', () => {
-    const key = { code: 'Space', altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, repeat: false };
+  it('moves the canonical terminal with Command-Shift-T without capturing bare Space', () => {
+    const key = { code: 'KeyT', altKey: false, ctrlKey: false, metaKey: true, shiftKey: true, repeat: false };
     expect(isTerminalShortcut(key)).toBe(true);
-    expect(isTerminalShortcut({ ...key, metaKey: true })).toBe(false);
-    expect(isTerminalShortcut({ ...key, shiftKey: true })).toBe(false);
+    expect(isTerminalShortcut({ ...key, metaKey: false })).toBe(false);
+    expect(isTerminalShortcut({ ...key, shiftKey: false })).toBe(false);
     expect(isTerminalShortcut({ ...key, repeat: true })).toBe(false);
-    expect(isTerminalShortcut({ ...key, code: 'KeyA' })).toBe(false);
+    expect(isTerminalShortcut({ ...key, code: 'Space' })).toBe(false);
   });
 
   it('summons the contextual HII assistant with Command-Space only', () => {
@@ -67,15 +70,14 @@ describe('canvas terminal command', () => {
     expect(isAssistantShortcut({ ...key, repeat: true })).toBe(false);
   });
 
-  it('renders Command-Space assistance as a dedicated canvas state panel', () => {
+  it('renders Command-Space as the canonical workspace terminal', () => {
     const root = readFileSync(resolve(process.cwd(), 'components/workspace/HiiRoot.tsx'), 'utf8');
     const css = readFileSync(resolve(process.cwd(), 'app/globals.css'), 'utf8');
-    expect(root).toContain("presentation === 'floating'");
     expect(root).toContain('isAssistantShortcut(event)');
-    expect(root).toContain('selectedCount={selected.length}');
-    expect(css).toContain('.hii-assistant-terminal-shell');
-    expect(root).toContain('Make presentation');
-    expect(root).toContain("setValue('/presentation ')");
+    expect(root).toContain("ensureWorkspaceTerminal('docked')");
+    expect(root).toContain("singletonKey: 'workspace-terminal'");
+    expect(css).toContain('.hii-docked-terminal');
+    expect(root).not.toContain('Make presentation');
   });
 
   it('turns direct canvas typing into a persistent objective draft', () => {
@@ -96,10 +98,10 @@ describe('canvas terminal command', () => {
     });
   });
 
-  it('routes direct workspace typing through the governed objective object', () => {
+  it('routes direct workspace typing into editable canvas text', () => {
     const root = readFileSync(resolve(process.cwd(), 'components/workspace/HiiRoot.tsx'), 'utf8');
-    expect(root).toContain('objectiveSeedFromText(event.key, { mode, contextNodeIds: selected })');
-    expect(root).not.toContain('spawnSeeds([canvasTextSeed(event.key)], at)');
+    expect(root).toContain('spawnSeeds([canvasTextSeed(event.key)], at)');
+    expect(root).not.toContain('objectiveSeedFromText(event.key, { mode, contextNodeIds: selected })');
   });
 
   it('recognizes plain typed text without capturing shortcuts', () => {

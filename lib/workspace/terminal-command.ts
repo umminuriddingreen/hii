@@ -6,11 +6,11 @@ const TERMINAL_COMMAND = /^\/terminal(?:\s+(.+))?$/i;
 const DEFAULT_CWD = '~/hii';
 
 export function isTerminalShortcut(event: Pick<KeyboardEvent, 'altKey' | 'code' | 'ctrlKey' | 'metaKey' | 'repeat' | 'shiftKey'>) {
-  return event.code === 'Space'
+  return event.code === 'KeyT'
     && !event.altKey
     && !event.ctrlKey
-    && !event.metaKey
-    && !event.shiftKey
+    && event.metaKey
+    && event.shiftKey
     && !event.repeat;
 }
 
@@ -66,12 +66,15 @@ export function terminalSeedFromCommand(value: string): NodeSeed | null {
       }]
     },
     payload: {
-      title: `terminal · ${cwdLabel(cwd)}`,
+      title: `HII · ${cwdLabel(cwd)}`,
       job: 'shell',
       cwd,
       status: 'ready',
       role: 'operator-terminal',
       terminalMode: 'shell',
+      terminalEntry: 'hii',
+      terminalPresentation: 'canvas',
+      singletonKey: 'workspace-terminal',
       windowState: 'normal',
       scope: 'human-controlled local shell',
       sessionId: crypto.randomUUID(),

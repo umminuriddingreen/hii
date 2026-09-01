@@ -19,6 +19,7 @@ npm run ui:live        # writes live mode, then runs next dev on 3042
                        # relaunch HII: it loads the dev server with HMR
 npm run ui:status
 npm run ui:live:off    # back to the installed/baked interface
+npm run ui:bundled     # prefer the current app bundle; preserve old UI bundles for rollback
 ```
 
 `ui:live` restores the previous mode when the dev server exits. One-off:

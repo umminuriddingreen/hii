@@ -119,6 +119,16 @@ fn shell_command(cwd: &Path) -> CommandBuilder {
     command
 }
 
+fn hii_command(app: &AppHandle, cwd: &Path) -> Result<CommandBuilder, String> {
+    let mut command = CommandBuilder::new(crate::hii_binary(app)?);
+    command.arg("--cwd");
+    command.arg(cwd);
+    command.cwd(cwd);
+    command.env("TERM", "xterm-256color");
+    command.env("COLORTERM", "truecolor");
+    Ok(command)
+}
+
 #[cfg(not(windows))]
 fn shell_command(cwd: &Path) -> CommandBuilder {
     let shell = env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
@@ -152,6 +162,7 @@ pub fn terminal_start(
     cwd: String,
     cols: Option<u16>,
     rows: Option<u16>,
+    entry: Option<String>,
 ) -> Result<TerminalStartResultV1, String> {
     require_trusted_terminal_webview(webview.label())?;
     if session_id.trim().is_empty() || session_id.len() > 128 {
@@ -201,10 +212,15 @@ pub fn terminal_start(
         .master
         .take_writer()
         .map_err(|error| format!("could not write terminal: {error}"))?;
+    let command = match entry.as_deref().unwrap_or("hii") {
+        "hii" => hii_command(&app, &cwd)?,
+        "shell" => shell_command(&cwd),
+        _ => return Err("terminal entry must be hii or shell".into()),
+    };
     let child = pair
         .slave
-        .spawn_command(shell_command(&cwd))
-        .map_err(|error| format!("could not start shell: {error}"))?;
+        .spawn_command(command)
+        .map_err(|error| format!("could not start terminal: {error}"))?;
     drop(pair.slave);
 
     let replay = Arc::new(Mutex::new(String::new()));

@@ -21,4 +21,13 @@ describe('Tauri capability boundary', () => {
     expect(capability.remote?.urls).toContain('http://127.0.0.1:*');
     expect(capability.remote?.urls).toContain('http://localhost:*');
   });
+
+  it('starts the canvas terminal through the bundled HII CLI while preserving an explicit shell entry', () => {
+    const terminal = readFileSync(path.join(process.cwd(), 'src-tauri/src/terminal.rs'), 'utf8');
+    const bridge = readFileSync(path.join(process.cwd(), 'lib/client/hii-bridge.ts'), 'utf8');
+    expect(terminal).toContain('"hii" => hii_command(&app, &cwd)?');
+    expect(terminal).toContain('"shell" => shell_command(&cwd)');
+    expect(terminal).toContain('terminal commands are restricted to the trusted HII webview');
+    expect(bridge).toContain("entry?: 'hii' | 'shell'");
+  });
 });

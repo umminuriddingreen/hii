@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { browserNavigationTarget, browserTargetKind, normalizedBrowserUrl } from '@/lib/workspace/browser-target';
 
@@ -24,5 +26,17 @@ describe('HII interactive browser targets', () => {
       'https://www.google.com/search?q=local%20first%20human%20interface'
     );
     expect(browserNavigationTarget('file:///tmp/private')).toBeNull();
+  });
+
+  it('projects search sources and live pages as independent canvas objects', () => {
+    const root = readFileSync(resolve(process.cwd(), 'components/workspace/HiiRoot.tsx'), 'utf8');
+    const browser = readFileSync(resolve(process.cwd(), 'components/workspace/NativeDevBrowser.tsx'), 'utf8');
+    expect(root).toContain("findInformation(query, { web: true, limit: 8 })");
+    expect(root).toContain("type: 'link'");
+    expect(root).toContain('onOpenBrowser={(url) => openDevBrowser');
+    expect(browser).toContain('onOpenObject(url)');
+    expect(browser).toContain("action('back')");
+    expect(browser).toContain("action('forward')");
+    expect(browser).toContain("action('reload')");
   });
 });

@@ -5,6 +5,7 @@
 //   node scripts/hii-ui-live.mjs            # follow http://127.0.0.1:3042
 //   node scripts/hii-ui-live.mjs --serve    # also run next dev, restore on exit
 //   node scripts/hii-ui-live.mjs --off      # go back to the installed/baked UI
+//   node scripts/hii-ui-live.mjs --bundled  # prefer this app's baked UI; keep old bundles for rollback
 //   node scripts/hii-ui-live.mjs --status
 //
 // The app reads ~/.hii/ui/state.json at startup and whenever ui_channel_set_live
@@ -58,6 +59,17 @@ if (process.argv.includes('--off')) {
   state.liveUrl = null;
   writeState(state);
   console.log(`HII UI channel: ${describe(state)} (restart HII to load it)`);
+  process.exit(0);
+}
+
+if (process.argv.includes('--bundled')) {
+  state.mode = 'bundled';
+  state.liveUrl = null;
+  state.version = null;
+  state.pendingVersion = null;
+  state.autoApply = false;
+  writeState(state);
+  console.log(`HII UI channel: ${describe(state)} (installed bundles preserved for rollback; restart HII)`);
   process.exit(0);
 }
 

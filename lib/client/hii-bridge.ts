@@ -534,6 +534,7 @@ export async function startTerminalSession(request: {
   cwd: string;
   cols: number;
   rows: number;
+  entry?: 'hii' | 'shell';
 }): Promise<TerminalStartResultV1> {
   if (!isTauri()) throw new Error('Native shell terminals are available in the HII desktop app.');
   const { invoke } = await import('@tauri-apps/api/core');

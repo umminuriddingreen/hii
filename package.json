@@ -19,6 +19,7 @@
     "dev:tauri": "tauri dev",
     "ui:live": "node scripts/hii-ui-live.mjs --serve",
     "ui:live:off": "node scripts/hii-ui-live.mjs --off",
+    "ui:bundled": "node scripts/hii-ui-live.mjs --bundled",
     "ui:status": "node scripts/hii-ui-live.mjs --status",
     "ui:release": "node scripts/hii-ui-release.mjs",
     "ui:publish": "node scripts/hii-ui-publish.mjs",

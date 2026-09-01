@@ -78,9 +78,7 @@ button, input, textarea { font: inherit; }
 }
 
 .hii-freeform-chrome { display: contents; }
-.hii-freeform-tools,
-.hii-freeform-zoom,
-.hii-freeform-state {
+.hii-freeform-tools {
   position: fixed;
   z-index: 2147482500;
   display: flex;
@@ -90,17 +88,14 @@ button, input, textarea { font: inherit; }
   margin: 0;
   padding: 4px;
   border: 0;
-  border-radius: 16px;
-  background: rgba(248, 248, 248, .88);
-  box-shadow: 0 10px 34px rgba(0, 0, 0, .09), inset 0 0 0 1px rgba(255,255,255,.6);
-  backdrop-filter: blur(26px) saturate(1.45);
+  border-radius: 13px;
+  background: rgba(247, 247, 245, .9);
+  box-shadow: 0 7px 24px rgba(0, 0, 0, .08), inset 0 0 0 1px rgba(0,0,0,.055);
+  backdrop-filter: blur(22px) saturate(1.2);
 }
 .hii-freeform-tools { top: 12px; left: 50%; transform: translateX(-50%); }
-.hii-freeform-zoom { left: 16px; bottom: 14px; }
-.hii-freeform-state { right: 16px; bottom: 14px; }
-.hii-freeform-tools button,
-.hii-freeform-zoom button,
-.hii-freeform-state button {
+.hii-freeform-tools > button {
+  position: relative;
   display: grid;
   width: 34px;
   height: 34px;
@@ -114,24 +109,54 @@ button, input, textarea { font: inherit; }
 }
 .hii-freeform-tools button:hover,
 .hii-freeform-tools button:focus-visible,
-.hii-freeform-zoom button:hover,
-.hii-freeform-zoom button:focus-visible,
-.hii-freeform-state button:hover,
-.hii-freeform-state button:focus-visible,
 .hii-freeform-tools button[aria-pressed="true"] {
   background: rgba(0,0,0,.075);
   color: #111;
   outline: 0;
 }
-.hii-freeform-tools > span,
-.hii-freeform-zoom > i { width: 1px; height: 22px; margin: 0 3px; background: rgba(0,0,0,.09); }
-.hii-freeform-zoom output { min-width: 46px; color: #4f4f4f; font-size: 12px; font-weight: 600; text-align: center; }
-.hii-freeform-state > span { display: flex; min-width: 34px; height: 34px; align-items: center; justify-content: center; gap: 4px; color: #4f4f4f; font-size: 11px; }
+.hii-freeform-tools > button[data-tooltip]::after,
+.hii-docked-terminal-actions button[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  width: max-content;
+  max-width: 220px;
+  padding: 5px 7px;
+  transform: translateX(-50%);
+  border-radius: 6px;
+  background: #202020;
+  color: #fff;
+  opacity: 0;
+  pointer-events: none;
+  font: 10px/1.2 -apple-system, BlinkMacSystemFont, sans-serif;
+  transition: opacity .12s ease .35s;
+}
+.hii-freeform-tools > button[data-tooltip]:hover::after,
+.hii-freeform-tools > button[data-tooltip]:focus-visible::after,
+.hii-docked-terminal-actions button[data-tooltip]:hover::after { opacity: 1; }
+.hii-freeform-more {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  width: 234px;
+  margin: 0;
+  padding: 6px;
+  border: 1px solid rgba(0,0,0,.09);
+  border-radius: 12px;
+  background: rgba(250,250,248,.97);
+  box-shadow: 0 16px 44px rgba(0,0,0,.14);
+  backdrop-filter: blur(28px);
+}
+.hii-freeform-more button { display: grid; grid-template-columns: 22px minmax(0,1fr) auto; align-items: center; min-height: 34px; padding: 0 9px; border: 0; border-radius: 7px; background: transparent; color: #222; cursor: pointer; font: 12px/1.2 -apple-system, BlinkMacSystemFont, sans-serif; text-align: left; }
+.hii-freeform-more button:hover, .hii-freeform-more button:focus-visible { background: rgba(0,0,0,.065); outline: 0; }
+.hii-freeform-more kbd { color: #777; font: 10px/1 "SF Mono", ui-monospace, monospace; }
+.hii-freeform-more hr { width: 100%; margin: 5px 0; border: 0; border-top: 1px solid rgba(0,0,0,.08); }
+.hii-freeform-more output { display: flex; align-items: center; gap: 7px; padding: 7px 9px 4px; color: #777; font-size: 10px; }
 
 @media (max-width: 760px) {
   .hii-freeform-tools { top: auto; right: 12px; bottom: 12px; left: 12px; justify-content: center; transform: none; }
-  .hii-freeform-zoom,
-  .hii-freeform-state { display: none; }
 }
 
 .hii-node {
@@ -269,8 +294,8 @@ button, input, textarea { font: inherit; }
 .hii-source header { border-bottom: 1px solid var(--faint); text-transform: uppercase; letter-spacing: .08em; }
 .hii-source footer { border-top: 1px solid var(--faint); }
 .hii-source footer span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hii-source footer a { flex: 0 0 auto; color: inherit; text-decoration: none; }
-.hii-source footer a:hover { color: var(--ink); }
+.hii-source footer button { flex: 0 0 auto; padding: 5px 9px; border: 0; border-radius: 6px; background: rgba(0,0,0,.055); color: inherit; cursor: pointer; font: inherit; }
+.hii-source footer button:hover { color: var(--ink); background: rgba(0,0,0,.09); }
 .hii-source > div { display: grid; align-content: center; gap: 12px; min-height: 0; padding: 22px; overflow: auto; }
 .hii-source strong { font-size: clamp(17px, 2.2vw, 28px); font-weight: 560; letter-spacing: -.025em; }
 .hii-source p { max-width: 64ch; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
@@ -281,15 +306,15 @@ button, input, textarea { font: inherit; }
 .hii-node[data-chromeless="true"] .hii-source > div { height: 100%; padding: 16px; }
 
 .hii-dev-browser {
-  --browser-ink: #e9edf4;
-  --browser-muted: #8d96a6;
-  --browser-line: #292e37;
+  --browser-ink: #242424;
+  --browser-muted: #747474;
+  --browser-line: #dededb;
   display: grid;
-  grid-template-rows: 34px 46px minmax(0, 1fr);
+  grid-template-rows: 42px minmax(0, 1fr);
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #101216;
+  background: #f6f6f4;
   color: var(--browser-ink);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
 }
@@ -303,16 +328,16 @@ button, input, textarea { font: inherit; }
 .hii-dev-browser button { border: 0; background: transparent; color: var(--browser-muted); cursor: pointer; }
 .hii-dev-browser button:hover { color: var(--browser-ink); }
 .hii-browser-tabs button { padding: 4px 7px; border: 1px solid var(--browser-line); border-radius: 4px; font: 9px/1 "SF Mono", ui-monospace, monospace; }
-.hii-browser-nav { gap: 3px; padding: 6px 9px; background: #12151a; }
+.hii-browser-nav { gap: 3px; padding: 5px 8px; background: #f6f6f4; }
 .hii-browser-nav > button { width: 30px; height: 30px; border-radius: 5px; font-size: 15px; }
 .hii-browser-nav > button:disabled { cursor: default; opacity: .28; }
-.hii-browser-nav form { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; flex: 1; height: 32px; margin: 0 5px; border: 1px solid #303641; border-radius: 6px; background: #0b0d10; }
+.hii-browser-nav form { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; flex: 1; height: 30px; margin: 0 5px; border: 1px solid #d7d7d3; border-radius: 7px; background: #fff; }
 .hii-browser-nav form:focus-within { border-color: #657089; box-shadow: 0 0 0 2px rgba(101, 112, 137, .18); }
-.hii-browser-nav form span { padding-left: 10px; color: #65d0a0; font-size: 12px; }
+.hii-browser-nav form span { padding-left: 10px; color: #777; font-size: 12px; }
 .hii-browser-nav input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--browser-ink); padding: 0 10px; font: 11px/1 "SF Mono", ui-monospace, monospace; }
 .hii-browser-open { padding: 0 8px; color: var(--browser-muted); font: 9px/30px "SF Mono", ui-monospace, monospace; text-decoration: none; white-space: nowrap; }
 .hii-browser-open:hover { color: var(--browser-ink); }
-.hii-browser-nav .hii-browser-capture { width: auto; padding: 0 10px; border: 1px solid #3b765f; color: #87dab5; font: 9px/1 "SF Mono", ui-monospace, monospace; letter-spacing: .04em; }
+.hii-browser-nav .hii-browser-capture { color: #555; }
 .hii-browser-workarea { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; }
 .hii-dev-browser[data-agent="true"] .hii-browser-workarea { grid-template-columns: minmax(0, 1fr) 260px; }
 .hii-dev-browser[data-device="desktop"] .hii-browser-viewport { width: min(1280px, 100%); justify-self: center; border-inline: 1px solid var(--browser-line); }
@@ -345,13 +370,14 @@ button, input, textarea { font: inherit; }
 .hii-assistant-terminal-shell {
   position: fixed;
   z-index: 2147483000;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  max-height: min(46vh, 520px);
+  right: 50%;
+  bottom: 22px;
+  width: min(620px, calc(100vw - 32px));
+  max-height: min(52vh, 560px);
+  transform: translateX(50%);
   overflow: auto;
-  border-top: 1px solid var(--ink);
-  background: var(--field);
+  border-radius: 15px;
+  background: transparent;
 }
 
 .hii-assistant-terminal-context {
@@ -378,14 +404,15 @@ button, input, textarea { font: inherit; }
 
 .hii-prompt {
   width: 100%;
-  border: 1px solid var(--ink);
-  border-radius: 0;
-  background: var(--field);
+  border: 1px solid rgba(0,0,0,.12);
+  border-radius: 15px;
+  background: rgba(255,255,255,.96);
   color: var(--ink);
-  box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.08);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, .14);
+  backdrop-filter: blur(24px);
 }
-.hii-prompt[data-presentation="terminal"] { border: 0; box-shadow: none; }
-.hii-prompt[data-presentation="terminal"] .hii-prompt-line { min-height: 58px; }
+.hii-prompt[data-presentation="terminal"] { border: 1px solid rgba(0,0,0,.1); box-shadow: 0 18px 60px rgba(0,0,0,.14); }
+.hii-prompt[data-presentation="terminal"] .hii-prompt-line { min-height: 54px; }
 .hii-prompt[data-presentation="terminal"] .hii-mode-strip { padding-inline: 16px; }
 
 .hii-prompt-context {
@@ -429,16 +456,23 @@ button, input, textarea { font: inherit; }
 .hii-conversation-timeline p { margin: 0; white-space: pre-wrap; }
 .hii-conversation-timeline time { white-space: nowrap; }
 
-.hii-prompt-line { display: grid; align-items: center; min-height: 52px; }
+.hii-prompt-line { display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; min-height: 52px; }
+.hii-prompt-options-toggle { display: grid; width: 32px; height: 32px; margin-left: 9px; padding: 0; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+.hii-prompt-options-toggle:hover, .hii-prompt-options-toggle[aria-expanded="true"] { background: rgba(0,0,0,.06); color: var(--ink); }
 .hii-prompt input {
   width: 100%;
   border: 0;
   background: transparent;
   color: inherit;
-  padding: 15px 18px;
+  padding: 15px 14px 15px 9px;
   outline: 0;
   font: 16px/1.25 Helvetica, Arial, sans-serif;
 }
+.hii-prompt-options { display: grid; gap: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--faint); color: var(--muted); font-size: 11px; }
+.hii-prompt-options header { display: flex; justify-content: space-between; gap: 12px; }
+.hii-prompt-options > div { display: flex; gap: 4px; }
+.hii-prompt-options button { padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; font: 9px/1 "SF Mono", ui-monospace, monospace; text-transform: uppercase; }
+.hii-prompt-options button[aria-pressed="true"] { background: var(--ink); color: var(--field); }
 
 .hii-prompt-response {
   display: block;
@@ -584,9 +618,21 @@ button, input, textarea { font: inherit; }
 .hii-job-terminal header strong { overflow: hidden; font-size: 11px; font-weight: 550; letter-spacing: .01em; text-overflow: ellipsis; white-space: nowrap; }
 .hii-job-terminal header small { color: #777b84; font-size: 9px; letter-spacing: .12em; text-transform: uppercase; }
 .hii-job-terminal pre { display: grid; align-content: start; gap: 7px; margin: 0; padding: 14px 16px; overflow: auto; color: #b9bdc6; font: 11px/1.45 inherit; }
-.hii-shell-terminal { min-width: 0; min-height: 0; padding: 14px 10px 10px 16px; overflow: hidden; background: #050505; }
+.hii-shell-terminal-shell { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #050505; }
+.hii-shell-terminal { width: 100%; height: 100%; min-width: 0; min-height: 0; padding: 14px 10px 10px 16px; overflow: hidden; background: #050505; }
 .hii-shell-terminal .xterm { height: 100%; padding: 0; }
 .hii-shell-terminal .xterm-viewport { scrollbar-color: #343840 transparent; scrollbar-width: thin; }
+.hii-terminal-find { position: absolute; z-index: 5; top: 8px; right: 10px; display: flex; height: 30px; align-items: center; padding: 2px; border: 1px solid #32353b; border-radius: 7px; background: #111318; box-shadow: 0 8px 24px rgba(0,0,0,.3); }
+.hii-terminal-find input { width: 180px; border: 0; outline: 0; background: transparent; color: #eee; padding: 0 7px; font: 11px/1 "SF Mono", ui-monospace, monospace; }
+.hii-terminal-find button { width: 26px; height: 26px; padding: 0; border: 0; background: transparent; color: #999; cursor: pointer; }
+.hii-terminal-find button:hover { color: #fff; }
+.hii-docked-terminal { position: fixed; z-index: 2147482400; right: 12px; bottom: 12px; left: 12px; height: min(42vh, 480px); overflow: hidden; border: 1px solid #26282d; border-radius: 13px; background: #050505; box-shadow: 0 20px 70px rgba(0,0,0,.28); }
+.hii-docked-terminal .hii-job-terminal { height: 100%; }
+.hii-docked-terminal .hii-job-terminal[data-kind="shell"] header { padding-left: 14px; }
+.hii-docked-terminal .hii-job-terminal header small { margin-right: 64px; }
+.hii-docked-terminal-actions { position: absolute; z-index: 14; top: 5px; right: 8px; display: flex; gap: 2px; }
+.hii-docked-terminal-actions button { position: relative; display: grid; width: 30px; height: 30px; padding: 0; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #777b84; cursor: pointer; }
+.hii-docked-terminal-actions button:hover { background: #1b1d21; color: #fff; }
 .hii-terminal-window-controls {
   position: absolute;
   z-index: 12;
