@@ -117,37 +117,6 @@ fn clean_final_output(message: &str, already_streamed: bool) -> String {
     }
 }
 
-#[derive(Debug, Default, PartialEq)]
-enum ModelContentProjection {
-    #[default]
-    Pending,
-    Human,
-    Protocol,
-}
-
-impl ModelContentProjection {
-    fn push(&mut self, buffered: &mut String, delta: &str) -> Option<String> {
-        match self {
-            Self::Human => Some(delta.to_string()),
-            Self::Protocol => None,
-            Self::Pending => {
-                buffered.push_str(delta);
-                let first = buffered
-                    .chars()
-                    .find(|character| !character.is_whitespace())?;
-                if matches!(first, '{' | '[' | '`') {
-                    *self = Self::Protocol;
-                    buffered.clear();
-                    None
-                } else {
-                    *self = Self::Human;
-                    Some(std::mem::take(buffered))
-                }
-            }
-        }
-    }
-}
-
 fn activity_excerpt(value: &str) -> String {
     let compact = redact_text(value)
         .split_whitespace()
@@ -859,9 +828,7 @@ impl Conversation {
                         )?);
                         run = Some(created);
                     }
-                    if self.shows_tool_lines() {
-                        crate::tui::tool_start(step, &label, target);
-                    }
+                    self.show_tool_start(step, &label, target);
                     let pre_hooks = self.hooks.fire(
                         HookEvent::PreTool,
                         Some(&label),
@@ -903,9 +870,7 @@ impl Conversation {
                         verification.clear();
                         observations.clear();
                     }
-                    if self.shows_tool_lines() {
-                        crate::tui::tool_result(ok, false);
-                    }
+                    self.show_tool_result(ok, false);
                     if self.shows_tool_output() {
                         crate::tui::tool_output(&safe_output);
                     }
@@ -1002,9 +967,7 @@ impl Conversation {
                         command.as_deref(),
                         url.as_deref(),
                     );
-                    if self.shows_tool_lines() {
-                        crate::tui::tool_start(step, &tool, &target);
-                    }
+                    self.show_tool_start(step, &tool, &target);
                     let observation = tool_is_observation(&tool);
                     let observation_key = observation.then(|| {
                         observation_signature(
@@ -1296,9 +1259,7 @@ impl Conversation {
                             observations.insert(key);
                         }
                     }
-                    if self.shows_tool_lines() {
-                        crate::tui::tool_result(result.ok, result.verification || shell_evidence);
-                    }
+                    self.show_tool_result(result.ok, result.verification || shell_evidence);
                     if self.shows_tool_output() {
                         crate::tui::tool_output(&safe_output);
                     }
@@ -2112,6 +2073,28 @@ impl Conversation {
         io::stdout().is_terminal() && matches!(self.thinking_mode, ThinkingMode::Raw)
     }
 
+    fn show_tool_start(&self, step: usize, tool: &str, target: &str) {
+        if !self.shows_tool_lines() {
+            return;
+        }
+        if matches!(self.thinking_mode, ThinkingMode::Raw) {
+            crate::tui::stream_tool_start(step, tool, target);
+        } else {
+            crate::tui::tool_start(step, tool, target);
+        }
+    }
+
+    fn show_tool_result(&self, ok: bool, verification: bool) {
+        if !self.shows_tool_lines() {
+            return;
+        }
+        if matches!(self.thinking_mode, ThinkingMode::Raw) {
+            crate::tui::stream_tool_result(ok, verification);
+        } else {
+            crate::tui::tool_result(ok, verification);
+        }
+    }
+
     /// Does the objective frame belong on screen? Everything but Stream.
     fn shows_flow(&self) -> bool {
         io::stdout().is_terminal() && !matches!(self.thinking_mode, ThinkingMode::Raw)
@@ -2862,8 +2845,6 @@ impl Conversation {
         let raw_activity = matches!(self.thinking_mode, ThinkingMode::Raw);
         let compact_activity = false;
         let mut content_started = false;
-        let mut content_projection = ModelContentProjection::default();
-        let mut pending_content = String::new();
         let mut reasoning_chars = 0usize;
         let mut activity_frame = 0usize;
         let mut thinking_excerpt = String::new();
@@ -2977,16 +2958,15 @@ impl Conversation {
                     if interactive && show_content {
                         content_started = true;
                         if raw_activity {
-                            if let Some(visible) =
-                                content_projection.push(&mut pending_content, &delta)
-                            {
-                                self.last_reply_streamed = true;
-                                if let Some(input) = live_input.as_mut() {
-                                    input.write_stream(&visible)?;
-                                } else {
-                                    print!("{visible}");
-                                    let _ = io::stdout().flush();
-                                }
+                            // Stream means stream: preserve every provider byte,
+                            // including JSON tool actions, so the operator can
+                            // see exactly why the next tool call occurs.
+                            self.last_reply_streamed = true;
+                            if let Some(input) = live_input.as_mut() {
+                                input.write_stream(&delta)?;
+                            } else {
+                                print!("{delta}");
+                                let _ = io::stdout().flush();
                             }
                         } else if let Some(input) = live_input.as_mut() {
                             let detail = if phase == "thinking" {
@@ -4192,8 +4172,8 @@ mod tests {
         render_permissions, resumable_messages, session_authority, session_flow, session_goal,
         session_plan_mode, session_title, shell_command_is_observation_only,
         shell_command_is_preview, shell_command_is_read_only, side_context, tool_is_observation,
-        verification_required_message, Conversation, ModelContentProjection, ReasoningMode,
-        REASONING_MODES, THINKING_MODES,
+        verification_required_message, Conversation, ReasoningMode, REASONING_MODES,
+        THINKING_MODES,
     };
     use crate::agent::parse_action;
     use crate::contract::{Authority, Decision};
@@ -4203,29 +4183,6 @@ mod tests {
     fn final_output_does_not_repeat_streamed_content_or_append_workspace_noise() {
         assert_eq!(clean_final_output("Hello, Ummi.\n", true), "");
         assert_eq!(clean_final_output("Hello, Ummi.\n", false), "Hello, Ummi.");
-    }
-
-    #[test]
-    fn model_content_projection_streams_prose_and_hides_protocol() {
-        let mut prose = ModelContentProjection::default();
-        let mut prose_buffer = String::new();
-        assert_eq!(prose.push(&mut prose_buffer, "  "), None);
-        assert_eq!(
-            prose.push(&mut prose_buffer, "Hello"),
-            Some("  Hello".into())
-        );
-        assert_eq!(
-            prose.push(&mut prose_buffer, ", Ummi."),
-            Some(", Ummi.".into())
-        );
-
-        let mut protocol = ModelContentProjection::default();
-        let mut protocol_buffer = String::new();
-        assert_eq!(protocol.push(&mut protocol_buffer, "\n{"), None);
-        assert_eq!(
-            protocol.push(&mut protocol_buffer, r#""type":"read"}"#),
-            None
-        );
     }
 
     #[test]

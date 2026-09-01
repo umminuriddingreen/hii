@@ -608,7 +608,18 @@ pub fn idle_background() {
 }
 
 pub fn tool_start(step: usize, tool: &str, target: &str) {
-    activity_line(&format!(
+    activity_line(&tool_start_frame(step, tool, target));
+}
+
+/// Print a tool call as durable stream history instead of transient activity.
+/// Raw/stream mode is an append-only transcript: later model activity must not
+/// erase the call or any output printed after it.
+pub fn stream_tool_start(step: usize, tool: &str, target: &str) {
+    println!("{}", tool_start_frame(step, tool, target));
+}
+
+fn tool_start_frame(step: usize, tool: &str, target: &str) -> String {
+    format!(
         "{}  {}  {}",
         paint("◇", &[palette().secondary]),
         paint(&format!("{step:02} {tool}"), &[BOLD]),
@@ -616,10 +627,19 @@ pub fn tool_start(step: usize, tool: &str, target: &str) {
             &crate::text::clip_line(target, terminal_width().saturating_sub(30)),
             &[DIM, palette().muted]
         )
-    ));
+    )
 }
 
 pub fn tool_result(ok: bool, verification: bool) {
+    activity_line(&tool_result_frame(ok, verification));
+}
+
+/// Keep a raw-mode result in terminal scrollback alongside its tool call.
+pub fn stream_tool_result(ok: bool, verification: bool) {
+    println!("{}", tool_result_frame(ok, verification));
+}
+
+fn tool_result_frame(ok: bool, verification: bool) -> String {
     let (mark, label, color) = if !ok {
         ("×", "tool failed", palette().error)
     } else if verification {
@@ -627,11 +647,11 @@ pub fn tool_result(ok: bool, verification: bool) {
     } else {
         ("✓", "complete", palette().primary)
     };
-    activity_line(&format!(
+    format!(
         "{}  {}",
         paint(mark, &[BOLD, color]),
         paint(label, &[DIM, palette().muted])
-    ));
+    )
 }
 
 pub fn tool_output(output: &str) {
@@ -869,8 +889,8 @@ mod tests {
     use super::{
         active_run_frame, active_run_progress_frame, clear_activity_sequence, command_matches,
         command_menu, composer_window, model_activity, overview, prompt_frame, short_path,
-        terminal_width, theme_choices, user_turn_frame, welcome_frame, workspace_state,
-        ActiveRunView, Theme,
+        terminal_width, theme_choices, tool_result_frame, tool_start_frame, user_turn_frame,
+        welcome_frame, workspace_state, ActiveRunView, Theme,
     };
     use std::path::Path;
 
@@ -1007,6 +1027,19 @@ mod tests {
         assert_eq!(clear_activity_sequence(0), "");
         assert_eq!(clear_activity_sequence(2).matches("\x1b[1A").count(), 2);
         assert_eq!(clear_activity_sequence(2).matches("\x1b[2K").count(), 2);
+    }
+
+    #[test]
+    fn stream_tool_frames_are_complete_durable_rows() {
+        let call = tool_start_frame(3, "list", "workspace");
+        let result = tool_result_frame(true, false);
+        assert!(call.contains("◇"));
+        assert!(call.contains("03 list"));
+        assert!(call.contains("workspace"));
+        assert!(result.contains("✓"));
+        assert!(result.contains("complete"));
+        assert!(!call.contains('\n'));
+        assert!(!result.contains('\n'));
     }
 
     #[test]
