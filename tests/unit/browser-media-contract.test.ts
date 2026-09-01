@@ -25,5 +25,7 @@ describe('browser canvas media contract', () => {
     expect(canvas).toContain('try again');
     expect(css).toContain('.hii-node-asset-state');
     expect(css).toContain('.hii-node-document-open');
+    expect(css).toContain('.hii-node[data-node-type="document"]:not([data-content-active="true"]) .hii-node-document { pointer-events: none; }');
+    expect(canvas).toContain("node.type === 'image' || node.type === 'document'");
   });
 });

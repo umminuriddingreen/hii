@@ -214,6 +214,7 @@ button, input, textarea { font: inherit; }
 }
 
 .hii-node[data-selected="true"] .hii-node-caption { opacity: 1; }
+.hii-selection-marquee { position: absolute; z-index: 2147483646; border: 1px solid rgba(17,17,17,.72); background: rgba(17,17,17,.055); pointer-events: none; }
 .hii-node-touch-controls { position: absolute; z-index: 8; inset: auto 0 -46px auto; display: flex; gap: 8px; pointer-events: auto; }
 .hii-node-touch-controls button { min-width: 72px; min-height: 38px; border: 1px solid var(--ink); border-radius: 999px; background: var(--field); color: var(--ink); font-size: 11px; }
 .hii-node-touch-controls .hii-node-delete { border-color: var(--danger); color: var(--danger); }
@@ -222,11 +223,13 @@ button, input, textarea { font: inherit; }
 .hii-node-copy { width: 100%; height: 100%; margin: 0; padding: 16px; overflow: auto; white-space: pre-wrap; font-size: 14px; line-height: 1.55; }
 .hii-node-copy[data-mono="true"] { font-family: "SF Mono", ui-monospace, monospace; font-size: 12px; }
 .hii-node-editor { width: 100%; height: 100%; resize: none; border: 0; background: transparent; color: inherit; padding: 16px; outline: 0; line-height: 1.55; }
+.hii-node[data-node-type="canvas-text"]:not([data-selected="true"]) .hii-node-editor { pointer-events: none; }
 .hii-node-editor::placeholder { color: currentColor; opacity: .38; }
 .hii-canvas[data-surface="account"] .hii-node[data-node-type="note"] { border-color: #b8b8b3; border-radius: 2px; background: #f2f2ef; box-shadow: 4px 4px 0 rgba(17, 17, 17, .08); }
 .hii-canvas[data-drop-active]::after { content: ''; position: absolute; inset: 8px; border: 2px dashed currentColor; border-radius: 12px; opacity: .35; pointer-events: none; z-index: 2147483000; }
 .hii-node-image, .hii-node-video { width: 100%; height: 100%; display: block; object-fit: contain; background: transparent; }
 .hii-node-document { width: 100%; height: 100%; display: block; border: 0; background: var(--field, #fffdf7); overflow: auto; }
+.hii-node[data-node-type="document"]:not([data-content-active="true"]) .hii-node-document { pointer-events: none; }
 .hii-node-document-shell { position: relative; width: 100%; height: 100%; }
 .hii-node-document-open { position: absolute; right: 8px; bottom: 8px; padding: 6px 8px; border: 1px solid var(--faint); border-radius: 999px; background: var(--surface); color: var(--ink); font: 9px/1 "SF Mono", ui-monospace, monospace; }
 .hii-node-document-fallback { display: grid; width: 100%; height: 100%; place-content: center; gap: 8px; padding: 16px; text-align: center; font-size: 13px; }

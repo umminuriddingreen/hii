@@ -39,6 +39,7 @@ import {
 } from '@/lib/client/hii-bridge';
 import { browserNavigationTarget } from '@/lib/workspace/browser-target';
 import { canvasTextSeed, canvasTextSize, clipboardFiles, directPasteSeeds, makeNode, nodeSeedFromResourceProjection, seedFor, seedFromFile, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
+import { flowSeedPlacements } from '@/lib/workspace/placement';
 import { HII_PROJECTION_MIME, type ProjectionIntent, type ResourceProjectionSeed } from '@/lib/ecosystem/contracts';
 import {
   canvasMode,
@@ -84,6 +85,8 @@ import { inkSeedFromPoints } from '@/components/spaces/ink-capture';
 import { isAccountCanvasNode, isAccountCanvasNodeType, isSpaceCanvasNode, isSpaceCanvasNodeType } from '@/components/spaces/space-surface';
 import { trackPointerGesture } from '@/lib/workspace/gestures';
 import { fitWorkspaceViewport } from '@/lib/workspace/viewport';
+import { nodesInMarquee, type MarqueeRect } from '@/lib/workspace/selection';
+import { historyShortcut } from '@/lib/workspace/history-shortcut';
 import { browserCanvasAssetUrl } from '@/lib/web/canvas-assets';
 
 const MusicPlaylistPanel = lazy(() => import('./MusicPlaylistPanel').then((module) => ({ default: module.MusicPlaylistPanel })));
@@ -849,6 +852,8 @@ export function HiiRoot({
   const camera = useCamera(settleCamera);
   const workspace = useWorkspace(camera.getViewport, undefined, persistence);
   const [selected, setSelected] = useState<string[]>([]);
+  const [marquee, setMarquee] = useState<MarqueeRect | null>(null);
+  const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
   const [mode, setMode] = useState<CanvasModeId>(() => {
     if (typeof window === 'undefined') return defaultCanvasMode;
     const stored = window.localStorage.getItem('hii.canvas.mode.v1');
@@ -962,15 +967,19 @@ export function HiiRoot({
     if (workspace.initialViewport) camera.setViewport(workspace.initialViewport);
   }, [camera.setViewport, workspace.initialViewport]);
 
-  const spawnSeeds = useCallback((seeds: NodeSeed[], at: Point) => {
+  const spawnSeeds = useCallback((seeds: NodeSeed[], at: Point, layout: 'cascade' | 'flow' = 'cascade') => {
     const ids: string[] = [];
     const acceptedSeeds = isSpace
       ? seeds.filter((seed) => isSpaceCanvasNodeType(seed.type))
       : isAccount
         ? seeds.filter((seed) => isAccountCanvasNodeType(seed.type))
         : seeds;
+    const flowWidth = Math.max(960, (camera.viewportRef.current?.clientWidth || window.innerWidth) / camera.cam.current.z - 120);
+    const placements = layout === 'flow'
+      ? flowSeedPlacements(acceptedSeeds, at, flowWidth)
+      : acceptedSeeds.map((_seed, index) => ({ x: at.x + index * 24, y: at.y + index * 24 }));
     acceptedSeeds.forEach((seed, index) => {
-      const node = makeNode(seed, at.x + index * 24, at.y + index * 24, workspace.takeZ());
+      const node = makeNode(seed, placements[index].x, placements[index].y, workspace.takeZ());
       if (isTouchCanvas) {
         node.spaceId = spaceId;
         node.creatorId = creatorId;
@@ -981,7 +990,7 @@ export function HiiRoot({
     });
     setSelected(ids);
     return ids;
-  }, [creatorId, isAccount, isSpace, isTouchCanvas, spaceId, workspace]);
+  }, [camera, creatorId, isAccount, isSpace, isTouchCanvas, spaceId, workspace]);
 
   const spawnCenteredSeed = useCallback((seed: NodeSeed) => {
     const center = camera.centerWorld();
@@ -991,7 +1000,7 @@ export function HiiRoot({
   const importFiles = useCallback(async (files: File[], at: Point, direct = false) => {
     try {
       const seeds = await (fileSeeder ? fileSeeder(files) : seedsFromFiles(files));
-      spawnSeeds(direct ? directPasteSeeds(seeds) : seeds, at);
+      spawnSeeds(direct ? directPasteSeeds(seeds) : seeds, at, 'flow');
       setToolMessage(`Added ${seeds.length} file${seeds.length === 1 ? '' : 's'}.`);
     } catch (error) {
       const code = error instanceof Error ? error.message : '';
@@ -1803,9 +1812,11 @@ export function HiiRoot({
           event.preventDefault();
           deleteSelection();
         }
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+        const history = historyShortcut(event);
+        if (history) {
           event.preventDefault();
-          event.shiftKey ? workspace.redo() : workspace.undo();
+          history === 'redo' ? workspace.redo() : workspace.undo();
+          return;
         }
         if (selected.length && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
           event.preventDefault();
@@ -1839,7 +1850,8 @@ export function HiiRoot({
         setPromptVisible(false);
         return;
       }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? workspace.redo() : workspace.undo(); return; }
+      const history = historyShortcut(event);
+      if (history) { event.preventDefault(); history === 'redo' ? workspace.redo() : workspace.undo(); return; }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         setPrompt((current) => ({
@@ -1865,12 +1877,14 @@ export function HiiRoot({
         return;
       }
       if ((event.key === 'Delete' || event.key === 'Backspace') && selected.length) { event.preventDefault(); deleteSelection(); return; }
-      if (selected.length === 1 && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+      if (selected.length && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
         event.preventDefault();
-        const node = workspace.nodes.find((entry) => entry.id === selected[0]);
-        if (!node) return;
         const step = event.shiftKey ? 10 : 1;
-        workspace.patchNode(node.id, { x: node.x + (event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0), y: node.y + (event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0) });
+        for (const id of selected) {
+          const node = workspace.nodes.find((entry) => entry.id === id);
+          if (!node) continue;
+          workspace.patchNode(node.id, { x: node.x + (event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0), y: node.y + (event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0) });
+        }
         return;
       }
       if (isDirectCanvasTyping(event)) {
@@ -1981,7 +1995,7 @@ export function HiiRoot({
       }}
       onPointerDown={(event) => {
         if ((event.target as Element).closest('[data-node-id],input,textarea,audio,video,a')) return;
-        setSelected([]);
+        setActiveDocumentId(null);
         setToolMessage('');
         setPromptVisible(false);
         if (isTouchCanvas && drawing) {
@@ -2001,7 +2015,27 @@ export function HiiRoot({
           return;
         }
         if (camera.touchStart(event)) return;
-        camera.panStart(event);
+        if (event.button !== 0) return;
+        event.preventDefault();
+        const start = camera.toWorld(event.clientX, event.clientY);
+        const prior = event.shiftKey ? selected : [];
+        trackPointerGesture(event.nativeEvent, {
+          onMove: (_delta, current) => {
+            const end = camera.toWorld(current.clientX, current.clientY);
+            const rect = { x: start.x, y: start.y, w: end.x - start.x, h: end.y - start.y };
+            setMarquee(rect);
+            const hits = nodesInMarquee(visibleNodes, rect);
+            setSelected(event.shiftKey ? [...new Set([...prior, ...hits])] : hits);
+          },
+          onEnd: (_delta, moved) => {
+            if (!moved) setSelected(prior);
+            setMarquee(null);
+          },
+          onCancel: () => {
+            setSelected(prior);
+            setMarquee(null);
+          }
+        });
       }}
       onDragOver={(event) => {
         event.preventDefault();
@@ -2111,14 +2145,23 @@ export function HiiRoot({
             selected={selected.includes(node.id)}
             title={titleFor(node)}
             getZoom={() => camera.cam.current.z}
-            onSelect={() => { setSelected([node.id]); setToolMessage(''); workspace.bringToFront(node.id); }}
+            onSelect={(event) => {
+              if (activeDocumentId !== node.id) setActiveDocumentId(null);
+              setSelected((ids) => event.shiftKey
+                ? ids.includes(node.id) ? ids.filter((id) => id !== node.id) : [...ids, node.id]
+                : [node.id]);
+              setToolMessage('');
+              workspace.bringToFront(node.id);
+            }}
+            contentActive={activeDocumentId === node.id}
+            onActivateContent={() => setActiveDocumentId(node.id)}
             onOpenConversation={() => { if (runtimeEnabled) openObjectConversation(node); }}
             onCommit={(patch) => workspace.patchNode(node.id, patch)}
             onWindowAction={(action) => windowAction(node, action)}
             onErase={() => { removeWorkspaceNode(node); setSelected((ids) => ids.filter((id) => id !== node.id)); }}
             onShare={onShareNode && (isAccount || (isSpace && isSpaceCanvasNode(node, spaceId))) ? () => onShareNode(node) : undefined}
             touchControls={isTouchCanvas}
-            chromeless={node.payload.canvasPresentation === 'direct-paste' || node.type === 'canvas-text' || node.type === 'ink' || node.type === 'image'}
+            chromeless={node.payload.canvasPresentation === 'direct-paste' || node.type === 'canvas-text' || node.type === 'ink' || node.type === 'image' || node.type === 'document'}
           >
             <NodeBody
               node={node}
@@ -2135,6 +2178,16 @@ export function HiiRoot({
             />
           </NodeFrame>
         ))}
+        {marquee && <div
+          className="hii-selection-marquee"
+          aria-hidden="true"
+          style={{
+            left: Math.min(marquee.x, marquee.x + marquee.w),
+            top: Math.min(marquee.y, marquee.y + marquee.h),
+            width: Math.abs(marquee.w),
+            height: Math.abs(marquee.h)
+          }}
+        />}
       </div>
       {runtimeEnabled && persistentChrome && workspaceTerminal?.payload.terminalPresentation === 'docked' && (
         <aside className="hii-docked-terminal" data-workspace-ui onPointerDown={(event) => event.stopPropagation()}>

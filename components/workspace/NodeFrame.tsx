@@ -8,7 +8,7 @@ type NodeFrameProps = {
   selected: boolean;
   title: string;
   getZoom: () => number;
-  onSelect: () => void;
+  onSelect: (event: React.PointerEvent) => void;
   onOpenConversation: () => void;
   onCommit: (patch: Partial<WorkspaceNode>) => void;
   onWindowAction?: (action: 'minimize' | 'maximize' | 'restore') => void;
@@ -16,19 +16,21 @@ type NodeFrameProps = {
   onShare?: () => void;
   touchControls?: boolean;
   chromeless?: boolean;
+  contentActive?: boolean;
+  onActivateContent?: () => void;
   children: React.ReactNode;
 };
 
 const INTERACTIVE = 'button,input,textarea,select,iframe,video,audio,embed,a,[contenteditable],.xterm';
 
-export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConversation, onCommit, onWindowAction, onErase, onShare, touchControls, chromeless, children }: NodeFrameProps) {
+export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConversation, onCommit, onWindowAction, onErase, onShare, touchControls, chromeless, contentActive, onActivateContent, children }: NodeFrameProps) {
   const frame = useRef<HTMLDivElement | null>(null);
   const windowed = node.type === 'app' || node.type === 'terminal';
   const windowState = windowed && typeof node.payload.windowState === 'string' ? node.payload.windowState : 'normal';
 
   const beginGesture = (event: React.PointerEvent, forceResize = false) => {
     if (event.button !== 0) return;
-    onSelect();
+    onSelect(event);
     if ((event.target as Element).closest(INTERACTIVE)) {
       event.stopPropagation();
       return;
@@ -74,6 +76,7 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConv
       data-node-type={node.type}
       data-selected={selected}
       data-chromeless={chromeless || undefined}
+      data-content-active={contentActive || undefined}
       data-window-state={windowed ? windowState : undefined}
       onPointerDown={pointerDown}
       onDoubleClick={(event) => {
@@ -82,6 +85,10 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConv
         event.preventDefault();
         if (node.type === 'terminal' && (event.target as Element).closest('.hii-job-terminal header')) {
           onWindowAction?.(windowState === 'maximized' ? 'restore' : 'maximize');
+          return;
+        }
+        if (node.type === 'document') {
+          onActivateContent?.();
           return;
         }
         onOpenConversation();
