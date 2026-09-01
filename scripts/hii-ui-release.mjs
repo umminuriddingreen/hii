@@ -87,7 +87,11 @@ if (privateKey) {
   signArgs.push(zipPath);
   run('npx', signArgs);
   const sigPath = `${zipPath}.sig`;
-  signature = fs.readFileSync(sigPath, 'utf8').trim();
+  const tauriSignature = fs.readFileSync(sigPath, 'utf8').trim();
+  // Tauri's signer base64-wraps the complete minisign signature file. HII's
+  // verifier consumes the minisign text itself so the manifest stays portable
+  // across the shell updater and UI channel.
+  signature = Buffer.from(tauriSignature, 'base64').toString('utf8').trim();
 } else if (flag('allow-unsigned')) {
   console.warn(
     'Publishing an UNSIGNED interface bundle. Apps accept it only with HII_UI_ALLOW_UNSIGNED=1.'

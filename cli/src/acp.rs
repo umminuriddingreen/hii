@@ -3,7 +3,8 @@
 //! The durable interface layer will speak ACP northbound (to the operator) and
 //! MCP southbound (to tools). Full duplex servers are a later milestone; this
 //! module publishes the machine-readable **tool manifest** — the single source
-//! of truth for what the agent can do — so an ACP/MCP adapter (or another agent)
+//! of truth for the bounded executors HII currently exposes — not a boundary on
+//! what an agent may reason about or construct — so an ACP/MCP adapter (or another agent)
 //! can discover the capability surface today via `hii tools-manifest`.
 
 use crate::config::AppPaths;
