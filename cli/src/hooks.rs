@@ -764,8 +764,16 @@ exit 2"#,
             json!({"tool":"write"}),
         );
         assert_eq!(batch.records.len(), 1);
-        assert_eq!(batch.records[0].status, "blocked");
-        assert!(batch.records[0].output.contains("protected path"));
+        assert_eq!(
+            batch.records[0].status, "blocked",
+            "hook output: {}",
+            batch.records[0].output
+        );
+        assert!(
+            batch.records[0].output.contains("protected path"),
+            "hook output: {}",
+            batch.records[0].output
+        );
         assert!(batch.block_reason.is_some());
     }
 
@@ -824,7 +832,11 @@ exit 2"#,
         );
         let runner = HookRunner::load(&runtime.0, &workspace.0, true).expect("load hooks");
         let batch = runner.fire(HookEvent::PostTool, Some("write"), "session", json!({}));
-        assert_eq!(batch.records[0].status, "passed");
+        assert_eq!(
+            batch.records[0].status, "passed",
+            "hook output: {}",
+            batch.records[0].output
+        );
         assert!(batch.mutated_workspace());
         assert_eq!(
             fs::read_to_string(workspace.0.join("formatted.txt")).expect("formatted output"),
