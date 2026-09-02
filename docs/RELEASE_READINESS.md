@@ -41,9 +41,11 @@ Security.
 Rust CLI formatting, linting, compilation, 184 Rust tests, CLI regression, and
 product smoke tests.
 
-`npm run build:cloudflare` passes with the Windows and macOS download routes.
-Those routes fail closed unless a versioned release manifest and matching
-artifact exist in the bound R2 bucket.
+`npm run deploy` builds the Worker and ships it with the Windows and macOS
+download routes. Those routes fail closed unless a versioned release manifest
+and matching artifact exist in the bound R2 bucket, and
+`scripts/hii-release-publish.mjs` is what puts them there. The Worker build
+needs rustup's rustc on PATH; Homebrew's has no wasm target.
 
 ### macOS packaged proof
 
