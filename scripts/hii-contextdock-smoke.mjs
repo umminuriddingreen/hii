@@ -101,7 +101,14 @@ try {
   assert.equal(firstInventory.some((item) => item.sourcePath === '.env'), false);
 
   const scan = contextDock.scanContextProject(project.id);
-  assert.equal(scan.filesDiscovered, 5);
+  const scanned = contextDock
+    .inventoryContextRoot({ rootPath: project.rootPath, approved: true })
+    .map((item) => item.sourcePath);
+  assert.equal(
+    scan.filesDiscovered,
+    5,
+    `scan walked ${project.rootPath} and found ${JSON.stringify(scanned)}; the root holds ${JSON.stringify(fs.readdirSync(project.rootPath))}`
+  );
   assert.equal(scan.filesIndexed, 5);
   assert.equal(scan.filesExcluded, 0);
   assert.equal(scan.filesSkipped, 0);
