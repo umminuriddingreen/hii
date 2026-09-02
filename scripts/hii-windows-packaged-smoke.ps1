@@ -68,11 +68,25 @@ try {
   throw "hii home --json did not return JSON: $home_json"
 }
 
-# ConPTY. The canvas puts real terminals on the surface, and the Windows PTY
-# path is the one piece of the app with no macOS equivalent to fall back on.
-$conpty = & $cli terminal probe --json 2>&1
-if ($LASTEXITCODE -ne 0) {
-  Write-Host "note: hii terminal probe unavailable in this build ($conpty)"
+# Terminal objects. The canvas puts real shells on the surface, and this is the
+# CLI half of that contract: it writes a terminal object into the Runtime
+# document with a working directory the app will spawn ConPTY in. Pointed at a
+# throwaway runtime root so the smoke never edits the real canvas. Spawning the
+# ConPTY itself is the app's job and is covered by the launch step below.
+$scratchRuntime = Join-Path $env:TEMP ("hii-smoke-" + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $scratchRuntime -Force | Out-Null
+try {
+  $terminal = & { $env:HII_RUNTIME_DIR = $scratchRuntime; & $cli terminal $scratchRuntime --json 2>&1 }
+  if ($LASTEXITCODE -ne 0) {
+    throw "The bundled hii.exe could not create a terminal object: $terminal"
+  }
+  $terminalObject = $terminal | ConvertFrom-Json
+  if ($terminalObject.node.object.kind -ne 'terminal' -or $terminalObject.node.object.status -ne 'ready') {
+    throw "hii terminal did not return a ready terminal object: $terminal"
+  }
+} finally {
+  Remove-Item -Recurse -Force $scratchRuntime -ErrorAction SilentlyContinue
+  Remove-Item Env:\HII_RUNTIME_DIR -ErrorAction SilentlyContinue
 }
 
 $process = Start-Process -FilePath $app -PassThru
