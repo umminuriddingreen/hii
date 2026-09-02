@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,7 +39,11 @@ if (withoutUpdater) {
   console.warn(
     'Building without an updater signature. This bundle is for local testing only and must not be published.'
   );
-  args.push('--config', JSON.stringify({ bundle: { createUpdaterArtifacts: false } }));
+  // Passed as a file, not inline JSON: the build runs through cmd.exe on
+  // Windows, which strips the quotes out of a JSON argument.
+  const overridePath = path.join(root, 'src-tauri', 'tauri.no-updater.json');
+  writeFileSync(overridePath, JSON.stringify({ bundle: { createUpdaterArtifacts: false } }));
+  args.push('--config', overridePath);
 }
 
 const build = spawnSync(tauri, args, {

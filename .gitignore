@@ -48,3 +48,4 @@ life/
 /macos/.build/
 /.next-desktop-perf/
 /.next-desktop-playwright/
+src-tauri/tauri.no-updater.json
