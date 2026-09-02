@@ -2,6 +2,8 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { AsciiWave } from '@/components/marketing/AsciiWave';
+import { HiiFirstRunTerminal } from '@/components/auth/HiiFirstRunTerminal';
 import { HiiRoot } from '@/components/workspace/HiiRoot';
 import { browserSpacePersistence } from '@/components/spaces/SpaceCanvas';
 import type { WorkspaceNode } from '@/lib/workspace/types';
@@ -132,30 +134,65 @@ function loginCredential(credential: PublicKeyCredential) {
   };
 }
 
-function SupportHii({ onCreateAccount }: { onCreateAccount: () => void }) {
-  const [spot, setSpot] = useState(1);
+function ProsumerLanding({ onLogin, onCreateAccount }: { onLogin: () => void; onCreateAccount: () => void }) {
   return (
-    <section className={styles.support} aria-labelledby="support-hii-title">
-      <header>
-        <small>support the next build</small>
-        <h2 id="support-hii-title">brand the Mac that builds HII.</h2>
-        <p>ten placements. one 14-day round. the round funds HII hardware and local-model work.</p>
+    <div className={styles.landing}>
+      <header className={styles.landingHeader}>
+        <a href="#top" aria-label="HII home">hii</a>
+        <nav aria-label="HII account access">
+          <button type="button" onClick={onLogin}>log in</button>
+          <button type="button" onClick={onCreateAccount}>create your HII</button>
+        </nav>
       </header>
-      <div className={styles.supportLid} role="group" aria-label="Mac sponsorship placements">
-        {Array.from({ length: 10 }, (_, index) => index + 1).map((number) => (
-          <button key={number} type="button" aria-pressed={spot === number} onClick={() => setSpot(number)}>
-            {String(number).padStart(2, '0')}
-          </button>
-        ))}
-        <span aria-hidden="true">hii</span>
-      </div>
-      <div className={styles.supportSelection} aria-live="polite">
-        <span>placement {String(spot).padStart(2, '0')}</span>
-        <span>opening round</span>
-      </div>
-      <button className={styles.supportAction} type="button" onClick={onCreateAccount}>create an account</button>
-      <small>preview only. no bid or payment is taken here. terms come before the round opens.</small>
-    </section>
+
+      <section className={styles.hero} id="top" aria-labelledby="hii-hero-title">
+        <div className={styles.heroCopy}>
+          <p className={styles.eyebrow}>Human Information Interface</p>
+          <h1 id="hii-hero-title">Everything you&apos;ve made.<br />Ready to make what&apos;s next.</h1>
+          <p className={styles.heroBody}>HII gives your files, notes, links, media, projects, and tools one working surface—then lets your own agent create with them.</p>
+          <div className={styles.heroActions}>
+            <button type="button" onClick={onCreateAccount}>create your HII</button>
+            <button type="button" onClick={onLogin}>open your workspace</button>
+          </div>
+        </div>
+        <div className={styles.asciiStage} aria-label="Your information becoming usable">
+          <AsciiWave className={styles.asciiWave} />
+          <div className={styles.asciiLegend} aria-hidden="true">
+            <span>files</span><span>images</span><span>notes</span><span>links</span>
+          </div>
+          <p><span aria-hidden="true">›</span> use what I&apos;ve made to create what&apos;s next<span className={styles.cursor} aria-hidden="true">_</span></p>
+        </div>
+      </section>
+
+      <section className={styles.workingLoop} aria-labelledby="working-loop-title">
+        <header>
+          <p className={styles.eyebrow}>One creative loop</p>
+          <h2 id="working-loop-title">Your material becomes a workspace, not a pile of uploads.</h2>
+        </header>
+        <div className={styles.loopRail}>
+          <article><small>Bring it in</small><h3>Collect your world.</h3><p>Drop in files and media. Paste links. Write notes. Capture useful pages in the browser.</p><span>files · images · video · PDF · notes · links</span></article>
+          <article><small>Work with it</small><h3>Ask HII directly.</h3><p>Select what matters and describe the outcome. HII keeps the relevant context attached to the work.</p><span>selection · text intent · local intelligence</span></article>
+          <article><small>Carry it forward</small><h3>Keep the result connected.</h3><p>Return finished work to the canvas, synchronize the workspace, and invite trusted collaborators with explicit access.</p><span>artifacts · workspaces · collaborators · proof</span></article>
+        </div>
+      </section>
+
+      <section className={styles.campaignVisual} aria-label="HII information field">
+        <div><p className={styles.eyebrow}>Your information. Your tools. Your agent.</p><h2>The technical layer stays underneath. You stay in the creative loop.</h2></div>
+      </section>
+
+      <section className={styles.controlSection} aria-labelledby="control-title">
+        <p className={styles.eyebrow}>Private by design</p>
+        <h2 id="control-title">Power without giving up control.</h2>
+        <p>HII can use connected computers, local models, browser research, and bounded tools. Consequential work stays visible, permissioned, and revocable.</p>
+        <div><span>local-first</span><span>source-linked</span><span>revocable access</span><span>receipts after action</span></div>
+        <button type="button" onClick={onCreateAccount}>start with your own workspace</button>
+      </section>
+
+      <footer className={styles.landingFooter}>
+        <span>hii · Human Information Interface</span>
+        <nav><a href="/download">desktop app</a><a href="/docs">documentation</a><a href="/privacy">privacy</a></nav>
+      </footer>
+    </div>
   );
 }
 
@@ -165,6 +202,8 @@ export function HiiWebAccess() {
   const [handle, setHandle] = useState('');
   const [message, setMessage] = useState('');
   const [accountOpen, setAccountOpen] = useState(false);
+  const [cliLinkRequested, setCliLinkRequested] = useState(false);
+  const [firstRunDismissed, setFirstRunDismissed] = useState(false);
   const [deviceMessage, setDeviceMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
@@ -207,6 +246,15 @@ export function HiiWebAccess() {
   );
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const requestedLink = params.get('link') === 'cli';
+    const requestedFirstRun = params.get('first-run') === '1';
+    setCliLinkRequested(requestedLink);
+    if (requestedLink) setMode('login');
+    if (requestedFirstRun) {
+      setReady(true);
+      return;
+    }
     const localSession = localOwnerSession(window.location.hostname);
     if (localSession) {
       setSession(localSession);
@@ -223,6 +271,10 @@ export function HiiWebAccess() {
       .finally(() => { if (active) setReady(true); });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (cliLinkRequested && session.authenticated) setAccountOpen(true);
+  }, [cliLinkRequested, session.authenticated]);
 
   useEffect(() => () => {
     if (canvasPersistence instanceof AccountWorkspacePersistence) canvasPersistence.dispose();
@@ -513,11 +565,8 @@ export function HiiWebAccess() {
           onShareNode={(node) => { setShareNode(node); setPanel('feed'); }}
           canvasImportRequest={canvasImport}
         />
-        <header className={styles.canvasHeader} data-workspace-ui>
-          <span className={styles.canvasWordmark}>hii</span>
+        <header className={styles.canvasHeader} data-workspace-ui aria-label="HII account access">
           <nav aria-label="HII account actions">
-            <button type="button" onClick={() => { setPanel('chat'); setAccountOpen(false); }}>social</button>
-            <button type="button" onClick={() => { setPanel('say-hi'); setAccountOpen(false); }}>say hi</button>
             <button
               type="button"
               aria-expanded={accountOpen}
@@ -544,14 +593,14 @@ export function HiiWebAccess() {
         {accountOpen ? (
           <aside id="hii-web-account" className={styles.accountPanel} data-workspace-ui aria-label="HII account">
             <dl>
-              <div><dt>name</dt><dd>{accountName}</dd></div>
-              <div><dt>access</dt><dd>passkey</dd></div>
-              <div><dt>canvas</dt><dd>{accountSync ? 'account synchronized' : 'stored on this device'}</dd></div>
-              <div><dt>computer</dt><dd>live through HII Chat</dd></div>
+              <div><dt>profile</dt><dd>{accountName}</dd></div>
+              <div><dt>sign-in</dt><dd>passkey</dd></div>
+              <div><dt>workspace</dt><dd>{accountSync ? 'synchronized to your account' : 'stored on this device'}</dd></div>
+              <div><dt>computer</dt><dd>connected only when you allow it</dd></div>
             </dl>
-            {accountSync ? <section className={styles.workspaceControls} aria-label="Business workspaces">
+            {accountSync ? <section className={styles.workspaceControls} aria-label="Your workspaces">
               <label>
-                workspace
+                your workspaces
                 <select value={activeWorkspaceId} onChange={(event) => setActiveWorkspaceId(event.target.value)}>
                   {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>
                     {workspace.name} · {workspace.role}
@@ -559,12 +608,13 @@ export function HiiWebAccess() {
                 </select>
               </label>
               <form onSubmit={createWorkspace}>
-                <input value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} placeholder="new business workspace" maxLength={80} />
+                <input value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} placeholder="new workspace" maxLength={80} />
                 <button type="submit" disabled={workspaceBusy || !workspaceName.trim()}>create</button>
               </form>
               {activeWorkspace?.role === 'owner' ? <button type="button" disabled={workspaceBusy} onClick={() => void issueStudioCode()}>
-                create studio admin code
+                invite a trusted operator
               </button> : null}
+              {activeWorkspace?.role === 'owner' ? <small>A one-time code grants admin access to this workspace for onboarding and support.</small> : null}
               {shareCode ? <div>
                 <code>{shareCode}</code>
                 <button type="button" onClick={() => navigator.clipboard?.writeText(shareCode)}>copy once</button>
@@ -581,35 +631,39 @@ export function HiiWebAccess() {
                 </span>)}
               </div> : null}
               <form onSubmit={redeemStudioCode}>
-                <input value={redeemCode} onChange={(event) => setRedeemCode(event.target.value)} placeholder="redeem workspace share code" maxLength={96} />
-                <button type="submit" disabled={workspaceBusy || !redeemCode.trim()}>redeem</button>
+                <input value={redeemCode} onChange={(event) => setRedeemCode(event.target.value)} placeholder="enter a workspace code" maxLength={96} />
+                <button type="submit" disabled={workspaceBusy || !redeemCode.trim()}>join</button>
               </form>
+            </section> : null}
+            {accountSync ? <section className={styles.deviceControls} aria-label="Connect HII on a computer" data-requested={cliLinkRequested || undefined}>
+              <strong>{cliLinkRequested ? 'Finish connecting the HII CLI' : 'Connect HII on a computer'}</strong>
+              <small>Create a one-time code, then paste it into the HII CLI or installed app. This does not grant browser terminal access.</small>
               <button type="button" disabled={workspaceBusy} onClick={() => void issueAppLinkCode()}>
-                link an installed HII app
+                create a computer code
               </button>
               {appLinkCode ? <div>
                 <code>{appLinkCode}</code>
                 <button type="button" onClick={() => navigator.clipboard?.writeText(appLinkCode)}>copy once</button>
               </div> : null}
               {accountDevices.length ? <div>
-                <small>linked apps</small>
+                <small>connected HII apps</small>
                 {accountDevices.map((device) => <span key={device.id}>
                   {device.name}
                   <button type="button" disabled={workspaceBusy} onClick={() => void revokeDevice(device.id)}>revoke</button>
                 </span>)}
               </div> : null}
-              <p role="status" aria-live="polite">{workspaceMessage}</p>
             </section> : null}
+            <p role="status" aria-live="polite">{workspaceMessage}</p>
             <nav className={styles.platformLinks} aria-label="Open HII on a computer">
-              <button type="button" onClick={() => { setPanel('chat'); setAccountOpen(false); }}>open HII Social</button>
-              <button type="button" onClick={() => { setPanel('say-hi'); setAccountOpen(false); }}>say hi</button>
-              <button type="button" onClick={() => { setPanel('models'); setAccountOpen(false); }}>devices &amp; local intelligence</button>
-              <a href="/download#mac">open on Mac</a>
-              <a href="/download#windows">open on Windows</a>
+              <button type="button" onClick={() => { setPanel('models'); setAccountOpen(false); }}>HII Remote</button>
+              <button type="button" onClick={() => { setPanel('say-hi'); setAccountOpen(false); }}>Ask HII</button>
+              <button type="button" onClick={() => { setPanel('chat'); setAccountOpen(false); }}>HII Social</button>
+              <a href="/download#mac">HII for Mac</a>
+              <a href="/download#windows">HII for Windows</a>
             </nav>
             <button type="button" onClick={signOut} disabled={busy}>log out</button>
             <p role="status" aria-live="polite">{deviceMessage}</p>
-            <small>{accountSync ? 'workspace objects synchronize through your account. media bytes remain on the importing browser until private asset sync is enabled.' : 'canvas media stays on this browser.'} paired computer screens and HII answers stream live through an outbound, revocable link.</small>
+            <small>{accountSync ? 'Workspace objects synchronize through your account. Media bytes remain on the importing browser until private asset sync is enabled.' : 'Canvas media stays on this browser.'} Connected computers use a separate outbound, revocable link.</small>
           </aside>
         ) : null}
       </div>
@@ -618,10 +672,40 @@ export function HiiWebAccess() {
 
   return (
     <main className={styles.access} id="hii-main">
-      <span className={styles.wordmark}>hii</span>
-
-      {mode ? (
-        <section className={styles.formPanel} aria-label={mode === 'login' ? 'Log in' : 'Sign up'}>
+      <ProsumerLanding onLogin={() => chooseMode('login')} onCreateAccount={() => chooseMode('signup')} />
+      {ready && !session.authenticated && !mode && !firstRunDismissed ? <HiiFirstRunTerminal
+        options={[
+          {
+            id: 'chatgpt',
+            label: 'Sign in with ChatGPT',
+            detail: 'complete this provider sign-in in the HII desktop app',
+            action: () => undefined,
+            disabled: true
+          },
+          {
+            id: 'hii-account',
+            label: 'Log in to HII',
+            detail: 'continue with your passkey',
+            action: () => chooseMode('login')
+          },
+          {
+            id: 'create',
+            label: 'Create your HII',
+            detail: 'make a passkey-protected account',
+            action: () => chooseMode('signup')
+          },
+          {
+            id: 'site',
+            label: 'Explore HII first',
+            detail: 'view the public product site',
+            action: () => setFirstRunDismissed(true)
+          }
+        ]}
+      /> : null}
+      {mode ? <div className={styles.authBackdrop} onPointerDown={(event) => { if (event.target === event.currentTarget) setMode(null); }}>
+        <section className={styles.formPanel} role="dialog" aria-modal="true" aria-label={mode === 'login' ? 'Log in' : 'Create your HII'}>
+          <header><span>hii / {mode === 'login' ? 'log in' : 'create your HII'}</span><button type="button" onClick={() => setMode(null)}>close</button></header>
+          {cliLinkRequested ? <p className={styles.cliLinkNotice}>The HII CLI is waiting. Log in, then create a one-time computer code.</p> : null}
           <form onSubmit={submit}>
             {mode === 'signup' ? (
               <label>
@@ -644,24 +728,14 @@ export function HiiWebAccess() {
             </button>
           </form>
           {message ? <p className={styles.message} role="status">{message}</p> : null}
-          <p className={styles.note}>{mode === 'login' ? 'use your passkey' : 'no password. names are public.'}</p>
+          <p className={styles.note}>{mode === 'login' ? 'Continue with your passkey.' : 'No password. Your public name identifies you on HII.'}</p>
           <nav className={styles.modeLinks} aria-label="Switch account action">
-            <button type="button" aria-current={mode === 'login'} onClick={() => chooseMode('login')}>login</button>
+            <button type="button" aria-current={mode === 'login'} onClick={() => chooseMode('login')}>log in</button>
             <span aria-hidden="true">/</span>
-            <button type="button" aria-current={mode === 'signup'} onClick={() => chooseMode('signup')}>sign up</button>
+            <button type="button" aria-current={mode === 'signup'} onClick={() => chooseMode('signup')}>create account</button>
           </nav>
         </section>
-      ) : (
-        <nav className={styles.actions} aria-label="HII account access">
-          <button type="button" onClick={() => chooseMode('login')}>login</button>
-          <span aria-hidden="true">/</span>
-          <button type="button" onClick={() => chooseMode('signup')}>sign up</button>
-        </nav>
-      )}
-      <SupportHii onCreateAccount={() => {
-        chooseMode('signup');
-        document.scrollingElement?.scrollTo({ top: 0, behavior: 'smooth' });
-      }} />
+      </div> : null}
     </main>
   );
 }

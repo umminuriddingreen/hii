@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-BSL-1.1
-import { RemoteDesktop } from '@/components/remote/RemoteDesktop';
+import { PairedMachines } from '@/components/remote/PairedMachines';
 
-export const metadata = { title: 'HII / Remote desktop' };
+export const metadata = { title: 'HII Remote' };
 
 export default function RemotePage() {
-  return <RemoteDesktop />;
+  return <PairedMachines />;
 }

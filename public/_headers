@@ -2,15 +2,15 @@
 # every preview type needs blob: explicitly:
 #   img-src    image nodes
 #   media-src  audio and video nodes (previously fell through to default-src)
-#   frame-src  the PDF node, which renders in the browser's own viewer
+#   frame-src  PDF nodes and sandboxed pasted-link browser objects
 # Framing a blob the page already created adds little reach beyond what
 # script-src 'unsafe-inline' already permits; it is the cost of in-app PDF.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; frame-src 'self' blob:; worker-src 'none'; manifest-src 'self'; upgrade-insecure-requests
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; frame-src 'self' blob: https:; worker-src 'none'; manifest-src 'self'; upgrade-insecure-requests
   Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Resource-Policy: same-origin
-  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), hid=(), interest-cohort=()
+  Permissions-Policy: camera=(), microphone=(self), geolocation=(), payment=(), usb=(), serial=(), hid=(), interest-cohort=()
   Referrer-Policy: no-referrer
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY

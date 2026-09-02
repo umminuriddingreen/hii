@@ -190,7 +190,6 @@ button, input, textarea { font: inherit; }
   outline: 1px solid var(--selection);
   outline-offset: 2px;
 }
-
 .hii-node[data-chromeless="true"] {
   overflow: visible;
   border-color: transparent;
@@ -459,9 +458,14 @@ button, input, textarea { font: inherit; }
 .hii-conversation-timeline p { margin: 0; white-space: pre-wrap; }
 .hii-conversation-timeline time { white-space: nowrap; }
 
-.hii-prompt-line { display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; min-height: 52px; }
+.hii-prompt-line { position: relative; display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; min-height: 52px; }
 .hii-prompt-options-toggle { display: grid; width: 32px; height: 32px; margin-left: 9px; padding: 0; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
 .hii-prompt-options-toggle:hover, .hii-prompt-options-toggle[aria-expanded="true"] { background: rgba(0,0,0,.06); color: var(--ink); }
+.hii-prompt-voice { display: grid; width: 34px; height: 34px; margin-right: 9px; padding: 0; place-items: center; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
+.hii-prompt-voice:hover, .hii-prompt-voice:focus-visible, .hii-prompt-voice[aria-pressed="true"] { outline: 0; background: rgba(0,0,0,.07); color: var(--ink); }
+.hii-prompt-voice[aria-pressed="true"] { color: #c3272b; }
+.hii-prompt-voice:disabled { cursor: default; opacity: .28; }
+.hii-voice-input-error { position: absolute; right: 10px; top: calc(100% + 6px); z-index: 2; max-width: min(320px, calc(100vw - 40px)); padding: 7px 9px; border: 1px solid var(--faint); background: var(--field); color: var(--muted); font: 9px/1.35 "SF Mono", ui-monospace, monospace; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
 .hii-prompt input {
   width: 100%;
   border: 0;

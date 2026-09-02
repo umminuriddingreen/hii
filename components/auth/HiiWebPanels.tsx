@@ -6,7 +6,7 @@ import type { WorkspaceNode } from '@/lib/workspace/types';
 import { decryptChatMessage, encryptChatMessage, ensureLocalChatDevice, type ChatDevice, type ChatEnvelope, type LocalChatDevice } from '@/lib/web/chat-crypto';
 import { feedSnapshotFromNode, type FeedItem, type FeedSnapshot } from '@/lib/web/feed-contract';
 import styles from './HiiWebAccess.module.css';
-import { RemoteDesktop } from '@/components/remote/RemoteDesktop';
+import { PairedMachines } from '@/components/remote/PairedMachines';
 import { LocalHiiChat } from '@/components/remote/LocalHiiChat';
 
 export type WebPanel = 'chat' | 'feed' | 'models' | 'say-hi';
@@ -172,18 +172,18 @@ function ChatPanel({ accountId, csrfToken }: { accountId: string; csrfToken: str
 
 export function HiiWebPanel({ panel, accountId, csrfToken, shareNode, onClose, onImport, onPanel }: { panel: WebPanel; accountId: string; csrfToken: string; shareNode: WorkspaceNode | null; onClose: () => void; onImport: (item: FeedItem) => void; onPanel: (panel: WebPanel) => void }) {
   return <aside className={styles.webPanel} aria-label={`HII ${panel}`} data-workspace-ui>
-    <header><span>{panel === 'say-hi' ? 'say hi' : panel === 'chat' ? 'HII Social' : panel}</span><button type="button" onClick={onClose}>close</button></header>
+    <header><span>{panel === 'say-hi' ? 'Ask HII' : panel === 'chat' ? 'HII Social' : panel === 'models' ? 'HII Remote' : panel}</span><button type="button" onClick={onClose}>close</button></header>
     {panel === 'feed' ? <FeedPanel csrfToken={csrfToken} shareNode={shareNode} onImport={onImport} /> : null}
     {panel === 'chat' ? <ChatPanel accountId={accountId} csrfToken={csrfToken} /> : null}
     {panel === 'say-hi' ? <LocalHiiChat onOpenDevices={() => onPanel('models')} /> : null}
     {panel === 'models' ? <>
       <section className={styles.modelState}>
-        <p>Devices &amp; local intelligence</p>
-        <small>browser-canonical HII · authenticated outbound local link</small>
-        <p>Pair this Mac once, then select the Codex application window and use HII typer from any signed-in browser.</p>
-        <small>The browser never receives a raw local port or unrestricted shell. Each paired host is revocable.</small>
+        <p>Bring your own computer into HII.</p>
+        <small>Your private bridge to local apps, models, files, and compute.</small>
+        <p>Pair a computer once, then choose an allowed app when you want to work with it from your signed-in HII.</p>
+        <small>Connections are outbound, account-scoped, and revocable. Pairing never grants the browser an unrestricted shell.</small>
       </section>
-      <RemoteDesktop embedded preferredBundleIdentifier="com.openai.codex" />
+      <PairedMachines embedded authenticatedSession={{ authenticated: true, csrfToken }} />
     </> : null}
   </aside>;
 }

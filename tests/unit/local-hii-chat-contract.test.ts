@@ -11,7 +11,7 @@ describe('local HII chat contract', () => {
   it('unlocks only against an online account-owned host', () => {
     expect(ui).toContain("fetch('/api/remote/hosts'");
     expect(ui).toContain('/api/remote/chat?host=');
-    expect(ui).toContain('download / connect HII Chat');
+    expect(ui).toContain('connect a computer');
     expect(ui).toContain('No paired hardware means no hidden local access');
     expect(relay).toContain('SELECT id FROM remote_hosts WHERE id = ?1 AND account_id = ?2');
   });

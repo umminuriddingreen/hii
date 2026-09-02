@@ -8,13 +8,13 @@ describe('Spaces reduced surface', () => {
     expect(spaceIdFromPathname('/s/../../private')).toBeNull();
   });
 
-  it('gives authenticated accounts rich passive objects without local execution nodes', () => {
-    expect(ACCOUNT_SURFACE_CAPABILITIES).toMatchObject({ files: true, links: true, undo: true, terminal: 'trusted-device-required', agents: false });
+  it('gives authenticated accounts rich objects and sandboxed browsers without local execution nodes', () => {
+    expect(ACCOUNT_SURFACE_CAPABILITIES).toMatchObject({ files: true, links: true, undo: true, terminal: 'trusted-device-required', browser: 'sandboxed-render', agents: false });
     expect(isAccountCanvasNodeType('document')).toBe(true);
     expect(isAccountCanvasNodeType('media')).toBe(true);
     expect(isAccountCanvasNodeType('link')).toBe(true);
     expect(isAccountCanvasNodeType('terminal')).toBe(false);
-    expect(isAccountCanvasNodeType('browser')).toBe(false);
+    expect(isAccountCanvasNodeType('browser')).toBe(true);
     expect(isAccountCanvasNodeType('html')).toBe(false);
     expect(isAccountCanvasNode({ type: 'document', spaceId: 'account:one' }, 'account:one')).toBe(true);
     expect(isAccountCanvasNode({ type: 'document', spaceId: 'account:two' }, 'account:one')).toBe(false);

@@ -73,7 +73,7 @@ export function SpaceToolbar({
     ...(onZoomOut ? [{ label: 'Zoom out', shortcut: '⌘−', keywords: 'view wider shrink scale', action: onZoomOut }] : []),
     { label: 'Undo', shortcut: '⌘Z', keywords: 'back history', action: onUndo },
     { label: 'Redo', shortcut: '⇧⌘Z', keywords: 'forward history', action: onRedo },
-    { label: 'Devices & models', shortcut: 'Space', keywords: 'computer terminal local model', action: onOpenTerminal },
+    { label: 'HII Remote', shortcut: '', keywords: 'device computer remote local model', action: onOpenTerminal },
     ...(selectionCount ? [{ label: `Delete selected (${selectionCount})`, shortcut: 'Delete', keywords: 'remove selection', action: onDeleteSelection }] : []),
     ...(selectionCount === 1 && onShareSelection ? [{ label: 'Share selected', shortcut: '', keywords: 'publish feed', action: onShareSelection }] : [])
   ], [drawing, onAddImage, onAddNote, onAddText, onDeleteSelection, onFitView, onOpenTerminal, onRedo, onShareSelection, onToggleDrawing, onUndo, onZoomIn, onZoomOut, photo, selectionCount]);
@@ -129,7 +129,7 @@ export function SpaceToolbar({
         <button type="button" onClick={onUndo}>undo</button>
         <button type="button" onClick={onRedo}>redo</button>
         <button type="button" onClick={onFitView}>fit canvas</button>
-        <button type="button" onClick={onOpenTerminal}>devices &amp; models</button>
+        <button type="button" onClick={onOpenTerminal}>HII Remote</button>
       </div>
       <form className="hii-canvas-touch-link" onSubmit={addLink}>
         <input aria-label="Web address" inputMode="url" autoCapitalize="none" autoCorrect="off" placeholder="https://" value={url} onChange={(event) => setUrl(event.target.value)} required />

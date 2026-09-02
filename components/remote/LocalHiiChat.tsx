@@ -3,6 +3,7 @@
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import styles from '@/components/auth/HiiWebAccess.module.css';
+import { VoiceInputButton } from '@/components/workspace/VoiceInputButton';
 
 type Host = { id: string; name: string; online: boolean; lastSeenAt: number | null };
 type Message = { id: string; role: 'user' | 'assistant'; text: string; state: 'complete' | 'streaming' | 'failed' };
@@ -108,23 +109,23 @@ export function LocalHiiChat({ onOpenDevices }: { onOpenDevices: () => void }) {
 
   if (!activeHost) {
     return <section className={styles.localChatGate}>
-      <h1>Say hi from your own computer.</h1>
-      <p>Download and pair HII Chat to unlock this conversation. Its replies run through the HII CLI and model providers available on that computer.</p>
-      <button type="button" onClick={onOpenDevices}>download / connect HII Chat</button>
+      <h1>Bring your own intelligence into HII.</h1>
+      <p>Connect a computer to work with its HII runtime and the model providers you already use.</p>
+      <button type="button" onClick={onOpenDevices}>connect a computer</button>
       <small>No paired hardware means no hidden local access and no pretend local answer.</small>
     </section>;
   }
 
   return <section className={styles.localChat}>
     <header>
-      <div><strong>Say hi</strong><small>{activeHost.name} · local HII</small></div>
+      <div><strong>Ask HII</strong><small>{activeHost.name} · local HII</small></div>
       <select aria-label="HII chat device" value={activeHost.id} onChange={(event) => setActiveHostId(event.target.value)}>
         {devices.filter((host) => host.online).map((host) => <option key={host.id} value={host.id}>{host.name}</option>)}
       </select>
       <span data-state={connection}>{connection}</span>
     </header>
     <div className={styles.localChatMessages} aria-live="polite">
-      {!messages.length ? <p className={styles.localChatEmpty}>Your browser is connected to the HII harness on {activeHost.name}. Ask directly; actions remain governed by HII’s local authority.</p> : null}
+      {!messages.length ? <p className={styles.localChatEmpty}>Your workspace is connected to HII on {activeHost.name}. Ask directly; actions remain governed by that computer’s local authority.</p> : null}
       {messages.map((message) => <article key={message.id} data-role={message.role} data-state={message.state}>
         <small>{message.role === 'user' ? 'you' : 'hii'}</small>
         <p>{message.text || (message.state === 'streaming' ? '…' : '')}</p>
@@ -145,6 +146,11 @@ export function LocalHiiChat({ onOpenDevices }: { onOpenDevices: () => void }) {
             event.currentTarget.form?.requestSubmit();
           }
         }}
+      />
+      <VoiceInputButton
+        className={styles.localChatVoice}
+        disabled={connection !== 'online'}
+        onTranscript={(transcript) => setDraft((current) => `${current.trimEnd()}${current.trim() ? ' ' : ''}${transcript}`)}
       />
       <button type="submit" disabled={!draft.trim() || connection !== 'online'} aria-label="Send message">↑</button>
     </form>

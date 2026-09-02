@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-BSL-1.1
+mod account;
 mod acp;
 mod agent;
 mod agents;
@@ -360,13 +361,13 @@ enum Commands {
     Models,
     #[command(about = "Show local, Codex, and Claude account access")]
     Providers,
-    #[command(about = "Connect an existing Codex or Claude plan")]
+    #[command(about = "Connect your HII account or an existing provider plan")]
     Login {
         #[arg(
             value_name = "PROVIDER",
-            help = "local | status | clear | codex | claude"
+            help = "account (default) | local | status | clear | codex | claude"
         )]
-        provider: String,
+        provider: Option<String>,
         #[arg(long, value_name = "NAME", help = "Display name for `hii login local`")]
         name: Option<String>,
         #[arg(
@@ -375,6 +376,12 @@ enum Commands {
             help = "Optional local profile email label"
         )]
         email: Option<String>,
+        #[arg(
+            long,
+            value_name = "NAME",
+            help = "Name shown for this linked computer"
+        )]
+        device_name: Option<String>,
     },
     #[command(about = "Create a signed local contact card for HII Link")]
     #[command(hide = true)]
@@ -2004,10 +2011,17 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             provider,
             name,
             email,
+            device_name,
         }) => {
             println!(
                 "{}",
-                login_command(&paths, &provider, name.as_deref(), email.as_deref())?
+                login_command(
+                    &paths,
+                    provider.as_deref(),
+                    name.as_deref(),
+                    email.as_deref(),
+                    device_name.as_deref(),
+                )?
             );
             Ok(ExitCode::SUCCESS)
         }
@@ -5639,13 +5653,33 @@ fn share_mode_label(mode: hii_core::runtime::RuntimeShareModeV1) -> &'static str
 
 fn login_command(
     paths: &AppPaths,
-    provider: &str,
+    provider: Option<&str>,
     name: Option<&str>,
     email: Option<&str>,
+    device_name: Option<&str>,
 ) -> Result<String, String> {
-    let provider = provider.trim().to_ascii_lowercase();
+    let provider = provider.unwrap_or("account").trim().to_ascii_lowercase();
     let store = identity::IdentityStore::open(paths);
     match provider.as_str() {
+        "account" | "web" => {
+            let code = account::read_link_code()?;
+            let device_name = device_name
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(account::default_device_name);
+            let linked = account::link(paths, &code, &device_name)?;
+            Ok(format!(
+                "HII account connected\nuser: {}\ncomputer: {}\nworkspaces: {}\nstate: {}",
+                linked.handle.as_deref().unwrap_or("connected account"),
+                device_name,
+                linked
+                    .workspace_count
+                    .map(|count| count.to_string())
+                    .unwrap_or_else(|| "available after refresh".into()),
+                paths.runtime.join("account/device.json").display()
+            ))
+        }
         "local" | "hii" => {
             let fallback_name = env::var("USER").unwrap_or_else(|_| "local operator".into());
             let identity = store.create_or_update(name.unwrap_or(&fallback_name), email)?;
@@ -5656,26 +5690,36 @@ fn login_command(
                 store.path().display()
             ))
         }
-        "status" => match store.current()? {
-            Some(identity) => Ok(format!(
-                "Local HII user\nuser: {}\nid: {}\nstate: {}",
-                identity.name,
-                identity.id,
-                store.path().display()
-            )),
-            None => Ok("No local HII user yet. Run `hii login local --name <name>`.".into()),
-        },
-        "clear" | "logout" => {
+        "status" => {
+            let local = match store.current()? {
+                Some(identity) => format!(
+                    "Local identity\nuser: {}\nid: {}\nstate: {}",
+                    identity.name,
+                    identity.id,
+                    store.path().display()
+                ),
+                None => "Local identity\nstate: not created".into(),
+            };
+            Ok(format!("{}\n\n{}", account::status(paths)?, local))
+        }
+        "clear" => {
             if store.clear()? {
                 Ok("Cleared the local HII login. Provider logins were not changed.".into())
             } else {
                 Ok("No local HII login was present.".into())
             }
         }
+        "account-logout" | "web-logout" => {
+            if account::logout(paths)? {
+                Ok("Cleared this computer's local HII account link. Revoke the computer from your web account to invalidate its server credential immediately.".into())
+            } else {
+                Ok("This computer had no local HII account link.".into())
+            }
+        }
         "codex" | "openai" | "claude" | "anthropic" => {
             agents::AgentManager::new(paths).login(&provider)
         }
-        _ => Err("login provider must be local, status, clear, codex, or claude".into()),
+        _ => Err("login provider must be account, local, status, clear, account-logout, codex, or claude".into()),
     }
 }
 
@@ -6243,10 +6287,25 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Login {
-                provider,
+                provider: Some(provider),
                 name: Some(name),
                 email: None,
+                device_name: None,
             }) if provider == "local" && name == "Ummi"
+        ));
+    }
+
+    #[test]
+    fn account_is_the_default_hii_login() {
+        let cli = Cli::try_parse_from(["hii", "login"]).expect("parse account login");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Login {
+                provider: None,
+                name: None,
+                email: None,
+                device_name: None,
+            })
         ));
     }
 

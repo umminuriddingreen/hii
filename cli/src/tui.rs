@@ -701,11 +701,7 @@ pub fn user_turn(message: &str) {
 }
 
 fn user_turn_frame(message: &str) -> String {
-    format!(
-        "\n{}\n{}\n",
-        paint("› YOU", &[BOLD, palette().primary]),
-        message
-    )
+    message.to_string()
 }
 
 pub struct ActiveRunView<'a> {
@@ -1106,8 +1102,7 @@ mod tests {
             direction: &["HII", "School"],
             next: "Add schedule.",
         });
-        assert!(human.contains("› YOU"));
-        assert!(human.contains("Fix this\nand verify it"));
+        assert_eq!(human, "Fix this\nand verify it");
         assert!(run.contains("Personal Dashboard"));
         assert!(run.contains("Currently"));
         assert!(run.contains("• School"));

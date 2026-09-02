@@ -12,11 +12,15 @@ export function ShellTerminal({
   sessionId,
   cwd,
   entry = 'hii',
+  preface = '',
+  initialInput = '',
   onState
 }: {
   sessionId: string;
   cwd: string;
   entry?: 'hii' | 'shell';
+  preface?: string;
+  initialInput?: string;
   onState: (state: { status: 'running' | 'stopped' | 'failed'; cwd?: string; error?: string }) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
@@ -76,6 +80,7 @@ export function ShellTerminal({
       terminal.loadAddon(new WebLinksAddon());
       terminal.open(element);
       terminalRef.current = terminal;
+      if (preface) terminal.write(`${preface.replace(/\r?\n/g, '\r\n')}\r\n\r\n`);
       const fitVisibleTerminal = () => {
         if (!terminal || !fit || element.clientWidth < 120 || element.clientHeight < 60) return false;
         fit.fit();
@@ -114,6 +119,7 @@ export function ShellTerminal({
         });
         if (disposed) return;
         if (started.replay) terminal.write(started.replay);
+        if (initialInput && started.created) await writeTerminalSession(sessionId, initialInput);
         terminal.focus();
         onStateRef.current({ status: 'running', cwd: started.cwd });
       } catch (error) {
@@ -132,7 +138,7 @@ export function ShellTerminal({
       terminal?.dispose();
       terminalRef.current = null;
     };
-  }, [cwd, entry, sessionId]);
+  }, [cwd, entry, initialInput, preface, sessionId]);
 
   const find = (direction: 1 | -1 = 1) => {
     const terminal = terminalRef.current;

@@ -1,0 +1,27 @@
+.canvas { position: fixed; z-index: 2147483000; inset: 0; display: grid; place-items: center; overflow: auto; padding: 32px; background: #fff; color: #111; }
+.terminal { width: min(860px, calc(100vw - 40px)); min-height: min(660px, calc(100vh - 64px)); padding: clamp(26px, 4vw, 52px); overflow: auto; border: 1px solid #202124; border-radius: 12px; background: #050505; color: #eeeeee; box-shadow: 0 30px 90px rgba(0,0,0,.24); font: 16px/1.5 "SF Mono", "Berkeley Mono", ui-monospace, Menlo, monospace; }
+.logo { margin: 0 0 30px; color: #f4f4f4; font: 700 clamp(12px, 1.65vw, 22px)/1.05 "SF Mono", ui-monospace, monospace; letter-spacing: -.08em; white-space: pre; }
+.welcome, .question, .success, .before p, .busy { margin: 0 0 22px; }
+.welcome strong { font-weight: 750; }
+.success { color: #72f18b; }
+.question { margin-top: 28px; color: #b9b9b9; }
+.before { margin: 34px 0; color: #e5e5e5; }
+.before p { margin-bottom: 8px; }
+.before small { display: block; max-width: 680px; color: #777; }
+.options { display: grid; gap: 2px; margin: 0 -14px; }
+.options button { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 18px; min-height: 50px; padding: 9px 14px; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; font: inherit; }
+.options button:hover, .options button:focus-visible, .options button[aria-selected="true"] { outline: 0; background: #292929; }
+.options button:disabled { cursor: default; opacity: .34; }
+.options span { display: flex; gap: 11px; }
+.options b { width: 10px; color: #72f18b; font-weight: 400; }
+.options small { color: #777; font: 12px/1.35 inherit; text-align: right; }
+.continue { width: 100%; min-height: 48px; margin: 2px 0 0; padding: 0 14px; border: 0; background: #2d2d2d; color: #eee; cursor: pointer; font: inherit; text-align: left; }
+.continue:hover, .continue:focus-visible { outline: 1px solid #666; background: #353535; }
+.output { max-height: 180px; margin: 26px 0 0; padding: 14px; overflow: auto; border: 1px solid #242424; background: #090909; color: #a8a8a8; font: 12px/1.5 inherit; white-space: pre-wrap; }
+.busy { margin-top: 16px; color: #72f18b; }
+@media (max-width: 640px) {
+  .canvas { padding: 0; background: #050505; }
+  .terminal { width: 100%; min-height: 100%; border: 0; border-radius: 0; box-shadow: none; }
+  .options button { grid-template-columns: 1fr; gap: 2px; }
+  .options small { padding-left: 21px; text-align: left; }
+}

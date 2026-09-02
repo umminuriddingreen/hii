@@ -154,7 +154,7 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
       </nav>
       <section className="hii-browser-workarea">
         <div ref={viewport} className="hii-browser-viewport">
-          {!isTauri() && <iframe key={`${url}:${reloadKey}`} src={normalizedBrowserUrl(url) || undefined} title="HII interactive browser" sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts" allow="clipboard-read; clipboard-write; fullscreen" onLoad={() => setStatus('ready')} onError={() => setStatus('error')} />}
+          {!isTauri() && <iframe key={`${url}:${reloadKey}`} src={normalizedBrowserUrl(url) || undefined} title="HII interactive browser" sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-scripts" allow="clipboard-read; clipboard-write; fullscreen" onLoad={() => setStatus('ready')} onError={() => setStatus('error')} />}
           {status === 'loading' && <span className="hii-browser-loading">Opening {targetKind === 'local-service' ? 'local service' : 'website'}…</span>}
           {status === 'error' && <span className="hii-browser-loading">This page refused the embedded view. Open it in its own window or check the local service.</span>}
         </div>

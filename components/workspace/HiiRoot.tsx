@@ -30,6 +30,7 @@ import {
   findInformation,
   listenAgentEvents,
   readAgentHome,
+  runtimeSpaceId,
   startAgent,
   stopTerminalSession,
   type AgentEventV1,
@@ -37,7 +38,7 @@ import {
   type HiiApplicationManifest,
   type InformationCaptureResult
 } from '@/lib/client/hii-bridge';
-import { browserNavigationTarget } from '@/lib/workspace/browser-target';
+import { renderedBrowserSeed } from '@/lib/workspace/browser-seed';
 import { canvasTextSeed, canvasTextSize, clipboardFiles, directPasteSeeds, makeNode, nodeSeedFromResourceProjection, seedFor, seedFromFile, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
 import { flowSeedPlacements } from '@/lib/workspace/placement';
 import { HII_PROJECTION_MIME, type ProjectionIntent, type ResourceProjectionSeed } from '@/lib/ecosystem/contracts';
@@ -86,13 +87,33 @@ import { inkSeedFromPoints } from '@/components/spaces/ink-capture';
 import { isAccountCanvasNode, isAccountCanvasNodeType, isSpaceCanvasNode, isSpaceCanvasNodeType } from '@/components/spaces/space-surface';
 import { trackPointerGesture } from '@/lib/workspace/gestures';
 import { fitWorkspaceViewport } from '@/lib/workspace/viewport';
+import { canvasManagerFocusNodes, type CanvasManagerBoard } from '@/lib/workspace/canvas-manager';
+import { CanvasManager } from './CanvasManager';
 import { nodesInMarquee, type MarqueeRect } from '@/lib/workspace/selection';
 import { historyShortcut } from '@/lib/workspace/history-shortcut';
 import { browserCanvasAssetUrl } from '@/lib/web/canvas-assets';
+import { VoiceInputButton } from './VoiceInputButton';
 
 const MusicPlaylistPanel = lazy(() => import('./MusicPlaylistPanel').then((module) => ({ default: module.MusicPlaylistPanel })));
 const NativeDevBrowser = lazy(() => import('./NativeDevBrowser').then((module) => ({ default: module.NativeDevBrowser })));
 const HiiMarketplace = lazy(() => import('./HiiMarketplace').then((module) => ({ default: module.HiiMarketplace })));
+
+const FIRST_RUN_TERMINAL_PREFACE = [
+  '\x1b[1;97m ██╗  ██╗██╗██╗',
+  ' ██║  ██║██║██║',
+  ' ███████║██║██║',
+  ' ██╔══██║██║██║',
+  ' ██║  ██║██║██║',
+  ' ╚═╝  ╚═╝╚═╝╚═╝\x1b[0m',
+  '',
+  '\x1b[1mWelcome to HII, your Human Information Interface.\x1b[0m',
+  '',
+  '  \x1b[32m/login codex\x1b[0m   sign in with your ChatGPT plan',
+  '  \x1b[32m/providers\x1b[0m     inspect available accounts and runtimes',
+  '  \x1b[32m/help\x1b[0m          see everything this terminal can do',
+  '',
+  '\x1b[90mThis is a real HII terminal. Local shell and file authority stay on this computer.\x1b[0m'
+].join('\n');
 const HiiLinkApp = lazy(() => import('./HiiLinkApp').then((module) => ({ default: module.HiiLinkApp })));
 const RegisteredApplication = lazy(() => import('./RegisteredApplication').then((module) => ({ default: module.RegisteredApplication })));
 const WaymarkApp = lazy(() => import('./WaymarkApp').then((module) => ({ default: module.WaymarkApp })));
@@ -207,18 +228,14 @@ function hostFor(url: string) {
   }
 }
 
-function accountLinkSeed(url: string): NodeSeed {
-  const host = hostFor(url);
-  return seedFor('link', { url, host, name: host || 'link' });
-}
-
 function accountSeedsFromDataTransfer(transfer: DataTransfer): NodeSeed[] {
   const uriValues = transfer.getData('text/uri-list').split('\n').map((value) => value.trim()).filter((value) => value && !value.startsWith('#'));
   if (uriValues.length) {
     const links = uriValues.flatMap((value) => {
       try {
         const parsed = new URL(value);
-        return ['http:', 'https:'].includes(parsed.protocol) ? [accountLinkSeed(parsed.href)] : [];
+        const seed = ['http:', 'https:'].includes(parsed.protocol) ? renderedBrowserSeed(parsed.href) : null;
+        return seed ? [seed] : [];
       } catch {
         return [];
       }
@@ -228,7 +245,10 @@ function accountSeedsFromDataTransfer(transfer: DataTransfer): NodeSeed[] {
   const value = transfer.getData('text/plain');
   if (!value) return [];
   const trimmed = value.trim();
-  if (/^https?:\/\/\S+$/i.test(trimmed)) return [accountLinkSeed(trimmed)];
+  if (/^https?:\/\/\S+$/i.test(trimmed)) {
+    const seed = renderedBrowserSeed(trimmed);
+    return seed ? [seed] : [];
+  }
   return [canvasTextSeed(value.slice(0, 100_000))];
 }
 
@@ -427,6 +447,8 @@ function TerminalBody({
           sessionId={text(node.payload.sessionId)}
           cwd={cwd}
           entry={node.payload.terminalEntry === 'shell' ? 'shell' : 'hii'}
+          preface={text(node.payload.terminalPreface)}
+          initialInput={text(node.payload.terminalInitialInput)}
           onState={(state) => onPayload({
             status: state.status,
             cwd: state.cwd || cwd,
@@ -796,6 +818,11 @@ function Prompt({
             autoComplete="off"
             spellCheck
           />
+          <VoiceInputButton
+            className="hii-prompt-voice"
+            disabled={Boolean(contextPack) || status === 'running'}
+            onTranscript={(transcript) => setValue((current) => `${current.trimEnd()}${current.trim() ? ' ' : ''}${transcript}`)}
+          />
         </div>}
         {!inferenceVisible && optionsOpen && <div className="hii-prompt-options" aria-label="HII context and modes">
           <header><span>{workspaceLabel}</span><small>{selectedCount ? `${selectedCount} selected` : 'whole workspace'}</small></header>
@@ -835,6 +862,8 @@ export function HiiRoot({
   persistence,
   allowPhoto = true,
   persistentChrome = true,
+  openTerminalOnReady = false,
+  onTerminalReady,
   onShareNode,
   onRequestDevice,
   fileSeeder,
@@ -847,6 +876,8 @@ export function HiiRoot({
   persistence?: WorkspacePersistence;
   allowPhoto?: boolean;
   persistentChrome?: boolean;
+  openTerminalOnReady?: boolean;
+  onTerminalReady?: () => void;
   onShareNode?: (node: WorkspaceNode) => void;
   onRequestDevice?: () => void;
   fileSeeder?: (files: File[]) => Promise<NodeSeed[]>;
@@ -857,6 +888,7 @@ export function HiiRoot({
   const isAccount = surface === 'account';
   const isTouchCanvas = isSpace || isAccount;
   const runtimeEnabled = !isTouchCanvas;
+  const startupTerminalHandled = useRef(false);
   const save = useRef<() => void>(() => {});
   const settleCamera = useCallback(() => save.current(), []);
   const camera = useCamera(settleCamera);
@@ -874,6 +906,7 @@ export function HiiRoot({
   const [promptPresentation, setPromptPresentation] = useState<'floating' | 'terminal'>('floating');
   const [drawing, setDrawing] = useState(false);
   const [canvasCommandsOpen, setCanvasCommandsOpen] = useState(false);
+  const [canvasManagerOpen, setCanvasManagerOpen] = useState(false);
   const [toolMessage, setToolMessage] = useState('');
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [dropActive, setDropActive] = useState(false);
@@ -916,7 +949,7 @@ export function HiiRoot({
       mode: request.mode,
       authority,
       selectedObjectIds: request.contextNodeIds,
-      spaceId: spaceId || 'default'
+      spaceId: spaceId || runtimeSpaceId() || 'default'
     });
     if (pack.risk.action === 'blocked') {
       throw new Error(pack.risk.reasons.join(' ') || 'HII blocked unsafe or missing context.');
@@ -926,7 +959,7 @@ export function HiiRoot({
         version: 1,
         intent: request.intent,
         mode: request.mode,
-        spaceId: spaceId || 'default',
+        spaceId: spaceId || runtimeSpaceId() || 'default',
         contextNodeIds: request.contextNodeIds,
         contextPackId: approved.id,
         contextFingerprint: approved.fingerprint
@@ -1114,11 +1147,10 @@ export function HiiRoot({
       : isAccount
         ? workspace.nodes.filter((node) => isAccountCanvasNode(node, spaceId))
         : workspace.nodes).filter((node) =>
-          (persistentChrome || node.type !== 'terminal')
-          && node.payload.terminalPresentation !== 'docked'
+          node.payload.terminalPresentation !== 'docked'
           && node.payload.terminalPresentation !== 'hidden'
         ),
-    [isAccount, isSpace, persistentChrome, spaceId, workspace.nodes]
+    [isAccount, isSpace, spaceId, workspace.nodes]
   );
 
   const fitCanvas = useCallback(() => {
@@ -1135,6 +1167,43 @@ export function HiiRoot({
       setToolMessage('Canvas view reset.');
     }
   }, [camera, visibleNodes]);
+
+  const focusNodes = useCallback((nodes: WorkspaceNode[], label: string) => {
+    const viewport = camera.viewportRef.current;
+    const fitted = fitWorkspaceViewport(nodes, {
+      width: viewport?.clientWidth || window.innerWidth,
+      height: viewport?.clientHeight || window.innerHeight
+    }, { maxZoom: 1 });
+    if (fitted) camera.setViewport(fitted);
+    setToolMessage(label);
+  }, [camera]);
+
+  const openCanvasManager = useCallback(() => {
+    setDrawing(false);
+    setCanvasCommandsOpen(false);
+    setPromptVisible(false);
+    setCanvasManagerOpen(true);
+  }, []);
+
+  const closeCanvasManager = useCallback(() => setCanvasManagerOpen(false), []);
+
+  const focusCanvasBoard = useCallback((board: CanvasManagerBoard) => {
+    setCanvasManagerOpen(false);
+    const nodes = canvasManagerFocusNodes(board);
+    if (!nodes.length) {
+      setToolMessage(`${board.title} is empty.`);
+      return;
+    }
+    setSelected(board.scene ? [board.scene.id] : []);
+    focusNodes(nodes, `Opened ${board.title}.`);
+  }, [focusNodes]);
+
+  const focusCanvasNode = useCallback((node: WorkspaceNode) => {
+    setCanvasManagerOpen(false);
+    setSelected([node.id]);
+    setFocusNodeId(node.id);
+    focusNodes([node], 'Jumped to the object.');
+  }, [focusNodes]);
 
   const toggleDrawing = useCallback(() => {
     setDrawing((current) => {
@@ -1215,6 +1284,21 @@ export function HiiRoot({
     setSelected(presentation === 'canvas' && id ? [id] : []);
     return id || null;
   }, [camera, spawnSeeds, workspace]);
+
+  useEffect(() => {
+    if (!openTerminalOnReady || !runtimeEnabled || !workspace.ready || startupTerminalHandled.current) return;
+    startupTerminalHandled.current = true;
+    const seed = terminalSeedFromCommand('/terminal');
+    if (!seed) return;
+    seed.h = 600;
+    seed.payload = {
+      ...seed.payload,
+      terminalPreface: FIRST_RUN_TERMINAL_PREFACE,
+      terminalInitialInput: '/providers\r'
+    };
+    const id = ensureWorkspaceTerminal('canvas', seed);
+    if (id) onTerminalReady?.();
+  }, [ensureWorkspaceTerminal, onTerminalReady, openTerminalOnReady, runtimeEnabled, workspace.ready]);
 
   useEffect(() => {
     if (!workspace.ready || !workspaceTerminal) return;
@@ -1459,21 +1543,8 @@ export function HiiRoot({
   }, [camera, workspace]);
 
   const openDevBrowser = useCallback((at: Point, requestedUrl?: string) => {
-    const url = browserNavigationTarget(requestedUrl || '') || 'https://developer.mozilla.org';
-    const seed: NodeSeed = {
-      type: 'browser',
-      w: 1120,
-      h: 720,
-      object: {
-        kind: 'browser',
-        owner: 'human',
-        status: 'ready',
-        source: url,
-        capabilityId: 'hii.browser.retrieval',
-        audit: [{ ts: new Date().toISOString(), actor: 'human', action: 'opened native development browser' }]
-      },
-      payload: { surface: 'native-dev-browser', title: hostFor(url), url }
-    };
+    const seed = renderedBrowserSeed(requestedUrl || 'https://developer.mozilla.org');
+    if (!seed) return '';
     return spawnSeeds([seed], at)[0];
   }, [spawnSeeds]);
 
@@ -1751,6 +1822,9 @@ export function HiiRoot({
   useEffect(() => {
     const inField = (target: EventTarget | null) => (target as Element | null)?.closest?.('input,textarea,[contenteditable]');
     const keydown = (event: KeyboardEvent) => {
+      // The manager is a full-screen surface with its own keymap; nothing on
+      // the canvas beneath it should react while it is up.
+      if (canvasManagerOpen) return;
       if (runtimeEnabled && isAssistantShortcut(event)) {
         event.preventDefault();
         if (workspaceTerminal?.payload.terminalPresentation === 'docked') {
@@ -1768,12 +1842,6 @@ export function HiiRoot({
         return;
       }
       if (inField(event.target)) return;
-      if (isAccount && isTerminalShortcut(event)) {
-        event.preventDefault();
-        onRequestDevice?.();
-        setToolMessage('Opened devices & models.');
-        return;
-      }
       if (isAccount && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'u') {
         event.preventDefault();
         fileInput.current?.click();
@@ -1810,10 +1878,18 @@ export function HiiRoot({
         return;
       }
       if (isAccount && event.key === 'Escape') {
-        setDrawing(false);
-        setCanvasCommandsOpen(false);
-        setSelected([]);
-        setToolMessage('Selection and active tool cleared.');
+        // Escape keeps its old job first: it clears. Only an already-idle
+        // canvas has nothing to clear, and that is when it opens the manager,
+        // so the existing muscle memory is never overridden.
+        if (drawing || canvasCommandsOpen || selected.length) {
+          setDrawing(false);
+          setCanvasCommandsOpen(false);
+          setSelected([]);
+          setToolMessage('Selection and active tool cleared.');
+          return;
+        }
+        event.preventDefault();
+        openCanvasManager();
         return;
       }
       // Camera keys run ahead of both branches: with nothing selected the arrows
@@ -1865,7 +1941,12 @@ export function HiiRoot({
         setPromptVisible(true);
         return;
       }
-      if (event.key === 'Escape') { setPromptVisible(false); setSelected([]); return; }
+      if (event.key === 'Escape') {
+        if (promptVisible || selected.length) { setPromptVisible(false); setSelected([]); return; }
+        event.preventDefault();
+        openCanvasManager();
+        return;
+      }
       if (isTerminalShortcut(event)) {
         event.preventDefault();
         const presentation = workspaceTerminal?.payload.terminalPresentation === 'canvas' ? 'docked' : 'canvas';
@@ -1936,16 +2017,14 @@ export function HiiRoot({
       event.preventDefault();
       if (isTouchCanvas) {
         if (isAccount && /^https?:\/\/\S+$/i.test(value.trim())) {
-          spawnSeeds([accountLinkSeed(value.trim())], at);
+          openDevBrowser(at, value.trim());
           return;
         }
         spawnSeeds([canvasTextSeed(value.slice(0, 100_000))], at);
         return;
       }
       if (/^https?:\/\/\S+$/i.test(value.trim())) {
-        void captureInformation(value.trim())
-          .then((result) => spawnInformation(directPasteSeeds(capturedInformationSeeds(result)), { x: at.x, y: at.y - 190 }))
-          .catch(() => spawnSeeds(directPasteSeeds([seedFromString(value)]), at));
+        openDevBrowser(at, value.trim());
       } else {
         spawnSeeds(directPasteSeeds([seedFromString(value)]), at);
       }
@@ -1954,7 +2033,7 @@ export function HiiRoot({
     addEventListener('pointermove', pointermove);
     addEventListener('paste', paste);
     return () => { removeEventListener('keydown', keydown); removeEventListener('pointermove', pointermove); removeEventListener('paste', paste); };
-  }, [allowPhoto, camera, canvasCommandsOpen, deleteSelection, ensureWorkspaceTerminal, fitCanvas, importFiles, isAccount, isSpace, isTouchCanvas, mode, onRequestDevice, openDevBrowser, runtimeEnabled, selected, spawnCenteredSeed, spawnInformation, spawnSeeds, toggleDrawing, workspace, workspaceTerminal]);
+  }, [allowPhoto, camera, canvasCommandsOpen, canvasManagerOpen, deleteSelection, drawing, ensureWorkspaceTerminal, fitCanvas, importFiles, isAccount, isSpace, isTouchCanvas, mode, onRequestDevice, openCanvasManager, openDevBrowser, promptVisible, runtimeEnabled, selected, spawnCenteredSeed, spawnInformation, spawnSeeds, toggleDrawing, workspace, workspaceTerminal]);
 
   const canvasFeedback = toolMessage || (drawing
     ? 'Drawing on · drag anywhere · Esc to stop.'
@@ -1980,8 +2059,8 @@ export function HiiRoot({
 
   const openSearchPanel = useCallback(() => {
     setMode('browse');
-    openAssistantPanel('/search ');
-  }, [openAssistantPanel]);
+    openCanvasManager();
+  }, [openCanvasManager]);
 
   const openActivityPanel = useCallback(() => {
     setPromptPresentation('terminal');
@@ -2128,11 +2207,12 @@ export function HiiRoot({
           setToolMessage('Note added.');
         }}
         onAddLink={(url) => {
-          spawnCenteredSeed(accountLinkSeed(url));
-          setToolMessage('Link added.');
+          const seed = renderedBrowserSeed(url);
+          if (seed) spawnCenteredSeed(seed);
+          setToolMessage(seed ? 'Link rendered.' : 'That link could not be opened.');
         }}
         onAddSticker={() => spawnCenteredSeed({ ...seedFor('image', { sticker: true, emoji: '✦', name: 'Sticker' }), w: 120, h: 120 })}
-        onOpenTerminal={() => { onRequestDevice?.(); setToolMessage('Opened devices & models.'); }}
+        onOpenTerminal={() => { onRequestDevice?.(); setToolMessage('Opened HII Remote.'); }}
         onUndo={() => { workspace.undo(); setToolMessage('Undid the last canvas change.'); }}
         onRedo={() => { workspace.redo(); setToolMessage('Redid the last canvas change.'); }}
         onFitView={fitCanvas}
@@ -2142,6 +2222,12 @@ export function HiiRoot({
         onShareSelection={onShareNode ? shareSelection : undefined}
         onCommandsOpenChange={setCanvasCommandsOpen}
         onToggleDrawing={toggleDrawing}
+      />}
+      {canvasManagerOpen && <CanvasManager
+        nodes={workspace.nodes}
+        onFocusBoard={focusCanvasBoard}
+        onFocusNode={focusCanvasNode}
+        onClose={closeCanvasManager}
       />}
       {isAccount && canvasFeedback && <div className="hii-canvas-feedback" role="status" aria-live="polite">{canvasFeedback}</div>}
       {runtimeEnabled && persistentChrome && workspace.nodes.some((node) => node.type === 'app') && <div className="hii-app-dock" onPointerDown={(event) => event.stopPropagation()}>

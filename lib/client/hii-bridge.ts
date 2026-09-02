@@ -359,10 +359,21 @@ export async function readAgentHome(): Promise<AgentHomeV2> {
   return developmentRequest<AgentHomeV2>('/home');
 }
 
+/// The space the runtime actually persists canvas objects into. The desktop
+/// canvas has no space prop, and assuming 'default' sent context-pack requests
+/// to a space holding none of the user's objects, so every selected object
+/// resolved as missing and the run was blocked before the model was called.
+let authoritativeSpaceId = '';
+
+export function runtimeSpaceId(): string {
+  return authoritativeSpaceId;
+}
+
 export async function readWorkspace(): Promise<WorkspaceDoc> {
   if (isTauri()) {
     const { invoke } = await import('@tauri-apps/api/core');
     const snapshot = await invoke<RuntimeSpaceSnapshotV1>('runtime_space_snapshot_v1');
+    authoritativeSpaceId = snapshot.spaceId || authoritativeSpaceId;
     return normalizeWorkspace(snapshot.document);
   }
   try {
@@ -384,6 +395,7 @@ export async function writeWorkspace(document: WorkspaceDoc): Promise<WorkspaceD
         document
       }
     });
+    authoritativeSpaceId = snapshot.spaceId || authoritativeSpaceId;
     return normalizeWorkspace(snapshot.document);
   }
   const saved = { ...document, revision: document.revision + 1 };

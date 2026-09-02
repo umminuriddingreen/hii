@@ -69,13 +69,19 @@ const packagingFossils = [
 const nodeTestRunner = ['tests/codex-memory-context.test.mjs', 'tests/remote-test-gateway.test.mjs'];
 
 export default defineConfig({
+  // tsconfig sets `jsx: preserve` for Next's own compiler, which leaves esbuild
+  // unable to parse a `.tsx` test. Transforming JSX here keeps the app build
+  // untouched while letting component tests run.
+  oxc: { jsx: { runtime: 'automatic' } },
   resolve: {
     alias: { '@': fileURLToPath(new URL('./', import.meta.url)) },
     conditions: ['browser']
   },
   test: {
     environment: 'jsdom',
-    include: ['tests/**/*.test.ts', 'tests/**/*.test.mjs'],
+    // `.tsx` is included so a component test cannot be written and then
+    // silently never run - the same failure mode the allowlist above caused.
+    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx', 'tests/**/*.test.mjs'],
     exclude: [
       '**/node_modules/**',
       '**/archive/**',

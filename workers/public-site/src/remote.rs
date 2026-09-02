@@ -1,10 +1,14 @@
-//! Remote desktop relay.
+//! Paired-host relay.
 //!
 //! A host agent running on a paired machine opens an outbound WebSocket to
 //! `/api/remote/host` with a bearer token; a signed-in browser opens
-//! `/api/remote/view`. Both land in the same Durable Object, which relays
-//! screen frames one way and input events the other. No inbound port is
-//! opened on the host machine and no frame data is ever persisted.
+//! `/api/remote/chat` or `/api/remote/terminal`. Both land in the same
+//! Durable Object, which relays typed control messages between them. No
+//! inbound port is opened on the host machine and nothing relayed is
+//! persisted.
+//!
+//! There is no screen channel: the relay carries text, and the remote surface
+//! it exists to carry is live canvas synchronisation, not a remote desktop.
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -16,9 +20,7 @@ use worker::{
 
 use crate::{SessionRow, api_error, hash_token, json_response, now_ms, random_token};
 
-/// Frames are JPEG stills; a 4K screen at high quality stays well under this.
-const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
-/// Input events are small JSON objects; anything larger is a protocol error.
+/// Control messages are small JSON objects; anything larger is a protocol error.
 const MAX_CONTROL_BYTES: usize = 16 * 1024;
 const MAX_HOSTS_PER_ACCOUNT: i64 = 16;
 const MAX_TERMINAL_GRANT_TTL_MS: i64 = 10 * 60 * 1000;
@@ -26,7 +28,6 @@ const MAX_TERMINAL_GRANT_TTL_MS: i64 = 10 * 60 * 1000;
 pub fn is_remote_api_path(path: &str) -> bool {
     path == "/api/remote/hosts"
         || path.starts_with("/api/remote/hosts/")
-        || path == "/api/remote/view"
         || path == "/api/remote/chat"
         || path == "/api/remote/terminal"
 }
@@ -144,7 +145,7 @@ pub async fn handle_remote_api(
     let path = url.path().to_owned();
     let db = env.d1("IDENTITY")?;
 
-    if path == "/api/remote/view" || path == "/api/remote/chat" {
+    if path == "/api/remote/chat" {
         let Some(host_id) = url
             .query_pairs()
             .find(|(key, _)| key == "host")
@@ -406,7 +407,7 @@ impl worker::DurableObject for RemoteRoom {
         match path.as_str() {
             "/status" => {
                 let online = !self.state.get_websockets_with_tag("host").is_empty();
-                let viewers = self.state.get_websockets_with_tag("viewer").len();
+                let viewers = self.state.get_websockets_with_tag("chat").len();
                 Response::from_json(&json!({ "online": online, "viewers": viewers }))
             }
             "/evict" => {
@@ -435,10 +436,7 @@ impl worker::DurableObject for RemoteRoom {
                 }
                 Response::from_json(&json!({ "revoked": true }))
             }
-            "/api/remote/host"
-            | "/api/remote/view"
-            | "/api/remote/chat"
-            | "/api/remote/terminal" => {
+            "/api/remote/host" | "/api/remote/chat" | "/api/remote/terminal" => {
                 let terminal_tag = url
                     .query_pairs()
                     .find(|(key, _)| key == "grant")
@@ -447,10 +445,8 @@ impl worker::DurableObject for RemoteRoom {
                     "host"
                 } else if path == "/api/remote/terminal" {
                     terminal_tag.as_deref().unwrap_or("terminal:invalid")
-                } else if path == "/api/remote/chat" {
-                    "chat"
                 } else {
-                    "viewer"
+                    "chat"
                 };
                 if role == "host" {
                     // One host per room: a reconnecting agent replaces the stale socket.
@@ -460,24 +456,16 @@ impl worker::DurableObject for RemoteRoom {
                 }
                 let pair = WebSocketPair::new()?;
                 self.state.accept_websocket_with_tags(&pair.server, &[role]);
-                if role == "viewer" {
-                    // Ask the host for a fresh frame and its screen geometry.
+                if role == "chat" {
+                    // Nudge the host to re-announce itself to a joining viewer.
                     for host in self.state.get_websockets_with_tag("host") {
                         let _ = host.send_with_str(r#"{"t":"viewer-joined"}"#);
                     }
-                    let online = !self.state.get_websockets_with_tag("host").is_empty();
-                    let _ = pair
-                        .server
-                        .send_with_str(json!({ "t": "room", "hostOnline": online }).to_string());
-                } else if role == "chat" {
                     let online = !self.state.get_websockets_with_tag("host").is_empty();
                     let _ = pair.server.send_with_str(
                         json!({ "t": "chat.room", "hostOnline": online }).to_string(),
                     );
                 } else if role == "host" {
-                    for viewer in self.state.get_websockets_with_tag("viewer") {
-                        let _ = viewer.send_with_str(r#"{"t":"host-online"}"#);
-                    }
                     for chat in self.state.get_websockets_with_tag("chat") {
                         let _ = chat.send_with_str(r#"{"t":"chat.host-online"}"#);
                     }
@@ -507,15 +495,8 @@ impl worker::DurableObject for RemoteRoom {
             .find(|tag| tag.starts_with("terminal:"));
         let from_chat = self.state.get_tags(&ws).iter().any(|tag| tag == "chat");
         match message {
-            WebSocketIncomingMessage::Binary(bytes) => {
-                // Only the host sends binary; viewers sending binary are ignored.
-                if !from_host || bytes.len() > MAX_FRAME_BYTES {
-                    return Ok(());
-                }
-                for viewer in self.state.get_websockets_with_tag("viewer") {
-                    let _ = viewer.send_with_bytes(&bytes);
-                }
-            }
+            // The relay is text-only; binary frames belong to no channel.
+            WebSocketIncomingMessage::Binary(_) => {}
             WebSocketIncomingMessage::String(text) => {
                 if text.len() > MAX_CONTROL_BYTES {
                     return Ok(());
@@ -556,10 +537,6 @@ impl worker::DurableObject for RemoteRoom {
                         {
                             let _ = viewer.send_with_str(&text);
                         }
-                    } else {
-                        for viewer in self.state.get_websockets_with_tag("viewer") {
-                            let _ = viewer.send_with_str(&text);
-                        }
                     }
                 } else {
                     for host in self.state.get_websockets_with_tag("host") {
@@ -581,9 +558,6 @@ impl worker::DurableObject for RemoteRoom {
         if self.state.get_tags(&ws).iter().any(|tag| tag == "host")
             && self.state.get_websockets_with_tag("host").len() <= 1
         {
-            for viewer in self.state.get_websockets_with_tag("viewer") {
-                let _ = viewer.send_with_str(r#"{"t":"host-offline"}"#);
-            }
             for chat in self.state.get_websockets_with_tag("chat") {
                 let _ = chat.send_with_str(r#"{"t":"chat.host-offline"}"#);
             }

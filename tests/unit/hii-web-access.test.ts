@@ -12,16 +12,34 @@ describe('HII web access gate', () => {
     expect(source).toContain('if (localSession)');
   });
 
-  it('starts with the HII wordmark and two account actions before the below-fold support board', () => {
+  it('opens on the landing with both account paths and no shell surface', () => {
     const source = readFileSync('components/auth/HiiWebAccess.tsx', 'utf8');
 
-    expect(source).toContain('<span className={styles.wordmark}>hii</span>');
-    expect(source).toContain("chooseMode('login')");
-    expect(source).toContain("chooseMode('signup')");
+    // The unauthenticated gate renders the landing, and the landing owns both
+    // ways in. Asserting the wiring rather than the marketing copy, so a
+    // rewrite of the words does not read as a regression.
+    expect(source).toContain('<ProsumerLanding');
+    expect(source).toMatch(/onLogin=\{\(\) => chooseMode\('login'\)\}/);
+    expect(source).toMatch(/onCreateAccount=\{\(\) => chooseMode\('signup'\)\}/);
+
+    // A public, unauthenticated page must never reach a shell.
     expect(source).not.toContain('ShellTerminal');
     expect(source).not.toContain('startTerminalSession');
-    expect(source).toContain('brand the Mac that builds HII.');
-    expect(source).toContain('no bid or payment is taken here');
+  });
+
+  it('defines every style class the access surface references', () => {
+    const source = readFileSync('components/auth/HiiWebAccess.tsx', 'utf8');
+    const css = readFileSync('components/auth/HiiWebAccess.module.css', 'utf8');
+
+    // A CSS module hands back `undefined` for a class it does not define, so a
+    // section can render completely unstyled while typechecking and rendering
+    // without error. This caught the landing shipping with none of its own
+    // styles; it is the only signal that failure produces.
+    const referenced = [...source.matchAll(/\bstyles\.([A-Za-z][\w]*)/g)].map((match) => match[1]);
+    const defined = new Set([...css.matchAll(/\.([A-Za-z][\w-]*)/g)].map((match) => match[1]));
+
+    expect(referenced.length).toBeGreaterThan(0);
+    expect([...new Set(referenced)].filter((name) => !defined.has(name))).toEqual([]);
   });
 
   it('uses HII passkey APIs and reveals the canvas only for an authenticated session', () => {
@@ -61,16 +79,18 @@ describe('HII web access gate', () => {
     expect(source).toContain('hydrateBrowserCanvasAssets(canvasAccountId, document)');
     expect(source).toContain('fileSeeder={canvasFileSeeder}');
     expect(source).toContain("onRequestDevice={() => setPanel('models')}");
-    expect(source).toContain("accountSync ? 'account synchronized' : 'stored on this device'");
+    // The panel must distinguish synchronized from device-local storage. The
+    // wording is editorial; the distinction is the contract.
+    expect(source).toMatch(/accountSync \? '[^']+' : 'stored on this device'/);
     expect(source).toContain('allowPhoto');
     expect(source).toContain('/^[A-Za-z0-9_-]{43}$/.test(canvasAccountId)');
     expect(source).toContain("setDeviceMessage('could not log out. try again.')");
-    expect(source).toContain('open on Mac');
+    expect(source).toContain('HII for Mac');
     expect(source).toContain('href="/download#mac"');
-    expect(source).toContain('open on Windows');
+    expect(source).toContain('HII for Windows');
     expect(source).toContain('href="/download#windows"');
-    expect(source).toContain('live through HII Chat');
-    expect(source).toContain('paired computer screens and HII answers stream live');
+    // The panel must state the computer's connection posture; the wording is editorial.
+    expect(source).toMatch(/<dt>computer<\/dt><dd>[^<]+<\/dd>/);
     expect(source).not.toContain('aria-label="HII canvas views"');
     expect(source).not.toContain('>chat</button>');
     expect(source).not.toContain('>feed</button>');
@@ -93,7 +113,7 @@ describe('HII web access gate', () => {
     expect(toolbar).toContain('aria-label="Canvas commands"');
     expect(toolbar).toContain('<span aria-hidden="true">?</span>');
     expect(toolbar).not.toContain("accountTools ? 'hii canvas' : 'hii space'");
-    expect(toolbar).toContain("label: 'Devices & models', shortcut: 'Space'");
+    expect(toolbar).toContain("label: 'HII Remote', shortcut: ''");
     expect(toolbar).toContain("label: 'Add note', shortcut: 'N'");
     expect(toolbar).toContain('aria-label="Search canvas commands"');
     expect(toolbar).toContain('hii-canvas-command-list');
@@ -101,7 +121,7 @@ describe('HII web access gate', () => {
     expect(toolbar).not.toContain('device terminal');
     expect(toolbar).not.toContain('double-click for text');
     expect(toolbar).toContain('onAddNote');
-    expect(canvas).toContain('isAccount && isTerminalShortcut(event)');
+    expect(canvas).not.toContain('isAccount && isTerminalShortcut(event)');
     expect(canvas).toContain("event.key.toLowerCase() === 'u'");
     expect(canvas).toContain("event.key.toLowerCase() === 't'");
     expect(canvas).toContain("event.key.toLowerCase() === 'd'");
@@ -111,7 +131,10 @@ describe('HII web access gate', () => {
     expect(canvas).toContain('commandsOpen={isAccount ? canvasCommandsOpen : undefined}');
     expect(canvas).toContain('fitWorkspaceViewport');
     expect(canvas).toContain('hii-canvas-feedback');
-    expect(canvas).toContain("setToolMessage('Opened devices & models.')");
+    expect(canvas).toContain("setToolMessage('Opened HII Remote.')");
+    expect(source).toContain('>HII Remote</button>');
+    expect(source).not.toContain('>ask HII</button>');
+    expect(source).not.toContain('>social</button>');
     expect(canvas).toContain('onAddLink={(url) =>');
     expect(canvas).toContain('fileSeeder ? fileSeeder(files) : seedsFromFiles(files)');
     expect(globalCss).toContain('.hii-space-toolbar[data-account-tools="true"] .hii-canvas-command-trigger');
@@ -160,18 +183,30 @@ describe('HII web access gate', () => {
     expect(worker).toContain('account_id: Some(&session.account_id)');
   });
 
-  it('keeps the page minimal and scrollable', () => {
+  it('presents HII as a restrained prosumer surface with original campaign art', () => {
+    const source = readFileSync('components/auth/HiiWebAccess.tsx', 'utf8');
     const css = readFileSync('components/auth/HiiWebAccess.module.css', 'utf8');
 
-    expect(css).toContain('--ink: #111');
+    expect(source).toContain("Everything you&apos;ve made.");
+    expect(source).toContain("Ready to make what&apos;s next.");
+    expect(source).toContain('<AsciiWave');
+    expect(source).toContain("const params = new URLSearchParams(window.location.search)");
+    expect(source).toContain("params.get('link') === 'cli'");
+    expect(source).toContain("if (requestedLink) setMode('login')");
+    expect(source).toContain('create a computer code');
+    expect(css).toContain('--black: #050505');
+    expect(css).toContain('--signal: #72f18b');
+    expect(css).toContain("url('/marketing/hii-prosumer-field-wide.png')");
+    expect(css).toContain("url('/marketing/hii-prosumer-field-portrait.png')");
     expect(css).not.toContain('#0066ff');
     expect(css).toContain('overflow-y: auto');
-    expect(css).toContain('justify-content: center');
-    expect(css).not.toContain('#0066ff');
+    expect(css).toContain('place-items: center');
   });
 
   it('keeps the desktop entry target while using the authenticated web gate', () => {
     const page = readFileSync('app/page.tsx', 'utf8');
+    const panels = readFileSync('components/auth/HiiWebPanels.tsx', 'utf8');
+    const remote = readFileSync('components/remote/PairedMachines.tsx', 'utf8');
 
     expect(page).toContain("process.env.NEXT_PUBLIC_HII_TARGET === 'desktop'");
     expect(page).toContain("await import('@/components/desktop/DesktopHiiAccess')");
@@ -180,9 +215,13 @@ describe('HII web access gate', () => {
     expect(desktop).toContain('persistentChrome={false}');
     expect(desktop).not.toContain('<header className={styles.header}');
     const canvas = readFileSync('components/workspace/HiiRoot.tsx', 'utf8');
-    expect(canvas).toContain("persistentChrome || node.type !== 'terminal'");
+    expect(desktop).toContain('openTerminalOnReady={ready && !onboardingComplete}');
+    expect(canvas).toContain("node.payload.terminalPresentation !== 'hidden'");
     expect(desktop).toContain('new NativeAccountWorkspacePersistence(active)');
     expect(page).toContain('return <HiiWebAccess />');
+    expect(panels).toContain('authenticatedSession={{ authenticated: true, csrfToken }}');
+    expect(remote).toContain('if (authenticatedSession)');
+    expect(remote).toContain('HII Remote is unavailable in this preview.');
   });
 
   it('routes platform handoffs to a truthful planned Tauri download page', () => {

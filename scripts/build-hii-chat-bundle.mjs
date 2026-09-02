@@ -10,8 +10,6 @@ mkdirSync(output, { recursive: true });
 
 const sources = {
   'hii-remote-host.mjs': 'remote/host/hii-remote-host.mjs',
-  'remote-source.mjs': 'remote/host/remote-source.mjs',
-  'hii-remote-input.swift': 'remote/host/hii-remote-input.swift',
   'install-local.sh': 'remote/host/install.sh',
   'update.sh': 'remote/host/update.sh',
 };

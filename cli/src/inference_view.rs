@@ -9,6 +9,9 @@ pub struct MiniInference {
     prompt_tokens: Vec<String>,
     generated: String,
     generated_tokens: usize,
+    /// Whether `generated` currently ends inside a word run, so a delta that
+    /// continues that word is not counted as a second token.
+    open_word: bool,
     frame: usize,
 }
 
@@ -18,13 +21,35 @@ impl MiniInference {
             prompt_tokens: visible_tokens(prompt).into_iter().take(100).collect(),
             generated: String::new(),
             generated_tokens: 0,
+            open_word: false,
             frame: 0,
         }
     }
 
+    #[cfg(test)]
+    pub fn generated_token_count(&self) -> usize {
+        self.generated_tokens
+    }
+
     pub fn observe_delta(&mut self, delta: &str) {
         self.generated.push_str(delta);
-        self.generated_tokens = visible_tokens(&self.generated).len();
+        // Count over the delta alone. Re-tokenizing the whole buffer on every
+        // delta allocated a Vec plus one String per token per delta - O(n^2)
+        // short-lived allocations for a single response, which fragmented the
+        // allocator badly enough to leave an idle TUI holding gigabytes.
+        for character in delta.chars() {
+            if is_word_char(character) {
+                if !self.open_word {
+                    self.generated_tokens += 1;
+                    self.open_word = true;
+                }
+            } else {
+                self.open_word = false;
+                if !character.is_whitespace() {
+                    self.generated_tokens += 1;
+                }
+            }
+        }
     }
 
     pub fn next_frame(&mut self, phase: &str, elapsed: Duration, width: usize) -> String {
@@ -148,11 +173,15 @@ fn prototype_candidate(tokens: &[String]) -> Option<String> {
         .then(|| "≈with .42".into())
 }
 
+fn is_word_char(character: char) -> bool {
+    character.is_alphanumeric() || matches!(character, '\'' | '’' | '-')
+}
+
 pub(crate) fn visible_tokens(value: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
     for character in value.chars() {
-        if character.is_alphanumeric() || matches!(character, '\'' | '’' | '-') {
+        if is_word_char(character) {
             current.push(character);
         } else {
             if !current.is_empty() {
@@ -179,6 +208,25 @@ fn stable_hash(value: &str) -> u32 {
 mod tests {
     use super::{render_frame, visible_tokens, MiniInference};
     use std::time::Duration;
+
+    #[test]
+    fn streamed_counting_matches_whole_buffer_tokenizing() {
+        // The count must not depend on how the stream is chunked: a word split
+        // across two deltas is one token, not two.
+        let text = "Design a small concrete house - beside the ocean, at 42m. It's quiet.";
+        for chunk in [1usize, 2, 3, 5, 7, 13] {
+            let mut view = MiniInference::new("prompt");
+            let characters: Vec<char> = text.chars().collect();
+            for piece in characters.chunks(chunk) {
+                view.observe_delta(&piece.iter().collect::<String>());
+            }
+            assert_eq!(
+                view.generated_token_count(),
+                visible_tokens(text).len(),
+                "chunk size {chunk} disagreed with whole-buffer tokenizing"
+            );
+        }
+    }
 
     #[test]
     fn tokenizes_the_prototype_prompt_without_inventing_ids() {

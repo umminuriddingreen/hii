@@ -14,7 +14,9 @@ import styles from './DesktopHiiAccess.module.css';
 type LinkedIdentity = { handle: string; deviceName: string };
 
 export function DesktopHiiAccess() {
+  const [ready, setReady] = useState(false);
   const [linked, setLinked] = useState(false);
+  const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<NativeAccountWorkspace[]>([]);
@@ -33,13 +35,20 @@ export function DesktopHiiAccess() {
   }, []);
 
   useEffect(() => {
+    setOnboardingComplete(window.localStorage.getItem('hii.onboarding.completed.v1') === 'true');
     void accountSyncStatus()
       .then(async (status) => {
         setLinked(status.linked);
         if (status.linked) await refresh();
       })
-      .catch(() => setMessage('could not inspect account synchronization.'));
+      .catch(() => setMessage('could not inspect account synchronization.'))
+      .finally(() => setReady(true));
   }, [refresh]);
+
+  const finishOnboarding = useCallback(() => {
+    window.localStorage.setItem('hii.onboarding.completed.v1', 'true');
+    setOnboardingComplete(true);
+  }, []);
 
   const persistence = useMemo(
     () => active === 'local' ? undefined : new NativeAccountWorkspacePersistence(active),
@@ -68,6 +77,7 @@ export function DesktopHiiAccess() {
       setCode('');
       await refresh();
       setMessage('this HII app is linked. choose an account workspace above.');
+      finishOnboarding();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'could not link this app.');
     } finally {
@@ -82,6 +92,8 @@ export function DesktopHiiAccess() {
       creatorId={identity ? `account:${identity.handle}` : 'human:local'}
       persistence={persistence}
       persistentChrome={false}
+      openTerminalOnReady={ready && !onboardingComplete}
+      onTerminalReady={finishOnboarding}
     />
     {workspaceOpen ? <aside className={styles.workspacePanel} data-workspace-ui aria-label="Workspaces">
       <header><strong>Workspaces</strong><kbd>⌘ 1</kbd></header>
@@ -103,12 +115,12 @@ export function DesktopHiiAccess() {
           <div><dt>authority</dt><dd>revocable workspace sync</dd></div>
         </dl>
         <button type="button" disabled={busy} onClick={() => void refresh()}>refresh workspaces</button>
-        <small>local terminal and files stay on this Mac. Only the selected account workspace document synchronizes.</small>
+        <small>Your local files, models, and terminal stay on this Mac. Only the selected account workspace synchronizes.</small>
       </> : <>
-        <p>Link this installed app to your HII account without giving the browser terminal access.</p>
+        <p>Connect this HII app to your account. Your workspaces become available here without exposing this computer&apos;s terminal to the browser.</p>
         <ol>
           <li>Open HII on the web.</li>
-          <li>Create a one-time app link code in your account menu.</li>
+          <li>Create a one-time computer code in your account menu.</li>
           <li>Paste it here within 15 minutes.</li>
         </ol>
         <form onSubmit={link}>

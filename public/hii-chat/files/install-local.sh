@@ -1,11 +1,12 @@
 #!/bin/sh
 # SPDX-License-Identifier: LicenseRef-BSL-1.1
 #
-# Install the HII remote desktop host agent on this Mac.
+# Install the HII paired-host agent on this Mac.
 #   sh remote/host/install.sh <pairing-token>
 #
-# Builds the input injector, writes the host config, and installs a launchd
-# agent that keeps the outbound relay connection alive across logins.
+# Writes the host config and installs a launchd agent that keeps the outbound
+# relay connection alive across logins. The agent answers chat over the paired
+# link; it does not capture the screen or replay remote input.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -25,10 +26,8 @@ if [ -z "$token" ]; then
   exit 2
 fi
 node_bin=$(command -v node)
-ffmpeg_bin=$(command -v ffmpeg || true)
 hii_bin=$(command -v hii || true)
 
-[ -n "$ffmpeg_bin" ] || { echo "ffmpeg is required: brew install ffmpeg" >&2; exit 3; }
 [ -n "$node_bin" ] || { echo "node is required" >&2; exit 3; }
 [ -n "$hii_bin" ] || { echo "hii is required" >&2; exit 3; }
 
@@ -49,20 +48,12 @@ bootstrap_agent() {
   launchctl bootstrap "$domain" "$source_plist"
 }
 
-echo "building input injector..."
-swiftc -O -o "$bin_dir/hii-remote-input" "$here/hii-remote-input.swift"
-
 cat > "$conf_dir/host.json" <<JSON
 {
   "relay": "${HII_REMOTE_RELAY:-wss://humaninformationinterface.com/api/remote/host}",
   "token": "$token",
-  "ffmpeg": "$ffmpeg_bin",
   "hii": "$hii_bin",
-  "chatCwd": "$HOME",
-  "fps": 24,
-  "quality": 6,
-  "maxWidth": 1600,
-  "display": 0
+  "chatCwd": "$HOME"
 }
 JSON
 chmod 600 "$conf_dir/host.json"
@@ -125,12 +116,8 @@ fi
 
 cat <<'NOTE'
 
-Installed. Two macOS permissions are required before the stream works:
-
-  System Settings > Privacy & Security > Screen & System Audio Recording
-    -> allow the terminal or launchd process running ffmpeg
-  System Settings > Privacy & Security > Accessibility
-    -> allow ~/.hii/bin/hii-remote-input
+Installed. This agent needs no screen-recording or accessibility permission:
+it never captures the screen and never replays remote input.
 
 Logs: ~/.hii/logs/remote-host.log
 Stop: launchctl bootout gui/$(id -u)/ai.hii.remote-host
