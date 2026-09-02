@@ -9,8 +9,9 @@ describe('minimal HII command bar', () => {
   const css = read('app/globals.css');
   const bridge = read('lib/client/hii-bridge.ts');
 
-  it('keeps Command-K as a compact prompt with direct output below it', () => {
+  it('keeps the contextual prompt compact while Command-K routes to the PTY', () => {
     expect(root).toContain("event.key.toLowerCase() === 'k'");
+    expect(root).toContain("ensureWorkspaceTerminal('quick')");
     expect(root).toContain('const promptWidth = Math.min(560');
     expect(root).toContain('<PromptResponse value={visibleResponse} running={running} />');
     expect(root).not.toContain('<InferenceConstellation');
@@ -27,8 +28,10 @@ describe('minimal HII command bar', () => {
 
   it('opens the complete keyboard command list with question mark', () => {
     expect(root).toContain("event.key === '?'");
+    expect(root).toContain("(event.metaKey || event.ctrlKey) && event.key === '?'");
     expect(root).toContain("menu: 'commands'");
-    expect(root).toContain("['⌘ K', 'Ask HII']");
+    expect(root).toContain("['⌘ K', 'Quick terminal']");
+    expect(root).toContain("['⌘ T', 'Search Google on the canvas']");
     expect(root).toContain("['Esc', 'Dismiss, clear, or open canvas manager']");
   });
 

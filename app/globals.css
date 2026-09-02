@@ -675,6 +675,18 @@ button, input, textarea { font: inherit; }
 .hii-docked-terminal-actions { position: absolute; z-index: 14; top: 5px; right: 8px; display: flex; gap: 2px; }
 .hii-docked-terminal-actions button { position: relative; display: grid; width: 30px; height: 30px; padding: 0; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #777b84; cursor: pointer; }
 .hii-docked-terminal-actions button:hover { background: #1b1d21; color: #fff; }
+.hii-docked-terminal[data-compact="true"] { right: auto; bottom: 18px; left: 50%; width: min(760px, calc(100vw - 32px)); height: min(28vh, 260px); transform: translateX(-50%); border-radius: 10px; }
+.hii-docked-terminal[data-compact="true"] .hii-job-terminal[data-kind="shell"] { grid-template-rows: minmax(0, 1fr); }
+.hii-docked-terminal[data-compact="true"] .hii-job-terminal[data-kind="shell"] header { display: none; }
+.hii-docked-terminal[data-compact="true"] .hii-shell-terminal { padding: 10px 8px 8px 12px; }
+.hii-docked-terminal[data-compact="true"] .hii-docked-terminal-actions { top: 4px; right: 5px; opacity: 0; transition: opacity 120ms ease; }
+.hii-docked-terminal[data-compact="true"]:hover .hii-docked-terminal-actions,
+.hii-docked-terminal[data-compact="true"]:focus-within .hii-docked-terminal-actions { opacity: 1; }
+
+.hii-quick-web-search { position: fixed; z-index: 2147482450; top: 18px; left: 50%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; width: min(560px, calc(100vw - 32px)); height: 42px; align-items: center; gap: 10px; padding: 0 12px; transform: translateX(-50%); border: 1px solid rgba(0, 0, 0, .14); border-radius: 10px; background: rgba(250, 250, 250, .96); box-shadow: 0 14px 40px rgba(0, 0, 0, .16); color: #777; backdrop-filter: blur(20px); }
+.hii-quick-web-search input { min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: transparent; color: #151515; font: 13px/1.2 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+.hii-quick-web-search input::placeholder { color: #8a8a8a; }
+.hii-quick-web-search kbd { color: #999; font: 9px/1 "SF Mono", ui-monospace, monospace; }
 .hii-terminal-window-controls {
   position: absolute;
   z-index: 12;

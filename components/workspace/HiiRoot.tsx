@@ -181,9 +181,9 @@ function CanvasChrome({
       </>}
       {moreOpen && <menu className="hii-freeform-more" aria-label="More canvas actions">
         <button type="button" onClick={onTerminal}><TerminalWindow size={17} />Terminal <kbd>⌘ Space</kbd></button>
-        <button type="button" onClick={onSearch}><Globe size={17} />Web search</button>
+        <button type="button" onClick={onSearch}><Globe size={17} />Web search <kbd>⌘ T</kbd></button>
         <button type="button" onClick={onPresentation}><PresentationChart size={17} />Presentation</button>
-        <button type="button" onClick={onAsk}><Sparkle size={17} />Ask HII <kbd>⌘ K</kbd></button>
+        <button type="button" onClick={onAsk}><Sparkle size={17} />Quick terminal <kbd>⌘ K</kbd></button>
         <button type="button" onClick={onActivity}><ListBullets size={17} />Activity & proof <kbd>⌘ 2</kbd></button>
         <hr />
         <button type="button" onClick={onZoomOut}><Minus size={17} />Zoom out <kbd>⌘ −</kbd></button>
@@ -230,7 +230,8 @@ const promptSlashCommands = [
 ] as const;
 
 const promptKeyboardCommands = [
-  ['⌘ K', 'Ask HII'],
+  ['⌘ K', 'Quick terminal'],
+  ['⌘ T', 'Search Google on the canvas'],
   ['⌘ Space / ⌥ Space', 'Open or hide the HII terminal'],
   ['⌘ ⇧ T', 'Move the terminal between dock and canvas'],
   ['⌘ ⇧ B', 'Open the native browser'],
@@ -297,6 +298,46 @@ function PromptResponse({ value, running }: { value: string; running: boolean })
         </span>
       ))}
     </output>
+  );
+}
+
+function QuickWebSearch({
+  onDismiss,
+  onSearch
+}: {
+  onDismiss: () => void;
+  onSearch: (query: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  return (
+    <form
+      className="hii-quick-web-search"
+      data-workspace-ui
+      onPointerDown={(event) => event.stopPropagation()}
+      onSubmit={(event) => {
+        event.preventDefault();
+        const value = query.trim();
+        if (value) onSearch(value);
+      }}
+    >
+      <Globe size={15} aria-hidden="true" />
+      <input
+        autoFocus
+        aria-label="Search Google"
+        autoComplete="off"
+        spellCheck={false}
+        value={query}
+        placeholder="Search Google"
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape') return;
+          event.preventDefault();
+          event.stopPropagation();
+          onDismiss();
+        }}
+      />
+      <kbd>return</kbd>
+    </form>
   );
 }
 
@@ -935,6 +976,7 @@ export function HiiRoot({
   });
   const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [promptVisible, setPromptVisible] = useState(false);
+  const [webSearchOpen, setWebSearchOpen] = useState(false);
   const [promptPresentation, setPromptPresentation] = useState<'floating' | 'terminal'>('floating');
   const [drawing, setDrawing] = useState(false);
   const [canvasCommandsOpen, setCanvasCommandsOpen] = useState(false);
@@ -1180,6 +1222,7 @@ export function HiiRoot({
         ? workspace.nodes.filter((node) => isAccountCanvasNode(node, spaceId))
         : workspace.nodes).filter((node) =>
           node.payload.terminalPresentation !== 'docked'
+          && node.payload.terminalPresentation !== 'quick'
           && node.payload.terminalPresentation !== 'hidden'
         ),
     [isAccount, isSpace, spaceId, workspace.nodes]
@@ -1290,7 +1333,7 @@ export function HiiRoot({
     && (node.payload.singletonKey === 'workspace-terminal' || node.payload.terminalMode === 'shell')
   ), [workspace.nodes]);
 
-  const ensureWorkspaceTerminal = useCallback((presentation: 'canvas' | 'docked' = 'docked', requestedSeed?: NodeSeed) => {
+  const ensureWorkspaceTerminal = useCallback((presentation: 'canvas' | 'docked' | 'quick' = 'docked', requestedSeed?: NodeSeed) => {
     const existing = workspace.nodes.find((node) =>
       node.type === 'terminal'
       && node.payload.role === 'operator-terminal'
@@ -1579,6 +1622,15 @@ export function HiiRoot({
     if (!seed) return '';
     return spawnSeeds([seed], at)[0];
   }, [spawnSeeds]);
+
+  const submitQuickWebSearch = useCallback((query: string) => {
+    const center = camera.toWorld(window.innerWidth / 2, window.innerHeight / 2);
+    const id = openDevBrowser({ x: center.x - 540, y: center.y - 360 }, query);
+    if (!id) return;
+    setWebSearchOpen(false);
+    setPromptVisible(false);
+    setToolMessage(`Opened Google results for “${query}”.`);
+  }, [camera, openDevBrowser]);
 
   const requestBrowserAgent = useCallback(async (node: WorkspaceNode, request: string) => {
     const url = text(node.payload.url);
@@ -1877,6 +1929,29 @@ export function HiiRoot({
         setToolMessage('Opened HII Remote.');
         return;
       }
+      if (runtimeEnabled && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        ensureWorkspaceTerminal('quick');
+        setWebSearchOpen(false);
+        setPromptVisible(false);
+        setSelected([]);
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 't') {
+        event.preventDefault();
+        setWebSearchOpen(true);
+        setPromptVisible(false);
+        setCanvasManagerOpen(false);
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key === '?') {
+        event.preventDefault();
+        setPrompt({ anchor: mouse.current, initialValue: '', response: '', status: 'idle', menu: 'commands' });
+        setPromptPresentation('floating');
+        setPromptVisible(true);
+        setWebSearchOpen(false);
+        return;
+      }
       if (inField(event.target)) return;
       if (isAccount && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'u') {
         event.preventDefault();
@@ -1991,7 +2066,7 @@ export function HiiRoot({
         return;
       }
       if (event.key === 'Escape') {
-        if (promptVisible || selected.length) { setPromptVisible(false); setSelected([]); return; }
+        if (webSearchOpen || promptVisible || selected.length) { setWebSearchOpen(false); setPromptVisible(false); setSelected([]); return; }
         event.preventDefault();
         openCanvasManager();
         return;
@@ -2005,18 +2080,6 @@ export function HiiRoot({
       }
       const history = historyShortcut(event);
       if (history) { event.preventDefault(); history === 'redo' ? workspace.redo() : workspace.undo(); return; }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        setPrompt((current) => ({
-          anchor: mouse.current,
-          initialValue: '',
-          response: current?.response || '',
-          status: current?.status || 'idle'
-        }));
-        setPromptPresentation('floating');
-        setPromptVisible(true);
-        return;
-      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'u') { event.preventDefault(); fileInput.current?.click(); return; }
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 't') {
         event.preventDefault();
@@ -2082,7 +2145,7 @@ export function HiiRoot({
     addEventListener('pointermove', pointermove);
     addEventListener('paste', paste);
     return () => { removeEventListener('keydown', keydown); removeEventListener('pointermove', pointermove); removeEventListener('paste', paste); };
-  }, [allowPhoto, camera, canvasCommandsOpen, canvasManagerOpen, deleteSelection, drawing, ensureWorkspaceTerminal, fitCanvas, importFiles, isAccount, isSpace, isTouchCanvas, mode, onRequestDevice, openCanvasManager, openDevBrowser, promptVisible, runtimeEnabled, selected, spawnCenteredSeed, spawnInformation, spawnSeeds, toggleDrawing, workspace, workspaceTerminal]);
+  }, [allowPhoto, camera, canvasCommandsOpen, canvasManagerOpen, deleteSelection, drawing, ensureWorkspaceTerminal, fitCanvas, importFiles, isAccount, isSpace, isTouchCanvas, mode, onRequestDevice, openCanvasManager, openDevBrowser, promptVisible, runtimeEnabled, selected, spawnCenteredSeed, spawnInformation, spawnSeeds, toggleDrawing, webSearchOpen, workspace, workspaceTerminal]);
 
   const canvasFeedback = toolMessage || (drawing
     ? 'Drawing on · drag anywhere · Esc to stop.'
@@ -2108,8 +2171,9 @@ export function HiiRoot({
 
   const openSearchPanel = useCallback(() => {
     setMode('browse');
-    openCanvasManager();
-  }, [openCanvasManager]);
+    setWebSearchOpen(true);
+    setPromptVisible(false);
+  }, []);
 
   const openActivityPanel = useCallback(() => {
     setPromptPresentation('terminal');
@@ -2234,7 +2298,7 @@ export function HiiRoot({
         onPresentation={openPresentationPanel}
         onSearch={openSearchPanel}
         onTerminal={() => ensureWorkspaceTerminal('docked')}
-        onAsk={() => openAssistantPanel()}
+        onAsk={() => { ensureWorkspaceTerminal('quick'); setPromptVisible(false); }}
         onActivity={openActivityPanel}
         onZoomOut={() => camera.zoomBy(1 / KEY_ZOOM_STEP)}
         onZoomIn={() => camera.zoomBy(KEY_ZOOM_STEP)}
@@ -2349,8 +2413,19 @@ export function HiiRoot({
           }}
         />}
       </div>
-      {runtimeEnabled && persistentChrome && workspaceTerminal?.payload.terminalPresentation === 'docked' && (
-        <aside className="hii-docked-terminal" data-workspace-ui onPointerDown={(event) => event.stopPropagation()}>
+      {runtimeEnabled && persistentChrome && (workspaceTerminal?.payload.terminalPresentation === 'docked' || workspaceTerminal?.payload.terminalPresentation === 'quick') && (
+        <aside
+          className="hii-docked-terminal"
+          data-compact={workspaceTerminal.payload.terminalPresentation === 'quick' || undefined}
+          data-workspace-ui
+          onPointerDown={(event) => event.stopPropagation()}
+          onKeyDownCapture={(event) => {
+            if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return;
+            event.preventDefault();
+            event.stopPropagation();
+            workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, terminalPresentation: 'hidden' } });
+          }}
+        >
           <div className="hii-docked-terminal-actions">
             <button type="button" data-tooltip="Move to canvas · ⌘⇧T" aria-label="Move terminal to canvas" onClick={() => ensureWorkspaceTerminal('canvas')}><CornersOut size={16} /></button>
             <button type="button" data-tooltip="Hide · ⌘Space" aria-label="Hide terminal" onClick={() => workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, terminalPresentation: 'hidden' } })}>×</button>
@@ -2358,6 +2433,7 @@ export function HiiRoot({
           <TerminalBody node={workspaceTerminal} onPayload={(patch) => workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, ...patch } })} onAgentSubmit={(intent) => void startObjectiveAgent(workspaceTerminal.id, intent)} />
         </aside>
       )}
+      {webSearchOpen && <QuickWebSearch onDismiss={() => setWebSearchOpen(false)} onSearch={submitQuickWebSearch} />}
       {runtimeEnabled && promptVisible && prompt && (
         <Prompt
           key={`${prompt.anchor.x}:${prompt.anchor.y}:${prompt.initialValue}:${prompt.menu || 'closed'}`}
