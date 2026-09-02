@@ -120,7 +120,11 @@ fn shell_command(cwd: &Path) -> CommandBuilder {
         .or_else(|| env::var_os("COMSPEC").filter(|value| !value.is_empty()))
         .unwrap_or_else(|| "powershell.exe".into());
     let mut command = CommandBuilder::new(&shell);
-    if shell.to_string_lossy().to_ascii_lowercase().contains("powershell") {
+    if shell
+        .to_string_lossy()
+        .to_ascii_lowercase()
+        .contains("powershell")
+    {
         command.arg("-NoLogo");
     }
     command.cwd(cwd);
