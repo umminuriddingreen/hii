@@ -5,6 +5,7 @@ mod chat;
 mod device;
 mod feed;
 mod remote;
+mod search;
 mod workspace;
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -150,6 +151,12 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
     let db = env.d1("IDENTITY")?;
 
     if path.starts_with("/api/") {
+        if method == Method::Get && path == "/api/search" {
+            if !rate_limit(request, env, &db, "web-search", 100_000).await? {
+                return secure_no_store(api_error(429, "rate_limited")?);
+            }
+            return secure_no_store(search::handle_search(request, env).await?);
+        }
         if remote::is_remote_host_socket(&path) {
             return remote::handle_host_socket(request, env).await;
         }

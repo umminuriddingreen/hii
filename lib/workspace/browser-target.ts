@@ -1,6 +1,7 @@
 export function normalizedBrowserUrl(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return 'https://developer.mozilla.org';
+  if (/\s/.test(trimmed)) return null;
   const localBare = /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(trimmed);
   if (!localBare && /^[a-z][a-z0-9+.-]*:/i.test(trimmed) && !/^https?:\/\//i.test(trimmed)) return null;
   try {

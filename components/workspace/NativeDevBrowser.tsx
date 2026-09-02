@@ -13,6 +13,16 @@ type Props = {
   onOpenObject?: (url: string) => void;
 };
 
+type WebSearchResult = { title: string; url: string; description: string };
+
+function searchQuery(value: string) {
+  try {
+    const parsed = new URL(value);
+    if (parsed.hostname === 'google.com' || parsed.hostname === 'www.google.com') return parsed.searchParams.get('q')?.trim() || '';
+  } catch { /* Invalid values are handled by browserNavigationTarget. */ }
+  return '';
+}
+
 function isTauri() {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
@@ -20,7 +30,7 @@ function isTauri() {
 export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture, onOpenObject }: Props) {
   const initial = browserNavigationTarget(initialUrl || '') || 'https://developer.mozilla.org/';
   const [url, setUrl] = useState(initial);
-  const [draftUrl, setDraftUrl] = useState(initial);
+  const [draftUrl, setDraftUrl] = useState(searchQuery(initial) || initial);
   const [history, setHistory] = useState([initial]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
@@ -28,6 +38,8 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
   const [request, setRequest] = useState('');
   const [device, setDevice] = useState<'responsive' | 'desktop' | 'mobile'>('responsive');
   const [showAgent, setShowAgent] = useState(false);
+  const [searchResults, setSearchResults] = useState<WebSearchResult[] | null>(null);
+  const [searchError, setSearchError] = useState('');
   const viewport = useRef<HTMLDivElement | null>(null);
   const webview = useRef<import('@tauri-apps/api/webview').Webview | null>(null);
   const label = `hii-browser-${nodeId.replace(/[^a-zA-Z0-9-]/g, '-')}`;
@@ -82,10 +94,33 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
   }, [label, syncBounds]);
 
   const targetKind = useMemo(() => browserTargetKind(url), [url]);
+  const activeSearchQuery = useMemo(() => searchQuery(url), [url]);
+  const locationLabel = !isTauri() && activeSearchQuery ? `Search · ${activeSearchQuery}` : url;
+
+  useEffect(() => {
+    if (isTauri() || !activeSearchQuery) { setSearchResults(null); setSearchError(''); return; }
+    const controller = new AbortController();
+    setSearchResults(null);
+    setSearchError('');
+    setStatus('loading');
+    void fetch(`/api/search?q=${encodeURIComponent(activeSearchQuery)}`, { signal: controller.signal })
+      .then(async (response) => {
+        const value = await response.json() as { results?: WebSearchResult[]; error?: string };
+        if (!response.ok) throw new Error(value.error || `Search failed (${response.status})`);
+        setSearchResults(value.results || []);
+        setStatus('ready');
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setSearchError(error instanceof Error ? error.message : 'Search failed');
+        setStatus('error');
+      });
+    return () => controller.abort();
+  }, [activeSearchQuery]);
 
   const commitUrl = useCallback((next: string, pushHistory = true) => {
     setUrl(next);
-    setDraftUrl(next);
+    setDraftUrl(searchQuery(next) || next);
     if (pushHistory) {
       setHistory((current) => [...current.slice(0, historyIndex + 1), next]);
       setHistoryIndex((current) => current + 1);
@@ -143,10 +178,7 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
         <button type="button" title="Back" disabled={!isTauri() && historyIndex === 0} onClick={() => void action('back')}>←</button>
         <button type="button" title="Forward" disabled={!isTauri() && historyIndex >= history.length - 1} onClick={() => void action('forward')}>→</button>
         <button type="button" title="Reload" onClick={() => void action('reload')}>↻</button>
-        <form onSubmit={(event) => { event.preventDefault(); void navigate(); }}>
-          <span aria-hidden="true">⌁</span>
-          <input value={draftUrl} onChange={(event) => setDraftUrl(event.target.value)} aria-label="URL or search" spellCheck={false} />
-        </form>
+        <span className="hii-browser-location" title={url}>{locationLabel}</span>
         <button type="button" title="View size" onClick={cycleDevice}>{device === 'responsive' ? '↔' : device === 'desktop' ? '▭' : '▯'}</button>
         <button type="button" title="Ask HII about this page" onClick={() => setShowAgent((current) => !current)}>✦</button>
         {onOpenObject && <button type="button" title="Duplicate page as canvas object" onClick={() => onOpenObject(url)}>＋</button>}
@@ -154,9 +186,18 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
       </nav>
       <section className="hii-browser-workarea">
         <div ref={viewport} className="hii-browser-viewport">
-          {!isTauri() && <iframe key={`${url}:${reloadKey}`} src={normalizedBrowserUrl(url) || undefined} title="HII interactive browser" sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-scripts" allow="clipboard-read; clipboard-write; fullscreen" onLoad={() => setStatus('ready')} onError={() => setStatus('error')} />}
-          {status === 'loading' && <span className="hii-browser-loading">Opening {targetKind === 'local-service' ? 'local service' : 'website'}…</span>}
-          {status === 'error' && <span className="hii-browser-loading">This page refused the embedded view. Open it in its own window or check the local service.</span>}
+          {!isTauri() && activeSearchQuery && searchResults && <div className="hii-browser-results" aria-label={`Search results for ${activeSearchQuery}`}>
+            <header><span>Web results</span><strong>{activeSearchQuery}</strong></header>
+            {searchResults.map((result) => <a key={result.url} href={result.url} onClick={(event) => { event.preventDefault(); void navigate(result.url); }}>
+              <small>{new URL(result.url).hostname.replace(/^www\./, '')}</small>
+              <h3>{result.title}</h3>
+              {result.description && <p>{result.description}</p>}
+            </a>)}
+            {!searchResults.length && <p className="hii-browser-results-empty">No results found.</p>}
+          </div>}
+          {!isTauri() && !activeSearchQuery && <iframe key={`${url}:${reloadKey}`} src={normalizedBrowserUrl(url) || undefined} title="HII interactive browser" sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-scripts" allow="clipboard-read; clipboard-write; fullscreen" onLoad={() => setStatus('ready')} onError={() => setStatus('error')} />}
+          {status === 'loading' && <span className="hii-browser-loading">{activeSearchQuery ? `Searching for ${activeSearchQuery}…` : `Opening ${targetKind === 'local-service' ? 'local service' : 'website'}…`}</span>}
+          {status === 'error' && <span className="hii-browser-loading">{searchError || 'This page refused the embedded view. Open it in its own window or check the local service.'}</span>}
         </div>
         {showAgent && <aside className="hii-browser-agent">
           <header><span>Agent lens</span><small>page context</small></header>
@@ -174,6 +215,16 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
           </dl>
         </aside>}
       </section>
+      <form className="hii-browser-hover-search" onSubmit={(event) => { event.preventDefault(); void navigate(); }}>
+        <span aria-hidden="true">⌕</span>
+        <input
+          value={draftUrl}
+          onChange={(event) => setDraftUrl(event.target.value)}
+          aria-label="Search or open another page"
+          placeholder="Search or enter a URL"
+          spellCheck={false}
+        />
+      </form>
     </article>
   );
 }

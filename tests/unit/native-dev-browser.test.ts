@@ -25,12 +25,16 @@ describe('HII interactive browser targets', () => {
     expect(browserNavigationTarget('local first human interface')).toBe(
       'https://www.google.com/search?q=local%20first%20human%20interface'
     );
+    expect(browserNavigationTarget('spatial computing interfaces')).toBe(
+      'https://www.google.com/search?q=spatial%20computing%20interfaces'
+    );
     expect(browserNavigationTarget('file:///tmp/private')).toBeNull();
   });
 
   it('projects search sources and live pages as independent canvas objects', () => {
     const root = readFileSync(resolve(process.cwd(), 'components/workspace/HiiRoot.tsx'), 'utf8');
     const browser = readFileSync(resolve(process.cwd(), 'components/workspace/NativeDevBrowser.tsx'), 'utf8');
+    const css = readFileSync(resolve(process.cwd(), 'app/globals.css'), 'utf8');
     expect(root).toContain("findInformation(query, { web: true, limit: 8 })");
     expect(root).toContain("type: 'link'");
     expect(root).toContain('onOpenBrowser={(url) => openDevBrowser');
@@ -38,5 +42,12 @@ describe('HII interactive browser targets', () => {
     expect(browser).toContain("action('back')");
     expect(browser).toContain("action('forward')");
     expect(browser).toContain("action('reload')");
+    expect(browser).toContain('className="hii-browser-hover-search"');
+    expect(browser).toContain('aria-label="Search or open another page"');
+    expect(browser).toContain('void navigate()');
+    expect(browser).toContain('/api/search?q=');
+    expect(browser).toContain('className="hii-browser-results"');
+    expect(browser).toContain('void navigate(result.url)');
+    expect(css).toContain('.hii-node[data-node-type="browser"] { overflow: visible; contain: none; }');
   });
 });

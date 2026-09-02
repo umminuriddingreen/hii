@@ -94,10 +94,14 @@ describe('canvas terminal command', () => {
 
   it('turns Command-T search text into a live browser object on the canvas', () => {
     const root = readFileSync(resolve(process.cwd(), 'components/workspace/HiiRoot.tsx'), 'utf8');
-    expect(root).toContain('aria-label="Search Google"');
+    const css = readFileSync(resolve(process.cwd(), 'app/globals.css'), 'utf8');
+    expect(root).toContain('aria-label="Write a web search on the canvas"');
+    expect(root).toContain('className="hii-canvas-search-text"');
     expect(root).toContain("event.key.toLowerCase() === 't'");
     expect(root).toContain('openDevBrowser({ x: center.x - 540, y: center.y - 360 }, query)');
-    expect(root).toContain('Opened Google results for “${query}”.');
+    expect(root).toContain('Opened web results for “${query}”.');
+    expect(css).toContain('.hii-canvas-search-text input');
+    expect(css).toContain('background: transparent');
   });
 
   it('turns direct canvas typing into a persistent objective draft', () => {

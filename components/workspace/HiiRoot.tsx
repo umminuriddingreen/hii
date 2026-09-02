@@ -311,7 +311,7 @@ function QuickWebSearch({
   const [query, setQuery] = useState('');
   return (
     <form
-      className="hii-quick-web-search"
+      className="hii-canvas-search-text"
       data-workspace-ui
       onPointerDown={(event) => event.stopPropagation()}
       onSubmit={(event) => {
@@ -320,14 +320,13 @@ function QuickWebSearch({
         if (value) onSearch(value);
       }}
     >
-      <Globe size={15} aria-hidden="true" />
       <input
         autoFocus
-        aria-label="Search Google"
+        aria-label="Write a web search on the canvas"
         autoComplete="off"
         spellCheck={false}
         value={query}
-        placeholder="Search Google"
+        placeholder="Search the web"
         onChange={(event) => setQuery(event.target.value)}
         onKeyDown={(event) => {
           if (event.key !== 'Escape') return;
@@ -336,7 +335,6 @@ function QuickWebSearch({
           onDismiss();
         }}
       />
-      <kbd>return</kbd>
     </form>
   );
 }
@@ -1629,7 +1627,7 @@ export function HiiRoot({
     if (!id) return;
     setWebSearchOpen(false);
     setPromptVisible(false);
-    setToolMessage(`Opened Google results for “${query}”.`);
+    setToolMessage(`Opened web results for “${query}”.`);
   }, [camera, openDevBrowser]);
 
   const requestBrowserAgent = useCallback(async (node: WorkspaceNode, request: string) => {
