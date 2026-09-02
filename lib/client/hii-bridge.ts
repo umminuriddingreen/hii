@@ -61,6 +61,12 @@ export type AgentEventV1 = {
   kind?: 'activity' | 'result' | 'status';
   text?: string;
   receiptPath?: string;
+  activity?: {
+    kind: 'tool-request' | 'tool-observation';
+    name: string;
+    detail?: string;
+    ok?: boolean;
+  };
 };
 
 export type TerminalOutputV1 = {

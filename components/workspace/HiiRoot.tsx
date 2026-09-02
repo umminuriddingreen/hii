@@ -76,6 +76,7 @@ import { applicationSeed } from '@/lib/workspace/application-seed';
 import { UpdateBanner } from './UpdateBanner';
 import { NodeFrame } from './NodeFrame';
 import { ShellTerminal } from './ShellTerminal';
+import { InferenceConstellation } from './InferenceConstellation';
 import { packagePlacementSeed, WAYMARK_PACKAGE, type HiiMarketplacePackage } from '@/lib/marketplace/catalog';
 import { KEY_ZOOM_STEP, cameraKeyIntent, useCamera } from './useCamera';
 import { useWorkspace, type WorkspacePersistence } from './useWorkspace';
@@ -186,6 +187,7 @@ type PromptState = {
   objectId?: string;
   conversationId?: string;
   contextPack?: ContextPackV1;
+  inferenceEvent?: AgentEventV1;
 };
 const RESPONSE_URL = /(https?:\/\/[^\s<>()]+)/g;
 
@@ -684,6 +686,7 @@ function Prompt({
   status,
   timeline,
   contextPack,
+  inferenceEvent,
   presentation = 'floating',
   workspaceLabel = 'HII workspace',
   selectedCount = 0,
@@ -700,6 +703,7 @@ function Prompt({
   status: 'idle' | 'running' | 'completed' | 'failed';
   timeline: ObjectConversationTurn[];
   contextPack?: ContextPackV1;
+  inferenceEvent?: AgentEventV1;
   onDismiss: () => void;
   onMode: (mode: CanvasModeId) => void;
   onApproveContext: () => void;
@@ -731,24 +735,28 @@ function Prompt({
   };
   useEffect(() => { input.current?.focus(); }, []);
   const floating = presentation === 'floating';
+  const inferenceVisible = status === 'running' && !contextPack;
   const promptWidth = Math.min(640, window.innerWidth - 32);
   const promptLeft = Math.max(16, Math.min(anchor.x - 14, window.innerWidth - promptWidth - 16));
   const promptTop = Math.max(16, Math.min(anchor.y + 14, window.innerHeight - 90));
+  const shellStyle = inferenceVisible
+    ? { left: '50%', top: '50%', right: 'auto', bottom: 'auto', width: 'min(920px, calc(100vw - 32px))', maxHeight: 'none', overflow: 'visible', transform: 'translate(-50%, -50%)' }
+    : floating ? { left: promptLeft, top: promptTop } : undefined;
   return (
     <div
       className={floating ? 'hii-prompt-shell' : 'hii-assistant-terminal-shell'}
-      style={floating ? { left: promptLeft, top: promptTop } : undefined}
+      style={shellStyle}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <form className="hii-prompt" data-mode={mode} data-status={status} data-presentation={presentation} onSubmit={(event) => { event.preventDefault(); submit(); }}>
-        {objectTitle && (
+      <form className="hii-prompt" data-mode={mode} data-status={status} data-presentation={presentation} data-inference={inferenceVisible || undefined} onSubmit={(event) => { event.preventDefault(); submit(); }}>
+        {!inferenceVisible && objectTitle && (
           <div className="hii-prompt-context">
             <span>Conversation with</span>
             <strong>{objectTitle}</strong>
             <small>{timeline.length} turn{timeline.length === 1 ? '' : 's'}</small>
           </div>
         )}
-        {timeline.length > 0 && (
+        {!inferenceVisible && timeline.length > 0 && (
           <ol className="hii-conversation-timeline" aria-label={`Conversation timeline for ${objectTitle || 'canvas'}`}>
             {timeline.slice(-8).map((turn) => (
               <li key={turn.id} data-role={turn.role} data-status={turn.status}>
@@ -759,7 +767,7 @@ function Prompt({
             ))}
           </ol>
         )}
-        <div className="hii-prompt-line">
+        {!inferenceVisible && <div className="hii-prompt-line">
           <button type="button" className="hii-prompt-options-toggle" aria-label="HII options" aria-expanded={optionsOpen} onClick={() => setOptionsOpen((open) => !open)}><DotsThree size={20} weight="bold" /></button>
           <input
             ref={input}
@@ -788,15 +796,17 @@ function Prompt({
             autoComplete="off"
             spellCheck
           />
-        </div>
-        {optionsOpen && <div className="hii-prompt-options" aria-label="HII context and modes">
+        </div>}
+        {!inferenceVisible && optionsOpen && <div className="hii-prompt-options" aria-label="HII context and modes">
           <header><span>{workspaceLabel}</span><small>{selectedCount ? `${selectedCount} selected` : 'whole workspace'}</small></header>
           <div>{canvasModes.map((item) => (
             <button key={item.id} type="button" disabled={Boolean(contextPack)} aria-pressed={item.id === mode} onClick={() => onMode(item.id)}>{item.label}</button>
           ))}</div>
           <small>{canvasMode(mode).description} · ⇧ Tab cycles modes</small>
         </div>}
-        {response && <PromptResponse value={response} running={status === 'running'} />}
+        {inferenceVisible
+          ? <InferenceConstellation prompt={initialValue} observedOutput={isAgentPlaceholder(response) ? '' : response} agentEvent={inferenceEvent} />
+          : response && <PromptResponse value={response} running={false} />}
         {contextPack && (
           <section className="hii-context-preflight" aria-label="Context review">
             <header>
@@ -812,7 +822,7 @@ function Prompt({
             <code>{contextPack.fingerprint.slice(0, 18)}…</code>
           </section>
         )}
-        {commands.length > 0 && <div className="hii-prompt-commands" aria-label="HII commands">{commands.map(([command, description]) => <span key={command}><b>{command}</b>{description}</span>)}</div>}
+        {!inferenceVisible && commands.length > 0 && <div className="hii-prompt-commands" aria-label="HII commands">{commands.map(([command, description]) => <span key={command}><b>{command}</b>{description}</span>)}</div>}
       </form>
     </div>
   );
@@ -882,6 +892,18 @@ export function HiiRoot({
     humanTurnId: string;
     assistantText: string;
   } | null>(null);
+
+  useEffect(() => {
+    if (!runtimeEnabled || process.env.NEXT_PUBLIC_HII_INFERENCE_DEMO !== '1') return;
+    setPrompt({
+      anchor: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+      initialValue: 'Design a small concrete house beside the ocean.',
+      response: 'Thinking…',
+      status: 'running'
+    });
+    setPromptPresentation('floating');
+    setPromptVisible(true);
+  }, [runtimeEnabled]);
 
   const startWithContext = useCallback(async (
     request: { intent: string; mode: CanvasModeId; contextNodeIds: string[] },
@@ -1667,6 +1689,7 @@ export function HiiRoot({
         return {
           ...current,
           response,
+          inferenceEvent: event,
           status: event.status === 'failed' ? 'failed' : event.status === 'completed' ? 'completed' : 'running'
         };
       });
@@ -2207,6 +2230,7 @@ export function HiiRoot({
           objectTitle={prompt.objectId ? titleFor(workspace.nodes.find((node) => node.id === prompt.objectId) || ({ type: 'context', payload: {} } as WorkspaceNode)) : undefined}
           response={prompt.response}
           status={prompt.status}
+          inferenceEvent={prompt.inferenceEvent}
           contextPack={prompt.contextPack}
           presentation={promptPresentation}
           workspaceLabel={spaceId ? `workspace · ${spaceId}` : 'working in ~/hii'}

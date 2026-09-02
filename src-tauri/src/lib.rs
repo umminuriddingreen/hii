@@ -8,8 +8,8 @@ use hii_core::{
     runtime::RuntimeSpaceApplyV1,
     runtime::RuntimeSpaceSnapshotV1,
     runtime_share_create, runtime_share_list, runtime_share_revoke, runtime_space_apply,
-    runtime_space_history, runtime_space_snapshot, write_workspace, AgentEventV1, AgentRequestV1,
-    AgentStartResult, CONTRACT_VERSION,
+    runtime_space_history, runtime_space_snapshot, write_workspace, AgentActivityV1, AgentEventV1,
+    AgentRequestV1, AgentStartResult, CONTRACT_VERSION,
 };
 use serde_json::Value;
 use std::{
@@ -216,6 +216,18 @@ fn emit_agent(
     text: Option<String>,
     receipt_path: Option<String>,
 ) {
+    emit_agent_with_activity(app, run_id, status, kind, text, receipt_path, None);
+}
+
+fn emit_agent_with_activity(
+    app: &tauri::AppHandle,
+    run_id: &str,
+    status: &str,
+    kind: Option<&str>,
+    text: Option<String>,
+    receipt_path: Option<String>,
+    activity: Option<AgentActivityV1>,
+) {
     let _ = app.emit(
         "hii://agent-event",
         AgentEventV1 {
@@ -225,8 +237,33 @@ fn emit_agent(
             kind: kind.map(str::to_owned),
             text,
             receipt_path,
+            activity,
         },
     );
+}
+
+fn jsonl_agent_activity(value: &Value) -> Option<AgentActivityV1> {
+    let event = value.get("event")?.as_str()?;
+    let data = value.get("data")?;
+    let name = data.get("tool").and_then(Value::as_str).unwrap_or("tool").to_string();
+    match event {
+        "tool.started" => Some(AgentActivityV1 {
+            kind: "tool-request".into(),
+            name,
+            detail: data.get("target").and_then(Value::as_str).map(str::to_owned),
+            ok: None,
+        }),
+        "tool.result" => Some(AgentActivityV1 {
+            kind: "tool-observation".into(),
+            name,
+            detail: data.get("output").and_then(Value::as_str).map(|output| {
+                let visible = output.lines().find(|line| !line.trim().is_empty()).unwrap_or("observation");
+                visible.chars().take(160).collect()
+            }),
+            ok: data.get("ok").and_then(Value::as_bool),
+        }),
+        _ => None,
+    }
 }
 
 fn jsonl_user_kind(value: &Value) -> Option<&'static str> {
@@ -403,13 +440,14 @@ fn agent_start(
                         }
                     }
                     if let Some(message) = jsonl_user_message(&value) {
-                        emit_agent(
+                        emit_agent_with_activity(
                             &app,
                             &run,
                             "progress",
                             jsonl_user_kind(&value),
                             Some(message),
                             None,
+                            jsonl_agent_activity(&value),
                         );
                     }
                 }
@@ -841,6 +879,13 @@ mod tests {
             jsonl_user_message(&completed).as_deref(),
             Some("External context loaded\nSource\nhttps://example.com/source")
         );
+        let request = jsonl_agent_activity(&started).expect("tool request activity");
+        assert_eq!(request.kind, "tool-request");
+        assert_eq!(request.name, "web_fetch");
+        assert_eq!(request.detail.as_deref(), Some("https://example.com/source"));
+        let observation = jsonl_agent_activity(&completed).expect("tool observation activity");
+        assert_eq!(observation.kind, "tool-observation");
+        assert_eq!(observation.ok, Some(true));
     }
 
     #[test]

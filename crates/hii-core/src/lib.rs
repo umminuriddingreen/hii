@@ -47,6 +47,19 @@ pub struct AgentEventV1 {
     pub text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub receipt_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activity: Option<AgentActivityV1>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentActivityV1 {
+    pub kind: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ok: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

@@ -26,6 +26,7 @@ mod governance;
 mod hii_tools;
 mod hooks;
 mod identity;
+mod inference_view;
 mod keyboard;
 mod keymap;
 mod learning;

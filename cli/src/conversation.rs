@@ -2769,6 +2769,12 @@ impl Conversation {
             ReasoningMode::Off => "off",
             ReasoningMode::Deep => "deep",
         };
+        let visible_prompt = messages
+            .iter()
+            .rev()
+            .find(|message| message.role == "user")
+            .map(|message| message.content.clone())
+            .unwrap_or_default();
         self.store.event(
             "model.reasoning_policy",
             json!({
@@ -2795,7 +2801,14 @@ impl Conversation {
         // Conversation turns may be either direct prose or a typed JSON action.
         // The provider must be free to choose between them; the client projection
         // streams prose and keeps protocol bytes inside the kernel.
-        self.receive_activity(phase, model, receiver, true, bounded_reasoning)
+        self.receive_activity(
+            phase,
+            model,
+            receiver,
+            true,
+            bounded_reasoning,
+            &visible_prompt,
+        )
     }
 
     fn take_reasoning_request(&mut self, phase: &str) -> (bool, bool) {
@@ -2837,6 +2850,7 @@ impl Conversation {
         receiver: mpsc::Receiver<ChatStreamEvent>,
         show_content: bool,
         bounded_reasoning: bool,
+        visible_prompt: &str,
     ) -> Result<ChatResult, String> {
         let started = Instant::now();
         let mut reasoning_started = false;
@@ -2848,6 +2862,7 @@ impl Conversation {
         let mut reasoning_chars = 0usize;
         let mut activity_frame = 0usize;
         let mut thinking_excerpt = String::new();
+        let mut inference_view = crate::inference_view::MiniInference::new(visible_prompt);
         if interactive && raw_activity {
             // The provider stream is the interface. Remove transient routing
             // and activity rows before the first delta, then write only bytes
@@ -2856,7 +2871,11 @@ impl Conversation {
         }
         if interactive && !raw_activity {
             if let Some(input) = live_input.as_mut() {
-                input.replace_stream_line(&crate::tui::model_activity(0, phase, None))?;
+                input.replace_status_line(&inference_view.next_frame(
+                    phase,
+                    started.elapsed(),
+                    crate::tui::terminal_width(),
+                ))?;
             }
         }
         loop {
@@ -2957,6 +2976,14 @@ impl Conversation {
                 Ok(ChatStreamEvent::Content(delta)) => {
                     if interactive && show_content {
                         content_started = true;
+                        inference_view.observe_delta(&delta);
+                        if let Some(input) = live_input.as_mut() {
+                            input.replace_status_line(&inference_view.next_frame(
+                                phase,
+                                started.elapsed(),
+                                crate::tui::terminal_width(),
+                            ))?;
+                        }
                         if raw_activity {
                             // Stream means stream: preserve every provider byte,
                             // including JSON tool actions, so the operator can
@@ -3031,16 +3058,13 @@ impl Conversation {
                     return Ok(result);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if interactive && !raw_activity {
+                    if interactive {
                         activity_frame = activity_frame.wrapping_add(1);
                         if let Some(input) = live_input.as_mut() {
-                            let detail = compact_activity
-                                .then_some(thinking_excerpt.as_str())
-                                .filter(|value| !value.is_empty());
-                            input.replace_stream_line(&crate::tui::model_activity(
-                                activity_frame,
+                            input.replace_status_line(&inference_view.next_frame(
                                 phase,
-                                detail,
+                                started.elapsed(),
+                                crate::tui::terminal_width(),
                             ))?;
                         }
                     }
