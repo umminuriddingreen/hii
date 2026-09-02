@@ -21,8 +21,8 @@ if (-not $installer) {
 Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait
 
 $candidates = @(
-  (Join-Path $env:LOCALAPPDATA 'Programs\HII\HII.exe'),
-  (Join-Path $env:LOCALAPPDATA 'HII\HII.exe')
+  (Join-Path $env:LOCALAPPDATA 'HII\hii.exe'),
+  (Join-Path $env:LOCALAPPDATA 'Programs\HII\hii.exe')
 )
 $app = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $app) {
@@ -38,10 +38,14 @@ if ($app -notlike "$env:LOCALAPPDATA*") {
 # The sidecar. src-tauri/src/lib.rs resolves the CLI from the resource
 # directory beside the executable; a bundle that ships without it launches fine
 # and then fails at the first agent run.
+#
+# Order matters: the Tauri app binary and the CLI are both named hii.exe, and
+# the app sits in the install root. Only resources\hii.exe is the CLI. Probing
+# the root first launches the GUI and gets no version back.
 $installRoot = Split-Path -Parent $app
 $cli = @(
-  (Join-Path $installRoot 'hii.exe'),
-  (Join-Path $installRoot 'resources\hii.exe')
+  (Join-Path $installRoot 'resources\hii.exe'),
+  (Join-Path $installRoot 'resources\resources\hii.exe')
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $cli) {
   throw "The installed bundle has no hii.exe sidecar under $installRoot."

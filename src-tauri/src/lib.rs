@@ -192,16 +192,21 @@ pub(crate) fn hii_binary(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     }
     #[cfg(target_os = "macos")]
     candidates.push(PathBuf::from("/opt/homebrew/bin").join(CLI_BINARY_NAME));
-    // The NSIS installer places HII per-user under %LOCALAPPDATA%\Programs\HII
-    // and creates no npm global shim, so the resource dir above is the only
-    // copy a Windows install has. This covers a developer who installed the app
-    // and is running `tauri dev` beside it.
+    // The NSIS installer places HII per-user under %LOCALAPPDATA%\HII and
+    // creates no npm global shim, so the resource directory beside the
+    // executable is the only copy a Windows install has. This covers a
+    // developer running `tauri dev` beside an installed copy.
+    //
+    // The app binary and the CLI are both named hii.exe, so the install root
+    // itself is deliberately NOT a candidate: it holds the GUI. Only the
+    // resources directory under it does. The current-executable check below is
+    // the second guard on the same collision.
     #[cfg(target_os = "windows")]
     if let Some(local) = env::var_os("LOCALAPPDATA") {
         candidates.push(
             PathBuf::from(local)
-                .join("Programs")
                 .join("HII")
+                .join("resources")
                 .join(CLI_BINARY_NAME),
         );
     }
