@@ -1,10 +1,10 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { requireHighTrust } from './proof-policy.ts';
+import { runtimeRoot } from './runtime-root.ts';
 import { workspaceRunCompletion } from './workspace-run-completion.ts';
 import { appendCapabilityJob, listCapabilityJobs } from '../capabilities/local-store.ts';
 import type { CapabilityJob } from '../capabilities/types.ts';
@@ -23,10 +23,6 @@ const execFileAsync = promisify(execFile);
 const capabilityId = 'hii.agent.workspace_run';
 export const defaultWorkspaceRunModel = 'qwen3.6:35b-mlx';
 const preferredModels = [defaultWorkspaceRunModel, 'qwen3.6:27b-mlx'];
-
-function runtimeRoot() {
-  return process.env.HII_RUNTIME_DIR || path.join(os.homedir(), '.hii');
-}
 
 function clean(value: unknown, max: number) {
   return String(value ?? '')
@@ -371,7 +367,10 @@ export async function createWorkspaceRunCapabilityDraft(input: { id?: unknown; n
     '--skill-description', `Repeat the verified ${name} workflow from approved HII context and return proof.`,
     '--next', 'Review the draft before registration or execution.'
   ], {
-    cwd: path.join(os.homedir(), 'hii'),
+    // hiiRoot, not ~/hii: the repository is not always checked out at the
+    // home-directory path, and spawning with a cwd that does not exist fails
+    // as ENOENT against the interpreter, which says nothing about the cause.
+    cwd: hiiRoot,
     env: { ...process.env, HII_RUNTIME_DIR: runtimeRoot() },
     timeout: 10_000,
     maxBuffer: 1024 * 1024
