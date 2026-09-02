@@ -65,6 +65,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # PDF page provenance is one of the things this gate proves, and the
+      # extractor shells out to pdftotext. Without poppler the scan indexes four
+      # of five fixture files and reports the PDF as an unavailable capability —
+      # correct behaviour, but not the path the gate is here to cover.
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
       - run: npm run ci:product
 
   build:

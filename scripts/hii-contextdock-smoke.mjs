@@ -104,12 +104,12 @@ try {
   const scanned = contextDock
     .inventoryContextRoot({ rootPath: project.rootPath, approved: true })
     .map((item) => item.sourcePath);
-  assert.equal(
-    scan.filesDiscovered,
-    5,
-    `scan walked ${project.rootPath} and found ${JSON.stringify(scanned)}; the root holds ${JSON.stringify(fs.readdirSync(project.rootPath))}`
-  );
-  assert.equal(scan.filesIndexed, 5);
+  const scanDetail = `walked ${JSON.stringify(scanned)}; issues ${JSON.stringify(scan.extractionIssues)}`;
+  assert.equal(scan.filesDiscovered, 5, `discovery: ${scanDetail}`);
+  // A missing pdftotext lands here: the PDF is discovered, reported as an
+  // unavailable capability, and not indexed. That is correct behaviour on a
+  // machine without poppler, and the wrong outcome for this gate — so name it.
+  assert.equal(scan.filesIndexed, 5, `indexing: ${scanDetail}`);
   assert.equal(scan.filesExcluded, 0);
   assert.equal(scan.filesSkipped, 0);
   assert.deepEqual(scan.extractionIssues, []);
