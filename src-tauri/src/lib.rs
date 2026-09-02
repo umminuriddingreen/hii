@@ -1,7 +1,5 @@
 use hii_core::{
-    context_pack::{
-        self, ContextApproveRequestV1, ContextCompileRequestV1, ContextPackV1,
-    },
+    context_pack::{self, ContextApproveRequestV1, ContextCompileRequestV1, ContextPackV1},
     default_workspace_root,
     information::{self, CaptureResult, InformationImage, InformationSource, SearchResult},
     new_run_id, read_workspace,
@@ -192,7 +190,27 @@ pub(crate) fn hii_binary(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         candidates.push(home.join("bin").join(CLI_BINARY_NAME));
         candidates.push(home.join("hii/target/release").join(CLI_BINARY_NAME));
     }
+    #[cfg(target_os = "macos")]
     candidates.push(PathBuf::from("/opt/homebrew/bin").join(CLI_BINARY_NAME));
+    // The NSIS installer places HII per-user under %LOCALAPPDATA%\Programs\HII
+    // and creates no npm global shim, so the resource dir above is the only
+    // copy a Windows install has. This covers a developer who installed the app
+    // and is running `tauri dev` beside it.
+    #[cfg(target_os = "windows")]
+    if let Some(local) = env::var_os("LOCALAPPDATA") {
+        candidates.push(
+            PathBuf::from(local)
+                .join("Programs")
+                .join("HII")
+                .join(CLI_BINARY_NAME),
+        );
+    }
+    // Last resort on any platform: whatever `hii` the user's PATH resolves to.
+    // A machine that can run `hii` in a shell should not be told the app cannot
+    // find it.
+    if let Some(path) = env::var_os("PATH") {
+        candidates.extend(env::split_paths(&path).map(|dir| dir.join(CLI_BINARY_NAME)));
+    }
     let current_executable = env::current_exe()
         .ok()
         .and_then(|path| path.canonicalize().ok());
@@ -245,19 +263,29 @@ fn emit_agent_with_activity(
 fn jsonl_agent_activity(value: &Value) -> Option<AgentActivityV1> {
     let event = value.get("event")?.as_str()?;
     let data = value.get("data")?;
-    let name = data.get("tool").and_then(Value::as_str).unwrap_or("tool").to_string();
+    let name = data
+        .get("tool")
+        .and_then(Value::as_str)
+        .unwrap_or("tool")
+        .to_string();
     match event {
         "tool.started" => Some(AgentActivityV1 {
             kind: "tool-request".into(),
             name,
-            detail: data.get("target").and_then(Value::as_str).map(str::to_owned),
+            detail: data
+                .get("target")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
             ok: None,
         }),
         "tool.result" => Some(AgentActivityV1 {
             kind: "tool-observation".into(),
             name,
             detail: data.get("output").and_then(Value::as_str).map(|output| {
-                let visible = output.lines().find(|line| !line.trim().is_empty()).unwrap_or("observation");
+                let visible = output
+                    .lines()
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or("observation");
                 visible.chars().take(160).collect()
             }),
             ok: data.get("ok").and_then(Value::as_bool),
@@ -377,10 +405,24 @@ fn agent_start(
     if pack.intent != intent || pack.mode != mode {
         return Err("The approved ContextPack does not match this intent or mode.".into());
     }
-    let requested_ids = request.context_node_ids.iter().cloned().collect::<BTreeSet<_>>();
-    let approved_ids = pack.items.iter().filter(|item| item.selected).map(|item| {
-        item.context_ref.id.rsplit(':').next().unwrap_or(&item.context_ref.id).to_string()
-    }).collect::<BTreeSet<_>>();
+    let requested_ids = request
+        .context_node_ids
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let approved_ids = pack
+        .items
+        .iter()
+        .filter(|item| item.selected)
+        .map(|item| {
+            item.context_ref
+                .id
+                .rsplit(':')
+                .next()
+                .unwrap_or(&item.context_ref.id)
+                .to_string()
+        })
+        .collect::<BTreeSet<_>>();
     if requested_ids != approved_ids {
         return Err("The approved ContextPack does not match the selected canvas objects.".into());
     }
@@ -390,10 +432,7 @@ fn agent_start(
     command
         .args(["run", "--cwd"])
         .arg(&root)
-        .args([
-            "--no-context",
-            "--context-source",
-        ])
+        .args(["--no-context", "--context-source"])
         .arg(format!("hii-context-pack:{}@{}", pack.id, pack.fingerprint))
         .args([
             "--jsonl",
@@ -897,7 +936,10 @@ mod tests {
         let request = jsonl_agent_activity(&started).expect("tool request activity");
         assert_eq!(request.kind, "tool-request");
         assert_eq!(request.name, "web_fetch");
-        assert_eq!(request.detail.as_deref(), Some("https://example.com/source"));
+        assert_eq!(
+            request.detail.as_deref(),
+            Some("https://example.com/source")
+        );
         let observation = jsonl_agent_activity(&completed).expect("tool observation activity");
         assert_eq!(observation.kind, "tool-observation");
         assert_eq!(observation.ok, Some(true));
