@@ -4636,8 +4636,11 @@ mod tests {
         // session had ever reached a `final` because the prompt never showed
         // one; that line is load-bearing, so it buys the extra bytes. The flow
         // block is the next place to trim if this needs to come back down.
+        //
+        // Raised again from 1_100 for the same reason the agent ceiling moved:
+        // the natively-served tools must be named to be callable.
         assert!(
-            prompt.len() <= 1_100,
+            prompt.len() <= 1_150,
             "conversation prompt grew to {} bytes",
             prompt.len()
         );

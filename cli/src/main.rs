@@ -579,6 +579,7 @@ enum Commands {
         action: ToolsCommand,
     },
     #[command(about = "Serve HII's governed tools and canonical canvas over MCP stdio")]
+    #[command(hide = true)]
     Mcp {
         #[arg(
             long,

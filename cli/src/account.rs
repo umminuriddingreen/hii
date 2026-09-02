@@ -213,11 +213,10 @@ pub fn login_mark_frame(phase: usize) -> Vec<String> {
         rows[top][x] = ['.', '~', '-', '='][(x + phase) % 4];
         rows[bottom][x] = ['=', '-', '~', '.'][(x + phase) % 4];
     }
-    for y in 2..height - 2 {
+    for (y, row) in rows.iter_mut().enumerate().take(height - 2).skip(2) {
         let shift = (((y + phase) as f32 * 0.76).sin() * 1.2).round() as isize;
-        rows[y][(2isize + shift).clamp(0, 4) as usize] = '/';
-        rows[y]
-            [(width as isize - 3 + shift).clamp(width as isize - 5, width as isize - 1) as usize] =
+        row[(2isize + shift).clamp(0, 4) as usize] = '/';
+        row[(width as isize - 3 + shift).clamp(width as isize - 5, width as isize - 1) as usize] =
             '\\';
     }
     let label = " HII / YOUR INFORMATION ";

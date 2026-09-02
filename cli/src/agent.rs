@@ -2907,8 +2907,15 @@ mod tests {
         // The ceiling is not arbitrary: small local models lose action-emission
         // reliability as the system prompt grows, so additions must be paid for
         // deliberately rather than accumulating.
+        //
+        // Raised from 1_250 to cover the native tool list. `web_search`,
+        // `web_fetch`, `canvas_*`, `object_*` and `bridge_*` became native
+        // tools, and a model cannot call a tool the `T:` line never names, so
+        // those bytes buy capability rather than prose. The `T:`/`F:` line is
+        // now ~30% of the prompt and is the first place to look if this needs
+        // to come back down -- by dropping tools, not by describing them less.
         assert!(
-            prompt.len() <= 1_250,
+            prompt.len() <= 1_300,
             "agent prompt grew to {} bytes",
             prompt.len()
         );

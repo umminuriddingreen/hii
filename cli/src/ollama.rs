@@ -661,7 +661,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         sender: mpsc::Sender<ChatStreamEvent>,
     ) {
         let started = Instant::now();
-        let response = match {
+        let request = {
             let mut body = json!({
                 "model": model,
                 "messages": openai_messages(messages),
@@ -676,7 +676,8 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
                 .post(&format!("{}/v1/chat/completions", self.base_url))
                 .send_json(body)
                 .map_err(format_ureq)
-        } {
+        };
+        let response = match request {
             Ok(response) => response,
             Err(error) => {
                 let _ = sender.send(ChatStreamEvent::Done(Err(error)));
@@ -716,7 +717,7 @@ fn ox_alpha_browser_prompt(messages: &[Message]) -> String {
         "This conversation is being relayed by HII through the Ox Alpha website UI. HII owns and executes every tool. Follow the HII runtime instructions below exactly and return its flat JSON action protocol when a tool is needed.\n",
     );
     for message in messages {
-        prompt.push_str("\n");
+        prompt.push('\n');
         prompt.push_str(&message.role.to_ascii_uppercase());
         prompt.push_str(":\n");
         prompt.push_str(&message.content);
