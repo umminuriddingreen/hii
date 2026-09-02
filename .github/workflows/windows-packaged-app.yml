@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - release/new-user-ready
+      - main
 
 permissions:
   contents: read
@@ -29,13 +29,17 @@ jobs:
       - run: npm run security:secrets
       - run: npm run check
       - run: npm run test
-      - run: npm run build:tauri:windows
+      # CI does not hold the minisign updater key, so it builds a bundle that
+      # cannot self-update. That is the right trade for a proof run: it proves
+      # the installer, the sidecar and the clean install, and the artifact it
+      # uploads is explicitly not the one anybody ships.
+      - run: node scripts/hii-tauri-build.mjs --no-updater
       - name: Install and smoke-test the packaged app
         shell: pwsh
         run: ./scripts/hii-windows-packaged-smoke.ps1
       - uses: actions/upload-artifact@v4
         with:
-          name: HII-${{ github.sha }}-windows-x64
+          name: HII-${{ github.sha }}-windows-x64-unsigned-no-updater
           path: src-tauri/target/release/bundle/nsis/*-setup.exe
           if-no-files-found: error
           retention-days: 14
