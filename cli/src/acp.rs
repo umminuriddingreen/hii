@@ -361,10 +361,7 @@ pub fn input_schema(name: &str) -> Value {
             }),
             json!(["system", "kind"]),
         ),
-        "canvas_list" => object(
-            json!({ "spaceId": string, "limit": integer }),
-            json!([]),
-        ),
+        "canvas_list" => object(json!({ "spaceId": string, "limit": integer }), json!([])),
         "canvas_read" => object(
             json!({ "spaceId": string, "objectId": string }),
             json!(["objectId"]),

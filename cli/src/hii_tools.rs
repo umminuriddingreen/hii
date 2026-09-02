@@ -50,7 +50,12 @@ pub fn is_hii_tool(tool: &str) -> bool {
 pub fn is_mutating(tool: &str) -> bool {
     matches!(
         tool,
-        "info_capture" | "board_write" | "schedule_write" | "bridge_send" | "canvas_add" | "canvas_update"
+        "info_capture"
+            | "board_write"
+            | "schedule_write"
+            | "bridge_send"
+            | "canvas_add"
+            | "canvas_update"
     )
 }
 
@@ -180,8 +185,12 @@ pub fn execute_as(
     }
 }
 
-fn canvas_snapshot(arguments: Option<&Value>) -> Result<hii_core::runtime::RuntimeSpaceSnapshotV1, String> {
-    runtime_space_snapshot(argument_field(arguments, "spaceId").filter(|value| !value.trim().is_empty()))
+fn canvas_snapshot(
+    arguments: Option<&Value>,
+) -> Result<hii_core::runtime::RuntimeSpaceSnapshotV1, String> {
+    runtime_space_snapshot(
+        argument_field(arguments, "spaceId").filter(|value| !value.trim().is_empty()),
+    )
 }
 
 fn canvas_list(arguments: Option<&Value>) -> Result<String, String> {
@@ -215,7 +224,11 @@ fn canvas_read(arguments: Option<&Value>) -> Result<String, String> {
         .document
         .get("nodes")
         .and_then(Value::as_array)
-        .and_then(|nodes| nodes.iter().find(|node| node.get("id").and_then(Value::as_str) == Some(id.as_str())))
+        .and_then(|nodes| {
+            nodes
+                .iter()
+                .find(|node| node.get("id").and_then(Value::as_str) == Some(id.as_str()))
+        })
         .cloned()
         .ok_or_else(|| format!("canvas object not found: {id}"))?;
     serde_json::to_string(&serde_json::json!({
@@ -228,21 +241,42 @@ fn canvas_read(arguments: Option<&Value>) -> Result<String, String> {
 
 fn canvas_add(arguments: Option<&Value>, actor_id: &str) -> Result<String, String> {
     let kind = required_argument(arguments, "type")?;
-    if !matches!(kind.as_str(), "note" | "canvas-text" | "image" | "link" | "document" | "frame") {
+    if !matches!(
+        kind.as_str(),
+        "note" | "canvas-text" | "image" | "link" | "document" | "frame"
+    ) {
         return Err(format!("canvas_add type is not allowed: {kind}"));
     }
     let mut snapshot = canvas_snapshot(arguments)?;
     let now = chrono::Utc::now().to_rfc3339();
     let id = format!("mcp-{}", uuid::Uuid::new_v4());
-    let next_z = snapshot.document.get("nextZ").and_then(Value::as_u64).unwrap_or(1) + 1;
-    let count = snapshot.document.get("nodes").and_then(Value::as_array).map_or(0, Vec::len) as f64;
+    let next_z = snapshot
+        .document
+        .get("nextZ")
+        .and_then(Value::as_u64)
+        .unwrap_or(1)
+        + 1;
+    let count = snapshot
+        .document
+        .get("nodes")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len) as f64;
     let mut payload = arguments
         .and_then(|value| value.get("payload"))
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
     copy_string_argument(arguments, "title", &mut payload, "title");
-    copy_string_argument(arguments, "content", &mut payload, if kind == "canvas-text" { "text" } else { "content" });
+    copy_string_argument(
+        arguments,
+        "content",
+        &mut payload,
+        if kind == "canvas-text" {
+            "text"
+        } else {
+            "content"
+        },
+    );
     copy_string_argument(arguments, "url", &mut payload, "url");
     let node = serde_json::json!({
         "id": id,
@@ -283,7 +317,11 @@ fn canvas_update(arguments: Option<&Value>, actor_id: &str) -> Result<String, St
         .document
         .get_mut("nodes")
         .and_then(Value::as_array_mut)
-        .and_then(|nodes| nodes.iter_mut().find(|node| node.get("id").and_then(Value::as_str) == Some(id.as_str())))
+        .and_then(|nodes| {
+            nodes
+                .iter_mut()
+                .find(|node| node.get("id").and_then(Value::as_str) == Some(id.as_str()))
+        })
         .ok_or_else(|| format!("canvas object not found: {id}"))?;
     for (argument, field, fallback, min, max) in [
         ("x", "x", 0.0, -100_000.0, 100_000.0),
@@ -293,16 +331,26 @@ fn canvas_update(arguments: Option<&Value>, actor_id: &str) -> Result<String, St
         ("rotation", "rotation", 0.0, -360.0, 360.0),
     ] {
         if arguments.and_then(|value| value.get(argument)).is_some() {
-            node[field] = serde_json::json!(bounded_number(arguments, argument, fallback, min, max));
+            node[field] =
+                serde_json::json!(bounded_number(arguments, argument, fallback, min, max));
         }
     }
-    let content_field = if node.get("type").and_then(Value::as_str) == Some("canvas-text") { "text" } else { "content" };
+    let content_field = if node.get("type").and_then(Value::as_str) == Some("canvas-text") {
+        "text"
+    } else {
+        "content"
+    };
     let payload = node
         .get_mut("payload")
         .and_then(Value::as_object_mut)
         .ok_or_else(|| "canvas object payload is unavailable".to_string())?;
-    if let Some(patch) = arguments.and_then(|value| value.get("payload")).and_then(Value::as_object) {
-        for (key, value) in patch { payload.insert(key.clone(), value.clone()); }
+    if let Some(patch) = arguments
+        .and_then(|value| value.get("payload"))
+        .and_then(Value::as_object)
+    {
+        for (key, value) in patch {
+            payload.insert(key.clone(), value.clone());
+        }
     }
     copy_string_argument(arguments, "title", payload, "title");
     copy_string_argument(arguments, "content", payload, content_field);
@@ -324,7 +372,10 @@ fn apply_canvas(
         version: 1,
         space_id: Some(snapshot.space_id.clone()),
         expected_sequence: snapshot.sequence,
-        actor: IdentityRefV1 { id: format!("mcp:{actor_id}"), kind: "agent".into() },
+        actor: IdentityRefV1 {
+            id: format!("mcp:{actor_id}"),
+            kind: "agent".into(),
+        },
         authority_grant_id: Some(
             argument_field(arguments, "authorityGrantId")
                 .filter(|value| !value.trim().is_empty())
@@ -348,7 +399,13 @@ fn required_argument(arguments: Option<&Value>, field: &str) -> Result<String, S
         .ok_or_else(|| format!("{field} is required"))
 }
 
-fn bounded_number(arguments: Option<&Value>, field: &str, fallback: f64, min: f64, max: f64) -> f64 {
+fn bounded_number(
+    arguments: Option<&Value>,
+    field: &str,
+    fallback: f64,
+    min: f64,
+    max: f64,
+) -> f64 {
     arguments
         .and_then(|value| value.get(field))
         .and_then(Value::as_f64)
@@ -364,7 +421,10 @@ fn copy_string_argument(
     destination: &str,
 ) {
     if let Some(value) = argument_field(arguments, source) {
-        target.insert(destination.into(), Value::from(value.chars().take(100_000).collect::<String>()));
+        target.insert(
+            destination.into(),
+            Value::from(value.chars().take(100_000).collect::<String>()),
+        );
     }
 }
 

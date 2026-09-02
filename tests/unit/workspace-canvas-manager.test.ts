@@ -116,7 +116,7 @@ describe('canvas manager wiring', () => {
     // outright it would swallow that, so the guard is the contract.
     expect(root).toContain('if (drawing || canvasCommandsOpen || selected.length) {');
     expect(root).toContain('openCanvasManager();');
-    expect(root).toContain('if (promptVisible || selected.length) { setPromptVisible(false); setSelected([]); return; }');
+    expect(root).toContain('if (webSearchOpen || promptVisible || selected.length) { setWebSearchOpen(false); setPromptVisible(false); setSelected([]); return; }');
   });
 
   it('stops the canvas keymap while the manager owns the screen', () => {

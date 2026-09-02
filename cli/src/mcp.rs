@@ -369,7 +369,10 @@ mod tests {
         // mcp_call is an agent action, not something this server can proxy.
         assert!(!specs.iter().any(|spec| spec["name"] == "mcp_call"));
         for name in ["canvas_list", "canvas_read", "canvas_add", "canvas_update"] {
-            assert!(specs.iter().any(|spec| spec["name"] == name), "missing {name}");
+            assert!(
+                specs.iter().any(|spec| spec["name"] == name),
+                "missing {name}"
+            );
         }
     }
 

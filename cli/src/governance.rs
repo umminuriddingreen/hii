@@ -74,7 +74,9 @@ impl AclConfig {
 
         let role_allows = match role.role.as_str() {
             "reader" => is_reader_tool(tool_name),
-            "canvas-operator" => is_reader_tool(tool_name) || matches!(tool_name, "canvas_add" | "canvas_update"),
+            "canvas-operator" => {
+                is_reader_tool(tool_name) || matches!(tool_name, "canvas_add" | "canvas_update")
+            }
             "operator" | "service" => true,
             _ => false,
         };
