@@ -78,6 +78,8 @@ describe('HII web access gate', () => {
     expect(source).toContain('`account:${canvasAccountId}`');
     expect(source).toContain('hydrateBrowserCanvasAssets(canvasAccountId, document)');
     expect(source).toContain('fileSeeder={canvasFileSeeder}');
+    expect(source).toContain('persistentChrome={false}');
+    expect(source).toContain("event.code !== 'Digit1'");
     expect(source).toContain("onRequestDevice={() => setPanel('models')}");
     // The panel must distinguish synchronized from device-local storage. The
     // wording is editorial; the distinction is the contract.
@@ -121,7 +123,7 @@ describe('HII web access gate', () => {
     expect(toolbar).not.toContain('device terminal');
     expect(toolbar).not.toContain('double-click for text');
     expect(toolbar).toContain('onAddNote');
-    expect(canvas).not.toContain('isAccount && isTerminalShortcut(event)');
+    expect(canvas).toContain('isAccount && isAssistantShortcut(event)');
     expect(canvas).toContain("event.key.toLowerCase() === 'u'");
     expect(canvas).toContain("event.key.toLowerCase() === 't'");
     expect(canvas).toContain("event.key.toLowerCase() === 'd'");
@@ -140,6 +142,9 @@ describe('HII web access gate', () => {
     expect(globalCss).toContain('.hii-space-toolbar[data-account-tools="true"] .hii-canvas-command-trigger');
     expect(globalCss).toContain('.hii-space-toolbar[data-account-tools="true"] .hii-canvas-touch-tools');
     expect(globalCss).toContain('@media (min-width: 561px) and (hover: hover) and (pointer: fine)');
+    expect(globalCss).toContain('[data-chrome="adaptive"] > .hii-space-toolbar { display: none; }');
+    expect(globalCss).toContain('[data-chrome="adaptive"][data-commands-open] > .hii-space-toolbar { display: flex; }');
+    expect(css).toContain('.canvasHeader { display: none; }');
     expect(globalCss).toContain('.hii-node[data-node-type="note"]');
     expect(globalCss).toContain('background: rgba(255, 255, 255, .99)');
     expect(css).toContain('@media (max-width: 560px)');

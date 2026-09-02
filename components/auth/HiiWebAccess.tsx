@@ -276,6 +276,17 @@ export function HiiWebAccess() {
     if (cliLinkRequested && session.authenticated) setAccountOpen(true);
   }, [cliLinkRequested, session.authenticated]);
 
+  useEffect(() => {
+    if (!ready || !session.authenticated) return;
+    const toggleAccount = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.code !== 'Digit1' || event.repeat) return;
+      event.preventDefault();
+      setAccountOpen((value) => !value);
+    };
+    window.addEventListener('keydown', toggleAccount);
+    return () => window.removeEventListener('keydown', toggleAccount);
+  }, [ready, session.authenticated]);
+
   useEffect(() => () => {
     if (canvasPersistence instanceof AccountWorkspacePersistence) canvasPersistence.dispose();
   }, [canvasPersistence]);
@@ -560,6 +571,7 @@ export function HiiWebAccess() {
           creatorId={`account:${canvasAccountId}`}
           persistence={canvasPersistence}
           allowPhoto
+          persistentChrome={false}
           fileSeeder={canvasFileSeeder}
           onRequestDevice={() => setPanel('models')}
           onShareNode={(node) => { setShareNode(node); setPanel('feed'); }}

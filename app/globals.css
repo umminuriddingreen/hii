@@ -273,6 +273,9 @@ button, input, textarea { font: inherit; }
 
 @media (min-width: 561px) and (hover: hover) and (pointer: fine) {
   .hii-canvas[data-surface="account"] .hii-node-touch-controls { display: none; }
+  .hii-canvas[data-surface="account"][data-chrome="adaptive"] > .hii-space-toolbar { display: none; }
+  .hii-canvas[data-surface="account"][data-chrome="adaptive"][data-commands-open] > .hii-space-toolbar { display: flex; }
+  .hii-canvas[data-surface="account"][data-chrome="adaptive"] > .hii-canvas-feedback { bottom: 18px; }
 }
 
 @media (max-width: 560px) {

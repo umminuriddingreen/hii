@@ -205,6 +205,10 @@
 
 .canvasHeader nav { display: flex; align-items: center; pointer-events: auto; }
 
+@media (min-width: 561px) and (hover: hover) and (pointer: fine) {
+  .canvasHeader { display: none; }
+}
+
 .canvasHeader button,
 .accountPanel button {
   min-height: 44px;

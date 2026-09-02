@@ -1841,6 +1841,12 @@ export function HiiRoot({
         setToolMessage('Commands closed.');
         return;
       }
+      if (isAccount && isAssistantShortcut(event)) {
+        event.preventDefault();
+        onRequestDevice?.();
+        setToolMessage('Opened HII Remote.');
+        return;
+      }
       if (inField(event.target)) return;
       if (isAccount && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'u') {
         event.preventDefault();
@@ -2085,6 +2091,8 @@ export function HiiRoot({
       ref={camera.viewportRef}
       className="hii-canvas"
       data-surface={surface}
+      data-chrome={persistentChrome ? 'persistent' : 'adaptive'}
+      data-commands-open={canvasCommandsOpen || undefined}
       data-drop-active={dropActive || undefined}
       tabIndex={-1}
       aria-label="HII canvas"
