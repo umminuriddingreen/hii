@@ -527,9 +527,12 @@ fn agent_cancel(
     let status = Command::new("/bin/kill")
         .args(["-TERM", &pid.to_string()])
         .status();
+    // /T takes the process tree, /F forces it. Without /F an agent that has
+    // stopped servicing its message loop -- the usual reason a run needs
+    // cancelling -- survives, and the run stays "active" forever.
     #[cfg(windows)]
     let status = Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T"])
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
         .status();
     if status.is_ok_and(|value| value.success()) {
         emit_agent(

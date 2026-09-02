@@ -4,6 +4,7 @@ import path from 'path';
 import { emptyWorkspace, normalizeWorkspace, type WorkspaceDoc } from '../workspace/types.ts';
 import { atomicWriteFile, withFileLock } from './atomic-write.ts';
 import { projectWorkspaceIntoOperationalGraph } from './operational-object-store.ts';
+import { runtimeRoot } from '@/lib/server/runtime-root';
 
 const legacySpatialKey = ['can', 'vas'].join('');
 export const DEFAULT_WORKSPACE_ID = 'default';
@@ -56,7 +57,7 @@ export class WorkspaceNotFoundError extends Error {
 }
 
 function runtimeDir() {
-  return process.env.HII_RUNTIME_DIR || path.join(process.env.HOME || '.', '.hii');
+  return runtimeRoot();
 }
 
 function paths() {

@@ -3,6 +3,7 @@ import 'server-only';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { runtimeRoot } from '@/lib/server/runtime-root';
 
 export type SyncRecord = {
   id: string;
@@ -30,7 +31,7 @@ const empty = (): SyncDocument => ({
 });
 
 function runtimeDir() {
-  return process.env.HII_RUNTIME_DIR || path.join(process.env.HOME || '.', '.hii');
+  return runtimeRoot();
 }
 
 function keyId(secret: string) {

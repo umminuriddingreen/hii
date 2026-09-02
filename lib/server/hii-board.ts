@@ -2,6 +2,7 @@ import 'server-only';
 import { appendFile, mkdir, readFile } from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { runtimeRoot } from '@/lib/server/runtime-root';
 
 export type BoardLane = 'backlog' | 'next' | 'doing' | 'blocked' | 'done';
 export type BoardPriority = 'low' | 'normal' | 'high' | 'urgent';
@@ -60,7 +61,7 @@ export const boardTaskRunStatuses: BoardTaskRunStatus[] = [
   'cancelled'
 ];
 
-const boardDir = path.join(process.env.HII_RUNTIME_DIR || path.join(process.env.HOME || '.', '.hii'), 'board');
+const boardDir = path.join(runtimeRoot(), 'board');
 const taskEventsPath = path.join(boardDir, 'tasks.jsonl');
 
 export class BoardTaskError extends Error {

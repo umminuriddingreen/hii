@@ -8,15 +8,16 @@ import { redactProcessLine } from '@/lib/server/hii-terminal';
 import { visibleRunOutput } from '@/lib/workspace/run-output';
 import { listCapabilityJobs } from '@/lib/capabilities/local-store';
 import { summarizeHiiDaemonHealth } from '@/lib/workspace/daemon-health';
+import { homeDirectory, runtimeRoot } from '@/lib/server/runtime-root';
 
 const execFileAsync = promisify(execFile);
 
-const home = process.env.HOME || process.cwd();
+const home = homeDirectory();
 const hiiRootCandidates = [process.env.HII_ROOT, process.cwd(), path.join(home, 'hii')].filter(
   (candidate): candidate is string => Boolean(candidate)
 );
 const hiiRoot = hiiRootCandidates.find((candidate) => existsSync(path.join(candidate, 'aii', 'daemon', 'hiid.mjs'))) ?? hiiRootCandidates[0] ?? process.cwd();
-const runtime = process.env.HII_RUNTIME_DIR || path.join(home, '.hii');
+const runtime = runtimeRoot();
 const daemonDir = path.join(runtime, 'daemon');
 const runsDir = path.join(daemonDir, 'runs');
 const statusPath = path.join(daemonDir, 'status.json');
@@ -28,6 +29,8 @@ const hiidScript = path.join(hiiRoot, 'aii', 'daemon', 'hiid.mjs');
 function nodeRuntime() {
   const candidates = [
     process.env.HII_NODE_RUNTIME,
+    // The packaged app runs under its own Node; the absolute paths below are
+    // a macOS/Linux courtesy for a stripped environment, not a Windows path.
     process.execPath,
     '/opt/homebrew/opt/node/bin/node',
     '/usr/local/bin/node',

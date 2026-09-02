@@ -23,4 +23,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run security:secrets
+      # The Apple-Silicon model runtime that Linux CI cannot build.
+      - run: npm run runner:check
       - run: npm run ci:release-candidate

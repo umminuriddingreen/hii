@@ -2,12 +2,12 @@ import { createHash, randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, realpath, rm } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
-import os from 'node:os';
 import path from 'node:path';
 import { readSpace, validateSpaceId } from '../../server/space-store.ts';
 import { evaluateSpacePolicy, type SpacePolicyActor } from '../policy.ts';
 import type { SpaceAudience } from '../types.ts';
 import { withFileLock } from '../../server/atomic-write.ts';
+import { runtimeRoot } from '../../server/runtime-root.ts';
 import {
   inspectAndSanitizeSpaceImage,
   safeSpaceAssetName,
@@ -36,7 +36,7 @@ export type RetrievedSpaceBlob = {
 };
 
 function runtimeDir() {
-  return process.env.HII_RUNTIME_DIR || path.join(process.env.HOME || os.homedir() || '.', '.hii');
+  return runtimeRoot();
 }
 
 export function spaceAssetsDirectory(spaceId: string) {

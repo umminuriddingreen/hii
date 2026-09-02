@@ -18,8 +18,8 @@
 import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import { atomicWriteFile, withFileLock } from './atomic-write.ts';
+import { runtimeRoot } from '@/lib/server/runtime-root';
 import {
   SPACE_ID_PATTERN,
   defaultSpacePolicy,
@@ -73,7 +73,7 @@ export class SpaceRevisionConflictError extends Error {
 }
 
 function runtimeDir() {
-  return process.env.HII_RUNTIME_DIR || path.join(process.env.HOME || os.homedir() || '.', '.hii');
+  return runtimeRoot();
 }
 
 export function spacesDirectory() {

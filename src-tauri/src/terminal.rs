@@ -112,10 +112,20 @@ fn resolve_cwd(value: &str) -> Result<PathBuf, String> {
 
 #[cfg(windows)]
 fn shell_command(cwd: &Path) -> CommandBuilder {
-    let shell = env::var_os("COMSPEC").unwrap_or_else(|| "powershell.exe".into());
-    let mut command = CommandBuilder::new(shell);
+    // PowerShell first, not COMSPEC. The canvas terminal is tuned for the
+    // login shell it gets on macOS; cmd.exe renders colour and line editing
+    // differently enough to read as a broken pane. COMSPEC stays as an escape
+    // hatch for anyone who has deliberately pointed it somewhere.
+    let shell = env::var_os("HII_SHELL")
+        .or_else(|| env::var_os("COMSPEC").filter(|value| !value.is_empty()))
+        .unwrap_or_else(|| "powershell.exe".into());
+    let mut command = CommandBuilder::new(&shell);
+    if shell.to_string_lossy().to_ascii_lowercase().contains("powershell") {
+        command.arg("-NoLogo");
+    }
     command.cwd(cwd);
     command.env("TERM", "xterm-256color");
+    command.env("COLORTERM", "truecolor");
     command
 }
 
