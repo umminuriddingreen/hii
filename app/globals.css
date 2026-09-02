@@ -410,11 +410,12 @@ button, input, textarea { font: inherit; }
 .hii-prompt {
   width: 100%;
   border: 1px solid rgba(0,0,0,.12);
-  border-radius: 15px;
-  background: rgba(255,255,255,.96);
+  border-radius: 12px;
+  background: rgba(255,255,255,.97);
   color: var(--ink);
-  box-shadow: 0 18px 60px rgba(0, 0, 0, .14);
-  backdrop-filter: blur(24px);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, .12);
+  backdrop-filter: blur(18px);
+  overflow: hidden;
 }
 .hii-prompt[data-presentation="terminal"] { border: 1px solid rgba(0,0,0,.1); box-shadow: 0 18px 60px rgba(0,0,0,.14); }
 .hii-prompt[data-presentation="terminal"] .hii-prompt-line { min-height: 54px; }
@@ -461,10 +462,10 @@ button, input, textarea { font: inherit; }
 .hii-conversation-timeline p { margin: 0; white-space: pre-wrap; }
 .hii-conversation-timeline time { white-space: nowrap; }
 
-.hii-prompt-line { position: relative; display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; min-height: 52px; }
-.hii-prompt-options-toggle { display: grid; width: 32px; height: 32px; margin-left: 9px; padding: 0; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+.hii-prompt-line { position: relative; display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; min-height: 42px; }
+.hii-prompt-options-toggle { display: grid; width: 28px; height: 28px; margin-left: 6px; padding: 0; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; }
 .hii-prompt-options-toggle:hover, .hii-prompt-options-toggle[aria-expanded="true"] { background: rgba(0,0,0,.06); color: var(--ink); }
-.hii-prompt-voice { display: grid; width: 34px; height: 34px; margin-right: 9px; padding: 0; place-items: center; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
+.hii-prompt-voice { display: grid; width: 28px; height: 28px; margin-right: 6px; padding: 0; place-items: center; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
 .hii-prompt-voice:hover, .hii-prompt-voice:focus-visible, .hii-prompt-voice[aria-pressed="true"] { outline: 0; background: rgba(0,0,0,.07); color: var(--ink); }
 .hii-prompt-voice[aria-pressed="true"] { color: #c3272b; }
 .hii-prompt-voice:disabled { cursor: default; opacity: .28; }
@@ -474,24 +475,18 @@ button, input, textarea { font: inherit; }
   border: 0;
   background: transparent;
   color: inherit;
-  padding: 15px 14px 15px 9px;
+  padding: 10px 9px;
   outline: 0;
-  font: 16px/1.25 Helvetica, Arial, sans-serif;
+  font: 14px/1.25 Helvetica, Arial, sans-serif;
 }
-.hii-prompt-options { display: grid; gap: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--faint); color: var(--muted); font-size: 11px; }
-.hii-prompt-options header { display: flex; justify-content: space-between; gap: 12px; }
-.hii-prompt-options > div { display: flex; gap: 4px; }
-.hii-prompt-options button { padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; font: 9px/1 "SF Mono", ui-monospace, monospace; text-transform: uppercase; }
-.hii-prompt-options button[aria-pressed="true"] { background: var(--ink); color: var(--field); }
-
 .hii-prompt-response {
   display: block;
   max-height: min(42vh, 420px);
   overflow: auto;
-  padding: 14px 18px 18px;
+  padding: 11px 13px 13px;
   border-top: 1px solid var(--faint);
   color: var(--ink);
-  font: 14px/1.5 Helvetica, Arial, sans-serif;
+  font: 13px/1.52 Helvetica, Arial, sans-serif;
   white-space: pre-wrap;
 }
 
@@ -533,6 +528,43 @@ button, input, textarea { font: inherit; }
 
 .hii-prompt-commands span { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; }
 .hii-prompt-commands b { color: var(--ink); font-weight: 400; }
+
+.hii-prompt-menu { display: grid; padding: 5px; border-top: 1px solid var(--faint); }
+.hii-prompt-menu button {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto 16px;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+}
+.hii-prompt-menu button:hover, .hii-prompt-menu button:focus-visible { outline: 0; background: rgba(0,0,0,.06); }
+.hii-prompt-menu kbd, .hii-prompt-panel kbd { color: var(--muted); font: 9px/1.2 "SF Mono", ui-monospace, monospace; }
+
+.hii-prompt-panel { display: grid; border-top: 1px solid var(--faint); color: var(--muted); }
+.hii-prompt-panel > header { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; min-height: 36px; padding: 0 8px 0 5px; border-bottom: 1px solid var(--faint); }
+.hii-prompt-panel > header button { display: grid; width: 26px; height: 26px; padding: 0; place-items: center; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.hii-prompt-panel > header button:hover, .hii-prompt-panel > header button:focus-visible { outline: 0; background: rgba(0,0,0,.06); color: var(--ink); }
+.hii-prompt-panel > header strong { color: var(--ink); font-size: 11px; font-weight: 600; }
+.hii-prompt-command-list { display: grid; max-height: 250px; padding: 5px; overflow: auto; }
+.hii-prompt-command-list + .hii-prompt-command-list { border-top: 1px solid var(--faint); }
+.hii-prompt-command-list span { display: grid; grid-template-columns: 145px minmax(0, 1fr); align-items: center; gap: 10px; min-height: 28px; padding: 0 8px; }
+.hii-prompt-command-list b { color: var(--ink); font-size: 11px; font-weight: 400; }
+.hii-prompt-command-list[data-slash-commands] { max-height: 180px; }
+.hii-prompt-setting { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 34px; padding: 0 12px; border-bottom: 1px solid var(--faint); font-size: 11px; }
+.hii-prompt-setting b { overflow: hidden; color: var(--ink); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.hii-prompt-modes { display: flex; gap: 3px; padding: 8px 9px 5px; }
+.hii-prompt-modes button { padding: 5px 7px; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; font: 9px/1 "SF Mono", ui-monospace, monospace; text-transform: uppercase; }
+.hii-prompt-modes button:hover { color: var(--ink); }
+.hii-prompt-modes button[aria-pressed="true"] { background: var(--ink); color: var(--field); }
+.hii-prompt-panel > small { padding: 1px 12px 10px; font: 9px/1.4 "SF Mono", ui-monospace, monospace; }
 
 .hii-context-preflight {
   display: grid;

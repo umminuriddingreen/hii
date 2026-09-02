@@ -268,7 +268,8 @@ fn jsonl_agent_activity(value: &Value) -> Option<AgentActivityV1> {
 
 fn jsonl_user_kind(value: &Value) -> Option<&'static str> {
     match value.get("event")?.as_str()? {
-        "run.finished" => Some("result"),
+        "assistant.stream.delta" => Some("delta"),
+        "run.finished" => Some("summary"),
         "run.blocked" | "run.interrupted" | "budget.exceeded" => Some("status"),
         "tool.started" | "tool.result" => Some("activity"),
         _ => None,
@@ -299,6 +300,7 @@ fn jsonl_user_message(value: &Value) -> Option<String> {
     let data = value.get("data").unwrap_or(&Value::Null);
     let string = |key: &str| data.get(key).and_then(Value::as_str);
     match event {
+        "assistant.stream.delta" => string("content").map(str::to_owned),
         "tool.started" => {
             let tool = string("tool").unwrap_or("tool");
             let target = string("target").unwrap_or("working");
@@ -859,6 +861,16 @@ mod tests {
             jsonl_receipt_path(&event).as_deref(),
             Some("/tmp/receipt.json")
         );
+    }
+
+    #[test]
+    fn assistant_content_streams_as_exact_visible_deltas() {
+        let event = json!({
+            "event": "assistant.stream.delta",
+            "data": { "content": " next token", "offset": 11 }
+        });
+        assert_eq!(jsonl_user_kind(&event), Some("delta"));
+        assert_eq!(jsonl_user_message(&event).as_deref(), Some(" next token"));
     }
 
     #[test]

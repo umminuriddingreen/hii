@@ -1,56 +1,68 @@
-# HII web and macOS parity design QA
+# HII Command-K bar design QA
 
-- Canonical macOS reference: `/Users/ummi/Desktop/Screenshot 2026-09-02 at 1.17.31 AM.png`
-- Before-state web reference: `/Users/ummi/Desktop/Screenshot 2026-09-02 at 1.17.24 AM.png`
-- Reference pixels: macOS 2890 x 1938; web 2640 x 1944
-- Target state: authenticated desktop web canvas at a fine-pointer viewport
-- Implementation screenshot: unavailable
+- Source visual truth: `/Users/ummi/Desktop/Screenshot 2026-09-02 at 1.34.27 AM.png`
+- Normalized source: `/tmp/hii-textbar-ref/reference-normalized.png`
+- Installed implementation: `/var/folders/hx/fjz8vhld0q9gmwxpbm3knjw40000gn/T/codex-shot-2026-09-02_01-45-05.png`
+- Normalized implementation: `/tmp/hii-textbar-ref/implementation-normalized.png`
+- Combined comparison: `/tmp/hii-textbar-ref/comparison.png`
+- Source pixels: 1404 x 786
+- Implementation pixels: 3104 x 2144; installed HII window 1440 x 960 CSS px
+- Comparison pixels: both views normalized to 1404 x 786
+- State: installed macOS HII app, one selected canvas object, Command-K prompt idle
 
-## Comparison evidence
+## Full-view comparison evidence
 
-The two supplied screenshots were normalized and inspected together. The visible
-difference was structural: the web surface added an account header and always-on
-canvas toolbar, while the macOS app used an adaptive, chrome-free canvas.
+The combined comparison places the supplied reference beside the installed app.
+The reference has a roughly 380 px-tall card containing context, five modes, an
+instruction, and an error. The implementation keeps the same white, rounded,
+near-cursor visual language but reduces the default Command-K surface to a
+single 42 px input row. Canvas content remains visible around it.
 
-The implementation now uses the same canonical `HiiRoot` in adaptive-chrome
-mode. Fine-pointer desktop web hides the account header and canvas toolbar;
-opening the command surface reveals the toolbar. Touch viewports retain visible
-controls.
+## Focused region comparison evidence
 
-A rendered after-state comparison is blocked. The in-app browser and Chrome
-browser-runtime targets both reported that no browser was available. The
-OS-level Chrome fallback could not reliably isolate the newly opened HII window
-from the user's existing Chrome windows, so capture was stopped without using
-or changing existing browser content.
+The Command-K region is readable in the combined comparison without another
+crop. The implementation preserves the ellipsis, text entry, microphone,
+rounded border, and soft shadow while removing all default secondary chrome.
+Response content opens directly below the bar only after a real model delta or
+terminal state arrives.
 
 ## Functional verification
 
-- Desktop web: Command/Control-1 toggles account and workspace controls.
-- Desktop web: Command-Space or Option-Space opens trusted HII Remote handoff.
-- Touch web: visible account and canvas controls remain present.
-- Existing account-canvas note, text, draw, import, zoom, undo, redo, delete,
-  canvas-manager, sharing, and persistence paths remain on canonical `HiiRoot`.
-- Focused interaction contract: 26 tests passed.
-- Type check: passed.
-- Production web build: passed.
+- Installed `/Applications/HII.app` opened the compact bar from Command-K.
+- The ellipsis menu exposes Commands and Settings.
+- Question mark opens the full keyboard command reference from the canvas.
+- Settings changes Build, Plan, Browse, See, and Present mode.
+- Tauri now forwards exact `assistant.stream.delta` content.
+- The web bridge preserves leading whitespace in response deltas.
+- Tool/status events do not pollute the direct model response.
+- 29 focused tests passed, including three response-stream tests and four
+  command-bar contract tests.
+- TypeScript check passed.
+- Focused Rust streaming test passed.
+- Signed Tauri build, installation, relaunch, and codesign verification passed.
 
 ## Findings
 
-- [P1] Final rendered fidelity is not verified.
-  Location: authenticated desktop web canvas.
-  Evidence: both integrated browser targets were unavailable and the safe
-  OS-level fallback could not isolate the HII preview window.
-  Impact: the structural parity is code- and test-verified, but exact rendered
-  spacing and viewport fidelity cannot yet be claimed.
-  Fix: capture the authenticated local preview at the same viewport as the
-  macOS reference and compare both images in one visual input.
+- [P2] Commands and Settings expanded states were not captured from the installed app.
+  Location: Command-K ellipsis menu and question-mark command reference.
+  Evidence: their behavior and styles are covered by focused tests, but only the
+  collapsed Command-K state was captured before input automation was stopped.
+  Impact: default-state fidelity is verified; expanded-state visual polish still
+  needs one human inspection.
+  Fix: press `?`, then open `••• → Settings`, and inspect the two compact panels.
 
 ## Required fidelity surfaces
 
-- Canvas and typography: shared canonical `HiiRoot`; rendered match blocked.
-- Persistent chrome: removed for fine-pointer desktop web.
-- Command chrome: available on demand; visible on touch.
-- Native authority: web routes terminal and assistant authority to trusted HII
-  Remote rather than pretending a browser has local Tauri capabilities.
+- Fonts and typography: compact 14 px input and 13 px streamed output match the native canvas hierarchy.
+- Spacing and layout rhythm: default prompt reduced to one 42 px row with 28 px controls.
+- Colors and visual tokens: existing HII white field, gray controls, faint border, and shadow retained.
+- Image quality and asset fidelity: no new raster assets or approximated icons; existing Phosphor icons are used.
+- Copy and content: `Ask HII…`, Commands, Settings, Direct model stream, modes, keyboard commands, and slash commands are present.
+
+## Comparison history
+
+- Initial reference: large persistent mode/context/error card obscured the canvas.
+- Revision: default Command-K state reduced to the minimal prompt row; modes moved into Settings; keyboard and slash commands moved into Commands; actual model deltas render below the row.
+- Post-fix evidence: installed-app screenshot and combined comparison confirm the compact default state.
 
 final result: blocked

@@ -58,7 +58,7 @@ export type AgentEventV1 = {
   version: 1;
   runId: string;
   status: 'started' | 'progress' | 'completed' | 'failed' | 'cancelled';
-  kind?: 'activity' | 'result' | 'status';
+  kind?: 'activity' | 'delta' | 'summary' | 'result' | 'status';
   text?: string;
   receiptPath?: string;
   activity?: {
@@ -515,9 +515,9 @@ export async function startAgent(request: AgentRequestV1): Promise<AgentStartRes
     try {
       const state = await developmentRequest<AgentEventV1>(`/agent/${started.runId}`);
       const nextText = state.text || '';
-      const delta = nextText.startsWith(previousText) ? nextText.slice(previousText.length).trimStart() : nextText;
+      const delta = nextText.startsWith(previousText) ? nextText.slice(previousText.length) : nextText;
       if (delta || state.status !== previousStatus || state.receiptPath) {
-        for (const listener of webAgentListeners) listener({ ...state, text: delta || undefined });
+        for (const listener of webAgentListeners) listener({ ...state, kind: delta ? 'delta' : state.kind, text: delta || undefined });
       }
       previousText = nextText;
       previousStatus = state.status;

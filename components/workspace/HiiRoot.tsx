@@ -3,8 +3,12 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle,
+  CaretLeft,
+  CaretRight,
+  Command,
   CornersOut,
   DotsThree,
+  GearSix,
   Globe,
   ListBullets,
   Minus,
@@ -77,7 +81,6 @@ import { applicationSeed } from '@/lib/workspace/application-seed';
 import { UpdateBanner } from './UpdateBanner';
 import { NodeFrame } from './NodeFrame';
 import { ShellTerminal } from './ShellTerminal';
-import { InferenceConstellation } from './InferenceConstellation';
 import { packagePlacementSeed, WAYMARK_PACKAGE, type HiiMarketplacePackage } from '@/lib/marketplace/catalog';
 import { KEY_ZOOM_STEP, cameraKeyIntent, useCamera } from './useCamera';
 import { useWorkspace, type WorkspacePersistence } from './useWorkspace';
@@ -91,6 +94,7 @@ import { canvasManagerFocusNodes, type CanvasManagerBoard } from '@/lib/workspac
 import { CanvasManager } from './CanvasManager';
 import { nodesInMarquee, type MarqueeRect } from '@/lib/workspace/selection';
 import { historyShortcut } from '@/lib/workspace/history-shortcut';
+import { mergeAgentResponse } from '@/lib/workspace/agent-stream';
 import { browserCanvasAssetUrl } from '@/lib/web/canvas-assets';
 import { VoiceInputButton } from './VoiceInputButton';
 
@@ -208,9 +212,37 @@ type PromptState = {
   objectId?: string;
   conversationId?: string;
   contextPack?: ContextPackV1;
-  inferenceEvent?: AgentEventV1;
+  menu?: 'commands' | 'settings';
 };
 const RESPONSE_URL = /(https?:\/\/[^\s<>()]+)/g;
+
+const promptSlashCommands = [
+  ['/codex <task>', 'Run with Codex'],
+  ['/claude <task>', 'Run with Claude'],
+  ['/model [name]', 'Choose a local model'],
+  ['/proof', 'Inspect the latest receipt'],
+  ['/presentation [direction]', 'Make an editable presentation'],
+  ['/status', 'Show HII state'],
+  ['/terminal [folder]', 'Create a local terminal'],
+  ['/browser [url]', 'Open the native browser'],
+  ['/search <query>', 'Search inside the native browser'],
+  ['/marketplace', 'Open apps, skills, and runtimes']
+] as const;
+
+const promptKeyboardCommands = [
+  ['⌘ K', 'Ask HII'],
+  ['⌘ Space / ⌥ Space', 'Open or hide the HII terminal'],
+  ['⌘ ⇧ T', 'Move the terminal between dock and canvas'],
+  ['⌘ ⇧ B', 'Open the native browser'],
+  ['⌘ U', 'Import files'],
+  ['⌘ Z / ⇧ ⌘ Z', 'Undo / redo'],
+  ['⇧ Tab', 'Cycle Build, Plan, Browse, See, Present'],
+  ['?', 'Show all commands'],
+  ['0', 'Fit the canvas'],
+  ['Arrow keys', 'Pan, or move selected objects'],
+  ['Delete', 'Remove selected objects'],
+  ['Esc', 'Dismiss, clear, or open canvas manager']
+] as const;
 
 function text(value: unknown) {
   return typeof value === 'string' ? value : '';
@@ -708,7 +740,7 @@ function Prompt({
   status,
   timeline,
   contextPack,
-  inferenceEvent,
+  initialMenu,
   presentation = 'floating',
   workspaceLabel = 'HII workspace',
   selectedCount = 0,
@@ -725,7 +757,7 @@ function Prompt({
   status: 'idle' | 'running' | 'completed' | 'failed';
   timeline: ObjectConversationTurn[];
   contextPack?: ContextPackV1;
-  inferenceEvent?: AgentEventV1;
+  initialMenu?: 'commands' | 'settings';
   onDismiss: () => void;
   onMode: (mode: CanvasModeId) => void;
   onApproveContext: () => void;
@@ -735,50 +767,37 @@ function Prompt({
   selectedCount?: number;
 }) {
   const [value, setValue] = useState(initialValue);
-  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [menu, setMenu] = useState<'root' | 'commands' | 'settings' | null>(initialMenu || null);
   const input = useRef<HTMLInputElement | null>(null);
   const commands = value.startsWith('/')
-    ? [
-        ['/codex <task>', 'run with Codex'],
-        ['/claude <task>', 'run with Claude'],
-        ['/model [name]', 'choose a local model'],
-        ['/proof', 'inspect the latest receipt'],
-        ['/presentation [direction]', 'make an editable presentation from this context'],
-        ['/status', 'show HII state'],
-        ['/terminal [folder]', 'create a local terminal object'],
-        ['/browser [url]', 'open the native development browser'],
-        ['/search <query>', 'search inside the native webview'],
-        ['/music', 'open profile playlists'],
-        ['/marketplace', 'install apps, experiences, skills, and runtimes']
-      ].filter(([command]) => command.startsWith(value.trim().toLowerCase()) || value.trim() === '/')
+    ? promptSlashCommands.filter(([command]) => command.startsWith(value.trim().toLowerCase()) || value.trim() === '/')
     : [];
   const submit = () => {
     if (value.trim() && status !== 'running' && !contextPack) onSubmit(value.trim());
   };
   useEffect(() => { input.current?.focus(); }, []);
   const floating = presentation === 'floating';
-  const inferenceVisible = status === 'running' && !contextPack;
-  const promptWidth = Math.min(640, window.innerWidth - 32);
+  const running = status === 'running' && !contextPack;
+  const visibleResponse = isAgentPlaceholder(response) ? '' : response;
+  const promptWidth = Math.min(560, window.innerWidth - 24);
   const promptLeft = Math.max(16, Math.min(anchor.x - 14, window.innerWidth - promptWidth - 16));
-  const promptTop = Math.max(16, Math.min(anchor.y + 14, window.innerHeight - 90));
-  const shellStyle = inferenceVisible
-    ? { left: '50%', top: '50%', right: 'auto', bottom: 'auto', width: 'min(920px, calc(100vw - 32px))', maxHeight: 'none', overflow: 'visible', transform: 'translate(-50%, -50%)' }
-    : floating ? { left: promptLeft, top: promptTop } : undefined;
+  const promptTop = Math.max(12, Math.min(anchor.y + 14, window.innerHeight - 64));
+  const shellStyle = floating ? { left: promptLeft, top: promptTop, width: promptWidth } : undefined;
   return (
     <div
       className={floating ? 'hii-prompt-shell' : 'hii-assistant-terminal-shell'}
       style={shellStyle}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <form className="hii-prompt" data-mode={mode} data-status={status} data-presentation={presentation} data-inference={inferenceVisible || undefined} onSubmit={(event) => { event.preventDefault(); submit(); }}>
-        {!inferenceVisible && objectTitle && (
+      <form className="hii-prompt" data-mode={mode} data-status={status} data-presentation={presentation} onSubmit={(event) => { event.preventDefault(); submit(); }}>
+        {objectTitle && (
           <div className="hii-prompt-context">
             <span>Conversation with</span>
             <strong>{objectTitle}</strong>
             <small>{timeline.length} turn{timeline.length === 1 ? '' : 's'}</small>
           </div>
         )}
-        {!inferenceVisible && timeline.length > 0 && (
+        {timeline.length > 0 && (
           <ol className="hii-conversation-timeline" aria-label={`Conversation timeline for ${objectTitle || 'canvas'}`}>
             {timeline.slice(-8).map((turn) => (
               <li key={turn.id} data-role={turn.role} data-status={turn.status}>
@@ -789,11 +808,11 @@ function Prompt({
             ))}
           </ol>
         )}
-        {!inferenceVisible && <div className="hii-prompt-line">
-          <button type="button" className="hii-prompt-options-toggle" aria-label="HII options" aria-expanded={optionsOpen} onClick={() => setOptionsOpen((open) => !open)}><DotsThree size={20} weight="bold" /></button>
+        <div className="hii-prompt-line">
+          <button type="button" className="hii-prompt-options-toggle" aria-label="Commands and settings" aria-expanded={Boolean(menu)} onClick={() => setMenu((open) => open ? null : 'root')}><DotsThree size={18} weight="bold" /></button>
           <input
             ref={input}
-            disabled={Boolean(contextPack)}
+            disabled={Boolean(contextPack) || running}
             value={value}
             onChange={(event) => setValue(event.target.value)}
             onKeyDown={(event) => {
@@ -813,27 +832,40 @@ function Prompt({
                 submit();
               }
             }}
-            placeholder={response ? 'Continue…' : 'Ask HII'}
+            placeholder={response ? 'Continue…' : 'Ask HII…'}
             aria-label="Tell HII what should happen"
             autoComplete="off"
             spellCheck
           />
           <VoiceInputButton
             className="hii-prompt-voice"
-            disabled={Boolean(contextPack) || status === 'running'}
+            disabled={Boolean(contextPack) || running}
             onTranscript={(transcript) => setValue((current) => `${current.trimEnd()}${current.trim() ? ' ' : ''}${transcript}`)}
           />
+        </div>
+        {menu === 'root' && <div className="hii-prompt-menu" aria-label="HII menu">
+          <button type="button" onClick={() => setMenu('commands')}><Command size={16} /><span>Commands</span><kbd>?</kbd><CaretRight size={14} /></button>
+          <button type="button" onClick={() => setMenu('settings')}><GearSix size={16} /><span>Settings</span><CaretRight size={14} /></button>
         </div>}
-        {!inferenceVisible && optionsOpen && <div className="hii-prompt-options" aria-label="HII context and modes">
-          <header><span>{workspaceLabel}</span><small>{selectedCount ? `${selectedCount} selected` : 'whole workspace'}</small></header>
-          <div>{canvasModes.map((item) => (
+        {menu === 'commands' && <section className="hii-prompt-panel" aria-label="All HII commands">
+          <header><button type="button" aria-label="Back" onClick={() => setMenu('root')}><CaretLeft size={15} /></button><strong>Commands</strong><kbd>?</kbd></header>
+          <div className="hii-prompt-command-list">
+            {promptKeyboardCommands.map(([shortcut, description]) => <span key={shortcut}><kbd>{shortcut}</kbd><b>{description}</b></span>)}
+          </div>
+          <div className="hii-prompt-command-list" data-slash-commands>
+            {promptSlashCommands.map(([command, description]) => <span key={command}><kbd>{command}</kbd><b>{description}</b></span>)}
+          </div>
+        </section>}
+        {menu === 'settings' && <section className="hii-prompt-panel" aria-label="HII prompt settings">
+          <header><button type="button" aria-label="Back" onClick={() => setMenu('root')}><CaretLeft size={15} /></button><strong>Settings</strong></header>
+          <div className="hii-prompt-setting"><span>Output</span><b>Direct model stream</b></div>
+          <div className="hii-prompt-setting"><span>Context</span><b>{selectedCount ? `${selectedCount} selected` : workspaceLabel}</b></div>
+          <div className="hii-prompt-modes" aria-label="Agent mode">{canvasModes.map((item) => (
             <button key={item.id} type="button" disabled={Boolean(contextPack)} aria-pressed={item.id === mode} onClick={() => onMode(item.id)}>{item.label}</button>
           ))}</div>
           <small>{canvasMode(mode).description} · ⇧ Tab cycles modes</small>
-        </div>}
-        {inferenceVisible
-          ? <InferenceConstellation prompt={initialValue} observedOutput={isAgentPlaceholder(response) ? '' : response} agentEvent={inferenceEvent} />
-          : response && <PromptResponse value={response} running={false} />}
+        </section>}
+        {(running || visibleResponse) && <PromptResponse value={visibleResponse} running={running} />}
         {contextPack && (
           <section className="hii-context-preflight" aria-label="Context review">
             <header>
@@ -849,7 +881,7 @@ function Prompt({
             <code>{contextPack.fingerprint.slice(0, 18)}…</code>
           </section>
         )}
-        {!inferenceVisible && commands.length > 0 && <div className="hii-prompt-commands" aria-label="HII commands">{commands.map(([command, description]) => <span key={command}><b>{command}</b>{description}</span>)}</div>}
+        {commands.length > 0 && <div className="hii-prompt-commands" aria-label="Matching HII commands">{commands.map(([command, description]) => <span key={command}><b>{command}</b>{description}</span>)}</div>}
       </form>
     </div>
   );
@@ -1755,12 +1787,10 @@ export function HiiRoot({
             status: event.status === 'failed' ? 'failed' : event.status === 'completed' ? 'completed' : 'running'
           };
         }
-        const prior = isAgentPlaceholder(current.response) ? '' : current.response;
-        const response = event.text ? `${prior}${prior ? '\n' : ''}${event.text}` : prior || 'Thinking…';
+        const response = mergeAgentResponse(current.response, event);
         return {
           ...current,
           response,
-          inferenceEvent: event,
           status: event.status === 'failed' ? 'failed' : event.status === 'completed' ? 'completed' : 'running'
         };
       });
@@ -1933,6 +1963,19 @@ export function HiiRoot({
           }
           setToolMessage(`Moved ${selected.length} object${selected.length === 1 ? '' : 's'} ${step} point${step === 1 ? '' : 's'}.`);
         }
+        return;
+      }
+      if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && event.key === '?') {
+        event.preventDefault();
+        setPrompt({
+          anchor: mouse.current,
+          initialValue: '',
+          response: '',
+          status: 'idle',
+          menu: 'commands'
+        });
+        setPromptPresentation('floating');
+        setPromptVisible(true);
         return;
       }
       if (event.key === 'Tab' && event.shiftKey) {
@@ -2317,14 +2360,14 @@ export function HiiRoot({
       )}
       {runtimeEnabled && promptVisible && prompt && (
         <Prompt
-          key={`${prompt.anchor.x}:${prompt.anchor.y}:${prompt.initialValue}`}
+          key={`${prompt.anchor.x}:${prompt.anchor.y}:${prompt.initialValue}:${prompt.menu || 'closed'}`}
           anchor={prompt.anchor}
           initialValue={prompt.initialValue}
           mode={mode}
           objectTitle={prompt.objectId ? titleFor(workspace.nodes.find((node) => node.id === prompt.objectId) || ({ type: 'context', payload: {} } as WorkspaceNode)) : undefined}
           response={prompt.response}
           status={prompt.status}
-          inferenceEvent={prompt.inferenceEvent}
+          initialMenu={prompt.menu}
           contextPack={prompt.contextPack}
           presentation={promptPresentation}
           workspaceLabel={spaceId ? `workspace · ${spaceId}` : 'working in ~/hii'}
