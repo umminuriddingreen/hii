@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-BSL-1.1
-import { ImageResponse } from 'next/og';
 import { SITE_TAGLINE } from '@/lib/site';
 
 export const alt = 'HII — Human Information Interface';
@@ -10,8 +9,17 @@ export const contentType = 'image/png';
  * The share card is the public surface rendered at card scale: white field,
  * monospace kicker, one tightly tracked line. Generated at build time so it can
  * never drift from the wordmark it is quoting.
+ *
+ * The card exists for link unfurls, which only the web surface has. The
+ * desktop bundle is served over hiiui:// and is never unfurled, so it skips
+ * the card entirely — which also keeps `next/og` out of the desktop build,
+ * where its Windows path handling cannot prerender.
  */
-export default function OpengraphImage() {
+export default async function OpengraphImage() {
+  if (process.env.NEXT_PUBLIC_HII_TARGET === 'desktop') {
+    return new Response(null, { status: 404 });
+  }
+  const { ImageResponse } = await import('next/og');
   return new ImageResponse(
     (
       <div
