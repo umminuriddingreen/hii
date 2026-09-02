@@ -3,7 +3,7 @@ import 'server-only';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { runtimeRoot } from '@/lib/server/runtime-root';
+import { runtimeRoot } from './runtime-root.ts';
 
 export type SyncRecord = {
   id: string;

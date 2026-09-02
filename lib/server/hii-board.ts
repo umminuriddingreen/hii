@@ -2,7 +2,7 @@ import 'server-only';
 import { appendFile, mkdir, readFile } from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { runtimeRoot } from '@/lib/server/runtime-root';
+import { runtimeRoot } from './runtime-root.ts';
 
 export type BoardLane = 'backlog' | 'next' | 'doing' | 'blocked' | 'done';
 export type BoardPriority = 'low' | 'normal' | 'high' | 'urgent';

@@ -19,7 +19,7 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { atomicWriteFile, withFileLock } from './atomic-write.ts';
-import { runtimeRoot } from '@/lib/server/runtime-root';
+import { runtimeRoot } from './runtime-root.ts';
 import {
   SPACE_ID_PATTERN,
   defaultSpacePolicy,

@@ -8,7 +8,7 @@ import { redactProcessLine } from '@/lib/server/hii-terminal';
 import { visibleRunOutput } from '@/lib/workspace/run-output';
 import { listCapabilityJobs } from '@/lib/capabilities/local-store';
 import { summarizeHiiDaemonHealth } from '@/lib/workspace/daemon-health';
-import { homeDirectory, runtimeRoot } from '@/lib/server/runtime-root';
+import { homeDirectory, runtimeRoot } from './runtime-root.ts';
 
 const execFileAsync = promisify(execFile);
 
