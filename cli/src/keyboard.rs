@@ -85,6 +85,7 @@ pub struct LiveInput {
     stream_column: usize,
     terminal_width: usize,
     stream_active: bool,
+    has_committed_output: bool,
 }
 
 impl LiveInput {
@@ -104,6 +105,7 @@ impl LiveInput {
                 .unwrap_or(80)
                 .max(1),
             stream_active: true,
+            has_committed_output: false,
         };
         input.begin_stream()?;
         Ok(Some(input))
@@ -151,6 +153,9 @@ impl LiveInput {
     }
 
     pub fn write_stream(&mut self, delta: &str) -> Result<()> {
+        if !delta.is_empty() {
+            self.has_committed_output = true;
+        }
         let mut out = io::stdout();
         for ch in delta.chars() {
             if ch == '\n' {
@@ -223,12 +228,23 @@ impl LiveInput {
             return;
         }
         let mut out = io::stdout();
-        let _ = write!(
-            out,
-            "\r\n\x1b[2K\x1b[2B\r\x1b[2K\x1b[1A\r\x1b[2K\x1b[1A\r\x1b[2K"
-        );
+        let _ = write!(out, "{}", finish_stream_sequence(self.has_committed_output));
         let _ = out.flush();
         self.stream_active = false;
+    }
+}
+
+fn finish_stream_sequence(has_committed_output: bool) -> &'static str {
+    if has_committed_output {
+        // The current row is durable model output. Clear the composer and
+        // inference rows below it, then leave the cursor on the blank row
+        // immediately after the response. Moving back onto the stream row
+        // would erase a one-line answer (or the last line of a longer one).
+        "\r\n\x1b[2K\x1b[1B\r\x1b[2K\x1b[1A\r"
+    } else {
+        // No reply bytes were committed, so the current activity row remains
+        // transient and can be removed with the rest of the live composer.
+        "\r\n\x1b[2K\x1b[2B\r\x1b[2K\x1b[1A\r\x1b[2K\x1b[1A\r\x1b[2K"
     }
 }
 
@@ -800,6 +816,16 @@ pub fn confirm_suggestion() -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finishing_committed_output_never_moves_back_onto_the_reply_row() {
+        assert_eq!(
+            finish_stream_sequence(true),
+            "\r\n\x1b[2K\x1b[1B\r\x1b[2K\x1b[1A\r"
+        );
+        assert!(!finish_stream_sequence(true).contains("\x1b[2A"));
+        assert_ne!(finish_stream_sequence(true), finish_stream_sequence(false));
+    }
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
