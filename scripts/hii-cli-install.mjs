@@ -8,6 +8,7 @@ import {
   renameSync,
   rmSync
 } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,8 +40,20 @@ export function installLauncher(options = {}) {
   return { source, destination };
 }
 
+function buildBrowserAdapter() {
+  const browser = path.join(root, 'browser');
+  const build = spawnSync('npm', ['run', 'build'], {
+    cwd: browser,
+    stdio: 'inherit',
+    shell: process.platform === 'win32'
+  });
+  if (build.error) throw new Error(`Unable to start the HII browser build: ${build.error.message}`);
+  if (build.status !== 0) throw new Error(`HII browser build exited with ${build.status}`);
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
+    buildBrowserAdapter();
     const installed = installLauncher();
     console.log(`hii CLI launcher installed: ${installed.destination}`);
     console.log('The launcher executes the release binary directly and builds only when that binary is missing.');

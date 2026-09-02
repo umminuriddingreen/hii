@@ -3683,7 +3683,7 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         "/keymap" => SlashCommand::Keymap(argument),
         "/raw" => match rest {
             "" | "on" => SlashCommand::Thinking(Some("raw".into())),
-            "off" => SlashCommand::Thinking(Some("compact".into())),
+            "off" => SlashCommand::Thinking(Some("stream".into())),
             _ => SlashCommand::Unknown(input.into()),
         },
         "/model" => SlashCommand::Model(argument),
@@ -3895,6 +3895,7 @@ fn status(paths: &AppPaths, cwd: Option<PathBuf>, json: bool) -> Result<(), Stri
 
 fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
     let workspace = workspace(cwd)?;
+    let ollama = Ollama::discover();
     let checks = [
         (
             "Rust binary",
@@ -3953,11 +3954,7 @@ fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
             "Model endpoint",
             true,
             "",
-            format!(
-                "{} ({:?})",
-                AppPaths::model_url(),
-                config::ModelProvider::discover(&AppPaths::model_url())
-            ),
+            format!("{} ({:?})", ollama.base_url(), ollama.provider()),
         ),
     ];
     let mut ok = true;
@@ -3971,7 +3968,6 @@ fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
             fixes.push(format!("{name}: {fix}"));
         }
     }
-    let ollama = Ollama::discover();
     match ollama.models() {
         Ok(models) => {
             let default_model = ollama.provider().default_model();
@@ -4013,7 +4009,7 @@ fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
                 "{}: no model backend answered at {}; start it, or set HII_MODEL_URL to one \
                  that is running",
                 ollama.provider_label(),
-                AppPaths::model_url()
+                ollama.base_url()
             ));
         }
     }
@@ -6522,7 +6518,7 @@ mod tests {
         assert_eq!(parse_slash_command("/new"), Some(SlashCommand::Clear));
         assert_eq!(
             parse_slash_command("/raw off"),
-            Some(SlashCommand::Thinking(Some("compact".into())))
+            Some(SlashCommand::Thinking(Some("stream".into())))
         );
         assert_eq!(
             parse_slash_command("/reasoning auto"),

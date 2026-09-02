@@ -1,11 +1,13 @@
 use crate::attachments::ImagePayload;
 use crate::budget::Cancel;
-use crate::config::ModelProvider;
+use crate::config::{ModelProvider, OX_ALPHA_WEB_MODEL, OX_ALPHA_WEB_URL};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Write},
     net::ToSocketAddrs,
+    path::PathBuf,
+    process::{Command, Stdio},
     sync::mpsc,
     time::{Duration, Instant},
 };
@@ -205,8 +207,18 @@ impl Ollama {
         if std::env::var_os("HII_MODEL_URL").is_some()
             || std::env::var_os("HII_OLLAMA_URL").is_some()
             || std::env::var_os("HII_RAPID_MLX_URL").is_some()
+            || std::env::var_os("HII_MODEL_PROVIDER").is_some()
         {
             return Self::new(crate::config::AppPaths::model_url());
+        }
+        if crate::config::AppPaths::discover()
+            .ok()
+            .and_then(|paths| paths.user_model_preference().ok().flatten())
+            .and_then(|preference| preference.provider)
+            .as_deref()
+            == Some(ModelProvider::OxAlphaWeb.id())
+        {
+            return Self::new(OX_ALPHA_WEB_URL.to_string());
         }
         Self::for_mode("auto")
     }
@@ -234,6 +246,10 @@ impl Ollama {
     /// explicit compatibility provider, never an automatic runtime dependency.
     /// An explicitly pinned model URL is never second-guessed.
     pub fn ensure_reachable(self) -> Result<Self, String> {
+        if self.provider == ModelProvider::OxAlphaWeb {
+            ox_alpha_browser_adapter()?;
+            return Ok(self);
+        }
         if endpoint_ready(&self.base_url) {
             return Ok(self);
         }
@@ -281,6 +297,10 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
                     .into_json()
                     .map_err(|error| format!("invalid model listing: {error}"))?;
                 Ok(response.data.into_iter().map(|model| model.id).collect())
+            }
+            ModelProvider::OxAlphaWeb => {
+                ox_alpha_browser_adapter()?;
+                Ok(vec![OX_ALPHA_WEB_MODEL.to_string()])
             }
         }
     }
@@ -362,6 +382,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             ModelProvider::LmStudio | ModelProvider::Native | ModelProvider::RapidMlx => {
                 self.chat_openai(model, &messages, format)
             }
+            ModelProvider::OxAlphaWeb => self.chat_website(model, &messages),
         };
         if let Ok(chat) = &result {
             log_llm_request(model, self.provider, &chat.usage);
@@ -463,6 +484,13 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         })
     }
 
+    /// Ox Alpha is controlled through the rendered website DOM in HII's
+    /// headless Chromium worker. HII supplies its bounded action protocol in
+    /// the prompt and remains the only tool executor.
+    fn chat_website(&self, model: &str, messages: &[Message]) -> Result<ChatResult, String> {
+        run_ox_alpha_browser(model, messages, &Cancel::new(), None)
+    }
+
     /// Stream an Ollama response so provider-supplied thinking can be rendered
     /// without inserting it into the next model request.
     /// Stream a completion.
@@ -508,6 +536,14 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         cancel: &Cancel,
         sender: mpsc::Sender<ChatStreamEvent>,
     ) {
+        if self.provider == ModelProvider::OxAlphaWeb {
+            let result = run_ox_alpha_browser(model, messages, cancel, Some(&sender));
+            if let Ok(result) = &result {
+                log_llm_request(model, self.provider, &result.usage);
+            }
+            let _ = sender.send(ChatStreamEvent::Done(result));
+            return;
+        }
         if self.provider != ModelProvider::Ollama {
             self.chat_openai_with_stream(model, messages, json_format, cancel, sender);
             return;
@@ -624,110 +660,245 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         cancel: &Cancel,
         sender: mpsc::Sender<ChatStreamEvent>,
     ) {
-        let mut body = json!({
-            "model": model,
-            "messages": openai_messages(messages),
-            "stream": true,
-            "stream_options": { "include_usage": true },
-            "temperature": 0.1,
-        });
-        if json_format {
-            body["response_format"] = json!({ "type": "json_object" });
-        }
         let started = Instant::now();
-        let response = match self
-            .agent
-            .post(&format!("{}/v1/chat/completions", self.base_url))
-            .send_json(body)
-            .map_err(format_ureq)
-        {
+        let response = match {
+            let mut body = json!({
+                "model": model,
+                "messages": openai_messages(messages),
+                "stream": true,
+                "stream_options": { "include_usage": true },
+                "temperature": 0.1,
+            });
+            if json_format {
+                body["response_format"] = json!({ "type": "json_object" });
+            }
+            self.agent
+                .post(&format!("{}/v1/chat/completions", self.base_url))
+                .send_json(body)
+                .map_err(format_ureq)
+        } {
             Ok(response) => response,
             Err(error) => {
                 let _ = sender.send(ChatStreamEvent::Done(Err(error)));
                 return;
             }
         };
+        let result = consume_openai_sse(response, started, cancel, Some(&sender));
+        if let Ok(result) = &result {
+            log_llm_request(model, self.provider, &result.usage);
+        }
+        let _ = sender.send(ChatStreamEvent::Done(result));
+    }
+}
 
-        let mut content = String::new();
-        let mut thinking = String::new();
-        let mut usage = ChatUsage::default();
-        let mut reported_durations = None;
-        let mut first_token_at = None;
-        let mut content_repetition = RepetitionGuard::default();
-        for line in BufReader::new(response.into_reader()).lines() {
-            if cancel.is_cancelled() {
-                let _ = sender.send(ChatStreamEvent::Done(Err(CANCELLED.into())));
-                return;
-            }
-            let line = match line {
-                Ok(line) => line,
-                Err(error) => {
-                    let _ = sender.send(ChatStreamEvent::Done(Err(format!(
-                        "failed to read model stream: {error}"
-                    ))));
-                    return;
+fn ox_alpha_browser_adapter() -> Result<PathBuf, String> {
+    let path = std::env::var_os("HII_OXALPHA_BROWSER_ADAPTER")
+        .map(PathBuf::from)
+        .or_else(|| {
+            crate::config::AppPaths::discover()
+                .ok()
+                .map(|paths| paths.repo.join("browser/dist/src/oxalpha-main.js"))
+        })
+        .ok_or_else(|| {
+            "Ox Alpha requires HII's Chromium worker; set HII_ROOT to a HII checkout".to_string()
+        })?;
+    if !path.is_file() {
+        return Err(format!(
+            "Ox Alpha browser adapter is missing at {}; run `npm --prefix browser run build`",
+            path.display()
+        ));
+    }
+    Ok(path)
+}
+
+fn ox_alpha_browser_prompt(messages: &[Message]) -> String {
+    let mut prompt = String::from(
+        "This conversation is being relayed by HII through the Ox Alpha website UI. HII owns and executes every tool. Follow the HII runtime instructions below exactly and return its flat JSON action protocol when a tool is needed.\n",
+    );
+    for message in messages {
+        prompt.push_str("\n");
+        prompt.push_str(&message.role.to_ascii_uppercase());
+        prompt.push_str(":\n");
+        prompt.push_str(&message.content);
+        prompt.push('\n');
+    }
+    prompt
+}
+
+fn run_ox_alpha_browser(
+    model: &str,
+    messages: &[Message],
+    cancel: &Cancel,
+    sender: Option<&mpsc::Sender<ChatStreamEvent>>,
+) -> Result<ChatResult, String> {
+    let adapter = ox_alpha_browser_adapter()?;
+    let started = Instant::now();
+    let mut child = Command::new("node")
+        .arg(&adapter)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|error| format!("could not start HII Chromium for Ox Alpha: {error}"))?;
+    let request = json!({
+        "model": model,
+        "prompt": ox_alpha_browser_prompt(messages),
+    });
+    let mut input = child
+        .stdin
+        .take()
+        .ok_or_else(|| "Ox Alpha browser adapter stdin is unavailable".to_string())?;
+    serde_json::to_writer(&mut input, &request)
+        .map_err(|error| format!("could not encode Ox Alpha browser request: {error}"))?;
+    input
+        .flush()
+        .map_err(|error| format!("could not send Ox Alpha browser request: {error}"))?;
+    drop(input);
+
+    let output = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Ox Alpha browser adapter stdout is unavailable".to_string())?;
+    let mut content = String::new();
+    let mut first_token_at = None;
+    let mut done = false;
+    for line in BufReader::new(output).lines() {
+        if cancel.is_cancelled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(CANCELLED.into());
+        }
+        let line = line.map_err(|error| format!("failed to read Ox Alpha DOM stream: {error}"))?;
+        let event: Value = serde_json::from_str(&line)
+            .map_err(|error| format!("invalid Ox Alpha DOM stream event: {error}"))?;
+        match event["type"].as_str() {
+            Some("delta") => {
+                let delta = event["content"].as_str().unwrap_or_default();
+                if !delta.is_empty() {
+                    first_token_at.get_or_insert_with(Instant::now);
+                    content.push_str(delta);
+                    if let Some(sender) = sender {
+                        let _ = sender.send(ChatStreamEvent::Content(delta.to_string()));
+                    }
                 }
-            };
-            let Some(data) = line.strip_prefix("data:").map(str::trim) else {
-                continue;
-            };
-            if data == "[DONE]" {
-                break;
             }
-            let value: Value = match serde_json::from_str(data) {
-                Ok(value) => value,
-                Err(error) => {
-                    let _ = sender.send(ChatStreamEvent::Done(Err(format!(
-                        "invalid model stream response: {error}"
-                    ))));
-                    return;
-                }
-            };
-            let delta = &value["choices"][0]["delta"];
-            if let Some(text) = openai_reasoning_delta(delta) {
-                first_token_at.get_or_insert_with(Instant::now);
-                thinking.push_str(text);
+            Some("done") => done = true,
+            Some("error") => {
+                let _ = child.wait();
+                return Err(format!(
+                    "Ox Alpha browser failed: {}",
+                    event["message"].as_str().unwrap_or("unknown DOM error")
+                ));
+            }
+            _ => {}
+        }
+    }
+    let status = child
+        .wait()
+        .map_err(|error| format!("could not finish Ox Alpha browser adapter: {error}"))?;
+    if !status.success() || !done || content.trim().is_empty() {
+        return Err("Ox Alpha browser closed before a complete rendered response".into());
+    }
+    let total_duration_ms = started.elapsed().as_millis() as u64;
+    let prompt_duration_ms = first_token_at
+        .map(|at| at.duration_since(started).as_millis() as u64)
+        .unwrap_or(total_duration_ms);
+    Ok(ChatResult {
+        content: content.clone(),
+        thinking: String::new(),
+        usage: ChatUsage {
+            prompt_tokens: ox_alpha_browser_prompt(messages).chars().count() as u64 / 4,
+            completion_tokens: content.chars().count() as u64 / 4,
+            prompt_duration_ms,
+            completion_duration_ms: total_duration_ms.saturating_sub(prompt_duration_ms),
+            total_duration_ms,
+        },
+    })
+}
+
+fn consume_openai_sse(
+    response: ureq::Response,
+    started: Instant,
+    cancel: &Cancel,
+    sender: Option<&mpsc::Sender<ChatStreamEvent>>,
+) -> Result<ChatResult, String> {
+    let mut content = String::new();
+    let mut thinking = String::new();
+    let mut usage = ChatUsage::default();
+    let mut reported_durations = None;
+    let mut first_token_at = None;
+    let mut content_repetition = RepetitionGuard::default();
+    for line in BufReader::new(response.into_reader()).lines() {
+        if cancel.is_cancelled() {
+            return Err(CANCELLED.into());
+        }
+        let line = line.map_err(|error| format!("failed to read model stream: {error}"))?;
+        let Some(data) = line.strip_prefix("data:").map(str::trim) else {
+            continue;
+        };
+        if data == "[DONE]" {
+            break;
+        }
+        let value: Value = serde_json::from_str(data)
+            .map_err(|error| format!("invalid model stream response: {error}"))?;
+        if let Some(error) = value.get("error") {
+            return Err(format!(
+                "model stream error: {}",
+                provider_error_message(error)
+            ));
+        }
+        let delta = &value["choices"][0]["delta"];
+        if let Some(text) = openai_reasoning_delta(delta) {
+            first_token_at.get_or_insert_with(Instant::now);
+            thinking.push_str(text);
+            if let Some(sender) = sender {
                 let _ = sender.send(ChatStreamEvent::Thinking(text.to_string()));
             }
-            if let Some(text) = delta["content"].as_str().filter(|text| !text.is_empty()) {
-                first_token_at.get_or_insert_with(Instant::now);
-                if content_repetition.observe(text) {
-                    let _ = sender.send(ChatStreamEvent::Done(Err(
-                        "MODEL LOOP DETECTED — the current generation repeated the same substantial block three times. The session is preserved; revise or retry the request."
-                            .into(),
-                    )));
-                    return;
-                }
-                content.push_str(text);
+        }
+        if let Some(text) = delta["content"].as_str().filter(|text| !text.is_empty()) {
+            first_token_at.get_or_insert_with(Instant::now);
+            if content_repetition.observe(text) {
+                return Err(
+                    "MODEL LOOP DETECTED — the current generation repeated the same substantial block three times. The session is preserved; revise or retry the request."
+                        .into(),
+                );
+            }
+            content.push_str(text);
+            if let Some(sender) = sender {
                 let _ = sender.send(ChatStreamEvent::Content(text.to_string()));
             }
-            if let Some(value) = value.get("usage") {
-                usage.prompt_tokens = value["prompt_tokens"].as_u64().unwrap_or(0);
-                usage.completion_tokens = value["completion_tokens"].as_u64().unwrap_or(0);
-                reported_durations =
-                    reported_durations.or_else(|| openai_reported_durations(value));
-            }
         }
-        // Prefer backend-reported timing; otherwise treat time-to-first-token as
-        // prompt evaluation and the remainder as completion.
-        let elapsed_ms = started.elapsed().as_millis() as u64;
-        let (prompt_ms, completion_ms, total_ms) = reported_durations.unwrap_or_else(|| {
-            let prompt_ms = first_token_at
-                .map(|at: Instant| at.duration_since(started).as_millis() as u64)
-                .unwrap_or(0);
-            (prompt_ms, elapsed_ms.saturating_sub(prompt_ms), elapsed_ms)
-        });
-        usage.prompt_duration_ms = prompt_ms;
-        usage.completion_duration_ms = completion_ms;
-        usage.total_duration_ms = total_ms;
-        let result = ChatResult {
-            content,
-            thinking,
-            usage,
-        };
-        log_llm_request(model, self.provider, &result.usage);
-        let _ = sender.send(ChatStreamEvent::Done(Ok(result)));
+        if let Some(value) = value.get("usage") {
+            usage.prompt_tokens = value["prompt_tokens"].as_u64().unwrap_or(0);
+            usage.completion_tokens = value["completion_tokens"].as_u64().unwrap_or(0);
+            reported_durations = reported_durations.or_else(|| openai_reported_durations(value));
+        }
     }
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    let (prompt_ms, completion_ms, total_ms) = reported_durations.unwrap_or_else(|| {
+        let prompt_ms = first_token_at
+            .map(|at: Instant| at.duration_since(started).as_millis() as u64)
+            .unwrap_or(0);
+        (prompt_ms, elapsed_ms.saturating_sub(prompt_ms), elapsed_ms)
+    });
+    usage.prompt_duration_ms = prompt_ms;
+    usage.completion_duration_ms = completion_ms;
+    usage.total_duration_ms = total_ms;
+    Ok(ChatResult {
+        content,
+        thinking,
+        usage,
+    })
+}
+
+fn provider_error_message(value: &Value) -> String {
+    value
+        .get("message")
+        .or_else(|| value.get("error"))
+        .and_then(Value::as_str)
+        .or_else(|| value.as_str())
+        .unwrap_or("unknown provider error")
+        .to_string()
 }
 
 fn pinned_model_url() -> bool {
@@ -1088,7 +1259,7 @@ fn format_ureq(error: ureq::Error) -> String {
 mod tests {
     use super::{
         acquired_native_model, openai_messages, openai_reasoning_delta, openai_reported_durations,
-        provider_messages, ChatUsage, Message, Ollama, RepetitionGuard,
+        ox_alpha_browser_prompt, provider_messages, ChatUsage, Message, Ollama, RepetitionGuard,
     };
     use crate::attachments::ImagePayload;
     use crate::config::ModelProvider;
@@ -1244,6 +1415,19 @@ mod tests {
         let client = Ollama::for_mode("auto");
         assert_eq!(client.base_url(), "http://127.0.0.1:11435");
         assert_eq!(client.provider(), ModelProvider::Native);
+    }
+
+    #[test]
+    fn website_dom_prompt_keeps_hii_instructions_and_conversation_roles() {
+        let prompt = ox_alpha_browser_prompt(&[
+            Message::system("HII tool protocol"),
+            Message::user("inspect"),
+            Message::assistant("working"),
+        ]);
+        assert!(prompt.contains("HII owns and executes every tool"));
+        assert!(prompt.contains("SYSTEM:\nHII tool protocol"));
+        assert!(prompt.contains("USER:\ninspect"));
+        assert!(prompt.contains("ASSISTANT:\nworking"));
     }
 
     #[test]

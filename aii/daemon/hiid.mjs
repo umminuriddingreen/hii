@@ -46,6 +46,7 @@ const MODEL_RUNTIME_URL = "http://127.0.0.1:11435";
 const MODEL_HOME = path.join(RUNTIME, "models");
 const HF_CACHE = path.join(MODEL_HOME, "huggingface", "hub");
 const MODEL_PROFILES = path.join(ROOT, "config", "native-model-profiles.json");
+const MODEL_PREFERENCE = path.join(RUNTIME, "config", "model.json");
 const CONTEXT_DB = path.join(RUNTIME, "hii.db");
 const OWNED_PATTERNS = [
   `${ROOT}/aii/daemon/hiid.mjs`,
@@ -1076,6 +1077,19 @@ function modelRuntimeStatus() {
 
 async function printModelRuntimeStatus() {
   const status = modelRuntimeStatus();
+  const preference = safeReadJson(MODEL_PREFERENCE, {});
+  const hosted = hostedModelCatalog().find((entry) => entry.provider === preference.provider);
+  status.selection = preference.provider ? {
+    provider: preference.provider,
+    model: preference.model || null,
+    endpoint: hosted?.endpoint || MODEL_RUNTIME_URL,
+    externalTransmission: Boolean(hosted?.externalTransmission)
+  } : {
+    provider: "native",
+    model: status.model || null,
+    endpoint: MODEL_RUNTIME_URL,
+    externalTransmission: false
+  };
   if (status.pid) {
     try {
       const response = await fetch(`${MODEL_RUNTIME_URL}/health`, { signal: AbortSignal.timeout(500) });
@@ -1131,6 +1145,25 @@ function modelSelectionCatalog() {
   return Array.isArray(manifest.selectionCatalog) ? manifest.selectionCatalog : [];
 }
 
+function hostedModelCatalog() {
+  const manifest = safeReadJson(MODEL_PROFILES, {});
+  return Array.isArray(manifest.hostedCatalog) ? manifest.hostedCatalog : [];
+}
+
+function resolveHostedModelSelection(value) {
+  const requested = String(value || "").trim().toLowerCase();
+  return hostedModelCatalog().find((entry) =>
+    entry.model.toLowerCase() === requested
+      || entry.provider.toLowerCase() === requested
+      || (entry.aliases || []).includes(requested)
+  ) || null;
+}
+
+function saveModelPreference(provider, model) {
+  writeJson(MODEL_PREFERENCE, { provider, model });
+  return MODEL_PREFERENCE;
+}
+
 function resolveModelSelection(value, command) {
   const requested = String(value || "").trim();
   const selected = modelSelectionCatalog().find((entry) =>
@@ -1178,7 +1211,12 @@ function modelRecommendations() {
           benchmark: "hii model bench"
         }
       };
-    })
+    }),
+    hostedChoices: hostedModelCatalog().map((entry) => ({
+      ...entry,
+      active: safeReadJson(MODEL_PREFERENCE, {}).provider === entry.provider,
+      commands: { use: `hii model use ${entry.aliases?.[0] || entry.model}` }
+    }))
   };
 }
 
@@ -1205,6 +1243,16 @@ function printModelRecommendations(args = []) {
     console.log(`   ${choice.speed} · ${choice.quality} · ~${choice.estimatedDiskGiB} GiB disk · ${(choice.capabilities || []).join(", ")}`);
     console.log(`   ${state}${measured}`);
     console.log(`   ${choice.installed ? "Use" : "Install"}: ${choice.installed ? choice.commands.use : choice.commands.install}\n`);
+  }
+  if (report.hostedChoices.length) {
+    console.log("Explicit external models\n");
+    for (const choice of report.hostedChoices) {
+      console.log(`- ${choice.role} [${choice.aliases?.[0] || choice.model}]${choice.active ? " · active" : ""}`);
+      console.log(`  ${choice.model} · ${(choice.capabilities || []).join(", ")}`);
+      console.log(`  ${choice.bestFor}`);
+      console.log(`  External transmission: explicit selection required`);
+      console.log(`  Use: ${choice.commands.use}\n`);
+    }
   }
   console.log("Explore more MLX models: hii model search <query>");
   console.log("Machine-readable view: hii model recommend --json");
@@ -1297,6 +1345,33 @@ async function waitForModelRuntimeStopped(timeoutMs = 30000) {
 }
 
 async function useModel(args) {
+  const hosted = resolveHostedModelSelection(args[0]);
+  if (hosted) {
+    if (hosted.provider === "ox-alpha-web") {
+      const adapter = path.join(ROOT, "browser", "dist", "src", "oxalpha-main.js");
+      if (!fs.existsSync(adapter)) {
+        throw new Error(`Ox Alpha browser adapter is not built; run: npm --prefix ${path.join(ROOT, "browser")} run build`);
+      }
+    }
+    const preference = saveModelPreference(hosted.provider, hosted.model);
+    event("model_runtime.hosted_selected", {
+      actor: "hii.cli",
+      target: hosted.model,
+      status: "selected",
+      text: `Selected ${hosted.role}; prompts now leave the machine through ${hosted.endpoint}`
+    });
+    console.log(JSON.stringify({
+      ok: true,
+      active: hosted.model,
+      provider: hosted.provider,
+      endpoint: hosted.endpoint,
+      externalTransmission: true,
+      transport: "HII headless Chromium DOM",
+      tools: "HII-owned bounded action protocol",
+      preference
+    }, null, 2));
+    return;
+  }
   const model = resolveModelSelection(args[0], "use");
   if (!modelIsInstalled(model)) {
     throw new Error(`${model} is not installed; run: hii model install ${model}`);
@@ -1307,8 +1382,9 @@ async function useModel(args) {
   }
   await startModelRuntime(["--model", model]);
   await waitForModelRuntime();
+  const preference = saveModelPreference("native", model);
   const pi = syncPiModel(model, true);
-  console.log(JSON.stringify({ ok: true, active: model, endpoint: MODEL_RUNTIME_URL, pi }, null, 2));
+  console.log(JSON.stringify({ ok: true, active: model, endpoint: MODEL_RUNTIME_URL, preference, pi }, null, 2));
 }
 
 function removeModel(args) {
@@ -1454,9 +1530,32 @@ function doctorModelRuntime() {
 }
 
 async function listModelRuntimeModels() {
-  const response = await fetch(`${MODEL_RUNTIME_URL}/v1/models`, { signal: AbortSignal.timeout(1500) });
-  if (!response.ok) throw new Error(`native model listing failed with ${response.status}`);
-  console.log(JSON.stringify(await response.json(), null, 2));
+  let nativeModels = [];
+  let nativeError = null;
+  try {
+    const response = await fetch(`${MODEL_RUNTIME_URL}/v1/models`, { signal: AbortSignal.timeout(1500) });
+    if (!response.ok) throw new Error(`native model listing failed with ${response.status}`);
+    const body = await response.json();
+    nativeModels = (body.data || []).map((model) => ({ ...model, provider: "native", externalTransmission: false }));
+  } catch (error) {
+    nativeError = error.message;
+  }
+  const preference = safeReadJson(MODEL_PREFERENCE, {});
+  const hostedModels = hostedModelCatalog().map((entry) => ({
+    id: entry.model,
+    object: "model",
+    provider: entry.provider,
+    endpoint: entry.endpoint,
+    aliases: entry.aliases || [],
+    capabilities: entry.capabilities || [],
+    externalTransmission: true,
+    active: preference.provider === entry.provider && preference.model === entry.model
+  }));
+  console.log(JSON.stringify({
+    object: "list",
+    data: [...nativeModels, ...hostedModels],
+    nativeError
+  }, null, 2));
 }
 
 async function benchModelRuntime(args) {

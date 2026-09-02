@@ -63,6 +63,7 @@ struct SessionUsage {
 
 #[derive(Clone, Copy)]
 enum ThinkingMode {
+    Stream,
     Flow,
     Activity,
     Raw,
@@ -109,12 +110,95 @@ const ADAPTIVE_REASONING_MAX_CHARS: usize = 4_096;
 const MODEL_THINKING_RECORD_MAX_CHARS: usize = 16_384;
 const ADAPTIVE_REASONING_MAX_TIME: Duration = Duration::from_secs(12);
 
-fn clean_final_output(message: &str, already_streamed: bool) -> String {
-    if already_streamed {
+fn clean_final_output(message: &str, raw_streamed: bool, projected: &str) -> String {
+    if raw_streamed {
         String::new()
+    } else if let Some(remaining) = message.trim_end().strip_prefix(projected) {
+        remaining.trim().to_string()
     } else {
         message.trim_end().to_string()
     }
+}
+
+#[derive(Default)]
+struct LiveReplyProjection {
+    raw: String,
+    emitted: String,
+}
+
+impl LiveReplyProjection {
+    fn push(&mut self, delta: &str) -> String {
+        self.raw.push_str(delta);
+        let visible = project_visible_reply(&self.raw);
+        let fresh = visible
+            .strip_prefix(&self.emitted)
+            .unwrap_or_default()
+            .to_string();
+        if !fresh.is_empty() {
+            self.emitted = visible;
+        }
+        fresh
+    }
+}
+
+/// Project the user-facing string out of HII's flat JSON action while it is
+/// still arriving. Tool protocol stays private; direct prose and the `message`
+/// or `summary` field become an append-only Codex-style transcript.
+fn project_visible_reply(raw: &str) -> String {
+    let trimmed = raw.trim_start();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if !trimmed.starts_with('{') && !trimmed.starts_with('[') && !trimmed.starts_with("```") {
+        return raw.to_string();
+    }
+    let json = trimmed
+        .find('{')
+        .map(|index| &trimmed[index..])
+        .unwrap_or(trimmed);
+    ["message", "summary"]
+        .into_iter()
+        .find_map(|key| partial_json_string_field(json, key))
+        .unwrap_or_default()
+}
+
+fn partial_json_string_field(raw: &str, key: &str) -> Option<String> {
+    let marker = format!("\"{key}\"");
+    let after_key = raw.get(raw.find(&marker)? + marker.len()..)?;
+    let after_colon = after_key.get(after_key.find(':')? + 1..)?.trim_start();
+    let encoded = after_colon.strip_prefix('"')?;
+    let mut decoded = String::new();
+    let mut chars = encoded.chars().peekable();
+    while let Some(character) = chars.next() {
+        match character {
+            '"' => break,
+            '\\' => match chars.next() {
+                Some('n') => decoded.push('\n'),
+                Some('r') => decoded.push('\r'),
+                Some('t') => decoded.push('\t'),
+                Some('b') => decoded.push('\u{0008}'),
+                Some('f') => decoded.push('\u{000c}'),
+                Some('"') => decoded.push('"'),
+                Some('\\') => decoded.push('\\'),
+                Some('/') => decoded.push('/'),
+                Some('u') => {
+                    let digits = chars.by_ref().take(4).collect::<String>();
+                    if digits.len() < 4 {
+                        break;
+                    }
+                    if let Ok(value) = u32::from_str_radix(&digits, 16) {
+                        if let Some(value) = char::from_u32(value) {
+                            decoded.push(value);
+                        }
+                    }
+                }
+                Some(other) => decoded.push(other),
+                None => break,
+            },
+            other => decoded.push(other),
+        }
+    }
+    Some(decoded)
 }
 
 fn activity_excerpt(value: &str) -> String {
@@ -266,6 +350,7 @@ pub struct Conversation {
     keymap: Keymap,
     mcp_clients: McpClients,
     last_reply_streamed: bool,
+    projected_reply_streamed: String,
     context_source_count: usize,
 }
 
@@ -366,7 +451,7 @@ impl Conversation {
             last_skill_draft: None,
             // The primary CLI view is the run itself: provider-emitted model
             // tokens plus explicit tool calls, results, and receipts.
-            thinking_mode: ThinkingMode::Raw,
+            thinking_mode: ThinkingMode::Stream,
             last_flow: None,
             thread: None,
             last_projection_item: None,
@@ -393,6 +478,7 @@ impl Conversation {
             keymap,
             mcp_clients,
             last_reply_streamed: false,
+            projected_reply_streamed: String::new(),
             context_source_count,
         };
         conversation.sync_authority_context();
@@ -412,6 +498,7 @@ impl Conversation {
 
     pub fn reply(&mut self, input: &str) -> Result<String, String> {
         self.last_reply_streamed = false;
+        self.projected_reply_streamed.clear();
         if self.context_chars() >= AUTO_COMPACT_CHARS {
             self.compact_internal("automatic")?;
         }
@@ -483,7 +570,9 @@ impl Conversation {
             }
             steps += 1;
             let step = steps;
-            let raw = match self.call_activity("thinking", self.messages.clone()) {
+            let can_stream_reply = !needs_verification(mutation_epoch, verified_epoch);
+            let raw = match self.call_activity("thinking", self.messages.clone(), can_stream_reply)
+            {
                 Ok(result) => result.content,
                 Err(error) if error == STEERING_RESTART => {
                     if let Some(steering) = self.steering.take() {
@@ -2077,7 +2166,7 @@ impl Conversation {
         if !self.shows_tool_lines() {
             return;
         }
-        if matches!(self.thinking_mode, ThinkingMode::Raw) {
+        if matches!(self.thinking_mode, ThinkingMode::Stream | ThinkingMode::Raw) {
             crate::tui::stream_tool_start(step, tool, target);
         } else {
             crate::tui::tool_start(step, tool, target);
@@ -2088,7 +2177,7 @@ impl Conversation {
         if !self.shows_tool_lines() {
             return;
         }
-        if matches!(self.thinking_mode, ThinkingMode::Raw) {
+        if matches!(self.thinking_mode, ThinkingMode::Stream | ThinkingMode::Raw) {
             crate::tui::stream_tool_result(ok, verification);
         } else {
             crate::tui::tool_result(ok, verification);
@@ -2097,7 +2186,11 @@ impl Conversation {
 
     /// Does the objective frame belong on screen? Everything but Stream.
     fn shows_flow(&self) -> bool {
-        io::stdout().is_terminal() && !matches!(self.thinking_mode, ThinkingMode::Raw)
+        io::stdout().is_terminal()
+            && matches!(
+                self.thinking_mode,
+                ThinkingMode::Flow | ThinkingMode::Activity
+            )
     }
 
     fn thinking_mode_for(requested: &str) -> Option<ThinkingMode> {
@@ -2106,7 +2199,8 @@ impl Conversation {
             // Flow is that, and there is no view with nothing in it.
             "flow" | "compact" | "off" => Some(ThinkingMode::Flow),
             "activity" => Some(ThinkingMode::Activity),
-            "raw" | "stream" | "diagnostics" => Some(ThinkingMode::Raw),
+            "stream" => Some(ThinkingMode::Stream),
+            "raw" | "diagnostics" => Some(ThinkingMode::Raw),
             _ => None,
         }
     }
@@ -2126,7 +2220,8 @@ impl Conversation {
             ThinkingMode::Activity => {
                 "Activity view is active. Progress remains objective-relative."
             }
-            ThinkingMode::Raw => "Stream view is active: model tokens, tool calls, results, and receipts. Use `/raw off` for the objective projection.",
+            ThinkingMode::Stream => "Stream view is active: readable replies, tool calls, results, and receipts are appended progressively. Use `/raw on` for protocol diagnostics.",
+            ThinkingMode::Raw => "Raw diagnostics are active: provider reasoning and protocol bytes are shown directly. Use `/raw off` for the readable stream.",
         }
         .into())
     }
@@ -2481,7 +2576,11 @@ impl Conversation {
     }
 
     pub fn final_output(&self, message: &str) -> String {
-        clean_final_output(message, self.last_reply_streamed)
+        clean_final_output(
+            message,
+            self.last_reply_streamed,
+            &self.projected_reply_streamed,
+        )
     }
 
     pub fn review(&mut self) -> Result<String, String> {
@@ -2495,7 +2594,7 @@ impl Conversation {
             ),
             Message::user(diff),
         ];
-        let review = redact_text(&self.call_activity("reviewing", messages)?.content);
+        let review = redact_text(&self.call_activity("reviewing", messages, true)?.content);
         self.store
             .event("conversation.review", json!({ "content": review }))?;
         Ok(review)
@@ -2507,7 +2606,7 @@ impl Conversation {
             return Err("usage: /side <question>".into());
         }
         let messages = side_context(&self.messages, prompt);
-        let answer = redact_text(&self.call_activity("side chat", messages)?.content);
+        let answer = redact_text(&self.call_activity("side chat", messages, true)?.content);
         self.store.event(
             "conversation.side",
             json!({ "prompt": redact_text(prompt), "answer": redact_text(&answer) }),
@@ -2617,7 +2716,12 @@ impl Conversation {
                 "flow.restored",
                 serde_json::to_value(&flow).map_err(|error| error.to_string())?,
             )?;
-            if io::stdout().is_terminal() && !matches!(self.thinking_mode, ThinkingMode::Raw) {
+            if io::stdout().is_terminal()
+                && matches!(
+                    self.thinking_mode,
+                    ThinkingMode::Flow | ThinkingMode::Activity
+                )
+            {
                 let direction = flow
                     .direction
                     .iter()
@@ -2698,7 +2802,11 @@ impl Conversation {
                 Message::system("You compact conversation context faithfully and economically."),
                 Message::user(prompt),
             ];
-            redact_text(&self.call_activity("compacting", summary_messages)?.content)
+            redact_text(
+                &self
+                    .call_activity("compacting", summary_messages, true)?
+                    .content,
+            )
         };
         let system = self
             .messages
@@ -2758,7 +2866,12 @@ impl Conversation {
         transcript
     }
 
-    fn call_activity(&mut self, phase: &str, messages: Vec<Message>) -> Result<ChatResult, String> {
+    fn call_activity(
+        &mut self,
+        phase: &str,
+        messages: Vec<Message>,
+        show_content: bool,
+    ) -> Result<ChatResult, String> {
         let ollama = self.ollama.clone();
         let model = self.model.clone();
         let model_for_thread = model.clone();
@@ -2805,7 +2918,7 @@ impl Conversation {
             phase,
             model,
             receiver,
-            true,
+            show_content,
             bounded_reasoning,
             &visible_prompt,
         )
@@ -2857,13 +2970,20 @@ impl Conversation {
         let mut live_input = crate::keyboard::LiveInput::enter(self.keymap.clone())?;
         let interactive = io::stdout().is_terminal();
         let raw_activity = matches!(self.thinking_mode, ThinkingMode::Raw);
+        let stream_activity = matches!(self.thinking_mode, ThinkingMode::Stream);
         let compact_activity = false;
         let mut content_started = false;
         let mut reasoning_chars = 0usize;
         let mut activity_frame = 0usize;
         let mut thinking_excerpt = String::new();
+        let mut live_reply = LiveReplyProjection::default();
+        let mut visible_chars = 0usize;
         let mut inference_view = crate::inference_view::MiniInference::new(visible_prompt);
-        if interactive && raw_activity {
+        self.store.event(
+            "assistant.stream.started",
+            json!({ "model": model, "phase": phase }),
+        )?;
+        if interactive && (raw_activity || stream_activity) {
             // The provider stream is the interface. Remove transient routing
             // and activity rows before the first delta, then write only bytes
             // the model emitted—no MODEL/THINKING/OUTPUT wrappers.
@@ -2974,6 +3094,24 @@ impl Conversation {
                     }
                 }
                 Ok(ChatStreamEvent::Content(delta)) => {
+                    let visible_delta = if stream_activity && show_content {
+                        live_reply.push(&delta)
+                    } else {
+                        String::new()
+                    };
+                    if !visible_delta.is_empty() {
+                        visible_chars += visible_delta.chars().count();
+                        self.projected_reply_streamed.push_str(&visible_delta);
+                        self.store.event(
+                            "assistant.stream.delta",
+                            json!({
+                                "model": model,
+                                "phase": phase,
+                                "content": redact_text(&visible_delta),
+                                "offset": visible_chars
+                            }),
+                        )?;
+                    }
                     if interactive && show_content {
                         content_started = true;
                         inference_view.observe_delta(&delta);
@@ -2984,7 +3122,14 @@ impl Conversation {
                                 crate::tui::terminal_width(),
                             ))?;
                         }
-                        if raw_activity {
+                        if stream_activity && !visible_delta.is_empty() {
+                            if let Some(input) = live_input.as_mut() {
+                                input.write_stream(&visible_delta)?;
+                            } else {
+                                print!("{visible_delta}");
+                                let _ = io::stdout().flush();
+                            }
+                        } else if raw_activity {
                             // Stream means stream: preserve every provider byte,
                             // including JSON tool actions, so the operator can
                             // see exactly why the next tool call occurs.
@@ -3039,6 +3184,16 @@ impl Conversation {
                             // completed message, so the streamed delta count is
                             // zero even when the turn reasoned.
                             "thinking_chars": reasoning_chars.max(result.thinking.chars().count())
+                        }),
+                    )?;
+                    self.store.event(
+                        "assistant.stream.completed",
+                        json!({
+                            "model": model,
+                            "phase": phase,
+                            "visible_chars": visible_chars,
+                            "content_chars": result.content.chars().count(),
+                            "thinking_chars": result.thinking.chars().count()
                         }),
                     )?;
                     if !result.thinking.is_empty() {
@@ -3191,7 +3346,7 @@ impl Conversation {
             );
             let explicit = explicit_skill_signal(input);
             match self
-                .call_activity("learning", messages)
+                .call_activity("learning", messages, true)
                 .and_then(|result| skills::parse_candidate(&result.content))
             {
                 Ok(candidate) if candidate.repeatable || explicit => {
@@ -4192,12 +4347,12 @@ mod tests {
     use super::{
         activity_excerpt, advisor_suggestion, authority_decision, clean_final_output,
         conversation_prompt, mode_choices, model_event_kind, needs_verification,
-        observation_signature, plain_message, plan_tool_allowed, public_test_sensitive_shell,
-        render_permissions, resumable_messages, session_authority, session_flow, session_goal,
-        session_plan_mode, session_title, shell_command_is_observation_only,
-        shell_command_is_preview, shell_command_is_read_only, side_context, tool_is_observation,
-        verification_required_message, Conversation, ReasoningMode, REASONING_MODES,
-        THINKING_MODES,
+        observation_signature, plain_message, plan_tool_allowed, project_visible_reply,
+        public_test_sensitive_shell, render_permissions, resumable_messages, session_authority,
+        session_flow, session_goal, session_plan_mode, session_title,
+        shell_command_is_observation_only, shell_command_is_preview, shell_command_is_read_only,
+        side_context, tool_is_observation, verification_required_message, Conversation,
+        ReasoningMode, REASONING_MODES, THINKING_MODES,
     };
     use crate::agent::parse_action;
     use crate::contract::{Authority, Decision};
@@ -4205,8 +4360,39 @@ mod tests {
 
     #[test]
     fn final_output_does_not_repeat_streamed_content_or_append_workspace_noise() {
-        assert_eq!(clean_final_output("Hello, Ummi.\n", true), "");
-        assert_eq!(clean_final_output("Hello, Ummi.\n", false), "Hello, Ummi.");
+        assert_eq!(clean_final_output("Hello, Ummi.\n", true, ""), "");
+        assert_eq!(
+            clean_final_output("Hello, Ummi.\n", false, "Hello, Ummi."),
+            ""
+        );
+        assert_eq!(
+            clean_final_output("Done.\n\nNext: ship", false, "Done."),
+            "Next: ship"
+        );
+        assert_eq!(
+            clean_final_output("Hello, Ummi.\n", false, ""),
+            "Hello, Ummi."
+        );
+    }
+
+    #[test]
+    fn live_transcript_projects_reply_text_but_not_tool_protocol() {
+        assert_eq!(
+            project_visible_reply(r#"{"type":"message","message":"Hello, Ummi.\nWorking"#),
+            "Hello, Ummi.\nWorking"
+        );
+        assert_eq!(
+            project_visible_reply(r#"{"type":"final","summary":"Verified \"live\""#),
+            "Verified \"live\""
+        );
+        assert_eq!(
+            project_visible_reply(r#"{"type":"read","path":"README.md","reason":"inspect"}"#),
+            ""
+        );
+        assert_eq!(
+            project_visible_reply("A direct streamed answer"),
+            "A direct streamed answer"
+        );
     }
 
     #[test]

@@ -105,6 +105,19 @@
       "capabilities": ["chat", "tools", "vision"]
     }
   ],
+  "hostedCatalogDoc": "Explicit hosted/browser-backed models. Selecting one records an external-transmission provider preference; HII never routes here automatically.",
+  "hostedCatalog": [
+    {
+      "provider": "ox-alpha-web",
+      "model": "z-ai/glm-5.3-flash",
+      "aliases": ["ox-alpha", "oxalpha", "alpha"],
+      "role": "Ox Alpha website",
+      "bestFor": "Fast hosted reasoning through direct DOM control of the public Ox Alpha chat while HII retains tool authority",
+      "endpoint": "https://oxalpha.com",
+      "externalTransmission": true,
+      "capabilities": ["chat", "reasoning", "hii-tools"]
+    }
+  ],
   "routing": {
     "auto": [
       "mlx-community/Qwen3.5-35B-A3B-4bit",
@@ -143,7 +156,7 @@
   },
   "hostedTransmission": "explicit-only",
   "metadata": {
-    "updated": "2026-09-01T18:15:00Z",
-    "reason": "Adopt the installed Qwen3.5-35B-A3B 4-bit model as this 48 GiB Mac's measured HII Native default while retaining the 4B worker as an explicit low-memory fast path."
+    "updated": "2026-09-02T04:28:00Z",
+    "reason": "Keep HII Native as the automatic local default and add Ox Alpha website access as an explicit external model choice that uses HII's bounded tool protocol."
   }
 }

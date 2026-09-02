@@ -105,19 +105,34 @@ production board (`~/.hii/board/tasks.jsonl`, 23 tasks including duplicate
 archival) with `diff <(hii board list --all) <(node scripts/hii-cli.mjs board
 list --all)` producing zero diff, plus unit tests in `cli/src/board.rs`.
 
-Interactive conversation preserves context across turns and streams the local
-model's provider-supplied thinking and response text as it arrives. Tool
-actions and results remain visible in sequence, so bare `hii` shows what the
-model is considering and doing instead of replacing activity with a generic
-working indicator.
+Interactive conversation preserves context across turns and progressively
+appends readable model text, HII tool calls, results, and receipts to permanent
+terminal scrollback. The same progression is written to the live conversation
+JSONL as `assistant.stream.started`, `assistant.stream.delta`, and
+`assistant.stream.completed` events, so another HII surface can follow the
+transcript while a response is still being generated.
 
 Type `/help` inside bare `hii` for the conversational control surface. It
 includes model switching, automatic/manual compaction, token and throughput
 activity, managed Codex and Claude sessions, local schedules, Apple Calendar,
 system resources, proof inspection, and automatically learned skill drafts.
 Schedule, Calendar, and system-resource controls require a `preview` build.
-`/thinking off|compact|raw` controls provider-supplied thinking display. Model
-response text continues streaming in every mode; `raw` is the default.
+`/thinking stream|flow|activity` selects the projection. `stream` is the
+default readable transcript; `/raw on` exposes provider reasoning and protocol
+bytes for diagnostics, and `/raw off` returns to the readable stream.
+
+Ox Alpha is available as an explicit external model through
+`hii model use ox-alpha`. HII opens `https://oxalpha.com/chat` in its existing
+headless Playwright Chromium worker, fills and submits the visible composer,
+and projects newly rendered assistant DOM text into the model stream. The HII
+system/tool contract travels in the prompt, while all tool execution stays in
+HII's bounded authority path. The website model is never selected
+automatically. Chromium closes after each model turn while its HII-owned site
+profile remains under `~/.hii/browser/ox-alpha` for continuity. If Ox Alpha
+requests its one-time human check, repeat one request with
+`HII_BROWSER_HEADLESS=0`, complete the visible verification, then return to
+headless use. HII does not automate that challenge. Use
+`hii model use <installed-local-model>` to return to HII Native.
 
 There is no tool-step ceiling by default. HII continues until the model
 finishes or the operator interrupts with Esc/Ctrl-C. `--max-steps N` remains

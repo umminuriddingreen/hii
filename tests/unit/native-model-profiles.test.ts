@@ -43,6 +43,18 @@ describe("native consumer model profiles", () => {
     expect(manifest.selectionCatalogDoc).toContain("never downloads");
     expect(JSON.stringify(manifest)).not.toContain("llmfit");
   });
+
+  it("offers Ox Alpha only as an explicit external HII-tool model", () => {
+    const manifest = JSON.parse(fs.readFileSync(profiles, "utf8"));
+    expect(manifest.hostedTransmission).toBe("explicit-only");
+    expect(manifest.hostedCatalog).toContainEqual(expect.objectContaining({
+      provider: "ox-alpha-web",
+      model: "z-ai/glm-5.3-flash",
+      aliases: expect.arrayContaining(["ox-alpha"]),
+      externalTransmission: true,
+      capabilities: expect.arrayContaining(["hii-tools"])
+    }));
+  });
 });
 
 describe("HII model management CLI", () => {
@@ -61,7 +73,8 @@ describe("HII model management CLI", () => {
 
   it("defaults conversation UX to the direct model and tool stream", () => {
     const source = fs.readFileSync(path.join(root, "cli", "src", "conversation.rs"), "utf8");
-    expect(source).toContain("thinking_mode: ThinkingMode::Raw");
-    expect(source).toContain("Stream view is active: model tokens, tool calls, results, and receipts.");
+    expect(source).toContain("thinking_mode: ThinkingMode::Stream");
+    expect(source).toContain("readable replies, tool calls, results, and receipts are appended progressively");
+    expect(source).toContain('"assistant.stream.delta"');
   });
 });

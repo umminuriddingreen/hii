@@ -176,6 +176,7 @@ pub fn classify_error(error: &str) -> Outcome {
     if lower.contains("model loop detected") {
         Outcome::LoopAbort
     } else if lower.contains("ollama")
+        || lower.contains("ox alpha")
         || lower.contains("model provider")
         || lower.contains("model stream")
         || lower.contains("lm studio")
@@ -801,6 +802,10 @@ mod tests {
         assert_eq!(classify_error("goal cannot be empty"), Outcome::InfraError);
         assert_eq!(
             classify_error("model provider returned HTTP 500"),
+            Outcome::ProviderError
+        );
+        assert_eq!(
+            classify_error("Ox Alpha website returned HTTP 428"),
             Outcome::ProviderError
         );
     }

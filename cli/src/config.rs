@@ -11,6 +11,8 @@ pub const DEFAULT_REVIEW_MODEL: &str = "qwen3.6:35b-mlx";
 /// sharing one string that is only valid on one runtime.
 pub const DEFAULT_NATIVE_MODEL: &str = "mlx-community/Qwen3.8-27B-4bit";
 pub const DEFAULT_NATIVE_REVIEW_MODEL: &str = "mlx-community/Qwen3.8-27B-4bit";
+pub const OX_ALPHA_WEB_MODEL: &str = "z-ai/glm-5.3-flash";
+pub const OX_ALPHA_WEB_URL: &str = "https://oxalpha.com";
 /// Default tool-step ceiling. `--max-steps 0` still means unlimited, but leaving
 /// it unlimited by default was unsafe unattended: nothing except the operator
 /// stopped a model that never converged. The wall-clock budget bounds a run in
@@ -26,6 +28,7 @@ pub enum ModelProvider {
     LmStudio,
     Native,
     RapidMlx,
+    OxAlphaWeb,
 }
 
 pub const RUNTIME_IDENTITY_PREFIX: &str = "AUTHORITATIVE HII RUNTIME IDENTITY";
@@ -55,6 +58,7 @@ impl ModelProvider {
         {
             Some(provider) => provider,
             None if env::var("HII_RAPID_MLX_URL").is_ok() => ModelProvider::RapidMlx,
+            _ if url.contains("oxalpha.com") => ModelProvider::OxAlphaWeb,
             _ if url.contains(":11435") => ModelProvider::Native,
             _ if url.contains(":1234") => ModelProvider::LmStudio,
             _ => ModelProvider::Ollama,
@@ -67,6 +71,9 @@ impl ModelProvider {
             "native" | "hii-native" | "hii_native" => Some(ModelProvider::Native),
             "ollama" => Some(ModelProvider::Ollama),
             "rapid-mlx" | "rapidmlx" | "rapid_mlx" | "rapid" => Some(ModelProvider::RapidMlx),
+            "ox-alpha-web" | "oxalpha-web" | "oxalpha" | "ox-alpha" => {
+                Some(ModelProvider::OxAlphaWeb)
+            }
             _ => None,
         }
     }
@@ -75,6 +82,7 @@ impl ModelProvider {
     pub fn default_model(self) -> &'static str {
         match self {
             ModelProvider::Native => DEFAULT_NATIVE_MODEL,
+            ModelProvider::OxAlphaWeb => OX_ALPHA_WEB_MODEL,
             ModelProvider::RapidMlx | ModelProvider::Ollama | ModelProvider::LmStudio => {
                 DEFAULT_MODEL
             }
@@ -85,6 +93,7 @@ impl ModelProvider {
     pub fn default_review_model(self) -> &'static str {
         match self {
             ModelProvider::Native => DEFAULT_NATIVE_REVIEW_MODEL,
+            ModelProvider::OxAlphaWeb => OX_ALPHA_WEB_MODEL,
             ModelProvider::RapidMlx | ModelProvider::Ollama | ModelProvider::LmStudio => {
                 DEFAULT_REVIEW_MODEL
             }
@@ -97,6 +106,7 @@ impl ModelProvider {
             ModelProvider::LmStudio => "lmstudio",
             ModelProvider::Native => "native",
             ModelProvider::RapidMlx => "rapid-mlx",
+            ModelProvider::OxAlphaWeb => "ox-alpha-web",
         }
     }
 
@@ -107,6 +117,7 @@ impl ModelProvider {
             ModelProvider::LmStudio => "LM Studio",
             ModelProvider::Ollama => "Ollama",
             ModelProvider::RapidMlx => "Rapid-MLX",
+            ModelProvider::OxAlphaWeb => "Ox Alpha Website (external)",
         }
     }
 }
@@ -139,7 +150,17 @@ impl AppPaths {
         env::var("HII_MODEL_URL")
             .or_else(|_| env::var("HII_RAPID_MLX_URL"))
             .or_else(|_| env::var("HII_OLLAMA_URL"))
-            .unwrap_or_else(|_| "http://127.0.0.1:11435".to_string())
+            .unwrap_or_else(|_| {
+                if env::var("HII_MODEL_PROVIDER")
+                    .ok()
+                    .and_then(|value| ModelProvider::from_env_value(value.trim()))
+                    == Some(ModelProvider::OxAlphaWeb)
+                {
+                    OX_ALPHA_WEB_URL.to_string()
+                } else {
+                    "http://127.0.0.1:11435".to_string()
+                }
+            })
             .trim_end_matches('/')
             .to_string()
     }
@@ -231,6 +252,15 @@ mod tests {
         assert_eq!(ModelProvider::RapidMlx.id(), "rapid-mlx");
         assert_eq!(ModelProvider::RapidMlx.label(), "Rapid-MLX");
         assert_eq!(ModelProvider::Native.default_model(), DEFAULT_NATIVE_MODEL);
+    }
+
+    #[test]
+    fn ox_alpha_website_provider_is_explicit_and_truthful() {
+        let provider = ModelProvider::discover("https://oxalpha.com");
+        assert_eq!(provider, ModelProvider::OxAlphaWeb);
+        assert_eq!(provider.id(), "ox-alpha-web");
+        assert_eq!(provider.label(), "Ox Alpha Website (external)");
+        assert_eq!(provider.default_model(), super::OX_ALPHA_WEB_MODEL);
     }
 
     #[test]
