@@ -13,6 +13,23 @@ import styles from './DesktopHiiAccess.module.css';
 
 type LinkedIdentity = { handle: string; deviceName: string };
 
+/**
+ * A first guess at what to call this machine in the account's device list.
+ *
+ * The default was the literal string "My Mac", so a Windows PC linked itself
+ * under that name and two devices were indistinguishable. The platform hint is
+ * the only signal available to a static export -- the user can still type over
+ * it before linking.
+ */
+function detectDeviceName() {
+  if (typeof navigator === 'undefined') return 'This computer';
+  const platform = `${navigator.userAgent} ${navigator.platform ?? ''}`.toLowerCase();
+  if (platform.includes('win')) return 'My PC';
+  if (platform.includes('mac')) return 'My Mac';
+  if (platform.includes('linux')) return 'My Linux machine';
+  return 'This computer';
+}
+
 export function DesktopHiiAccess() {
   const [ready, setReady] = useState(false);
   const [linked, setLinked] = useState(false);
@@ -23,7 +40,9 @@ export function DesktopHiiAccess() {
   const [active, setActive] = useState('local');
   const [identity, setIdentity] = useState<LinkedIdentity | null>(null);
   const [code, setCode] = useState('');
-  const [deviceName, setDeviceName] = useState('My Mac');
+  // Every device would have arrived in the account list as "My Mac", including
+  // the Windows ones. Name it after the machine it is actually running on.
+  const [deviceName, setDeviceName] = useState(detectDeviceName);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
 
