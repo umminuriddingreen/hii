@@ -278,17 +278,25 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
         return secure_no_store(api_error(405, "method_not_allowed")?);
     }
 
-    if let Some(platform) = path
-        .strip_prefix("/download/")
-        .filter(|platform| matches!(*platform, "windows" | "macos"))
-    {
+    if let Some(target) = path.strip_prefix("/download/").filter(|target| {
+        matches!(
+            *target,
+            "windows" | "macos" | "windows.json" | "macos.json"
+        )
+    }) {
         let Some(token) = cookie(request, SESSION_COOKIE)? else {
             return secure_no_store(api_error(401, "authentication_required")?);
         };
         if active_session(&db, &token).await?.is_none() {
             return secure_no_store(api_error(401, "authentication_required")?);
         }
-        return secure_no_store(download_desktop(request, env, platform).await?);
+        // The download page is a static export, so it cannot read R2 at build
+        // time. It fetches the manifest from here to show the version, size
+        // and digest of the build it is about to hand over.
+        return match target.strip_suffix(".json") {
+            Some(platform) => secure_no_store(release_manifest(env, platform).await?),
+            None => secure_no_store(download_desktop(request, env, target).await?),
+        };
     }
 
     if let Some(asset) = path.strip_prefix("/cli/releases/latest/") {
@@ -816,6 +824,29 @@ fn secure(mut response: Response) -> Result<Response> {
 fn secure_no_store(mut response: Response) -> Result<Response> {
     response.headers_mut().set("Cache-Control", "no-store")?;
     secure(response)
+}
+
+/// The release manifest for a platform, as published by
+/// `scripts/hii-release-publish.mjs`. Behind the same session gate as the
+/// artifact itself: what is being shipped is as private as the shipping.
+async fn release_manifest(env: &Env, platform: &str) -> Result<Response> {
+    let bucket = env.bucket("DOWNLOADS")?;
+    let Some(manifest) = bucket
+        .get(format!("releases/latest-{platform}.json"))
+        .execute()
+        .await?
+    else {
+        return api_error(404, "release_not_available");
+    };
+    let Some(body) = manifest.body() else {
+        return api_error(502, "release_metadata_invalid");
+    };
+    let value: Value = serde_json::from_str(&body.text().await?)?;
+    let mut response = Response::from_json(&value)?;
+    response
+        .headers_mut()
+        .set("content-type", "application/json; charset=utf-8")?;
+    Ok(response)
 }
 
 async fn download_desktop(request: &Request, env: &Env, platform: &str) -> Result<Response> {

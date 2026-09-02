@@ -229,14 +229,41 @@ describe('HII web access gate', () => {
     expect(remote).toContain('HII Remote is unavailable in this preview.');
   });
 
-  it('routes platform handoffs to a truthful planned Tauri download page', () => {
+  it('offers both platforms as real gated downloads and says what is not signed', () => {
     const download = readFileSync('app/download/page.tsx', 'utf8');
+    const release = readFileSync('components/public/DesktopRelease.tsx', 'utf8');
 
     expect(download).toContain('Tauri desktop app for Mac and Windows');
-    expect(download).toContain('browser account remains the canonical data source');
-    expect(download).toContain('automatically synchronized local copy');
     expect(download).toContain('id="mac"');
     expect(download).toContain('id="windows"');
-    expect(download).toContain('Windows Tauri build is planned');
+    expect(download).toContain('<DesktopRelease platform="macos"');
+    expect(download).toContain('<DesktopRelease platform="windows"');
+    // The old page claimed the browser was canonical and that every install
+    // mirrored it. The desktop default is the local ~/.hii document and only a
+    // chosen account workspace syncs, so that claim must not come back.
+    expect(download).not.toContain('canonical data source');
+    expect(download).not.toContain('automatically synchronized local copy');
+    expect(download).toContain('opens on the local Runtime document');
+    // Unsigned builds are shipping; the page has to say so rather than let the
+    // OS be the one to break the news.
+    expect(download).toContain('not code-signed yet');
+    expect(download).toContain('SmartScreen');
+
+    // The facts come from the gated manifest at read time, never hardcoded.
+    expect(release).toContain('`/download/${platform}.json`');
+    expect(release).toContain("credentials: 'include'");
+    expect(release).toContain('response.status === 401');
+  });
+
+  it('documents the product that exists rather than a gesture the canvas dropped', () => {
+    const docs = readFileSync('app/docs/page.tsx', 'utf8');
+
+    expect(docs).not.toContain('Fn + Shift');
+    expect(docs).toContain('id="canvas"');
+    expect(docs).toContain('id="terminals"');
+    expect(docs).toContain('id="workspaces"');
+    expect(docs).toContain('id="devices"');
+    expect(docs).toContain('id="cli"');
+    expect(docs).toContain('hii login');
   });
 });

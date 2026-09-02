@@ -878,6 +878,32 @@ button, input, textarea { font: inherit; }
 .public-home nav { display: flex; gap: 24px; margin-top: 48px; }
 .public-home a { color: inherit; text-underline-offset: 5px; }
 
+/* Download page. The sections carry the platform facts, so they need to read as
+   quiet subheads under the oversized h1 rather than compete with it. */
+.public-home section { max-width: 44rem; margin: 56px 0 0; }
+.public-home section h2 { margin: 0 0 16px; font-size: clamp(20px, 2vw, 26px); letter-spacing: -.02em; }
+.public-home section p { margin: 0 0 16px; font-size: clamp(15px, 1.3vw, 18px); line-height: 1.5; }
+.public-home section code { font: 13px "SF Mono", ui-monospace, monospace; }
+.release-download {
+  display: inline-block;
+  padding: 11px 20px;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  text-decoration: none;
+}
+.release-facts {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 0 0 16px;
+  font: 12px/1.5 "SF Mono", ui-monospace, monospace;
+  opacity: .62;
+  overflow-wrap: anywhere;
+}
+.release-facts dt { margin: 0; }
+.release-facts dd { margin: 0; }
+p.release-facts { display: block; }
+
 /* Keyboard entry point. Visually hidden until focused, then lands as the first
    thing on the page — required because the canvas surfaces put many controls
    ahead of primary content in DOM order. */
