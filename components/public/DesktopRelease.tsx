@@ -8,9 +8,10 @@ type Platform = 'macos' | 'windows';
 type Release = {
   version?: string;
   filename?: string;
-  size?: number;
+  bytes?: number;
   sha256?: string;
-  publishedAt?: string;
+  createdAt?: string;
+  signed?: boolean;
 };
 
 type State =
@@ -72,7 +73,7 @@ export function DesktopRelease({ platform, label }: { platform: Platform; label:
     return <p className="release-facts">No build published for this platform yet.</p>;
   }
 
-  const { version, size, sha256, publishedAt } = state.release;
+  const { version, bytes, sha256, createdAt } = state.release;
 
   return (
     <>
@@ -83,16 +84,16 @@ export function DesktopRelease({ platform, label }: { platform: Platform; label:
         </a>
       </p>
       <dl className="release-facts">
-        {typeof size === 'number' ? (
+        {typeof bytes === 'number' ? (
           <>
             <dt>Size</dt>
-            <dd>{megabytes(size)}</dd>
+            <dd>{megabytes(bytes)}</dd>
           </>
         ) : null}
-        {publishedAt ? (
+        {createdAt ? (
           <>
             <dt>Published</dt>
-            <dd>{new Date(publishedAt).toISOString().slice(0, 10)}</dd>
+            <dd>{new Date(createdAt).toISOString().slice(0, 10)}</dd>
           </>
         ) : null}
         {sha256 ? (

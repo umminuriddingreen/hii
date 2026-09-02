@@ -84,3 +84,17 @@ export function updaterFeed({ version, platforms, publishedAt = new Date().toISO
 export function downloadUrl(platform) {
   return `${DOWNLOAD_ORIGIN}/download/${platform}`;
 }
+
+/**
+ * Where the Tauri updater would fetch a platform's update payload.
+ *
+ * Unresolved, and deliberately not wired up: /download/* is session-gated, and
+ * the updater plugin sends no cookie and no bearer token, so it cannot reach a
+ * gated route. Serving updates during a private beta means either an
+ * unauthenticated release path or no auto-update at all. Until that is decided,
+ * the feed is generated but tauri.conf.json still points elsewhere -- so a
+ * build cannot quietly start trusting a route nobody chose.
+ */
+export function updaterUrl(platform) {
+  return `${DOWNLOAD_ORIGIN}/download/${platform}-updater`;
+}

@@ -7,11 +7,11 @@
  *   - Apple Developer ID + notarization, so Gatekeeper opens the download.
  *   - A minisign key, so the updater refuses any bundle it cannot verify.
  */
-import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { downloadManifest, fileFacts, updaterFeed, updaterUrl } from './hii-release-manifest.mjs';
 
 if (process.platform !== 'darwin') {
   console.error('hii:release:mac requires macOS.');
@@ -135,44 +135,54 @@ copyFileSync(dmg, releaseDmg);
 copyFileSync(updaterArchive, releaseUpdater);
 copyFileSync(updaterSignature, `${releaseUpdater}.sig`);
 
-const dmgBytes = statSync(releaseDmg).size;
-const dmgSha256 = createHash('sha256').update(readFileSync(releaseDmg)).digest('hex');
+const { bytes: dmgBytes, sha256: dmgSha256 } = fileFacts(releaseDmg);
 const signature = readFileSync(updaterSignature, 'utf8').trim();
-const downloadBase = `https://github.com/umminuriddingreen/hii/releases/download/v${version}`;
+const macosUpdaterUrl = updaterUrl('macos');
 const publishedAt = new Date().toISOString();
 
-// The shape the Tauri updater expects at plugins.updater.endpoints.
+// The Tauri updater feed covers every platform in one document, so merge into
+// whatever a Windows publish last wrote rather than replacing it.
+const feedPath = path.join(outputDir, 'latest.json');
+const existingFeed = existsSync(feedPath) ? JSON.parse(readFileSync(feedPath, 'utf8')) : null;
 writeFileSync(
-  path.join(outputDir, 'latest.json'),
-  `${JSON.stringify({
-    version,
-    notes: `HII ${version}`,
-    pub_date: publishedAt,
-    platforms: {
-      'darwin-aarch64': { signature, url: `${downloadBase}/${path.basename(releaseUpdater)}` },
-      'darwin-x86_64': { signature, url: `${downloadBase}/${path.basename(releaseUpdater)}` }
-    }
-  }, null, 2)}\n`
+  feedPath,
+  `${JSON.stringify(
+    updaterFeed(
+      {
+        version,
+        publishedAt,
+        platforms: {
+          'darwin-aarch64': { signature, url: macosUpdaterUrl },
+          'darwin-x86_64': { signature, url: macosUpdaterUrl }
+        }
+      },
+      existingFeed
+    ),
+    null,
+    2
+  )}\n`
 );
 
-// A human-readable receipt for the download page and the release notes.
+// The document the Worker reads to find and verify the artifact it serves.
 writeFileSync(
-  path.join(outputDir, 'release.json'),
-  `${JSON.stringify({
-    version,
-    platform: 'macos',
-    architecture: arch,
-    minimumSystemVersion: config.bundle.macOS.minimumSystemVersion,
-    download: path.basename(releaseDmg),
-    bytes: dmgBytes,
-    sha256: dmgSha256,
-    gitCommit,
-    gitTree: 'clean',
-    signed: true,
-    notarized: true,
-    updaterSigned: true,
-    createdAt: publishedAt
-  }, null, 2)}\n`
+  path.join(outputDir, 'latest-macos.json'),
+  `${JSON.stringify(
+    downloadManifest({
+      platform: 'macos',
+      version,
+      filename: path.basename(releaseDmg),
+      architecture: arch,
+      minimumSystemVersion: config.bundle.macOS.minimumSystemVersion,
+      gitCommit,
+      signed: true,
+      notarized: true,
+      bytes: dmgBytes,
+      sha256: dmgSha256,
+      publishedAt
+    }),
+    null,
+    2
+  )}\n`
 );
 
 console.log(`hii release ready: ${path.relative(root, releaseDmg)}`);
