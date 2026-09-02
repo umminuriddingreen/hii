@@ -71,10 +71,14 @@ async function observeAnswer(
       nextHeartbeat = Date.now() + 1_000;
     }
     const verification = page.getByText("Please confirm you're human", { exact: false });
-    if (await verification.isVisible({ timeout: 50 }).catch(() => false) && process.env.HII_BROWSER_HEADLESS !== "0") {
-      throw new Error(
-        "Ox Alpha requires a one-time human verification. Run the same HII request once with HII_BROWSER_HEADLESS=0, complete the visible check, then later turns can stay headless in the persisted HII browser profile.",
-      );
+    if (await verification.isVisible({ timeout: 50 }).catch(() => false)) {
+      if (process.env.HII_BROWSER_HEADLESS !== "0") {
+        throw new Error(
+          "Ox Alpha requires a one-time human verification. Run the same HII request once with HII_BROWSER_HEADLESS=0, complete the visible check, then later turns can stay headless in the persisted HII browser profile.",
+        );
+      }
+      await page.waitForTimeout(100);
+      continue;
     }
     const assistants = page.locator(".msg.msg-assistant");
     if (await assistants.count() === 0) {
