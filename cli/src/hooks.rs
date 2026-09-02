@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use std::{
     collections::HashSet,
     env, fs,
-    io::{Read, Write},
+    io::{self, Read, Write},
     path::{Component, Path, PathBuf},
     process::{Child, Command, Stdio},
     thread,
@@ -403,19 +403,24 @@ impl HookRunner {
             }
         };
         if let Some(mut stdin) = child.stdin.take() {
-            if serde_json::to_writer(&mut stdin, input).is_err() || stdin.write_all(b"\n").is_err()
-            {
-                terminate_child_tree(&mut child);
-                let _ = child.wait();
-                return hook_failure_record(
-                    event,
-                    spec,
-                    name,
-                    started,
-                    "failed",
-                    None,
-                    "could not send hook event JSON".into(),
-                );
+            // A hook is free to ignore the event payload and exit immediately.
+            // When it does, the pipe closes under us mid-write; that is the
+            // hook declining to read, not a failure, and its exit status still
+            // carries the verdict. Only a genuine write error is fatal.
+            if let Err(error) = write_hook_event(&mut stdin, input) {
+                if error.kind() != io::ErrorKind::BrokenPipe {
+                    terminate_child_tree(&mut child);
+                    let _ = child.wait();
+                    return hook_failure_record(
+                        event,
+                        spec,
+                        name,
+                        started,
+                        "failed",
+                        None,
+                        format!("could not send hook event JSON: {error}"),
+                    );
+                }
             }
         }
         let stdout = child.stdout.take().map(capture_output);
@@ -644,6 +649,15 @@ fn combined_output(stdout: &str, stderr: &str) -> String {
     }
 }
 
+/// Serialize the hook event onto the child's stdin. Returns the raw io error so
+/// the caller can distinguish a hook that simply exited early (broken pipe)
+/// from a real transport failure.
+fn write_hook_event(stdin: &mut std::process::ChildStdin, input: &Value) -> io::Result<()> {
+    serde_json::to_writer(&mut *stdin, input).map_err(io::Error::from)?;
+    stdin.write_all(b"\n")?;
+    stdin.flush()
+}
+
 fn hook_failure_record(
     event: HookEvent,
     spec: &HookSpec,
@@ -738,6 +752,42 @@ mod tests {
             .fire(HookEvent::PreTool, Some("write"), "session", json!({}))
             .records
             .is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hook_that_never_reads_stdin_still_reports_its_verdict() {
+        // The hook closes stdin and exits without draining the event, so the
+        // pipe breaks mid-write. Linux reports EPIPE here; macOS pipe
+        // semantics absorb the write, so this only bites on Linux — which is
+        // exactly where it was found. Either way the hook's exit status is the
+        // verdict and must survive a refused payload.
+        let runtime = TempDir::new("runtime");
+        let workspace = TempDir::new("workspace");
+        executable(
+            &workspace.0.join("deaf.sh"),
+            r#"exec 0<&-
+echo "protected path" >&2
+exit 2"#,
+        );
+        write_config(
+            &runtime.0,
+            r#"{"schemaVersion":1,"enabled":true,"hooks":{"preTool":[{"name":"deaf","command":"deaf.sh","approved":true,"timeoutMs":2000}]}}"#,
+        );
+        let runner = HookRunner::load(&runtime.0, &workspace.0, true).expect("load hooks");
+        let batch = runner.fire(
+            HookEvent::PreTool,
+            Some("write"),
+            "session",
+            json!({"tool": "write", "padding": "x".repeat(512 * 1024)}),
+        );
+        assert_eq!(batch.records.len(), 1);
+        assert_eq!(
+            batch.records[0].status, "blocked",
+            "hook output: {}",
+            batch.records[0].output
+        );
+        assert!(batch.block_reason.is_some());
     }
 
     #[cfg(unix)]
