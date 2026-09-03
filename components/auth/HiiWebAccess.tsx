@@ -204,6 +204,7 @@ export function HiiWebAccess() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [cliLinkRequested, setCliLinkRequested] = useState(false);
   const [firstRunDismissed, setFirstRunDismissed] = useState(false);
+  const [productSite, setProductSite] = useState(false);
   const [deviceMessage, setDeviceMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
@@ -240,6 +241,12 @@ export function HiiWebAccess() {
           ),
     [accountSync, activeWorkspace, canvasAccountId, canvasAccountReady, session.csrfToken],
   );
+  // The signed-out canvas is the same surface, kept in this browser only.
+  const guestPersistence = useMemo(() => browserSpacePersistence('guest'), []);
+  const completeFirstRun = useCallback(() => {
+    window.localStorage.setItem('hii.onboarding.completed.v1', 'true');
+    setFirstRunDismissed(true);
+  }, []);
   const canvasFileSeeder = useCallback(
     (files: File[]) => browserCanvasSeedsFromFiles(canvasAccountId, files),
     [canvasAccountId],
@@ -249,6 +256,9 @@ export function HiiWebAccess() {
     const params = new URLSearchParams(window.location.search);
     const requestedLink = params.get('link') === 'cli';
     const requestedFirstRun = params.get('first-run') === '1';
+    if (params.get('site') === '1') setProductSite(true);
+    // Same onboarding key the installed app uses, so the terminal opens once.
+    if (window.localStorage.getItem('hii.onboarding.completed.v1') === 'true') setFirstRunDismissed(true);
     setCliLinkRequested(requestedLink);
     if (requestedLink) setMode('login');
     if (requestedFirstRun) {
@@ -277,7 +287,7 @@ export function HiiWebAccess() {
   }, [cliLinkRequested, session.authenticated]);
 
   useEffect(() => {
-    if (!ready || !session.authenticated) return;
+    if (!ready || productSite) return;
     const toggleAccount = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.code !== 'Digit1' || event.repeat) return;
       event.preventDefault();
@@ -285,7 +295,7 @@ export function HiiWebAccess() {
     };
     window.addEventListener('keydown', toggleAccount);
     return () => window.removeEventListener('keydown', toggleAccount);
-  }, [ready, session.authenticated]);
+  }, [ready, productSite]);
 
   useEffect(() => () => {
     if (canvasPersistence instanceof AccountWorkspacePersistence) canvasPersistence.dispose();
@@ -682,73 +692,129 @@ export function HiiWebAccess() {
     );
   }
 
+  const authDialog = <>
+        {mode ? <div className={styles.authBackdrop} onPointerDown={(event) => { if (event.target === event.currentTarget) setMode(null); }}>
+          <section className={styles.formPanel} role="dialog" aria-modal="true" aria-label={mode === 'login' ? 'Log in' : 'Create your HII'}>
+            <header><span>hii / {mode === 'login' ? 'log in' : 'create your HII'}</span><button type="button" onClick={() => setMode(null)}>close</button></header>
+            {cliLinkRequested ? <p className={styles.cliLinkNotice}>The HII CLI is waiting. Log in, then create a one-time computer code.</p> : null}
+            <form onSubmit={submit}>
+              {mode === 'signup' ? (
+                <label>
+                  name
+                  <input
+                    type="text"
+                    name="handle"
+                    autoComplete="username"
+                    value={handle}
+                    onChange={(event) => setHandle(event.target.value)}
+                    minLength={3}
+                    maxLength={48}
+                    pattern="[-A-Za-z0-9._]+"
+                    required
+                  />
+                </label>
+              ) : null}
+              <button type="submit" disabled={busy || (mode === 'signup' && handle.trim().length < 3)}>
+                {busy ? 'working…' : 'continue'}
+              </button>
+            </form>
+            {message ? <p className={styles.message} role="status">{message}</p> : null}
+            <p className={styles.note}>{mode === 'login' ? 'Continue with your passkey.' : 'No password. Your public name identifies you on HII.'}</p>
+            <nav className={styles.modeLinks} aria-label="Switch account action">
+              <button type="button" aria-current={mode === 'login'} onClick={() => chooseMode('login')}>log in</button>
+              <span aria-hidden="true">/</span>
+              <button type="button" aria-current={mode === 'signup'} onClick={() => chooseMode('signup')}>create account</button>
+            </nav>
+          </section>
+        </div> : null}
+  </>;
+
+  if (productSite) {
+    return (
+      <main className={styles.access} id="hii-main">
+        <ProsumerLanding onLogin={() => chooseMode('login')} onCreateAccount={() => chooseMode('signup')} />
+        {ready && !session.authenticated && !mode && !firstRunDismissed ? <HiiFirstRunTerminal
+          options={[
+            {
+              id: 'chatgpt',
+              label: 'Sign in with ChatGPT',
+              detail: 'complete this provider sign-in in the HII desktop app',
+              action: () => undefined,
+              disabled: true
+            },
+            {
+              id: 'hii-account',
+              label: 'Log in to HII',
+              detail: 'continue with your passkey',
+              action: () => chooseMode('login')
+            },
+            {
+              id: 'create',
+              label: 'Create your HII',
+              detail: 'make a passkey-protected account',
+              action: () => chooseMode('signup')
+            },
+            {
+              id: 'site',
+              label: 'Explore HII first',
+              detail: 'view the public product site',
+              action: () => setFirstRunDismissed(true)
+            }
+          ]}
+        /> : null}
+        {authDialog}
+      </main>
+    );
+  }
+
+  // The browser opens on the same canvas the installed app opens on. Signing in
+  // is chrome over that canvas, not a page in front of it; the marketing site
+  // stays reachable at /?site=1 and from the panel below.
   return (
-    <main className={styles.access} id="hii-main">
-      <ProsumerLanding onLogin={() => chooseMode('login')} onCreateAccount={() => chooseMode('signup')} />
-      {ready && !session.authenticated && !mode && !firstRunDismissed ? <HiiFirstRunTerminal
-        options={[
-          {
-            id: 'chatgpt',
-            label: 'Sign in with ChatGPT',
-            detail: 'complete this provider sign-in in the HII desktop app',
-            action: () => undefined,
-            disabled: true
-          },
-          {
-            id: 'hii-account',
-            label: 'Log in to HII',
-            detail: 'continue with your passkey',
-            action: () => chooseMode('login')
-          },
-          {
-            id: 'create',
-            label: 'Create your HII',
-            detail: 'make a passkey-protected account',
-            action: () => chooseMode('signup')
-          },
-          {
-            id: 'site',
-            label: 'Explore HII first',
-            detail: 'view the public product site',
-            action: () => setFirstRunDismissed(true)
-          }
-        ]}
-      /> : null}
-      {mode ? <div className={styles.authBackdrop} onPointerDown={(event) => { if (event.target === event.currentTarget) setMode(null); }}>
-        <section className={styles.formPanel} role="dialog" aria-modal="true" aria-label={mode === 'login' ? 'Log in' : 'Create your HII'}>
-          <header><span>hii / {mode === 'login' ? 'log in' : 'create your HII'}</span><button type="button" onClick={() => setMode(null)}>close</button></header>
-          {cliLinkRequested ? <p className={styles.cliLinkNotice}>The HII CLI is waiting. Log in, then create a one-time computer code.</p> : null}
-          <form onSubmit={submit}>
-            {mode === 'signup' ? (
-              <label>
-                name
-                <input
-                  type="text"
-                  name="handle"
-                  autoComplete="username"
-                  value={handle}
-                  onChange={(event) => setHandle(event.target.value)}
-                  minLength={3}
-                  maxLength={48}
-                  pattern="[-A-Za-z0-9._]+"
-                  required
-                />
-              </label>
-            ) : null}
-            <button type="submit" disabled={busy || (mode === 'signup' && handle.trim().length < 3)}>
-              {busy ? 'working…' : 'continue'}
-            </button>
-          </form>
-          {message ? <p className={styles.message} role="status">{message}</p> : null}
-          <p className={styles.note}>{mode === 'login' ? 'Continue with your passkey.' : 'No password. Your public name identifies you on HII.'}</p>
-          <nav className={styles.modeLinks} aria-label="Switch account action">
-            <button type="button" aria-current={mode === 'login'} onClick={() => chooseMode('login')}>log in</button>
-            <span aria-hidden="true">/</span>
-            <button type="button" aria-current={mode === 'signup'} onClick={() => chooseMode('signup')}>create account</button>
+    <div className={styles.canvasShell}>
+      <HiiRoot
+        surface="account"
+        spaceId=""
+        creatorId="human:guest"
+        persistence={guestPersistence}
+        allowPhoto
+        persistentChrome={false}
+        openTerminalOnReady={ready && !firstRunDismissed}
+        onTerminalReady={completeFirstRun}
+      />
+      <header className={styles.canvasHeader} data-workspace-ui aria-label="HII account access">
+        <nav aria-label="HII account actions">
+          <button
+            type="button"
+            aria-expanded={accountOpen}
+            aria-controls="hii-web-account"
+            onClick={() => setAccountOpen((value) => !value)}
+          >
+            hii
+          </button>
+        </nav>
+      </header>
+      {accountOpen ? (
+        <aside id="hii-web-account" className={styles.accountPanel} data-workspace-ui aria-label="HII account">
+          <dl>
+            <div><dt>profile</dt><dd>not signed in</dd></div>
+            <div><dt>sign-in</dt><dd>passkey</dd></div>
+            <div><dt>workspace</dt><dd>stored on this browser</dd></div>
+            <div><dt>computer</dt><dd>connected only when you allow it</dd></div>
+          </dl>
+          <button type="button" onClick={() => { chooseMode('login'); setAccountOpen(false); }}>log in</button>
+          <button type="button" onClick={() => { chooseMode('signup'); setAccountOpen(false); }}>create your HII</button>
+          <small>Sign in to synchronize this canvas to your account. Until then it stays in this browser.</small>
+          <nav className={styles.platformLinks} aria-label="Open HII on a computer">
+            <a href="/?site=1">what HII is</a>
+            <a href="/download#mac">HII for Mac</a>
+            <a href="/download#windows">HII for Windows</a>
+            <a href="/docs">documentation</a>
           </nav>
-        </section>
-      </div> : null}
-    </main>
+        </aside>
+      ) : null}
+      {authDialog}
+    </div>
   );
 }
 

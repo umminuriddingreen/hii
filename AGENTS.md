@@ -145,6 +145,12 @@ synthesis, and code that ships.
   entrypoints.
 - For CLI work, run `cargo build` and `cargo test` from `cli/`.
 - Use `npm run build` for app validation.
+- Web changes are not done until they are live. Ummi has standing authority for
+  this one action: after any change that alters what
+  humaninformationinterface.com serves, run `npm run deploy` (build +
+  `wrangler deploy`) without asking, then confirm the live site with `curl`
+  before reporting. Do not leave the deploy as a manual step for the user;
+  agents have dropped it repeatedly.
 - Use `hii ship` only for local typecheck + commit. Use `hii ship --push` only
   after explicit user approval to publish externally.
 - For billing work, also verify `/credits`, `/api/credits/quote`, `/api/credits/account`, `/api/credits/checkout`, `/api/capabilities/jobs`, and `/api/stripe/webhook` behavior where possible.

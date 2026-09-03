@@ -144,7 +144,10 @@ describe('HII web access gate', () => {
     expect(globalCss).toContain('@media (min-width: 561px) and (hover: hover) and (pointer: fine)');
     expect(globalCss).toContain('[data-chrome="adaptive"] > .hii-space-toolbar { display: none; }');
     expect(globalCss).toContain('[data-chrome="adaptive"][data-commands-open] > .hii-space-toolbar { display: flex; }');
-    expect(css).toContain('.canvasHeader { display: none; }');
+    // The browser canvas now carries the installed app's floating pill at every
+    // size, the way DesktopHiiAccess does, instead of hiding it on desktop.
+    expect(css).not.toContain('.canvasHeader { display: none; }');
+    expect(css).toContain('backdrop-filter: blur(24px) saturate(1.4);');
     expect(globalCss).toContain('.hii-node[data-node-type="note"]');
     expect(globalCss).toContain('background: rgba(255, 255, 255, .99)');
     expect(css).toContain('@media (max-width: 560px)');
