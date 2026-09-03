@@ -116,6 +116,11 @@ TASKS = [
 ]
 
 
+# Every model name the server reported while answering. More than one entry
+# means the model changed mid-run and the score covers two different things.
+SERVED = set()
+
+
 class SilentModel(RuntimeError):
     """The server returned a reply the model never actually wrote.
 
@@ -160,6 +165,10 @@ def ask(endpoint, model, prompt, temperature, thinking=None, timeout=300):
         raise SilentModel(
             f"the server returned {written} completion token(s); "
             f"finish_reason {payload['choices'][0].get('finish_reason')!r}")
+
+    # llama.cpp serves whatever it has loaded and does not refuse a request
+    # naming something else, so `--model` is a label, not a selector.
+    SERVED.add(payload.get("model") or "unreported")
 
     calls = []
     for entry in message.get("tool_calls") or []:
@@ -207,7 +216,19 @@ def main():
             if not ok:
                 print(f"        {why}")
 
+    served = ", ".join(sorted(SERVED)) or "nothing"
+    if len(SERVED) > 1:
+        # Two models split one percentage between them. Which tasks went to
+        # which is not recoverable from here, so the whole run goes.
+        print(f"\nVOID: the server answered as {served} during one run.")
+        print("That score belongs to no single model. Re-run against a "
+              "settled server.")
+        return 2
+
     print(f"\n{passed}/{total} ({100 * passed / total:.0f}%)")
+    print(f"served by: {served}"
+          + ("" if served == options.model
+             else f"   (NOT the --model you asked for, {options.model})"))
     return 0 if passed == total else 1
 
 

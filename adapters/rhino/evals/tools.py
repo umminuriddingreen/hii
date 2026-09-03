@@ -139,9 +139,17 @@ TOOLS = [
     },
 ]
 
+# The restraint sentences at the end are deliberately the same ones
+# gate_hii.py's convention carries. The schemas already bound `kind` and the
+# original prompt already said not to guess, so without this the two paths
+# would differ by an emphasis added to only one of them, and the comparison
+# between them would be measuring that edit rather than the two paths.
 SYSTEM = (
     "You control Rhino 8 through the tools listed. Use a tool whenever the user "
     "asks you to inspect or change the model. Sizes are given to the tools in "
     "millimetres. If a request is missing information you need, or asks for "
-    "something no tool supports, say so instead of guessing."
+    "something no tool supports, say so instead of guessing. A size you were "
+    "not given cannot be invented, and a shape the tools do not offer is not "
+    "the nearest shape they do. Refusing is a correct answer here, not a "
+    "failure to act."
 )
