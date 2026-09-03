@@ -73,22 +73,45 @@ def extract(text):
     return None
 
 
-def ask(endpoint, model, prompt, temperature):
+class SilentModel(RuntimeError):
+    """The server returned a reply the model never actually wrote.
+
+    Scoring this as a task failure is what made an earlier run report 55% for a
+    model that answers the same tasks correctly: `enable_thinking: false` against
+    a thinking-tuned Qwen3.8 ends the turn after one token, so ten of the
+    forty-two replies were an empty string the judges dutifully marked wrong.
+    A model that never spoke has not failed the task -- the harness has.
+    """
+
+
+def ask(endpoint, model, prompt, temperature, thinking, timeout):
     """Return calls in gate.py's shape, so the same judges can score them."""
-    body = json.dumps({
+    body = {
         "model": model,
         "messages": [{"role": "system", "content": SYSTEM},
                      {"role": "user", "content": prompt}],
         "temperature": temperature,
         "top_p": 0.8,
         "max_tokens": 2048,
-        "chat_template_kwargs": {"enable_thinking": False},
-    }).encode()
+    }
+    if thinking is not None:
+        # Only sent when asked for. Some templates read this key as permission
+        # to emit the stop token immediately, and a flag that silences the model
+        # measures the flag rather than the model.
+        body["chat_template_kwargs"] = {"enable_thinking": thinking}
+
     request = urllib.request.Request(
-        f"{endpoint}/v1/chat/completions", body,
+        f"{endpoint}/v1/chat/completions", json.dumps(body).encode(),
         {"Content-Type": "application/json"})
-    with urllib.request.urlopen(request, timeout=300) as response:
-        message = json.load(response)["choices"][0]["message"]
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        payload = json.load(response)
+
+    message = payload["choices"][0]["message"]
+    written = payload.get("usage", {}).get("completion_tokens")
+    if written is not None and written <= 1:
+        raise SilentModel(
+            f"the server returned {written} completion token(s); "
+            f"finish_reason {payload['choices'][0].get('finish_reason')!r}")
 
     text = (message.get("content") or "").strip()
     emitted = extract(text)
@@ -109,7 +132,16 @@ def main():
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--only")
+    parser.add_argument(
+        "--thinking", choices=("on", "off", "unset"), default="unset",
+        help="send chat_template_kwargs.enable_thinking, or leave it out "
+             "entirely (default). 'off' silences some Qwen3.8 builds outright.")
+    parser.add_argument(
+        "--timeout", type=float, default=300,
+        help="seconds per request; thinking mode needs considerably more")
     options = parser.parse_args()
+
+    thinking = {"on": True, "off": False, "unset": None}[options.thinking]
 
     tasks = [t for t in TASKS if not options.only or options.only in t[0]]
     print(f"model {options.model}  temp {options.temperature}  "
@@ -117,26 +149,47 @@ def main():
 
     total = passed = 0
     malformed = 0
+    silent = []
     for name, prompt, judge in tasks:
         results = []
         for _ in range(options.runs):
             try:
-                calls, text = ask(options.endpoint, options.model, prompt, options.temperature)
+                calls, text = ask(options.endpoint, options.model, prompt,
+                                  options.temperature, thinking, options.timeout)
                 if not calls and extract(text) is None:
                     malformed += 1
                 ok, why = judge(calls)
+            except SilentModel as error:
+                # Not scored either way. Counting it as a failure would put a
+                # serving fault in the model's column.
+                silent.append(f"{name}: {error}")
+                continue
             except Exception as error:                      # noqa: BLE001
                 ok, why = False, f"{type(error).__name__}: {error}"
             results.append((ok, why))
             total += 1
             passed += ok
 
+        if not results:
+            print(f"VOID  {name:22} -/-")
+            continue
         hits = sum(1 for ok, _ in results if ok)
         mark = "PASS" if hits == len(results) else ("FLAKY" if hits else "FAIL")
         print(f"{mark:5} {name:22} {hits}/{len(results)}")
         for ok, why in results:
             if not ok:
                 print(f"        {why}")
+
+    if silent:
+        # Loud, and fatal to the score. A run where the model was gagged on some
+        # tasks is not a weaker result than one where it answered -- it is not a
+        # result at all, and the percentage below would invite the comparison.
+        print(f"\nVOID: the model returned no tokens on {len(silent)} request(s).")
+        for note in silent:
+            print(f"  {note}")
+        print("Nothing here measures the model. Re-run once the server is "
+              "answering; --thinking off is the usual cause.")
+        return 2
 
     print(f"\n{passed}/{total} ({100 * passed / total:.0f}%)"
           f"   {malformed} reply/replies contained no parseable JSON at all")
