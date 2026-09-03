@@ -116,8 +116,19 @@ TASKS = [
 ]
 
 
-def ask(endpoint, model, prompt, temperature):
-    body = json.dumps({
+class SilentModel(RuntimeError):
+    """The server returned a reply the model never actually wrote.
+
+    Scoring this as a task failure is what made an earlier run report 55% for a
+    model that answers the same tasks correctly: `enable_thinking: false`
+    against a thinking-tuned Qwen3.8 ends the turn after one token, and the
+    judges dutifully marked the empty strings wrong. A model that never spoke
+    has not failed the task -- the harness has.
+    """
+
+
+def ask(endpoint, model, prompt, temperature, thinking=None, timeout=300):
+    body = {
         "model": model,
         "messages": [{"role": "system", "content": SYSTEM},
                      {"role": "user", "content": prompt}],
@@ -125,15 +136,31 @@ def ask(endpoint, model, prompt, temperature):
         "temperature": temperature,
         "top_p": 0.8,
         "max_tokens": 2048,
-        "chat_template_kwargs": {"enable_thinking": False},
-    }).encode()
+    }
+    if thinking is not None:
+        # Only sent when asked for. Some templates read this key as permission
+        # to emit the stop token immediately, and a flag that silences the
+        # model measures the flag rather than the model.
+        body["chat_template_kwargs"] = {"enable_thinking": thinking}
+
     request = urllib.request.Request(
-        f"{endpoint}/v1/chat/completions", body,
+        f"{endpoint}/v1/chat/completions", json.dumps(body).encode(),
         {"Content-Type": "application/json"})
-    with urllib.request.urlopen(request, timeout=300) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         payload = json.load(response)
 
     message = payload["choices"][0]["message"]
+
+    # Deliberately narrower than the same check in gate_hii: on this path a
+    # tool call with empty content is the correct answer, so silence only
+    # counts when the model produced neither a call nor a word.
+    written = payload.get("usage", {}).get("completion_tokens")
+    if (not message.get("tool_calls") and not (message.get("content") or "").strip()
+            and written is not None and written <= 1):
+        raise SilentModel(
+            f"the server returned {written} completion token(s); "
+            f"finish_reason {payload['choices'][0].get('finish_reason')!r}")
+
     calls = []
     for entry in message.get("tool_calls") or []:
         raw = entry["function"].get("arguments") or "{}"

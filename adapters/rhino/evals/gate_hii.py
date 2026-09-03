@@ -21,16 +21,24 @@ from gate import TASKS, GUID          # noqa: F401  (GUID is used via TASKS)
 # The tool vocabulary, written the way HII writes it: names in T, argument
 # names in F. Deliberately terse -- copying the real prompt's economy rather
 # than giving this eval a friendlier one it would not get in production.
-TOOL_NAMES = ",".join([
-    "rhino_object_create",
-    "rhino_object_delete",
-    "rhino_undo",
-    "rhino_document_describe",
-    "rhino_document_objects",
-    "rhino_object_get",
-    "rhino_geometry_bounding_box",
-    "rhino_session_describe",
-])
+#
+# Each name now carries one clause saying what it is for, taken from the
+# catalogue in tools.py rather than freshly invented. Names alone left the
+# model guessing between the pairs that read alike: it reached for
+# rhino_object_get to measure something and rhino_session_describe to ask
+# about units. A clause is the smallest thing that separates them, and the
+# tools array -- which scored higher -- was carrying exactly this and no more.
+TOOLS = [
+    ("rhino_object_create", "make a box"),
+    ("rhino_object_delete", "remove one object by id"),
+    ("rhino_undo", "reverse the last change"),
+    ("rhino_document_describe", "the document's units and object count"),
+    ("rhino_document_objects", "list what is in the document"),
+    ("rhino_object_get", "one object's type and attributes"),
+    ("rhino_geometry_bounding_box", "how big an object is, in mm"),
+    ("rhino_session_describe", "which Rhino process this is"),
+]
+TOOL_NAMES = " ".join(f"{name}({purpose})" for name, purpose in TOOLS)
 
 FIELDS = "kind,size_mm,origin,anchor,object_id"
 
@@ -38,11 +46,17 @@ SYSTEM = f"""You are HII, the work system, driving Rhino 8.
 Loop: intent -> context -> bounded work -> verify -> receipt. No plan narration.
 JSON only; no native tool tags. T:{TOOL_NAMES}. F:{FIELDS}.
 Sizes in F:size_mm are millimetres (a number for a cube, or three numbers
-[width,depth,height]). F:origin is [x,y,z]. F:anchor is corner|centre.
-Create: {{"type":"rhino_object_create","kind":"box","size_mm":40,"origin":[0,0,0]}}
+[width,depth,height]). F:origin is [x,y,z]. F:kind is box -- the only
+primitive that exists; there is no sphere, cylinder or curve.
+Always set F:anchor on a create: centre when the request centres the object
+on a point, corner otherwise.
+Create: {{"type":"rhino_object_create","kind":"box","size_mm":[12,34,56],"origin":[7,0,0],"anchor":"corner"}}
 Finish: {{"type":"final","summary":"result","verification":["checks run"],"next":null}}
 If a request is missing a value you need, or asks for something no tool
-supports, emit a final saying so instead of inventing one."""
+supports, emit a final saying so instead of inventing one. The numbers above
+are only there to show the shape of a call -- they are not defaults, and a
+size you were not given cannot be taken from them. A shape outside F:kind is
+a final too. Refusing is a correct answer here, not a failure to act."""
 
 
 def extract(text):
