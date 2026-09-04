@@ -380,6 +380,21 @@ impl RunGuard {
         self.draft.summary = redact_text(message);
     }
 
+    /// Persist a terminal checkpoint before fallible cleanup and presentation.
+    /// A long-lived interactive process may retain the guard after a turn, so
+    /// relying on `Drop` alone can leave `hii proof` claiming the run is still
+    /// active even after a loop stop was already shown to the operator.
+    pub fn checkpoint_error(
+        &mut self,
+        outcome: Outcome,
+        message: &str,
+        steps: usize,
+    ) -> Result<(), String> {
+        self.record_error(outcome, message);
+        self.draft.steps = steps;
+        write_receipt(&self.dir, &self.runtime, &self.id, &self.draft).map(|_| ())
+    }
+
     pub fn finalize(mut self, receipt: &Receipt) -> Result<PathBuf, String> {
         self.finalized = true;
         write_receipt(&self.dir, &self.runtime, &self.id, receipt)
@@ -728,6 +743,30 @@ mod tests {
         assert_eq!(receipt.exit_code, 1);
         assert_eq!(receipt.status, "incomplete");
         assert!(receipt.summary.contains("HTTP 500"));
+    }
+
+    #[test]
+    fn terminal_checkpoint_is_visible_before_guard_drop() {
+        let runtime = TempDir::new("checkpoint-runtime");
+        let workspace = TempDir::new("checkpoint-ws");
+        let dir = runtime.0.join("runs").join("cli").join("run-checkpoint");
+        fs::create_dir_all(&dir).expect("create run dir");
+        let mut draft = sample("run-checkpoint", &workspace.0);
+        draft.status = Outcome::Running.status().into();
+        draft.outcome = Outcome::Running.label().into();
+        let mut guard =
+            RunGuard::start(&runtime.0, &dir, "run-checkpoint", draft).expect("start guard");
+
+        guard
+            .checkpoint_error(Outcome::LoopAbort, "repeated HTTP 403", 4)
+            .expect("checkpoint terminal state");
+
+        let raw = fs::read_to_string(dir.join("receipt.json")).expect("checkpoint receipt exists");
+        let receipt: Receipt = serde_json::from_str(&raw).expect("parse receipt");
+        assert_eq!(receipt.outcome, "loop-abort");
+        assert_eq!(receipt.exit_code, 6);
+        assert_eq!(receipt.steps, 4);
+        assert!(receipt.finished_at_unix_ms > 0);
     }
 
     /// An unfinalized guard with no recorded error still writes something.

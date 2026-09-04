@@ -253,8 +253,8 @@ impl Toolbelt {
             return tool_result(Err("web search query cannot be empty".into()), false);
         }
         tool_result(
-            Ok(format!(
-                "NATIVE_WEBVIEW_REQUIRED\nquery: {query}\nnavigation: {}\nOpen this search in HII's native browser, choose a source, then use web_fetch on the selected page URL.",
+            Err(format!(
+                "NATIVE_WEBVIEW_REQUIRED\nquery: {query}\nnavigation: {}\nNo search results were observed by this CLI tool. Stop and ask the operator to complete the native-browser handoff or provide a source URL; do not treat this as research evidence and do not guess from the query.",
                 webview_search_url(query)
             )),
             false,
@@ -1503,8 +1503,9 @@ mod tests {
         let path = workspace();
         let tools = Toolbelt::new(path.clone()).unwrap();
         let result = tools.web_search("local first");
-        assert!(result.ok);
+        assert!(!result.ok);
         assert!(result.output.contains("NATIVE_WEBVIEW_REQUIRED"));
+        assert!(result.output.contains("No search results were observed"));
         assert!(result
             .output
             .contains("https://www.google.com/search?q=local+first"));

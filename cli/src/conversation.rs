@@ -1,7 +1,7 @@
 use crate::{
     agent::{
         choose_model, execute_tool, parse_action_with_repair, Action, RejectedActionGuard,
-        MODEL_LOOP_DETECTED_MESSAGE,
+        RepeatedToolFailureGuard, MODEL_LOOP_DETECTED_MESSAGE,
     },
     attachments::AttachmentQueue,
     background::BackgroundJobs,
@@ -236,7 +236,7 @@ impl SessionUsage {
 struct BackendOutcome {
     verification: Vec<VerificationRecord>,
     hook_records: Vec<HookRecord>,
-    completed: bool,
+    outcome: Outcome,
 }
 
 fn conversation_draft_receipt(
@@ -294,15 +294,21 @@ impl BackendOutcome {
         Self {
             verification,
             hook_records,
-            completed: true,
+            outcome: Outcome::Completed,
         }
     }
 
-    fn incomplete(verification: Vec<VerificationRecord>, hook_records: Vec<HookRecord>) -> Self {
+    fn stopped(
+        outcome: Outcome,
+        verification: Vec<VerificationRecord>,
+        hook_records: Vec<HookRecord>,
+    ) -> Self {
+        debug_assert_ne!(outcome, Outcome::Completed);
+        debug_assert_ne!(outcome, Outcome::Running);
         Self {
             verification,
             hook_records,
-            completed: false,
+            outcome,
         }
     }
 }
@@ -564,6 +570,7 @@ impl Conversation {
         let mut web_mutation_pending = false;
         let mut repeated_verification_failure: Option<(String, usize)> = None;
         let mut rejected_actions = RejectedActionGuard::default();
+        let mut repeated_tool_failures = RepeatedToolFailureGuard::default();
         loop {
             if self.max_steps > 0 && steps >= self.max_steps {
                 break;
@@ -654,13 +661,16 @@ impl Conversation {
                 }
                 self.messages.push(Message::assistant(raw));
                 self.messages.push(Message::user(message.clone()));
+                if let Some(guard) = run_guard.as_mut() {
+                    guard.checkpoint_error(Outcome::LoopAbort, &message, step)?;
+                }
                 self.finish_backend_run(
                     run,
                     run_guard,
                     input,
                     step,
                     &message,
-                    BackendOutcome::incomplete(verification, hook_records),
+                    BackendOutcome::stopped(Outcome::LoopAbort, verification, hook_records),
                 )?;
                 self.store
                     .event("assistant.message", json!({ "content": &message }))?;
@@ -1094,13 +1104,20 @@ impl Conversation {
                             )?;
                             self.messages.push(Message::assistant(raw));
                             self.messages.push(Message::user(blocked));
+                            if let Some(guard) = run_guard.as_mut() {
+                                guard.checkpoint_error(Outcome::LoopAbort, &message, step)?;
+                            }
                             self.finish_backend_run(
                                 run,
                                 run_guard,
                                 input,
                                 step,
                                 &message,
-                                BackendOutcome::incomplete(verification, hook_records),
+                                BackendOutcome::stopped(
+                                    Outcome::LoopAbort,
+                                    verification,
+                                    hook_records,
+                                ),
                             )?;
                             self.store
                                 .event("assistant.message", json!({ "content": &message }))?;
@@ -1317,6 +1334,9 @@ impl Conversation {
                         )
                     };
                     let mut safe_output = redact_text(&result.output);
+                    let repeated_failure = (!result.ok)
+                        .then(|| repeated_tool_failures.record(&tool, &safe_output, mutation_epoch))
+                        .flatten();
                     if result.ok {
                         self.action_failures = 0;
                         rejected_actions.reset();
@@ -1438,6 +1458,41 @@ impl Conversation {
                             }),
                         )?;
                     }
+                    if let Some((signature, count)) = repeated_failure {
+                        let message = format!(
+                            "HII stopped after the same {tool} failure class repeated {count} times without state progress. The failed approach was not retried again; completed changes remain in place."
+                        );
+                        self.store.event(
+                            "model.loop_detected",
+                            json!({
+                                "step": step,
+                                "reason": "same tool failure class repeated without state progress",
+                                "tool": tool,
+                                "signature": signature,
+                                "count": count
+                            }),
+                        )?;
+                        if let Some(run) = &run {
+                            run.event(
+                                "model.loop_detected",
+                                json!({ "step": step, "message": &message }),
+                            )?;
+                        }
+                        if let Some(guard) = run_guard.as_mut() {
+                            guard.checkpoint_error(Outcome::LoopAbort, &message, step)?;
+                        }
+                        self.finish_backend_run(
+                            run,
+                            run_guard,
+                            input,
+                            step,
+                            &message,
+                            BackendOutcome::stopped(Outcome::LoopAbort, verification, hook_records),
+                        )?;
+                        self.store
+                            .event("assistant.message", json!({ "content": &message }))?;
+                        return Ok(message);
+                    }
                     self.messages.push(Message::assistant(raw));
                     let proof_hint = if result.ok && mutation {
                         format!(
@@ -1465,7 +1520,7 @@ impl Conversation {
                 input,
                 steps,
                 "The operator step ceiling was reached before I could finish cleanly.",
-                BackendOutcome::incomplete(verification, hook_records),
+                BackendOutcome::stopped(Outcome::StepCeiling, verification, hook_records),
             )?;
         }
         Ok("The operator step ceiling was reached before I could finish cleanly.".into())
@@ -3246,8 +3301,9 @@ impl Conversation {
         let BackendOutcome {
             verification,
             mut hook_records,
-            completed,
+            outcome,
         } = outcome;
+        let completed = outcome == Outcome::Completed;
         let stop_hooks = self.hooks.fire(
             HookEvent::Stop,
             None,
@@ -3263,11 +3319,6 @@ impl Conversation {
         hook_records.extend(stop_hooks.records);
         let Some(run) = run else {
             return Ok(());
-        };
-        let outcome = if completed {
-            Outcome::Completed
-        } else {
-            Outcome::Aborted
         };
         let receipt = Receipt {
             schema_version: 7,
@@ -4323,7 +4374,13 @@ Flow is user-facing objective language: expose steerable assumptions, never mach
 
 #[cfg(test)]
 mod tests {
-    use super::last_code_block;
+    use super::{last_code_block, BackendOutcome, Outcome};
+
+    #[test]
+    fn stopped_backend_outcome_retains_the_terminal_reason() {
+        let outcome = BackendOutcome::stopped(Outcome::LoopAbort, Vec::new(), Vec::new());
+        assert_eq!(outcome.outcome, Outcome::LoopAbort);
+    }
 
     #[test]
     fn copy_code_takes_the_last_fenced_block() {

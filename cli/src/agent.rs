@@ -17,7 +17,7 @@ use hii_core::adaptive::InteractionProposalV1;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fs,
     io::{self, IsTerminal, Write},
     path::{Component, Path, PathBuf},
@@ -335,6 +335,52 @@ impl RejectedActionGuard {
     }
 }
 
+/// Stops semantically identical tool failures even when the model disguises
+/// the retry by changing a query, URL, or surrounding JSON. The action-text
+/// guard cannot catch that class of loop.
+#[derive(Debug, Default)]
+pub(crate) struct RepeatedToolFailureGuard {
+    mutation_epoch: usize,
+    counts: HashMap<String, usize>,
+}
+
+impl RepeatedToolFailureGuard {
+    pub(crate) fn record(
+        &mut self,
+        tool: &str,
+        output: &str,
+        mutation_epoch: usize,
+    ) -> Option<(String, usize)> {
+        if self.mutation_epoch != mutation_epoch {
+            self.mutation_epoch = mutation_epoch;
+            self.counts.clear();
+        }
+        let signature = tool_failure_signature(tool, output)?;
+        let count = self.counts.entry(signature.clone()).or_insert(0);
+        *count += 1;
+        (*count >= 2).then(|| (signature, *count))
+    }
+}
+
+fn tool_failure_signature(tool: &str, output: &str) -> Option<String> {
+    let first_line = output
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("unknown tool failure")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    let repeatable_class = first_line.starts_with("native_webview_required")
+        || first_line.starts_with("web fetch returned http ")
+        || first_line.starts_with("web fetch failed:")
+        || first_line.starts_with("blocked destructive shell pattern:")
+        || first_line.starts_with("missing_dependency:")
+        || first_line.starts_with("hook_blocked:")
+        || first_line.starts_with("blocked:");
+    repeatable_class.then(|| format!("{}:{first_line}", tool.to_ascii_lowercase()))
+}
+
 #[derive(Debug, Default)]
 struct MissingProofGuard {
     last_state: Option<(usize, Option<usize>)>,
@@ -641,6 +687,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let mut observations = HashSet::new();
     let mut steps = 0usize;
     let mut rejected_actions = RejectedActionGuard::default();
+    let mut repeated_tool_failures = RepeatedToolFailureGuard::default();
     let mut missing_proof = MissingProofGuard::default();
     let mut model_loop_detected = false;
     let mut action_failures = 0usize;
@@ -1003,6 +1050,9 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     )
                 };
                 let safe_output = redact_text(&result.output);
+                let repeated_failure = (!result.ok)
+                    .then(|| repeated_tool_failures.record(&tool, &safe_output, mutation_epoch))
+                    .flatten();
                 if result.ok {
                     action_failures = 0;
                     rejected_actions.reset();
@@ -1127,6 +1177,22 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 )?;
                 messages.push(Message::assistant(raw));
                 push_feedback(&mut messages, feedback);
+                if let Some((signature, count)) = repeated_failure {
+                    model_loop_detected = true;
+                    journal.emit(
+                        Event::new("model.loop_detected")
+                            .data(json!({
+                                "step": steps,
+                                "reason": "same tool failure class repeated without state progress",
+                                "tool": tool,
+                                "signature": signature,
+                                "count": count,
+                                "message": MODEL_LOOP_DETECTED_MESSAGE
+                            }))
+                            .human(Human::Recovery(MODEL_LOOP_DETECTED_MESSAGE.into())),
+                    )?;
+                    break;
+                }
                 if result.verification && result.ok {
                     if let Some(pending) = take_verified_pending_final(
                         &mut pending_final,
@@ -3024,6 +3090,42 @@ mod tests {
 
         guard.reset();
         assert!(!guard.would_loop("same action", 1, None));
+    }
+
+    #[test]
+    fn repeated_tool_failure_guard_uses_failure_class_not_action_text() {
+        let mut guard = RepeatedToolFailureGuard::default();
+
+        assert_eq!(
+            guard.record(
+                "web_fetch",
+                "web fetch returned HTTP 403\nurl: https://first.example",
+                0,
+            ),
+            None
+        );
+        let repeated = guard
+            .record(
+                "web_fetch",
+                "web fetch returned HTTP 403\nurl: https://second.example",
+                0,
+            )
+            .expect("same failure class should stop after the second occurrence");
+        assert_eq!(repeated.1, 2);
+        assert!(repeated.0.contains("http 403"));
+
+        assert_eq!(
+            guard.record("web_fetch", "web fetch returned HTTP 403", 1),
+            None,
+            "a workspace mutation starts a fresh failure epoch"
+        );
+
+        assert_eq!(guard.record("shell", "exit 1", 1), None);
+        assert_eq!(
+            guard.record("shell", "exit 1", 1),
+            None,
+            "generic failures need the existing exact-action guard to avoid false positives"
+        );
     }
 
     #[test]
