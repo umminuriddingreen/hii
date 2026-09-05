@@ -75,3 +75,9 @@ updates neither rebuild installed applications nor deploy the website.
 
 Mac CLI build, nine session-backup tests, and actual capture of 1,187 session
 files also passed from shared-main. No account upload is implied.
+
+Both real clean checkouts subsequently updated from `ef6aaf1` to `b749042`,
+rolled back to the recorded previous commit detached, and returned to main.
+No database was restored or downgraded. The Mac's three-provider restore
+verification and first scheduled backup both passed. Original Mac Drive dirty
+paths were checked again and remain unchanged.

@@ -59,3 +59,9 @@ files with zero errors, no missing source roots, and no skipped links. Use
 `node scripts/hii-session-backup-verify.mjs` to restore the smallest snapshot per
 provider and compare its SHA-256 independently. It creates new private proof
 files; it never rewrites original sessions or existing restore destinations.
+
+The Mac verifier passed for all three providers (453, 513, and 1,042 bytes).
+Its `com.hii.session-backup` LaunchAgent was installed for the clean shared-main
+checkout with a five-minute interval and successfully completed its first run
+(exit 0). Both machines now have verified local scheduled backups. This still
+does not provide account-bound or off-device backup.
