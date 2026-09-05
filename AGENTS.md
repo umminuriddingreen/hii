@@ -35,16 +35,18 @@ Selected object + text/voice intent -> bounded capability -> visible result -> p
 - Check `git status --short` and targeted diffs before editing.
 - Do not reset, delete, format, or rewrite files outside your scoped task.
 - Treat broad untracked folders such as `.claude/`, `.hermes/`, screenshots, and `life/` as possibly owned by another agent or the user.
-- Treat `/Users/ummi/hii-newest`, checked out on `main`, as the current HII. It is
-  a linked worktree and it is where the product lives; `/Users/ummi/hii` is the
-  original checkout, left detached at the pre-2026-08-17 `main` and holding only
-  build junk and untracked scratch. Mine old checkouts for migration evidence
-  only; do not add new dependencies on `/Users/ummi/hii-old`.
-- `main` was repointed at the real product on 2026-08-17. It had been a single
-  orphan commit — a 2026-06-28 SvelteKit track store sharing no history with any
-  live branch — so a clone produced a product that no longer existed. The prior
-  tip is preserved at tag `main-orphan-20260817`. `main` is ahead of `origin/main`
-  and has not been pushed; pushing is the user's call, and it will need `--force`.
+- Discover the active checkout with `git rev-parse --show-toplevel` and inspect
+  its branch, remotes, and dirty state. As of 2026-09-05 the working Mac checkout
+  is `/Users/ummi/hii`; do not assume historical checkout paths are authoritative.
+- Read `docs/records/2026-09-05-shared-main-handoff.md` for the Windows/Mac
+  integration and outstanding verification. Run
+  `node scripts/hii-source-update.mjs status` at session start for cached source
+  currency. `check` explicitly fetches; `update` only fast-forwards a clean main.
+  Never stash, discard, or commit another agent's work to unblock an update.
+- Source rollback is distinct from app or data rollback. Follow
+  `docs/hii-source-update.md`; never downgrade or restore a live database as a
+  side effect of checking out older code. Do not force-push based on historical
+  notes: compare the current remote ancestry first.
 - Keep secrets reference-only. Never print raw token values or copy credential files into docs, logs, or commits.
 - Complete work locally by default. Do not fetch, push, publish, upload, or call
   external services unless the user explicitly asks for that external action.

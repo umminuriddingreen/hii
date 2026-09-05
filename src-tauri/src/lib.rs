@@ -24,6 +24,7 @@ use tauri::{Emitter, Manager};
 
 mod account_sync;
 mod browser;
+mod chat;
 mod terminal;
 mod ui_channel;
 
@@ -814,11 +815,23 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            app.manage(chat::ChatState::open(app.handle().clone()).map_err(std::io::Error::other)?);
             ui_channel::apply_startup(&app.handle().clone());
             ui_channel::spawn_poller(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            chat::chat_conversation_list,
+            chat::chat_conversation_create,
+            chat::chat_conversation_get,
+            chat::chat_conversation_select_branch,
+            chat::chat_message_send,
+            chat::chat_generation_stop,
+            chat::chat_settings_get,
+            chat::chat_settings_set,
+            chat::chat_runtime_status,
+            chat::chat_runtime_start,
+            chat::chat_runtime_stop,
             runtime_space_snapshot_v1,
             runtime_space_apply_v1,
             runtime_space_history_v1,
@@ -835,6 +848,8 @@ pub fn run() {
             account_sync::account_workspace_list,
             account_sync::account_workspace_read,
             account_sync::account_workspace_write,
+            account_sync::account_workspace_selection_get,
+            account_sync::account_workspace_selection_set,
             workspace_asset_store,
             information_capture,
             information_find,
@@ -867,7 +882,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building HII desktop interface");
 
-    app.run(|_, _| {});
+    app.run(|app, event| {
+        if let tauri::RunEvent::Exit = event {
+            app.state::<chat::ChatState>().shutdown();
+        }
+    });
 }
 
 #[cfg(test)]

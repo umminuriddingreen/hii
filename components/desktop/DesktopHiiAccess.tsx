@@ -2,6 +2,9 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { HiiRoot } from '@/components/workspace/HiiRoot';
+import { LocalChatSurface } from './chat/LocalChatSurface';
+import { ChatCircle, SquaresFour, UserCircle, SidebarSimple, X } from '@phosphor-icons/react';
+import { readAccountWorkspaceSelection, resolveAccountWorkspaceSelection, saveAccountWorkspaceSelection } from '@/lib/desktop/account-selection';
 import {
   accountSyncStatus,
   linkAccountSync,
@@ -31,6 +34,8 @@ function detectDeviceName() {
 }
 
 export function DesktopHiiAccess() {
+  const [surface, setSurface] = useState<'canvas' | 'chat'>('canvas');
+  const [chatOpened, setChatOpened] = useState(false);
   const [ready, setReady] = useState(false);
   const [linked, setLinked] = useState(false);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
@@ -45,12 +50,21 @@ export function DesktopHiiAccess() {
   const [deviceName, setDeviceName] = useState(detectDeviceName);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [canvasAvailable, setCanvasAvailable] = useState(false);
+  const [unsaved, setUnsaved] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (restore = false) => {
     const value = await listNativeAccountWorkspaces();
     setIdentity({ handle: value.account.handle, deviceName: value.device.name });
     setWorkspaces(value.workspaces);
     setLinked(true);
+    if (restore) {
+      const selection = await readAccountWorkspaceSelection();
+      const next = resolveAccountWorkspaceSelection(selection, value.workspaces);
+      if (!selection.configured) await saveAccountWorkspaceSelection(next === 'local' ? null : next);
+      setActive(next);
+      setCanvasAvailable(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -58,11 +72,31 @@ export function DesktopHiiAccess() {
     void accountSyncStatus()
       .then(async (status) => {
         setLinked(status.linked);
-        if (status.linked) await refresh();
+        if (status.linked) await refresh(true);
+        else setCanvasAvailable(true);
       })
-      .catch(() => setMessage('could not inspect account synchronization.'))
+      .catch((error) => {
+        setMessage(error instanceof Error ? error.message : 'Could not open your account workspace.');
+        setAccountOpen(true);
+      })
       .finally(() => setReady(true));
   }, [refresh]);
+
+  const selectWorkspace = async (id: string) => {
+    if (busy || unsaved || id === active && canvasAvailable) return;
+    setBusy(true);
+    try {
+      if (linked) await saveAccountWorkspaceSelection(id === 'local' ? null : id);
+      setActive(id);
+      setCanvasAvailable(true);
+      setMessage('');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not remember your workspace.');
+      setAccountOpen(true);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const finishOnboarding = useCallback(() => {
     window.localStorage.setItem('hii.onboarding.completed.v1', 'true');
@@ -78,24 +112,24 @@ export function DesktopHiiAccess() {
 
   useEffect(() => {
     const toggleWorkspaces = (event: KeyboardEvent) => {
-      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.code !== 'Digit1' || event.repeat) return;
+      if (surface !== 'canvas' || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.code !== 'Digit1' || event.repeat) return;
       event.preventDefault();
       setWorkspaceOpen((value) => !value);
     };
     window.addEventListener('keydown', toggleWorkspaces);
     return () => window.removeEventListener('keydown', toggleWorkspaces);
-  }, []);
+  }, [surface]);
 
   const link = async (event: FormEvent) => {
     event.preventDefault();
-    if (!code.trim() || !deviceName.trim() || busy) return;
+    if (!code.trim() || !deviceName.trim() || busy || unsaved) return;
     setBusy(true);
     setMessage('');
     try {
       await linkAccountSync(code, deviceName);
       setCode('');
-      await refresh();
-      setMessage('this HII app is linked. choose an account workspace above.');
+      await refresh(true);
+      setMessage('Connected to your existing HII account.');
       finishOnboarding();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'could not link this app.');
@@ -104,8 +138,17 @@ export function DesktopHiiAccess() {
     }
   };
 
-  return <div className={styles.shell} data-workspace-open={workspaceOpen || undefined}>
-    <HiiRoot
+  return <div className={styles.shell} data-workspace-open={surface === 'canvas' && workspaceOpen || undefined}
+    onKeyDown={(event) => { if (surface === 'chat') event.stopPropagation(); }}
+    onPaste={(event) => { if (surface === 'chat') event.stopPropagation(); }}
+    onPointerMove={(event) => { if (surface === 'chat') event.stopPropagation(); }}
+  >
+    <nav className={styles.surfaceSwitch} aria-label="HII surface" data-workspace-ui>
+      <button type="button" aria-pressed={surface === 'canvas'} onClick={() => setSurface('canvas')}><SquaresFour size={16} />Canvas</button>
+      <button type="button" aria-pressed={surface === 'chat'} onClick={() => { setChatOpened(true); setSurface('chat'); }}><ChatCircle size={16} />Chat</button>
+    </nav>
+    <div className={styles.surface} hidden={surface !== 'canvas'}>
+    {ready && canvasAvailable ? <HiiRoot
       key={active}
       spaceId={active === 'local' ? '' : active}
       creatorId={identity ? `account:${identity.handle}` : 'human:local'}
@@ -113,39 +156,47 @@ export function DesktopHiiAccess() {
       persistentChrome={false}
       openTerminalOnReady={ready && !onboardingComplete}
       onTerminalReady={finishOnboarding}
-    />
-    {workspaceOpen ? <aside className={styles.workspacePanel} data-workspace-ui aria-label="Workspaces">
-      <header><strong>Workspaces</strong><kbd>⌘ 1</kbd></header>
+      onUnsavedChanges={setUnsaved}
+    /> : <div className={styles.loading} role="status">{ready ? 'Your account canvas could not be opened.' : 'Opening HII...'}</div>}
+    </div>
+    {chatOpened && <div className={styles.surface} hidden={surface !== 'chat'}><LocalChatSurface /></div>}
+    {surface === 'canvas' && <nav className={styles.accountControls} data-workspace-ui aria-label="Canvas account">
+      <button type="button" title="Workspaces" aria-label="Workspaces" aria-expanded={workspaceOpen} onClick={() => setWorkspaceOpen((value) => !value)}><SidebarSimple size={19} /></button>
+      <button type="button" title="HII account" aria-expanded={accountOpen} onClick={() => setAccountOpen((value) => !value)}><UserCircle size={19} /><span>{identity?.handle ?? 'HII account'}</span></button>
+    </nav>}
+    {surface === 'canvas' && workspaceOpen ? <aside className={styles.workspacePanel} data-workspace-ui aria-label="Workspaces">
+      <header><strong>Workspaces</strong><kbd>Ctrl / Cmd 1</kbd></header>
       <nav aria-label="Available workspaces">
-        <button type="button" data-active={active === 'local' || undefined} onClick={() => setActive('local')}>
-          <span>this Mac</span><small>local canvas</small>
+        <button type="button" disabled={busy || unsaved} data-active={active === 'local' || undefined} onClick={() => void selectWorkspace('local')}>
+          <span>this device</span><small>local canvas</small>
         </button>
-        {workspaces.map((workspace) => <button type="button" key={workspace.id} data-active={active === workspace.id || undefined} onClick={() => setActive(workspace.id)}>
+        {workspaces.map((workspace) => <button type="button" disabled={busy || unsaved} key={workspace.id} data-active={active === workspace.id || undefined} onClick={() => void selectWorkspace(workspace.id)}>
           <span>{workspace.name}</span><small>{workspace.role}</small>
         </button>)}
       </nav>
       <footer><span>Canvas</span><small>⌘ Space · ⌥ Space</small></footer>
     </aside> : null}
-    {accountOpen ? <aside className={styles.panel} data-workspace-ui aria-label="HII account synchronization">
+    {surface === 'canvas' && accountOpen ? <aside className={styles.panel} data-workspace-ui aria-label="HII account synchronization">
+      <button type="button" title="Close account" aria-label="Close account" onClick={() => setAccountOpen(false)}><X size={18} /></button>
       {linked ? <>
         <dl>
           <div><dt>account</dt><dd>{identity?.handle}</dd></div>
           <div><dt>device</dt><dd>{identity?.deviceName}</dd></div>
           <div><dt>authority</dt><dd>revocable workspace sync</dd></div>
         </dl>
-        <button type="button" disabled={busy} onClick={() => void refresh()}>refresh workspaces</button>
-        <small>Your local files, models, and terminal stay on this Mac. Only the selected account workspace synchronizes.</small>
+        <button type="button" disabled={busy || unsaved} onClick={() => { void refresh(!canvasAvailable).catch((error) => setMessage(error instanceof Error ? error.message : 'Could not refresh workspaces.')); }}>Refresh workspaces</button>
+        <small>Your local files, models, and terminal stay on this device. Only the selected account workspace synchronizes.</small>
       </> : <>
         <p>Connect this HII app to your account. Your workspaces become available here without exposing this computer&apos;s terminal to the browser.</p>
         <ol>
-          <li>Open HII on the web.</li>
+          <li>Sign in to your existing HII account on the web.</li>
           <li>Create a one-time computer code in your account menu.</li>
           <li>Paste it here within 15 minutes.</li>
         </ol>
         <form onSubmit={link}>
           <label>device name<input value={deviceName} onChange={(event) => setDeviceName(event.target.value)} maxLength={64} required /></label>
           <label>link code<input value={code} onChange={(event) => setCode(event.target.value)} maxLength={128} autoComplete="off" required /></label>
-          <button disabled={busy || !code.trim()}>{busy ? 'linking…' : 'link this app'}</button>
+          <button disabled={busy || unsaved || !code.trim()}>{busy ? 'linking…' : 'link this app'}</button>
         </form>
       </>}
       <p role="status">{message}</p>

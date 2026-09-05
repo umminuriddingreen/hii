@@ -935,6 +935,7 @@ export function HiiRoot({
   persistentChrome = true,
   openTerminalOnReady = false,
   onTerminalReady,
+  onUnsavedChanges,
   onShareNode,
   onRequestDevice,
   fileSeeder,
@@ -949,6 +950,7 @@ export function HiiRoot({
   persistentChrome?: boolean;
   openTerminalOnReady?: boolean;
   onTerminalReady?: () => void;
+  onUnsavedChanges?: (unsaved: boolean) => void;
   onShareNode?: (node: WorkspaceNode) => void;
   onRequestDevice?: () => void;
   fileSeeder?: (files: File[]) => Promise<NodeSeed[]>;
@@ -964,6 +966,9 @@ export function HiiRoot({
   const settleCamera = useCallback(() => save.current(), []);
   const camera = useCamera(settleCamera);
   const workspace = useWorkspace(camera.getViewport, undefined, persistence);
+  useEffect(() => {
+    onUnsavedChanges?.(workspace.hasUnsavedChanges);
+  }, [onUnsavedChanges, workspace.hasUnsavedChanges]);
   const [selected, setSelected] = useState<string[]>([]);
   const [marquee, setMarquee] = useState<MarqueeRect | null>(null);
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
@@ -2278,6 +2283,13 @@ export function HiiRoot({
         }
       }}
     >
+      {!workspace.ready ? <div className="hii-workspace-load-state" data-workspace-ui role="status">
+        <span>{workspace.syncError ? 'Could not load this canvas.' : 'Opening canvas...'}</span>
+        {workspace.syncError && <button type="button" onClick={workspace.retrySave}>Retry</button>}
+      </div> : (workspace.syncError || workspace.hasUnsavedChanges) && <div className="hii-workspace-save-state" data-workspace-ui role="status" aria-live="polite">
+        <span>{workspace.syncError ? (workspace.hasUnsavedChanges ? 'Canvas not saved. Keep HII open.' : 'Canvas synchronization unavailable.') : 'Saving canvas...'}</span>
+        {workspace.syncError && <button type="button" onClick={workspace.retrySave}>Retry save</button>}
+      </div>}
       {runtimeEnabled && persistentChrome && <UpdateBanner />}
       {runtimeEnabled && persistentChrome && <CanvasChrome
         drawing={drawing}

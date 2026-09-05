@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-BSL-1.1
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AsciiWave } from '@/components/marketing/AsciiWave';
 import { HiiFirstRunTerminal } from '@/components/auth/HiiFirstRunTerminal';
 import { HiiRoot } from '@/components/workspace/HiiRoot';
@@ -216,6 +216,8 @@ export function HiiWebAccess() {
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [workspaceName, setWorkspaceName] = useState('');
   const [workspaceMessage, setWorkspaceMessage] = useState('');
+  const canvasUnsaved = useRef(false);
+  const setCanvasUnsaved = useCallback((unsaved: boolean) => { canvasUnsaved.current = unsaved; }, []);
   const [shareCode, setShareCode] = useState('');
   const [redeemCode, setRedeemCode] = useState('');
   const [accountDevices, setAccountDevices] = useState<AccountDevice[]>([]);
@@ -239,7 +241,7 @@ export function HiiWebAccess() {
             `account:${canvasAccountId}`,
             (document) => hydrateBrowserCanvasAssets(canvasAccountId, document)
           ),
-    [accountSync, activeWorkspace, canvasAccountId, canvasAccountReady, session.csrfToken],
+    [accountSync, activeWorkspace?.id, canvasAccountId, canvasAccountReady, session.csrfToken],
   );
   // The signed-out canvas is the same surface, kept in this browser only.
   const guestPersistence = useMemo(() => browserSpacePersistence('guest'), []);
@@ -313,6 +315,7 @@ export function HiiWebAccess() {
       }
       setWorkspaces(next);
       setActiveWorkspaceId((current) => {
+        if (canvasUnsaved.current) return current;
         const requested = preferredId || current;
         return next.some((workspace) => workspace.id === requested) ? requested : next[0]?.id ?? '';
       });
@@ -361,6 +364,7 @@ export function HiiWebAccess() {
 
   const createWorkspace = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (canvasUnsaved.current) { setWorkspaceMessage('Save or retry the current canvas before changing workspaces.'); return; }
     if (!session.csrfToken || !workspaceName.trim() || workspaceBusy) return;
     setWorkspaceBusy(true);
     setWorkspaceMessage('');
@@ -392,6 +396,7 @@ export function HiiWebAccess() {
 
   const redeemStudioCode = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (canvasUnsaved.current) { setWorkspaceMessage('Save or retry the current canvas before changing workspaces.'); return; }
     if (!session.csrfToken || !redeemCode.trim() || workspaceBusy) return;
     setWorkspaceBusy(true);
     setWorkspaceMessage('');
@@ -458,6 +463,7 @@ export function HiiWebAccess() {
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (canvasUnsaved.current) { setMessage('Save or retry the current canvas before signing in.'); return; }
     if (!mode || busy) return;
 
     setBusy(true);
@@ -539,6 +545,7 @@ export function HiiWebAccess() {
   };
 
   const signOut = async () => {
+    if (canvasUnsaved.current) { setWorkspaceMessage('Save or retry the current canvas before logging out.'); return; }
     if (busy || !session.csrfToken) return;
     setBusy(true);
     setDeviceMessage('');
@@ -576,10 +583,12 @@ export function HiiWebAccess() {
     return (
       <div className={styles.canvasShell}>
         <HiiRoot
+          key={`${canvasAccountId}:${canvasSpaceId}`}
           surface="account"
           spaceId={canvasSpaceId}
           creatorId={`account:${canvasAccountId}`}
           persistence={canvasPersistence}
+          onUnsavedChanges={setCanvasUnsaved}
           allowPhoto
           persistentChrome={false}
           fileSeeder={canvasFileSeeder}
@@ -623,7 +632,10 @@ export function HiiWebAccess() {
             {accountSync ? <section className={styles.workspaceControls} aria-label="Your workspaces">
               <label>
                 your workspaces
-                <select value={activeWorkspaceId} onChange={(event) => setActiveWorkspaceId(event.target.value)}>
+                <select value={activeWorkspaceId} onChange={(event) => {
+                  if (canvasUnsaved.current) { setWorkspaceMessage('Save or retry the current canvas before changing workspaces.'); return; }
+                  setActiveWorkspaceId(event.target.value);
+                }}>
                   {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>
                     {workspace.name} · {workspace.role}
                   </option>)}
@@ -773,10 +785,12 @@ export function HiiWebAccess() {
   return (
     <div className={styles.canvasShell}>
       <HiiRoot
+        key="guest"
         surface="account"
         spaceId=""
         creatorId="human:guest"
         persistence={guestPersistence}
+        onUnsavedChanges={setCanvasUnsaved}
         allowPhoto
         persistentChrome={false}
         openTerminalOnReady={ready && !firstRunDismissed}

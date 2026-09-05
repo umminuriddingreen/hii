@@ -55,6 +55,16 @@ export class NativeAccountWorkspacePersistence implements WorkspacePersistence {
   private authoritative: WorkspaceDoc | null = null;
   private readonly listeners = new Set<(document: WorkspaceDoc) => void>();
   private timer: ReturnType<typeof setInterval> | null = null;
+  private disposed = false;
+  private writing = false;
+  private pollEpoch = 0;
+  private readonly revisions = new Map<number, WorkspaceDoc>();
+
+  private remember(document: WorkspaceDoc) {
+    this.revisions.set(document.revision, document);
+    if (this.revisions.size > 64) this.revisions.delete(this.revisions.keys().next().value!);
+    if (!this.authoritative || document.revision >= this.authoritative.revision) this.authoritative = document;
+  }
 
   constructor(readonly workspaceId: string) {}
 
@@ -67,7 +77,7 @@ export class NativeAccountWorkspacePersistence implements WorkspacePersistence {
 
   async read() {
     const document = await this.remoteRead();
-    this.authoritative = document;
+    this.remember(document);
     return document;
   }
 
@@ -87,30 +97,39 @@ export class NativeAccountWorkspacePersistence implements WorkspacePersistence {
   }
 
   async write(document: WorkspaceDoc) {
-    const base = this.authoritative ?? await this.read();
-    const first = await this.save(document, base.revision);
-    let saved = first.document;
-    if (first.conflict) {
-      const rebased = rebaseWorkspaceDoc(document, first.document, base);
-      const retry = await this.save(rebased, first.document.revision);
-      if (retry.conflict) throw new Error('account_workspace_conflict_retry_required');
-      saved = retry.document;
-    }
-    this.authoritative = saved;
-    return saved;
+    if (this.writing) throw new Error('account_workspace_save_already_running');
+    this.writing = true;
+    try {
+      if (!this.authoritative) await this.read();
+      const base = this.revisions.get(document.revision);
+      if (!base) throw new Error('account_workspace_revision_not_loaded');
+      const first = await this.save(document, document.revision);
+      let saved = first.document;
+      if (first.conflict) {
+        const rebased = rebaseWorkspaceDoc(document, first.document, base);
+        const retry = await this.save(rebased, first.document.revision);
+        if (retry.conflict) throw new Error('account_workspace_conflict_retry_required');
+        saved = retry.document;
+      }
+      this.remember(saved);
+      return saved;
+    } finally { this.writing = false; }
   }
 
-  subscribe(listener: (document: WorkspaceDoc) => void) {
+  subscribe(listener: (document: WorkspaceDoc) => void, onError?: (error: unknown) => void) {
+    this.disposed = false;
     this.listeners.add(listener);
     if (!this.timer) {
+      const scope = ++this.pollEpoch;
       this.timer = setInterval(() => {
-        if (typeof document !== 'undefined' && document.hidden) return;
+        if (this.disposed || this.writing || !this.authoritative || (typeof document !== 'undefined' && document.hidden)) return;
         void this.remoteRead().then((next) => {
+          if (this.disposed || this.writing || scope !== this.pollEpoch) return;
           if (!this.authoritative || next.revision > this.authoritative.revision) {
-            this.authoritative = next;
+            this.remember(next);
             for (const current of this.listeners) current(next);
           }
-        }).catch(() => undefined);
+        }).catch((error) => { if (!this.disposed && scope === this.pollEpoch) onError?.(error); });
       }, 2_000);
     }
     return () => {
@@ -118,11 +137,14 @@ export class NativeAccountWorkspacePersistence implements WorkspacePersistence {
       if (!this.listeners.size && this.timer) {
         clearInterval(this.timer);
         this.timer = null;
+        this.pollEpoch += 1;
       }
     };
   }
 
   dispose() {
+    this.disposed = true;
+    this.pollEpoch += 1;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.listeners.clear();

@@ -129,9 +129,11 @@ use Visibility::{Core, Extended};
 /// are native, every other verb of those families is not.
 pub const CONTEXT_NATIVE_VERBS: &[&str] = &["compile", "show", "approve", "search"];
 pub const SKILLS_NATIVE_VERBS: &[&str] = &["promote", "reject", "lifecycle", "record-use", "run"];
+pub const CHAT_NATIVE_VERBS: &[&str] = &["list", "show", "new", "settings", "send"];
 
 /// Every command `hii` answers to, and who answers it.
 pub const ROUTES: &[Route] = &[
+    native("session-backup", Extended, Infra, "back up and restore provider session logs"),
     // ---- the bounded-work loop: what a new user should see first ----
     delegated("home", Core, Context, "show the compact current coordinate"),
     native(
@@ -149,7 +151,13 @@ pub const ROUTES: &[Route] = &[
     delegated("work", Core, Work, "show and advance the work queue"),
     delegated("task", Core, Work, "capture a task into the queue"),
     delegated("now", Core, Work, "show what to do next"),
-    delegated("chat", Core, Work, "open the conversational surface"),
+    split(
+        "chat",
+        CHAT_NATIVE_VERBS,
+        Core,
+        Work,
+        "open chat or run durable local conversations",
+    ),
     delegated("check", Core, Build, "typecheck: the inner fix loop"),
     delegated("ship", Core, Build, "validate and commit locally"),
     native(
@@ -553,6 +561,58 @@ pub fn full_command_list() -> String {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn chat_native_verbs_reach_clap_without_changing_bare_chat_delegation() {
+        assert!(is_delegated("chat"));
+        assert!(has_native_surface("chat"));
+        assert!(!claims_verb("chat", None));
+        for command in [
+            "chat",
+            "chat --help",
+            "chat --json",
+            "chat open",
+            "chat unknown",
+        ] {
+            let args: Vec<String> = command.split_whitespace().map(str::to_owned).collect();
+            assert!(
+                !crate::claimed_from_legacy(&args),
+                "{command} must remain delegated"
+            );
+        }
+        for command in [
+            "chat list",
+            "chat show conversation-id",
+            "chat new",
+            "chat settings",
+            "chat send hello local model",
+        ] {
+            let args: Vec<String> = command.split_whitespace().map(str::to_owned).collect();
+            assert!(
+                crate::claimed_from_legacy(&args),
+                "{command} must reach Rust"
+            );
+            let cli = <crate::Cli as clap::Parser>::try_parse_from(
+                std::iter::once("hii").chain(args.iter().map(String::as_str)),
+            )
+            .expect("every claimed chat verb must parse on the native surface");
+            assert!(matches!(cli.command, Some(crate::Commands::Chat { .. })));
+        }
+    }
+
+    #[test]
+    fn chat_route_verbs_match_native_subcommands() {
+        let command = <crate::Cli as clap::CommandFactory>::command();
+        let chat = command
+            .find_subcommand("chat")
+            .expect("native chat command");
+        let parsed: HashSet<&str> = chat.get_subcommands().map(|sub| sub.get_name()).collect();
+        let routed: HashSet<&str> = CHAT_NATIVE_VERBS.iter().copied().collect();
+        assert_eq!(
+            parsed, routed,
+            "chat verbs must have matching clap and routing ownership"
+        );
+    }
 
     /// The regression this table exists to prevent.
     ///
