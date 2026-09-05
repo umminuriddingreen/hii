@@ -52,3 +52,10 @@ Shared core: nine tests cover deduplication, append/truncation, growth during
 capture, timestamps, corrupt chunks, excluded paths, device namespaces, schema
 coexistence, and backup writer locking. Mac execution is a separate verification
 step, not implied by cross-platform Rust source.
+
+Mac verification on 2026-09-05: CLI build and all nine core backup tests passed
+from the clean shared-main checkout. The actual initial scan captured 1,187
+files with zero errors, no missing source roots, and no skipped links. Use
+`node scripts/hii-session-backup-verify.mjs` to restore the smallest snapshot per
+provider and compare its SHA-256 independently. It creates new private proof
+files; it never rewrites original sessions or existing restore destinations.

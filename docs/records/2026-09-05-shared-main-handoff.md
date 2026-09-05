@@ -54,3 +54,24 @@ See `2026-09-05-windows-local-chat.md` and
 
 Source rollback never rewinds SQLite or session snapshots. Signed Tauri/UI
 release publication and its signing credentials remain separate release work.
+
+## Installed Source Maintenance
+
+On 2026-09-05, `ef6aaf1` was pushed normally to GitHub main. Dedicated clean
+checkouts were created at `C:\Users\ummin\dev\hii-main` and
+`/Users/ummi/hii-shared-main`; both have 15-minute per-user source-update jobs.
+Each job was invoked through its actual scheduler and completed with exit 0.
+The Mac uses its existing GitHub SSH authentication; no credentials were copied.
+All 12 source-update/scheduler tests passed on both operating systems.
+
+Start new Codex or Claude sessions in these shared checkouts to read the current
+AGENTS/CLAUDE handoff. An already-running session in a different checkout does
+not automatically absorb new instructions. Keep active edits on a feature
+branch or separate worktree: the scheduler blocks non-main and dirty checkouts.
+
+The original Mac `/Users/ummi/hii` and older Windows checkouts are not silently
+advanced. Their unfinished work remains with its current owner. Shared source
+updates neither rebuild installed applications nor deploy the website.
+
+Mac CLI build, nine session-backup tests, and actual capture of 1,187 session
+files also passed from shared-main. No account upload is implied.
