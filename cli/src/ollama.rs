@@ -167,7 +167,7 @@ struct RunningModel {
     model: String,
 }
 
-/// OpenAI-compatible `/v1/models` listing used by LM Studio and HII Native.
+/// OpenAI-compatible `/v1/models` listing used by LM Studio and HII.
 #[derive(Debug, Deserialize)]
 struct OpenAiModels {
     #[serde(default)]
@@ -202,7 +202,7 @@ impl Ollama {
     }
 
     /// Choose the lowest-friction local runtime. An explicit model URL always
-    /// wins; otherwise a ready HII Native endpoint wins over Ollama.
+    /// wins; otherwise a ready HII endpoint wins over Ollama.
     pub fn discover() -> Self {
         if std::env::var_os("HII_MODEL_URL").is_some()
             || std::env::var_os("HII_OLLAMA_URL").is_some()
@@ -433,7 +433,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
     }
 
     /// OpenAI-compatible chat (`/v1/chat/completions`), used for LM Studio and
-    /// HII Native. A requested JSON schema maps to `response_format:
+    /// HII. A requested JSON schema maps to `response_format:
     /// json_object` since not all backends honor a full schema constraint.
     fn chat_openai(
         &self,
@@ -938,14 +938,14 @@ fn wait_ready_verbose(
                 eprint!("\r\x1b[2K");
                 let _ = std::io::stderr().flush();
             }
-            eprintln!("hii: HII Native exited during startup — {}", log_tail(log));
+            eprintln!("hii: HII exited during startup — {}", log_tail(log));
             eprintln!("hii: full startup log at {}", log.display());
             return false;
         }
         if show {
             let detail = log_tail(log);
             eprint!(
-                "\r\x1b[2K{} starting HII Native ({}s){}",
+                "\r\x1b[2K{} starting HII ({}s){}",
                 frames[tick % frames.len()],
                 started.elapsed().as_secs(),
                 if detail.is_empty() {
@@ -999,7 +999,7 @@ fn acquired_native_model(manifest: &Value) -> Option<String> {
     (!model.is_empty()).then(|| model.to_string())
 }
 
-/// Start HII Native only when weights were acquired explicitly beforehand.
+/// Start HII only when weights were acquired explicitly beforehand.
 /// Missing, malformed, or pending manifests fail closed without spawning the
 /// runner, network access, or a model download.
 fn start_native_runner() -> Option<Ollama> {
@@ -1068,7 +1068,7 @@ fn endpoint_ready(base_url: &str) -> bool {
 }
 
 /// Durations an OpenAI-compatible backend reported itself, in milliseconds.
-/// Ollama-style backends report nanoseconds here; HII Native and LM Studio
+/// Ollama-style backends report nanoseconds here; HII and LM Studio
 /// report nothing, which is why callers fall back to client-side wall clock.
 fn openai_reported_durations(usage: &Value) -> Option<(u64, u64, u64)> {
     let prompt = usage["prompt_eval_duration"].as_u64();
@@ -1267,7 +1267,7 @@ mod tests {
 
     #[test]
     fn reported_durations_are_absent_for_backends_that_do_not_time_themselves() {
-        // HII Native and LM Studio return a usage block with tokens only, which
+        // HII and LM Studio return a usage block with tokens only, which
         // is why every session since the native default went to zero timings.
         let usage = serde_json::json!({ "prompt_tokens": 11070, "completion_tokens": 11 });
         assert_eq!(openai_reported_durations(&usage), None);

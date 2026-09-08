@@ -309,7 +309,7 @@ pub const CONTROL_ACTIONS: &[&str] = &["final", "message"];
 ///
 /// The prompt and the JSON schema have to offer the same set. A backend that
 /// does not honor a schema constraint leaves the prompt as the model's only
-/// signal — HII Native accepts `response_format: json_object` and nothing more —
+/// signal — HII accepts `response_format: json_object` and nothing more —
 /// so a `final` present only in the schema is a `final` the model never learns
 /// about, and the session can never complete.
 pub fn action_type_names(include_hii: bool) -> Vec<&'static str> {

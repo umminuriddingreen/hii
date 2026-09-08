@@ -1012,10 +1012,10 @@ function ensureHiiNativeEngine() {
     const result = spawnSync(candidate, ["--version"], { stdio: "ignore" });
     return result.status === 0;
   });
-  if (!python) throw new Error("HII Native needs Python 3.12+ to prepare its MLX engine.");
-  console.log("Preparing HII Native's private Apple-Silicon runtime…");
+  if (!python) throw new Error("HII needs Python 3.12+ to prepare its MLX engine.");
+  console.log("Preparing HII's private Apple-Silicon runtime…");
   let result = spawnSync(python, ["-m", "venv", runtimeRoot], { stdio: "inherit" });
-  if (result.status !== 0) throw new Error("could not create HII Native's managed MLX environment");
+  if (result.status !== 0) throw new Error("could not create HII's managed MLX environment");
   const pip = path.join(runtimeRoot, "bin", "python");
   result = spawnSync(pip, [
     "-m", "pip", "install", "--disable-pip-version-check",
@@ -1024,7 +1024,7 @@ function ensureHiiNativeEngine() {
     stdio: "inherit"
   });
   if (result.status !== 0 || !fs.existsSync(server)) {
-    throw new Error("could not install HII Native's MLX-VLM engine");
+    throw new Error("could not install HII's MLX-VLM engine");
   }
   return server;
 }
@@ -1122,7 +1122,7 @@ function requireHuggingFaceModel(value, command) {
 function hf(args, options = {}) {
   const result = spawnSync("hf", args, { encoding: "utf8", ...options });
   if (result.error?.code === "ENOENT") {
-    throw new Error("Hugging Face CLI is missing; install `hf` before managing HII Native models");
+    throw new Error("Hugging Face CLI is missing; install `hf` before managing HII models");
   }
   if (result.status !== 0) {
     if (options.stdio === "inherit") process.exitCode = result.status || 1;
@@ -1277,7 +1277,7 @@ function syncPiModel(model, makeDefault) {
   if (!provider.models.some((entry) => entry.id === model)) {
     provider.models.push({
       id: model,
-      name: `${model} (HII Native MLX)`,
+      name: `${model} (HII MLX)`,
       input: ["text"],
       reasoning: false,
       contextWindow: 262144,
@@ -1312,7 +1312,7 @@ function installModel(args) {
   hf(["cache", "verify", model, "--cache-dir", HF_CACHE], { stdio: "inherit" });
   const pi = syncPiModel(model, false);
   event("model_runtime.model_installed", {
-    actor: "hii.cli", target: model, status: "verified", text: `Installed ${model} in HII Native's model cache`
+    actor: "hii.cli", target: model, status: "verified", text: `Installed ${model} in HII's model cache`
   });
   console.log(JSON.stringify({ ok: true, model, cache: HF_CACHE, verified: true, pi }, null, 2));
 }
@@ -1332,7 +1332,7 @@ async function waitForModelRuntime(timeoutMs = 30 * 60 * 1000) {
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
-  throw new Error("HII Native did not become ready within 30 minutes; run `hii model logs`");
+  throw new Error("HII did not become ready within 30 minutes; run `hii model logs`");
 }
 
 async function waitForModelRuntimeStopped(timeoutMs = 30000) {
@@ -1341,7 +1341,7 @@ async function waitForModelRuntimeStopped(timeoutMs = 30000) {
     if (!modelRuntimeProcess()) return;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error("HII Native did not stop within 30 seconds; inspect `hii model status` and `hii model logs`");
+  throw new Error("HII did not stop within 30 seconds; inspect `hii model status` and `hii model logs`");
 }
 
 async function useModel(args) {
@@ -1391,14 +1391,14 @@ function removeModel(args) {
   const model = resolveModelSelection(args[0], "remove");
   const active = modelRuntimeStatus().model === model && Boolean(modelRuntimePid());
   if (active) throw new Error(`${model} is active; choose another model or run \`hii model stop\` first`);
-  if (!modelIsInstalled(model)) throw new Error(`${model} is not installed in HII Native`);
+  if (!modelIsInstalled(model)) throw new Error(`${model} is not installed in HII`);
   if (!args.includes("--yes")) {
     console.log(JSON.stringify({ ok: true, dryRun: true, model, path: cachedModelPath(model), apply: `hii model remove ${model} --yes` }, null, 2));
     return;
   }
   hf(["cache", "rm", `model/${model}`, "--cache-dir", HF_CACHE, "--yes"], { stdio: "inherit" });
   event("model_runtime.model_removed", {
-    actor: "hii.cli", target: model, status: "removed", text: `Removed ${model} from HII Native's model cache`
+    actor: "hii.cli", target: model, status: "removed", text: `Removed ${model} from HII's model cache`
   });
 }
 
@@ -1453,8 +1453,8 @@ async function startModelRuntime(args) {
     pid: child.pid,
     endpoint: MODEL_RUNTIME_URL,
     backend: process.platform === "darwin" && process.arch === "arm64"
-      ? "hii-native/mlx-vlm"
-      : "hii-native/mistral.rs",
+      ? "hii/mlx-vlm"
+      : "hii/mistral.rs",
     model,
     quantization: quant,
     performance: {
@@ -1759,7 +1759,7 @@ function instanceSnapshot() {
     ...(runtimePid ? [{
       id: "service:model-runtime",
       type: "model-runtime",
-      title: `HII Native · ${runtimeState.model || "loading"}`,
+      title: `HII · ${runtimeState.model || "loading"}`,
       pid: runtimePid,
       status: runtimeState.state === "ready" ? "running" : "starting",
       owned: true,

@@ -27,7 +27,7 @@
     {
       "memoryGiBMax": null,
       "name": "48gb+",
-      "localClass": "35B MoE / 3B active (HII Native / MLX default)",
+      "localClass": "35B MoE / 3B active (HII / MLX default)",
       "model": "mlx-community/Qwen3.5-35B-A3B-4bit",
       "quantization": "4",
       "native_model": "mlx-community/Qwen3.5-35B-A3B-4bit",
@@ -49,7 +49,7 @@
       "localClass": "4B Dense — Default Fast Worker",
       "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
       "quantization": "4",
-      "description": "The default HII Native MLX worker for low-latency interaction and tool routing."
+      "description": "The default HII MLX worker for low-latency interaction and tool routing."
     },
     {
       "tier": 2,
@@ -57,7 +57,7 @@
       "localClass": "35B MoE / 3B Active — Strong Local Brain (MLX)",
       "model": "mlx-community/Qwen3.5-35B-A3B-4bit",
       "quantization": "4",
-      "description": "Difficult reasoning and long-context work with measured interactive throughput on this Mac. Explicitly selectable through the HII Native MLX engine.",
+      "description": "Difficult reasoning and long-context work with measured interactive throughput on this Mac. Explicitly selectable through the HII MLX engine.",
       "provider": "hii-native",
       "backend": "mlx"
     },
@@ -69,7 +69,7 @@
       "description": "Operator-invoked only, through /codex or /claude. Never entered automatically."
     }
   ],
-  "selectionCatalogDoc": "Curated HII Native choices for explicit operator selection. This catalog recommends but never downloads, starts, switches, or routes a model by itself.",
+  "selectionCatalogDoc": "Curated HII choices for explicit operator selection. This catalog recommends but never downloads, starts, switches, or routes a model by itself.",
   "selectionCatalog": [
     {
       "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
@@ -139,13 +139,13 @@
     ],
     "tiers": {
       "0": "Deterministic — no LLM, tool routing only",
-      "1": "Qwen3-4B-Instruct-2507-4bit (default low-latency HII Native MLX worker)",
+      "1": "Qwen3-4B-Instruct-2507-4bit (default low-latency HII MLX worker)",
       "2": "Qwen3.5-35B-A3B-4bit (measured high-throughput local reasoning model)",
       "3": "cloud only — when local models fail, task is extremely consequential, or explicitly requested"
     },
     "mlxBACKEND": {
       "tag": "mlx-community/Qwen3.5-35B-A3B-4bit",
-      "engine": "HII Native MLX-VLM on 127.0.0.1:11435",
+      "engine": "HII MLX-VLM on 127.0.0.1:11435",
       "status": "hii runner model status"
     }
   },
@@ -157,6 +157,6 @@
   "hostedTransmission": "explicit-only",
   "metadata": {
     "updated": "2026-09-02T04:28:00Z",
-    "reason": "Keep HII Native as the automatic local default and add Ox Alpha website access as an explicit external model choice that uses HII's bounded tool protocol."
+    "reason": "Keep HII as the automatic local default and add Ox Alpha website access as an explicit external model choice that uses HII's bounded tool protocol."
   }
 }

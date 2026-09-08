@@ -995,13 +995,13 @@ mod tests {
     fn welcome_is_compact_and_leaves_instruction_to_the_composer() {
         let rendered = welcome_frame(
             Path::new("/tmp/studio"),
-            "HII Native",
+            "HII",
             "local-model",
             "Welcome back — 2 context sources loaded.",
             false,
         );
         assert!(rendered.contains("HUMAN INFORMATION INTERFACE"));
-        assert!(rendered.contains("HII Native"));
+        assert!(rendered.contains("HII"));
         assert!(rendered.contains("Welcome back"));
         assert!(!rendered.contains("What do you want"));
         assert!(!rendered.contains("Type naturally"));

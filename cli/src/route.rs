@@ -201,7 +201,7 @@ pub const ROUTES: &[Route] = &[
         "model",
         Core,
         Infra,
-        "fully manage the HII Native model backend",
+        "fully manage the HII model backend",
     ),
     delegated(
         "open",

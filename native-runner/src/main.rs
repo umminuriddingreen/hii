@@ -177,7 +177,7 @@ fn serve_mlx(config: &ServeConfig, binary: &Path) -> Result<()> {
     let endpoint = format!("http://{}:{}", config.host, config.port);
     let mut manifest = RuntimeManifest {
         schema_version: 1,
-        backend: "hii-native/mlx-vlm".into(),
+        backend: "hii/mlx-vlm".into(),
         model: config.model.clone(),
         source: if Path::new(&config.model).exists() {
             "local-path"
@@ -348,7 +348,7 @@ fn capabilities(model_home: &Path) -> Value {
     let mlx = mlx_vlm_binary();
     json!({
         "runtime": "hii-native-runner",
-        "backend": if mlx.is_some() { "hii-native/mlx-vlm" } else if cfg!(feature = "metal") { "mistral.rs-metal" } else { "mistral.rs-cpu" },
+        "backend": if mlx.is_some() { "hii/mlx-vlm" } else if cfg!(feature = "metal") { "mistral.rs-metal" } else { "mistral.rs-cpu" },
         "metal": cfg!(feature = "metal"),
         "mlxWorker": {
             "status": if mlx.is_some() { "ready" } else { "not-installed" },
@@ -390,7 +390,7 @@ async fn metrics() -> Json<Value> {
 async fn serve(config: ServeConfig) -> Result<()> {
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         let binary = mlx_vlm_binary().ok_or_else(|| anyhow::anyhow!(
-            "HII Native's Apple-Silicon engine is not installed. Expected ~/.hii/runtimes/mlx/bin/mlx_vlm.server or HII_MLX_VLM_BIN."
+            "HII's Apple-Silicon engine is not installed. Expected ~/.hii/runtimes/mlx/bin/mlx_vlm.server or HII_MLX_VLM_BIN."
         ))?;
         return serve_mlx(&config, &binary);
     }

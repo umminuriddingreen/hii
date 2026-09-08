@@ -201,7 +201,7 @@ function cmdApp(args) {
 
 function slashDefaults() {
   return [
-    { name: "backend", description: "manage HII Native models", argvPrefix: ["model"] },
+    { name: "backend", description: "manage HII models", argvPrefix: ["model"] },
     { name: "open", description: "launch HII app, web, or site", argvPrefix: ["open"] },
     { name: "ui", description: "control app and web surfaces", argvPrefix: ["ui"] }
   ];
@@ -1373,9 +1373,9 @@ function agentCommandCatalog() {
     { command: "hii loop decide <yes|no>", purpose: "Approve or reject the latest proposed plan." },
     { command: "hii model recommend", purpose: "Compare HII-curated local models against this machine, installed state, and measured speed." },
     { command: "hii model search <query>", purpose: "Discover MLX-ready Hugging Face models; defaults to mlx-community." },
-    { command: "hii model install <org/model>", purpose: "Explicitly download and verify weights in HII Native's private cache." },
-    { command: "hii model installed", purpose: "List locally installed HII Native model weights and disk usage." },
-    { command: "hii model use <org/model>", purpose: "Switch the HII Native backend and project the active choice into Pi." },
+    { command: "hii model install <org/model>", purpose: "Explicitly download and verify weights in HII's private cache." },
+    { command: "hii model installed", purpose: "List locally installed HII model weights and disk usage." },
+    { command: "hii model use <org/model>", purpose: "Switch the HII backend and project the active choice into Pi." },
     { command: "hii model status", purpose: "Show backend, active model, endpoint, process, performance settings, and logs." },
     { command: "hii model bench", purpose: "Run HII's bounded end-to-end completion benchmark against the active model." },
     { command: "hii model remove <org/model>", purpose: "Preview removal; add --yes only when the displayed target is correct." },
@@ -1416,7 +1416,7 @@ function agentCommandCatalog() {
     { command: "hii runner init <name>", purpose: "Register an owned runner and print its local token once." },
     { command: "hii runner start --once", purpose: "Heartbeat, claim one whitelisted capability job, stream logs, and exit." },
     { command: "hii runner doctor", purpose: "Inspect the native model runtime, consumer hardware tier, and privacy route." },
-    { command: "hii runner model start", purpose: "Start HII Native with the hardware-optimized local engine and explicit model acquisition." },
+    { command: "hii runner model start", purpose: "Start HII with the hardware-optimized local engine and explicit model acquisition." },
     { command: "hii runner bench", purpose: "Measure an end-to-end native completion and print model usage." },
     { command: "hii jobs", purpose: "List recent local capability jobs." },
     { command: "hii jobs reconcile", purpose: "Append local reconciliation receipts for completed Claude-backed HII agent jobs." },
@@ -3345,9 +3345,9 @@ usage: hii <command>
   model [recommend]    compare curated choices for this machine
   model search <query> discover MLX models on Hugging Face
   model install <id>  download and verify a model in HII's private cache
-  model installed     list models installed for HII Native
+  model installed     list models installed for HII
   model use <id|alias> activate an installed model and update Pi
-  model status|models inspect the active HII Native backend
+  model status|models inspect the active HII backend
   model bench|logs    benchmark or inspect the active backend
   model start|stop    control the HII-owned model runtime
   model remove <id>   preview removal; add --yes to apply

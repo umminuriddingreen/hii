@@ -368,7 +368,7 @@ enum Commands {
         )]
         json: bool,
     },
-    #[command(about = "Check CLI, workspace, Git, HII Native, and provider readiness")]
+    #[command(about = "Check CLI, workspace, Git, HII, and provider readiness")]
     Doctor,
     #[command(about = "List models advertised by the selected local runtime")]
     #[command(hide = true)]
@@ -3309,19 +3309,19 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         Ok(conversation) => conversation,
         Err(error)
             if !public_test
-                && error.contains("cannot reach HII Native")
+                && error.contains("cannot reach HII")
                 && io::stdin().is_terminal()
                 && io::stdout().is_terminal() =>
         {
             tui::system(
-                "Welcome to HII. HII Native is not prepared on this machine yet.\nSet up the private hardware-optimized local runtime now? [Y/n]",
+                "Welcome to HII. HII is not prepared on this machine yet.\nSet up the private hardware-optimized local runtime now? [Y/n]",
             );
             let mut answer = String::new();
             io::stdin()
                 .read_line(&mut answer)
                 .map_err(|read_error| read_error.to_string())?;
             if matches!(answer.trim().to_ascii_lowercase().as_str(), "n" | "no") {
-                return Err("HII Native setup was skipped. Run `hii runner model start` when ready, or use `hii login codex|claude` for an explicit hosted provider.".into());
+                return Err("HII setup was skipped. Run `hii runner model start` when ready, or use `hii login codex|claude` for an explicit hosted provider.".into());
             }
             let args = ["runner", "model", "start"]
                 .into_iter()
@@ -3329,23 +3329,23 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 .collect::<Vec<_>>();
             if legacy::run(&paths.repo, &args)? != 0 {
                 return Err(
-                    "HII Native setup did not start. Run `hii runner model logs` for details."
+                    "HII setup did not start. Run `hii runner model logs` for details."
                         .into(),
                 );
             }
-            tui::system("◇ MODEL LOADING  HII Native · acquiring the local model; live model events begin when the runner is ready.");
+            tui::system("◇ MODEL LOADING  HII · acquiring the local model; live model events begin when the runner is ready.");
             let started = std::time::Instant::now();
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(1));
                 match create() {
                     Ok(conversation) => break conversation,
                     Err(wait_error) if started.elapsed() < std::time::Duration::from_secs(1800) => {
-                        if !wait_error.contains("cannot reach HII Native") {
+                        if !wait_error.contains("cannot reach HII") {
                             return Err(wait_error);
                         }
                     }
                     Err(wait_error) => return Err(format!(
-                        "HII Native did not become ready within 30 minutes: {wait_error}. Run `hii runner model logs`."
+                        "HII did not become ready within 30 minutes: {wait_error}. Run `hii runner model logs`."
                     )),
                 }
             }
