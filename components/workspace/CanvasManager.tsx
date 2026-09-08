@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
   canvasManagerBoards,
   canvasManagerHits,
@@ -97,9 +98,14 @@ function BoardPreview({ board }: { board: CanvasManagerBoard }) {
 const feedSection: CanvasManagerSection = {
   id: 'feed',
   title: 'Your canvases',
-  render: ({ boards, query, focusBoard }) => {
+  render: ({ boards, query, focusBoard, close }) => {
     if (!boards.length) {
-      return <p className={styles.empty}>{query.trim() ? 'No board holds a match.' : 'No boards yet. Press F on the canvas to frame one.'}</p>;
+      return query.trim() ? <p className={styles.empty}>No board holds a match.</p> : (
+        <div className={styles.emptyState}>
+          <p className={styles.empty}>Nothing here yet. Return to the canvas and add text or a file to get started.</p>
+          <button type="button" className={styles.close} onClick={close}>Back to canvas</button>
+        </div>
+      );
     }
     return (
       <div className={styles.feed}>
@@ -109,7 +115,7 @@ const feedSection: CanvasManagerSection = {
             <span className={styles.cardText}>
               <span className={styles.cardTitle}>
                 {board.sequence ? <span className={styles.sequence}>{board.sequence}</span> : null}
-                {board.title}
+                <span className={styles.cardName}>{board.title}</span>
               </span>
               <span className={styles.cardMeta}>
                 {board.memberCount} object{board.memberCount === 1 ? '' : 's'} · {board.summary}
@@ -144,12 +150,44 @@ export function CanvasManager({
   sections?: CanvasManagerSection[];
 }) {
   const [query, setQuery] = useState('');
+  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const shellRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => { searchRef.current?.focus(); }, []);
+  useEffect(() => { setPortalRoot(document.body); }, []);
+
+  useEffect(() => {
+    if (!portalRoot) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    searchRef.current?.focus();
+    const containFocus = (event: FocusEvent) => {
+      if (event.target instanceof Node && !shellRef.current?.contains(event.target)) searchRef.current?.focus();
+    };
+    document.addEventListener('focusin', containFocus);
+    return () => {
+      document.removeEventListener('focusin', containFocus);
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+    };
+  }, [portalRoot]);
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
+      if (event.key === 'Tab') {
+        const controls = [...(shellRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button, input, select, textarea, [tabindex]'
+        ) ?? [])].filter((element) => element.tabIndex >= 0 && !element.matches(':disabled')
+          && !element.closest('[hidden], [inert]') && getComputedStyle(element).display !== 'none'
+          && getComputedStyle(element).visibility !== 'hidden');
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        const active = document.activeElement;
+        if (!first || !shellRef.current?.contains(active) || (event.shiftKey ? active === first : active === last)) {
+          event.preventDefault();
+          (event.shiftKey ? last : first)?.focus();
+        }
+        event.stopPropagation();
+        return;
+      }
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopPropagation();
@@ -177,8 +215,12 @@ export function CanvasManager({
     .map((section) => ({ section, content: section.render(context) }))
     .filter((entry) => entry.content !== null && entry.content !== undefined);
 
-  return (
-    <div className={styles.shell} role="dialog" aria-modal="true" aria-label="Canvas manager">
+  if (!portalRoot) return null;
+
+  // Escape the canvas stacking context and its touch-action: none so this
+  // modal covers account controls and its feed can scroll on touch screens.
+  return createPortal(
+    <div ref={shellRef} className={styles.shell} role="dialog" aria-modal="true" aria-label="Canvas manager">
       <header className={styles.bar}>
         <span className={styles.title}>Canvases</span>
         <span className={styles.count}>{boards.length}</span>
@@ -209,6 +251,7 @@ export function CanvasManager({
           </section>
         ))}
       </div>
-    </div>
+    </div>,
+    portalRoot
   );
 }

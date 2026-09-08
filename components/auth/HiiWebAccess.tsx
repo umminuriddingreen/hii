@@ -3,7 +3,6 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AsciiWave } from '@/components/marketing/AsciiWave';
-import { HiiFirstRunTerminal } from '@/components/auth/HiiFirstRunTerminal';
 import { HiiRoot } from '@/components/workspace/HiiRoot';
 import { browserSpacePersistence } from '@/components/spaces/SpaceCanvas';
 import type { WorkspaceNode } from '@/lib/workspace/types';
@@ -152,8 +151,9 @@ function ProsumerLanding({ onLogin, onCreateAccount }: { onLogin: () => void; on
           <p className={styles.heroBody}>HII gives your files, notes, links, media, projects, and tools one working surface—then lets your own agent create with them.</p>
           <div className={styles.heroActions}>
             <button type="button" onClick={onCreateAccount}>create your HII</button>
-            <button type="button" onClick={onLogin}>open your workspace</button>
+            <a href="/">try the canvas</a>
           </div>
+          <p className={styles.heroNote}>Start in your browser. No account needed.</p>
         </div>
         <div className={styles.asciiStage} aria-label="Your information becoming usable">
           <AsciiWave className={styles.asciiWave} />
@@ -198,6 +198,7 @@ function ProsumerLanding({ onLogin, onCreateAccount }: { onLogin: () => void; on
 
 export function HiiWebAccess() {
   const [mode, setMode] = useState<AccessMode>(null);
+  const authRef = useRef<HTMLElement | null>(null);
   const [session, setSession] = useState<Session>({ authenticated: false });
   const [handle, setHandle] = useState('');
   const [message, setMessage] = useState('');
@@ -253,6 +254,34 @@ export function HiiWebAccess() {
     (files: File[]) => browserCanvasSeedsFromFiles(canvasAccountId, files),
     [canvasAccountId],
   );
+
+  useEffect(() => {
+    if (!mode) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = authRef.current;
+    const controls = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href]') ?? []);
+    (dialog?.querySelector<HTMLElement>('input') ?? controls()[0])?.focus();
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setMode(null);
+      } else if (event.key === 'Tab') {
+        const items = controls();
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (!dialog?.contains(document.activeElement) || (event.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+          event.preventDefault();
+          (event.shiftKey ? last : first)?.focus();
+        }
+      }
+    };
+    window.addEventListener('keydown', keydown, true);
+    return () => {
+      window.removeEventListener('keydown', keydown, true);
+      if (previous?.isConnected) previous.focus();
+    };
+  }, [mode]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -533,6 +562,8 @@ export function HiiWebAccess() {
         });
         setSession({ ...next, source: 'account' });
       }
+      setMode(null);
+      setProductSite(false);
     } catch {
       setMessage(
         mode === 'signup'
@@ -563,7 +594,7 @@ export function HiiWebAccess() {
     }
   };
 
-  if (ready && session.authenticated) {
+  if (ready && session.authenticated && !productSite) {
     const accountName = session.handle ?? 'account';
     if (!canvasAccountReady || !canvasPersistence || (accountSync && (!activeWorkspace || workspaceBusy && !workspaces.length))) {
       return (
@@ -706,7 +737,7 @@ export function HiiWebAccess() {
 
   const authDialog = <>
         {mode ? <div className={styles.authBackdrop} onPointerDown={(event) => { if (event.target === event.currentTarget) setMode(null); }}>
-          <section className={styles.formPanel} role="dialog" aria-modal="true" aria-label={mode === 'login' ? 'Log in' : 'Create your HII'}>
+          <section ref={authRef} className={styles.formPanel} role="dialog" aria-modal="true" aria-label={mode === 'login' ? 'Log in' : 'Create your HII'}>
             <header><span>hii / {mode === 'login' ? 'log in' : 'create your HII'}</span><button type="button" onClick={() => setMode(null)}>close</button></header>
             {cliLinkRequested ? <p className={styles.cliLinkNotice}>The HII CLI is waiting. Log in, then create a one-time computer code.</p> : null}
             <form onSubmit={submit}>
@@ -744,36 +775,10 @@ export function HiiWebAccess() {
   if (productSite) {
     return (
       <main className={styles.access} id="hii-main">
-        <ProsumerLanding onLogin={() => chooseMode('login')} onCreateAccount={() => chooseMode('signup')} />
-        {ready && !session.authenticated && !mode && !firstRunDismissed ? <HiiFirstRunTerminal
-          options={[
-            {
-              id: 'chatgpt',
-              label: 'Sign in with ChatGPT',
-              detail: 'complete this provider sign-in in the HII desktop app',
-              action: () => undefined,
-              disabled: true
-            },
-            {
-              id: 'hii-account',
-              label: 'Log in to HII',
-              detail: 'continue with your passkey',
-              action: () => chooseMode('login')
-            },
-            {
-              id: 'create',
-              label: 'Create your HII',
-              detail: 'make a passkey-protected account',
-              action: () => chooseMode('signup')
-            },
-            {
-              id: 'site',
-              label: 'Explore HII first',
-              detail: 'view the public product site',
-              action: () => setFirstRunDismissed(true)
-            }
-          ]}
-        /> : null}
+        <ProsumerLanding
+          onLogin={() => session.authenticated ? setProductSite(false) : chooseMode('login')}
+          onCreateAccount={() => session.authenticated ? setProductSite(false) : chooseMode('signup')}
+        />
         {authDialog}
       </main>
     );

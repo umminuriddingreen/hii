@@ -1,4 +1,4 @@
-import { act } from 'react-dom/test-utils';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CanvasManager } from '../../components/workspace/CanvasManager';
@@ -39,13 +39,15 @@ const nodes = [
 describe('canvas manager renders and responds', () => {
   let container: HTMLDivElement;
   let root: Root;
+  let opener: HTMLButtonElement;
   const onFocusBoard = vi.fn();
   const onFocusNode = vi.fn();
   const onClose = vi.fn();
 
-  const search = () => container.querySelector<HTMLInputElement>('input[aria-label="Search every board"]')!;
-  const cards = () => [...container.querySelectorAll('button')].filter((button) => button.querySelector('img, [class*="preview"]'));
-  const text = () => container.textContent ?? '';
+  const dialog = () => document.querySelector('[role="dialog"][aria-label="Canvas manager"]')!;
+  const search = () => dialog().querySelector<HTMLInputElement>('input[aria-label="Search every board"]')!;
+  const cards = () => [...dialog().querySelectorAll('button')].filter((button) => button.querySelector('img, [class*="preview"]'));
+  const text = () => dialog().textContent ?? '';
 
   function type(value: string) {
     const input = search();
@@ -61,6 +63,9 @@ describe('canvas manager renders and responds', () => {
     onFocusNode.mockClear();
     onClose.mockClear();
     container = document.createElement('div');
+    opener = document.createElement('button');
+    document.body.append(opener);
+    opener.focus();
     document.body.append(container);
     root = createRoot(container);
     act(() => {
@@ -73,6 +78,7 @@ describe('canvas manager renders and responds', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    opener.remove();
   });
 
   it('opens on the feed with every board and its object counts', () => {
@@ -87,6 +93,39 @@ describe('canvas manager renders and responds', () => {
 
   it('focuses the search field so typing searches immediately', () => {
     expect(document.activeElement).toBe(search());
+    expect(dialog().parentElement).toBe(document.body);
+  });
+
+  it('wraps Tab and Shift+Tab inside the dialog, including after filtering', () => {
+    const tab = (shiftKey = false) => {
+      const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true, cancelable: true });
+      act(() => document.activeElement?.dispatchEvent(event));
+      expect(event.defaultPrevented).toBe(true);
+    };
+    tab(true);
+    expect(document.activeElement).toBe(cards().at(-1));
+    tab();
+    expect(document.activeElement).toBe(search());
+    type('zzzznothing');
+    tab(true);
+    expect(document.activeElement?.textContent).toBe('Close · Esc');
+    tab();
+    expect(document.activeElement).toBe(search());
+  });
+
+  it('contains outside focus and restores the opener when closed', () => {
+    opener.focus();
+    expect(document.activeElement).toBe(search());
+    act(() => root.render(null));
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it('offers a pointer-accessible return from an empty canvas', () => {
+    act(() => root.render(<CanvasManager nodes={[]} onFocusBoard={onFocusBoard} onFocusNode={onFocusNode} onClose={onClose} />));
+    expect(text()).toContain('add text or a file');
+    const back = [...dialog().querySelectorAll('button')].find((button) => button.textContent === 'Back to canvas')!;
+    act(() => back.click());
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('searches every board at once and names the board each hit lives on', () => {
@@ -108,7 +147,7 @@ describe('canvas manager renders and responds', () => {
 
   it('jumps to the object behind a hit', () => {
     type('parapet');
-    const hit = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Parapet detail'))!;
+    const hit = [...dialog().querySelectorAll('button')].find((button) => button.textContent?.includes('Parapet detail'))!;
     act(() => hit.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     expect(onFocusNode).toHaveBeenCalledTimes(1);
     expect(onFocusNode.mock.calls[0][0].id).toBe('detail');
