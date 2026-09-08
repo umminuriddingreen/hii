@@ -1,6 +1,7 @@
 'use client';
 
 import type { WorkspacePersistence } from '@/components/workspace/useWorkspace';
+import { ACCOUNT_CANVAS_SYNC_INTERVAL_MS } from '@/lib/workspace/account-sync-timing';
 import { rebaseWorkspaceDoc } from '@/lib/workspace/rebase';
 import { normalizeWorkspace, type WorkspaceDoc } from '@/lib/workspace/types';
 
@@ -130,7 +131,7 @@ export class NativeAccountWorkspacePersistence implements WorkspacePersistence {
             for (const current of this.listeners) current(next);
           }
         }).catch((error) => { if (!this.disposed && scope === this.pollEpoch) onError?.(error); });
-      }, 2_000);
+      }, ACCOUNT_CANVAS_SYNC_INTERVAL_MS);
     }
     return () => {
       this.listeners.delete(listener);

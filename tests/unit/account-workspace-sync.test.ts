@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AccountWorkspacePersistence } from '../../lib/web/account-workspace';
 import { NativeAccountWorkspacePersistence } from '../../lib/desktop/account-sync';
+import { ACCOUNT_CANVAS_SYNC_INTERVAL_MS } from '../../lib/workspace/account-sync-timing';
 import { emptyWorkspace, type WorkspaceDoc, type WorkspaceNode } from '../../lib/workspace/types';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -55,7 +56,7 @@ describe.each(['web', 'native'] as const)('%s account canvas synchronization', k
       .mockImplementationOnce(async value => ({ status: 200, document: { ...value, revision: 3 } }));
     await adapter.read();
     adapter.subscribe(vi.fn());
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(ACCOUNT_CANVAS_SYNC_INTERVAL_MS);
     const saved = await adapter.write(doc(1, ['base', 'mine']));
     expect(save.mock.calls[0][1]).toBe(1);
     expect(save.mock.calls[1][1]).toBe(2);
@@ -72,14 +73,14 @@ describe.each(['web', 'native'] as const)('%s account canvas synchronization', k
     await adapter.read();
     const listener = vi.fn();
     adapter.subscribe(listener);
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(ACCOUNT_CANVAS_SYNC_INTERVAL_MS);
     const pending = adapter.write(doc(1, ['base', 'mine']));
     poll.resolve(doc(3, ['base', 'mine', 'theirs']));
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(ACCOUNT_CANVAS_SYNC_INTERVAL_MS);
     expect(listener).not.toHaveBeenCalled();
     writing.resolve({ status: 200, document: doc(2, ['base', 'mine']) });
     await pending;
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(ACCOUNT_CANVAS_SYNC_INTERVAL_MS);
     expect(listener).toHaveBeenCalledWith(expect.objectContaining({ revision: 3 }));
     adapter.dispose();
   });
@@ -92,9 +93,9 @@ describe.each(['web', 'native'] as const)('%s account canvas synchronization', k
     const listener = vi.fn();
     const errors = vi.fn();
     adapter.subscribe(listener, errors);
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(ACCOUNT_CANVAS_SYNC_INTERVAL_MS);
     expect(errors).toHaveBeenCalledWith(expect.objectContaining({ message: 'offline' }));
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(ACCOUNT_CANVAS_SYNC_INTERVAL_MS);
     adapter.dispose();
     pending.resolve(doc(2, ['wrong']));
     await vi.advanceTimersByTimeAsync(0);
@@ -109,12 +110,12 @@ describe.each(['web', 'native'] as const)('%s account canvas synchronization', k
     await adapter.read();
     const oldListener = vi.fn();
     adapter.subscribe(oldListener);
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(ACCOUNT_CANVAS_SYNC_INTERVAL_MS);
     adapter.dispose();
     const currentListener = vi.fn();
     adapter.subscribe(currentListener);
     oldPoll.resolve(doc(10, ['stale-scope']));
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(ACCOUNT_CANVAS_SYNC_INTERVAL_MS);
     expect(oldListener).not.toHaveBeenCalled();
     expect(currentListener).toHaveBeenCalledTimes(1);
     expect(currentListener).toHaveBeenCalledWith(expect.objectContaining({ revision: 2 }));
