@@ -1341,7 +1341,9 @@ impl Conversation {
                         self.action_failures = 0;
                         rejected_actions.reset();
                     } else {
-                        self.action_failures += 1;
+                        if !crate::agent::is_capability_handoff_failure(&safe_output) {
+                            self.action_failures += 1;
+                        }
                         rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                     }
                     let mut repair_hint = String::new();
@@ -1478,6 +1480,8 @@ impl Conversation {
                                 json!({ "step": step, "message": &message }),
                             )?;
                         }
+                        self.messages.push(Message::assistant(raw));
+                        self.messages.push(Message::user(message.clone()));
                         if let Some(guard) = run_guard.as_mut() {
                             guard.checkpoint_error(Outcome::LoopAbort, &message, step)?;
                         }
@@ -1514,12 +1518,16 @@ impl Conversation {
         }
 
         if used_tools {
+            let message = "The operator step ceiling was reached before I could finish cleanly.";
+            if let Some(guard) = run_guard.as_mut() {
+                guard.checkpoint_error(Outcome::StepCeiling, message, steps)?;
+            }
             self.finish_backend_run(
                 run,
                 run_guard,
                 input,
                 steps,
-                "The operator step ceiling was reached before I could finish cleanly.",
+                message,
                 BackendOutcome::stopped(Outcome::StepCeiling, verification, hook_records),
             )?;
         }

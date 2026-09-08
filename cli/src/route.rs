@@ -471,6 +471,12 @@ pub const ROUTES: &[Route] = &[
         "explicit compatibility-surface escape hatch",
     ),
     native(
+        "completions",
+        Extended,
+        Infra,
+        "print a shell tab-completion script",
+    ),
+    native(
         "help",
         Core,
         Internal,

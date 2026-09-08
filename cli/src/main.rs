@@ -52,6 +52,7 @@ mod skill_lifecycle;
 mod skill_runtime;
 mod skills;
 mod slash_registry;
+// mod drive; // disabled: hii-drive crate does not compile yet (rusqlite/AsRef<Path> errors); drive.rs is also unwired to any subcommand
 mod store;
 mod stream;
 #[cfg(feature = "preview")]
@@ -611,6 +612,12 @@ enum Commands {
     Legacy {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
+    },
+    #[command(about = "Print a shell tab-completion script for bash, zsh, fish, elvish, or powershell")]
+    #[command(hide = true)]
+    Completions {
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
     },
 }
 
@@ -3238,6 +3245,19 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         Some(Commands::Legacy { args }) => {
             let code = legacy::run(&paths.repo, &args)?;
             Ok(ExitCode::from(code as u8))
+        }
+        Some(Commands::Completions { shell }) => {
+            use clap::CommandFactory;
+            // Generate into an in-memory buffer rather than directly into stdout:
+            // clap_complete's writer panics on a write error, and piping the
+            // output into `head`/`grep -m1`/etc. closes stdout mid-write.
+            let mut script = Vec::new();
+            clap_complete::generate(shell, &mut Cli::command(), "hii", &mut script);
+            match io::stdout().write_all(&script) {
+                Ok(()) => Ok(ExitCode::SUCCESS),
+                Err(error) if error.kind() == io::ErrorKind::BrokenPipe => Ok(ExitCode::SUCCESS),
+                Err(error) => Err(format!("failed to print completion script: {error}")),
+            }
         }
         None => {
             if io::stdin().is_terminal() && io::stdout().is_terminal() {

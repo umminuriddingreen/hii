@@ -376,9 +376,17 @@ fn tool_failure_signature(tool: &str, output: &str) -> Option<String> {
         || first_line.starts_with("web fetch failed:")
         || first_line.starts_with("blocked destructive shell pattern:")
         || first_line.starts_with("missing_dependency:")
-        || first_line.starts_with("hook_blocked:")
         || first_line.starts_with("blocked:");
     repeatable_class.then(|| format!("{}:{first_line}", tool.to_ascii_lowercase()))
+}
+
+/// True when a tool failure is a structural capability handoff (the tool is
+/// permanently unavailable in this environment, e.g. web_search always
+/// requiring a native browser) rather than an execution failure. These
+/// should not count toward `action_failures`/reasoning escalation: the model
+/// did nothing wrong, the capability simply isn't there.
+pub(crate) fn is_capability_handoff_failure(output: &str) -> bool {
+    output.trim_start().starts_with("NATIVE_WEBVIEW_REQUIRED")
 }
 
 #[derive(Debug, Default)]
@@ -1057,7 +1065,9 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     action_failures = 0;
                     rejected_actions.reset();
                 } else {
-                    action_failures += 1;
+                    if !is_capability_handoff_failure(&safe_output) {
+                        action_failures += 1;
+                    }
                     rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                 }
                 if result.ok {
@@ -3125,6 +3135,19 @@ mod tests {
             guard.record("shell", "exit 1", 1),
             None,
             "generic failures need the existing exact-action guard to avoid false positives"
+        );
+
+        // Prove the fallback claim above: identical generic-failure actions
+        // are still caught, just by RejectedActionGuard instead.
+        let mut rejected = RejectedActionGuard::default();
+        let action = r#"{"type":"shell","command":"exit 1"}"#;
+        assert!(!rejected.would_loop(action, 1, None));
+        rejected.reject(action, 1, None);
+        assert!(!rejected.would_loop(action, 1, None));
+        rejected.reject(action, 1, None);
+        assert!(
+            rejected.would_loop(action, 1, None),
+            "RejectedActionGuard must catch repeated generic failures that RepeatedToolFailureGuard ignores"
         );
     }
 

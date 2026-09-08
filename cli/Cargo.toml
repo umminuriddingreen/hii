@@ -17,6 +17,7 @@ preview = []
 base64 = "0.22.1"
 chrono = { version = "0.4.42", features = ["clock", "serde"] }
 clap = { version = "4.5.58", features = ["derive"] }
+clap_complete = "4.5.58"
 crossterm = "0.28.1"
 ctrlc = "3.4.5"
 dirs = "5.0.1"
