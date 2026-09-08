@@ -86,6 +86,15 @@ pub fn validate_settings(settings: &Settings) -> Result<()> {
     Ok(())
 }
 
+/// Many OpenAI-compatible servers (mlx-vlm included) put `"tool_calls": null`
+/// and `"function_call": null` on *every* delta, tool call or not. Presence
+/// of the key alone (`Value::get(..).is_some()`) is therefore not a signal;
+/// only a non-null value means the model actually requested a tool.
+fn delta_requests_a_tool_call(delta: &Value) -> bool {
+    let is_present = |key: &str| delta.get(key).is_some_and(|value| !value.is_null());
+    is_present("tool_calls") || is_present("function_call")
+}
+
 pub struct OpenAiCompatible {
     client: Client,
     base: Url,
@@ -181,7 +190,7 @@ impl InferenceProvider for OpenAiCompatible {
                 if value.get("error").is_some() || event.event == "error" { Err(anyhow!("Provider reported an inference error"))?; }
                 if let Some(choice) = value["choices"].as_array().and_then(|c| c.first()) {
                     let delta = &choice["delta"];
-                    if delta.get("tool_calls").is_some() || delta.get("function_call").is_some() { Err(anyhow!("Tool calls are not supported in this slice"))?; }
+                    if delta_requests_a_tool_call(delta) { Err(anyhow!("Tool calls are not supported in this slice"))?; }
                     if let Some(text) = ["reasoning_content", "reasoning", "thinking"].iter()
                         .find_map(|key| delta[*key].as_str().filter(|s| !s.is_empty())) {
                         yield InferenceEvent::Part(MessagePart::Reasoning { text: text.into() });
@@ -194,5 +203,53 @@ impl InferenceProvider for OpenAiCompatible {
             }
             if !done { Err(anyhow!("Provider disconnected before [DONE]; partial response was retained"))?; }
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The exact shape mlx-vlm sends for a plain-text delta: every OpenAI
+    /// tool-call field present, all of them null. Regression test for the
+    /// bug where `hii chat send` rejected every mlx-vlm response as a
+    /// phantom tool call.
+    #[test]
+    fn null_tool_call_fields_are_not_a_tool_call() {
+        let delta = json!({
+            "role": "assistant",
+            "content": "pong",
+            "reasoning_content": null,
+            "reasoning": null,
+            "tool_calls": null,
+            "tool_call_id": null,
+            "name": null
+        });
+        assert!(!delta_requests_a_tool_call(&delta));
+    }
+
+    #[test]
+    fn absent_tool_call_fields_are_not_a_tool_call() {
+        let delta = json!({ "role": "assistant", "content": "pong" });
+        assert!(!delta_requests_a_tool_call(&delta));
+    }
+
+    #[test]
+    fn a_populated_tool_calls_array_is_a_tool_call() {
+        let delta = json!({
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "shell", "arguments": "{}"}}]
+        });
+        assert!(delta_requests_a_tool_call(&delta));
+    }
+
+    #[test]
+    fn a_populated_function_call_is_a_tool_call() {
+        let delta = json!({
+            "role": "assistant",
+            "function_call": {"name": "shell", "arguments": "{}"}
+        });
+        assert!(delta_requests_a_tool_call(&delta));
     }
 }

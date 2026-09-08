@@ -231,7 +231,7 @@ impl Store {
         ensure!(text.len() <= 256_000, "Message is too large");
         ensure!(
             !settings.model.trim().is_empty(),
-            "Select a local model in Runtime settings"
+            "No local model selected: choose one in Runtime settings, or run `hii chat settings --model-id <id> --endpoint <url>` (see `hii model status` for the running local endpoint)"
         );
         let mut db = self.lock()?;
         let tx = db.transaction()?;
