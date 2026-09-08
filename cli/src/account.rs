@@ -56,7 +56,17 @@ pub struct LinkedAccount {
 }
 
 fn config_path(paths: &AppPaths) -> PathBuf {
-    paths.runtime.join("account/device.json")
+    account_config_path(
+        &paths.runtime,
+        env::var_os("HII_ACCOUNT_DIR").map(PathBuf::from),
+    )
+}
+
+fn account_config_path(runtime: &Path, directory: Option<PathBuf>) -> PathBuf {
+    directory
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| runtime.join("account"))
+        .join("device.json")
 }
 
 fn allowed_origin(value: String, fallback: &str) -> String {
@@ -302,6 +312,23 @@ pub fn read_link_code() -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_path_uses_explicit_account_directory_or_runtime() {
+        let runtime = Path::new("isolated-runtime");
+        assert_eq!(
+            account_config_path(runtime, None),
+            runtime.join("account/device.json")
+        );
+        assert_eq!(
+            account_config_path(runtime, Some(PathBuf::new())),
+            runtime.join("account/device.json")
+        );
+        assert_eq!(
+            account_config_path(runtime, Some(PathBuf::from("selected-account"))),
+            Path::new("selected-account/device.json")
+        );
+    }
 
     #[test]
     fn login_mark_is_a_stable_moving_box() {

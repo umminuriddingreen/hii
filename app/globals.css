@@ -38,6 +38,9 @@ button, input, textarea { font: inherit; }
 .hii-node[data-chromeless='true'] .hii-node-image { width: 100%; height: 100%; border-radius: 0; }
 ::selection { background: var(--ink); color: var(--field); }
 
+.hii-workspace-load-state { position: absolute; inset: 0; z-index: 2147483600; display: flex; align-items: center; justify-content: center; gap: 12px; background: #fff; color: #333; font: 13px/1.4 system-ui, sans-serif; }
+.hii-workspace-save-state { position: absolute; top: 62px; left: 16px; z-index: 2147483300; display: flex; align-items: center; gap: 12px; max-width: calc(100% - 32px); padding: 8px 12px; background: #fff; border: 1px solid #dedede; color: #5e3b12; font: 12px/1.4 system-ui, sans-serif; }
+.hii-workspace-load-state button, .hii-workspace-save-state button { min-height: 32px; padding: 4px 8px; border: 1px solid #bbb; background: #fff; color: #222; cursor: pointer; font: inherit; }
 .hii-canvas {
   position: fixed;
   inset: 0;

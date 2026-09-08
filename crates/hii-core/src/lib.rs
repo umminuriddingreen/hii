@@ -14,6 +14,7 @@ pub mod context_pack;
 pub mod information;
 pub mod operational;
 pub mod runtime;
+pub mod session_backup;
 pub mod web;
 
 pub const CONTRACT_VERSION: u8 = 1;

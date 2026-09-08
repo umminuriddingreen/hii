@@ -129,6 +129,15 @@ export class AccountWorkspacePersistence implements WorkspacePersistence {
   private readonly listeners = new Set<(document: WorkspaceDoc) => void>();
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
+  private writing = false;
+  private pollEpoch = 0;
+  private readonly revisions = new Map<number, WorkspaceDoc>();
+
+  private remember(document: WorkspaceDoc) {
+    this.revisions.set(document.revision, document);
+    if (this.revisions.size > 64) this.revisions.delete(this.revisions.keys().next().value!);
+    if (!this.authoritative || document.revision >= this.authoritative.revision) this.authoritative = document;
+  }
 
   constructor(
     readonly workspaceId: string,
@@ -146,7 +155,7 @@ export class AccountWorkspacePersistence implements WorkspacePersistence {
 
   async read(): Promise<WorkspaceDoc> {
     const document = await this.load();
-    this.authoritative = document;
+    this.remember(document);
     return document;
   }
 
@@ -170,30 +179,39 @@ export class AccountWorkspacePersistence implements WorkspacePersistence {
   }
 
   async write(document: WorkspaceDoc): Promise<WorkspaceDoc> {
-    const base = this.authoritative ?? await this.read();
-    const first = await this.save(document, base.revision);
-    let saved = first.document;
-    if (first.conflict) {
-      const rebased = rebaseWorkspaceDoc(document, first.document, base);
-      const retry = await this.save(rebased, first.document.revision);
-      if (retry.conflict) throw new Error('workspace_conflict_retry_required');
-      saved = retry.document;
-    }
-    this.authoritative = saved;
-    return this.hydrate ? this.hydrate(saved) : saved;
+    if (this.writing) throw new Error('workspace_save_already_running');
+    this.writing = true;
+    try {
+      if (!this.authoritative) await this.read();
+      const base = this.revisions.get(document.revision);
+      if (!base) throw new Error('workspace_revision_not_loaded');
+      const first = await this.save(document, document.revision);
+      let saved = first.document;
+      if (first.conflict) {
+        const rebased = rebaseWorkspaceDoc(document, first.document, base);
+        const retry = await this.save(rebased, first.document.revision);
+        if (retry.conflict) throw new Error('workspace_conflict_retry_required');
+        saved = retry.document;
+      }
+      this.remember(saved);
+      return this.hydrate ? await this.hydrate(saved) : saved;
+    } finally { this.writing = false; }
   }
 
-  subscribe(listener: (document: WorkspaceDoc) => void) {
+  subscribe(listener: (document: WorkspaceDoc) => void, onError?: (error: unknown) => void) {
+    this.disposed = false;
     this.listeners.add(listener);
     if (!this.pollTimer) {
+      const scope = ++this.pollEpoch;
       this.pollTimer = setInterval(() => {
-        if (this.disposed || (typeof document !== 'undefined' && document.hidden)) return;
+        if (this.disposed || this.writing || !this.authoritative || (typeof document !== 'undefined' && document.hidden)) return;
         void this.load().then((next) => {
+          if (this.disposed || this.writing || scope !== this.pollEpoch) return;
           if (!this.authoritative || next.revision > this.authoritative.revision) {
-            this.authoritative = next;
+            this.remember(next);
             for (const current of this.listeners) current(next);
           }
-        }).catch(() => undefined);
+        }).catch((error) => { if (!this.disposed && scope === this.pollEpoch) onError?.(error); });
       }, 2_000);
     }
     return () => {
@@ -201,12 +219,14 @@ export class AccountWorkspacePersistence implements WorkspacePersistence {
       if (!this.listeners.size && this.pollTimer) {
         clearInterval(this.pollTimer);
         this.pollTimer = null;
+        this.pollEpoch += 1;
       }
     };
   }
 
   dispose() {
     this.disposed = true;
+    this.pollEpoch += 1;
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.pollTimer = null;
     this.listeners.clear();

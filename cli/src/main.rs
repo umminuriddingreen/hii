@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-BSL-1.1
 mod account;
+mod session_backup;
 mod acp;
 mod agent;
 mod agents;
@@ -32,6 +33,7 @@ mod keyboard;
 mod keymap;
 mod learning;
 mod legacy;
+mod local_chat;
 mod mcp;
 mod mcp_client;
 mod network;
@@ -161,6 +163,16 @@ enum SessionProfile {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    #[command(about = "Back up and restore local Codex, Claude and Pi session logs")]
+    SessionBackup {
+        #[command(subcommand)]
+        action: session_backup::SessionBackupCommand,
+    },
+    #[command(about = "Inspect and run durable local chat shared with the desktop")]
+    Chat {
+        #[command(subcommand)]
+        action: local_chat::ChatCommand,
+    },
     #[command(about = "Stream one direct answer from the fastest configured local model")]
     Ask {
         #[arg(required = true, num_args = 1..)]
@@ -1822,6 +1834,14 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         );
     }
     match cli.command {
+        Some(Commands::SessionBackup { action }) => {
+            session_backup::execute(action)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Chat { action }) => {
+            local_chat::execute(action)?;
+            Ok(ExitCode::SUCCESS)
+        }
         Some(Commands::Ask { prompt, jsonl }) => {
             ask::run(&paths, cli.model.as_deref(), prompt.join(" "), jsonl)?;
             Ok(ExitCode::SUCCESS)
