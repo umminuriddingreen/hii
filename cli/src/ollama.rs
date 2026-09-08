@@ -548,7 +548,15 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             return;
         }
         if self.provider != ModelProvider::Ollama {
-            self.chat_openai_with_stream(model, messages, json_format, think, cancel, sender);
+            self.chat_openai_with_stream(
+                model,
+                messages,
+                json_format,
+                strict_json_schema,
+                think,
+                cancel,
+                sender,
+            );
             return;
         }
 
@@ -660,6 +668,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         model: &str,
         messages: &[Message],
         json_format: bool,
+        strict_json_schema: bool,
         think: bool,
         cancel: &Cancel,
         sender: mpsc::Sender<ChatStreamEvent>,
@@ -675,7 +684,19 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             });
             apply_thinking(&mut body, think);
             if json_format {
-                body["response_format"] = json!({ "type": "json_object" });
+                // `json_object` only promises *some* JSON object: every action
+                // parameter is optional and unbounded under it, which is how a
+                // `read` carrying an invented file body stayed legal all the
+                // way to the completion cap. The action schema constrains
+                // decoding to one real action instead.
+                body["response_format"] = if strict_json_schema && strict_action_schema_enabled() {
+                    json!({
+                        "type": "json_schema",
+                        "json_schema": { "name": "hii_action", "strict": true, "schema": action_schema() },
+                    })
+                } else {
+                    json!({ "type": "json_object" })
+                };
             }
             self.agent
                 .post(&format!("{}/v1/chat/completions", self.base_url))
@@ -1190,36 +1211,31 @@ impl RepetitionGuard {
     }
 }
 
+/// The grammar the model must generate within, from the one place actions are
+/// declared. See [`crate::acp::action_schema`] for why it is per-action rather
+/// than one flat object accepting every property.
 fn action_schema() -> Value {
-    let mut action_types = crate::acp::action_type_names(true);
-    action_types.push("mcp_call");
-    json!({
-        "type": "object",
-        "required": ["type"],
-        "properties": {
-            "type": {
-                "enum": action_types
-            },
-            "path": { "type": "string" },
-            "query": { "type": "string" },
-            "command": { "type": "string" },
-            "content": { "type": "string" },
-            "url": { "type": "string" },
-            "old": { "type": "string" },
-            "new": { "type": "string" },
-            "replace_all": { "type": "boolean" },
-            "offset": { "type": "integer" },
-            "limit": { "type": "integer" },
-            "reason": { "type": "string" },
-            "summary": { "type": "string" },
-            "message": { "type": "string" },
-            "server": { "type": "string" },
-            "tool": { "type": "string" },
-            "arguments": { "type": "object" },
-            "verification": { "type": "array", "items": { "type": "string" } },
-            "next": { "type": ["string", "null"] }
-        }
-    })
+    crate::acp::action_schema()
+}
+
+/// Whether to constrain decoding to [`action_schema`] on OpenAI-compatible
+/// backends, rather than asking only for "some JSON object".
+///
+/// Off by default, and deliberately so. The constraint is unambiguously right
+/// about *shape*: it makes a truncated-mid-string action and a `read` carrying
+/// an invented file body impossible, both of which were observed. But measured
+/// against the 9B runner it also changed which action the model *chose* —
+/// toward whichever branch has no required parameters — and a harness that
+/// picks the wrong tool cheaply is not better than one that picks the right
+/// tool expensively. Turning it on is therefore a per-model decision backed by
+/// a measured run, not a default.
+///
+/// `HII_STRICT_ACTION_SCHEMA=1` enables it.
+fn strict_action_schema_enabled() -> bool {
+    matches!(
+        std::env::var("HII_STRICT_ACTION_SCHEMA").as_deref(),
+        Ok("1") | Ok("true") | Ok("on")
+    )
 }
 
 /// Append a compact record of a model call to `~/.hii/traces/llm_requests.jsonl`
@@ -1360,17 +1376,35 @@ mod tests {
 
     use super::action_schema;
 
+    /// The old flat schema was capped at 1000 bytes because it was pasted into
+    /// the prompt, where size is a real cost. A `json_schema` response format
+    /// drives a logits processor instead of prompt text, so the budget that
+    /// matters is per-action precision, not total bytes.
     #[test]
-    fn action_schema_uses_local_model_friendly_flat_types() {
+    fn the_action_schema_offers_every_action_and_closes_each_one() {
         let schema = action_schema();
-        let types = schema["properties"]["type"]["enum"]
-            .as_array()
-            .expect("type enum");
-        assert!(types.iter().any(|value| value == "write"));
-        assert!(types.iter().any(|value| value == "verify"));
-        assert!(!types.iter().any(|value| value == "tool"));
-        let bytes = serde_json::to_vec(&schema).expect("serialize schema").len();
-        assert!(bytes <= 1_000, "action schema grew to {bytes} bytes");
+        let branches = schema["oneOf"].as_array().expect("oneOf branches");
+        let named = |name: &str| {
+            branches
+                .iter()
+                .find(|branch| branch["properties"]["type"]["const"] == name)
+        };
+        for name in ["write", "verify", "read", "final", "message", "mcp_call"] {
+            assert!(named(name).is_some(), "{name} is not offered to the model");
+        }
+        assert!(named("tool").is_none(), "the wrapper spelling is internal");
+
+        // Every branch is closed: this is what makes a hallucinated parameter
+        // ungeneratable rather than merely ignored.
+        for branch in branches {
+            assert_eq!(branch["additionalProperties"], json!(false));
+        }
+        let read = named("read").expect("read branch");
+        assert!(read["properties"].get("path").is_some());
+        assert!(
+            read["properties"].get("content").is_none(),
+            "a read must not be able to carry a file body"
+        );
     }
 
     #[test]

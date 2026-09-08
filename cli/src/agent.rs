@@ -748,6 +748,30 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             &cancel,
         ) {
             Ok(result) => result,
+            // `chat_with_stream_unconstrained` and `relaxed_json` were written
+            // for this case and then never reached: nothing set the flag, so a
+            // backend that rejects the grammar failed the step outright. With
+            // the action schema now selectable, the fallback has to be real.
+            Err(error) if schema_was_rejected(&error) => {
+                journal.emit(Event::new("model.schema_unsupported").data(json!({
+                    "step": steps,
+                    "error": &error,
+                })))?;
+                cancel.reset();
+                stream_model_json_with_retries(
+                    &ollama,
+                    &model,
+                    &messages,
+                    ModelStreamPolicy {
+                        step: steps,
+                        think: request_reasoning,
+                        relaxed_json: true,
+                    },
+                    &mut journal,
+                    &deadline,
+                    &cancel,
+                )?
+            }
             Err(error) if error == ADAPTIVE_REASONING_BUDGET_RETRY => {
                 cancel.reset();
                 action_failures = 0;
@@ -2398,6 +2422,21 @@ pub(crate) fn parse_action(raw: &str) -> Result<Action, String> {
     parse_action_with_repair(raw).map(|(action, _)| action)
 }
 
+/// Did the backend refuse the request because of the response-format schema?
+///
+/// Local OpenAI-compatible servers disagree about structured output: some take
+/// a full JSON schema, some only `json_object`, some neither. They say so with
+/// a 400 before emitting any token, which is distinguishable from a model that
+/// answered badly — so it is worth one unconstrained retry rather than a failed
+/// step. HII validates the action with its own parser either way.
+fn schema_was_rejected(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    (error.contains("400") || error.contains("422") || error.contains("unsupported"))
+        && (error.contains("response_format")
+            || error.contains("json_schema")
+            || error.contains("schema"))
+}
+
 /// What had to be adjusted before a raw model response parsed as an action.
 ///
 /// The repairs themselves are deliberate — compact local models fence their
@@ -2451,79 +2490,22 @@ pub(crate) fn parse_action_with_repair(
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default()
         .to_string();
-    if matches!(
-        action_type.as_str(),
-        "read"
-            | "list"
-            | "search"
-            | "web_search"
-            | "web_fetch"
-            | "write"
-            | "edit"
-            | "shell"
-            | "verify"
-            | "http"
-            | "hii_context"
-            | "og_next"
-            | "caps_check"
-            | "board_read"
-            | "board_write"
-            | "skill_search"
-            | "schedule_read"
-            | "schedule_write"
-            | "bridge_send"
-            | "bridge_read"
-    ) {
+    // Which flat `{"type":"read"}` spellings normalize to a tool call comes
+    // from the manifest, not a copy of it. A hand-maintained copy had already
+    // lost canvas_*, info_find, info_capture, object_*, and system_* — ten
+    // tools the agent advertises, executes, and could not parse a call to.
+    if crate::acp::action_tool_names(true).contains(&action_type.as_str()) {
+        crate::acp::validate_action_params(&action_type, &value)?;
         value["type"] = serde_json::Value::String("tool".into());
         value["tool"] = serde_json::Value::String(action_type);
+    } else if action_type == "tool" {
+        if let Some(tool) = value.get("tool").and_then(serde_json::Value::as_str) {
+            let tool = tool.to_string();
+            crate::acp::validate_action_params(&tool, &value)?;
+        }
     }
     let action = serde_json::from_value(value).map_err(|error| error.to_string())?;
-    validate_action_fields(&action)?;
     Ok((action, repair))
-}
-
-/// Reject incomplete calls before they consume a tool step. Compact models
-/// often emit `{\"type\":\"verify\"}` while trying to finish a simple task;
-/// executing that shape only produces a vague tool failure and encourages a
-/// recovery loop. Keep this beside parsing so both managed runs and the REPL
-/// return the same precise correction to the model.
-fn validate_action_fields(action: &Action) -> Result<(), String> {
-    let Action::Tool {
-        tool,
-        path,
-        query,
-        command,
-        content,
-        url,
-        old,
-        new,
-        ..
-    } = action
-    else {
-        return Ok(());
-    };
-    let present = |value: Option<&String>| value.is_some_and(|value| !value.trim().is_empty());
-    match tool.as_str() {
-        "read" => present(path.as_ref())
-            .then_some(())
-            .ok_or_else(|| "read requires a non-empty path".into()),
-        "search" | "web_search" => present(query.as_ref())
-            .then_some(())
-            .ok_or_else(|| format!("{tool} requires a non-empty query")),
-        "web_fetch" | "http" => present(url.as_ref())
-            .then_some(())
-            .ok_or_else(|| format!("{tool} requires a non-empty url")),
-        "write" => (present(path.as_ref()) && content.is_some())
-            .then_some(())
-            .ok_or_else(|| "write requires a path and content".into()),
-        "edit" => (present(path.as_ref()) && old.is_some() && new.is_some())
-            .then_some(())
-            .ok_or_else(|| "edit requires path, old, and new fields".into()),
-        "shell" | "verify" => present(command.as_ref())
-            .then_some(())
-            .ok_or_else(|| format!("{tool} requires a non-empty command")),
-        _ => Ok(()),
-    }
 }
 
 /// Local models occasionally emit otherwise valid JSON tool actions with

@@ -318,6 +318,14 @@ pub fn action_type_names(include_hii: bool) -> Vec<&'static str> {
     names
 }
 
+/// The published input schema for `name`.
+///
+/// Ten tools have no entry below and fall through to a `{ "query": string }`
+/// placeholder that does not describe them — `board_write`, `bridge_send` and
+/// the rest take parameters this never mentions. The placeholder is preserved
+/// because it is already published in the MCP manifest, but callers that need
+/// to know whether a schema is authoritative must ask
+/// [`has_declared_input_schema`] rather than trusting what comes back here.
 pub fn input_schema(name: &str) -> Value {
     let object = |properties: Value, required: Value| json!({ "type": "object", "properties": properties, "required": required });
     let string = json!({ "type": "string" });
@@ -412,6 +420,174 @@ pub fn input_schema(name: &str) -> Value {
         ),
         _ => object(json!({ "query": string }), json!([])),
     }
+}
+
+/// Does [`input_schema`] actually describe this tool, or is it the placeholder?
+///
+/// Enforcing "no undeclared parameters" against a placeholder would reject every
+/// real call to the tools it covers, so enforcement asks this first.
+pub fn has_declared_input_schema(name: &str) -> bool {
+    // The placeholder is exactly an optional `query` and nothing else. Tools
+    // that really do take just a query — `web_search` — require it, so they do
+    // not collide with this.
+    input_schema(name)
+        != json!({
+            "type": "object",
+            "properties": { "query": { "type": "string" } },
+            "required": []
+        })
+}
+
+/// Keys every action may carry regardless of which tool it names: the
+/// discriminator itself, the explicit `{"type":"tool","tool":"read"}` spelling,
+/// a free-text justification, and the optional flow projection.
+pub const ACTION_ENVELOPE_KEYS: &[&str] = &["type", "tool", "reason", "flow"];
+
+/// The complete action grammar, as one JSON Schema.
+///
+/// This is what the model is *physically* allowed to emit. Each action is its
+/// own branch carrying only the parameters its tool declares, closed with
+/// `additionalProperties: false`, so a shape like
+/// `{"type":"read","path":"x.py","content":"<invented file body>"}` cannot be
+/// generated at all.
+///
+/// That shape is not hypothetical. It is what the 9B model produced on step 1
+/// of a real run: a `read` carrying 5138 characters of hallucinated file
+/// content, which ran past the completion cap mid-string, truncated into
+/// invalid JSON, cost a protocol retry and 2048 tokens — and then, because the
+/// invented body stayed in the transcript, the model spent two more steps
+/// editing against a file that never existed. A flat schema that accepts every
+/// property on every action cannot prevent any step of that; a per-action
+/// schema makes it unreachable.
+///
+/// Derived from [`input_schema`] so the grammar, the published MCP manifest,
+/// and the loop's own validation cannot drift apart.
+pub fn action_schema() -> Value {
+    let string = json!({ "type": "string" });
+    let mut branches: Vec<Value> = action_tool_names(true)
+        .into_iter()
+        .map(|name| {
+            let schema = input_schema(name);
+            let mut properties = schema
+                .get("properties")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            properties.insert("type".into(), json!({ "const": name }));
+            properties.insert("reason".into(), string.clone());
+            let mut required = vec![json!("type")];
+            if let Some(list) = schema.get("required").and_then(Value::as_array) {
+                required.extend(list.iter().cloned());
+            }
+            json!({
+                "type": "object",
+                "properties": properties,
+                "required": required,
+                "additionalProperties": false,
+            })
+        })
+        .collect();
+    branches.push(json!({
+        "type": "object",
+        "properties": {
+            "type": { "const": "final" },
+            "summary": string,
+            "verification": { "type": "array", "items": string },
+            "next": string,
+        },
+        "required": ["type", "summary"],
+        "additionalProperties": false,
+    }));
+    branches.push(json!({
+        "type": "object",
+        "properties": { "type": { "const": "message" }, "message": string },
+        "required": ["type", "message"],
+        "additionalProperties": false,
+    }));
+    branches.push(json!({
+        "type": "object",
+        "properties": {
+            "type": { "const": "mcp_call" },
+            "server": string,
+            "tool": string,
+            "arguments": { "type": "object" },
+            "reason": string,
+        },
+        "required": ["type", "server", "tool"],
+        "additionalProperties": false,
+    }));
+    json!({ "oneOf": branches })
+}
+
+/// Check a raw action object against the grammar its tool declares.
+///
+/// Runs on the parsed JSON rather than the deserialized [`Action`], because
+/// `Action::Tool` flattens every tool's parameters into one struct: by the time
+/// it exists, "this key was present" and "this key belongs here" are no longer
+/// distinguishable. Two failures are reported:
+///
+/// * a **missing** required parameter — a compact model emitting
+///   `{"type":"verify"}` while trying to finish; and
+/// * an **unexpected** parameter, which is the more valuable signal. A tool
+///   parameter the tool does not have is the model stating something it cannot
+///   know. Rejecting it costs one retry; accepting it writes a confabulation
+///   into the transcript that the model then treats as an observation.
+///
+/// A backend that honors [`action_schema`] never reaches these errors. Not
+/// every backend does, so the same rules are enforced here as well.
+pub fn validate_action_params(tool: &str, value: &Value) -> Result<(), String> {
+    let schema = input_schema(tool);
+    let declared = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let object = match value.as_object() {
+        Some(object) => object,
+        None => return Err("an action must be a JSON object".into()),
+    };
+
+    if let Some(required) = schema.get("required").and_then(Value::as_array) {
+        for key in required.iter().filter_map(Value::as_str) {
+            let present = object.get(key).is_some_and(|value| match value {
+                Value::Null => false,
+                Value::String(text) => !text.trim().is_empty(),
+                _ => true,
+            });
+            if !present {
+                return Err(format!("{tool} requires a non-empty {key}"));
+            }
+        }
+    }
+
+    // Only a tool whose schema actually describes it can say which parameters
+    // are undeclared. Against the `{ "query": string }` placeholder this check
+    // would reject every real `board_write` or `bridge_send`.
+    if !has_declared_input_schema(tool) {
+        return Ok(());
+    }
+    let unexpected: Vec<&str> = object
+        .keys()
+        .map(String::as_str)
+        .filter(|key| !declared.contains_key(*key) && !ACTION_ENVELOPE_KEYS.contains(key))
+        .collect();
+    if unexpected.is_empty() {
+        return Ok(());
+    }
+    let accepted = {
+        let mut names: Vec<&str> = declared.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        names
+    };
+    Err(format!(
+        "{tool} does not take {}; it accepts only {}. Do not state a file's contents in the action that reads it — call the tool and use what it returns.",
+        unexpected.join(", "),
+        if accepted.is_empty() {
+            "no parameters".to_string()
+        } else {
+            accepted.join(", ")
+        }
+    ))
 }
 
 pub fn output_schema(name: &str) -> Option<Value> {
@@ -656,5 +832,61 @@ mod tests {
         assert!(is_known_tool("read"));
         assert!(is_known_tool("bridge_send"));
         assert!(!is_known_tool("nope"));
+    }
+
+    /// The concrete confabulation this rejects: on step 1 of a real run the
+    /// model emitted a `read` carrying 5138 characters of invented file body,
+    /// then spent two further steps editing against the file it had imagined.
+    /// The harness ignored the field; the transcript did not.
+    #[test]
+    fn a_read_cannot_smuggle_an_invented_file_body() {
+        let action = json!({ "type": "read", "path": "fizz.py", "content": "def fizz(n):\n    ..." });
+        let error = validate_action_params("read", &action).expect_err("content is not a read parameter");
+        assert!(error.contains("content"), "{error}");
+        assert!(error.contains("path"), "should name what read does accept: {error}");
+
+        let honest = json!({ "type": "read", "path": "fizz.py" });
+        assert!(validate_action_params("read", &honest).is_ok());
+    }
+
+    #[test]
+    fn a_missing_required_parameter_is_named() {
+        let error = validate_action_params("verify", &json!({ "type": "verify" }))
+            .expect_err("verify needs a command");
+        assert!(error.contains("command"), "{error}");
+        // Present-but-blank is missing, not satisfied.
+        assert!(validate_action_params("edit", &json!({ "type": "edit", "path": "  ", "old": "a", "new": "b" })).is_err());
+    }
+
+    /// Ten tools publish a `{ "query": string }` placeholder that does not
+    /// describe them. Enforcing undeclared-parameter rejection against that
+    /// placeholder would reject every real call to them.
+    #[test]
+    fn placeholder_schemas_never_reject_a_real_call() {
+        for name in ["board_write", "bridge_send", "og_next", "caps_check", "hii_context"] {
+            assert!(!has_declared_input_schema(name), "{name} gained a real schema; enforce it");
+            assert!(
+                validate_action_params(name, &json!({ "type": name, "task": "x", "anything": 1 })).is_ok(),
+                "{name} must not be gated by a placeholder"
+            );
+        }
+        assert!(has_declared_input_schema("read"));
+        assert!(has_declared_input_schema("web_search"));
+    }
+
+    /// Every tool the agent can execute must be reachable as a flat action.
+    /// Ten were not: the parser carried its own copy of this list.
+    #[test]
+    fn every_executable_tool_is_reachable_as_a_flat_action() {
+        for spec in tools() {
+            if spec.reach == Reach::Mcp {
+                continue;
+            }
+            assert!(
+                action_tool_names(true).contains(&spec.name),
+                "{} is advertised and executable but unreachable",
+                spec.name
+            );
+        }
     }
 }
