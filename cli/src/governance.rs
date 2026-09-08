@@ -113,28 +113,19 @@ impl AclConfig {
     }
 }
 
+/// Read-ness is derived from the tool manifest, not a second hand-maintained
+/// list. A hardcoded copy drifted once already: `web_fetch` and `web_search`
+/// were missing while the strictly broader `http` was allowed, so the Pi agent
+/// got `acl denied: tool 'web_fetch' not permitted for role 'canvas-operator'`
+/// for a tool the manifest itself declares non-mutating.
+///
+/// A tool is a reader when the manifest says it does not mutate *and* its reach
+/// is not `Exec` — `verify` runs an arbitrary command, so "does not mutate" is
+/// a claim about intent there, not an enforceable boundary.
 fn is_reader_tool(tool_name: &str) -> bool {
-    matches!(
-        tool_name,
-        "read"
-            | "list"
-            | "search"
-            | "http"
-            | "hii_context"
-            | "canvas_list"
-            | "canvas_read"
-            | "info_find"
-            | "og_next"
-            | "caps_check"
-            | "board_read"
-            | "skill_search"
-            | "schedule_read"
-            | "system_status"
-            | "system_observe"
-            | "object_list"
-            | "object_read"
-            | "bridge_read"
-    )
+    crate::acp::tools()
+        .iter()
+        .any(|spec| spec.name == tool_name && !spec.mutates && spec.reach != crate::acp::Reach::Exec)
 }
 
 /// A single violation type that gets returned from ACL checks.
@@ -228,5 +219,45 @@ mod tests {
         assert!(cfg.check_acl("codex", "write").is_err());
         assert!(cfg.check_acl("codex", "shell").is_err());
         assert!(cfg.check_acl("codex", "board_write").is_err());
+    }
+
+    /// Regression: `web_fetch`/`web_search` were denied to read-only roles even
+    /// though the manifest declares them non-mutating, which broke the Pi
+    /// agent's `hii_web_fetch` calls. Reader-ness now comes from the manifest,
+    /// so every non-mutating, non-exec tool is allowed and no future tool can
+    /// drift out of the list.
+    #[test]
+    fn every_non_mutating_manifest_tool_is_a_reader_tool() {
+        for spec in crate::acp::tools() {
+            let expected = !spec.mutates && spec.reach != crate::acp::Reach::Exec;
+            assert_eq!(
+                is_reader_tool(spec.name),
+                expected,
+                "reader classification drifted for {}",
+                spec.name
+            );
+        }
+        assert!(is_reader_tool("web_fetch"));
+        assert!(is_reader_tool("web_search"));
+        assert!(!is_reader_tool("verify"));
+        assert!(!is_reader_tool("not_a_tool"));
+    }
+
+    #[test]
+    fn read_only_roles_may_reach_the_public_web() {
+        let mut cfg = AclConfig::load_default();
+        for role in ["reader", "canvas-operator"] {
+            cfg.clients.insert(
+                "pi".into(),
+                ClientRole {
+                    role: role.into(),
+                    restricted_tools: vec![],
+                    max_params_per_call: 64,
+                },
+            );
+            assert!(cfg.check_acl("pi", "web_fetch").is_ok(), "{role}");
+            assert!(cfg.check_acl("pi", "web_search").is_ok(), "{role}");
+            assert!(cfg.check_acl("pi", "shell").is_err(), "{role}");
+        }
     }
 }
