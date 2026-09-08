@@ -164,6 +164,7 @@ enum SessionProfile {
 #[derive(Subcommand, Debug)]
 enum Commands {
     #[command(about = "Back up and restore local Codex, Claude and Pi session logs")]
+    #[command(hide = true)]
     SessionBackup {
         #[command(subcommand)]
         action: session_backup::SessionBackupCommand,
