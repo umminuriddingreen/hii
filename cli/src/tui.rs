@@ -429,7 +429,12 @@ pub(crate) fn welcome_frame(
         paint("HUMAN INFORMATION INTERFACE", &[DIM, palette().muted])
     );
     let location = paint(
-        &format!("{}  ·  {}  ·  {}", short_path(workspace), provider, model),
+        &format!(
+            "{}  ·  started with {}  ·  {}",
+            short_path(workspace),
+            provider,
+            model
+        ),
         &[DIM, palette().muted],
     );
     let greeting = paint(greeting, &[palette().secondary]);
@@ -505,34 +510,22 @@ fn model_query(input: &str) -> Option<&str> {
         .map(str::trim)
 }
 
-fn model_matches(query: &str, public_test: bool) -> Vec<(String, String)> {
+fn model_matches(query: &str, _public_test: bool) -> Vec<(String, String)> {
     let query = query.to_ascii_lowercase();
-    let mut rows = crate::ollama::Ollama::discover()
+    let provider = crate::ollama::Ollama::discover();
+    let provider_label = provider.provider_label().to_string();
+    let mut rows = provider
         .models()
         .unwrap_or_default()
         .into_iter()
         .filter(|model| query.is_empty() || model.to_ascii_lowercase().contains(&query))
-        .map(|model| (format!("/model {model}"), "Local".to_string()))
+        .map(|model| (format!("/model {model}"), provider_label.clone()))
         .collect::<Vec<_>>();
-    if !public_test {
-        rows.extend(
-            crate::agents::AgentManager::hosted_model_choices()
-                .into_iter()
-                .filter(|(provider, model)| {
-                    query.is_empty()
-                        || provider.to_ascii_lowercase().contains(&query)
-                        || model.to_ascii_lowercase().contains(&query)
-                })
-                .map(|(provider, model)| {
-                    let command = match provider.as_str() {
-                        "Claude" => "/claude ".to_string(),
-                        "Codex" => "/codex ".to_string(),
-                        _ => format!("/model {model}"),
-                    };
-                    (command, format!("{provider} · {model}"))
-                }),
-        );
-    }
+    // `/model` changes the model used by HII's local inference runtime. Hosted
+    // CLIs are explicit task routes (`/codex` and `/claude`), not selectable
+    // HII models. Listing their aliases here was especially misleading because
+    // selecting one inserted only the provider command and discarded the
+    // displayed model name.
     rows.sort_by(|left, right| {
         left.1
             .to_ascii_lowercase()
@@ -1002,6 +995,7 @@ mod tests {
         );
         assert!(rendered.contains("HUMAN INFORMATION INTERFACE"));
         assert!(rendered.contains("HII"));
+        assert!(rendered.contains("started with HII  ·  local-model"));
         assert!(rendered.contains("Welcome back"));
         assert!(!rendered.contains("What do you want"));
         assert!(!rendered.contains("Type naturally"));
@@ -1118,9 +1112,10 @@ mod tests {
         assert_eq!(matches.first().map(|item| item.0.as_str()), Some("/status"));
         assert!(command_matches("status", false).is_empty());
         let model_matches = command_matches("/model claude", false);
-        assert!(model_matches
+        assert!(model_matches.is_empty());
+        assert!(command_matches("/cla", false)
             .iter()
-            .any(|(command, description)| command == "/claude " && description.contains("Claude")));
+            .any(|(command, _)| command == "/claude"));
     }
 
     #[test]

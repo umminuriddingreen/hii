@@ -2464,18 +2464,20 @@ impl Conversation {
             if crate::picker::is_available() && !models.is_empty() {
                 return self.pick_model(&models);
             }
-            let mut rows = crate::agents::AgentManager::new(&self.paths).model_routes();
-            rows.extend(models.iter().map(|model| {
-                (
-                    self.ollama.provider_label().to_string(),
-                    model.clone(),
-                    if model == &self.model {
-                        "current · /model <name>".into()
-                    } else {
-                        "/model <name>".into()
-                    },
-                )
-            }));
+            let mut rows = models
+                .iter()
+                .map(|model| {
+                    (
+                        self.ollama.provider_label().to_string(),
+                        model.clone(),
+                        if model == &self.model {
+                            "current · /model <name>".to_string()
+                        } else {
+                            "/model <name>".to_string()
+                        },
+                    )
+                })
+                .collect::<Vec<_>>();
             rows.sort_by(|left, right| {
                 left.0
                     .to_ascii_lowercase()
@@ -2488,7 +2490,7 @@ impl Conversation {
                 .collect::<Vec<_>>()
                 .join("\n");
             return Ok(format!(
-                "Provider     Model                        Status / action\n{body}\n\n↑↓ choose in the / picker · Tab/→ complete · Enter run\nHosted routes use /codex <task> or /claude <task>."
+                "Provider     Model                        Status / action\n{body}\n\n↑↓ choose in the / picker · Tab/→ complete · Enter run\nHosted work is routed separately with /codex <task> or /claude <task>."
             ));
         };
         let selected = choose_model(Some(requested), self.ollama.provider(), &models)?;
