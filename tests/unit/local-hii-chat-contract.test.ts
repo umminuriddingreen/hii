@@ -7,6 +7,7 @@ describe('local HII chat contract', () => {
   const relay = readFileSync('workers/public-site/src/remote.rs', 'utf8');
   const installer = readFileSync('public/hii-chat/install.sh', 'utf8');
   const updater = readFileSync('remote/host/update.sh', 'utf8');
+  const bundleBuilder = readFileSync('scripts/build-hii-chat-bundle.mjs', 'utf8');
 
   it('unlocks only against an online account-owned host', () => {
     expect(ui).toContain("fetch('/api/remote/hosts'");
@@ -30,5 +31,13 @@ describe('local HII chat contract', () => {
     expect(updater).toContain('shasum -a 256');
     expect(updater).toContain('manifest.json');
     expect(updater).toContain('HII_PAIR_TOKEN');
+    expect(updater).not.toContain('remote-source.mjs');
+    expect(updater).not.toContain('hii-remote-input.swift');
+    for (const file of ['hii-remote-host.mjs', 'install-local.sh', 'update.sh']) {
+      expect(updater).toContain(file);
+      expect(bundleBuilder).toContain(file);
+    }
+    expect(installer).toContain('HII is not installed');
+    expect(installer).toContain('Node.js is required');
   });
 });
