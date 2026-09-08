@@ -447,6 +447,9 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             "stream": false,
             "temperature": 0.1,
         });
+        // The blocking path is the structured/JSON path; it mirrors the Ollama
+        // branch's `"think": false` and asks for an answer directly.
+        apply_thinking(&mut body, false);
         if format.is_some() {
             body["response_format"] = json!({ "type": "json_object" });
         }
@@ -545,7 +548,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             return;
         }
         if self.provider != ModelProvider::Ollama {
-            self.chat_openai_with_stream(model, messages, json_format, cancel, sender);
+            self.chat_openai_with_stream(model, messages, json_format, think, cancel, sender);
             return;
         }
 
@@ -657,6 +660,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         model: &str,
         messages: &[Message],
         json_format: bool,
+        think: bool,
         cancel: &Cancel,
         sender: mpsc::Sender<ChatStreamEvent>,
     ) {
@@ -669,6 +673,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
                 "stream_options": { "include_usage": true },
                 "temperature": 0.1,
             });
+            apply_thinking(&mut body, think);
             if json_format {
                 body["response_format"] = json!({ "type": "json_object" });
             }
@@ -1084,6 +1089,23 @@ fn openai_reported_durations(usage: &Value) -> Option<(u64, u64, u64)> {
     ))
 }
 
+/// Apply the operator's reasoning setting to an OpenAI-compatible request body.
+///
+/// Ollama has a first-class `"think"` field; the OpenAI wire format has none,
+/// so each server invents its own. HII's runner (mlx-vlm) reads a **top-level**
+/// `enable_thinking` and, failing that, the OpenAI-standard `reasoning_effort`;
+/// it then splits the model's `<think>` block out into `reasoning_content`,
+/// which [`openai_reasoning_delta`] already understands. `chat_template_kwargs`
+/// — the spelling vLLM uses — is silently ignored there: sending it produced
+/// byte-identical output for `true` and `false` against the live 9B runner,
+/// which is exactly how this stayed unnoticed. Send both keys so the setting
+/// lands on either server, and pair them so a backend that honors only one
+/// still agrees with the other.
+fn apply_thinking(body: &mut Value, think: bool) {
+    body["enable_thinking"] = json!(think);
+    body["reasoning_effort"] = json!(if think { "medium" } else { "none" });
+}
+
 fn openai_reasoning_delta(delta: &Value) -> Option<&str> {
     ["reasoning_content", "reasoning", "thinking"]
         .into_iter()
@@ -1258,8 +1280,10 @@ fn format_ureq(error: ureq::Error) -> String {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::{
-        acquired_native_model, openai_messages, openai_reasoning_delta, openai_reported_durations,
+        acquired_native_model, apply_thinking, openai_messages, openai_reasoning_delta, openai_reported_durations,
         ox_alpha_browser_prompt, provider_messages, ChatUsage, Message, Ollama, RepetitionGuard,
     };
     use crate::attachments::ImagePayload;
@@ -1384,6 +1408,35 @@ mod tests {
         );
         assert_eq!(messages[1]["role"], "user");
         assert_eq!(messages[1]["content"], "hello");
+    }
+
+    /// The reasoning setting must reach OpenAI-compatible backends on the
+    /// fields they actually read. `chat_template_kwargs` is not one of them:
+    /// against the live mlx-vlm runner it produced byte-identical output for
+    /// both settings, while `enable_thinking` yields a populated
+    /// `reasoning_content` for `true` and none for `false`.
+    #[test]
+    fn the_reasoning_setting_reaches_openai_compatible_backends() {
+        let mut on = json!({ "model": "m" });
+        apply_thinking(&mut on, true);
+        assert_eq!(on["enable_thinking"], json!(true));
+        assert_eq!(on["reasoning_effort"], json!("medium"));
+
+        let mut off = json!({ "model": "m" });
+        apply_thinking(&mut off, false);
+        assert_eq!(off["enable_thinking"], json!(false));
+        assert_eq!(off["reasoning_effort"], json!("none"));
+
+        // The two controls must never disagree: a backend honoring only one of
+        // them still has to land on the operator's setting.
+        for think in [true, false] {
+            let mut body = json!({});
+            apply_thinking(&mut body, think);
+            assert_eq!(
+                body["enable_thinking"].as_bool().expect("enable_thinking"),
+                body["reasoning_effort"] != json!("none")
+            );
+        }
     }
 
     #[test]
