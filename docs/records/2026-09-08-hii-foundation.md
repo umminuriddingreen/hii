@@ -1,6 +1,6 @@
 # HII foundation: an interface for living in a digital world
 
-Status: implementation in progress. This is the running architecture and decision record for this work, not a claim of release readiness.
+Status: foundation integration shipped to main and deployed locally/web on September 9. This is the running architecture and decision record, not a claim that every product or public-release gap is closed.
 
 ## Product thesis
 
@@ -106,3 +106,14 @@ Remaining acceptance beyond source tests: current installed native visual/run pr
 - Installer routing, archive/checksum names and CLI publication automation now agree. Updater manifests use version-pinned artifacts and truthful architecture coverage. Public release remains gated on real signing/notarization and published artifacts, not merely these source repairs.
 
 Final source verification: 837 frontend tests in 136 files; core 54 unit and 2 integration tests; account projection 10 native tests and 11 adapter tests; CLI 515 tests plus named-state parsing; Drive 10 tests. TypeScript passed. Native clippy passed with the pre-existing Tauri command argument-count lint allowed; this is not an unqualified strict-lint pass. Package, deployment and installed-app evidence follow after those operations complete.
+
+### Delivery evidence
+
+- Source integration `0ccd51a8` pushed to `origin/main`; remote SHA matched. Secret scan passed for 1,334 tracked files. No private board data or generated environments were committed.
+- `npm run deploy` built successfully but its first Cloudflare upload failed with consumed completion token 100312. Retrying `wrangler deploy` succeeded: version `be2bd3e9-c546-4c98-b509-566312f296c9`. Live `/` and `/download` returned HTTP 200; `/` contains the canvas shell. Live `/install` exactly matches the canonical installer SHA256 `6c1f83cc3dda865e0c17480ee46ce864a35ff4c1be3822ee63cb3a11da2e9d83` and passes shell syntax validation.
+- Final Mac build and all 30 native tests passed. Actual-package smoke verified the embedded CLI, 86 frontend build inputs and isolated Runtime persistence through package replacement and removal of compatibility JSON. This is not an agent-model or cross-device transport test.
+- Installed `/Applications/HII.app`, retaining the previous bundle in Trash, and reopened it through native UI automation. The actual WebView shows the shared canvas and the new workspace picker: `launch-proof` 33 objects, `default` 181, and the separate account board labeled mirrored with web. No board switch, merge or upload was performed for this check.
+- Installed executable SHA256: `b81004ad50d98a71f07a6bb65156346ad77fcebcc63e850e4a93c1524a0a0b1d`; embedded CLI: `15397d77785b4682638f4942fd873c42ea43d496483214cca766d48d02cb6d20`. Strict local signature verification passed. No Developer ID identity is available on this machine, so this does not establish notarized public-release readiness.
+- Proof logs: `/tmp/hii-final-all-tests.log`, `/tmp/hii-foundation-final-mac-build.log`, `/tmp/hii-foundation-final-native-tests.log`, `/tmp/hii-foundation-final-package-smoke.log`, `/tmp/hii-final-deploy-retry.log`. Local action receipt: `ac5a3daa-4506-43c5-8e5a-b99d899dca8c`.
+
+Next highest-leverage acceptance is an explicitly chosen existing-board connection with user-owned binary asset transport, exercised against a real browser and native app in both directions. Simulated adapter tests and the native picker are not proof of that flow. Public distribution also needs signing/notarization, real release artifacts and CI publication credentials (none configured in the repository at verification), plus Windows/Linux package proof.
