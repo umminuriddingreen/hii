@@ -17,6 +17,7 @@ export function SpaceToolbar({
   onUndo,
   onRedo,
   onFitView,
+  onArrangeImages,
   onZoomIn,
   onZoomOut,
   onDeleteSelection,
@@ -39,6 +40,7 @@ export function SpaceToolbar({
   onUndo?: () => void;
   onRedo?: () => void;
   onFitView?: () => void;
+  onArrangeImages?: () => void;
   onZoomIn?: () => void;
   onZoomOut?: () => void;
   onDeleteSelection?: () => void;
@@ -69,6 +71,7 @@ export function SpaceToolbar({
     { label: drawing ? 'Stop drawing' : 'Draw', shortcut: 'D', keywords: 'ink pen', action: onToggleDrawing },
     ...(photo ? [{ label: 'Add file', shortcut: '⌘U', keywords: 'upload image media document', action: onAddImage }] : []),
     { label: 'Fit canvas', shortcut: '0', keywords: 'view zoom show all', action: onFitView },
+    ...(onArrangeImages ? [{ label: 'Arrange images', shortcut: '', keywords: 'parametric layout grid field chronology constellation portfolio', action: onArrangeImages }] : []),
     ...(onZoomIn ? [{ label: 'Zoom in', shortcut: '⌘=', keywords: 'view closer magnify scale', action: onZoomIn }] : []),
     ...(onZoomOut ? [{ label: 'Zoom out', shortcut: '⌘−', keywords: 'view wider shrink scale', action: onZoomOut }] : []),
     { label: 'Undo', shortcut: '⌘Z', keywords: 'back history', action: onUndo },
@@ -76,7 +79,7 @@ export function SpaceToolbar({
     { label: 'HII Remote', shortcut: '', keywords: 'device computer remote local model', action: onOpenTerminal },
     ...(selectionCount ? [{ label: `Delete selected (${selectionCount})`, shortcut: 'Delete', keywords: 'remove selection', action: onDeleteSelection }] : []),
     ...(selectionCount === 1 && onShareSelection ? [{ label: 'Share selected', shortcut: '', keywords: 'publish feed', action: onShareSelection }] : [])
-  ], [drawing, onAddImage, onAddNote, onAddText, onDeleteSelection, onFitView, onOpenTerminal, onRedo, onShareSelection, onToggleDrawing, onUndo, onZoomIn, onZoomOut, photo, selectionCount]);
+  ], [drawing, onAddImage, onAddNote, onAddText, onArrangeImages, onDeleteSelection, onFitView, onOpenTerminal, onRedo, onShareSelection, onToggleDrawing, onUndo, onZoomIn, onZoomOut, photo, selectionCount]);
   const normalizedQuery = query.trim().toLowerCase();
   const visibleCommands = normalizedQuery
     ? commands.filter((command) => `${command.label} ${command.shortcut} ${command.keywords}`.toLowerCase().includes(normalizedQuery))

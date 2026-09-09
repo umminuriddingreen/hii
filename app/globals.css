@@ -158,6 +158,51 @@ button, input, textarea { font: inherit; }
 .hii-freeform-more hr { width: 100%; margin: 5px 0; border: 0; border-top: 1px solid rgba(0,0,0,.08); }
 .hii-freeform-more output { display: flex; align-items: center; gap: 7px; padding: 7px 9px 4px; color: #777; font-size: 10px; }
 
+.hii-parametric-panel { position: fixed; z-index: 2147482600; top: 64px; right: 18px; width: min(320px, calc(100vw - 36px)); padding: 16px; border: 1px solid #111; background: #fff; color: #000; box-shadow: 0 18px 50px rgba(0,0,0,.16); font-family: Inter, Helvetica, Arial, sans-serif; }
+.hii-parametric-trigger { position: fixed; z-index: 2147482500; right: 18px; bottom: 18px; display: inline-flex; min-height: 36px; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid #000; background: #fff; color: #000; cursor: pointer; font: 10px/1 "SF Mono", ui-monospace, monospace; text-transform: uppercase; }
+.hii-parametric-trigger:hover, .hii-parametric-trigger:focus-visible { background: #000; color: #fff; outline: 0; }
+.hii-site-views-trigger { position: fixed; z-index: 2147482500; right: 18px; bottom: 60px; display: inline-flex; min-height: 36px; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid #000; background: #000; color: #fff; cursor: pointer; font: 10px/1 "SF Mono", ui-monospace, monospace; text-transform: uppercase; }
+.hii-site-views-trigger:hover, .hii-site-views-trigger:focus-visible { background: #fff; color: #000; outline: 0; }
+.hii-site-views-panel { position: fixed; z-index: 2147482600; top: 64px; right: 18px; width: min(340px, calc(100vw - 36px)); padding: 16px; border: 1px solid #000; background: #fff; color: #000; box-shadow: 0 18px 50px rgba(0,0,0,.16); font-family: Inter, Helvetica, Arial, sans-serif; }
+.hii-site-views-panel header { display: flex; align-items: center; justify-content: space-between; }
+.hii-site-views-panel header small, .hii-site-views-panel > small, .hii-site-views-panel label span { display: block; font: 9px/1.45 "SF Mono", ui-monospace, monospace; text-transform: uppercase; letter-spacing: .08em; }
+.hii-site-views-panel header strong { display: block; margin-top: 5px; font-size: 18px; }
+.hii-site-views-panel header button { border: 0; background: transparent; color: #000; font-size: 24px; cursor: pointer; }
+.hii-site-views-panel label { display: grid; gap: 7px; margin: 18px 0 12px; }
+.hii-site-views-panel input { min-height: 38px; padding: 0 9px; border: 1px solid #000; border-radius: 0; background: #fff; color: #000; font: 10px/1 "SF Mono", ui-monospace, monospace; }
+.hii-site-views-panel nav { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid #000; }
+.hii-site-views-panel nav button { min-height: 38px; border: 0; border-right: 1px solid #000; border-bottom: 1px solid #000; background: #fff; color: #000; font: 10px/1 "SF Mono", ui-monospace, monospace; cursor: pointer; }
+.hii-site-views-panel nav button:nth-child(even) { border-right: 0; }
+.hii-site-views-panel nav button:nth-last-child(-n+2) { border-bottom: 0; }
+.hii-site-views-panel nav button:hover { background: #000; color: #fff; }
+.hii-site-views-panel form { display: grid; grid-template-columns: 1fr auto; margin: 12px 0; }
+.hii-site-views-panel form input { border-right: 0; }
+.hii-site-views-panel form button { border: 1px solid #000; background: #000; color: #fff; font: 9px/1 "SF Mono", ui-monospace, monospace; text-transform: uppercase; }
+.hii-export-trigger { position: fixed; z-index: 2147482500; right: 18px; bottom: 102px; min-height: 36px; padding: 0 11px; border: 1px solid #000; background: #fff; color: #000; cursor: pointer; font: 10px/1 "SF Mono", ui-monospace, monospace; text-transform: uppercase; }
+.hii-export-panel { position: fixed; z-index: 2147482700; right: 18px; bottom: 18px; display: grid; width: min(300px, calc(100vw - 36px)); border: 1px solid #000; background: #fff; color: #000; font-family: Inter, Helvetica, Arial, sans-serif; }
+.hii-export-panel header { display: flex; align-items: center; justify-content: space-between; padding: 14px; border-bottom: 1px solid #000; }
+.hii-export-panel header small, .hii-export-panel > small { font: 9px/1.45 "SF Mono", ui-monospace, monospace; text-transform: uppercase; }
+.hii-export-panel header strong { display: block; margin-top: 5px; font-size: 14px; }
+.hii-export-panel header button { border: 0; background: transparent; color: #000; font-size: 22px; }
+.hii-export-panel > button { min-height: 42px; border: 0; border-bottom: 1px solid #000; background: #fff; color: #000; cursor: pointer; font: 10px/1 "SF Mono", ui-monospace, monospace; text-transform: uppercase; }
+.hii-export-panel > button:hover { background: #000; color: #fff; }
+.hii-export-panel > small { padding: 12px 14px; }
+.hii-parametric-panel header, .hii-parametric-panel label > span { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.hii-parametric-panel header small, .hii-parametric-panel > small { display: block; font: 9px/1.45 "SF Mono", ui-monospace, monospace; text-transform: uppercase; letter-spacing: .08em; }
+.hii-parametric-panel header strong { display: block; margin-top: 5px; font-size: 18px; }
+.hii-parametric-panel header button { border: 0; background: transparent; color: #000; font-size: 24px; cursor: pointer; }
+.hii-parametric-panel p { margin: 18px 0; font-size: 12px; }
+.hii-parametric-panel fieldset { display: grid; grid-template-columns: 1fr 1fr; margin: 0 0 18px; padding: 0; border: 1px solid #000; }
+.hii-parametric-panel legend { padding: 0 5px; font: 9px/1 "SF Mono", ui-monospace, monospace; text-transform: uppercase; }
+.hii-parametric-panel fieldset button { min-height: 36px; border: 0; border-right: 1px solid #000; border-bottom: 1px solid #000; background: #fff; color: #000; font: 10px/1 "SF Mono", ui-monospace, monospace; cursor: pointer; }
+.hii-parametric-panel fieldset button:nth-of-type(even) { border-right: 0; }
+.hii-parametric-panel fieldset button:nth-last-of-type(-n+2) { border-bottom: 0; }
+.hii-parametric-panel fieldset button[aria-pressed="true"] { background: #000; color: #fff; }
+.hii-parametric-panel label { display: grid; gap: 8px; margin: 14px 0; font: 10px/1 "SF Mono", ui-monospace, monospace; text-transform: uppercase; }
+.hii-parametric-panel input[type="range"] { width: 100%; accent-color: #000; }
+.hii-parametric-apply { width: 100%; min-height: 42px; margin: 8px 0 12px; border: 1px solid #000; background: #000; color: #fff; cursor: pointer; font: 10px/1 "SF Mono", ui-monospace, monospace; text-transform: uppercase; }
+.hii-parametric-apply:disabled { cursor: default; opacity: .35; }
+
 @media (max-width: 760px) {
   .hii-freeform-tools { top: auto; right: 12px; bottom: 12px; left: 12px; justify-content: center; transform: none; }
 }

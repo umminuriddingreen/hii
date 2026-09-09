@@ -18,6 +18,7 @@ import {
   Plus,
   PresentationChart,
   Shapes,
+  SlidersHorizontal,
   Sparkle,
   TerminalWindow,
   TextT
@@ -109,6 +110,10 @@ import { historyShortcut } from '@/lib/workspace/history-shortcut';
 import { mergeAgentResponse } from '@/lib/workspace/agent-stream';
 import { browserCanvasAssetUrl } from '@/lib/web/canvas-assets';
 import { VoiceInputButton } from './VoiceInputButton';
+import { ParametricLayoutPanel, type ParametricLayoutSettings } from './ParametricLayoutPanel';
+import { SiteViewsPanel } from './SiteViewsPanel';
+import { downloadWorkspaceOutput, ExportOutputPanel } from './ExportOutputPanel';
+import { parametricImageLayout } from '@/lib/workspace/parametric-layout';
 
 const MusicPlaylistPanel = lazy(() => import('./MusicPlaylistPanel').then((module) => ({ default: module.MusicPlaylistPanel })));
 const NativeDevBrowser = lazy(() => import('./NativeDevBrowser').then((module) => ({ default: module.NativeDevBrowser })));
@@ -153,6 +158,7 @@ function CanvasChrome({
   onTerminal,
   onAsk,
   onActivity,
+  onArrangeImages,
   onZoomOut,
   onZoomIn,
   onFit
@@ -169,6 +175,7 @@ function CanvasChrome({
   onTerminal: () => void;
   onAsk: () => void;
   onActivity: () => void;
+  onArrangeImages: () => void;
   onZoomOut: () => void;
   onZoomIn: () => void;
   onFit: () => void;
@@ -197,6 +204,7 @@ function CanvasChrome({
         <button type="button" onClick={onPresentation}><PresentationChart size={17} />Presentation</button>
         <button type="button" onClick={onAsk}><Sparkle size={17} />Quick terminal <kbd>⌘ K</kbd></button>
         <button type="button" onClick={onActivity}><ListBullets size={17} />Activity & proof <kbd>⌘ 2</kbd></button>
+        <button type="button" onClick={onArrangeImages}><SlidersHorizontal size={17} />Arrange images</button>
         <hr />
         <button type="button" onClick={onZoomOut}><Minus size={17} />Zoom out <kbd>⌘ −</kbd></button>
         <button type="button" onClick={onZoomIn}><Plus size={17} />Zoom in <kbd>⌘ +</kbd></button>
@@ -1113,6 +1121,9 @@ export function HiiRoot({
   const [drawing, setDrawing] = useState(false);
   const [canvasCommandsOpen, setCanvasCommandsOpen] = useState(false);
   const [canvasManagerOpen, setCanvasManagerOpen] = useState(false);
+  const [parametricLayoutOpen, setParametricLayoutOpen] = useState(false);
+  const [siteViewsOpen, setSiteViewsOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   /**
    * Which projection of the workspace is on screen.
    *
@@ -1445,6 +1456,21 @@ export function HiiRoot({
       setToolMessage('Canvas view reset.');
     }
   }, [camera, visibleNodes]);
+
+  const layoutImages = useCallback((settings: ParametricLayoutSettings) => {
+    const selectedImages = visibleNodes.filter((node) => node.type === 'image' && selected.includes(node.id));
+    const images = selectedImages.length ? selectedImages : visibleNodes.filter((node) => node.type === 'image');
+    const center = camera.toWorld(window.innerWidth / 2, window.innerHeight / 2);
+    const placements = parametricImageLayout(images, { ...settings, origin: center });
+    placements.forEach(({ id, ...patch }) => {
+      const node = workspace.nodes.find((entry) => entry.id === id);
+      if (node) workspace.patchNode(id, { ...patch, payload: { ...node.payload, parametricLayout: settings.layout, parametricScale: settings.scale, parametricSpacing: settings.spacing } });
+    });
+    setSelected(placements.map((placement) => placement.id));
+    setParametricLayoutOpen(false);
+    setToolMessage(`Arranged ${placements.length} image${placements.length === 1 ? '' : 's'} as ${settings.layout}.`);
+    window.setTimeout(fitCanvas, 40);
+  }, [camera, fitCanvas, selected, visibleNodes, workspace]);
 
   const focusNodes = useCallback((nodes: WorkspaceNode[], label: string) => {
     const viewport = camera.viewportRef.current;
@@ -2601,6 +2627,7 @@ export function HiiRoot({
         onTerminal={() => ensureWorkspaceTerminal('docked')}
         onAsk={() => { ensureWorkspaceTerminal('quick'); setPromptVisible(false); }}
         onActivity={openActivityPanel}
+        onArrangeImages={() => setParametricLayoutOpen(true)}
         onZoomOut={() => camera.zoomBy(1 / KEY_ZOOM_STEP)}
         onZoomIn={() => camera.zoomBy(KEY_ZOOM_STEP)}
         onFit={fitCanvas}
@@ -2632,6 +2659,7 @@ export function HiiRoot({
         onUndo={() => { workspace.undo(); setToolMessage('Undid the last canvas change.'); }}
         onRedo={() => { workspace.redo(); setToolMessage('Redid the last canvas change.'); }}
         onFitView={fitCanvas}
+        onArrangeImages={() => { setCanvasCommandsOpen(false); setParametricLayoutOpen(true); }}
         onZoomIn={() => camera.zoomBy(KEY_ZOOM_STEP)}
         onZoomOut={() => camera.zoomBy(1 / KEY_ZOOM_STEP)}
         onDeleteSelection={deleteSelection}
@@ -2645,6 +2673,58 @@ export function HiiRoot({
         onFocusNode={focusCanvasNode}
         onClose={closeCanvasManager}
       />}
+      {visibleNodes.some((node) => node.type === 'image') && !parametricLayoutOpen && <button
+        type="button"
+        className="hii-parametric-trigger"
+        data-workspace-ui
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={() => setParametricLayoutOpen(true)}
+      ><SlidersHorizontal size={16} />parameters</button>}
+      {!siteViewsOpen && <button
+        type="button"
+        className="hii-site-views-trigger"
+        data-workspace-ui
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={() => setSiteViewsOpen(true)}
+      ><Globe size={16} />site views</button>}
+      {selected.length === 1 && !exportOpen && <button
+        type="button"
+        className="hii-export-trigger"
+        data-workspace-ui
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={() => setExportOpen(true)}
+      >export</button>}
+      {parametricLayoutOpen && <ParametricLayoutPanel
+        count={(visibleNodes.some((node) => node.type === 'image' && selected.includes(node.id))
+          ? visibleNodes.filter((node) => node.type === 'image' && selected.includes(node.id))
+          : visibleNodes.filter((node) => node.type === 'image')).length}
+        onApply={layoutImages}
+        onClose={() => setParametricLayoutOpen(false)}
+      />}
+      {siteViewsOpen && <SiteViewsPanel
+        onOpen={(url) => {
+          const center = camera.toWorld(window.innerWidth / 2, window.innerHeight / 2);
+          const offset = workspace.nodes.filter((node) => node.type === 'browser').length * 28;
+          const id = openDevBrowser({ x: center.x - 380 + offset, y: center.y - 270 + offset }, url);
+          if (id) { setSelected([id]); setToolMessage('Placed website view on the canvas.'); }
+        }}
+        onClose={() => setSiteViewsOpen(false)}
+      />}
+      {exportOpen && selected.length === 1 && (() => {
+        const node = workspace.nodes.find((entry) => entry.id === selected[0]);
+        if (!node) return null;
+        return <ExportOutputPanel node={node} onClose={() => setExportOpen(false)} onCanvas={() => {
+          const copy = makeNode({ type: node.type, w: node.w, h: node.h, object: node.object, objectRef: node.objectRef, payload: { ...node.payload, duplicatedFrom: node.id } }, node.x + 44, node.y + 44, workspace.takeZ());
+          workspace.addNode(copy);
+          setSelected([copy.id]);
+          setExportOpen(false);
+          setToolMessage('Placed an editable copy on the canvas.');
+        }} onDownload={() => {
+          downloadWorkspaceOutput(node);
+          setExportOpen(false);
+          setToolMessage('Prepared the selected output for saving.');
+        }} />;
+      })()}
       {projectionToggle}
       {isAccount && canvasFeedback && <div className="hii-canvas-feedback" role="status" aria-live="polite">{canvasFeedback}</div>}
       {runtimeEnabled && persistentChrome && workspace.nodes.some((node) => node.type === 'app') && <div className="hii-app-dock" onPointerDown={(event) => event.stopPropagation()}>

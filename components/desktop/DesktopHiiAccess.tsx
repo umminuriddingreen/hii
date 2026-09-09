@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { HiiRoot } from '@/components/workspace/HiiRoot';
 import { LocalChatSurface } from './chat/LocalChatSurface';
-import { ChatCircle, SquaresFour, UserCircle, SidebarSimple, X } from '@phosphor-icons/react';
+import { ChatCircle, UserCircle, SidebarSimple, X } from '@phosphor-icons/react';
 import { readAccountWorkspaceSelection, resolveAccountWorkspaceSelection, saveAccountWorkspaceSelection } from '@/lib/desktop/account-selection';
 import {
   accountSyncStatus,
@@ -168,11 +168,10 @@ export function DesktopHiiAccess() {
     onPaste={(event) => { if (surface === 'chat') event.stopPropagation(); }}
     onPointerMove={(event) => { if (surface === 'chat') event.stopPropagation(); }}
   >
-    <nav className={styles.surfaceSwitch} aria-label="HII surface" data-workspace-ui>
-      <button type="button" aria-pressed={surface === 'canvas'} onClick={() => setSurface('canvas')}><SquaresFour size={16} />Canvas</button>
-      <button type="button" aria-pressed={surface === 'chat'} onClick={() => { setChatOpened(true); setSurface('chat'); }}><ChatCircle size={16} />Chat</button>
+    <nav className={styles.surfaceSwitch} aria-label="HII panels" data-workspace-ui>
+      <button type="button" aria-expanded={surface === 'chat'} onClick={() => { setChatOpened(true); setSurface((current) => current === 'chat' ? 'canvas' : 'chat'); }}><ChatCircle size={16} />chat</button>
     </nav>
-    <div className={styles.surface} hidden={surface !== 'canvas'}>
+    <div className={styles.surface}>
     {ready && canvasAvailable ? <HiiRoot
       key={`${active}:${localEpoch}`}
       spaceId={active === 'local' ? '' : active}
@@ -184,7 +183,10 @@ export function DesktopHiiAccess() {
       onUnsavedChanges={setUnsaved}
     /> : <div className={styles.loading} role="status">{ready ? 'Your account canvas could not be opened.' : 'Opening HII...'}</div>}
     </div>
-    {chatOpened && <div className={styles.surface} hidden={surface !== 'chat'}><LocalChatSurface /></div>}
+    {chatOpened && surface === 'chat' && <aside className={styles.chatPanel} aria-label="Chat panel" data-workspace-ui>
+      <button className={styles.chatClose} type="button" aria-label="Close chat panel" onClick={() => setSurface('canvas')}><X size={18} /></button>
+      <LocalChatSurface />
+    </aside>}
     {surface === 'canvas' && <nav className={styles.accountControls} data-workspace-ui aria-label="Canvas account">
       <button type="button" title="Workspaces" aria-label="Workspaces" aria-expanded={workspaceOpen} onClick={() => setWorkspaceOpen((value) => !value)}><SidebarSimple size={19} /></button>
       <button type="button" title="HII account" aria-expanded={accountOpen} onClick={() => setAccountOpen((value) => !value)}><UserCircle size={19} /><span>{identity?.handle ?? 'HII account'}</span></button>
