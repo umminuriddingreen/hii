@@ -200,6 +200,7 @@ export function HiiWebAccess() {
   const [mode, setMode] = useState<AccessMode>(null);
   const authRef = useRef<HTMLElement | null>(null);
   const [session, setSession] = useState<Session>({ authenticated: false });
+  const [browserOnly, setBrowserOnly] = useState(false);
   const [handle, setHandle] = useState('');
   const [message, setMessage] = useState('');
   const [accountOpen, setAccountOpen] = useState(false);
@@ -562,8 +563,11 @@ export function HiiWebAccess() {
         });
         setSession({ ...next, source: 'account' });
       }
+      // Authentication changes identity, never the canvas the person is editing.
+      setBrowserOnly(true);
       setMode(null);
       setProductSite(false);
+      setAccountOpen(true);
     } catch {
       setMessage(
         mode === 'signup'
@@ -594,7 +598,17 @@ export function HiiWebAccess() {
     }
   };
 
-  if (ready && session.authenticated && !productSite) {
+  const switchCanvas = (local: boolean) => {
+    if (canvasUnsaved.current) {
+      setWorkspaceMessage('Save or retry the current canvas before changing workspaces.');
+      return;
+    }
+    setBrowserOnly(local);
+    setWorkspaceMessage('');
+    setPanel(null);
+  };
+
+  if (ready && session.authenticated && !browserOnly && !productSite) {
     const accountName = session.handle ?? 'account';
     if (!canvasAccountReady || !canvasPersistence || (accountSync && (!activeWorkspace || workspaceBusy && !workspaces.length))) {
       return (
@@ -607,6 +621,7 @@ export function HiiWebAccess() {
                 : 'could not open this account.'}
             </p>
             <button type="button" onClick={() => window.location.reload()}>retry</button>
+            <button type="button" onClick={() => switchCanvas(true)}>open browser-only canvas</button>
           </section>
         </main>
       );
@@ -660,6 +675,7 @@ export function HiiWebAccess() {
               <div><dt>workspace</dt><dd>{accountSync ? 'synchronized to your account' : 'stored on this device'}</dd></div>
               <div><dt>computer</dt><dd>connected only when you allow it</dd></div>
             </dl>
+            <button type="button" onClick={() => switchCanvas(true)}>open browser-only canvas</button>
             {accountSync ? <section className={styles.workspaceControls} aria-label="Your workspaces">
               <label>
                 your workspaces
@@ -784,9 +800,8 @@ export function HiiWebAccess() {
     );
   }
 
-  // The browser opens on the same canvas the installed app opens on. Signing in
-  // is chrome over that canvas, not a page in front of it; the marketing site
-  // stays reachable at /?site=1 and from the panel below.
+  // Signing in keeps this browser-only document mounted. Account workspaces
+  // are separate documents, opened explicitly; login never uploads this one.
   return (
     <div className={styles.canvasShell}>
       <HiiRoot
@@ -809,21 +824,27 @@ export function HiiWebAccess() {
             aria-controls="hii-web-account"
             onClick={() => setAccountOpen((value) => !value)}
           >
-            hii
+            {session.authenticated ? session.handle ?? 'account' : 'hii'}
           </button>
         </nav>
       </header>
       {accountOpen ? (
         <aside id="hii-web-account" className={styles.accountPanel} data-workspace-ui aria-label="HII account">
           <dl>
-            <div><dt>profile</dt><dd>not signed in</dd></div>
+            <div><dt>profile</dt><dd>{session.authenticated ? session.handle ?? 'account' : 'not signed in'}</dd></div>
             <div><dt>sign-in</dt><dd>passkey</dd></div>
             <div><dt>workspace</dt><dd>stored on this browser</dd></div>
             <div><dt>computer</dt><dd>connected only when you allow it</dd></div>
           </dl>
-          <button type="button" onClick={() => { chooseMode('login'); setAccountOpen(false); }}>log in</button>
-          <button type="button" onClick={() => { chooseMode('signup'); setAccountOpen(false); }}>create your HII</button>
-          <small>Sign in to synchronize this canvas to your account. Until then it stays in this browser.</small>
+          {session.authenticated ? <>
+            <button type="button" onClick={() => switchCanvas(false)}>open account workspace</button>
+            <button type="button" onClick={signOut} disabled={busy}>log out</button>
+          </> : <>
+            <button type="button" onClick={() => { chooseMode('login'); setAccountOpen(false); }}>log in</button>
+            <button type="button" onClick={() => { chooseMode('signup'); setAccountOpen(false); }}>create your HII</button>
+          </>}
+          <small>This canvas stays in this browser. Account workspaces are separate; signing in does not upload or synchronize this canvas.</small>
+          <p role="status" aria-live="polite">{workspaceMessage || deviceMessage}</p>
           <nav className={styles.platformLinks} aria-label="Open HII on a computer">
             <a href="/?site=1">what HII is</a>
             <a href="/download#mac">HII for Mac</a>

@@ -23,6 +23,72 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
+it('native Runtime conflicts preserve competing text instead of picking a timestamp winner', async () => {
+  const base = doc(2, ['one']);
+  const local = structuredClone(base);
+  local.nodes[0].payload.content = 'unsaved canvas text';
+  local.nodes[0].updatedAt = '2026-03-01';
+  const competing = structuredClone(base);
+  competing.revision = 3;
+  competing.nodes[0].payload.content = 'concurrent CLI text';
+  native.invoke.mockImplementation(async command => command === 'account_workspace_read'
+    ? { status: 200, body: envelope(base) }
+    : { status: 409, body: envelope(competing) });
+  const adapter = new NativeAccountWorkspacePersistence('workspace');
+  await adapter.read();
+  await expect(adapter.write(local)).rejects.toThrow('conflict at nodes/one/payload/content');
+  expect(native.invoke.mock.calls.filter(([command]) => command === 'account_workspace_write')).toHaveLength(1);
+  expect(local.nodes[0].payload.content).toBe('unsaved canvas text');
+  adapter.dispose();
+});
+
+it('native account documents use Runtime sequence rather than the hosted revision', async () => {
+  const document = doc(3, ['one']);
+  native.invoke.mockResolvedValue({ status: 200, body: { workspace: {
+    revision: 87, remoteRevision: 87, runtimeSpaceId: 'workspace', document
+  } } });
+  const adapter = new NativeAccountWorkspacePersistence('workspace');
+  expect((await adapter.read()).revision).toBe(3);
+  native.invoke.mockResolvedValue({ status: 200, body: { workspace: {
+    runtimeSpaceId: 'another-workspace', document
+  } } });
+  await expect(adapter.read()).rejects.toThrow('account_projection_space_mismatch');
+  adapter.dispose();
+});
+
+it('mirrors a board between real web/native adapters and preserves independent edits after reopening', async () => {
+  let stored = doc(1, ['shared']);
+  const transact = (next: WorkspaceDoc, expected: number) => {
+    if (expected !== stored.revision) return { status: 409, document: structuredClone(stored) };
+    stored = structuredClone({ ...next, revision: stored.revision + 1 });
+    return { status: 200, document: structuredClone(stored) };
+  };
+  native.invoke.mockImplementation(async (command, args) => {
+    if (command === 'account_workspace_read') return { status: 200, body: envelope(structuredClone(stored)) };
+    const saved = transact(args.document, args.expectedRevision);
+    return { status: saved.status, body: envelope(saved.document) };
+  });
+  vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
+    const saved = options?.method === 'POST'
+      ? (() => { const request = JSON.parse(options.body); return transact(request.document, request.expectedRevision); })()
+      : { status: 200, document: structuredClone(stored) };
+    return new Response(JSON.stringify(envelope(saved.document)), { status: saved.status });
+  }));
+  const web = new AccountWorkspacePersistence('shared-board', 'csrf');
+  const mac = new NativeAccountWorkspacePersistence('shared-board');
+  const [webDoc, macDoc] = await Promise.all([web.read(), mac.read()]);
+  await web.write({ ...webDoc, nodes: [{ ...webDoc.nodes[0], payload: { content: 'browser edit' }, updatedAt: '2026-02-01' }] });
+  await mac.write({ ...macDoc, nodes: [{ ...macDoc.nodes[0], x: 420, updatedAt: '2026-02-02' }] });
+  const changed = vi.fn();
+  web.subscribe(changed);
+  await vi.advanceTimersByTimeAsync(ACCOUNT_CANVAS_SYNC_INTERVAL_MS);
+  expect(changed).toHaveBeenCalledWith(expect.objectContaining({ nodes: [expect.objectContaining({ x: 420, payload: { content: 'browser edit' } })] }));
+  web.dispose(); mac.dispose();
+  const reopened = new NativeAccountWorkspacePersistence('shared-board');
+  expect((await reopened.read()).nodes[0]).toMatchObject({ x: 420, payload: { content: 'browser edit' } });
+  reopened.dispose();
+});
+
 describe.each(['web', 'native'] as const)('%s account canvas synchronization', kind => {
   function setup() {
     const read = vi.fn<() => Promise<WorkspaceDoc>>();

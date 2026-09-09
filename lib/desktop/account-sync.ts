@@ -21,7 +21,13 @@ export type NativeAccountWorkspace = {
 };
 
 type Envelope<T> = { status: number; body: T & { error?: string } };
-type WorkspaceEnvelope = { workspace: NativeAccountWorkspace & { document: WorkspaceDoc } };
+/** Native document.revision is the local Runtime sequence. The hosted CAS
+ * revision is retained separately and never used as a local mutation version. */
+type WorkspaceEnvelope = { workspace: NativeAccountWorkspace & {
+  document: WorkspaceDoc;
+  remoteRevision?: number;
+  runtimeSpaceId?: string;
+} };
 
 async function invoke<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
   const tauri = await import('@tauri-apps/api/core');
@@ -33,6 +39,33 @@ function unwrap<T>(envelope: Envelope<T>, expected = 200): T {
     throw new Error(envelope.body.error || `account_sync_${envelope.status}`);
   }
   return envelope.body;
+}
+
+const equal = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+const record = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+/** An in-flight CLI edit can advance the local Runtime independently of this
+ * view. Merge independent fields, but never resolve competing content by time. */
+function assertMergeable(base: WorkspaceDoc, local: WorkspaceDoc, remote: WorkspaceDoc) {
+  const inspect = (base: unknown, local: unknown, remote: unknown, path: string): void => {
+    if (equal(local, base) || equal(remote, base) || equal(local, remote) || path.endsWith('/updatedAt')) return;
+    if (record(base) && record(local) && record(remote)) {
+      for (const key of new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(remote)])) {
+        inspect(base[key], local[key], remote[key], `${path}/${key}`);
+      }
+      return;
+    }
+    throw new Error(`Account synchronization conflict at ${path}; your edits are preserved. Review both versions before saving.`);
+  };
+  for (const kind of ['nodes', 'links'] as const) {
+    const original = new Map((base[kind] ?? []).map((item) => [item.id, item]));
+    const changed = new Map((local[kind] ?? []).map((item) => [item.id, item]));
+    const current = new Map((remote[kind] ?? []).map((item) => [item.id, item]));
+    for (const id of new Set([...original.keys(), ...changed.keys(), ...current.keys()])) {
+      inspect(original.get(id), changed.get(id), current.get(id), `${kind}/${id}`);
+    }
+  }
 }
 
 export function accountSyncStatus() {
@@ -73,7 +106,11 @@ export class NativeAccountWorkspacePersistence implements WorkspacePersistence {
     const envelope = await invoke<Envelope<WorkspaceEnvelope>>('account_workspace_read', {
       workspaceId: this.workspaceId
     });
-    return normalizeWorkspace(unwrap(envelope).workspace.document);
+    const workspace = unwrap(envelope).workspace;
+    if (workspace.runtimeSpaceId && workspace.runtimeSpaceId !== this.workspaceId) {
+      throw new Error('account_projection_space_mismatch');
+    }
+    return normalizeWorkspace(workspace.document);
   }
 
   async read() {
@@ -107,6 +144,7 @@ export class NativeAccountWorkspacePersistence implements WorkspacePersistence {
       const first = await this.save(document, document.revision);
       let saved = first.document;
       if (first.conflict) {
+        assertMergeable(base, document, first.document);
         const rebased = rebaseWorkspaceDoc(document, first.document, base);
         const retry = await this.save(rebased, first.document.revision);
         if (retry.conflict) throw new Error('account_workspace_conflict_retry_required');

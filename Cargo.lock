@@ -2426,6 +2426,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "hii-drive"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dirs 5.0.1",
+ "futures",
+ "hex",
+ "hii-core",
+ "rand 0.8.7",
+ "ring",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 1.0.69",
+ "time",
+ "tokio",
+ "uuid 1.24.0",
+ "walkdir",
+]
+
+[[package]]
 name = "hii-fabric-protocol"
 version = "0.1.0"
 dependencies = [

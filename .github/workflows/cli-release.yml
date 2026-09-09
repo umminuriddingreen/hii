@@ -24,7 +24,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: cli-release-${{ github.ref }}
+  group: cli-release-publication
   cancel-in-progress: false
 
 jobs:
@@ -46,6 +46,8 @@ jobs:
             runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Install Rust toolchain
         run: |
@@ -92,6 +94,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - uses: actions/download-artifact@v4
         with:
@@ -108,10 +112,27 @@ jobs:
           rm -f *.sha256
           ls -la
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install publisher tooling
+        run: npm ci --ignore-scripts
+
+      - name: Publish verified artifacts to HII
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: node scripts/hii-cli-release-publish.mjs artifacts "$RELEASE_TAG"
+
       - name: Publish
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          # Desktop Tauri checks GitHub's latest release for latest.json.
+          # Publishing a CLI tag must not replace that desktop update channel.
+          make_latest: false
           files: artifacts/*
           fail_on_unmatched_files: true
           body: |

@@ -23,6 +23,17 @@ const repoRoot = path.resolve(import.meta.dirname, '..', '..');
 const read = (...segments: string[]) => readFile(path.join(repoRoot, ...segments), 'utf8');
 
 describe('packaged CLI closure', () => {
+  it('runs package proof against the embedded CLI and isolated durable Runtime', async () => {
+    const smoke = await read('scripts', 'hii-packaged-app-smoke.mjs');
+    expect(smoke).toContain('Contents/Resources/resources/hii');
+    expect(smoke).toContain('HII_RUNTIME_DIR: runtimeDir');
+    expect(smoke).toContain('restored.nodes.some(node => node.id === first.node.id)');
+    expect(smoke).toContain('await rename(snapshotPath');
+    expect(smoke).toContain('Packaged CLI differs from the current release build');
+    expect(smoke).toContain("'--verify', '--deep', '--strict'");
+    expect(smoke).toContain('native WebView rendering');
+    expect(smoke).not.toContain('server.mjs');
+  });
   it('bundles the CLI as an app resource', async () => {
     const config = JSON.parse(await read('src-tauri', 'tauri.conf.json'));
     expect(config.bundle.resources).toContain('resources/hii');

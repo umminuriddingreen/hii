@@ -8,6 +8,7 @@ import path from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import url from "node:url";
 import { runSkillCommand } from "../aii/skills/registry.mjs";
+import { observeInstances } from "./lib/instance-observation.mjs";
 
 // The repository this CLI belongs to. Derived from this file's own location so
 // a checkout anywhere works; HII_ROOT overrides it. Hardcoding ~/hii made every
@@ -643,16 +644,6 @@ function runtimePointers() {
   ];
 }
 
-function processIsLive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function countBy(items, key) {
   return items.reduce((counts, item) => {
     const value = String(item?.[key] || "unknown");
@@ -683,10 +674,9 @@ function activeStatePayload(context) {
   );
   const daemon = readJsonObject(DAEMON_STATUS);
   const instanceDocument = readJsonObject(DAEMON_INSTANCES);
-  const instances = Array.isArray(instanceDocument?.instances) ? instanceDocument.instances : [];
-  const activeInstances = instances
-    .filter((instance) => ["queued", "running", "working", "attention"].includes(String(instance?.status).toLowerCase()))
-    .map((instance) => ({ ...instance, live: instance.pid == null ? null : processIsLive(instance.pid) }));
+  const reportedInstances = observeInstances(instanceDocument, { now: Date.parse(observedAt) });
+  const observations = countBy(reportedInstances, "observation");
+  const activeInstances = reportedInstances.filter((instance) => instance.live === true);
   const ownedInstances = activeInstances.filter((instance) => instance.owned === true);
   const observedProcesses = activeInstances.filter((instance) => instance.type === "process" && instance.owned !== true);
   const partialCapabilities = context.capabilities.filter((capability) => capability.status === "partial");
@@ -708,16 +698,16 @@ function activeStatePayload(context) {
       basis: `${tasks.byLane.doing || 0} doing, ${tasks.byLane.blocked || 0} blocked, ${tasks.open} open.`, counts: tasks.byLane
     },
     {
-      id: "agents", state: activeJobs.length || ownedInstances.some((instance) => instance.type === "codex-run") ? "active" : "idle", visibility: "observed",
+      id: "agents", state: ownedInstances.some((instance) => instance.type === "codex-run") ? "active" : activeJobs.length ? "ready" : "idle", visibility: activeJobs.length ? "partial" : "observed",
       source: LOCAL_CAPABILITY_JOBS, updatedAt: context.localState.capabilityJobs.updatedAt || null,
-      basis: `${activeJobs.length} bounded job(s); ${ownedInstances.filter((instance) => instance.type === "codex-run").length} managed agent run(s).`,
+      basis: `${activeJobs.length} reported bounded job(s), not process-verified; ${ownedInstances.filter((instance) => instance.type === "codex-run").length} verified live managed agent run(s).`,
       counts: { boundedJobs: activeJobs.length, managedRuns: ownedInstances.filter((instance) => instance.type === "codex-run").length }
     },
     {
-      id: "systems", state: activeInstances.length ? "active" : daemon ? "idle" : "offline", visibility: daemon ? "observed" : "unavailable",
+      id: "systems", state: activeInstances.length ? "active" : reportedInstances.length ? "unknown" : daemon ? "idle" : "offline", visibility: observations.stale || observations.unknown ? "partial" : daemon ? "observed" : "unavailable",
       source: DAEMON_INSTANCES, updatedAt: instanceDocument?.updatedAt || daemon?.updatedAt || null,
-      basis: daemon ? `${activeInstances.length} live or reported instance(s), including ${observedProcesses.length} observed process(es).` : "The HII daemon has not published system state.",
-      counts: { active: activeInstances.length, owned: ownedInstances.length, observed: observedProcesses.length, byType: countBy(activeInstances, "type") }
+      basis: instanceDocument ? `${activeInstances.length} verified live instance(s); ${observations.dead || 0} dead, ${observations.stale || 0} stale, ${observations.unknown || 0} unverified report(s).` : "The HII daemon has not published system state.",
+      counts: { active: activeInstances.length, owned: ownedInstances.length, observed: observedProcesses.length, reported: reportedInstances.length, dead: observations.dead || 0, stale: observations.stale || 0, unknown: observations.unknown || 0, byType: countBy(activeInstances, "type") }
     },
     {
       id: "context", state: context.localState.personalContext.knowledge.exists ? "ready" : "unknown", visibility: "observed",

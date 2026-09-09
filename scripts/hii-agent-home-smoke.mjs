@@ -6,6 +6,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+execFileSync(process.execPath, ['--test', path.join(root, 'scripts', 'hii-instance-observation.test.mjs')], {
+  cwd: root, encoding: 'utf8', stdio: 'pipe'
+});
 
 function run(...args) {
   return execFileSync(process.execPath, [path.join(root, 'scripts', 'hii-cli.mjs'), ...args], {
@@ -37,6 +40,10 @@ assert.ok(home.activeState.domains.some((domain) => domain.id === 'systems'));
 assert.ok(home.activeState.domains.every((domain) => domain.source && domain.visibility && domain.state));
 assert.equal(home.activeState.coverage.registeredDomains, home.activeState.domains.length);
 assert.equal(home.activeState.activeInstanceProjection.returned, home.activeState.activeInstances.length);
+assert.ok(home.activeState.activeInstances.every((instance) => instance.live === true));
+const systems = home.activeState.domains.find((domain) => domain.id === 'systems');
+assert.equal(systems.counts.active, home.activeState.activeInstanceProjection.total);
+assert.equal(systems.counts.reported, systems.counts.active + systems.counts.dead + systems.counts.stale + systems.counts.unknown);
 assert.ok(home.activeState.activeInstanceProjection.total >= home.activeState.activeInstanceProjection.returned);
 assert.ok(home.activeState.coverage.exclusions.includes('raw model internals or private chain-of-thought'));
 assert.ok(homeRaw.length < fullRaw.length / 2, `home=${homeRaw.length} full=${fullRaw.length}`);

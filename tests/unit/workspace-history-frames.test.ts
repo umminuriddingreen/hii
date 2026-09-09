@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { assignNodesToFrame, moveNodeAndFrameContents, removeFrame } from '../../lib/workspace/frames';
-import { emptyWorkspaceHistory, recordWorkspaceChange, redoWorkspace, undoWorkspace } from '../../lib/workspace/history';
+import { reverseWorkspaceChange } from '../../lib/workspace/reverse-change';
 import { emptyWorkspace, normalizeWorkspace, type WorkspaceNode } from '../../lib/workspace/types';
 
 const node = (id: string, type: WorkspaceNode['type'], x: number, y: number, w = 100, h = 100): WorkspaceNode => ({
@@ -11,14 +11,13 @@ const node = (id: string, type: WorkspaceNode['type'], x: number, y: number, w =
 describe('workspace undo and frames', () => {
   it('restores a deleted node and redoes deletion without rolling back the persisted revision', () => {
     const original = { ...emptyWorkspace(), revision: 7, nodes: [node('note-1', 'note', 20, 20)] };
-    const history = recordWorkspaceChange(emptyWorkspaceHistory(), original);
     const deleted = { ...original, revision: 8, nodes: [] };
-    const undone = undoWorkspace(history, deleted);
-    expect(undone?.doc.nodes.map((item) => item.id)).toEqual(['note-1']);
-    expect(undone?.doc.revision).toBe(8);
-    const redone = redoWorkspace(undone!.history, undone!.doc);
-    expect(redone?.doc.nodes).toEqual([]);
-    expect(redone?.doc.revision).toBe(8);
+    const undone = reverseWorkspaceChange(original, deleted, deleted);
+    expect(undone.nodes.map((item) => item.id)).toEqual(['note-1']);
+    expect(undone.revision).toBe(8);
+    const redone = reverseWorkspaceChange(deleted, undone, undone);
+    expect(redone.nodes).toEqual([]);
+    expect(redone.revision).toBe(8);
   });
 
   it('assigns contained objects to a frame and moves them as one unit', () => {

@@ -23,6 +23,7 @@ use std::{
 use tauri::{Emitter, Manager};
 
 mod account_sync;
+mod local_workspaces;
 mod browser;
 mod chat;
 mod terminal;
@@ -846,6 +847,8 @@ pub fn run() {
             account_sync::account_sync_status,
             account_sync::account_sync_link,
             account_sync::account_workspace_list,
+            local_workspaces::local_workspace_list,
+            local_workspaces::local_workspace_select,
             account_sync::account_workspace_read,
             account_sync::account_workspace_write,
             account_sync::account_workspace_selection_get,

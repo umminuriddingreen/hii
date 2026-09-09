@@ -278,6 +278,16 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
         return secure_no_store(api_error(405, "method_not_allowed")?);
     }
 
+    if path == "/install" {
+        let mut response = if method == Method::Head {
+            Response::empty()?
+        } else {
+            Response::ok(include_str!("../../../scripts/install.sh"))?
+        };
+        response.headers_mut().set("Content-Type", "text/plain; charset=utf-8")?;
+        return secure_no_store(response);
+    }
+
     if let Some(target) = path.strip_prefix("/download/").filter(|target| {
         matches!(
             *target,
@@ -884,15 +894,7 @@ async fn download_desktop(request: &Request, env: &Env, platform: &str) -> Resul
 }
 
 async fn download_cli(request: &Request, env: &Env, asset: &str) -> Result<Response> {
-    const ASSETS: &[&str] = &[
-        "hii-macos-arm64.tar.gz",
-        "hii-macos-arm64.tar.gz.sha256",
-        "hii-linux-x64.tar.gz",
-        "hii-linux-x64.tar.gz.sha256",
-        "hii-windows-x64.zip",
-        "hii-windows-x64.zip.sha256",
-    ];
-    if !ASSETS.contains(&asset) {
+    if !valid_cli_asset(asset) {
         return api_error(404, "release_not_found");
     }
     let bucket = env.bucket("DOWNLOADS")?;
@@ -917,6 +919,23 @@ async fn download_cli(request: &Request, env: &Env, asset: &str) -> Result<Respo
         return api_error(404, "release_not_found");
     };
     downloadable(request, object, asset, None)
+}
+
+fn valid_cli_asset(asset: &str) -> bool {
+    const LEGACY_ASSETS: &[&str] = &[
+        "hii-macos-arm64.tar.gz",
+        "hii-macos-arm64.tar.gz.sha256",
+        "hii-linux-x64.tar.gz",
+        "hii-linux-x64.tar.gz.sha256",
+        "hii-windows-x64.zip",
+        "hii-windows-x64.zip.sha256",
+    ];
+    const TARGETS: &[&str] = &[
+        "aarch64-apple-darwin", "x86_64-apple-darwin",
+        "aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu",
+    ];
+    asset == "SHA256SUMS" || LEGACY_ASSETS.contains(&asset)
+        || TARGETS.iter().any(|target| asset == format!("hii-{target}.tar.gz"))
 }
 
 async fn download_ui(request: &Request, env: &Env, asset: &str) -> Result<Response> {
@@ -1003,7 +1022,17 @@ fn valid_cli_tag(tag: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{SessionResponse, normalize_handle, valid_cli_tag, valid_ui_asset};
+    use super::{SessionResponse, normalize_handle, valid_cli_asset, valid_cli_tag, valid_ui_asset};
+
+    #[test]
+    fn cli_distribution_accepts_installer_contract_and_legacy_assets_only() {
+        for asset in ["SHA256SUMS", "hii-aarch64-apple-darwin.tar.gz", "hii-x86_64-apple-darwin.tar.gz", "hii-aarch64-unknown-linux-gnu.tar.gz", "hii-x86_64-unknown-linux-gnu.tar.gz", "hii-macos-arm64.tar.gz", "hii-macos-arm64.tar.gz.sha256", "hii-windows-x64.zip"] {
+            assert!(valid_cli_asset(asset), "{asset}");
+        }
+        for asset in ["../SHA256SUMS", "latest.json", "hii-unknown.tar.gz", "hii-aarch64-apple-darwin.tar.gz/extra"] {
+            assert!(!valid_cli_asset(asset), "{asset}");
+        }
+    }
 
     #[test]
     fn authenticated_sessions_expose_an_opaque_canvas_scope() {

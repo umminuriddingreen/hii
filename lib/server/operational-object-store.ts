@@ -12,7 +12,7 @@ import {
   type ProvenanceClass,
   type RelationType
 } from '../operational-graph/types.ts';
-import type { WorkspaceDoc, WorkspaceNode } from '../workspace/types.ts';
+import { workspaceNodeTransform3D, type WorkspaceDoc, type WorkspaceNode } from '../workspace/types.ts';
 
 const databases = new Map<string, DatabaseSync>();
 
@@ -181,8 +181,31 @@ function semanticProperties(node: WorkspaceNode) {
   };
 }
 
+/**
+ * Where an object sits, in the only domain allowed to change when it moves.
+ *
+ * `projectionVersion` is bumped by presentation alone, so a drag - in 2D or in
+ * 3D - must never touch `semanticVersion`. That split is what keeps a move from
+ * invalidating the semantic context an approved run was reviewed against.
+ *
+ * `z` here is paint order, not depth. Depth is `transform.position.z`, and the
+ * two are unrelated: reading paint order as depth would scatter every card
+ * along the view axis by how recently it was touched.
+ */
 function projectionState(node: WorkspaceNode) {
-  return { x: node.x, y: node.y, w: node.w, h: node.h, z: node.z };
+  const transform = workspaceNodeTransform3D(node);
+  return {
+    x: node.x,
+    y: node.y,
+    w: node.w,
+    h: node.h,
+    z: node.z,
+    rotation: Number.isFinite(node.rotation) ? node.rotation : 0,
+    position: transform.position,
+    quaternion: transform.rotation,
+    scale: transform.scale,
+    size: transform.size
+  };
 }
 
 /**

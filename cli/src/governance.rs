@@ -123,9 +123,9 @@ impl AclConfig {
 /// is not `Exec` — `verify` runs an arbitrary command, so "does not mutate" is
 /// a claim about intent there, not an enforceable boundary.
 fn is_reader_tool(tool_name: &str) -> bool {
-    crate::acp::tools()
-        .iter()
-        .any(|spec| spec.name == tool_name && !spec.mutates && spec.reach != crate::acp::Reach::Exec)
+    crate::acp::tools().iter().any(|spec| {
+        spec.name == tool_name && !spec.mutates && spec.reach != crate::acp::Reach::Exec
+    })
 }
 
 /// A single violation type that gets returned from ACL checks.

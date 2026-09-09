@@ -5,6 +5,8 @@ import { DesktopHiiAccess } from '@/components/desktop/DesktopHiiAccess';
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 const api = vi.hoisted(() => ({ status: vi.fn(), list: vi.fn(), selection: vi.fn(), save: vi.fn() }));
+const local = vi.hoisted(() => ({ list: vi.fn(), select: vi.fn() }));
+vi.mock('@/lib/desktop/local-workspaces', () => ({ listLocalWorkspaces: local.list, selectLocalWorkspace: local.select }));
 vi.mock('@phosphor-icons/react', () => ({ ChatCircle: () => null, SquaresFour: () => null, UserCircle: () => null, SidebarSimple: () => null, X: () => null }));
 vi.mock('@/lib/desktop/account-sync', () => ({
   accountSyncStatus: api.status,
@@ -23,6 +25,8 @@ describe('desktop account access', () => {
   let root: Root;
   beforeEach(() => {
     vi.clearAllMocks();
+    local.list.mockResolvedValue({ selectedWorkspaceId: 'launch-proof', workspaces: [{ id: 'default', objects: 181, unreadable: false }, { id: 'launch-proof', objects: 33, unreadable: false }] });
+    local.select.mockResolvedValue(undefined);
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) });
     api.status.mockResolvedValue({ linked: true });
@@ -43,11 +47,27 @@ describe('desktop account access', () => {
     expect(container.querySelector('[aria-label="HII account synchronization"]')?.textContent).toContain('Ummi');
     expect(api.save).not.toHaveBeenCalled();
   });
+  it('reveals existing device boards and opens one without uploading it', async () => {
+    await render();
+    await act(async () => container.querySelector<HTMLButtonElement>('button[title="Workspaces"]')!.click());
+    expect(container.textContent).toContain('181 objects');
+    const board = [...container.querySelectorAll('button')].find(button => button.textContent?.startsWith('default'))!;
+    await act(async () => board.click());
+    expect(local.select).toHaveBeenCalledWith('default');
+    expect(api.save).toHaveBeenCalledWith(null);
+    expect(container.textContent).toContain('No content was uploaded');
+  });
   it('keeps the local canvas available when not linked', async () => {
     api.status.mockResolvedValue({ linked: false });
     await render();
     expect(container.querySelector('[data-testid="canvas"]')?.textContent).toBe('local');
     expect(api.list).not.toHaveBeenCalled();
+  });
+  it('does not hide existing local work on first account-linked launch', async () => {
+    api.selection.mockResolvedValue({ configured: false, workspaceId: null });
+    await render();
+    expect(container.querySelector('[data-testid="canvas"]')?.textContent).toBe('local');
+    expect(api.save).toHaveBeenCalledWith(null);
   });
   it('does not expose an empty editable canvas when account loading fails', async () => {
     api.list.mockRejectedValue(new Error('Connection unavailable'));

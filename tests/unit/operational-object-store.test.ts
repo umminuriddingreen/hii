@@ -58,8 +58,56 @@ describe('universal operational object store', () => {
         deletedAt: null
       })
     ]);
-    expect(snapshot.projections).toContainEqual(expect.objectContaining({ objectId: 'workspace:default:object:idea-1', projection: 'workspace-spatial', state: { x: 10, y: 20, w: 240, h: 160, z: 1 } }));
+    expect(snapshot.projections).toContainEqual(expect.objectContaining({
+      objectId: 'workspace:default:object:idea-1',
+      projection: 'workspace-spatial',
+      state: {
+        x: 10,
+        y: 20,
+        w: 240,
+        h: 160,
+        // Paint order, not depth. Depth is `position.z`, and it is 0 here.
+        z: 1,
+        rotation: 0,
+        position: { x: 10, y: 20, z: 0 },
+        quaternion: { x: 0, y: 0, z: 0, w: 1 },
+        scale: { x: 1, y: 1, z: 1 },
+        size: { x: 240, y: 160, z: 0 }
+      }
+    }));
     expect(snapshot.operations).toEqual([expect.objectContaining({ type: 'PROJECT_WORKSPACE_REVISION', lamport: 1, payload: { revision: 1, objectCount: 2, relationCount: 1 } })]);
+  });
+
+  it('treats a move in depth as presentation, not meaning', async () => {
+    const { projectWorkspaceIntoOperationalGraph, readOperationalSpace } = await import('../../lib/server/operational-object-store');
+    projectWorkspaceIntoOperationalGraph('default', workspace());
+    const before = readOperationalSpace('default');
+    const objectId = 'workspace:default:object:idea-1';
+    const semanticBefore = before.objects.find((object) => object.id === objectId)?.semanticVersion;
+    const projectionBefore = before.projections.find((entry) => entry.objectId === objectId)?.projectionVersion;
+
+    const moved = workspace(2);
+    moved.updatedAt = '2026-08-07T11:00:00.000Z';
+    moved.nodes[0] = {
+      ...moved.nodes[0],
+      transform: {
+        position: { x: 10, y: 20, z: -180 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        scale: { x: 1, y: 1, z: 1 },
+        size: { x: 240, y: 160, z: 0 }
+      }
+    };
+    projectWorkspaceIntoOperationalGraph('default', moved);
+
+    const after = readOperationalSpace('default');
+    const projection = after.projections.find((entry) => entry.objectId === objectId);
+
+    expect(projection?.state).toMatchObject({ position: { x: 10, y: 20, z: -180 } });
+    expect(projection?.projectionVersion).toBe((projectionBefore ?? 0) + 1);
+    // The whole point of the three-domain split: pushing an object back in
+    // space must not invalidate the semantic context an approved run was
+    // reviewed against.
+    expect(after.objects.find((object) => object.id === objectId)?.semanticVersion).toBe(semanticBefore);
   });
 
   it('is replay-safe and tombstones removed legacy objects and relations', async () => {

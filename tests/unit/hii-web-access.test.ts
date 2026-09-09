@@ -50,7 +50,7 @@ describe('HII web access gate', () => {
     expect(source).toContain("'/api/auth/login/start'");
     expect(source).toContain('navigator.credentials.create');
     expect(source).toContain('navigator.credentials.get');
-    expect(source).toContain('if (ready && session.authenticated && !productSite)');
+    expect(source).toContain('if (ready && session.authenticated && !browserOnly && !productSite)');
     expect(source).not.toMatch(/supabase/i);
     expect(source).not.toContain('type="password"');
   });

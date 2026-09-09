@@ -203,7 +203,7 @@ pub struct ConversationStore {
 impl ConversationStore {
     pub fn create(runtime: &Path) -> Result<Self, String> {
         let now = crate::clock::unix_ms();
-        let id = format!("{now:x}-{:x}", std::process::id());
+        let id = new_store_id(now);
         let dir = runtime.join("conversations").join("cli");
         fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
         Ok(Self {
@@ -232,7 +232,7 @@ impl ConversationStore {
 impl RunStore {
     pub fn create(runtime: &Path) -> Result<Self, String> {
         let now = crate::clock::unix_ms();
-        let id = format!("{now:x}-{:x}", std::process::id());
+        let id = new_store_id(now);
         let dir = runtime.join("runs").join("cli").join(&id);
         fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
         // Bind the ambient run identity at the moment it exists, so model-call
@@ -285,20 +285,29 @@ fn write_receipt(
     receipt: &Receipt,
 ) -> Result<PathBuf, String> {
     let receipt_path = dir.join("receipt.json");
-    let content = serde_json::to_vec_pretty(receipt).map_err(|error| error.to_string())?;
-    fs::write(&receipt_path, content).map_err(|error| error.to_string())?;
+    crate::store::write_json_private_atomic(&receipt_path, receipt)?;
     // The global pointer stays: cli/scripts/local-model-eval.sh and
     // scripts/hii-activation-smoke.mjs both read it.
     let latest = runtime.join("runs").join("cli").join("latest");
-    fs::write(&latest, format!("{id}\n")).map_err(|error| error.to_string())?;
+    crate::store::write_private_atomic(&latest, format!("{id}\n").as_bytes())?;
     // The per-workspace pointer is what `hii proof` resolves against, so a run
     // in one workspace can no longer answer for another.
     if !receipt.workspace.is_empty() {
         let scoped = workspace_pointer_dir(runtime, Path::new(&receipt.workspace));
         fs::create_dir_all(&scoped).map_err(|error| error.to_string())?;
-        fs::write(scoped.join("latest"), format!("{id}\n")).map_err(|error| error.to_string())?;
+        crate::store::write_private_atomic(&scoped.join("latest"), format!("{id}\n").as_bytes())?;
     }
     Ok(receipt_path)
+}
+
+// Retain the sortable timestamp prefix and add independent identity for runs
+// started in the same process during one clock tick.
+fn new_store_id(now: u128) -> String {
+    format!(
+        "{now:x}-{:x}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    )
 }
 
 /// Where a workspace's `latest` pointer lives. The directory name is a hash so
@@ -378,6 +387,9 @@ impl RunGuard {
         self.draft.exit_code = outcome.exit_code();
         self.draft.finished_at_unix_ms = crate::clock::unix_ms();
         self.draft.summary = redact_text(message);
+        self.draft.completion = Some(crate::completion::CompletionAssessment::terminated(
+            &self.draft.summary,
+        ));
     }
 
     /// Persist a terminal checkpoint before fallible cleanup and presentation.
@@ -396,8 +408,19 @@ impl RunGuard {
     }
 
     pub fn finalize(mut self, receipt: &Receipt) -> Result<PathBuf, String> {
+        self.draft = receipt.clone();
+        let path = match write_receipt(&self.dir, &self.runtime, &self.id, receipt) {
+            Ok(path) => path,
+            Err(error) => {
+                self.record_error(
+                    Outcome::InfraError,
+                    &format!("Receipt persistence failed: {error}"),
+                );
+                return Err(error);
+            }
+        };
         self.finalized = true;
-        write_receipt(&self.dir, &self.runtime, &self.id, receipt)
+        Ok(path)
     }
 }
 
@@ -417,22 +440,28 @@ impl Drop for RunGuard {
     }
 }
 
-/// Append a verification record unless the same command already passed.
+/// Keep the current verification result for each command in this mutation epoch.
 ///
 /// Records are cleared whenever a new mutation epoch begins, so equality within
 /// the current vector is already epoch-scoped. Without this, declaring
 /// `--verify "cargo test"` for a check the model also runs itself recorded the
-/// result twice and executed the suite twice.
+/// result twice and executed the suite twice. A retry replaces an earlier
+/// result, including a success followed by a failure; the event journal retains
+/// the full attempt history. This keeps every completion consumer consistent.
 pub fn record_verification(
     records: &mut Vec<VerificationRecord>,
     record: VerificationRecord,
 ) -> bool {
-    if records
-        .iter()
-        .any(|existing| existing.ok && existing.command == record.command)
+    if record.ok
+        && records
+            .iter()
+            .rev()
+            .find(|existing| existing.command == record.command)
+            .is_some_and(|existing| existing.ok)
     {
         return false;
     }
+    records.retain(|existing| existing.command != record.command);
     records.push(record);
     true
 }
@@ -802,7 +831,86 @@ mod tests {
         // A failure is still recorded, since a retry after a fix is real news.
         let mut failing = vec![check(false)];
         assert!(record_verification(&mut failing, check(false)));
-        assert_eq!(failing.len(), 2);
+        assert_eq!(failing.len(), 1);
+    }
+
+    #[test]
+    fn store_ids_do_not_collide_within_one_clock_tick() {
+        let now = crate::clock::unix_ms();
+        let ids = (0..1000)
+            .map(|_| new_store_id(now))
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(ids.len(), 1000);
+        assert!(ids.iter().all(|id| id.starts_with(&format!("{now:x}-"))));
+    }
+
+    #[test]
+    fn finalize_failure_recovers_terminal_evidence_instead_of_leaving_a_draft() {
+        let runtime = TempDir::new("finalize-failure");
+        let workspace = TempDir::new("finalize-failure-workspace");
+        let run = RunStore::create(&runtime.0).unwrap();
+        let mut draft = sample(&run.id, &workspace.0);
+        draft.outcome = Outcome::Running.label().into();
+        let guard = RunGuard::start(&runtime.0, &run.dir, &run.id, draft).unwrap();
+        let latest = runtime.0.join("runs/cli/latest");
+        fs::remove_file(&latest).unwrap();
+        fs::create_dir(&latest).unwrap();
+        let mut completed = sample(&run.id, &workspace.0);
+        completed.steps = 7;
+        completed.artifacts = vec!["report.md".into()];
+        assert!(guard.finalize(&completed).is_err());
+        let recovered: Receipt =
+            serde_json::from_slice(&fs::read(run.dir.join("receipt.json")).unwrap()).unwrap();
+        assert_eq!(recovered.outcome, "infra-error");
+        assert_eq!(recovered.steps, 7);
+        assert_eq!(recovered.artifacts, vec!["report.md"]);
+        assert!(recovered.summary.contains("Receipt persistence failed"));
+        assert!(!recovered.completion.unwrap().satisfied);
+    }
+
+    #[test]
+    fn retry_results_replace_stale_evidence_without_hiding_a_regression() {
+        let mut records = Vec::new();
+        for ok in [false, true, false] {
+            assert!(record_verification(
+                &mut records,
+                VerificationRecord {
+                    command: "cargo test".into(),
+                    ok,
+                    output: format!("result {ok}"),
+                }
+            ));
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].ok, ok);
+        }
+    }
+
+    #[test]
+    fn concurrent_receipt_readers_never_observe_partial_json() {
+        let runtime = TempDir::new("atomic-reader");
+        let workspace = TempDir::new("atomic-reader-workspace");
+        let run = RunStore::create(&runtime.0).unwrap();
+        let receipt = sample(&run.id, &workspace.0);
+        run.finish(&runtime.0, &receipt).unwrap();
+        let barrier = std::sync::Barrier::new(2);
+        std::thread::scope(|scope| {
+            let reader = scope.spawn(|| {
+                barrier.wait();
+                for _ in 0..300 {
+                    let bytes = fs::read(run.dir.join("receipt.json")).unwrap();
+                    let observed: Receipt = serde_json::from_slice(&bytes)
+                        .expect("complete receipt during replacement");
+                    assert_eq!(observed.id, run.id);
+                }
+            });
+            barrier.wait();
+            let mut updated = receipt;
+            for index in 0..30 {
+                updated.summary = format!("{index}: {}", "evidence ".repeat(1000));
+                run.finish(&runtime.0, &updated).unwrap();
+            }
+            reader.join().unwrap();
+        });
     }
 
     #[test]

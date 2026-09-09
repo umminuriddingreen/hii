@@ -163,6 +163,7 @@ pub fn assess(input: CompletionInput<'_>) -> CompletionAssessment {
         let record = input
             .verification
             .iter()
+            .rev()
             .find(|entry| entry.command == *command);
         match record {
             Some(entry) if entry.ok => {}
@@ -712,6 +713,20 @@ mod tests {
         let assessment = assess(input(&dir, None, &declared, &verification, &[]));
         assert!(!assessment.satisfied);
         assert_eq!(assessment.failed_checks, vec!["cargo test"]);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn declared_check_uses_the_latest_attempt_after_recovery_or_regression() {
+        let dir = workspace();
+        let declared = vec!["cargo test".to_string()];
+        let recovered = vec![check("cargo test", false), check("cargo test", true)];
+        let assessment = assess(input(&dir, None, &declared, &recovered, &[]));
+        assert!(assessment.satisfied, "{assessment:?}");
+        let regressed = vec![check("cargo test", true), check("cargo test", false)];
+        let assessment = assess(input(&dir, None, &declared, &regressed, &[]));
+        assert!(!assessment.satisfied);
+        assert_eq!(assessment.failed_checks, declared);
         let _ = fs::remove_dir_all(dir);
     }
 

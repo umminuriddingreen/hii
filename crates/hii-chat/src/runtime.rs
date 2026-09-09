@@ -130,7 +130,9 @@ impl RuntimeManager {
             command.creation_flags(0x08000000);
         }
         drop(probe);
-        let mut child = command.spawn().context("Unable to start llama-server")?;
+        let child = command.spawn().context("Unable to start llama-server")?;
+        #[cfg(windows)]
+        let mut child = child;
         #[cfg(windows)]
         let job = match windows_job::Job::attach(&child) {
             Ok(job) => job,

@@ -18,7 +18,8 @@ export async function saveAccountWorkspaceSelection(workspaceId: string | null):
 
 export function resolveAccountWorkspaceSelection(
   selection: AccountWorkspaceSelection,
-  workspaces: { id: string; role: string }[]
+  workspaces: { id: string; role: string }[],
+  hasLocalContent = false
 ): string {
   if (selection.configured) {
     if (selection.workspaceId === null) return 'local';
@@ -27,5 +28,8 @@ export function resolveAccountWorkspaceSelection(
     }
     return selection.workspaceId;
   }
+  // Upgrading/linking must not hide an existing board behind an empty account.
+  // A configured preference is still authoritative, including account boards.
+  if (hasLocalContent) return 'local';
   return workspaces.find((workspace) => workspace.role === 'owner')?.id ?? workspaces[0]?.id ?? 'local';
 }

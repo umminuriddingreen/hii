@@ -29,6 +29,16 @@ const doc = (revision: number, nodes: WorkspaceNode[], overrides: Partial<Worksp
 const ids = (result: WorkspaceDoc) => result.nodes.map((n) => n.id).sort();
 
 describe('workspace save-conflict rebase', () => {
+  it('mirrors independent desktop geometry and browser content without data loss', () => {
+    const initial = node('shared', '2026-01-01T00:00:00.000Z', { payload: { content: 'original', label: 'keep' } });
+    const base = doc(1, [initial]);
+    const desktop = doc(1, [{ ...initial, x: 200, updatedAt: '2026-01-01T00:02:00.000Z' }]);
+    const browser = doc(2, [{ ...initial, payload: { content: 'edited on web', label: 'keep' }, updatedAt: '2026-01-01T00:01:00.000Z' }]);
+    const merged = rebaseWorkspaceDoc(desktop, browser, base);
+    expect(merged.nodes[0].x).toBe(200);
+    expect(merged.nodes[0].payload.content).toBe('edited on web');
+    expect(rebaseWorkspaceDoc(browser, desktop, base).nodes).toEqual(merged.nodes);
+  });
   it('does not let a completed save erase text typed while it was in flight', () => {
     const submitted = doc(4, [node('note', '2026-01-01T00:01:00.000Z', { payload: { content: 'h' } })]);
     const saved = doc(5, [node('note', '2026-01-01T00:01:00.000Z', { payload: { content: 'h' } })]);

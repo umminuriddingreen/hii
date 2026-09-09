@@ -25,8 +25,7 @@ import { fileURLToPath } from 'node:url';
 import {
   SERVABLE_FILENAME,
   downloadManifest,
-  fileFacts,
-  updaterFeed
+  fileFacts
 } from './hii-release-manifest.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');

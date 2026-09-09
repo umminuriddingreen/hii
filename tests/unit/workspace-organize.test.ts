@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyWorkspaceHistory, recordWorkspaceChange, undoWorkspace } from '../../lib/workspace/history';
+import { reverseWorkspaceChange } from '../../lib/workspace/reverse-change';
 import { organizeWorkspaceSelection } from '../../lib/workspace/organize';
 import { workspaceOutlineGroups } from '../../lib/workspace/outline';
 import type { WorkspaceDoc, WorkspaceNode } from '../../lib/workspace/types';
@@ -85,11 +85,10 @@ describe('explicit workspace selection organization', () => {
       sceneId: 'scene-reversible',
       now: '2026-07-30T12:00:00.000Z'
     });
-    const history = recordWorkspaceChange(emptyWorkspaceHistory(), before);
-    const undone = organized ? undoWorkspace(history, organized.doc) : null;
+    const undone = organized ? reverseWorkspaceChange(before, organized.doc, organized.doc) : null;
 
-    expect(undone?.doc.nodes).toEqual(before.nodes);
-    expect(undone?.doc.revision).toBe(before.revision);
+    expect(undone?.nodes.map(({ updatedAt, ...node }) => node)).toEqual(before.nodes.map(({ updatedAt, ...node }) => node));
+    expect(undone?.revision).toBe(before.revision);
   });
 
   it('keeps hundreds of objects navigable as one governed Scene without dropping lineage', () => {

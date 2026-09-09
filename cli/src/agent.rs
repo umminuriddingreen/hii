@@ -358,7 +358,7 @@ impl RepeatedToolFailureGuard {
         let signature = tool_failure_signature(tool, output)?;
         let count = self.counts.entry(signature.clone()).or_insert(0);
         *count += 1;
-        (*count >= 2).then(|| (signature, *count))
+        (*count >= 2).then_some((signature, *count))
     }
 }
 

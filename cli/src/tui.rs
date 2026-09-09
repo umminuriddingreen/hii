@@ -56,53 +56,61 @@ const MONO: Palette = Palette {
 static ACTIVE_THEME: AtomicU8 = AtomicU8::new(Theme::Heritage as u8);
 static ACTIVITY_ROWS: AtomicUsize = AtomicUsize::new(0);
 
+/// Grouped for better navigation and discoverability.
 const COMMANDS: &[(&str, &str)] = &[
+    // Navigation & Overview
     ("/help", "all controls"),
     ("/overview", "context state map"),
     ("/status", "session state"),
-    ("/attach", "add file or image"),
-    ("/attachments", "pending context"),
-    ("/detach", "remove pending context"),
+    // Work & Tasks
     ("/goal", "persistent objective"),
     ("/plan", "inspect before acting"),
     ("/side", "ask without derailing"),
-    ("/theme", "visual signature"),
-    ("/keymap", "keyboard profile"),
-    ("/usage", "tokens and speed"),
-    ("/reasoning", "model effort"),
-    ("/autonomy", "local action policy"),
-    ("/model", "choose local model"),
-    ("/files", "ranger-style explorer"),
-    ("/explore", "ranger-style explorer"),
-    ("/codex", "use Codex model for a task"),
-    ("/claude", "use Claude model for a task"),
-    ("/models", "list local models"),
-    ("/providers", "accounts and plans"),
-    ("/login", "connect an account"),
+    ("/attachments", "pending context"),
+    ("/attach", "add file or image"),
+    ("/detach", "remove pending context"),
     ("/proof", "latest receipt"),
     ("/diff", "workspace changes"),
     ("/review", "review current diff"),
-    ("/permissions", "authority boundary"),
-    ("/resume", "restore a session"),
-    ("/agents", "managed workers"),
-    ("/ps", "managed workers"),
-    ("/stop", "stop one worker"),
-    ("/skills", "learned workflows"),
-    ("/learn", "learning memory"),
-    ("/hooks", "lifecycle policy"),
-    ("/mcp", "governed tool servers"),
-    ("/background", "supervised local task"),
-    ("/jobs", "background work"),
-    ("/job", "inspect or cancel job"),
-    ("/compact", "shrink context"),
+    // Conversation Control
     ("/clear", "fresh conversation"),
     ("/new", "fresh conversation"),
     ("/rename", "name this session"),
     ("/copy", "copy response, code, or all"),
     ("/undo", "drop last exchange"),
     ("/fork", "snapshot session"),
-    ("/teach", "save as skill"),
+    ("/resume", "restore a session"),
+    // Models & AI
+    ("/reasoning", "model effort"),
+    ("/autonomy", "local action policy"),
+    ("/model", "choose local model"),
+    ("/models", "list local models"),
+    ("/codex", "use Codex model for a task"),
+    ("/claude", "use Claude model for a task"),
+    ("/providers", "accounts and plans"),
+    ("/login", "connect an account"),
+    // Tools & Files
+    ("/files", "ranger-style explorer"),
+    ("/explore", "ranger-style explorer"),
+    ("/mcp", "governed tool servers"),
+    ("/skills", "learned workflows"),
+    ("/learn", "learning memory"),
+    ("/hooks", "lifecycle policy"),
+    // Agents & Background Work
+    ("/agents", "managed workers"),
     ("/agent", "manage one worker"),
+    ("/ps", "managed workers"),
+    ("/stop", "stop one worker"),
+    ("/background", "supervised local task"),
+    ("/jobs", "background work"),
+    ("/job", "inspect or cancel job"),
+    // Permissions & Security
+    ("/permissions", "authority boundary"),
+    // System & Resources
+    ("/usage", "tokens and speed"),
+    ("/compact", "shrink context"),
+    ("/theme", "visual signature"),
+    ("/keymap", "keyboard profile"),
     #[cfg(feature = "preview")]
     ("/resources", "machine resources"),
     #[cfg(feature = "preview")]
@@ -115,6 +123,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/calendar", "calendar view"),
     #[cfg(feature = "preview")]
     ("/sync", "sync calendar"),
+    ("/teach", "save as skill"),
     ("/exit", "leave HII"),
 ];
 

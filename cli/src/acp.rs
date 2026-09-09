@@ -840,10 +840,15 @@ mod tests {
     /// The harness ignored the field; the transcript did not.
     #[test]
     fn a_read_cannot_smuggle_an_invented_file_body() {
-        let action = json!({ "type": "read", "path": "fizz.py", "content": "def fizz(n):\n    ..." });
-        let error = validate_action_params("read", &action).expect_err("content is not a read parameter");
+        let action =
+            json!({ "type": "read", "path": "fizz.py", "content": "def fizz(n):\n    ..." });
+        let error =
+            validate_action_params("read", &action).expect_err("content is not a read parameter");
         assert!(error.contains("content"), "{error}");
-        assert!(error.contains("path"), "should name what read does accept: {error}");
+        assert!(
+            error.contains("path"),
+            "should name what read does accept: {error}"
+        );
 
         let honest = json!({ "type": "read", "path": "fizz.py" });
         assert!(validate_action_params("read", &honest).is_ok());
@@ -855,7 +860,11 @@ mod tests {
             .expect_err("verify needs a command");
         assert!(error.contains("command"), "{error}");
         // Present-but-blank is missing, not satisfied.
-        assert!(validate_action_params("edit", &json!({ "type": "edit", "path": "  ", "old": "a", "new": "b" })).is_err());
+        assert!(validate_action_params(
+            "edit",
+            &json!({ "type": "edit", "path": "  ", "old": "a", "new": "b" })
+        )
+        .is_err());
     }
 
     /// Ten tools publish a `{ "query": string }` placeholder that does not
@@ -863,10 +872,20 @@ mod tests {
     /// placeholder would reject every real call to them.
     #[test]
     fn placeholder_schemas_never_reject_a_real_call() {
-        for name in ["board_write", "bridge_send", "og_next", "caps_check", "hii_context"] {
-            assert!(!has_declared_input_schema(name), "{name} gained a real schema; enforce it");
+        for name in [
+            "board_write",
+            "bridge_send",
+            "og_next",
+            "caps_check",
+            "hii_context",
+        ] {
             assert!(
-                validate_action_params(name, &json!({ "type": name, "task": "x", "anything": 1 })).is_ok(),
+                !has_declared_input_schema(name),
+                "{name} gained a real schema; enforce it"
+            );
+            assert!(
+                validate_action_params(name, &json!({ "type": name, "task": "x", "anything": 1 }))
+                    .is_ok(),
                 "{name} must not be gated by a placeholder"
             );
         }

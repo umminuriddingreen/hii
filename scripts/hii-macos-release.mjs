@@ -137,7 +137,7 @@ copyFileSync(updaterSignature, `${releaseUpdater}.sig`);
 
 const { bytes: dmgBytes, sha256: dmgSha256 } = fileFacts(releaseDmg);
 const signature = readFileSync(updaterSignature, 'utf8').trim();
-const macosUpdaterUrl = updaterUrl('macos');
+const macosUpdaterUrl = updaterUrl(version, path.basename(releaseUpdater));
 const publishedAt = new Date().toISOString();
 
 // The Tauri updater feed covers every platform in one document, so merge into
@@ -152,8 +152,7 @@ writeFileSync(
         version,
         publishedAt,
         platforms: {
-          'darwin-aarch64': { signature, url: macosUpdaterUrl },
-          'darwin-x86_64': { signature, url: macosUpdaterUrl }
+          [`darwin-${arch}`]: { signature, url: macosUpdaterUrl }
         }
       },
       existingFeed

@@ -57,24 +57,41 @@ This build ships HII's native commands only.
 /// `--help` used to print all 77 commands, which buried the four that carry the
 /// product. Extended commands still exist and still work; they are one flag away.
 pub fn help_footer() -> String {
-    let mut lines = vec!["More core commands:".to_string()];
+    let mut lines = vec![
+        "More core commands:".to_string(),
+        "  work      work task now chat".to_string(),
+        "  context   home".to_string(),
+        "  infrastructure model open slash".to_string(),
+        "  build     check ship".to_string(),
+        String::new(),
+        "Quick help:".to_string(),
+        "  hii --help            show all options and subcommands".to_string(),
+        "  hii help --all        complete command list with descriptions".to_string(),
+        "  hii <command> --help  get help for a specific command".to_string(),
+        String::new(),
+        "Navigation:".to_string(),
+        "  Type /help in the TUI for inline controls".to_string(),
+        "  Run hii agents guide for the runtime contract".to_string(),
+    ];
+
+    // Add grouped commands
     for group in route::Group::ORDER {
         let names: Vec<&str> = route::in_group(*group, Some(route::Visibility::Core))
             .filter(|entry| route::is_delegated(entry.name))
             .map(|entry| entry.name)
             .collect();
-        if names.is_empty() {
-            continue;
+        if !names.is_empty() {
+            lines.push(String::new());
+            lines.push(format!("  {}:", group.title().to_lowercase()));
+            for name in names {
+                lines.push(format!("    {}", name));
+            }
         }
-        lines.push(format!(
-            "  {:<9} {}",
-            group.title().to_lowercase(),
-            names.join(" ")
-        ));
     }
+
     lines.push(String::new());
-    lines.push("  Full command list: hii help --all".into());
-    lines.push("  Every command supports `hii <command> --help`.".into());
+    lines.push("Full command list: hii help --all".into());
+    lines.push("Every command supports `hii <command> --help`.".into());
     lines.join("\n")
 }
 

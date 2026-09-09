@@ -13,6 +13,7 @@ import {
   type NativeAccountWorkspace
 } from '@/lib/desktop/account-sync';
 import styles from './DesktopHiiAccess.module.css';
+import { listLocalWorkspaces, selectLocalWorkspace, type LocalWorkspaceInventory } from '@/lib/desktop/local-workspaces';
 
 type LinkedIdentity = { handle: string; deviceName: string };
 
@@ -52,6 +53,27 @@ export function DesktopHiiAccess() {
   const [busy, setBusy] = useState(false);
   const [canvasAvailable, setCanvasAvailable] = useState(false);
   const [unsaved, setUnsaved] = useState(false);
+  const [localBoards, setLocalBoards] = useState<LocalWorkspaceInventory | null>(null);
+  const [localEpoch, setLocalEpoch] = useState(0);
+
+  useEffect(() => {
+    void listLocalWorkspaces().then(setLocalBoards).catch((error) => setMessage(String(error)));
+  }, []);
+
+  const openLocalBoard = async (id: string) => {
+    if (busy || unsaved) return;
+    setBusy(true);
+    try {
+      await selectLocalWorkspace(id);
+      if (linked) await saveAccountWorkspaceSelection(null);
+      setLocalBoards(await listLocalWorkspaces());
+      setActive('local');
+      setLocalEpoch(value => value + 1);
+      setCanvasAvailable(true);
+      setMessage('Opened on this device. No content was uploaded.');
+    } catch (error) { setMessage(String(error)); }
+    finally { setBusy(false); }
+  };
 
   const refresh = useCallback(async (restore = false) => {
     const value = await listNativeAccountWorkspaces();
@@ -60,7 +82,10 @@ export function DesktopHiiAccess() {
     setLinked(true);
     if (restore) {
       const selection = await readAccountWorkspaceSelection();
-      const next = resolveAccountWorkspaceSelection(selection, value.workspaces);
+      const local = await listLocalWorkspaces();
+      setLocalBoards(local);
+      const hasLocalContent = local.workspaces.some(board => board.id === local.selectedWorkspaceId && (board.objects ?? 0) > 0);
+      const next = resolveAccountWorkspaceSelection(selection, value.workspaces, hasLocalContent);
       if (!selection.configured) await saveAccountWorkspaceSelection(next === 'local' ? null : next);
       setActive(next);
       setCanvasAvailable(true);
@@ -149,7 +174,7 @@ export function DesktopHiiAccess() {
     </nav>
     <div className={styles.surface} hidden={surface !== 'canvas'}>
     {ready && canvasAvailable ? <HiiRoot
-      key={active}
+      key={`${active}:${localEpoch}`}
       spaceId={active === 'local' ? '' : active}
       creatorId={identity ? `account:${identity.handle}` : 'human:local'}
       persistence={persistence}
@@ -170,11 +195,17 @@ export function DesktopHiiAccess() {
         <button type="button" disabled={busy || unsaved} data-active={active === 'local' || undefined} onClick={() => void selectWorkspace('local')}>
           <span>this device</span><small>local canvas</small>
         </button>
+        {localBoards?.workspaces.map(board => <button type="button" key={`local:${board.id}`} disabled={busy || unsaved || board.unreadable}
+          data-active={active === 'local' && localBoards.selectedWorkspaceId === board.id || undefined}
+          onClick={() => void openLocalBoard(board.id)}>
+          <span>{board.id}</span><small>{board.unreadable ? 'needs recovery · preserved' : `${board.objects ?? 0} objects · on this device`}</small>
+        </button>)}
         {workspaces.map((workspace) => <button type="button" disabled={busy || unsaved} key={workspace.id} data-active={active === workspace.id || undefined} onClick={() => void selectWorkspace(workspace.id)}>
-          <span>{workspace.name}</span><small>{workspace.role}</small>
+          <span>{workspace.name}</span><small>{workspace.role} · mirrored with web</small>
         </button>)}
       </nav>
-      <footer><span>Canvas</span><small>⌘ Space · ⌥ Space</small></footer>
+      <footer><span>Same account board in web and app</span><small>Device-only boards are preserved separately until you choose to connect them.</small></footer>
+      <p role="status">{message}</p>
     </aside> : null}
     {surface === 'canvas' && accountOpen ? <aside className={styles.panel} data-workspace-ui aria-label="HII account synchronization">
       <button type="button" title="Close account" aria-label="Close account" onClick={() => setAccountOpen(false)}><X size={18} /></button>

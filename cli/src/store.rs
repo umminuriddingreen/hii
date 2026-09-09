@@ -161,17 +161,10 @@ pub fn write_private_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
 /// Rename `temporary` over `path`, cleaning up if it cannot.
 ///
-/// Windows `rename` fails when the destination exists, so an unlinking step is
-/// required there. Only `vpn.rs` had it; every other atomic write in this CLI would
-/// have failed to update an existing file on the Windows machines HII enrolls.
+/// Keep the destination intact when replacement fails, including on Windows.
 fn replace(temporary: &Path, path: &Path) -> Result<(), String> {
-    #[cfg(windows)]
-    if path.exists() {
-        if let Err(error) = fs::remove_file(path) {
-            let _ = fs::remove_file(temporary);
-            return Err(format!("failed to replace {}: {error}", path.display()));
-        }
-    }
+    // Rename replaces an existing file on supported platforms. Removing the
+    // destination first creates a data-loss window if replacement then fails.
     fs::rename(temporary, path).map_err(|error| {
         let _ = fs::remove_file(temporary);
         format!("failed to replace {}: {error}", path.display())

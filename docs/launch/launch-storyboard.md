@@ -2,20 +2,20 @@
 
 ## Beat 1
 Time: 0–8s
-Screen: Select three real source objects in a clean HII workspace.
-Caption: You pick the context.
+Screen: Select three real source objects in the workspace canvas.
+Caption: Three objects selected for the launch proof.
 
 ## Beat 2
-Time: 8–21s
-Screen: Show the capability, step budget, workspace boundary, external boundary, and installed model before approval.
-Caption: You see the boundary first.
+Time: 8–16s
+Screen: HII Canvas compiles intent and context into a single agent loop.
+Caption: Intent received, context assembled, work begins.
 
 ## Beat 3
-Time: 21–39s
-Screen: Approve the bounded run and show the five-step lifecycle with the stop control visible.
-Caption: Bounded work. Visible state.
+Time: 16–24s
+Screen: Agent executes bounded work, generating a verified artifact.
+Caption: Artifact created, proof verified, receipt saved.
 
 ## Beat 4
-Time: 39–45s
-Screen: Open and edit the Markdown artifact beside its receipt, with raw logs closed.
-Caption: Edit the result. Inspect receipt.
+Time: 24–32s
+Screen: Final artifact displayed with provenance and QR code.
+Caption: Launch complete, proof verified, ready for review.

@@ -5,6 +5,7 @@
 Before planning or modifying HII, read:
 
 - `docs/HII_AII_MASTER_CONTEXT.md`
+- `docs/business/structure.md`
 - `docs/decisions/004-cli-first-hii-runtime.md`
 - `docs/decisions/005-one-surface-machine-fabric.md`
 
@@ -56,6 +57,10 @@ Selected object + text/voice intent -> bounded capability -> visible result -> p
 - Do not claim something is verified unless a command or visible output proves it.
 - If a command fails, report the failure and continue only when the next step is safe.
 - If shell/tooling is blocked, stop and report instead of fighting it.
+- For business, launch, offer, or client-workspace tasks, classify the work
+  before building: Studio sells one outcome now; Product repeats proven
+  workflows; Network waits for shared-object/account evidence; unsupported
+  architecture goes to parked backlog.
 
 ## Current Product Direction
 
@@ -64,8 +69,8 @@ Selected object + text/voice intent -> bounded capability -> visible result -> p
   selection, and direct manipulation are inputs to the same typed intent and
   object model.
 - The Rust CLI is the primary runtime, authority, verification surface, and
-  agent contract. CLI-first defines implementation ownership; it does not make
-  a terminal the human-facing product center.
+  agent contract. The friendly terminal and canvas are primary human interfaces
+  to the same objects; the terminal is not developer-only or a chat transcript.
 - Do not introduce or revive AII as a separate product, brand, app, repo,
   daemon family, or planning track. Existing `aii/` code is legacy/internal HII
   runtime code until it is migrated behind CLI-owned modules and commands.

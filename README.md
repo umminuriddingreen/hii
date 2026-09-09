@@ -24,6 +24,7 @@ human intent
 
 The product direction is defined by
 [the HII master context](docs/HII_AII_MASTER_CONTEXT.md),
+[the HII business structure](docs/business/structure.md),
 [the user-owned Network direction](docs/HII_USER_OWNED_NETWORK.md),
 [ADR 004: CLI-First HII Runtime](docs/decisions/004-cli-first-hii-runtime.md),
 and
@@ -313,7 +314,7 @@ protocol/              versioned runtime schema
 fabric/                cross-device foundations; not an end-to-end fabric yet
 lib/                   workspace, context, knowledge, and client adapters
 scripts/               local development, smoke, packaging, and release gates
-docs/                  product context, decisions, evidence, and historical plans
+docs/                  product context, decisions, evidence, business, and historical plans
 aii/                   temporary internal migration debt
 ```
 

@@ -142,6 +142,13 @@ pub enum ChatStreamEvent {
     Done(Result<ChatResult, String>),
 }
 
+#[derive(Clone, Copy, Debug)]
+struct ChatStreamFormat {
+    json_format: bool,
+    strict_json_schema: bool,
+    think: bool,
+}
+
 #[derive(Debug, Deserialize)]
 struct TagsResponse {
     #[serde(default)]
@@ -511,7 +518,17 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         cancel: &Cancel,
         sender: mpsc::Sender<ChatStreamEvent>,
     ) {
-        self.chat_with_stream_format(model, messages, json_format, true, think, cancel, sender);
+        self.chat_with_stream_format(
+            model,
+            messages,
+            ChatStreamFormat {
+                json_format,
+                strict_json_schema: true,
+                think,
+            },
+            cancel,
+            sender,
+        );
     }
 
     /// Retry a structured action request without a provider-side grammar.
@@ -525,17 +542,24 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         cancel: &Cancel,
         sender: mpsc::Sender<ChatStreamEvent>,
     ) {
-        self.chat_with_stream_format(model, messages, false, false, think, cancel, sender);
+        self.chat_with_stream_format(
+            model,
+            messages,
+            ChatStreamFormat {
+                json_format: false,
+                strict_json_schema: false,
+                think,
+            },
+            cancel,
+            sender,
+        );
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn chat_with_stream_format(
         &self,
         model: &str,
         messages: &[Message],
-        json_format: bool,
-        strict_json_schema: bool,
-        think: bool,
+        format: ChatStreamFormat,
         cancel: &Cancel,
         sender: mpsc::Sender<ChatStreamEvent>,
     ) {
@@ -548,15 +572,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             return;
         }
         if self.provider != ModelProvider::Ollama {
-            self.chat_openai_with_stream(
-                model,
-                messages,
-                json_format,
-                strict_json_schema,
-                think,
-                cancel,
-                sender,
-            );
+            self.chat_openai_with_stream(model, messages, format, cancel, sender);
             return;
         }
 
@@ -564,7 +580,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             "model": model,
             "messages": messages,
             "stream": true,
-            "think": think,
+            "think": format.think,
             "keep_alive": "10m",
             "options": {
                 "temperature": 0.1,
@@ -573,8 +589,8 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
                 "repeat_last_n": 256
             }
         });
-        if json_format {
-            body["format"] = if strict_json_schema {
+        if format.json_format {
+            body["format"] = if format.strict_json_schema {
                 action_schema()
             } else {
                 json!("json")
@@ -667,9 +683,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         &self,
         model: &str,
         messages: &[Message],
-        json_format: bool,
-        strict_json_schema: bool,
-        think: bool,
+        format: ChatStreamFormat,
         cancel: &Cancel,
         sender: mpsc::Sender<ChatStreamEvent>,
     ) {
@@ -682,14 +696,16 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
                 "stream_options": { "include_usage": true },
                 "temperature": 0.1,
             });
-            apply_thinking(&mut body, think);
-            if json_format {
+            apply_thinking(&mut body, format.think);
+            if format.json_format {
                 // `json_object` only promises *some* JSON object: every action
                 // parameter is optional and unbounded under it, which is how a
                 // `read` carrying an invented file body stayed legal all the
                 // way to the completion cap. The action schema constrains
                 // decoding to one real action instead.
-                body["response_format"] = if strict_json_schema && strict_action_schema_enabled() {
+                body["response_format"] = if format.strict_json_schema
+                    && strict_action_schema_enabled()
+                {
                     json!({
                         "type": "json_schema",
                         "json_schema": { "name": "hii_action", "strict": true, "schema": action_schema() },
@@ -1299,8 +1315,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        acquired_native_model, apply_thinking, openai_messages, openai_reasoning_delta, openai_reported_durations,
-        ox_alpha_browser_prompt, provider_messages, ChatUsage, Message, Ollama, RepetitionGuard,
+        acquired_native_model, apply_thinking, openai_messages, openai_reasoning_delta,
+        openai_reported_durations, ox_alpha_browser_prompt, provider_messages, ChatUsage, Message,
+        Ollama, RepetitionGuard,
     };
     use crate::attachments::ImagePayload;
     use crate::config::ModelProvider;

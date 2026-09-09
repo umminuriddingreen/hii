@@ -13,7 +13,7 @@ describe('minimal HII command bar', () => {
     expect(root).toContain("event.key.toLowerCase() === 'k'");
     expect(root).toContain("ensureWorkspaceTerminal('quick')");
     expect(root).toContain('const promptWidth = Math.min(560');
-    expect(root).toContain('<PromptResponse value={visibleResponse} running={running} />');
+    expect(root).toContain('<PromptResponse value={visibleResponse} running={running}');
     expect(root).not.toContain('<InferenceConstellation');
     expect(css).toContain('.hii-prompt-line { position: relative; display: grid;');
     expect(css).toContain('min-height: 42px;');

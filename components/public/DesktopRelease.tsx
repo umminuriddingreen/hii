@@ -18,7 +18,18 @@ type State =
   | { kind: 'loading' }
   | { kind: 'ready'; release: Release }
   | { kind: 'signed-out' }
-  | { kind: 'absent' };
+  | { kind: 'absent' }
+  | { kind: 'error'; message: string };
+
+function validRelease(value: unknown): value is Release {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const release = value as Release;
+  return typeof release.version === 'string' && release.version.trim().length > 0
+    && typeof release.filename === 'string' && /^[A-Za-z0-9_.-]+$/.test(release.filename)
+    && typeof release.bytes === 'number' && Number.isSafeInteger(release.bytes) && release.bytes > 0
+    && typeof release.sha256 === 'string' && /^[a-fA-F0-9]{64}$/.test(release.sha256)
+    && (release.createdAt === undefined || typeof release.createdAt === 'string' && Number.isFinite(Date.parse(release.createdAt)));
+}
 
 function megabytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -33,29 +44,39 @@ function megabytes(bytes: number) {
  */
 export function DesktopRelease({ platform, label }: { platform: Platform; label: string }) {
   const [state, setState] = useState<State>({ kind: 'loading' });
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let live = true;
-    fetch(`/download/${platform}.json`, { credentials: 'include' })
+    setState({ kind: 'loading' });
+    fetch(`/download/${platform}.json`, { credentials: 'include', cache: 'no-store' })
       .then(async (response) => {
         if (!live) return;
         if (response.status === 401) {
           setState({ kind: 'signed-out' });
           return;
         }
-        if (!response.ok) {
+        if (response.status === 404) {
           setState({ kind: 'absent' });
           return;
         }
-        setState({ kind: 'ready', release: (await response.json()) as Release });
+        if (!response.ok) {
+          setState({ kind: 'error', message: 'The download service could not check this build.' });
+          return;
+        }
+        const release: unknown = await response.json().catch(() => null);
+        if (!live) return;
+        setState(validRelease(release)
+          ? { kind: 'ready', release }
+          : { kind: 'error', message: 'The published build information is incomplete or invalid.' });
       })
       .catch(() => {
-        if (live) setState({ kind: 'absent' });
+        if (live) setState({ kind: 'error', message: 'Could not reach the download service. Check your connection.' });
       });
     return () => {
       live = false;
     };
-  }, [platform]);
+  }, [platform, attempt]);
 
   if (state.kind === 'loading') {
     return <p className="release-facts">Checking for a build&hellip;</p>;
@@ -71,6 +92,13 @@ export function DesktopRelease({ platform, label }: { platform: Platform; label:
 
   if (state.kind === 'absent') {
     return <p className="release-facts">No build published for this platform yet.</p>;
+  }
+
+  if (state.kind === 'error') {
+    return <p className="release-facts" role="status">
+      {state.message}{' '}
+      <button type="button" onClick={() => setAttempt((value) => value + 1)}>Try again</button>
+    </p>;
   }
 
   const { version, bytes, sha256, createdAt } = state.release;

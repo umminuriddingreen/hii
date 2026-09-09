@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["dom", "dom.iterable", "ES2022"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "ES2022"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -36,7 +40,8 @@
     "lib/**/*.ts",
     ".next/types/**/*.ts",
     ".next-web-dev/types/**/*.ts",
-    ".next-desktop-playwright/types/**/*.ts"
+    ".next-desktop-playwright/types/**/*.ts",
+    ".next-desktop-dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

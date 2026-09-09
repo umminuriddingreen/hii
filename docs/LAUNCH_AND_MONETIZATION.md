@@ -4,6 +4,10 @@ Status: founder-beta operating plan
 Product: HII for Apple Silicon Macs running macOS 13 or newer  
 Activation event: a user completes one real task and can inspect its sources, changes, checks, and receipt
 
+Business lane: HII Studio now, HII Product after repeated activation evidence.
+Use `docs/business/structure.md` as the operating map for deciding whether a
+new idea belongs in Studio, Product, Network, or parked backlog.
+
 ## The product we are launching
 
 HII is the Human Information Interface: one local workspace where a person can bring information, give it an intention, work with the agent they already use, and inspect the result.

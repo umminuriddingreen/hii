@@ -13,8 +13,9 @@ describe('HII first-run and voice input', () => {
     expect(firstRun).toContain('HII_ASCII');
     expect(firstRun).toContain("event.key === 'ArrowDown'");
     expect(firstRun).toContain("event.key === 'Enter'");
-    expect(web).toContain('<HiiFirstRunTerminal');
-    expect(web).toContain("'Sign in with ChatGPT'");
+    expect(web).not.toContain('<HiiFirstRunTerminal');
+    expect(web).toContain('openTerminalOnReady={ready && !firstRunDismissed}');
+    expect(web).toContain('onTerminalReady={completeFirstRun}');
     expect(web).toContain("params.get('first-run') === '1'");
     expect(desktop).not.toContain('<HiiFirstRunTerminal');
     expect(desktop).toContain('openTerminalOnReady={ready && !onboardingComplete}');

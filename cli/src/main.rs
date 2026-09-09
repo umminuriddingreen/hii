@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-BSL-1.1
 mod account;
-mod session_backup;
 mod acp;
 mod agent;
 mod agents;
@@ -50,11 +49,12 @@ mod run_context;
 mod runlog;
 mod schedule;
 mod service;
+mod session_backup;
 mod skill_lifecycle;
 mod skill_runtime;
 mod skills;
 mod slash_registry;
-// mod drive; // disabled: hii-drive crate does not compile yet (rusqlite/AsRef<Path> errors); drive.rs is also unwired to any subcommand
+// mod drive; // preview surface: hii-drive compiles as a workspace crate, but this CLI module is not wired to a subcommand yet
 mod store;
 mod stream;
 #[cfg(feature = "preview")]
@@ -205,6 +205,18 @@ enum Commands {
     Context {
         #[command(subcommand)]
         action: ContextCommand,
+    },
+    #[command(about = "Save, inspect, and restore named local canvas states")]
+    #[command(hide = true)]
+    State {
+        #[arg(
+            long,
+            global = true,
+            help = "Space ID; defaults to the selected local Space"
+        )]
+        space: Option<String>,
+        #[command(subcommand)]
+        action: StateCommand,
     },
     #[command(name = "apps", about = "List, register, and launch HII applications")]
     #[command(hide = true)]
@@ -626,7 +638,9 @@ enum Commands {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
     },
-    #[command(about = "Print a shell tab-completion script for bash, zsh, fish, elvish, or powershell")]
+    #[command(
+        about = "Print a shell tab-completion script for bash, zsh, fish, elvish, or powershell"
+    )]
     #[command(hide = true)]
     Completions {
         #[arg(value_enum)]
@@ -671,6 +685,29 @@ enum ShareCommand {
         share: String,
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum StateCommand {
+    Save {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    Show {
+        state: String,
+    },
+    Restore {
+        state: String,
+        #[arg(long, help = "Apply the previewed state; otherwise only preview")]
+        apply: bool,
+        #[arg(long, help = "Sequence shown in the preview; required with --apply")]
+        expected_sequence: Option<u64>,
     },
 }
 
@@ -1861,6 +1898,10 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         }
         Some(Commands::Context { action }) => {
             context_command(&paths, cli.cwd, action)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::State { space, action }) => {
+            state_command(space, action)?;
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Apps { action }) => {
@@ -3329,8 +3370,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 .collect::<Vec<_>>();
             if legacy::run(&paths.repo, &args)? != 0 {
                 return Err(
-                    "HII setup did not start. Run `hii runner model logs` for details."
-                        .into(),
+                    "HII setup did not start. Run `hii runner model logs` for details.".into(),
                 );
             }
             tui::system("◇ MODEL LOADING  HII · acquiring the local model; live model events begin when the runner is ready.");
@@ -3938,6 +3978,7 @@ fn status(paths: &AppPaths, cwd: Option<PathBuf>, json: bool) -> Result<(), Stri
 fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
     let workspace = workspace(cwd)?;
     let ollama = Ollama::discover();
+    let native_status = native_model_status(paths);
     let checks = [
         (
             "Rust binary",
@@ -4014,21 +4055,52 @@ fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
         Ok(models) => {
             let default_model = ollama.provider().default_model();
             let review_model = ollama.provider().default_review_model();
-            let default = models.iter().any(|model| model == default_model);
+            let selected_model = native_status
+                .as_ref()
+                .and_then(|status| status["selection"]["model"].as_str())
+                .unwrap_or(default_model);
+            let loaded_model = native_status
+                .as_ref()
+                .and_then(|status| status["loadedModel"].as_str())
+                .or_else(|| {
+                    (models.len() == 1)
+                        .then(|| models.first().map(String::as_str))
+                        .flatten()
+                });
+            let selected = models.iter().any(|model| model == selected_model);
+            let loaded_matches_selection = loaded_model.is_none_or(|model| model == selected_model);
             let review = models.iter().any(|model| model == review_model);
-            ok &= default;
+            ok &= selected && loaded_matches_selection;
             println!(
                 "{}  {:<14} {}",
-                if default { "ok" } else { "!!" },
+                if selected { "ok" } else { "!!" },
                 format!("{} agent", ollama.provider_label()),
-                default_model
+                selected_model
             );
-            if !default {
+            if !selected {
                 fixes.push(format!(
-                    "{} agent: the default model is not installed; run `ollama pull {default_model}` \
-                     or pick another with --model",
+                    "{} agent: the selected or loaded model is not advertised by {}; start it with `hii model use {selected_model}` or choose another with `hii model use <model>`",
+                    ollama.provider_label(),
                     ollama.provider_label()
                 ));
+            }
+            if selected_model != default_model {
+                println!("--  {:<14} {}", "configured", default_model);
+            }
+            if let Some(loaded_model) = loaded_model {
+                let loaded_ok = loaded_model == selected_model;
+                println!(
+                    "{}  {:<14} {}",
+                    if loaded_ok { "ok" } else { "!!" },
+                    "loaded",
+                    loaded_model
+                );
+                if !loaded_ok {
+                    fixes.push(format!(
+                        "{} loaded: runtime is serving {loaded_model}, but HII selected {selected_model}; run `hii model use {selected_model}` or update the selection",
+                        ollama.provider_label()
+                    ));
+                }
             }
             // Only worth saying when it is a different pull than the agent model's.
             if !review && review_model != default_model {
@@ -4063,6 +4135,23 @@ fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
     }
     println!("\n{}", if ok { "ready" } else { "not ready" });
     Ok(ok)
+}
+
+fn native_model_status(paths: &AppPaths) -> Option<serde_json::Value> {
+    let script = paths.repo.join("aii/daemon/hiid.mjs");
+    if !script.is_file() {
+        return None;
+    }
+    let output = Command::new("node")
+        .arg(script)
+        .args(["model-runtime", "status"])
+        .current_dir(&paths.repo)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    serde_json::from_slice(&output.stdout).ok()
 }
 
 fn information_command(
@@ -5447,6 +5536,7 @@ fn context_command(
                     ),
                     intent: intent.join(" "),
                     selected_object_ids: selections,
+                    excluded_object_ids: Vec::new(),
                     actor: hii_core::runtime::IdentityRefV1 {
                         id: "human:local".into(),
                         kind: "human".into(),
@@ -5561,6 +5651,68 @@ fn context_command(
             }
         }
     }
+    Ok(())
+}
+
+fn state_command(space: Option<String>, action: StateCommand) -> Result<(), String> {
+    use hii_core::checkpoints;
+    let runtime = hii_core::runtime_root()?;
+    let current = hii_core::runtime_space_snapshot(space)?;
+    let space = &current.space_id;
+    let output = match action {
+        StateCommand::Save { name, json } => {
+            let checkpoint = checkpoints::save(&runtime, space, &name, current.sequence)?;
+            if !json {
+                println!(
+                    "Saved {} as {} in Space {} at sequence {}",
+                    checkpoint.name, checkpoint.id, space, checkpoint.source_sequence
+                );
+                return Ok(());
+            }
+            serde_json::to_value(checkpoint).map_err(|error| error.to_string())?
+        }
+        StateCommand::List { json } => {
+            let checkpoints = checkpoints::list(&runtime, space)?;
+            if !json {
+                if checkpoints.is_empty() {
+                    println!("No named states in Space {space}.");
+                }
+                for checkpoint in checkpoints {
+                    println!(
+                        "{}\t{}\tsequence {}\t{}",
+                        checkpoint.id,
+                        checkpoint.name,
+                        checkpoint.source_sequence,
+                        checkpoint.created_at
+                    );
+                }
+                return Ok(());
+            }
+            serde_json::to_value(checkpoints).map_err(|error| error.to_string())?
+        }
+        StateCommand::Show { state } => {
+            serde_json::to_value(checkpoints::get(&runtime, space, &state)?)
+                .map_err(|error| error.to_string())?
+        }
+        StateCommand::Restore {
+            state,
+            apply,
+            expected_sequence,
+        } => {
+            if apply {
+                let expected = expected_sequence
+                    .ok_or("Preview first, then provide --apply --expected-sequence <sequence>")?;
+                let (snapshot, safety) = checkpoints::restore(&runtime, space, &state, expected)?;
+                serde_json::json!({"applied":true,"spaceId":space,"sequence":snapshot.sequence,"safetyCheckpoint":safety.id,"document":snapshot.document})
+            } else {
+                serde_json::json!({"applied":false,"preview":checkpoints::preview(&runtime, space, &state)?,"next":"Repeat with --apply --expected-sequence <preview.expectedSequence>. Only canvas state is restored; external files and processes are not rewound."})
+            }
+        }
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&output).map_err(|error| error.to_string())?
+    );
     Ok(())
 }
 
@@ -6144,6 +6296,38 @@ mod tests {
     fn first_command_reads_inline_flag_values() {
         let args = vec!["--model=status".into(), "doctor".into()];
         assert_eq!(first_command(&args), Some("doctor"));
+    }
+
+    #[test]
+    fn named_state_restore_defaults_to_preview_and_routes_natively() {
+        assert!(route::has_native_surface("state"));
+        let cli =
+            Cli::try_parse_from(["hii", "state", "restore", "before edit", "--space", "local"])
+                .unwrap();
+        assert!(
+            matches!(cli.command, Some(Commands::State { space: Some(space), action: StateCommand::Restore { apply: false, expected_sequence: None, .. } }) if space == "local")
+        );
+        let cli = Cli::try_parse_from([
+            "hii",
+            "state",
+            "restore",
+            "before edit",
+            "--apply",
+            "--expected-sequence",
+            "4",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::State {
+                action: StateCommand::Restore {
+                    apply: true,
+                    expected_sequence: Some(4),
+                    ..
+                },
+                ..
+            })
+        ));
     }
 
     /// Unattended runs need a bound by default; `0` remains the explicit opt-out.

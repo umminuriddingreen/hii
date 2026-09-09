@@ -86,15 +86,12 @@ export function downloadUrl(platform) {
 }
 
 /**
- * Where the Tauri updater would fetch a platform's update payload.
- *
- * Unresolved, and deliberately not wired up: /download/* is session-gated, and
- * the updater plugin sends no cookie and no bearer token, so it cannot reach a
- * gated route. Serving updates during a private beta means either an
- * unauthenticated release path or no auto-update at all. Until that is decided,
- * the feed is generated but tauri.conf.json still points elsewhere -- so a
- * build cannot quietly start trusting a route nobody chose.
+ * Signed updates use the same GitHub release channel as tauri.conf.json.
+ * Versioned URLs ensure a feed cannot resolve to a later platform artifact.
  */
-export function updaterUrl(platform) {
-  return `${DOWNLOAD_ORIGIN}/download/${platform}-updater`;
+export function updaterUrl(version, filename) {
+  if (!/^\d+\.\d+\.\d+$/.test(version) || !SERVABLE_FILENAME.test(filename)) {
+    throw new Error('Invalid updater release identity');
+  }
+  return `https://github.com/umminuriddingreen/hii/releases/download/v${version}/${filename}`;
 }

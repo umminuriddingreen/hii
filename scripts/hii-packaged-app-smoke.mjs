@@ -1,365 +1,88 @@
 #!/usr/bin/env node
+// Current package proof: Tauri executable + embedded Rust CLI, never a Node server.
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
-import { access, cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import net from 'node:net';
+import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { access, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const sourceApp = path.resolve(
-  process.env.HII_APP_BUNDLE ||
-    path.join(root, 'src-tauri', 'target', 'release', 'bundle', 'macos', 'HII.app')
-);
+const sourceApp = path.resolve(process.env.HII_APP_BUNDLE || path.join(root, 'src-tauri/target/release/bundle/macos/HII.app'));
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hii-packaged-app-'));
 const installedApp = path.join(temporaryRoot, 'Applications', 'HII.app');
-const runtimeDir = path.join(temporaryRoot, 'clean-user', '.hii');
-const keepTemporaryRoot = process.env.HII_KEEP_PACKAGED_SMOKE === '1';
+const runtimeDir = path.join(temporaryRoot, 'runtime');
+const workspace = path.join(temporaryRoot, 'work');
+const hash = async (file) => createHash('sha256').update(await readFile(file)).digest('hex');
 
-function installedPaths() {
-  const resources = path.join(installedApp, 'Contents', 'Resources', 'hii-app');
-  return {
-    executable: path.join(installedApp, 'Contents', 'MacOS', 'hii'),
-    node: path.join(resources, 'bin', 'node'),
-    server: path.join(resources, 'server'),
-    entrypoint: path.join(resources, 'server', 'server.mjs')
-  };
+async function files(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  return (await Promise.all(entries.map(entry => entry.isDirectory()
+    ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat();
 }
 
-async function freePort() {
-  const server = net.createServer();
-  await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', resolve);
-  });
-  const address = server.address();
-  assert(address && typeof address === 'object');
-  const port = address.port;
-  await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
-  return port;
+function command(binary, args, env = process.env) {
+  const result = spawnSync(binary, args, { cwd: workspace, env, encoding: 'utf8', timeout: 30_000, maxBuffer: 8 * 1024 * 1024 });
+  assert.equal(result.status, 0, `${path.basename(binary)} ${args.join(' ')} failed: ${result.error?.message || result.stderr}`);
+  return result.stdout;
 }
 
-async function installFreshCopy() {
-  await rm(installedApp, { recursive: true, force: true });
-  await mkdir(path.dirname(installedApp), { recursive: true });
-  await cp(sourceApp, installedApp, {
-    recursive: true,
-    force: true,
-    preserveTimestamps: true,
-    verbatimSymlinks: true
-  });
-  const paths = installedPaths();
-  await Promise.all(Object.values(paths).map((item) => access(item)));
-  if (process.platform === 'darwin') {
-    const verification = spawnSync(
-      'codesign',
-      ['--verify', '--deep', '--strict', '--verbose=2', installedApp],
-      { encoding: 'utf8' }
-    );
-    assert.equal(
-      verification.status,
-      0,
-      `Copied HII.app failed strict code-sign verification.\n${verification.stderr || verification.stdout}`
-    );
-  }
-}
-
-async function startPackagedServer() {
-  const paths = installedPaths();
-  const port = await freePort();
-  const output = [];
-  const child = spawn(paths.node, ['server.mjs'], {
-    cwd: paths.server,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      HOME: path.dirname(runtimeDir),
-      HII_RUNTIME_DIR: runtimeDir,
-      HOST: '127.0.0.1',
-      PORT: String(port),
-      ORIGIN: `http://127.0.0.1:${port}`,
-      BODY_SIZE_LIMIT: '251M',
-      HII_TAURI: '1',
-      NODE_ENV: 'production'
-    }
-  });
-  child.stdout.on('data', (chunk) => output.push(String(chunk)));
-  child.stderr.on('data', (chunk) => output.push(String(chunk)));
-  const baseUrl = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(`Packaged HII server exited before readiness.\n${output.join('')}`);
-    }
-    let response;
-    try {
-      response = await fetch(`${baseUrl}/api/workspace?workspaceId=default`);
-    } catch {
-      // The packaged server is still starting.
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      continue;
-    }
-    if (response.ok) return { child, baseUrl, output };
-    if (response.status >= 500) {
-      const body = await response.text();
-      child.kill('SIGKILL');
-      throw new Error(
-        `Packaged HII returned ${response.status} during readiness.\n${body}\n${output.join('')}`
-      );
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  child.kill('SIGKILL');
-  throw new Error(`Packaged HII server did not become ready within 15 seconds.\n${output.join('')}`);
-}
-
-async function stopPackagedServer(instance) {
-  const { child } = instance;
-  if (child.exitCode !== null) return;
-  const exited = new Promise((resolve) => child.once('exit', resolve));
-  child.kill('SIGTERM');
-  const stopped = await Promise.race([
-    exited.then(() => true),
-    new Promise((resolve) => setTimeout(() => resolve(false), 5_000))
-  ]);
-  if (!stopped && child.exitCode === null) {
-    child.kill('SIGKILL');
-    await exited;
-  }
-}
-
-/**
- * The packaged server must not outlive the application that spawned it.
- *
- * The desktop app stops the server when it exits cleanly, but a crash or a Force
- * Quit never reaches that handler. What survived was a headless server
- * reparented to launchd, still bound to its port and still holding the user's
- * runtime open with no window anywhere to close.
- */
-async function orphanedServerExits() {
-  const paths = installedPaths();
-  const port = await freePort();
-  const supervisor = spawn(paths.node, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
-  const child = spawn(paths.node, ['server.mjs'], {
-    cwd: paths.server,
-    stdio: ['ignore', 'ignore', 'ignore'],
-    env: {
-      ...process.env,
-      HOME: path.dirname(runtimeDir),
-      HII_RUNTIME_DIR: runtimeDir,
-      HOST: '127.0.0.1',
-      PORT: String(port),
-      ORIGIN: `http://127.0.0.1:${port}`,
-      HII_TAURI: '1',
-      NODE_ENV: 'production',
-      HII_SUPERVISOR_PID: String(supervisor.pid)
-    }
-  });
-  const exited = new Promise((resolve) => child.once('exit', resolve));
-  const ready = Date.now() + 15_000;
-  while (Date.now() < ready) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/workspace?workspaceId=default`);
-      if (response.ok) break;
-    } catch {
-      // Still starting.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  assert.equal(child.exitCode, null, 'The packaged server exited before its supervisor did.');
-
-  supervisor.kill('SIGKILL');
-  const stopped = await Promise.race([
-    exited.then(() => true),
-    new Promise((resolve) => setTimeout(() => resolve(false), 15_000))
-  ]);
-  if (!stopped) {
-    child.kill('SIGKILL');
-    throw new Error('The packaged server kept running after its supervisor was killed.');
-  }
-}
-
-async function requestJson(baseUrl, pathname, init) {
-  const response = await fetch(`${baseUrl}${pathname}`, {
-    ...init,
-    headers: {
-      'content-type': 'application/json',
-      origin: baseUrl,
-      ...(init?.headers || {})
-    }
-  });
-  const body = await response.json();
-  return { response, body };
-}
-
-function receiptNode(now) {
-  return {
-    id: 'packaged-receipt',
-    type: 'note',
-    x: 120,
-    y: 120,
-    w: 360,
-    h: 220,
-    z: 2,
-    createdAt: now,
-    updatedAt: now,
-    object: {
-      kind: 'receipt',
-      owner: 'hii',
-      status: 'completed',
-      proofRefs: ['packaged-app-smoke'],
-      audit: [{ ts: now, actor: 'system', action: 'packaged_app_smoke' }]
-    },
-    payload: {
-      title: 'Packaged app receipt',
-      summary: 'Created before reinstall and verified after restart.'
-    }
-  };
-}
-
-let server;
 try {
-  if (process.platform !== 'darwin') {
-    throw new Error('The packaged HII.app smoke test requires macOS.');
-  }
+  assert.equal(process.platform, 'darwin', 'The HII.app package proof requires macOS.');
   await access(sourceApp);
-  await installFreshCopy();
+  await mkdir(workspace, { recursive: true });
+  await cp(sourceApp, installedApp, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true });
+  const executable = path.join(installedApp, 'Contents/MacOS/hii');
+  const cli = path.join(installedApp, 'Contents/Resources/resources/hii');
+  await Promise.all([access(executable), access(cli)]);
+  command('codesign', ['--verify', '--deep', '--strict', '--verbose=2', installedApp]);
 
-  server = await startPackagedServer();
-  const firstLoad = await requestJson(server.baseUrl, '/api/workspace?workspaceId=default');
-  assert.equal(firstLoad.response.status, 200);
-  assert.equal(firstLoad.body.status, 'missing');
-  assert.equal(firstLoad.body.workspace.version, 1);
-
-  const daemonStart = await requestJson(server.baseUrl, '/api/daemon', {
-    method: 'POST',
-    body: JSON.stringify({ action: 'start' })
-  });
-  assert.equal(daemonStart.response.status, 200);
-  assert.equal(daemonStart.body.ok, true);
-  const daemonDeadline = Date.now() + 10_000;
-  let daemonSnapshot = daemonStart.body.snapshot;
-  while (!daemonSnapshot?.alive && Date.now() < daemonDeadline) {
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    const probe = await requestJson(server.baseUrl, '/api/daemon');
-    assert.equal(probe.response.status, 200);
-    daemonSnapshot = probe.body;
+  // Tauri embeds assets in its executable. Validate build inputs and chronology;
+  // this does not claim native rendering or byte extraction from the binary.
+  const config = JSON.parse(await readFile(path.join(root, 'src-tauri/tauri.conf.json'), 'utf8'));
+  const frontend = path.resolve(root, 'src-tauri', config.build.frontendDist);
+  const html = await readFile(path.join(frontend, 'index.html'), 'utf8');
+  assert.match(html, /_next\/static\//, 'Static frontend entrypoint is missing its Next assets.');
+  const assets = await files(frontend);
+  const executableTime = (await stat(executable)).mtimeMs;
+  for (const asset of assets) {
+    assert.ok((await stat(asset)).mtimeMs <= executableTime, `Frontend input is newer than package: ${asset}`);
   }
-  assert.equal(daemonSnapshot?.alive, true, 'Packaged HII could not start its embedded AII runtime.');
-  const daemonStop = await requestJson(server.baseUrl, '/api/daemon', {
-    method: 'POST',
-    body: JSON.stringify({ action: 'stop' })
-  });
-  assert.equal(daemonStop.response.status, 200);
-  assert.equal(daemonStop.body.ok, true);
+  const cliHash = await hash(cli);
+  assert.equal(cliHash, await hash(path.join(root, 'target/release/hii')), 'Packaged CLI differs from the current release build.');
+  assert.equal(cliHash, await hash(path.join(root, 'src-tauri/resources/hii')), 'Packaged CLI differs from staged resource.');
 
-  const assetBytes = Buffer.alloc(600 * 1024, 0x68);
-  const firstAssetForm = new FormData();
-  firstAssetForm.set('file', new File([assetBytes], 'reference.png', { type: 'image/png' }));
-  const firstAssetResponse = await fetch(`${server.baseUrl}/api/workspace/assets`, {
-    method: 'POST',
-    headers: { origin: server.baseUrl },
-    body: firstAssetForm
-  });
-  assert.equal(firstAssetResponse.status, 200);
-  const firstAsset = await firstAssetResponse.json();
-  assert.equal(firstAsset.storage, 'hii-content-addressed');
-  assert.equal(firstAsset.deduplicated, false);
-  assert.match(firstAsset.sha256, /^[a-f0-9]{64}$/);
-  assert.equal(path.basename(firstAsset.path), `${firstAsset.sha256}.png`);
-
-  const repeatedAssetForm = new FormData();
-  repeatedAssetForm.set('file', new File([assetBytes], 'renamed.png', { type: 'image/png' }));
-  const repeatedAssetResponse = await fetch(`${server.baseUrl}/api/workspace/assets`, {
-    method: 'POST',
-    headers: { origin: server.baseUrl },
-    body: repeatedAssetForm
-  });
-  assert.equal(repeatedAssetResponse.status, 200);
-  const repeatedAsset = await repeatedAssetResponse.json();
-  assert.equal(repeatedAsset.deduplicated, true);
-  assert.equal(repeatedAsset.path, firstAsset.path);
-  assert.equal(repeatedAsset.url, firstAsset.url);
-
-  const created = await requestJson(server.baseUrl, '/api/workspace', {
-    method: 'POST',
-    body: JSON.stringify({ action: 'create', workspaceId: 'packaged-proof', select: true })
-  });
-  assert.equal(created.response.status, 201);
-  const now = new Date().toISOString();
-  const workspace = created.body.workspace;
-  workspace.nodes = [receiptNode(now)];
-  workspace.nextZ = 2;
-  const saved = await requestJson(server.baseUrl, '/api/workspace', {
-    method: 'PUT',
-    body: JSON.stringify({
-      workspaceId: 'packaged-proof',
-      expectedRevision: workspace.revision,
-      workspace
-    })
-  });
-  assert.equal(saved.response.status, 200);
-  assert.equal(saved.body.workspace.revision, 1);
-  assert.equal(saved.body.workspace.nodes[0].object.kind, 'receipt');
-  await stopPackagedServer(server);
-  server = null;
-
-  const persistedPath = path.join(runtimeDir, 'workspace', 'workspaces', 'packaged-proof.json');
-  const persistedBeforeReinstall = JSON.parse(await readFile(persistedPath, 'utf8'));
-  assert.equal(persistedBeforeReinstall.nodes[0].id, 'packaged-receipt');
-
-  // Replacing the isolated app copy models a packaged upgrade while leaving user data untouched.
-  await installFreshCopy();
-  server = await startPackagedServer();
-  const afterReinstall = await requestJson(
-    server.baseUrl,
-    '/api/workspace?workspaceId=packaged-proof'
-  );
-  assert.equal(afterReinstall.response.status, 200);
-  assert.equal(afterReinstall.body.status, 'ready');
-  assert.equal(afterReinstall.body.workspace.version, 1);
-  assert.equal(afterReinstall.body.workspace.nodes[0].id, 'packaged-receipt');
-  assert.equal(afterReinstall.body.workspace.nodes[0].object.kind, 'receipt');
-  const persistedAsset = await fetch(`${server.baseUrl}${firstAsset.url}`);
-  assert.equal(persistedAsset.status, 200);
-  assert.deepEqual(Buffer.from(await persistedAsset.arrayBuffer()), assetBytes);
-
-  const brokenPath = path.join(runtimeDir, 'workspace', 'workspaces', 'broken.json');
-  await writeFile(brokenPath, '{"version":1,"nodes":', 'utf8');
-  const recovery = await requestJson(server.baseUrl, '/api/workspace?workspaceId=broken');
-  assert.equal(recovery.response.status, 500);
-  assert.equal(recovery.body.status, 'recovery');
-  assert.equal(typeof recovery.body.recoveryPath, 'string');
-  assert(recovery.body.recoveryPath.startsWith(runtimeDir));
-  await stat(recovery.body.recoveryPath);
-
-  const listing = await requestJson(server.baseUrl, '/api/workspace?list=1');
-  assert.equal(listing.response.status, 200);
-  assert(
-    listing.body.workspaces.some(
-      (item) => item.id === 'packaged-proof' && item.status === 'ready' && item.revision === 1
-    )
-  );
-  assert(listing.body.workspaces.some((item) => item.id === 'broken' && item.status === 'recovery'));
-
-  await orphanedServerExits();
-
-  console.log('HII packaged app smoke');
-  console.log('status:       ok');
-  console.log('isolation:    copied HII.app ran outside the source repository');
-  console.log('clean user:   empty isolated runtime initialized');
-  console.log('local AII:    embedded daemon started and stopped without a source checkout');
-  console.log('persistence:  receipt workspace survived packaged reinstall + restart');
-  console.log('assets:       content-addressed upload deduplicated and survived reinstall');
-  console.log('recovery:     corrupt workspace preserved with an inspectable recovery path');
-  console.log('signature:    copied app passed strict deep code-sign verification');
-  console.log('supervision:  server stopped itself when its supervising process was killed');
+  const env = { ...process.env, HII_RUNTIME_DIR: runtimeDir, HII_ROOT: workspace, HII_NO_AUTO_UPDATE: '1', HII_UI_LINE_MODE: '1' };
+  delete env.HII_BIN;
+  delete env.HII_DB_PATH;
+  delete env.HII_ACCOUNT_DIR;
+  const terminal = () => JSON.parse(command(cli, ['--cwd', workspace, 'terminal', workspace, '--json'], env));
+  const first = terminal();
+  assert.equal(first.desktopLaunched, false);
+  assert.equal(first.node.type, 'terminal');
+  assert.match(first.spaceId, /^[a-z0-9_-]+$/);
+  const snapshotPath = path.join(runtimeDir, 'workspace/workspaces', `${first.spaceId}.json`);
+  const original = JSON.parse(await readFile(snapshotPath, 'utf8'));
+  assert.ok(original.nodes.some(node => node.id === first.node.id));
+  // A new CLI process must recover Runtime objects without the disposable export.
+  await rename(snapshotPath, `${snapshotPath}.preserved`);
+  await cp(sourceApp, installedApp, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true });
+  const second = terminal();
+  assert.equal(second.spaceId, first.spaceId);
+  assert.ok(second.sequence > first.sequence);
+  const restored = JSON.parse(await readFile(snapshotPath, 'utf8'));
+  assert.ok(restored.nodes.some(node => node.id === first.node.id), 'Reinstall/restart lost the first durable object.');
+  assert.ok(restored.nodes.some(node => node.id === second.node.id));
+  assert.equal(restored.nodes.length, original.nodes.length + 1);
+  console.log(JSON.stringify({
+    status: 'passed', sourceApp, executableSha256: await hash(executable), cliSha256: cliHash,
+    frontendInputFiles: assets.length, spaceId: first.spaceId, initialSequence: first.sequence,
+    finalSequence: second.sequence, durableObjects: restored.nodes.length,
+    isolation: 'copied embedded CLI outside repository; fresh temporary Runtime; no model or desktop launch',
+    notVerified: ['native WebView rendering', 'PTY interaction', 'embedded asset byte equality', 'notarization', 'updater transport'],
+    evidenceDirectory: process.env.HII_KEEP_PACKAGED_SMOKE === '1' ? temporaryRoot : null
+  }, null, 2));
 } finally {
-  if (server) await stopPackagedServer(server);
-  if (keepTemporaryRoot) {
-    console.log(`kept:         ${temporaryRoot}`);
-  } else {
-    await rm(temporaryRoot, { recursive: true, force: true });
-  }
+  if (process.env.HII_KEEP_PACKAGED_SMOKE !== '1') await rm(temporaryRoot, { recursive: true, force: true });
 }
