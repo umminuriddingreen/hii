@@ -56,18 +56,6 @@ if ($LASTEXITCODE -ne 0) {
   throw "The bundled hii.exe did not run: $version"
 }
 
-# A read-only command that exercises the runtime root. This is where the Rust
-# and TypeScript halves used to disagree on Windows about where ~/.hii lives.
-$home_json = & $cli home --json 2>&1
-if ($LASTEXITCODE -ne 0) {
-  throw "The bundled hii.exe could not read its runtime root: $home_json"
-}
-try {
-  $null = $home_json | ConvertFrom-Json
-} catch {
-  throw "hii home --json did not return JSON: $home_json"
-}
-
 # Terminal objects. The canvas puts real shells on the surface, and this is the
 # CLI half of that contract: it writes a terminal object into the Runtime
 # document with a working directory the app will spawn ConPTY in. Pointed at a
@@ -76,6 +64,22 @@ try {
 $scratchRuntime = Join-Path $env:TEMP ("hii-smoke-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $scratchRuntime -Force | Out-Null
 try {
+  # The packaged sidecar contains native Rust commands. `home` still delegates
+  # to the checkout-only Node surface, so prove the native status contract in
+  # the same throwaway runtime that the terminal command writes into.
+  $statusJson = & { $env:HII_RUNTIME_DIR = $scratchRuntime; & $cli --cwd $scratchRuntime status --json 2>&1 }
+  if ($LASTEXITCODE -ne 0) {
+    throw "The bundled hii.exe could not read its runtime root: $statusJson"
+  }
+  try {
+    $runtimeStatus = $statusJson | ConvertFrom-Json
+  } catch {
+    throw "hii status --json did not return JSON: $statusJson"
+  }
+  if ($runtimeStatus.engine -ne 'rust' -or $runtimeStatus.runtime -ne $scratchRuntime) {
+    throw "hii status --json did not identify the isolated Rust runtime: $statusJson"
+  }
+
   $terminal = & { $env:HII_RUNTIME_DIR = $scratchRuntime; & $cli terminal $scratchRuntime --json 2>&1 }
   if ($LASTEXITCODE -ne 0) {
     throw "The bundled hii.exe could not create a terminal object: $terminal"
