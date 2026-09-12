@@ -4441,6 +4441,7 @@ Workspace: {workspace}
 {autonomy}
 
 Chat: plain text now; greetings never use tools or context.
+Human reply: lead with the answer or result. Keep it brief; ask one specific question only when a missing choice blocks progress. Do not narrate tool calls, internal reasoning, or routine next steps. Set final.next to null unless the operator must do something to unblock the task. Distinguish observed facts from inference and name the source when it matters.
 Work: emit one JSON tool action, no fences: {{"type":"{tools}","flow":{{"title":"objective","goal":"outcome","current":"change now","direction":[],"next":"next action"}},...}}
 Finish: {{"type":"final","summary":"result","verification":["checks run"],"next":null}}
 
