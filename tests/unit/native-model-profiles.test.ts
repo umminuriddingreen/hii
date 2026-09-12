@@ -71,9 +71,11 @@ describe("HII model management CLI", () => {
     expect(source).toContain('status.loadedModel = health.loaded_model || health.model');
   });
 
-  it("defaults conversation UX to the direct model and tool stream", () => {
+  it("defaults to the readable conversation view and keeps the direct stream available", () => {
     const source = fs.readFileSync(path.join(root, "cli", "src", "conversation.rs"), "utf8");
-    expect(source).toContain("thinking_mode: ThinkingMode::Stream");
+    const settings = fs.readFileSync(path.join(root, "cli", "src", "settings.rs"), "utf8");
+    expect(settings).toContain('"conversation".into()');
+    expect(source).toContain("Self::thinking_mode_for(&configured_view).unwrap_or(ThinkingMode::Conversation)");
     expect(source).toContain("readable replies, tool calls, results, and receipts are appended progressively");
     expect(source).toContain('"assistant.stream.delta"');
   });

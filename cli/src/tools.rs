@@ -346,7 +346,7 @@ impl Toolbelt {
         }
         use base64::Engine as _;
         Ok(crate::attachments::ImagePayload {
-            mime_type: mime.into(),
+            mime_type: mime,
             base64: base64::engine::general_purpose::STANDARD.encode(bytes),
         })
     }
