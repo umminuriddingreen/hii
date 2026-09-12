@@ -110,6 +110,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/usage", "tokens and speed"),
     ("/compact", "shrink context"),
     ("/theme", "visual signature"),
+    ("/settings", "conversation and image display"),
     ("/keymap", "keyboard profile"),
     #[cfg(feature = "preview")]
     ("/resources", "machine resources"),

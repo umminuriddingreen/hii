@@ -161,6 +161,13 @@ impl AttachmentQueue {
             .any(|item| matches!(item.data, AttachmentData::Image(_)))
     }
 
+    pub fn latest_image(&self) -> Option<&ImagePayload> {
+        self.items.last().and_then(|item| match &item.data {
+            AttachmentData::Image(image) => Some(image),
+            AttachmentData::Text(_) => None,
+        })
+    }
+
     pub fn count(&self) -> usize {
         self.items.len()
     }

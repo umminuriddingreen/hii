@@ -2383,6 +2383,7 @@ dependencies = [
  "hii-core",
  "hii-fabric-protocol",
  "ignore",
+ "image",
  "libc",
  "plist",
  "rand 0.8.7",

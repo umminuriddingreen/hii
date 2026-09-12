@@ -21,6 +21,8 @@ use std::{
 /// toolbelt. Kept in one place so the schema, dispatcher, and docs agree.
 pub const HII_TOOLS: &[&str] = &[
     "hii_context",
+    "config_read",
+    "config_write",
     "canvas_list",
     "canvas_read",
     "canvas_add",
@@ -51,6 +53,7 @@ pub fn is_mutating(tool: &str) -> bool {
     matches!(
         tool,
         "info_capture"
+            | "config_write"
             | "board_write"
             | "schedule_write"
             | "bridge_send"
@@ -75,6 +78,22 @@ pub fn execute_as(
     let arg = arg.trim();
     let result = match tool {
         "hii_context" => hii(repo, &["context", "--json"]).and_then(compact_context),
+        "config_read" => crate::config::AppPaths::discover()
+            .map(|paths| crate::settings::describe(&paths.runtime)),
+        "config_write" => crate::config::AppPaths::discover().and_then(|paths| {
+            let pair = argument_field(arguments, "query").unwrap_or_default();
+            let fallback = pair
+                .split_once('=')
+                .or_else(|| pair.split_once(char::is_whitespace));
+            let key = argument_field(arguments, "key")
+                .or_else(|| fallback.map(|(key, _)| key.trim().into()))
+                .ok_or_else(|| "config_write needs `key` and `value`".to_string())?;
+            let value = argument_field(arguments, "value")
+                .or_else(|| fallback.map(|(_, value)| value.trim().into()))
+                .ok_or_else(|| "config_write needs `key` and `value`".to_string())?;
+            crate::settings::set(&paths.runtime, &key, &value)?;
+            Ok(crate::settings::describe(&paths.runtime))
+        }),
         "canvas_list" => canvas_list(arguments),
         "canvas_read" => canvas_read(arguments),
         "canvas_add" => canvas_add(arguments, actor_id),

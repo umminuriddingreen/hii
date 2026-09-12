@@ -23,6 +23,7 @@ ctrlc = "3.4.5"
 dirs = "5.0.1"
 fs2 = "0.4.3"
 ignore = "0.4.23"
+image = { version = "0.25.10", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
 hii-core = { path = "../crates/hii-core" }
 hii-chat = { path = "../crates/hii-chat" }
 hii-fabric-protocol = { path = "../fabric/protocol" }

@@ -445,6 +445,9 @@ impl Conversation {
         if !capsule.text.is_empty() {
             messages.push(Message::system(capsule.text));
         }
+        let configured_view = crate::settings::load(&paths.runtime).conversation_view;
+        let thinking_mode =
+            Self::thinking_mode_for(&configured_view).unwrap_or(ThinkingMode::Conversation);
         let mut conversation = Self {
             cancel: Cancel::new(),
             paths,
@@ -458,7 +461,7 @@ impl Conversation {
             last_skill_draft: None,
             // Conversation is the primary human view: keep execution and proof
             // durable, but render only the assistant's words and questions.
-            thinking_mode: ThinkingMode::Conversation,
+            thinking_mode,
             last_flow: None,
             thread: None,
             last_projection_item: None,
@@ -1334,6 +1337,12 @@ impl Conversation {
                             false,
                         )
                     };
+                    if result.ok && tool == "config_write" {
+                        let configured =
+                            crate::settings::load(&self.paths.runtime).conversation_view;
+                        self.thinking_mode = Self::thinking_mode_for(&configured)
+                            .unwrap_or(ThinkingMode::Conversation);
+                    }
                     let mut safe_output = redact_text(&result.output);
                     let repeated_failure = (!result.ok)
                         .then(|| repeated_tool_failures.record(&tool, &safe_output, mutation_epoch))
@@ -1720,6 +1729,11 @@ impl Conversation {
 
     pub fn attach(&mut self, path: &str) -> Result<String, String> {
         let result = self.attachments.add(path)?;
+        let inline = self
+            .attachments
+            .latest_image()
+            .map(|image| crate::terminal_image::render(&self.paths.runtime, image))
+            .transpose()?;
         self.store.event(
             "attachment.added",
             json!({
@@ -1727,7 +1741,39 @@ impl Conversation {
                 "bytes": self.attachments.total_bytes()
             }),
         )?;
-        Ok(result)
+        Ok(if inline == Some(true) {
+            format!("{result}\nInline preview rendered.")
+        } else {
+            result
+        })
+    }
+
+    pub fn settings(&mut self, requested: Option<&str>) -> Result<String, String> {
+        let Some(requested) = requested else {
+            return Ok(crate::settings::describe(&self.paths.runtime));
+        };
+        let (key, value) = requested
+            .trim()
+            .split_once(char::is_whitespace)
+            .ok_or_else(|| {
+                "usage: /settings <conversation-view|inline-images> <value>".to_string()
+            })?;
+        let settings = crate::settings::set(&self.paths.runtime, key, value)?;
+        if matches!(
+            key.trim().to_ascii_lowercase().replace('_', "-").as_str(),
+            "conversation-view" | "view"
+        ) {
+            self.thinking_mode = Self::thinking_mode_for(&settings.conversation_view)
+                .unwrap_or(ThinkingMode::Conversation);
+        }
+        self.store.event(
+            "conversation.settings_changed",
+            json!({
+                "key": key,
+                "value": value.trim()
+            }),
+        )?;
+        Ok(crate::settings::describe(&self.paths.runtime))
     }
 
     pub fn attachments(&self) -> String {

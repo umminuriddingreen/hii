@@ -152,6 +152,20 @@ const TOOLS: &[ToolSpec] = &[
         "repo/runtime context snapshot",
     ),
     tool(
+        "config_read",
+        "hii",
+        Reach::Hii,
+        false,
+        "read bounded HII CLI presentation settings",
+    ),
+    tool(
+        "config_write",
+        "hii",
+        Reach::Hii,
+        true,
+        "change one bounded HII CLI presentation setting",
+    ),
+    tool(
         "canvas_list",
         "hii",
         Reach::Hii,
@@ -354,6 +368,11 @@ pub fn input_schema(name: &str) -> Value {
         ),
         "shell" | "verify" => object(json!({ "command": string }), json!(["command"])),
         "http" => object(json!({ "url": string }), json!(["url"])),
+        "config_read" => object(json!({}), json!([])),
+        "config_write" => object(
+            json!({ "key": string, "value": string }),
+            json!(["key", "value"]),
+        ),
         "info_find" => object(
             json!({ "query": string, "web": { "type": "boolean" }, "limit": integer }),
             json!(["query"]),

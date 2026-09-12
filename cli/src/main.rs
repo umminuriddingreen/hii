@@ -55,10 +55,12 @@ mod skill_runtime;
 mod skills;
 mod slash_registry;
 // mod drive; // preview surface: hii-drive compiles as a workspace crate, but this CLI module is not wired to a subcommand yet
+mod settings;
 mod store;
 mod stream;
 #[cfg(feature = "preview")]
 mod system_monitor;
+mod terminal_image;
 mod text;
 mod timeline;
 mod tools;
@@ -3549,6 +3551,7 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Some(SlashCommand::Autonomy(mode)) => conversation.autonomy(mode.as_deref()),
             Some(SlashCommand::Learn(requested)) => conversation.learn(&requested),
             Some(SlashCommand::Theme(theme)) => conversation.theme(theme.as_deref()),
+            Some(SlashCommand::Settings(requested)) => conversation.settings(requested.as_deref()),
             Some(SlashCommand::Keymap(requested)) => {
                 conversation.keymap_command(requested.as_deref())
             }
@@ -3681,6 +3684,7 @@ enum SlashCommand {
     Autonomy(Option<String>),
     Learn(String),
     Theme(Option<String>),
+    Settings(Option<String>),
     Keymap(Option<String>),
     Model(Option<String>),
     DynamicControl(Vec<String>),
@@ -3762,6 +3766,7 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         "/autonomy" => SlashCommand::Autonomy(argument),
         "/learn" => SlashCommand::Learn(rest.to_string()),
         "/theme" => SlashCommand::Theme(argument),
+        "/settings" => SlashCommand::Settings(argument),
         "/keymap" => SlashCommand::Keymap(argument),
         "/raw" => match rest {
             "" | "on" => SlashCommand::Thinking(Some("raw".into())),
@@ -3865,7 +3870,7 @@ fn slash_help() -> String {
     )
     .replace(
         "/theme [name]                 switch the persistent visual signature\n",
-        "/theme [name]                 switch the persistent visual signature\n/keymap [default|vim]          inspect or switch keyboard profile\n/keymap bind ACTION CHORD      add a safe custom binding\n",
+        "/theme [name]                 switch the persistent visual signature\n/settings [key value]         configure conversation and inline images\n/keymap [default|vim]          inspect or switch keyboard profile\n/keymap bind ACTION CHORD      add a safe custom binding\n",
     )
     .replace(
         "/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n",
