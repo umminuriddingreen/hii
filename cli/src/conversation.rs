@@ -1152,7 +1152,7 @@ impl Conversation {
                         )?;
                         self.messages.push(Message::assistant(raw));
                         self.messages.push(Message::user(
-                            "PLAN MODE: do not write, edit, verify, or run mutating tools. Continue with read/list/search/web_search/web_fetch/http or read-only shell evidence, then return a concrete plan. The operator can use /plan off before implementation.",
+                            "PLAN MODE: do not write, edit, verify, or run mutating tools. Continue with read/list/search/web_search/image_search/web_fetch/http or read-only shell evidence, then return a concrete plan. The operator can use /plan off before implementation.",
                         ));
                         rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                         continue;
@@ -1969,7 +1969,7 @@ impl Conversation {
         self.messages.insert(
             1.min(self.messages.len()),
             Message::system(
-                "PLAN MODE: inspect and reason only. Use read, list, search, web_search, web_fetch, http, or read-only shell evidence. Do not write, edit, verify, or mutate anything. Return a concrete implementation plan when enough evidence is available.",
+                "PLAN MODE: inspect and reason only. Use read, list, search, web_search, image_search, web_fetch, http, or read-only shell evidence. Do not write, edit, verify, or mutate anything. Return a concrete implementation plan when enough evidence is available.",
             ),
         );
     }
@@ -2049,7 +2049,7 @@ impl Conversation {
             other => {
                 return Err(format!(
                     "unknown copy target `{other}` — use /copy, /copy code, or /copy all"
-                ))
+                ));
             }
         };
         let lines = value.lines().count();
@@ -2610,7 +2610,8 @@ impl Conversation {
         )?;
         Ok(format!(
             "Mode: {mode}\nProvider: {}\nModel: {}\nHosted use remains explicit through /codex or /claude.",
-            self.ollama.provider_label(), self.model
+            self.ollama.provider_label(),
+            self.model
         ))
     }
 
@@ -3674,7 +3675,7 @@ fn shell_command_is_preview(command: &str) -> bool {
 fn plan_tool_allowed(tool: &str, shell_evidence: bool) -> bool {
     matches!(
         tool,
-        "read" | "list" | "search" | "web_search" | "web_fetch" | "http"
+        "read" | "list" | "search" | "web_search" | "image_search" | "web_fetch" | "http"
     ) || (tool == "shell" && shell_evidence)
 }
 
@@ -4070,7 +4071,7 @@ fn observation_signature(
 fn tool_is_observation(tool: &str) -> bool {
     matches!(
         tool,
-        "read" | "list" | "search" | "web_search" | "web_fetch"
+        "read" | "list" | "search" | "web_search" | "image_search" | "web_fetch"
     ) || (crate::hii_tools::is_hii_tool(tool) && !crate::hii_tools::is_mutating(tool))
 }
 
@@ -4763,7 +4764,7 @@ mod tests {
         // Raised again from 1_100 for the same reason the agent ceiling moved:
         // the natively-served tools must be named to be callable.
         assert!(
-            prompt.len() <= 1_150,
+            prompt.len() <= 1_175,
             "conversation prompt grew to {} bytes",
             prompt.len()
         );

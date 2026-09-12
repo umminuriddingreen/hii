@@ -96,6 +96,13 @@ const TOOLS: &[ToolSpec] = &[
         "search the public web and return compact cited results",
     ),
     tool(
+        "image_search",
+        "network",
+        Reach::Network,
+        false,
+        "find public images with direct image, thumbnail, and source URLs",
+    ),
+    tool(
         "web_fetch",
         "network",
         Reach::Network,
@@ -351,7 +358,7 @@ pub fn input_schema(name: &str) -> Value {
         ),
         "list" => object(json!({ "path": string }), json!([])),
         "search" => object(json!({ "query": string, "path": string }), json!(["query"])),
-        "web_search" => object(json!({ "query": string }), json!(["query"])),
+        "web_search" | "image_search" => object(json!({ "query": string }), json!(["query"])),
         "web_fetch" => object(json!({ "url": string }), json!(["url"])),
         "write" => object(
             json!({ "path": string, "content": string }),
@@ -910,6 +917,7 @@ mod tests {
         }
         assert!(has_declared_input_schema("read"));
         assert!(has_declared_input_schema("web_search"));
+        assert!(has_declared_input_schema("image_search"));
     }
 
     /// Every tool the agent can execute must be reachable as a flat action.

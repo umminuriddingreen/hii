@@ -76,7 +76,7 @@ impl Toolbelt {
                     return Ok(format!(
                         "binary file ({} bytes); not readable as text. Use search for content or shell for a hex/metadata view.",
                         metadata.len()
-                    ))
+                    ));
                 }
             };
             let windowed = offset.is_some() || limit.is_some();
@@ -239,26 +239,96 @@ impl Toolbelt {
             let mut command = Command::new("rg");
             command.args(["-n", "--hidden", "-g", "!.git", "--"]);
             command.arg(query).arg(&relative);
-            return self.run_command(command, false, DEFAULT_TIMEOUT_SECS);
+            let result = self.run_command(command, false, DEFAULT_TIMEOUT_SECS);
+            // ripgrep uses exit 1 for a valid search with no matches. Keep
+            // actual errors (exit 2, timeouts, and stderr) as failures.
+            if !result.ok && result.output.trim() == "exit 1" {
+                return tool_result(Ok(String::new()), false);
+            }
+            return result;
         }
         let base = self.workspace.join(&relative);
         tool_result(self.search_native(query, &base), false)
     }
 
-    /// Hand web discovery to HII's native WebView. The CLI does not scrape a
-    /// search engine or pretend that an HTTP parser observed a browser.
+    /// Search through a configured provider and return only observed results.
+    /// No browser handoff or guessed links are presented as search evidence.
     pub fn web_search(&self, query: &str) -> ToolResult {
         let query = query.trim();
         if query.is_empty() {
             return tool_result(Err("web search query cannot be empty".into()), false);
         }
-        tool_result(
-            Err(format!(
-                "NATIVE_WEBVIEW_REQUIRED\nquery: {query}\nnavigation: {}\nNo search results were observed by this CLI tool. Stop and ask the operator to complete the native-browser handoff or provide a source URL; do not treat this as research evidence and do not guess from the query.",
-                webview_search_url(query)
-            )),
-            false,
-        )
+        let result = (|| {
+            let key = std::env::var("BRAVE_SEARCH_API_KEY")
+                .ok()
+                .filter(|key| !key.trim().is_empty())
+                .ok_or("SEARCH_NOT_CONFIGURED: set BRAVE_SEARCH_API_KEY for native web search; no results were observed")?;
+            self.search_brave(
+                query,
+                &key,
+                "https://api.search.brave.com/res/v1/web/search",
+            )
+        })();
+        tool_result(result, false)
+    }
+
+    fn search_brave(&self, query: &str, key: &str, endpoint: &str) -> Result<String, String> {
+        let mut url = Url::parse(endpoint).map_err(|error| error.to_string())?;
+        url.query_pairs_mut()
+            .append_pair("q", &query.chars().take(300).collect::<String>())
+            .append_pair("count", "8");
+        let response = self
+            .web_http
+            .get(url.as_str())
+            .set("Accept", "application/json")
+            .set("X-Subscription-Token", key)
+            .call()
+            .map_err(|error| format!("web search failed: {error}; no results were observed"))?;
+        let body: serde_json::Value = response
+            .into_json()
+            .map_err(|error| format!("invalid search response: {error}"))?;
+        format_search_results(query, &body)
+    }
+
+    pub fn image_search(&self, query: &str) -> ToolResult {
+        let query = query.trim();
+        if query.is_empty() {
+            return tool_result(Err("image search query cannot be empty".into()), false);
+        }
+        let result = (|| {
+            let key = std::env::var("BRAVE_SEARCH_API_KEY").ok()
+                .filter(|key| !key.trim().is_empty())
+                .ok_or("SEARCH_NOT_CONFIGURED: set BRAVE_SEARCH_API_KEY for native image search; no results were observed")?;
+            self.search_images_brave(
+                query,
+                &key,
+                "https://api.search.brave.com/res/v1/images/search",
+            )
+        })();
+        tool_result(result, false)
+    }
+
+    fn search_images_brave(
+        &self,
+        query: &str,
+        key: &str,
+        endpoint: &str,
+    ) -> Result<String, String> {
+        let mut url = Url::parse(endpoint).map_err(|error| error.to_string())?;
+        url.query_pairs_mut()
+            .append_pair("q", &query.chars().take(300).collect::<String>())
+            .append_pair("count", "8");
+        let response = self
+            .web_http
+            .get(url.as_str())
+            .set("Accept", "application/json")
+            .set("X-Subscription-Token", key)
+            .call()
+            .map_err(|error| format!("image search failed: {error}; no results were observed"))?;
+        let body: serde_json::Value = response
+            .into_json()
+            .map_err(|error| format!("invalid image search response: {error}"))?;
+        format_image_results(query, &body)
     }
 
     /// Fetch one public page selected from research results. This is a bounded
@@ -382,7 +452,7 @@ impl Toolbelt {
                 // Refused rather than run: a check that cannot see a stage fail
                 // would report `ok`, which is worse evidence than none.
                 PipelineGuard::Unavailable(reason) => {
-                    return tool_result(Err(reason), verification)
+                    return tool_result(Err(reason), verification);
                 }
             }
         } else {
@@ -648,11 +718,86 @@ impl Toolbelt {
     }
 }
 
-fn webview_search_url(query: &str) -> String {
-    format!(
-        "https://www.google.com/search?q={}",
-        crate::text::percent_encode_query(query)
-    )
+fn format_search_results(query: &str, body: &serde_json::Value) -> Result<String, String> {
+    let results = body
+        .pointer("/web/results")
+        .and_then(|value| value.as_array())
+        .ok_or("search response had no web results; no results were observed")?;
+    let mut lines = Vec::new();
+    for result in results.iter().take(8) {
+        let (Some(title), Some(link)) = (
+            result.get("title").and_then(|value| value.as_str()),
+            result.get("url").and_then(|value| value.as_str()),
+        ) else {
+            continue;
+        };
+        if title.trim().is_empty() || validate_public_web_url(link).is_err() {
+            continue;
+        }
+        let description = result
+            .get("description")
+            .and_then(|value| value.as_str())
+            .map(readable_html)
+            .unwrap_or_default();
+        lines.push(format!(
+            "{}. {}\nURL: {}\n{}",
+            lines.len() + 1,
+            readable_html(title).chars().take(250).collect::<String>(),
+            link,
+            description.chars().take(500).collect::<String>()
+        ));
+    }
+    if lines.is_empty() {
+        Ok("No web results found.".into())
+    } else {
+        Ok(format!(
+            "SEARCH RESULTS for {query}\n\n{}",
+            lines.join("\n\n")
+        ))
+    }
+}
+
+fn format_image_results(query: &str, body: &serde_json::Value) -> Result<String, String> {
+    let results = body
+        .get("results")
+        .and_then(|value| value.as_array())
+        .ok_or("image search response had no results; no images were observed")?;
+    let mut lines = Vec::new();
+    for result in results.iter().take(8) {
+        let (Some(title), Some(source), Some(image)) = (
+            result.get("title").and_then(|value| value.as_str()),
+            result.get("url").and_then(|value| value.as_str()),
+            result
+                .pointer("/properties/url")
+                .and_then(|value| value.as_str()),
+        ) else {
+            continue;
+        };
+        if validate_public_web_url(source).is_err() || validate_public_web_url(image).is_err() {
+            continue;
+        }
+        let thumbnail = result
+            .pointer("/thumbnail/src")
+            .and_then(|value| value.as_str())
+            .filter(|url| validate_public_web_url(url).is_ok())
+            .unwrap_or(image);
+        lines.push(format!(
+            "{}. {}\nImage: {}\nThumbnail: {}\nSource: {}",
+            lines.len() + 1,
+            readable_html(title).chars().take(250).collect::<String>(),
+            image,
+            thumbnail,
+            source
+        ));
+    }
+    if lines.is_empty() {
+        Ok("No image results found.".into())
+    } else {
+        Ok(format!(
+            "IMAGE RESULTS for {query}\n\n{}",
+            lines.join("\n\n")
+        ))
+    }
 }
 
 fn readable_html(value: &str) -> String {
@@ -1495,20 +1640,70 @@ mod tests {
     }
 
     #[test]
-    fn web_search_hands_queries_to_the_native_webview() {
-        assert_eq!(
-            webview_search_url("local first"),
-            "https://www.google.com/search?q=local+first"
-        );
+    fn search_no_matches_is_not_a_tool_failure() {
         let path = workspace();
         let tools = Toolbelt::new(path.clone()).unwrap();
-        let result = tools.web_search("local first");
-        assert!(!result.ok);
-        assert!(result.output.contains("NATIVE_WEBVIEW_REQUIRED"));
-        assert!(result.output.contains("No search results were observed"));
-        assert!(result
-            .output
-            .contains("https://www.google.com/search?q=local+first"));
+        assert!(tools.write("sample.txt", "known content\n").ok);
+        let result = tools.search("absent-pattern", None);
+        assert!(result.ok, "{}", result.output);
+        assert!(result.output.is_empty());
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn search_results_include_only_public_source_links() {
+        let body = serde_json::json!({"web":{"results":[
+            {"title":"A <b>source</b>","url":"https://example.com/a","description":"Some <b>context</b>"},
+            {"title":"Internal","url":"http://127.0.0.1/private"}
+        ]}});
+        let result = format_search_results("test", &body).unwrap();
+        assert!(result.contains("https://example.com/a"));
+        assert!(result.contains("Some context"));
+        assert!(!result.contains("127.0.0.1"));
+    }
+
+    #[test]
+    fn image_results_include_direct_image_thumbnail_and_source() {
+        let body = serde_json::json!({"results":[
+            {"title":"Facade","url":"https://example.com/page","properties":{"url":"https://example.com/a.jpg"},"thumbnail":{"src":"https://example.com/thumb.jpg"}},
+            {"title":"Internal","url":"http://127.0.0.1/page","properties":{"url":"https://example.com/b.jpg"}}
+        ]});
+        let result = format_image_results("facade", &body).unwrap();
+        assert!(result.contains("Image: https://example.com/a.jpg"));
+        assert!(result.contains("Thumbnail: https://example.com/thumb.jpg"));
+        assert!(result.contains("Source: https://example.com/page"));
+        assert!(!result.contains("127.0.0.1"));
+    }
+
+    #[test]
+    fn native_image_search_requests_provider_and_returns_observed_result() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 4096];
+            let size = stream.read(&mut request).unwrap();
+            let request = String::from_utf8_lossy(&request[..size]);
+            assert!(request.contains("q=facade+study"));
+            assert!(request
+                .to_ascii_lowercase()
+                .contains("x-subscription-token: test-key"));
+            let body = r#"{"results":[{"title":"Facade","url":"https://example.com/page","properties":{"url":"https://example.com/a.jpg"},"thumbnail":{"src":"https://example.com/t.jpg"}}]}"#;
+            use std::io::Write;
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+        });
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        let result = tools
+            .search_images_brave(
+                "facade study",
+                "test-key",
+                &format!("http://{address}/images/search"),
+            )
+            .unwrap();
+        assert!(result.contains("Image: https://example.com/a.jpg"));
+        server.join().unwrap();
         let _ = fs::remove_dir_all(path);
     }
 

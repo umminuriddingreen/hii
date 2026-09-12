@@ -499,7 +499,7 @@ fn assess_case(
         .filter(|tool| {
             matches!(
                 tool.as_str(),
-                "read" | "list" | "search" | "web_search" | "web_fetch"
+                "read" | "list" | "search" | "web_search" | "image_search" | "web_fetch"
             )
         })
         .cloned()
@@ -509,7 +509,7 @@ fn assess_case(
         .filter(|tool| {
             !matches!(
                 tool.as_str(),
-                "verify" | "read" | "list" | "search" | "web_search" | "web_fetch"
+                "verify" | "read" | "list" | "search" | "web_search" | "image_search" | "web_fetch"
             )
         })
         .cloned()
@@ -714,10 +714,11 @@ mod tests {
     fn suite_is_twenty_declarative_requests_balanced_across_categories() {
         let suite = suite().expect("valid suite");
         assert_eq!(suite.cases.len(), 20);
-        assert!(suite.cases.iter().all(|case| case
-            .expectations
-            .iter()
-            .all(|item| item.path == RESULT_PATH)));
+        assert!(suite.cases.iter().all(|case| {
+            case.expectations
+                .iter()
+                .all(|item| item.path == RESULT_PATH)
+        }));
     }
 
     #[test]

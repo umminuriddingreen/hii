@@ -278,7 +278,7 @@ impl Action {
 fn capability_phase(tool: &str) -> &'static str {
     match tool {
         "verify" => "verify",
-        "read" | "list" | "search" | "web_search" | "web_fetch" => "observe",
+        "read" | "list" | "search" | "web_search" | "image_search" | "web_fetch" => "observe",
         other if crate::hii_tools::is_hii_tool(other) && !crate::hii_tools::is_mutating(other) => {
             "observe"
         }
@@ -286,8 +286,7 @@ fn capability_phase(tool: &str) -> &'static str {
     }
 }
 
-pub(crate) const MODEL_LOOP_DETECTED_MESSAGE: &str =
-    "MODEL LOOP DETECTED — HII stopped the repeated rejected action and preserved the session. Revise or steer the request; completed workspace changes remain in place.";
+pub(crate) const MODEL_LOOP_DETECTED_MESSAGE: &str = "MODEL LOOP DETECTED — HII stopped the repeated rejected action and preserved the session. Revise or steer the request; completed workspace changes remain in place.";
 const ADAPTIVE_REASONING_BUDGET_RETRY: &str = "adaptive reasoning budget ended";
 const ADAPTIVE_REASONING_MAX_CHARS: usize = 4_096;
 const ADAPTIVE_REASONING_MAX_TIME: Duration = Duration::from_secs(12);
@@ -371,7 +370,8 @@ fn tool_failure_signature(tool: &str, output: &str) -> Option<String> {
         .collect::<Vec<_>>()
         .join(" ")
         .to_ascii_lowercase();
-    let repeatable_class = first_line.starts_with("native_webview_required")
+    let repeatable_class = first_line.starts_with("search_not_configured:")
+        || first_line.starts_with("native_webview_required")
         || first_line.starts_with("web fetch returned http ")
         || first_line.starts_with("web fetch failed:")
         || first_line.starts_with("blocked destructive shell pattern:")
@@ -445,7 +445,8 @@ fn final_requires_model_verification(
 }
 
 fn counts_as_read_only_source_evidence(authority: Authority, tool: &str, ok: bool) -> bool {
-    ok && authority == Authority::ReadOnly && matches!(tool, "web_search" | "web_fetch")
+    ok && authority == Authority::ReadOnly
+        && matches!(tool, "web_search" | "image_search" | "web_fetch")
 }
 
 pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
@@ -971,7 +972,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 let is_hii = crate::hii_tools::is_hii_tool(&tool);
                 let observation = matches!(
                     tool.as_str(),
-                    "read" | "list" | "search" | "web_search" | "web_fetch"
+                    "read" | "list" | "search" | "web_search" | "image_search" | "web_fetch"
                 );
                 let observation_key = observation.then(|| {
                     observation_signature(
@@ -1606,7 +1607,11 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 git_before,
                 git_status,
                 serde_json::to_string(&artifacts).unwrap_or_default(),
-                if diff.is_empty() { "(no tracked diff)" } else { &diff }
+                if diff.is_empty() {
+                    "(no tracked diff)"
+                } else {
+                    &diff
+                }
             );
             Some(
                 match ollama.chat_text(
@@ -2271,7 +2276,7 @@ fn resolve_last_message_path(workspace: &Path, requested: &Path) -> Result<PathB
                 return Err(format!(
                     "--last-message must stay inside the workspace: {}",
                     requested.display()
-                ))
+                ));
             }
         }
     }
@@ -2595,6 +2600,7 @@ pub(crate) fn execute_tool(tools: &Toolbelt, call: ToolCall, dry_run: bool) -> T
         "list" => tools.list(call.path),
         "search" => tools.search(call.query.unwrap_or(""), call.path),
         "web_search" => tools.web_search(call.query.unwrap_or("")),
+        "image_search" => tools.image_search(call.query.unwrap_or("")),
         "web_fetch" if call.url.is_none_or(|url| url.trim().is_empty()) => malformed("url"),
         "web_fetch" => tools.web_fetch(call.url.unwrap_or("")),
         "write" if dry_run => blocked("write"),
@@ -2973,7 +2979,7 @@ mod tests {
         // now ~30% of the prompt and is the first place to look if this needs
         // to come back down -- by dropping tools, not by describing them less.
         assert!(
-            prompt.len() <= 1_300,
+            prompt.len() <= 1_350,
             "agent prompt grew to {} bytes",
             prompt.len()
         );
