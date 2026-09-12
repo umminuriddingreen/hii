@@ -86,7 +86,7 @@ describe('governed object reads', () => {
     await seed(['a', 'b', 'c']);
     const { listApprovedObjects } = await governed();
     expect(listApprovedObjects(scope()).map((entry) => entry.id)).toEqual(['a', 'b']);
-  });
+  }, 30_000); // Windows CI took 15s on this first DB-backed case under parallel load.
 
   it('refuses to read an object outside the approved scope', async () => {
     await seed(['a', 'c']);
