@@ -62,6 +62,8 @@
 }
 .results button[aria-selected='true'], .results button:hover { background: #111; color: #fff; }
 .results button[aria-selected='true'] kbd, .results button:hover kbd { color: #ddd; }
+.results button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.results button kbd { flex: none; margin-left: 12px; }
 .results p, .message { margin: 0; padding: 10px 14px; }
 .palette > small { padding: 8px 14px; border-top: 1px solid #eee; color: #777; }
 .palette form { display: grid; }

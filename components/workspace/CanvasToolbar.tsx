@@ -33,6 +33,7 @@ export type CanvasToolbarProps = {
   onOpenSiteViews?: () => void;
   onOpenParameters?: () => void;
   onRequestFeature?: (title: string) => Promise<string>;
+  onStartWork?: (intent: string) => void;
 };
 
 const toolCommands: Array<{ label: string; shortcut: string; id: CanvasTool; keywords: string }> = [
@@ -50,7 +51,7 @@ export function CanvasToolbar({
   activeTool, capabilities = {}, open, disabled = false, onOpenChange, onToolChange,
   onZoomIn, onZoomOut, onFitView, onOpenScenes, onExport, onOpenTerminal,
   onSearch, onOpenActivity, onOpenRemote, onOpenSiteViews, onOpenParameters,
-  onRequestFeature
+  onRequestFeature, onStartWork
 }: CanvasToolbarProps) {
   const [localOpen, setLocalOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -88,6 +89,9 @@ export function CanvasToolbar({
     return items;
   }, [capabilities.activity, capabilities.export, capabilities.nativeTerminal, capabilities.remote, capabilities.scenes, capabilities.search, onExport, onFitView, onOpenActivity, onOpenParameters, onOpenRemote, onOpenScenes, onOpenSiteViews, onOpenTerminal, onRequestFeature, onSearch, onToolChange, onZoomIn, onZoomOut]);
   const visible = commands.filter((command) => `${command.label} ${command.keywords} ${command.shortcut}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const workIntent = query.trim();
+  const showStartWork = Boolean(onStartWork && workIntent);
+  const resultCount = visible.length + Number(showStartWork);
   const run = (action: () => void, label: string) => {
     if (label === 'Request a feature') { setFeatureDraft(''); setQuery(''); return; }
     action();
@@ -96,9 +100,10 @@ export function CanvasToolbar({
   const onKeys = (event: KeyboardEvent<HTMLInputElement>) => {
     event.stopPropagation();
     if (event.key === 'Escape') { event.preventDefault(); setExpanded(false); }
-    else if (event.key === 'ArrowDown') { event.preventDefault(); setIndex((value) => Math.min(value + 1, visible.length - 1)); }
+    else if (event.key === 'ArrowDown') { event.preventDefault(); setIndex((value) => Math.min(value + 1, Math.max(0, resultCount - 1))); }
     else if (event.key === 'ArrowUp') { event.preventDefault(); setIndex((value) => Math.max(value - 1, 0)); }
     else if (event.key === 'Enter' && visible[index]) { event.preventDefault(); run(visible[index].run, visible[index].label); }
+    else if (event.key === 'Enter' && showStartWork && index === visible.length) { event.preventDefault(); onStartWork?.(workIntent); setExpanded(false); }
   };
   const saveFeature = async () => {
     const title = featureDraft?.trim() || '';
@@ -120,12 +125,15 @@ export function CanvasToolbar({
     </button>
     {expanded && <section id="hii-information-terminal" className={styles.palette} aria-label="Information terminal">
       {featureDraft === null ? <>
-        <input ref={input} aria-label="Search HII commands" placeholder="Type a command, tool, or request..." value={query} onChange={(event) => { setQuery(event.target.value); setIndex(0); }} onKeyDown={onKeys} disabled={disabled} />
+        <input ref={input} aria-label="Search HII commands" placeholder="Find a command or describe work..." value={query} onChange={(event) => { setQuery(event.target.value); setIndex(0); }} onKeyDown={onKeys} disabled={disabled} />
         <div className={styles.results} role="listbox" aria-label="Commands">
           {visible.map((command, position) => <button key={command.label} type="button" role="option" aria-selected={position === index} onMouseEnter={() => setIndex(position)} onClick={() => run(command.run, command.label)}>
             <span>{command.label}{command.id === activeTool && toolCommands.some((tool) => tool.label === command.label) ? ' ✓' : ''}</span><kbd>{command.shortcut}</kbd>
           </button>)}
-          {!visible.length && <p>No matching command.</p>}
+          {showStartWork && <button type="button" role="option" aria-selected={index === visible.length} onMouseEnter={() => setIndex(visible.length)} onClick={() => { onStartWork?.(workIntent); setExpanded(false); }}>
+            <span>Start work: {workIntent}</span><kbd>review first</kbd>
+          </button>}
+          {!resultCount && <p>No matching command.</p>}
         </div>
       </> : <form onSubmit={(event) => { event.preventDefault(); void saveFeature(); }}>
         <label htmlFor="hii-feature-request">Request a feature</label>

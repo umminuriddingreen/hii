@@ -2718,6 +2718,7 @@ export function HiiRoot({
         onOpenSiteViews={() => setSiteViewsOpen(true)}
         onOpenParameters={visibleNodes.some((node) => node.type === 'image') ? () => setParametricLayoutOpen(true) : undefined}
         onRequestFeature={runtimeEnabled ? requestFeature : undefined}
+        onStartWork={runtimeEnabled ? openAssistantPanel : undefined}
       />
       <CanvasSelectionBar selectionCount={selected.length} canConnect={selected.length <= 2} canAskHii={Boolean(runtimeEnabled || onRequestDevice)} onAction={selectionAction} />
       {inspectorOpen && selectedNodes.length > 0 && <CanvasObjectInspector

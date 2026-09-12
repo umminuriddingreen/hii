@@ -50,6 +50,22 @@ describe('shared canvas controls', () => {
     expect(terminal).toHaveBeenCalledTimes(1);
   });
 
+  it('stages an unmatched work intent for review without running it', () => {
+    const startWork = vi.fn();
+    renderToolbar({ onStartWork: startWork });
+    openCommands();
+    const input = container.querySelector('[aria-label="Search HII commands"]') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, 'organize my project research');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.textContent).toContain('Start work: organize my project research');
+    act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    expect(startWork).toHaveBeenCalledWith('organize my project research');
+    expect(container.querySelector('[aria-label="Search HII commands"]')).toBeNull();
+  });
+
   it('saves a feature request through the supplied local board action', async () => {
     const request = vi.fn().mockResolvedValue('added 12345678  Better canvas');
     renderToolbar({ onRequestFeature: request });
