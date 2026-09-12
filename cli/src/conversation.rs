@@ -1384,6 +1384,20 @@ impl Conversation {
                     if self.shows_tool_output() {
                         crate::tui::tool_output(&safe_output);
                     }
+                    if result.ok
+                        && tool == "image_search"
+                        && io::stdout().is_terminal()
+                        && crate::settings::load(&self.paths.runtime).inline_images != "off"
+                    {
+                        if let Some(thumbnail) = safe_output
+                            .lines()
+                            .find_map(|line| line.strip_prefix("Thumbnail: "))
+                        {
+                            if let Ok(image) = self.tools.image_preview(thumbnail) {
+                                let _ = crate::terminal_image::render(&self.paths.runtime, &image);
+                            }
+                        }
+                    }
                     if result.verification || shell_evidence {
                         let accepted = result.ok && (!web_mutation_pending || tool == "http");
                         if result.ok && web_mutation_pending && tool != "http" {

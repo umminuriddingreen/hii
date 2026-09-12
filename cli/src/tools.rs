@@ -331,6 +331,52 @@ impl Toolbelt {
         format_image_results(query, &body)
     }
 
+    /// Load a bounded public thumbnail for the CLI's existing Kitty image
+    /// renderer. Search metadata remains useful when inline images are off.
+    pub fn image_preview(&self, raw_url: &str) -> Result<crate::attachments::ImagePayload, String> {
+        let url = validate_public_web_url(raw_url)?;
+        let response = self
+            .web_http
+            .get(url.as_str())
+            .call()
+            .map_err(|error| format!("thumbnail fetch failed: {error}"))?;
+        let mime = response
+            .header("Content-Type")
+            .unwrap_or("")
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if !matches!(
+            mime.as_str(),
+            "image/png" | "image/jpeg" | "image/webp" | "image/gif"
+        ) {
+            return Err("thumbnail response is not a supported image".into());
+        }
+        if response
+            .header("Content-Length")
+            .and_then(|size| size.parse::<u64>().ok())
+            .is_some_and(|size| size > 2_000_000)
+        {
+            return Err("thumbnail exceeds 2 MB limit".into());
+        }
+        let mut bytes = Vec::new();
+        response
+            .into_reader()
+            .take(2_000_001)
+            .read_to_end(&mut bytes)
+            .map_err(|error| error.to_string())?;
+        if bytes.len() > 2_000_000 {
+            return Err("thumbnail exceeds 2 MB limit".into());
+        }
+        use base64::Engine as _;
+        Ok(crate::attachments::ImagePayload {
+            mime_type: mime.into(),
+            base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+        })
+    }
+
     /// Fetch one public page selected from research results. This is a bounded
     /// GET-only reader, not a general network client: credentials, non-standard
     /// ports, loopback/private destinations, redirect escapes, and binary
@@ -1704,6 +1750,16 @@ mod tests {
             .unwrap();
         assert!(result.contains("Image: https://example.com/a.jpg"));
         server.join().unwrap();
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn image_preview_rejects_private_urls() {
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        assert!(tools
+            .image_preview("http://127.0.0.1:8888/image.png")
+            .is_err());
         let _ = fs::remove_dir_all(path);
     }
 
