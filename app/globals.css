@@ -364,36 +364,41 @@ button, input, textarea { font: inherit; }
   --browser-muted: #747474;
   --browser-line: #dededb;
   display: grid;
-  grid-template-rows: 42px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   width: 100%;
   height: 100%;
   position: relative;
-  overflow: visible;
+  overflow: hidden;
   background: #f6f6f4;
   color: var(--browser-ink);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
 }
-.hii-browser-tabs, .hii-browser-nav { display: flex; align-items: center; border-bottom: 1px solid var(--browser-line); }
-.hii-browser-tabs { justify-content: space-between; padding: 0 10px 0 14px; background: #181b21; }
-.hii-browser-tabs > div { display: flex; align-items: center; min-width: 0; gap: 8px; }
-.hii-browser-view-actions { flex: 0 0 auto; }
-.hii-browser-tabs i { width: 7px; height: 7px; border-radius: 50%; background: #7ce3ae; box-shadow: 0 0 10px rgba(124, 227, 174, .38); }
-.hii-browser-tabs strong { max-width: 260px; overflow: hidden; font-size: 10px; font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
-.hii-browser-tabs small { color: var(--browser-muted); font: 8px/1 "SF Mono", ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase; }
 .hii-dev-browser button { border: 0; background: transparent; color: var(--browser-muted); cursor: pointer; }
 .hii-dev-browser button:hover { color: var(--browser-ink); }
-.hii-browser-tabs button { padding: 4px 7px; border: 1px solid var(--browser-line); border-radius: 4px; font: 9px/1 "SF Mono", ui-monospace, monospace; }
-.hii-browser-nav { gap: 3px; padding: 5px 8px; background: #f6f6f4; }
-.hii-browser-nav > button { width: 30px; height: 30px; border-radius: 5px; font-size: 15px; }
-.hii-browser-nav > button:disabled { cursor: default; opacity: .28; }
-.hii-browser-location { flex: 1; min-width: 0; margin: 0 8px; overflow: hidden; color: var(--browser-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.hii-browser-open { padding: 0 8px; color: var(--browser-muted); font: 9px/30px "SF Mono", ui-monospace, monospace; text-decoration: none; white-space: nowrap; }
-.hii-browser-open:hover { color: var(--browser-ink); }
-.hii-browser-nav .hii-browser-capture { color: #555; }
+.hii-browser-nav { min-width: 0; border-bottom: 1px solid var(--browser-line); background: #f6f6f4; }
+.hii-browser-nav-main { display: flex; align-items: center; gap: 2px; min-width: 0; min-height: 40px; padding: 4px 7px; }
+.hii-browser-nav-main > button { display: grid; flex: 0 0 30px; width: 30px; height: 30px; padding: 0; place-items: center; border-radius: 4px; }
+.hii-browser-nav-main > button:hover, .hii-browser-nav-main > button[aria-expanded="true"] { background: #e9e9e6; }
+.hii-browser-nav-main > button:disabled { cursor: default; opacity: .28; }
+.hii-browser-nav-main .hii-browser-capture { color: #454545; }
+.hii-browser-address { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; height: 30px; margin: 0 3px; padding: 0 10px; border: 1px solid #e3e3e0; border-radius: 5px; background: #fff; color: #777; }
+.hii-browser-address:focus-within { border-color: #a2a7a8; }
+.hii-browser-address input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: transparent; color: var(--browser-ink); font: 12px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
+.hii-browser-address input::placeholder { color: #929292; }
+.hii-browser-omnibox-options { max-height: min(220px, 40vh); overflow: auto; padding: 4px 7px 7px; border-top: 1px solid var(--browser-line); }
+.hii-browser-omnibox-options button { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 34px; padding: 5px 10px; border-radius: 4px; text-align: left; }
+.hii-browser-omnibox-options button[aria-selected="true"], .hii-browser-omnibox-options button:hover { background: #e9e9e6; }
+.hii-browser-omnibox-options span { flex: 0 0 54px; color: #888; font-size: 10px; text-transform: capitalize; }
+.hii-browser-omnibox-options strong { overflow: hidden; color: #333; font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.hii-browser-more { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 4px 10px; border-top: 1px solid var(--browser-line); }
+.hii-browser-more button, .hii-browser-more label { color: #444; font-size: 11px; }
+.hii-browser-more button { padding: 6px 8px; border-radius: 4px; }
+.hii-browser-more button:hover { background: #e9e9e6; }
+.hii-browser-more label { display: flex; align-items: center; gap: 7px; margin-left: auto; }
+.hii-browser-more select { padding: 4px; border: 1px solid var(--browser-line); border-radius: 4px; background: #fff; color: #333; font: inherit; }
 .hii-browser-workarea { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; overflow: hidden; }
-.hii-dev-browser[data-agent="true"] .hii-browser-workarea { grid-template-columns: minmax(0, 1fr) 260px; }
 .hii-dev-browser[data-device="desktop"] .hii-browser-viewport { width: min(1280px, 100%); justify-self: center; border-inline: 1px solid var(--browser-line); }
-.hii-dev-browser[data-device="mobile"] .hii-browser-viewport { width: 390px; justify-self: center; border-inline: 1px solid var(--browser-line); }
+.hii-dev-browser[data-device="mobile"] .hii-browser-viewport { width: min(390px, 100%); justify-self: center; border-inline: 1px solid var(--browser-line); }
 .hii-browser-viewport { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #fff; }
 .hii-browser-viewport iframe { width: 100%; height: 100%; border: 0; background: #fff; }
 .hii-browser-loading { position: absolute; left: 50%; top: 50%; z-index: 1; transform: translate(-50%, -50%); color: #5d6572; font: 10px/1.4 "SF Mono", ui-monospace, monospace; pointer-events: none; }
@@ -407,25 +412,6 @@ button, input, textarea { font: inherit; }
 .hii-browser-results h3 { margin: 5px 0 6px; color: #171717; font: 500 18px/1.25 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; letter-spacing: -.015em; }
 .hii-browser-results p { max-width: 680px; margin: 0; color: #5d5d5d; font-size: 13px; line-height: 1.5; }
 .hii-browser-results .hii-browser-results-empty { color: #777; }
-.hii-browser-agent { display: grid; grid-template-rows: auto auto minmax(120px, 1fr) auto; gap: 13px; min-height: 0; padding: 16px; border-left: 1px solid var(--browser-line); background: #15181d; }
-.hii-browser-agent > header { display: flex; align-items: center; justify-content: space-between; }
-.hii-browser-agent > header span { font-size: 11px; font-weight: 620; }
-.hii-browser-agent > header small { color: #65d0a0; font: 8px/1 "SF Mono", ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
-.hii-browser-agent > p { margin: 0; color: var(--browser-muted); font-size: 10px; line-height: 1.5; }
-.hii-browser-agent form { display: grid; grid-template-rows: minmax(90px, 1fr) auto; gap: 8px; min-height: 0; }
-.hii-browser-agent textarea { width: 100%; resize: none; border: 1px solid var(--browser-line); border-radius: 6px; outline: 0; background: #0d0f12; color: var(--browser-ink); padding: 10px; font-size: 11px; line-height: 1.45; }
-.hii-browser-agent textarea:focus { border-color: #657089; }
-.hii-browser-agent form button { display: flex; align-items: center; justify-content: space-between; min-height: 32px; padding: 0 10px; border-radius: 5px; background: #e8edf5; color: #111419; font-size: 10px; font-weight: 600; }
-.hii-browser-agent form button:disabled { cursor: default; opacity: .28; }
-.hii-browser-agent form button span { color: #626a77; font: 8px/1 "SF Mono", ui-monospace, monospace; }
-.hii-browser-agent dl { display: grid; gap: 7px; margin: 0; padding-top: 12px; border-top: 1px solid var(--browser-line); }
-.hii-browser-agent dl div { display: flex; justify-content: space-between; gap: 8px; font: 8px/1.2 "SF Mono", ui-monospace, monospace; text-transform: uppercase; }
-.hii-browser-agent dt { color: #626b79; }
-.hii-browser-agent dd { margin: 0; color: #aeb6c3; text-align: right; }
-.hii-browser-hover-search { position: absolute; top: calc(100% + 10px); left: 50%; z-index: 20; display: grid; grid-template-columns: auto minmax(0, 1fr); width: min(560px, calc(100% - 32px)); height: 40px; align-items: center; gap: 8px; padding: 0 13px; transform: translateX(-50%); border: 1px solid rgba(22, 22, 22, .14); border-radius: 9px; background: rgba(255, 255, 255, .96); box-shadow: 0 12px 34px rgba(0, 0, 0, .13); backdrop-filter: blur(18px); }
-.hii-browser-hover-search span { color: #777; font-size: 16px; }
-.hii-browser-hover-search input { min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: transparent; color: #181818; font: 13px/1.2 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
-.hii-browser-hover-search input::placeholder { color: #8a8a8a; }
 
 .hii-prompt-shell {
   position: fixed;

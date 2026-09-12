@@ -656,11 +656,9 @@ export function HiiWebAccess() {
         </header>
         {panel ? <HiiWebPanel
           panel={panel}
-          accountId={canvasAccountId}
           csrfToken={session.csrfToken ?? ''}
           shareNode={shareNode}
           onClose={() => { setPanel(null); setShareNode(null); }}
-          onPanel={(nextPanel) => setPanel(nextPanel)}
           onImport={(item: FeedItem) => {
             setCanvasImport({ id: crypto.randomUUID(), seed: nodeSeedFromFeedSnapshot(item) });
             setPanel(null);
@@ -737,8 +735,6 @@ export function HiiWebAccess() {
             <p role="status" aria-live="polite">{workspaceMessage}</p>
             <nav className={styles.platformLinks} aria-label="Open HII on a computer">
               <button type="button" onClick={() => { setPanel('models'); setAccountOpen(false); }}>HII Remote</button>
-              <button type="button" onClick={() => { setPanel('say-hi'); setAccountOpen(false); }}>Ask HII</button>
-              <button type="button" onClick={() => { setPanel('chat'); setAccountOpen(false); }}>HII Social</button>
               <a href="/download#mac">HII for Mac</a>
               <a href="/download#windows">HII for Windows</a>
             </nav>

@@ -28,6 +28,9 @@ describe('HII interactive browser targets', () => {
     expect(browserNavigationTarget('spatial computing interfaces')).toBe(
       'https://www.google.com/search?q=spatial%20computing%20interfaces'
     );
+    expect(browserNavigationTarget('architecture')).toBe('https://www.google.com/search?q=architecture');
+    expect(browserNavigationTarget('site:archdaily.com museum')).toBe('https://www.google.com/search?q=site%3Aarchdaily.com%20museum');
+    expect(browserNavigationTarget('archdaily.com')).toBe('https://archdaily.com/');
     expect(browserNavigationTarget('file:///tmp/private')).toBeNull();
   });
 
@@ -42,12 +45,11 @@ describe('HII interactive browser targets', () => {
     expect(browser).toContain("action('back')");
     expect(browser).toContain("action('forward')");
     expect(browser).toContain("action('reload')");
-    expect(browser).toContain('className="hii-browser-hover-search"');
+    expect(browser).toContain('className="hii-browser-address"');
     expect(browser).toContain('aria-label="Search or open another page"');
-    expect(browser).toContain('void navigate()');
-    expect(browser).toContain('/api/search?q=');
+    expect(browser).toContain('className="hii-browser-omnibox-options"');
+    expect(browser).toContain('activeSearchQuery');
     expect(browser).toContain('className="hii-browser-results"');
-    expect(browser).toContain('void navigate(result.url)');
     expect(css).toContain('.hii-node[data-node-type="browser"] { overflow: visible; contain: none; }');
   });
 });

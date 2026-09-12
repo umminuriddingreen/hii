@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowClockwise, ArrowLeft, ArrowRight, Check, DownloadSimple, DotsThree, MagnifyingGlass } from '@phosphor-icons/react';
 import { captureInformation, type InformationCaptureResult } from '@/lib/client/hii-bridge';
 import { browserNavigationTarget, browserTargetKind, normalizedBrowserUrl } from '@/lib/workspace/browser-target';
 
@@ -8,7 +9,6 @@ type Props = {
   nodeId: string;
   initialUrl?: string;
   onUrl: (url: string) => void;
-  onAgent: (request: string) => void;
   onCapture: (result: InformationCaptureResult) => void;
   onOpenObject?: (url: string) => void;
 };
@@ -27,7 +27,7 @@ function isTauri() {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture, onOpenObject }: Props) {
+export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onCapture, onOpenObject }: Props) {
   const initial = browserNavigationTarget(initialUrl || '') || 'https://developer.mozilla.org/';
   const [url, setUrl] = useState(initial);
   const [draftUrl, setDraftUrl] = useState(searchQuery(initial) || initial);
@@ -35,14 +35,16 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
   const [historyIndex, setHistoryIndex] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
   const [status, setStatus] = useState<'loading' | 'ready' | 'captured' | 'error'>('loading');
-  const [request, setRequest] = useState('');
   const [device, setDevice] = useState<'responsive' | 'desktop' | 'mobile'>('responsive');
-  const [showAgent, setShowAgent] = useState(false);
+  const [showMore, setShowMore] = useState(false);
+  const [omniboxOpen, setOmniboxOpen] = useState(false);
+  const [omniboxIndex, setOmniboxIndex] = useState(0);
   const [searchResults, setSearchResults] = useState<WebSearchResult[] | null>(null);
   const [searchError, setSearchError] = useState('');
   const viewport = useRef<HTMLDivElement | null>(null);
   const webview = useRef<import('@tauri-apps/api/webview').Webview | null>(null);
   const label = `hii-browser-${nodeId.replace(/[^a-zA-Z0-9-]/g, '-')}`;
+  const omniboxId = `${label}-options`;
 
   const syncBounds = useCallback(async () => {
     if (!webview.current || !viewport.current) return;
@@ -95,7 +97,22 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
 
   const targetKind = useMemo(() => browserTargetKind(url), [url]);
   const activeSearchQuery = useMemo(() => searchQuery(url), [url]);
-  const locationLabel = !isTauri() && activeSearchQuery ? `Search · ${activeSearchQuery}` : url;
+  const omniboxOptions = useMemo(() => {
+    if (!omniboxOpen) return [];
+    const input = draftUrl.trim();
+    const target = browserNavigationTarget(input);
+    if (!target) return [];
+    const isAddress = normalizedBrowserUrl(input) !== null;
+    const options = [{ target, label: isAddress ? `Open ${input}` : `Search the web for ${input}`, kind: isAddress ? 'address' : 'search' }];
+    const seen = new Set([target]);
+    for (const entry of [...history].reverse()) {
+      if (seen.has(entry) || !entry.toLowerCase().includes(input.toLowerCase())) continue;
+      seen.add(entry);
+      options.push({ target: entry, label: searchQuery(entry) || entry, kind: 'recent' });
+      if (options.length === 5) break;
+    }
+    return options;
+  }, [draftUrl, history, omniboxOpen]);
 
   useEffect(() => {
     if (isTauri() || !activeSearchQuery) { setSearchResults(null); setSearchError(''); return; }
@@ -131,6 +148,8 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
   const navigate = async (nextValue = draftUrl) => {
     const next = browserNavigationTarget(nextValue);
     if (!next) { setStatus('error'); return; }
+    setOmniboxOpen(false);
+    setShowMore(false);
     commitUrl(next);
     setStatus('loading');
     try {
@@ -161,8 +180,6 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
     setStatus('loading');
   };
 
-  const cycleDevice = () => setDevice((current) => current === 'responsive' ? 'desktop' : current === 'desktop' ? 'mobile' : 'responsive');
-
   const capture = async () => {
     setStatus('loading');
     try {
@@ -173,16 +190,30 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
   };
 
   return (
-    <article className="hii-dev-browser" data-device={device} data-agent={showAgent || undefined} data-target={targetKind}>
+    <article className="hii-dev-browser" data-device={device} data-target={targetKind}>
       <nav className="hii-browser-nav" aria-label="Browser controls">
-        <button type="button" title="Back" disabled={!isTauri() && historyIndex === 0} onClick={() => void action('back')}>←</button>
-        <button type="button" title="Forward" disabled={!isTauri() && historyIndex >= history.length - 1} onClick={() => void action('forward')}>→</button>
-        <button type="button" title="Reload" onClick={() => void action('reload')}>↻</button>
-        <span className="hii-browser-location" title={url}>{locationLabel}</span>
-        <button type="button" title="View size" onClick={cycleDevice}>{device === 'responsive' ? '↔' : device === 'desktop' ? '▭' : '▯'}</button>
-        <button type="button" title="Ask HII about this page" onClick={() => setShowAgent((current) => !current)}>✦</button>
-        {onOpenObject && <button type="button" title="Duplicate page as canvas object" onClick={() => onOpenObject(url)}>＋</button>}
-        <button type="button" className="hii-browser-capture" title="Capture source" onClick={() => void capture()}>{status === 'captured' ? '✓' : '↓'}</button>
+        <div className="hii-browser-nav-main">
+          <button type="button" title="Back" aria-label="Back" disabled={!isTauri() && historyIndex === 0} onClick={() => void action('back')}><ArrowLeft size={16} /></button>
+          <button type="button" title="Forward" aria-label="Forward" disabled={!isTauri() && historyIndex >= history.length - 1} onClick={() => void action('forward')}><ArrowRight size={16} /></button>
+          <button type="button" title="Reload" aria-label="Reload" onClick={() => void action('reload')}><ArrowClockwise size={16} /></button>
+          <form className="hii-browser-address" onSubmit={(event) => { event.preventDefault(); void navigate(omniboxOpen ? omniboxOptions[omniboxIndex]?.target || draftUrl : draftUrl); }}>
+            <MagnifyingGlass size={15} aria-hidden="true" />
+            <input value={draftUrl} onChange={(event) => { setDraftUrl(event.target.value); setOmniboxOpen(true); setOmniboxIndex(0); }} onFocus={(event) => { event.target.select(); setOmniboxOpen(true); setShowMore(false); }} onBlur={() => setOmniboxOpen(false)} onKeyDown={(event) => {
+              if (event.key === 'ArrowDown' && omniboxOptions.length) { event.preventDefault(); setOmniboxIndex((current) => (current + 1) % omniboxOptions.length); }
+              if (event.key === 'ArrowUp' && omniboxOptions.length) { event.preventDefault(); setOmniboxIndex((current) => (current - 1 + omniboxOptions.length) % omniboxOptions.length); }
+              if (event.key === 'Escape') { setOmniboxOpen(false); event.currentTarget.blur(); }
+            }} role="combobox" aria-autocomplete="list" aria-controls={omniboxId} aria-expanded={omniboxOpen && omniboxOptions.length > 0} aria-activedescendant={omniboxOpen && omniboxOptions.length ? `${omniboxId}-${omniboxIndex}` : undefined} aria-label="Search or open another page" placeholder="Search or enter a URL" spellCheck={false} />
+          </form>
+          <button type="button" className="hii-browser-capture" title="Capture source" aria-label="Capture source" onClick={() => void capture()}>{status === 'captured' ? <Check size={17} /> : <DownloadSimple size={17} />}</button>
+          <button type="button" title="More browser actions" aria-label="More browser actions" aria-expanded={showMore} onClick={() => { setShowMore((current) => !current); setOmniboxOpen(false); }}><DotsThree size={19} /></button>
+        </div>
+        {omniboxOpen && omniboxOptions.length > 0 && <div className="hii-browser-omnibox-options" id={omniboxId} role="listbox" aria-label="Browser suggestions">
+          {omniboxOptions.map((option, index) => <button type="button" role="option" id={`${omniboxId}-${index}`} aria-selected={index === omniboxIndex} key={option.target} onMouseDown={(event) => event.preventDefault()} onClick={() => void navigate(option.target)}><span>{option.kind}</span><strong>{option.label}</strong></button>)}
+        </div>}
+        {showMore && <div className="hii-browser-more">
+          {onOpenObject && <button type="button" onClick={() => { onOpenObject(url); setShowMore(false); }}>Open as object</button>}
+          <label>View size <select value={device} onChange={(event) => setDevice(event.target.value as typeof device)}><option value="responsive">Fit</option><option value="desktop">Desktop</option><option value="mobile">Mobile</option></select></label>
+        </div>}
       </nav>
       <section className="hii-browser-workarea">
         <div ref={viewport} className="hii-browser-viewport">
@@ -199,32 +230,7 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onAgent, onCapture
           {status === 'loading' && <span className="hii-browser-loading">{activeSearchQuery ? `Searching for ${activeSearchQuery}…` : `Opening ${targetKind === 'local-service' ? 'local service' : 'website'}…`}</span>}
           {status === 'error' && <span className="hii-browser-loading">{searchError || 'This page refused the embedded view. Open it in its own window or check the local service.'}</span>}
         </div>
-        {showAgent && <aside className="hii-browser-agent">
-          <header><span>Agent lens</span><small>page context</small></header>
-          <p>Give HII the current URL and a bounded instruction. Reading is allowed; changes still follow the active mode and approval boundary.</p>
-          <form onSubmit={(event) => { event.preventDefault(); if (request.trim()) { onAgent(request.trim()); setRequest(''); } }}>
-            <textarea value={request} onChange={(event) => setRequest(event.target.value)} placeholder="Explain this codebase, compare docs, or turn findings into an artifact…" />
-            <button type="submit" disabled={!request.trim()}>Ask HII <span>⌘ ↵</span></button>
-          </form>
-          <dl>
-            <div><dt>Context</dt><dd>current page</dd></div>
-            <div><dt>Target</dt><dd>{targetKind === 'local-service' ? 'localhost' : 'public web'}</dd></div>
-            <div><dt>View</dt><dd>{device}</dd></div>
-            <div><dt>Authority</dt><dd>read first</dd></div>
-            <div><dt>Proof</dt><dd>{status === 'captured' ? 'source saved' : 'on capture'}</dd></div>
-          </dl>
-        </aside>}
       </section>
-      <form className="hii-browser-hover-search" onSubmit={(event) => { event.preventDefault(); void navigate(); }}>
-        <span aria-hidden="true">⌕</span>
-        <input
-          value={draftUrl}
-          onChange={(event) => setDraftUrl(event.target.value)}
-          aria-label="Search or open another page"
-          placeholder="Search or enter a URL"
-          spellCheck={false}
-        />
-      </form>
     </article>
   );
 }

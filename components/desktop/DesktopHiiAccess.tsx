@@ -2,8 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { HiiRoot } from '@/components/workspace/HiiRoot';
-import { LocalChatSurface } from './chat/LocalChatSurface';
-import { ChatCircle, UserCircle, SidebarSimple, X } from '@phosphor-icons/react';
+import { UserCircle, SidebarSimple, X } from '@phosphor-icons/react';
 import { readAccountWorkspaceSelection, resolveAccountWorkspaceSelection, saveAccountWorkspaceSelection } from '@/lib/desktop/account-selection';
 import {
   accountSyncStatus,
@@ -35,8 +34,6 @@ function detectDeviceName() {
 }
 
 export function DesktopHiiAccess() {
-  const [surface, setSurface] = useState<'canvas' | 'chat'>('canvas');
-  const [chatOpened, setChatOpened] = useState(false);
   const [ready, setReady] = useState(false);
   const [linked, setLinked] = useState(false);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
@@ -137,13 +134,13 @@ export function DesktopHiiAccess() {
 
   useEffect(() => {
     const toggleWorkspaces = (event: KeyboardEvent) => {
-      if (surface !== 'canvas' || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.code !== 'Digit1' || event.repeat) return;
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.code !== 'Digit1' || event.repeat) return;
       event.preventDefault();
       setWorkspaceOpen((value) => !value);
     };
     window.addEventListener('keydown', toggleWorkspaces);
     return () => window.removeEventListener('keydown', toggleWorkspaces);
-  }, [surface]);
+  }, []);
 
   const link = async (event: FormEvent) => {
     event.preventDefault();
@@ -163,14 +160,7 @@ export function DesktopHiiAccess() {
     }
   };
 
-  return <div className={styles.shell} data-workspace-open={surface === 'canvas' && workspaceOpen || undefined}
-    onKeyDown={(event) => { if (surface === 'chat') event.stopPropagation(); }}
-    onPaste={(event) => { if (surface === 'chat') event.stopPropagation(); }}
-    onPointerMove={(event) => { if (surface === 'chat') event.stopPropagation(); }}
-  >
-    <nav className={styles.surfaceSwitch} aria-label="HII panels" data-workspace-ui>
-      <button type="button" aria-expanded={surface === 'chat'} onClick={() => { setChatOpened(true); setSurface((current) => current === 'chat' ? 'canvas' : 'chat'); }}><ChatCircle size={16} />chat</button>
-    </nav>
+  return <div className={styles.shell} data-workspace-open={workspaceOpen || undefined}>
     <div className={styles.surface}>
     {ready && canvasAvailable ? <HiiRoot
       key={`${active}:${localEpoch}`}
@@ -181,15 +171,11 @@ export function DesktopHiiAccess() {
       onUnsavedChanges={setUnsaved}
     /> : <div className={styles.loading} role="status">{ready ? 'Your account canvas could not be opened.' : 'Opening HII...'}</div>}
     </div>
-    {chatOpened && surface === 'chat' && <aside className={styles.chatPanel} aria-label="Chat panel" data-workspace-ui>
-      <button className={styles.chatClose} type="button" aria-label="Close chat panel" onClick={() => setSurface('canvas')}><X size={18} /></button>
-      <LocalChatSurface />
-    </aside>}
-    {surface === 'canvas' && <nav className={styles.accountControls} data-workspace-ui aria-label="Canvas account">
+    <nav className={styles.accountControls} data-workspace-ui aria-label="Canvas account">
       <button type="button" title="Workspaces" aria-label="Workspaces" aria-expanded={workspaceOpen} onClick={() => setWorkspaceOpen((value) => !value)}><SidebarSimple size={19} /></button>
       <button type="button" title="HII account" aria-expanded={accountOpen} onClick={() => setAccountOpen((value) => !value)}><UserCircle size={19} /><span>{identity?.handle ?? 'HII account'}</span></button>
-    </nav>}
-    {surface === 'canvas' && workspaceOpen ? <aside className={styles.workspacePanel} data-workspace-ui aria-label="Workspaces">
+    </nav>
+    {workspaceOpen ? <aside className={styles.workspacePanel} data-workspace-ui aria-label="Workspaces">
       <header><strong>Workspaces</strong><kbd>Ctrl / Cmd 1</kbd></header>
       <nav aria-label="Available workspaces">
         <button type="button" disabled={busy || unsaved} data-active={active === 'local' || undefined} onClick={() => void selectWorkspace('local')}>
@@ -207,7 +193,7 @@ export function DesktopHiiAccess() {
       <footer><span>Same account board in web and app</span><small>Device-only boards are preserved separately until you choose to connect them.</small></footer>
       <p role="status">{message}</p>
     </aside> : null}
-    {surface === 'canvas' && accountOpen ? <aside className={styles.panel} data-workspace-ui aria-label="HII account synchronization">
+    {accountOpen ? <aside className={styles.panel} data-workspace-ui aria-label="HII account synchronization">
       <button type="button" title="Close account" aria-label="Close account" onClick={() => setAccountOpen(false)}><X size={18} /></button>
       {linked ? <>
         <dl>

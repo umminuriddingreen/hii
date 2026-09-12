@@ -93,8 +93,9 @@ describe('shared canvas controls', () => {
     const onAction = vi.fn();
     act(() => root.render(<CanvasSelectionBar selectionCount={2} onAction={onAction} />));
     expect(container.querySelector('aside')?.getAttribute('aria-label')).toBe('2 canvas objects selected');
-    act(() => [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Ask HII'))!.click());
-    expect(onAction).toHaveBeenCalledWith('ask-hii');
+    expect(container.textContent).not.toContain('Ask HII');
+    act(() => [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Inspect'))!.click());
+    expect(onAction).toHaveBeenCalledWith('inspect');
     act(() => root.render(<CanvasSelectionBar selectionCount={0} onAction={onAction} />));
     expect(container.innerHTML).toBe('');
   });

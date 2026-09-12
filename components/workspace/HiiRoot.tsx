@@ -764,7 +764,6 @@ function NodeBody({
   onAgentSubmit,
   onInstallPackage,
   onCurationRequest,
-  onBrowserAgent,
   onBrowserCapture,
   onOpenBrowser,
   onApproveRun,
@@ -779,7 +778,6 @@ function NodeBody({
   onAgentSubmit: (intent: string) => void;
   onInstallPackage: (pkg: HiiMarketplacePackage, destination: string) => void;
   onCurationRequest: (request: string, payload: MusicPanelPayload) => void;
-  onBrowserAgent: (request: string) => void;
   onBrowserCapture: (result: InformationCaptureResult) => void;
   onOpenBrowser: (url: string) => void;
   onApproveRun: () => void;
@@ -822,7 +820,7 @@ function NodeBody({
   }
 
   if (node.type === 'browser' && payload.surface === 'native-dev-browser') {
-    return <DeferredSurface><NativeDevBrowser nodeId={node.id} initialUrl={url} onUrl={(nextUrl) => onPayload({ url: nextUrl, title: hostFor(nextUrl) })} onAgent={onBrowserAgent} onCapture={onBrowserCapture} onOpenObject={onOpenBrowser} /></DeferredSurface>;
+    return <DeferredSurface><NativeDevBrowser nodeId={node.id} initialUrl={url} onUrl={(nextUrl) => onPayload({ url: nextUrl, title: hostFor(nextUrl) })} onCapture={onBrowserCapture} onOpenObject={onOpenBrowser} /></DeferredSurface>;
   }
   if (node.type === 'browser' || node.type === 'link') return <SourceBody node={node} onOpen={onOpenBrowser} />;
   if (node.type === 'run') return <RunBody node={node} onApprove={onApproveRun} onStop={onStopRun} onOpenProof={onOpenProof} />;
@@ -986,7 +984,7 @@ function Prompt({
                 submit();
               }
             }}
-            placeholder={response ? 'Continue…' : 'Ask HII…'}
+            placeholder="Describe what should happen…"
             aria-label="Tell HII what should happen"
             autoComplete="off"
             spellCheck
@@ -1837,41 +1835,6 @@ export function HiiRoot({
     setToolMessage(`Receipt path copied · ${receiptPath}`);
   }, []);
 
-  const openObjectConversation = useCallback((node: WorkspaceNode) => {
-    const conversationId = text(node.payload.conversationId) || crypto.randomUUID();
-    if (!text(node.payload.conversationId)) {
-      workspace.patchNode(node.id, {
-        payload: { ...node.payload, conversationId, conversationTimeline: [] },
-        object: {
-          ...(node.object || { kind: 'event' as const }),
-          audit: [
-            ...(node.object?.audit || []),
-            { ts: new Date().toISOString(), actor: 'human' as const, action: 'opened linked object conversation' }
-          ].slice(-20)
-        }
-      });
-    }
-    const viewport = camera.cam.current;
-    const anchor = {
-      x: viewport.x + node.x * viewport.z,
-      y: viewport.y + (node.y + node.h) * viewport.z
-    };
-    const timeline = objectConversationTurns(node.payload, conversationId);
-    const previous = [...timeline].reverse().find((turn) => turn.role === 'assistant');
-    setSelected([node.id]);
-    workspace.bringToFront(node.id);
-    setPrompt({
-      anchor,
-      initialValue: '',
-      response: previous?.text || '',
-      status: 'idle',
-      objectId: node.id,
-      conversationId
-    });
-    setPromptPresentation('floating');
-    setPromptVisible(true);
-  }, [camera, workspace]);
-
   const openMusicPanel = useCallback((at: Point) => {
     const existing = workspace.nodes.find((node) => node.type === 'surface' && node.payload.surface === 'profile-music');
     if (existing) {
@@ -1985,22 +1948,6 @@ export function HiiRoot({
     setPromptVisible(false);
     setToolMessage(`Opened web results for “${query}”.`);
   }, [camera, openDevBrowser]);
-
-  const requestBrowserAgent = useCallback(async (node: WorkspaceNode, request: string) => {
-    const url = text(node.payload.url);
-    setSelected([node.id]);
-    setPrompt({ anchor: mouse.current, initialValue: '', response: 'Reading the active page context…', status: 'running' });
-    setPromptVisible(true);
-    try {
-      await startWithContext({
-        intent: modeIntent(mode, `${request}\n\nActive browser page: ${url}`),
-        mode,
-        contextNodeIds: [node.id]
-      }, (result) => { activeRun.current = result.runId; });
-    } catch (error) {
-      setPrompt((current) => current ? { ...current, response: error instanceof Error ? error.message : 'HII could not start the browser agent.', status: 'failed' } : current);
-    }
-  }, [mode, startWithContext]);
 
   const requestCuration = useCallback(async (nodeId: string, request: string, payload: MusicPanelPayload) => {
     setPrompt({ anchor: mouse.current, initialValue: '', response: 'Preparing a curation proposal…', status: 'running' });
@@ -2564,11 +2511,7 @@ export function HiiRoot({
   const selectionAction = useCallback((action: CanvasSelectionAction) => {
     if (action === 'format' || action === 'inspect') { setInspectorOpen(true); return; }
     if (action === 'connect') { setActiveTool('connector'); setConnectorStartId(selected.length === 1 ? selected[0] : null); setToolMessage('Choose the next object to connect.'); return; }
-    const node = selected.length === 1 ? workspace.nodes.find((entry) => entry.id === selected[0]) : null;
-    if (runtimeEnabled && node) openObjectConversation(node);
-    else if (runtimeEnabled) { ensureWorkspaceTerminal('quick'); setToolMessage(`HII received ${selected.length} selected objects as context.`); }
-    else { onRequestDevice?.(); setToolMessage('Open HII Remote to run this selection on your owner device.'); }
-  }, [ensureWorkspaceTerminal, onRequestDevice, openObjectConversation, runtimeEnabled, selected, workspace.nodes]);
+  }, [selected]);
 
   const projectionToggle = runtimeEnabled && persistentChrome ? (
     <nav className="hii-projection-toggle" aria-label="Workspace projection" data-workspace-ui onPointerDown={(event) => event.stopPropagation()}>
@@ -2720,7 +2663,7 @@ export function HiiRoot({
         onRequestFeature={runtimeEnabled ? requestFeature : undefined}
         onStartWork={runtimeEnabled ? openAssistantPanel : undefined}
       />
-      <CanvasSelectionBar selectionCount={selected.length} canConnect={selected.length <= 2} canAskHii={Boolean(runtimeEnabled || onRequestDevice)} onAction={selectionAction} />
+      <CanvasSelectionBar selectionCount={selected.length} canConnect={selected.length <= 2} onAction={selectionAction} />
       {inspectorOpen && selectedNodes.length > 0 && <CanvasObjectInspector
         title={selectedNodes.length === 1 ? titleFor(selectedNodes[0]) : 'Multiple selection'} typeLabel={selectedNodes[0]?.type || 'objects'} selectionCount={selectedNodes.length}
         locked={selectedNodes.every((node) => canvasObjectState(node).locked)}
@@ -2835,7 +2778,6 @@ export function HiiRoot({
             }}
             contentActive={activeDocumentId === node.id}
             onActivateContent={() => setActiveDocumentId(node.id)}
-            onOpenConversation={() => { if (runtimeEnabled) openObjectConversation(node); }}
             onCommit={(patch) => workspace.patchNode(node.id, patch)}
             onTransformPreview={transformPreview}
             onTransformCommit={transformCommit}
@@ -2854,7 +2796,6 @@ export function HiiRoot({
               onAgentSubmit={(intent) => void startObjectiveAgent(node.id, intent)}
               onInstallPackage={installPackage}
               onCurationRequest={(request, payload) => void requestCuration(node.id, request, payload)}
-              onBrowserAgent={(request) => void requestBrowserAgent(node, request)}
               onBrowserCapture={(result) => spawnInformation(capturedInformationSeeds(result), { x: node.x + node.w + 40, y: node.y })}
               onOpenBrowser={(url) => openDevBrowser({ x: node.x + node.w + 40, y: node.y }, url)}
               onApproveRun={() => void startObjectiveAgent(node.id, runIntent(node))}

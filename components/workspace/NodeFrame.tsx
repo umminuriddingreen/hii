@@ -19,7 +19,6 @@ type NodeFrameProps = {
   title: string;
   getZoom: () => number;
   onSelect: (event: React.PointerEvent) => void;
-  onOpenConversation: () => void;
   onCommit: (patch: Partial<WorkspaceNode>) => void;
   onTransformStart?: (detail: NodeTransformDetail) => void;
   onTransformPreview?: (detail: NodeTransformDetail) => Partial<NodeTransformRect> | void;
@@ -36,7 +35,7 @@ type NodeFrameProps = {
 
 const INTERACTIVE = 'button,input,textarea,select,iframe,video,audio,embed,a,[contenteditable],.xterm';
 
-export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConversation, onCommit, onTransformStart, onTransformPreview, onTransformCommit, onWindowAction, onErase, onShare, touchControls, chromeless, contentActive, onActivateContent, children }: NodeFrameProps) {
+export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, onTransformStart, onTransformPreview, onTransformCommit, onWindowAction, onErase, onShare, touchControls, chromeless, contentActive, onActivateContent, children }: NodeFrameProps) {
   const frame = useRef<HTMLDivElement | null>(null);
   const windowed = node.type === 'app' || node.type === 'terminal';
   const locked = isNodeLocked(node);
@@ -140,7 +139,6 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConv
           onActivateContent?.();
           return;
         }
-        onOpenConversation();
       }}
       style={{
         transform: workspaceNodeTransform(node),
