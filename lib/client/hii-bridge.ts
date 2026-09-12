@@ -303,7 +303,43 @@ export type AgentHomeV2 = {
   };
 };
 
-export function formatActiveState(home: AgentHomeV2) {
+export type HiiPresenceV1 = {
+  schemaVersion: 1;
+  kind: 'hii.presence';
+  state: 'available' | 'working';
+  claim: string;
+  runtime: { component: string; version: string; invocation: string; persistentProcess: boolean };
+  supervisor: { state: string; liveExecutors: number };
+  model: { provider: string; state: string; configuredModel: string; loadedState: string; loadedModels: string[] };
+  traceCoverage: { records: number; hiiControlledRecords: number; scope: string };
+  context: { workspace: string };
+  attention: Array<{ id: string; title: string; lane: string; coordinate: string }>;
+  recentProof: null | { id: string; status: string; verified: number; checks: number; verification: string };
+  authority: { act: string; represent: string };
+  next: string;
+};
+
+export function formatActiveState(home: AgentHomeV2 | HiiPresenceV1) {
+  if (home.kind === 'hii.presence') {
+    const loaded = home.model.loadedModels.length ? home.model.loadedModels.join(', ') : home.model.loadedState;
+    return [
+      `HII PRESENCE · ${home.state}`,
+      home.claim,
+      `runtime: ${home.runtime.component} ${home.runtime.version} · ${home.runtime.invocation}${home.runtime.persistentProcess ? '' : ' · not a persistent process'}`,
+      `CLI workspace: ${home.context.workspace}`,
+      `supervisor: ${home.supervisor.state} · ${home.supervisor.liveExecutors} live executor(s)`,
+      `model: ${home.model.provider} · ${home.model.state} · configured ${home.model.configuredModel} · loaded ${loaded}`,
+      `traces: ${home.traceCoverage.hiiControlledRecords}/${home.traceCoverage.records} HII-controlled · ${home.traceCoverage.scope}`,
+      `attention: ${home.attention.length} local board thread(s) shown (up to 3)`,
+      ...home.attention.map((item) => `${item.lane} · ${item.title} · ${item.coordinate}`),
+      home.recentProof
+        ? `latest proof: ${home.recentProof.status} · ${home.recentProof.verification} · ${home.recentProof.verified}/${home.recentProof.checks} checks · ${home.recentProof.id}`
+        : 'latest CLI workspace proof: no receipt observed',
+      `authority: ${home.authority.act}`,
+      `identity: ${home.authority.represent}`,
+      `next: ${home.next}`
+    ].join('\n');
+  }
   const state = home.activeState;
   const domains = state.domains.map((domain) => `${domain.id.toUpperCase()} · ${domain.state}\n${domain.basis}\nsource: ${domain.source}`);
   const instances = state.activeInstances.slice(0, 8).map((instance) =>
@@ -351,10 +387,10 @@ function isTauri() {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-export async function readAgentHome(): Promise<AgentHomeV2> {
+export async function readAgentHome(): Promise<AgentHomeV2 | HiiPresenceV1> {
   if (isTauri()) {
     const { invoke } = await import('@tauri-apps/api/core');
-    return invoke<AgentHomeV2>('agent_home');
+    return invoke<HiiPresenceV1>('agent_home');
   }
   return developmentRequest<AgentHomeV2>('/home');
 }

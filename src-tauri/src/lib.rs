@@ -655,7 +655,13 @@ fn applications_list(app: tauri::AppHandle) -> Result<Value, String> {
 
 #[tauri::command]
 fn agent_home(app: tauri::AppHandle) -> Result<Value, String> {
-    hii_json(&app, &["home", "--json"])
+    // The installed sidecar ships native Rust commands, not the checkout-only
+    // Node `home` projection. Presence is the native, evidence-scoped view.
+    let presence = hii_json(&app, &["presence", "--json"])?;
+    if presence["kind"] != "hii.presence" {
+        return Err("HII's native presence command returned an unexpected document.".into());
+    }
+    Ok(presence)
 }
 
 const ECOSYSTEM_CATALOG_MAX_BYTES: u64 = 256 * 1024;
