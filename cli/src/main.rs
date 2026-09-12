@@ -164,6 +164,12 @@ enum SessionProfile {
 }
 
 #[derive(Subcommand, Debug)]
+enum DoctorCommand {
+    #[command(about = "Run the real bare `hii` interactive startup smoke test")]
+    Interactive,
+}
+
+#[derive(Subcommand, Debug)]
 enum Commands {
     #[command(about = "Back up and restore local Codex, Claude and Pi session logs")]
     #[command(hide = true)]
@@ -383,7 +389,10 @@ enum Commands {
         json: bool,
     },
     #[command(about = "Check CLI, workspace, Git, HII, and provider readiness")]
-    Doctor,
+    Doctor {
+        #[command(subcommand)]
+        action: Option<DoctorCommand>,
+    },
     #[command(about = "List models advertised by the selected local runtime")]
     #[command(hide = true)]
     Models,
@@ -2053,14 +2062,17 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             presence::show(&paths, &workspace, json)?;
             Ok(ExitCode::SUCCESS)
         }
-        Some(Commands::Doctor) => {
-            let ok = doctor(&paths, cli.cwd)?;
-            Ok(if ok {
-                ExitCode::SUCCESS
-            } else {
-                ExitCode::from(1)
-            })
-        }
+        Some(Commands::Doctor { action }) => match action {
+            Some(DoctorCommand::Interactive) => run_interactive_doctor(&paths),
+            None => {
+                let ok = doctor(&paths, cli.cwd)?;
+                Ok(if ok {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::from(1)
+                })
+            }
+        },
         Some(Commands::Models) => {
             let ollama = Ollama::discover().ensure_reachable()?;
             let default_model = ollama.provider().default_model();
@@ -4144,6 +4156,35 @@ fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
     Ok(ok)
 }
 
+fn interactive_doctor_script(paths: &AppPaths) -> PathBuf {
+    paths.repo.join("scripts/hii-cli-interactive-smoke.mjs")
+}
+
+fn run_interactive_doctor(paths: &AppPaths) -> Result<ExitCode, String> {
+    let script = interactive_doctor_script(paths);
+    if !script.is_file() {
+        return Err(format!(
+            "missing interactive smoke test at {}; HII repo resolved to {}",
+            script.display(),
+            paths.repo.display()
+        ));
+    }
+    if command_text("node", &["--version"], &paths.repo).is_none() {
+        return Err("node is required for `hii doctor interactive`".into());
+    }
+
+    let status = Command::new("node")
+        .arg(&script)
+        .current_dir(&paths.repo)
+        .status()
+        .map_err(|error| format!("failed to run {}: {error}", script.display()))?;
+    Ok(status
+        .code()
+        .and_then(|code| u8::try_from(code).ok())
+        .map(ExitCode::from)
+        .unwrap_or_else(|| ExitCode::from(1)))
+}
+
 fn native_model_status(paths: &AppPaths) -> Option<serde_json::Value> {
     let script = paths.repo.join("aii/daemon/hiid.mjs");
     if !script.is_file() {
@@ -6122,6 +6163,28 @@ mod tests {
         )));
         assert!(claimed_from_legacy(&words("context show ctx_1")));
         assert!(!claimed_from_legacy(&words("context --json")));
+    }
+
+    #[test]
+    fn doctor_interactive_is_a_repo_resolved_machine_check() {
+        let repo = TempRepo::new();
+        let paths = AppPaths {
+            repo: repo.path().to_path_buf(),
+            runtime: repo.path().join("runtime"),
+        };
+
+        assert!(matches!(
+            Cli::try_parse_from(["hii", "doctor", "interactive"])
+                .expect("doctor interactive parses")
+                .command,
+            Some(Commands::Doctor {
+                action: Some(DoctorCommand::Interactive)
+            })
+        ));
+        assert_eq!(
+            interactive_doctor_script(&paths),
+            repo.path().join("scripts/hii-cli-interactive-smoke.mjs")
+        );
     }
 
     /// Subcommands are registered in two places: the clap `Commands` enum and
