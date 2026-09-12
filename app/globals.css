@@ -1177,3 +1177,47 @@ p.release-facts { display: block; }
 .hii-context-decision { display: flex; flex-wrap: wrap; gap: 6px; }
 .hii-context-reject { border: 1px solid var(--faint) !important; background: var(--field) !important; color: var(--muted) !important; }
 .hii-context-reject:hover, .hii-context-reject:focus-visible { border-color: var(--danger) !important; background: var(--field) !important; color: var(--danger) !important; outline: 0; }
+.hii-canvas-connectors {
+  position: absolute;
+  inset: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.hii-canvas-connectors line {
+  stroke: #111;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.hii-canvas-connectors marker path { fill: #111; }
+
+.hii-canvas-shape {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding: 22px;
+  background: var(--shape-fill);
+  border: var(--shape-stroke-width) solid var(--shape-stroke);
+  opacity: var(--shape-opacity);
+  overflow: hidden;
+}
+
+.hii-canvas-shape[data-shape="rounded-rectangle"] { border-radius: 24px; }
+.hii-canvas-shape[data-shape="ellipse"] { border-radius: 50%; }
+.hii-canvas-shape[data-shape="triangle"] { clip-path: polygon(50% 0, 100% 100%, 0 100%); padding-top: 45%; }
+.hii-canvas-shape[data-shape="diamond"] { clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); padding: 25%; }
+.hii-canvas-shape[data-shape="hexagon"] { clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
+.hii-canvas-shape[data-shape="arrow"] { clip-path: polygon(0 30%, 65% 30%, 65% 0, 100% 50%, 65% 100%, 65% 70%, 0 70%); }
+.hii-canvas-shape[data-shape="cloud"] { border-radius: 48% 52% 44% 56% / 55% 45% 55% 45%; }
+
+.hii-canvas-table-wrap { width: 100%; height: 100%; overflow: auto; background: #fff; }
+.hii-canvas-table { width: 100%; height: 100%; border-collapse: collapse; table-layout: fixed; color: #111; background: #fff; }
+.hii-canvas-table th, .hii-canvas-table td { min-width: 84px; padding: 10px 12px; border: 1px solid #111; text-align: left; vertical-align: top; outline: none; }
+.hii-canvas-table th { font-weight: 700; background: #111; color: #fff; }
+.hii-canvas-table td:focus { box-shadow: inset 0 0 0 2px #111; }

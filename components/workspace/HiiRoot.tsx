@@ -93,7 +93,6 @@ import { packagePlacementSeed, WAYMARK_PACKAGE, type HiiMarketplacePackage } fro
 import { KEY_ZOOM_STEP, cameraKeyIntent, useCamera } from './useCamera';
 import dynamic from 'next/dynamic';
 import { useWorkspace, type WorkspacePersistence } from './useWorkspace';
-import { SpaceToolbar } from '@/components/spaces/SpaceToolbar';
 import { InkBody } from '@/components/spaces/InkBody';
 import { inkSeedFromPoints } from '@/components/spaces/ink-capture';
 import { isAccountCanvasNode, isAccountCanvasNodeType, isSpaceCanvasNode, isSpaceCanvasNodeType } from '@/components/spaces/space-surface';
@@ -114,6 +113,13 @@ import { ParametricLayoutPanel, type ParametricLayoutSettings } from './Parametr
 import { SiteViewsPanel } from './SiteViewsPanel';
 import { downloadWorkspaceOutput, ExportOutputPanel } from './ExportOutputPanel';
 import { parametricImageLayout } from '@/lib/workspace/parametric-layout';
+import { CanvasToolbar, type CanvasTool } from './CanvasToolbar';
+import { CanvasSelectionBar, type CanvasSelectionAction } from './CanvasSelectionBar';
+import { CanvasObjectInspector } from './CanvasObjectInspector';
+import { canvasObjectPayload, canvasObjectState, type CanvasShapeKind } from '@/lib/workspace/canvas-objects';
+import { duplicateWorkspaceNodes, linkWorkspaceNodes } from '@/lib/workspace/selection';
+import { alignWorkspaceNodes, distributeWorkspaceNodes, snapWorkspaceRect } from '@/lib/workspace/snap';
+import type { NodeTransformDetail } from './nodeTransform';
 
 const MusicPlaylistPanel = lazy(() => import('./MusicPlaylistPanel').then((module) => ({ default: module.MusicPlaylistPanel })));
 const NativeDevBrowser = lazy(() => import('./NativeDevBrowser').then((module) => ({ default: module.NativeDevBrowser })));
@@ -782,6 +788,36 @@ function NodeBody({
   const content = text(payload.content) || text(payload.text) || text(payload.output) || text(payload.summary);
   const url = text(payload.url);
   const name = text(payload.name) || text(payload.title) || node.type;
+  const canvasObject = canvasObjectPayload(node);
+
+  if (canvasObject?.canvasKind === 'shape') {
+    const appearance = canvasObject.appearance || {};
+    return <div
+      className="hii-canvas-shape"
+      data-shape={canvasObject.shape}
+      style={{
+        '--shape-fill': appearance.fill || '#ffffff',
+        '--shape-stroke': appearance.stroke || '#101010',
+        '--shape-stroke-width': `${appearance.strokeWidth ?? 2}px`,
+        '--shape-opacity': appearance.opacity ?? 1,
+        color: appearance.foreground || '#101010',
+        fontFamily: appearance.fontFamily,
+        fontSize: appearance.fontSize,
+        fontWeight: appearance.fontWeight,
+        textAlign: appearance.textAlign
+      } as React.CSSProperties}
+    ><span>{canvasObject.content || 'Shape'}</span></div>;
+  }
+  if (canvasObject?.canvasKind === 'table') {
+    return <div className="hii-canvas-table-wrap"><table className="hii-canvas-table"><tbody>{canvasObject.table.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, columnIndex) => {
+      const Cell = canvasObject.table.headerRow && rowIndex === 0 ? 'th' : 'td';
+      return <Cell key={columnIndex} contentEditable suppressContentEditableWarning onBlur={(event) => {
+        const rows = canvasObject.table.rows.map((entry) => [...entry]);
+        rows[rowIndex][columnIndex] = event.currentTarget.textContent || '';
+        onPayload({ table: { ...canvasObject.table, rows } });
+      }}>{cell}</Cell>;
+    })}</tr>)}</tbody></table></div>;
+  }
 
   if (node.type === 'browser' && payload.surface === 'native-dev-browser') {
     return <DeferredSurface><NativeDevBrowser nodeId={node.id} initialUrl={url} onUrl={(nextUrl) => onPayload({ url: nextUrl, title: hostFor(nextUrl) })} onAgent={onBrowserAgent} onCapture={onBrowserCapture} onOpenObject={onOpenBrowser} /></DeferredSurface>;
@@ -1119,6 +1155,9 @@ export function HiiRoot({
   const [webSearchOpen, setWebSearchOpen] = useState(false);
   const [promptPresentation, setPromptPresentation] = useState<'floating' | 'terminal'>('floating');
   const [drawing, setDrawing] = useState(false);
+  const [activeTool, setActiveTool] = useState<CanvasTool>('select');
+  const [connectorStartId, setConnectorStartId] = useState<string | null>(null);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [canvasCommandsOpen, setCanvasCommandsOpen] = useState(false);
   const [canvasManagerOpen, setCanvasManagerOpen] = useState(false);
   const [parametricLayoutOpen, setParametricLayoutOpen] = useState(false);
@@ -1516,6 +1555,52 @@ export function HiiRoot({
       return next;
     });
   }, []);
+
+  const chooseCanvasTool = useCallback((tool: CanvasTool) => {
+    setActiveTool(tool);
+    setDrawing(tool === 'draw');
+    setConnectorStartId(null);
+    if (tool === 'media') {
+      fileInput.current?.click();
+      setActiveTool('select');
+    }
+    setToolMessage(tool === 'connector' ? 'Choose two objects to connect.' : '');
+  }, []);
+
+  const createCanvasObject = useCallback((tool: CanvasTool, at: Point) => {
+    let seed: NodeSeed | null = null;
+    if (tool === 'text') seed = { ...canvasTextSeed(), payload: { ...canvasTextSeed().payload, canvasKind: 'text', content: '' } };
+    if (tool === 'sticky') seed = { ...seedFor('note', { content: '', name: 'Sticky', canvasKind: 'sticky', appearance: { fill: '#fff2a8', foreground: '#101010' } }), w: 240, h: 220 };
+    if (tool === 'shape') seed = { ...seedFor('canvas-text', { content: 'Shape', name: 'Shape', canvasKind: 'shape', shape: 'rounded-rectangle' satisfies CanvasShapeKind, appearance: { fill: '#ffffff', stroke: '#101010', strokeWidth: 2 } }), w: 260, h: 180 };
+    if (tool === 'table') seed = { ...seedFor('note', { name: 'Table', canvasKind: 'table', table: { headerRow: true, rows: [['Heading', 'Heading'], ['Cell', 'Cell'], ['Cell', 'Cell']] } }), w: 420, h: 220 };
+    if (!seed) return false;
+    const [id] = spawnSeeds([seed], at);
+    if (id) { setSelected([id]); setFocusNodeId(tool === 'text' || tool === 'sticky' ? id : null); }
+    setActiveTool('select');
+    return true;
+  }, [spawnSeeds]);
+
+  const patchSelection = useCallback((patcher: (node: WorkspaceNode) => Partial<WorkspaceNode>) => {
+    const ids = new Set(selected);
+    workspace.mutateDocument((doc) => ({ ...doc, nodes: doc.nodes.map((node) => ids.has(node.id) ? { ...node, ...patcher(node), updatedAt: new Date().toISOString() } : node) }));
+  }, [selected, workspace]);
+
+  const transformPreview = useCallback((detail: NodeTransformDetail) => {
+    if (detail.kind !== 'move') return;
+    const snap = snapWorkspaceRect(detail.next, visibleNodes.filter((node) => node.id !== detail.nodeId && !selected.includes(node.id)), camera.cam.current.z);
+    return { x: snap.x, y: snap.y };
+  }, [camera.cam, selected, visibleNodes]);
+
+  const transformCommit = useCallback((detail: NodeTransformDetail) => {
+    const dx = detail.next.x - detail.origin.x;
+    const dy = detail.next.y - detail.origin.y;
+    const moving = selected.includes(detail.nodeId) ? new Set(selected) : new Set([detail.nodeId]);
+    workspace.mutateDocument((doc) => ({ ...doc, nodes: doc.nodes.map((node) => {
+      if (node.id === detail.nodeId) return { ...node, ...detail.next };
+      if (detail.kind === 'move' && moving.has(node.id)) return { ...node, x: node.x + dx, y: node.y + dy };
+      return node;
+    }) }));
+  }, [selected, workspace]);
 
   const removeWorkspaceNode = useCallback((node: WorkspaceNode) => {
     const sessionId = text(node.payload.sessionId);
@@ -2475,6 +2560,15 @@ export function HiiRoot({
       } : current));
   }, []);
 
+  const selectionAction = useCallback((action: CanvasSelectionAction) => {
+    if (action === 'format' || action === 'inspect') { setInspectorOpen(true); return; }
+    if (action === 'connect') { setActiveTool('connector'); setConnectorStartId(selected.length === 1 ? selected[0] : null); setToolMessage('Choose the next object to connect.'); return; }
+    const node = selected.length === 1 ? workspace.nodes.find((entry) => entry.id === selected[0]) : null;
+    if (runtimeEnabled && node) openObjectConversation(node);
+    else if (runtimeEnabled) { ensureWorkspaceTerminal('quick'); setToolMessage(`HII received ${selected.length} selected objects as context.`); }
+    else { onRequestDevice?.(); setToolMessage('Open HII Remote to run this selection on your owner device.'); }
+  }, [ensureWorkspaceTerminal, onRequestDevice, openObjectConversation, runtimeEnabled, selected, workspace.nodes]);
+
   const projectionToggle = runtimeEnabled && persistentChrome ? (
     <nav className="hii-projection-toggle" aria-label="Workspace projection" data-workspace-ui onPointerDown={(event) => event.stopPropagation()}>
       <button
@@ -2535,7 +2629,7 @@ export function HiiRoot({
         setActiveDocumentId(null);
         setToolMessage('');
         setPromptVisible(false);
-        if (isTouchCanvas && drawing) {
+        if (drawing) {
           event.preventDefault();
           const start = camera.toWorld(event.clientX, event.clientY);
           const points = [start.x, start.y];
@@ -2553,6 +2647,8 @@ export function HiiRoot({
         }
         if (camera.touchStart(event)) return;
         if (event.button !== 0) return;
+        const createAt = camera.toWorld(event.clientX, event.clientY);
+        if (createCanvasObject(activeTool, createAt)) { event.preventDefault(); return; }
         event.preventDefault();
         const start = camera.toWorld(event.clientX, event.clientY);
         const prior = event.shiftKey ? selected : [];
@@ -2608,64 +2704,31 @@ export function HiiRoot({
         {workspace.syncError && <button type="button" onClick={workspace.retrySave}>Retry save</button>}
       </div>}
       {runtimeEnabled && persistentChrome && <UpdateBanner />}
-      {runtimeEnabled && persistentChrome && <CanvasChrome
-        drawing={drawing}
-        selectionCount={selected.length}
-        onAddNote={() => {
-          const [id] = spawnCenteredSeed(seedFor('note', { content: '', name: 'Note' }));
-          setFocusNodeId(id ?? null);
-        }}
-        onAddText={() => {
-          const [id] = spawnCenteredSeed(canvasTextSeed());
-          setFocusNodeId(id ?? null);
-        }}
-        onAddFrame={() => spawnCenteredSeed({ ...seedFor('frame', { title: 'Frame' }), w: 720, h: 480 })}
-        onAddFile={() => fileInput.current?.click()}
-        onDraw={toggleDrawing}
-        onPresentation={openPresentationPanel}
-        onSearch={openSearchPanel}
-        onTerminal={() => ensureWorkspaceTerminal('docked')}
-        onAsk={() => { ensureWorkspaceTerminal('quick'); setPromptVisible(false); }}
-        onActivity={openActivityPanel}
-        onArrangeImages={() => setParametricLayoutOpen(true)}
-        onZoomOut={() => camera.zoomBy(1 / KEY_ZOOM_STEP)}
-        onZoomIn={() => camera.zoomBy(KEY_ZOOM_STEP)}
-        onFit={fitCanvas}
-      />}
-      {isTouchCanvas && <SpaceToolbar
-        drawing={drawing}
-        photo={allowPhoto}
-        accountTools={isAccount}
-        commandsOpen={isAccount ? canvasCommandsOpen : undefined}
-        selectionCount={selected.length}
-        onAddImage={() => { fileInput.current?.click(); setToolMessage('Choose a file to add.'); }}
-        onAddText={() => {
-          const [id] = spawnCenteredSeed(seedFor('canvas-text', { text: '', name: 'Text' }));
-          setFocusNodeId(id ?? null);
-          setToolMessage('Text added.');
-        }}
-        onAddNote={() => {
-          const [id] = spawnCenteredSeed(seedFor('note', { content: '', name: 'Note' }));
-          setFocusNodeId(id ?? null);
-          setToolMessage('Note added.');
-        }}
-        onAddLink={(url) => {
-          const seed = renderedBrowserSeed(url);
-          if (seed) spawnCenteredSeed(seed);
-          setToolMessage(seed ? 'Link rendered.' : 'That link could not be opened.');
-        }}
-        onAddSticker={() => spawnCenteredSeed({ ...seedFor('image', { sticker: true, emoji: '✦', name: 'Sticker' }), w: 120, h: 120 })}
-        onOpenTerminal={() => { onRequestDevice?.(); setToolMessage('Opened HII Remote.'); }}
-        onUndo={() => { workspace.undo(); setToolMessage('Undid the last canvas change.'); }}
-        onRedo={() => { workspace.redo(); setToolMessage('Redid the last canvas change.'); }}
-        onFitView={fitCanvas}
-        onArrangeImages={() => { setCanvasCommandsOpen(false); setParametricLayoutOpen(true); }}
-        onZoomIn={() => camera.zoomBy(KEY_ZOOM_STEP)}
-        onZoomOut={() => camera.zoomBy(1 / KEY_ZOOM_STEP)}
-        onDeleteSelection={deleteSelection}
-        onShareSelection={onShareNode ? shareSelection : undefined}
-        onCommandsOpenChange={setCanvasCommandsOpen}
-        onToggleDrawing={toggleDrawing}
+      <CanvasToolbar
+        activeTool={activeTool}
+        onToolChange={chooseCanvasTool}
+        capabilities={{ scenes: true, export: selected.length === 1, nativeTerminal: runtimeEnabled, search: runtimeEnabled, activity: runtimeEnabled, remote: !runtimeEnabled }}
+        onZoomOut={() => camera.zoomBy(1 / KEY_ZOOM_STEP)} onZoomIn={() => camera.zoomBy(KEY_ZOOM_STEP)} onFitView={fitCanvas}
+        onOpenScenes={openPresentationPanel} onExport={() => setExportOpen(true)}
+        onOpenTerminal={() => ensureWorkspaceTerminal('docked')} onSearch={openSearchPanel} onOpenActivity={openActivityPanel}
+        onOpenRemote={() => { onRequestDevice?.(); setToolMessage('Opened HII Remote.'); }}
+      />
+      <CanvasSelectionBar selectionCount={selected.length} canConnect={selected.length <= 2} canAskHii={Boolean(runtimeEnabled || onRequestDevice)} onAction={selectionAction} />
+      {inspectorOpen && selectedNodes.length > 0 && <CanvasObjectInspector
+        title={selectedNodes.length === 1 ? titleFor(selectedNodes[0]) : 'Multiple selection'} typeLabel={selectedNodes[0]?.type || 'objects'} selectionCount={selectedNodes.length}
+        locked={selectedNodes.every((node) => canvasObjectState(node).locked)}
+        fields={[{ label: 'Position', value: `${Math.round(selectedNodes[0].x)}, ${Math.round(selectedNodes[0].y)}` }, { label: 'Size', value: `${Math.round(selectedNodes[0].w)} × ${Math.round(selectedNodes[0].h)}` }]}
+        actions={[
+          { label: 'Align left', disabled: selectedNodes.length < 2, onClick: () => { const moves = alignWorkspaceNodes(selectedNodes, 'left'); patchSelection((node) => moves.get(node.id) || {}); } },
+          { label: 'Align top', disabled: selectedNodes.length < 2, onClick: () => { const moves = alignWorkspaceNodes(selectedNodes, 'top'); patchSelection((node) => moves.get(node.id) || {}); } },
+          { label: 'Distribute ↔', disabled: selectedNodes.length < 3, onClick: () => { const moves = distributeWorkspaceNodes(selectedNodes, 'x'); patchSelection((node) => moves.get(node.id) || {}); } },
+          { label: 'Distribute ↕', disabled: selectedNodes.length < 3, onClick: () => { const moves = distributeWorkspaceNodes(selectedNodes, 'y'); patchSelection((node) => moves.get(node.id) || {}); } },
+          { label: 'Group', disabled: selectedNodes.length < 2, onClick: () => { const groupId = `group-${Date.now()}`; patchSelection((node) => ({ payload: { ...node.payload, groupId } })); } },
+          { label: 'Duplicate', onClick: () => { const result = duplicateWorkspaceNodes(workspace.document, selected); workspace.mutateDocument(() => result.doc); setSelected(result.createdIds); } },
+          { label: 'Bring front', onClick: () => patchSelection(() => ({ z: workspace.takeZ() })) },
+          { label: 'Send back', onClick: () => { const z = Math.min(...workspace.nodes.map((node) => node.z)) - 1; patchSelection(() => ({ z })); } }
+        ]}
+        onLockedChange={(locked) => patchSelection((node) => ({ payload: { ...node.payload, locked } }))} onClose={() => setInspectorOpen(false)}
       />}
       {canvasManagerOpen && <CanvasManager
         nodes={workspace.nodes}
@@ -2744,6 +2807,15 @@ export function HiiRoot({
         </section>
       )}
       <div ref={camera.worldRef} className="hii-world">
+        <svg className="hii-canvas-connectors" aria-label="Canvas connectors">
+          {(workspace.document.links || []).map((link) => {
+            const from = visibleNodes.find((node) => node.id === link.fromId);
+            const to = visibleNodes.find((node) => node.id === link.toId);
+            if (!from || !to) return null;
+            return <line key={link.id} x1={from.x + from.w / 2} y1={from.y + from.h / 2} x2={to.x + to.w / 2} y2={to.y + to.h / 2} markerEnd="url(#hii-arrow)" />;
+          })}
+          <defs><marker id="hii-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" /></marker></defs>
+        </svg>
         {visibleNodes.map((node) => (
           <NodeFrame
             key={node.id}
@@ -2752,6 +2824,15 @@ export function HiiRoot({
             title={titleFor(node)}
             getZoom={() => camera.cam.current.z}
             onSelect={(event) => {
+              if (activeTool === 'connector') {
+                event.stopPropagation();
+                if (!connectorStartId) { setConnectorStartId(node.id); setSelected([node.id]); setToolMessage('Choose the second object.'); }
+                else if (connectorStartId !== node.id) {
+                  workspace.mutateDocument((doc) => linkWorkspaceNodes(doc, connectorStartId, node.id));
+                  setSelected([connectorStartId, node.id]); setConnectorStartId(null); setActiveTool('select'); setToolMessage('Objects connected.');
+                }
+                return;
+              }
               if (activeDocumentId !== node.id) setActiveDocumentId(null);
               setSelected((ids) => event.shiftKey
                 ? ids.includes(node.id) ? ids.filter((id) => id !== node.id) : [...ids, node.id]
@@ -2763,6 +2844,8 @@ export function HiiRoot({
             onActivateContent={() => setActiveDocumentId(node.id)}
             onOpenConversation={() => { if (runtimeEnabled) openObjectConversation(node); }}
             onCommit={(patch) => workspace.patchNode(node.id, patch)}
+            onTransformPreview={transformPreview}
+            onTransformCommit={transformCommit}
             onWindowAction={(action) => windowAction(node, action)}
             onErase={() => { removeWorkspaceNode(node); setSelected((ids) => ids.filter((id) => id !== node.id)); }}
             onShare={onShareNode && (isAccount || (isSpace && isSpaceCanvasNode(node, spaceId))) ? () => onShareNode(node) : undefined}

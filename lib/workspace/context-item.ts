@@ -2,6 +2,7 @@ import type { WorkspaceNode } from './types.ts';
 import { workspaceNodeTitle } from './search.ts';
 import { normalizeWorkspaceContextAnchor } from './context-anchor.ts';
 import { contactSheetContextItems } from './contact-sheet.ts';
+import { canvasObjectContextText } from './canvas-objects.ts';
 
 /**
  * Builds the context descriptor a workspace node contributes to a run.
@@ -12,6 +13,7 @@ import { contactSheetContextItems } from './contact-sheet.ts';
  */
 export function workspaceNodeContextExcerpt(node: WorkspaceNode) {
   const candidates = [
+    canvasObjectContextText(node),
     node.payload.content,
     node.payload.text,
     node.payload.summary,

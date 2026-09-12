@@ -1,0 +1,20 @@
+.inspector { position: absolute; z-index: 122; top: 88px; right: 18px; width: min(280px, calc(100vw - 24px)); padding: 12px; border: 1px solid rgba(0,0,0,.16); border-radius: 12px; color: #111; background: rgba(255,255,255,.98); box-shadow: 0 14px 36px rgba(0,0,0,.12); font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif); }
+.inspector header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 11px; border-bottom: 1px solid #e6e6e6; }
+.inspector header div { min-width: 0; display: grid; gap: 2px; }
+.inspector header small { color: #707070; font: 10px/1.4 var(--font-mono, ui-monospace, monospace); letter-spacing: .06em; text-transform: uppercase; }
+.inspector header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.inspector header button { width: 32px; height: 32px; border: 0; border-radius: 7px; display: grid; place-items: center; background: transparent; cursor: pointer; }
+.inspector header button:hover { background: #f1f1f1; }
+.inspector dl { display: grid; gap: 0; margin: 8px 0; }
+.inspector dl div { display: grid; grid-template-columns: 90px 1fr; gap: 8px; padding: 7px 2px; border-bottom: 1px solid #efefef; }
+.inspector dt { color: #707070; font-size: 11px; }
+.inspector dd { margin: 0; overflow-wrap: anywhere; font-size: 12px; }
+.inspector dd small { display: block; margin-top: 2px; color: #777; }
+.lock { width: 100%; min-height: 38px; margin-top: 4px; padding: 0 10px; border: 1px solid #d3d3d3; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 7px; color: inherit; background: #fff; font: inherit; font-size: 12px; cursor: pointer; }
+.lock:hover { background: #f3f3f3; }
+.lock[aria-pressed='true'] { color: #fff; border-color: #111; background: #111; }
+.actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin: 10px 0; }
+.actions button { min-height: 34px; border: 1px solid #d3d3d3; border-radius: 7px; background: #fff; color: #111; font: inherit; font-size: 11px; cursor: pointer; }
+.actions button:hover { background: #f3f3f3; }
+.actions button:disabled { opacity: .35; cursor: default; }
+.inspector button:focus-visible { outline: 2px solid #1677ff; outline-offset: 2px; }

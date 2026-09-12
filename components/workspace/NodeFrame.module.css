@@ -1,0 +1,68 @@
+.handles {
+  position: absolute;
+  z-index: 20;
+  inset: 0;
+  pointer-events: none;
+}
+
+.handle,
+.rotationHandle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 1px solid #1677ff;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 16%);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.handle[data-handle='nw'] { top: 2px; left: 2px; cursor: nwse-resize; }
+.handle[data-handle='n'] { top: 2px; left: calc(50% - 6px); cursor: ns-resize; }
+.handle[data-handle='ne'] { top: 2px; right: 2px; cursor: nesw-resize; }
+.handle[data-handle='e'] { top: calc(50% - 6px); right: 2px; cursor: ew-resize; }
+.handle[data-handle='se'] { right: 2px; bottom: 2px; cursor: nwse-resize; }
+.handle[data-handle='s'] { bottom: 2px; left: calc(50% - 6px); cursor: ns-resize; }
+.handle[data-handle='sw'] { bottom: 2px; left: 2px; cursor: nesw-resize; }
+.handle[data-handle='w'] { top: calc(50% - 6px); left: 2px; cursor: ew-resize; }
+
+.rotationHandle {
+  top: 18px;
+  left: calc(50% - 7px);
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  cursor: grab;
+}
+
+.rotationHandle::after {
+  content: '';
+  position: absolute;
+  right: 5px;
+  bottom: 100%;
+  width: 1px;
+  height: 14px;
+  background: #1677ff;
+}
+
+.lockIndicator {
+  position: absolute;
+  z-index: 20;
+  top: 8px;
+  right: 8px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: rgb(17 17 17 / 88%);
+  color: #fff;
+  font: 9px/1 "SF Mono", ui-monospace, monospace;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+@media (pointer: coarse) {
+  .handle { width: 18px; height: 18px; }
+  .rotationHandle { width: 20px; height: 20px; left: calc(50% - 10px); }
+}

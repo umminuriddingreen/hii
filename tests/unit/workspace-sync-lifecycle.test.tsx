@@ -50,6 +50,34 @@ afterEach(async () => {
 });
 
 describe('workspace synchronization lifecycle', () => {
+  it('applies a multi-node and link transaction as one save and one undo entry', async () => {
+    const initial = doc(1, ['base', 'other']);
+    const { adapter } = persistence(initial);
+    await render(adapter);
+    act(() => api.mutateDocument((document) => ({
+      ...document,
+      nodes: document.nodes.map((entry) => ({ ...entry, x: entry.x + 50 })),
+      links: [{ id: 'joined', fromId: 'base', toId: 'other', arrow: 'both' }]
+    })));
+    expect(api.document.nodes.map((entry) => entry.x)).toEqual([50, 50]);
+    expect(api.document.links).toHaveLength(1);
+    await act(async () => { await api.flush(); });
+    expect(adapter.write).toHaveBeenCalledTimes(1);
+    act(() => api.undo());
+    expect(api.document.nodes.map((entry) => entry.x)).toEqual([0, 0]);
+    expect(api.document.links).toEqual([]);
+  });
+
+  it('prunes dangling links once at the document transaction boundary', async () => {
+    const { adapter } = persistence(doc(1, ['base']));
+    await render(adapter);
+    act(() => api.mutateDocument((document) => ({
+      ...document,
+      links: [{ id: 'dangling', fromId: 'base', toId: 'missing' }]
+    })));
+    expect(api.document.links).toEqual([]);
+  });
+
   it('undo and redo preserve independent agent objects and fields', async () => {
     const { adapter, remote } = persistence();
     await render(adapter);

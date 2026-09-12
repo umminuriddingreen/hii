@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { readWorkspace, writeWorkspace } from '@/lib/client/hii-bridge';
 import { rebaseWorkspaceDoc, reconcileWorkspaceSave } from '@/lib/workspace/rebase';
 import { reverseWorkspaceChange } from '@/lib/workspace/reverse-change';
-import { emptyWorkspace, type WorkspaceDoc, type WorkspaceNode, type WorkspaceViewport } from '@/lib/workspace/types';
+import { emptyWorkspace, normalizeLinks, type WorkspaceDoc, type WorkspaceNode, type WorkspaceViewport } from '@/lib/workspace/types';
 
 export type WorkspaceApi = {
   ready: boolean;
@@ -13,7 +13,9 @@ export type WorkspaceApi = {
   hasUnsavedChanges: boolean;
   retrySave: () => void;
   flush: () => Promise<WorkspaceDoc>;
+  document: WorkspaceDoc;
   nodes: WorkspaceNode[];
+  mutateDocument: (updater: (document: WorkspaceDoc) => WorkspaceDoc) => void;
   addNode: (node: WorkspaceNode) => void;
   patchNode: (id: string, patch: Partial<WorkspaceNode>) => void;
   removeNode: (id: string) => void;
@@ -232,15 +234,21 @@ export function useWorkspace(
     return () => { disposed = true; window.clearInterval(timer); };
   }, [persistence, receive]);
 
-  const mutate = useCallback((change: (nodes: WorkspaceNode[]) => WorkspaceNode[]) => {
+  const mutateDocument = useCallback((updater: (document: WorkspaceDoc) => WorkspaceDoc) => {
     if (!loaded.current) return;
     const before = current.current;
+    const updated = updater(before);
+    if (updated === before) return;
     mutationVersion.current += 1;
     // Revision is the authoritative Runtime sequence. Local optimistic edits
     // keep the last observed sequence; persistence advances it atomically.
-    const nodes = change(before.nodes);
-    const ids = new Set(nodes.map(node => node.id));
-    const next = { ...before, nodes, links: before.links.filter(link => ids.has(link.fromId) && ids.has(link.toId)), updatedAt: new Date().toISOString() };
+    const next = {
+      ...updated,
+      version: 1 as const,
+      revision: before.revision,
+      links: normalizeLinks(updated.links, updated.nodes),
+      updatedAt: new Date().toISOString()
+    };
     past.current.push({ before, after: next });
     if (past.current.length > 80) past.current.shift();
     future.current = [];
@@ -248,6 +256,10 @@ export function useWorkspace(
     setDocument(next);
     scheduleSave();
   }, [scheduleSave]);
+
+  const mutate = useCallback((change: (nodes: WorkspaceNode[]) => WorkspaceNode[]) => {
+    mutateDocument((before) => ({ ...before, nodes: change(before.nodes) }));
+  }, [mutateDocument]);
 
   const addNode = useCallback((node: WorkspaceNode) => mutate((nodes) => [...nodes, node]), [mutate]);
   const patchNode = useCallback((id: string, patch: Partial<WorkspaceNode>) => mutate((nodes) => nodes.map((node) => node.id === id ? { ...node, ...patch, updatedAt: new Date().toISOString() } : node)), [mutate]);
@@ -280,6 +292,8 @@ export function useWorkspace(
     syncError,
     hasUnsavedChanges,
     flush,
+    document,
+    mutateDocument,
     retrySave: () => {
       if (!loaded.current) setLoadAttempt((attempt) => attempt + 1);
       else if (dirty.current) inFlight.current = persistRef.current();

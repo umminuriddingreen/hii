@@ -22,4 +22,13 @@ describe('workspace direct manipulation contract', () => {
     expect(canvas).toContain('for (const id of selected)');
     expect(canvas).toContain('const step = event.shiftKey ? 10 : 1');
   });
+
+  it('exposes direct resize, rotation, lock, and transform lifecycle controls', () => {
+    expect(frame).toContain("(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const)");
+    expect(frame).toContain('hii-node-rotation-handle');
+    expect(frame).toContain('onTransformPreview?.(detail(current))');
+    expect(frame).toContain('if (onTransformCommit) onTransformCommit(finalDetail)');
+    expect(frame).toContain('data-locked={locked || undefined}');
+    expect(frame).toContain('selected && locked');
+  });
 });
