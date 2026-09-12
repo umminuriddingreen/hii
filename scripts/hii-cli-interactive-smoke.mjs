@@ -14,6 +14,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const binary = process.env.HII_CLI_BIN || path.join(root, 'target', 'release', 'hii');
 const fakeModel = path.join(root, 'cli', 'tests', 'fixtures', 'fake_model.mjs');
 const runtime = mkdtempSync(path.join(tmpdir(), 'hii-cli-interactive-'));
+const realRuntime = process.argv.includes('--real');
 
 if (!existsSync(binary)) {
   throw new Error(`missing HII CLI at ${binary}; run cargo build --release -p hii-cli`);
@@ -47,28 +48,32 @@ let server;
 let pty;
 let ptyExited = false;
 try {
-  server = spawn(process.execPath, [fakeModel, '--scenario', 'happy_calc', '--port', '0'], {
-    cwd: root,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: process.env
-  });
-  const { match } = await waitFor(server, (text) => text.match(/PORT=(\d+)/), 'fake model port');
-  const port = match[1];
+  let port = null;
+  if (!realRuntime) {
+    server = spawn(process.execPath, [fakeModel, '--scenario', 'happy_calc', '--port', '0'], {
+      cwd: root,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: process.env
+    });
+    const { match } = await waitFor(server, (text) => text.match(/PORT=(\d+)/), 'fake model port');
+    port = match[1];
+  }
   const output = [];
   let exitCode = null;
   let sentExit = false;
+  const env = realRuntime ? process.env : {
+    ...process.env,
+    HII_RUNTIME_DIR: runtime,
+    HII_MODEL_PROVIDER: 'ollama',
+    HII_MODEL_URL: `http://127.0.0.1:${port}`,
+    HII_MODEL: 'fake-model'
+  };
   pty = spawnPty(binary, [], {
     name: 'xterm-256color',
     cols: 100,
     rows: 28,
-    cwd: root,
-    env: {
-      ...process.env,
-      HII_RUNTIME_DIR: runtime,
-      HII_MODEL_PROVIDER: 'ollama',
-      HII_MODEL_URL: `http://127.0.0.1:${port}`,
-      HII_MODEL: 'fake-model'
-    }
+    cwd: realRuntime ? process.cwd() : root,
+    env
   });
   pty.onData((data) => {
     output.push(data);
@@ -100,7 +105,8 @@ try {
   console.log('status:       ok');
   console.log(`binary:       ${binary}`);
   console.log('entrypoint:   bare hii');
-  console.log('model:        fake-model');
+  console.log(`runtime:      ${realRuntime ? 'real' : 'isolated fake model'}`);
+  console.log(`model:        ${realRuntime ? 'persisted selection' : 'fake-model'}`);
   console.log(`exitCode:     ${exitCode}`);
 } finally {
   if (pty && !ptyExited) pty.kill();

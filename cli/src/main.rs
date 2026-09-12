@@ -166,7 +166,13 @@ enum SessionProfile {
 #[derive(Subcommand, Debug)]
 enum DoctorCommand {
     #[command(about = "Run the real bare `hii` interactive startup smoke test")]
-    Interactive,
+    Interactive {
+        #[arg(
+            long,
+            help = "Use the persisted local runtime/model instead of an isolated fake model"
+        )]
+        real: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -2063,7 +2069,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Doctor { action }) => match action {
-            Some(DoctorCommand::Interactive) => run_interactive_doctor(&paths),
+            Some(DoctorCommand::Interactive { real }) => run_interactive_doctor(&paths, real),
             None => {
                 let ok = doctor(&paths, cli.cwd)?;
                 Ok(if ok {
@@ -4160,7 +4166,7 @@ fn interactive_doctor_script(paths: &AppPaths) -> PathBuf {
     paths.repo.join("scripts/hii-cli-interactive-smoke.mjs")
 }
 
-fn run_interactive_doctor(paths: &AppPaths) -> Result<ExitCode, String> {
+fn run_interactive_doctor(paths: &AppPaths, real: bool) -> Result<ExitCode, String> {
     let script = interactive_doctor_script(paths);
     if !script.is_file() {
         return Err(format!(
@@ -4175,6 +4181,7 @@ fn run_interactive_doctor(paths: &AppPaths) -> Result<ExitCode, String> {
 
     let status = Command::new("node")
         .arg(&script)
+        .args(real.then_some("--real"))
         .current_dir(&paths.repo)
         .status()
         .map_err(|error| format!("failed to run {}: {error}", script.display()))?;
@@ -6178,7 +6185,15 @@ mod tests {
                 .expect("doctor interactive parses")
                 .command,
             Some(Commands::Doctor {
-                action: Some(DoctorCommand::Interactive)
+                action: Some(DoctorCommand::Interactive { real: false })
+            })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["hii", "doctor", "interactive", "--real"])
+                .expect("doctor interactive --real parses")
+                .command,
+            Some(Commands::Doctor {
+                action: Some(DoctorCommand::Interactive { real: true })
             })
         ));
         assert_eq!(
