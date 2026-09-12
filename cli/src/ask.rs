@@ -29,6 +29,7 @@ pub fn run(
 
     let ollama = Ollama::discover().ensure_reachable()?;
     let models = ollama.models()?;
+    let env_model_present = std::env::var_os("HII_MODEL").is_some();
     let saved_model = if requested_model.is_none() {
         paths
             .user_model_preference()?
@@ -36,11 +37,12 @@ pub fn run(
     } else {
         None
     };
-    let model = agent::choose_model(
-        requested_model.or(saved_model.as_deref()),
-        ollama.provider(),
-        &models,
-    )?;
+    let (requested, _) = agent::requested_model_selection(
+        requested_model,
+        saved_model.as_deref(),
+        env_model_present,
+    );
+    let model = agent::choose_model(requested, ollama.provider(), &models)?;
     let system = format!(
         "{SYSTEM_PROMPT}\n\n{}",
         crate::config::runtime_identity_context(ollama.provider(), &model, ollama.base_url(),)

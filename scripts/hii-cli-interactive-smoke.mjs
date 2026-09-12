@@ -106,7 +106,7 @@ try {
   console.log(`binary:       ${binary}`);
   console.log('entrypoint:   bare hii');
   console.log(`runtime:      ${realRuntime ? 'real' : 'isolated fake model'}`);
-  console.log(`model:        ${realRuntime ? 'persisted selection' : 'fake-model'}`);
+  console.log(`model:        ${realRuntime ? 'real shell selection' : 'fake-model'}`);
   console.log(`exitCode:     ${exitCode}`);
 } finally {
   if (pty && !ptyExited) pty.kill();

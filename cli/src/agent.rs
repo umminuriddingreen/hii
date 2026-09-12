@@ -490,6 +490,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let git_before = tools.git_snapshot();
     let ollama = Ollama::discover().ensure_reachable()?;
     let models = ollama.models()?;
+    let env_model_present = std::env::var_os("HII_MODEL").is_some();
     let saved_model = if options.model.is_none() {
         paths
             .user_model_preference()?
@@ -497,21 +498,12 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     } else {
         None
     };
-    let model_source = if options.model.is_some() {
-        "explicit"
-    } else if saved_model.is_some() {
-        "saved-user"
-    } else if std::env::var_os("HII_MODEL").is_some() {
-        "env"
-    } else {
-        "provider-default"
-    }
-    .to_string();
-    let model = choose_model(
-        options.model.as_deref().or(saved_model.as_deref()),
-        ollama.provider(),
-        &models,
-    )?;
+    let (requested_model, model_source) = requested_model_selection(
+        options.model.as_deref(),
+        saved_model.as_deref(),
+        env_model_present,
+    );
+    let model = choose_model(requested_model, ollama.provider(), &models)?;
     let review_model = if options.review {
         Some(choose_review_model(
             options.review_model.as_deref(),
@@ -1843,6 +1835,23 @@ pub(crate) fn choose_model(
         provider,
         installed,
     )
+}
+
+pub(crate) fn requested_model_selection<'a>(
+    explicit: Option<&'a str>,
+    saved: Option<&'a str>,
+    env_model_present: bool,
+) -> (Option<&'a str>, String) {
+    if let Some(explicit) = explicit {
+        return (Some(explicit), "explicit".into());
+    }
+    if env_model_present {
+        return (None, "env".into());
+    }
+    if let Some(saved) = saved {
+        return (Some(saved), "saved-user".into());
+    }
+    (None, "provider-default".into())
 }
 
 fn choose_model_with_env(
@@ -3429,6 +3438,22 @@ fn model_selection_is_strict_and_defaults_per_provider() {
         choose_model_with_env(None, Some("Qwen/Qwen3-4B"), ModelProvider::Native, &partial)
             .unwrap(),
         "Qwen/Qwen3-4B"
+    );
+}
+
+#[test]
+fn env_model_preempts_saved_user_preference() {
+    assert_eq!(
+        requested_model_selection(Some("flag-model"), Some("saved-model"), true),
+        (Some("flag-model"), "explicit".into())
+    );
+    assert_eq!(
+        requested_model_selection(None, Some("saved-model"), true),
+        (None, "env".into())
+    );
+    assert_eq!(
+        requested_model_selection(None, Some("saved-model"), false),
+        (Some("saved-model"), "saved-user".into())
     );
 }
 

@@ -1,7 +1,7 @@
 use crate::{
     agent::{
-        choose_model, execute_tool, parse_action_with_repair, Action, RejectedActionGuard,
-        RepeatedToolFailureGuard, MODEL_LOOP_DETECTED_MESSAGE,
+        choose_model, execute_tool, parse_action_with_repair, requested_model_selection, Action,
+        RejectedActionGuard, RepeatedToolFailureGuard, MODEL_LOOP_DETECTED_MESSAGE,
     },
     attachments::AttachmentQueue,
     background::BackgroundJobs,
@@ -373,6 +373,7 @@ impl Conversation {
         crate::tui::load_theme(&paths.runtime);
         let tools = Toolbelt::new(workspace)?;
         let ollama = Ollama::discover().ensure_reachable()?;
+        let env_model_present = std::env::var_os("HII_MODEL").is_some();
         let saved_model = if requested_model.is_none() {
             paths
                 .user_model_preference()?
@@ -381,22 +382,22 @@ impl Conversation {
             None
         };
         let installed = ollama.models()?;
-        let requested = requested_model.as_deref().or(saved_model.as_deref());
+        let (requested, _) = requested_model_selection(
+            requested_model.as_deref(),
+            saved_model.as_deref(),
+            env_model_present,
+        );
         // Nothing was asked for and the default is not installed: an operator
         // sitting at a terminal can just choose, the way `ollama` does, rather
         // than read an error and retype a name from `hii models`.
         let model = match choose_model(requested, ollama.provider(), &installed) {
             Ok(model) => model,
-            Err(_error)
-                if requested.is_none()
-                    && std::env::var_os("HII_MODEL").is_none()
-                    && installed.len() == 1 =>
-            {
+            Err(_error) if requested.is_none() && !env_model_present && installed.len() == 1 => {
                 installed[0].clone()
             }
             Err(error)
                 if requested.is_none()
-                    && std::env::var_os("HII_MODEL").is_none()
+                    && !env_model_present
                     && !installed.is_empty()
                     && crate::picker::is_available() =>
             {
