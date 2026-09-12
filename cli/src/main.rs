@@ -3869,7 +3869,7 @@ fn slash_help() -> String {
     )
     .replace(
         "/thinking [mode]              off | compact | raw model stream\n/raw [on|off]                 toggle the raw model stream\n",
-        "/thinking [mode]              stream | flow | activity\n/raw [on|off]                 toggle the direct model and tool stream\n/reasoning [mode]             auto | off | deep model effort\n/mode [coding|general|auto|local|private|best]\n                               choose coding behavior or provider routing\n/autonomy [local-full|approval]\n                               choose local autonomy policy\n/model save                   persist the current user-determined model\n/learn [status]               show learning memory\nStream is the default; Flow and Activity are optional projections.\nAuto-compact is on by default.\n",
+        "/thinking [mode]              conversation | stream | flow | activity\n/raw [on|off]                 toggle the direct model and tool stream\n/reasoning [mode]             auto | off | deep model effort\n/mode [coding|general|auto|local|private|best]\n                               choose coding behavior or provider routing\n/autonomy [local-full|approval]\n                               choose local autonomy policy\n/model save                   persist the current user-determined model\n/learn [status]               show learning memory\nConversation is the default; Stream and diagnostics are developer views.\nAuto-compact is on by default.\n",
     )
 }
 
@@ -3882,7 +3882,7 @@ fn public_test_slash_help() -> String {
     "/help                         show commands\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/status                       show isolated session, workspace, model, and usage\n/attach <path>                add workspace text/image context\n/attachments                  show pending context and size\n/detach [number|all]          remove pending context\n/theme [name]                 switch the terminal theme\n/keymap [default|vim]          inspect or switch keyboard profile\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw display\n/reasoning [mode]             auto | off | deep model effort\n/raw [on|off]                 toggle the raw model stream\n/model [name]                 list or switch available models\n/proof [run-id]               inspect isolated execution proof\n/permissions                  show the tester-safe authority boundary\n/undo                         drop the last exchange\n/exit                         leave HII\n\nAttachments must already exist inside this disposable workspace. Installed Mac tools are available to HII inside it. Direct shell input and deletion are unavailable."
         .replace(
             "/thinking [mode]              off | compact | raw display\n/reasoning [mode]             auto | off | deep model effort\n/raw [on|off]                 toggle the raw model stream\n",
-            "/thinking [mode]              flow | activity | diagnostics\n/reasoning [mode]             auto | off | deep model effort\n/raw [on|off]                 toggle diagnostics\n",
+            "/thinking [mode]              conversation | flow | activity | diagnostics\n/reasoning [mode]             auto | off | deep model effort\n/raw [on|off]                 toggle diagnostics\n",
         )
 }
 

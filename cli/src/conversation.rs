@@ -63,6 +63,7 @@ struct SessionUsage {
 
 #[derive(Clone, Copy)]
 enum ThinkingMode {
+    Conversation,
     Stream,
     Flow,
     Activity,
@@ -455,9 +456,9 @@ impl Conversation {
             max_steps,
             usage: SessionUsage::default(),
             last_skill_draft: None,
-            // The primary CLI view is the run itself: provider-emitted model
-            // tokens plus explicit tool calls, results, and receipts.
-            thinking_mode: ThinkingMode::Stream,
+            // Conversation is the primary human view: keep execution and proof
+            // durable, but render only the assistant's words and questions.
+            thinking_mode: ThinkingMode::Conversation,
             last_flow: None,
             thread: None,
             last_projection_item: None,
@@ -2217,6 +2218,7 @@ impl Conversation {
     /// in which case the tool lines are all there is to show.
     fn shows_tool_lines(&self) -> bool {
         io::stdout().is_terminal()
+            && !matches!(self.thinking_mode, ThinkingMode::Conversation)
             && (!matches!(self.thinking_mode, ThinkingMode::Flow) || self.flow_blind)
     }
 
@@ -2258,9 +2260,9 @@ impl Conversation {
 
     fn thinking_mode_for(requested: &str) -> Option<ThinkingMode> {
         match requested {
-            // `off` predates these views and still means "show me the least":
-            // Flow is that, and there is no view with nothing in it.
-            "flow" | "compact" | "off" => Some(ThinkingMode::Flow),
+            "conversation" | "chat" | "off" => Some(ThinkingMode::Conversation),
+            // `compact` remains the objective-only flow projection.
+            "flow" | "compact" => Some(ThinkingMode::Flow),
             "activity" => Some(ThinkingMode::Activity),
             "stream" => Some(ThinkingMode::Stream),
             "raw" | "diagnostics" => Some(ThinkingMode::Raw),
@@ -2269,14 +2271,17 @@ impl Conversation {
     }
 
     pub fn thinking(&mut self, requested: Option<&str>) -> Result<String, String> {
-        let requested = requested.unwrap_or("stream");
+        let requested = requested.unwrap_or("conversation");
         let Some(mode) = Self::thinking_mode_for(requested) else {
             return Err(format!(
-                "unknown thinking view {requested:?}; choose stream, flow, or activity"
+                "unknown thinking view {requested:?}; choose conversation, stream, flow, or activity"
             ));
         };
         self.thinking_mode = mode;
         Ok(match mode {
+            ThinkingMode::Conversation => {
+                "Conversation view is active — only replies and questions are shown. Work and proof remain available through `/thinking activity`, `/raw on`, and `/proof`."
+            }
             ThinkingMode::Flow => {
                 "Flow view is active — objective projection only. Use `/raw on` for the direct model and tool stream."
             }
@@ -3035,7 +3040,10 @@ impl Conversation {
         let mut live_input = crate::keyboard::LiveInput::enter(self.keymap.clone())?;
         let interactive = io::stdout().is_terminal();
         let raw_activity = matches!(self.thinking_mode, ThinkingMode::Raw);
-        let stream_activity = matches!(self.thinking_mode, ThinkingMode::Stream);
+        let stream_activity = matches!(
+            self.thinking_mode,
+            ThinkingMode::Conversation | ThinkingMode::Stream
+        );
         let compact_activity = false;
         let mut content_started = false;
         let mut reasoning_chars = 0usize;
@@ -4652,6 +4660,8 @@ mod tests {
     #[test]
     fn every_thinking_view_is_reachable_and_unknown_views_name_the_choices() {
         for view in [
+            "conversation",
+            "chat",
             "flow",
             "compact",
             "off",
