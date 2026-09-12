@@ -78,6 +78,7 @@
     "hii:bootstrap:check": "node scripts/hii-shell-syntax-check.mjs scripts/hii-bootstrap.sh",
     "hii:central:check": "node --check scripts/hii-release-installer.mjs && node --check scripts/hii-release-install-smoke.mjs && bash -n scripts/hii-install-release.sh && node scripts/hii-release-install-smoke.mjs",
     "hii:agent-home:check": "node scripts/hii-agent-home-smoke.mjs",
+    "hii:interactive:check": "node scripts/hii-cli-interactive-smoke.mjs",
     "hii:central:install": "bash scripts/hii-install-release.sh",
     "hii:central:install:windows": "pwsh -NoProfile -NoLogo -File scripts/hii-install-release.ps1",
     "hii:launcher:check": "node scripts/hii-shell-syntax-check.mjs scripts/hii-launcher.sh && node scripts/hii-cli-launcher-smoke.mjs",
