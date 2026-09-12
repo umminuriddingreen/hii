@@ -1,7 +1,8 @@
 use crate::{
     agent::{
-        choose_model, execute_tool, parse_action_with_repair, requested_model_selection, Action,
-        RejectedActionGuard, RepeatedToolFailureGuard, MODEL_LOOP_DETECTED_MESSAGE,
+        choose_model, execute_tool, parse_action_with_repair, requested_model_selection,
+        saved_model_for_provider, Action, RejectedActionGuard, RepeatedToolFailureGuard,
+        MODEL_LOOP_DETECTED_MESSAGE,
     },
     attachments::AttachmentQueue,
     background::BackgroundJobs,
@@ -375,9 +376,7 @@ impl Conversation {
         let ollama = Ollama::discover().ensure_reachable()?;
         let env_model_present = std::env::var_os("HII_MODEL").is_some();
         let saved_model = if requested_model.is_none() {
-            paths
-                .user_model_preference()?
-                .map(|preference| preference.model)
+            saved_model_for_provider(&paths, ollama.provider())?
         } else {
             None
         };

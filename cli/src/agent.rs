@@ -492,9 +492,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let models = ollama.models()?;
     let env_model_present = std::env::var_os("HII_MODEL").is_some();
     let saved_model = if options.model.is_none() {
-        paths
-            .user_model_preference()?
-            .map(|preference| preference.model)
+        saved_model_for_provider(paths, ollama.provider())?
     } else {
         None
     };
@@ -1852,6 +1850,21 @@ pub(crate) fn requested_model_selection<'a>(
         return (Some(saved), "saved-user".into());
     }
     (None, "provider-default".into())
+}
+
+pub(crate) fn saved_model_for_provider(
+    paths: &AppPaths,
+    provider: ModelProvider,
+) -> Result<Option<String>, String> {
+    Ok(paths
+        .user_model_preference()?
+        .filter(|preference| {
+            preference
+                .provider
+                .as_deref()
+                .is_none_or(|saved_provider| saved_provider == provider.id())
+        })
+        .map(|preference| preference.model))
 }
 
 fn choose_model_with_env(
@@ -3455,6 +3468,33 @@ fn env_model_preempts_saved_user_preference() {
         requested_model_selection(None, Some("saved-model"), false),
         (Some("saved-model"), "saved-user".into())
     );
+}
+
+#[test]
+fn saved_model_is_scoped_to_its_provider() {
+    let runtime =
+        std::env::temp_dir().join(format!("hii-saved-model-provider-{}", std::process::id()));
+    let config = runtime.join("config");
+    fs::create_dir_all(&config).expect("create config dir");
+    fs::write(
+        config.join("model.json"),
+        r#"{"provider":"lmstudio","model":"qwen3.6-35b-a3b-agent"}"#,
+    )
+    .expect("write model preference");
+    let paths = AppPaths {
+        repo: runtime.join("repo"),
+        runtime: runtime.clone(),
+    };
+
+    assert_eq!(
+        saved_model_for_provider(&paths, ModelProvider::LmStudio).unwrap(),
+        Some("qwen3.6-35b-a3b-agent".into())
+    );
+    assert_eq!(
+        saved_model_for_provider(&paths, ModelProvider::Native).unwrap(),
+        None
+    );
+    fs::remove_dir_all(runtime).expect("remove temp runtime");
 }
 
 #[test]

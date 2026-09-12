@@ -31,9 +31,7 @@ pub fn run(
     let models = ollama.models()?;
     let env_model_present = std::env::var_os("HII_MODEL").is_some();
     let saved_model = if requested_model.is_none() {
-        paths
-            .user_model_preference()?
-            .map(|preference| preference.model)
+        agent::saved_model_for_provider(paths, ollama.provider())?
     } else {
         None
     };
