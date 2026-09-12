@@ -251,43 +251,13 @@ impl Toolbelt {
         tool_result(self.search_native(query, &base), false)
     }
 
-    /// Search through a configured provider and return only observed results.
-    /// No browser handoff or guessed links are presented as search evidence.
+    /// Search via HII's user-level, non-Docker SearXNG service.
     pub fn web_search(&self, query: &str) -> ToolResult {
         let query = query.trim();
         if query.is_empty() {
             return tool_result(Err("web search query cannot be empty".into()), false);
         }
-        let result = (|| {
-            let key = std::env::var("BRAVE_SEARCH_API_KEY")
-                .ok()
-                .filter(|key| !key.trim().is_empty())
-                .ok_or("SEARCH_NOT_CONFIGURED: set BRAVE_SEARCH_API_KEY for native web search; no results were observed")?;
-            self.search_brave(
-                query,
-                &key,
-                "https://api.search.brave.com/res/v1/web/search",
-            )
-        })();
-        tool_result(result, false)
-    }
-
-    fn search_brave(&self, query: &str, key: &str, endpoint: &str) -> Result<String, String> {
-        let mut url = Url::parse(endpoint).map_err(|error| error.to_string())?;
-        url.query_pairs_mut()
-            .append_pair("q", &query.chars().take(300).collect::<String>())
-            .append_pair("count", "8");
-        let response = self
-            .web_http
-            .get(url.as_str())
-            .set("Accept", "application/json")
-            .set("X-Subscription-Token", key)
-            .call()
-            .map_err(|error| format!("web search failed: {error}; no results were observed"))?;
-        let body: serde_json::Value = response
-            .into_json()
-            .map_err(|error| format!("invalid search response: {error}"))?;
-        format_search_results(query, &body)
+        tool_result(self.search_searxng(query, "goc", false), false)
     }
 
     pub fn image_search(&self, query: &str) -> ToolResult {
@@ -295,40 +265,44 @@ impl Toolbelt {
         if query.is_empty() {
             return tool_result(Err("image search query cannot be empty".into()), false);
         }
-        let result = (|| {
-            let key = std::env::var("BRAVE_SEARCH_API_KEY").ok()
-                .filter(|key| !key.trim().is_empty())
-                .ok_or("SEARCH_NOT_CONFIGURED: set BRAVE_SEARCH_API_KEY for native image search; no results were observed")?;
-            self.search_images_brave(
-                query,
-                &key,
-                "https://api.search.brave.com/res/v1/images/search",
-            )
-        })();
-        tool_result(result, false)
+        tool_result(self.search_searxng(query, "bii", true), false)
     }
 
-    fn search_images_brave(
+    fn search_searxng(&self, query: &str, engine: &str, images: bool) -> Result<String, String> {
+        self.search_searxng_at(query, engine, images, "http://127.0.0.1:8888/search")
+    }
+
+    fn search_searxng_at(
         &self,
         query: &str,
-        key: &str,
+        engine: &str,
+        images: bool,
         endpoint: &str,
     ) -> Result<String, String> {
         let mut url = Url::parse(endpoint).map_err(|error| error.to_string())?;
+        let safe_query = query
+            .chars()
+            .filter(|ch| *ch != '!')
+            .take(300)
+            .collect::<String>();
         url.query_pairs_mut()
-            .append_pair("q", &query.chars().take(300).collect::<String>())
-            .append_pair("count", "8");
+            .append_pair("q", &format!("!{engine} {safe_query}"))
+            .append_pair("format", "json")
+            .append_pair("categories", if images { "images" } else { "general" });
         let response = self
             .web_http
             .get(url.as_str())
             .set("Accept", "application/json")
-            .set("X-Subscription-Token", key)
             .call()
-            .map_err(|error| format!("image search failed: {error}; no results were observed"))?;
+            .map_err(|error| format!("LOCAL_SEARCH_UNAVAILABLE: {error}; start the non-Docker service with node scripts/hii-searxng.mjs start; no results were observed"))?;
         let body: serde_json::Value = response
             .into_json()
-            .map_err(|error| format!("invalid image search response: {error}"))?;
-        format_image_results(query, &body)
+            .map_err(|error| format!("invalid local search response: {error}"))?;
+        if images {
+            format_image_results(query, &body)
+        } else {
+            format_search_results(query, &body)
+        }
     }
 
     /// Load a bounded public thumbnail for the CLI's existing Kitty image
@@ -766,11 +740,14 @@ impl Toolbelt {
 
 fn format_search_results(query: &str, body: &serde_json::Value) -> Result<String, String> {
     let results = body
-        .pointer("/web/results")
+        .get("results")
         .and_then(|value| value.as_array())
-        .ok_or("search response had no web results; no results were observed")?;
+        .ok_or("search response had no results; no results were observed")?;
     let mut lines = Vec::new();
     for result in results.iter().take(8) {
+        if result.get("engine").and_then(|value| value.as_str()) != Some("google cse") {
+            continue;
+        }
         let (Some(title), Some(link)) = (
             result.get("title").and_then(|value| value.as_str()),
             result.get("url").and_then(|value| value.as_str()),
@@ -781,7 +758,7 @@ fn format_search_results(query: &str, body: &serde_json::Value) -> Result<String
             continue;
         }
         let description = result
-            .get("description")
+            .get("content")
             .and_then(|value| value.as_str())
             .map(readable_html)
             .unwrap_or_default();
@@ -810,12 +787,13 @@ fn format_image_results(query: &str, body: &serde_json::Value) -> Result<String,
         .ok_or("image search response had no results; no images were observed")?;
     let mut lines = Vec::new();
     for result in results.iter().take(8) {
+        if result.get("engine").and_then(|value| value.as_str()) != Some("bing images") {
+            continue;
+        }
         let (Some(title), Some(source), Some(image)) = (
             result.get("title").and_then(|value| value.as_str()),
             result.get("url").and_then(|value| value.as_str()),
-            result
-                .pointer("/properties/url")
-                .and_then(|value| value.as_str()),
+            result.get("img_src").and_then(|value| value.as_str()),
         ) else {
             continue;
         };
@@ -823,7 +801,7 @@ fn format_image_results(query: &str, body: &serde_json::Value) -> Result<String,
             continue;
         }
         let thumbnail = result
-            .pointer("/thumbnail/src")
+            .get("thumbnail")
             .and_then(|value| value.as_str())
             .filter(|url| validate_public_web_url(url).is_ok())
             .unwrap_or(image);
@@ -1698,31 +1676,35 @@ mod tests {
 
     #[test]
     fn search_results_include_only_public_source_links() {
-        let body = serde_json::json!({"web":{"results":[
-            {"title":"A <b>source</b>","url":"https://example.com/a","description":"Some <b>context</b>"},
-            {"title":"Internal","url":"http://127.0.0.1/private"}
-        ]}});
+        let body = serde_json::json!({"results":[
+            {"title":"A <b>source</b>","url":"https://example.com/a","content":"Some <b>context</b>","engine":"google cse"},
+            {"title":"Internal","url":"http://127.0.0.1/private","engine":"google cse"},
+            {"title":"Wrong engine","url":"https://example.com/brave","engine":"brave"}
+        ]});
         let result = format_search_results("test", &body).unwrap();
         assert!(result.contains("https://example.com/a"));
         assert!(result.contains("Some context"));
         assert!(!result.contains("127.0.0.1"));
+        assert!(!result.contains("Wrong engine"));
     }
 
     #[test]
     fn image_results_include_direct_image_thumbnail_and_source() {
         let body = serde_json::json!({"results":[
-            {"title":"Facade","url":"https://example.com/page","properties":{"url":"https://example.com/a.jpg"},"thumbnail":{"src":"https://example.com/thumb.jpg"}},
-            {"title":"Internal","url":"http://127.0.0.1/page","properties":{"url":"https://example.com/b.jpg"}}
+            {"title":"Facade","url":"https://example.com/page","img_src":"https://example.com/a.jpg","thumbnail":"https://example.com/thumb.jpg","engine":"bing images"},
+            {"title":"Internal","url":"http://127.0.0.1/page","img_src":"https://example.com/b.jpg","engine":"bing images"},
+            {"title":"Wrong engine","url":"https://example.com/page","img_src":"https://example.com/b.jpg","engine":"brave.images"}
         ]});
         let result = format_image_results("facade", &body).unwrap();
         assert!(result.contains("Image: https://example.com/a.jpg"));
         assert!(result.contains("Thumbnail: https://example.com/thumb.jpg"));
         assert!(result.contains("Source: https://example.com/page"));
         assert!(!result.contains("127.0.0.1"));
+        assert!(!result.contains("Wrong engine"));
     }
 
     #[test]
-    fn native_image_search_requests_provider_and_returns_observed_result() {
+    fn native_image_search_requests_local_engine_and_returns_observed_result() {
         use std::net::TcpListener;
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -1731,20 +1713,19 @@ mod tests {
             let mut request = [0u8; 4096];
             let size = stream.read(&mut request).unwrap();
             let request = String::from_utf8_lossy(&request[..size]);
-            assert!(request.contains("q=facade+study"));
-            assert!(request
-                .to_ascii_lowercase()
-                .contains("x-subscription-token: test-key"));
-            let body = r#"{"results":[{"title":"Facade","url":"https://example.com/page","properties":{"url":"https://example.com/a.jpg"},"thumbnail":{"src":"https://example.com/t.jpg"}}]}"#;
+            assert!(request.contains("q=%21bii+facade+study"));
+            assert!(!request.to_ascii_lowercase().contains("subscription-token"));
+            let body = r#"{"results":[{"title":"Facade","url":"https://example.com/page","img_src":"https://example.com/a.jpg","thumbnail":"https://example.com/t.jpg","engine":"bing images"}]}"#;
             use std::io::Write;
             write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
         });
         let path = workspace();
         let tools = Toolbelt::new(path.clone()).unwrap();
         let result = tools
-            .search_images_brave(
+            .search_searxng_at(
                 "facade study",
-                "test-key",
+                "bii",
+                true,
                 &format!("http://{address}/images/search"),
             )
             .unwrap();
@@ -1760,6 +1741,33 @@ mod tests {
         assert!(tools
             .image_preview("http://127.0.0.1:8888/image.png")
             .is_err());
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    #[ignore = "requires the user's local non-Docker search service"]
+    fn live_local_web_and_image_search() {
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        let web = tools.web_search("architecture facade");
+        assert!(
+            web.ok && web.output.contains("URL: https://"),
+            "{}",
+            web.output
+        );
+        let images = tools.image_search("architecture facade");
+        assert!(
+            images.ok && images.output.contains("Image: https://"),
+            "{}",
+            images.output
+        );
+        let thumbnail = images
+            .output
+            .lines()
+            .find_map(|line| line.strip_prefix("Thumbnail: "))
+            .unwrap();
+        let preview = tools.image_preview(thumbnail).unwrap();
+        assert!(preview.mime_type.starts_with("image/") && !preview.base64.is_empty());
         let _ = fs::remove_dir_all(path);
     }
 

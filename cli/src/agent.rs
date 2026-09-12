@@ -370,7 +370,7 @@ fn tool_failure_signature(tool: &str, output: &str) -> Option<String> {
         .collect::<Vec<_>>()
         .join(" ")
         .to_ascii_lowercase();
-    let repeatable_class = first_line.starts_with("search_not_configured:")
+    let repeatable_class = first_line.starts_with("local_search_unavailable:")
         || first_line.starts_with("native_webview_required")
         || first_line.starts_with("web fetch returned http ")
         || first_line.starts_with("web fetch failed:")
