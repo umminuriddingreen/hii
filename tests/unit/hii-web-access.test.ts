@@ -110,10 +110,10 @@ describe('HII web access gate', () => {
     expect(canvas).toContain('<CanvasToolbar');
     expect(canvas).toContain('remote: !runtimeEnabled');
     const toolbar = readFileSync('components/workspace/CanvasToolbar.tsx', 'utf8');
-    expect(toolbar).toContain('aria-label="Canvas tools"');
-    expect(toolbar).toContain("id: 'sticky', label: 'Sticky', shortcut: 'N'");
-    expect(toolbar).toContain("id: 'connector', label: 'Connector', shortcut: 'C'");
-    expect(toolbar).toContain("id: 'table', label: 'Table', shortcut: 'B'");
+    expect(toolbar).toContain('aria-label="Information terminal"');
+    expect(toolbar).toContain("id: 'sticky', keywords: 'sticky'");
+    expect(toolbar).toContain("id: 'connector', keywords: 'line link'");
+    expect(toolbar).toContain("label: 'Table', shortcut: 'B', id: 'table'");
     expect(toolbar).toContain('HII Remote');
     expect(toolbar).not.toContain('device terminal');
     expect(toolbar).not.toContain('double-click for text');
@@ -213,7 +213,7 @@ describe('HII web access gate', () => {
     expect(desktop).toContain('persistentChrome={false}');
     expect(desktop).not.toContain('<header className={styles.header}');
     const canvas = readFileSync('components/workspace/HiiRoot.tsx', 'utf8');
-    expect(desktop).toContain('openTerminalOnReady={ready && !onboardingComplete}');
+    expect(desktop).not.toContain('openTerminalOnReady={ready && !onboardingComplete}');
     expect(canvas).toContain("node.payload.terminalPresentation !== 'hidden'");
     expect(desktop).toContain('new NativeAccountWorkspacePersistence(active)');
     expect(page).toContain('return <HiiWebAccess />');

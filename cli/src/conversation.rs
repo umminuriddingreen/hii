@@ -4776,10 +4776,11 @@ mod tests {
         // one; that line is load-bearing, so it buys the extra bytes. The flow
         // block is the next place to trim if this needs to come back down.
         //
-        // Raised again from 1_100 for the same reason the agent ceiling moved:
-        // the natively-served tools must be named to be callable.
+        // Raised again for the same reason the agent ceiling moved: natively
+        // served tools, including HII-owned information actions, must be named
+        // to be callable by providers that only honor json_object mode.
         assert!(
-            prompt.len() <= 1_175,
+            prompt.len() <= 1_550,
             "conversation prompt grew to {} bytes",
             prompt.len()
         );

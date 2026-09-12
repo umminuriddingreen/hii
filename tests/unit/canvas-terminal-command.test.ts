@@ -80,11 +80,12 @@ describe('canvas terminal command', () => {
     expect(root).not.toContain('Make presentation');
   });
 
-  it('opens Command-K as the compact persistent PTY', () => {
+  it('keeps Command-K for the information terminal and Command-Space for the PTY', () => {
     const root = readFileSync(resolve(process.cwd(), 'components/workspace/HiiRoot.tsx'), 'utf8');
     const css = readFileSync(resolve(process.cwd(), 'app/globals.css'), 'utf8');
-    expect(root).toContain("ensureWorkspaceTerminal('quick')");
-    expect(root).toContain("runtimeEnabled && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k'");
+    expect(root).toContain("event.key.toLowerCase() === 'k'");
+    expect(root).toContain('setCanvasCommandsOpen((open) => !open)');
+    expect(root).toContain("ensureWorkspaceTerminal('docked')");
     expect(root).toContain("presentation: 'canvas' | 'docked' | 'quick'");
     expect(root).toContain("data-compact={workspaceTerminal.payload.terminalPresentation === 'quick' || undefined}");
     expect(root).toContain('onKeyDownCapture={(event) => {');

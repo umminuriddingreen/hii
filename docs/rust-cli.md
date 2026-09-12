@@ -265,6 +265,13 @@ HII_MODEL_URL=http://127.0.0.1:11435 \
 hii --model mlx-community/Qwen3.8-27B-4bit
 ```
 
+For an authenticated remote OpenAI-compatible endpoint, set `HII_MODEL_URL`
+and point `HII_MODEL_API_KEY_FILE` at a private, single-line bearer-token file.
+HII reads that file without logging its contents and authenticates model listing
+and completion requests. `HII_MODEL_API_KEY` is an explicit environment-variable
+fallback only when `HII_MODEL_API_KEY_FILE` is unset; the file setting takes
+precedence and a missing, unreadable, or empty configured file fails closed.
+
 The native provider supports incremental response and reasoning streams,
 interrupt cancellation, model discovery, and token telemetry. HII continues
 to own the agent loop, tools, verification, and durable receipts.

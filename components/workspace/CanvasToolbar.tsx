@@ -1,26 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import {
-  ArrowUpRight,
-  CornersOut,
-  Cursor,
-  DotsThree,
-  Export,
-  FileArrowUp,
-  MagnifyingGlass,
-  Minus,
-  Note,
-  Path,
-  PencilSimple,
-  Plus,
-  PresentationChart,
-  Pulse,
-  Shapes,
-  Table,
-  TerminalWindow,
-  TextT
-} from '@phosphor-icons/react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import styles from './CanvasToolbar.module.css';
 
 export type CanvasTool = 'select' | 'text' | 'sticky' | 'shape' | 'connector' | 'table' | 'draw' | 'media';
@@ -37,7 +17,9 @@ export type CanvasToolbarCapabilities = {
 export type CanvasToolbarProps = {
   activeTool: CanvasTool;
   capabilities?: CanvasToolbarCapabilities;
+  open?: boolean;
   disabled?: boolean;
+  onOpenChange?: (open: boolean) => void;
   onToolChange: (tool: CanvasTool) => void;
   onZoomIn?: () => void;
   onZoomOut?: () => void;
@@ -48,102 +30,110 @@ export type CanvasToolbarProps = {
   onSearch?: () => void;
   onOpenActivity?: () => void;
   onOpenRemote?: () => void;
+  onOpenSiteViews?: () => void;
+  onOpenParameters?: () => void;
+  onRequestFeature?: (title: string) => Promise<string>;
 };
 
-const tools: Array<{ id: CanvasTool; label: string; shortcut: string; icon: typeof Cursor }> = [
-  { id: 'select', label: 'Select', shortcut: 'V', icon: Cursor },
-  { id: 'text', label: 'Text', shortcut: 'T', icon: TextT },
-  { id: 'sticky', label: 'Sticky', shortcut: 'N', icon: Note },
-  { id: 'shape', label: 'Shape', shortcut: 'S', icon: Shapes },
-  { id: 'connector', label: 'Connector', shortcut: 'C', icon: Path },
-  { id: 'table', label: 'Table', shortcut: 'B', icon: Table },
-  { id: 'draw', label: 'Draw', shortcut: 'D', icon: PencilSimple },
-  { id: 'media', label: 'Media', shortcut: '⌘U', icon: FileArrowUp }
+const toolCommands: Array<{ label: string; shortcut: string; id: CanvasTool; keywords: string }> = [
+  { label: 'Select', shortcut: 'V', id: 'select', keywords: 'cursor move' },
+  { label: 'Text', shortcut: 'T', id: 'text', keywords: 'write type' },
+  { label: 'Note', shortcut: 'N', id: 'sticky', keywords: 'sticky' },
+  { label: 'Shape', shortcut: 'S', id: 'shape', keywords: 'rectangle ellipse' },
+  { label: 'Connect', shortcut: 'C', id: 'connector', keywords: 'line link' },
+  { label: 'Table', shortcut: 'B', id: 'table', keywords: 'grid' },
+  { label: 'Draw', shortcut: 'D', id: 'draw', keywords: 'pen ink' },
+  { label: 'Import file', shortcut: '⌘U', id: 'media', keywords: 'image media upload' }
 ];
 
 export function CanvasToolbar({
-  activeTool,
-  capabilities = {},
-  disabled = false,
-  onToolChange,
-  onZoomIn,
-  onZoomOut,
-  onFitView,
-  onOpenScenes,
-  onExport,
-  onOpenTerminal,
-  onSearch,
-  onOpenActivity,
-  onOpenRemote
+  activeTool, capabilities = {}, open, disabled = false, onOpenChange, onToolChange,
+  onZoomIn, onZoomOut, onFitView, onOpenScenes, onExport, onOpenTerminal,
+  onSearch, onOpenActivity, onOpenRemote, onOpenSiteViews, onOpenParameters,
+  onRequestFeature
 }: CanvasToolbarProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const shellRef = useRef<HTMLElement>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const close = (event: globalThis.KeyboardEvent | PointerEvent) => {
-      if (event instanceof globalThis.KeyboardEvent && event.key === 'Escape') setMenuOpen(false);
-      if (event instanceof PointerEvent && !shellRef.current?.contains(event.target as Node)) setMenuOpen(false);
-    };
-    window.addEventListener('keydown', close);
-    window.addEventListener('pointerdown', close);
-    return () => {
-      window.removeEventListener('keydown', close);
-      window.removeEventListener('pointerdown', close);
-    };
-  }, [menuOpen]);
-
-  const moveFocus = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
-    const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
-    const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
-    buttons[next]?.focus();
-    event.preventDefault();
+  const [localOpen, setLocalOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [index, setIndex] = useState(0);
+  const [featureDraft, setFeatureDraft] = useState<string | null>(null);
+  const [featureBusy, setFeatureBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const input = useRef<HTMLInputElement>(null);
+  const expanded = open ?? localOpen;
+  const setExpanded = (value: boolean) => {
+    setLocalOpen(value);
+    onOpenChange?.(value);
+    if (!value) { setQuery(''); setFeatureDraft(null); setMessage(''); setIndex(0); }
   };
 
-  const run = (action?: () => void) => {
-    action?.();
-    setMenuOpen(false);
+  useEffect(() => { if (expanded) input.current?.focus(); }, [expanded, featureDraft]);
+
+  const commands = useMemo(() => {
+    const items = toolCommands.map((tool) => ({ ...tool, run: () => onToolChange(tool.id) }));
+    const add = (label: string, keywords: string, run?: () => void, shortcut = '') => {
+      if (run) items.push({ label, keywords, shortcut, id: 'select' as CanvasTool, run });
+    };
+    add('Fit canvas', 'view center reset zoom', onFitView, '0');
+    add('Zoom in', 'view enlarge', onZoomIn, '+');
+    add('Zoom out', 'view shrink', onZoomOut, '−');
+    if (capabilities.scenes) add('Scenes', 'presentation', onOpenScenes);
+    if (capabilities.export) add('Export selection', 'download save', onExport);
+    if (capabilities.nativeTerminal) add('Terminal', 'hii cli shell', onOpenTerminal);
+    if (capabilities.search) add('Search', 'find', onSearch);
+    if (capabilities.activity) add('Activity', 'runs receipts', onOpenActivity);
+    if (capabilities.remote) add('HII Remote', 'computer device model', onOpenRemote);
+    add('Site views', 'website browser portfolio', onOpenSiteViews);
+    add('Image parameters', 'layout arrange images', onOpenParameters);
+    if (onRequestFeature) add('Request a feature', 'feedback idea suggestion board', () => setFeatureDraft(''));
+    return items;
+  }, [capabilities.activity, capabilities.export, capabilities.nativeTerminal, capabilities.remote, capabilities.scenes, capabilities.search, onExport, onFitView, onOpenActivity, onOpenParameters, onOpenRemote, onOpenScenes, onOpenSiteViews, onOpenTerminal, onRequestFeature, onSearch, onToolChange, onZoomIn, onZoomOut]);
+  const visible = commands.filter((command) => `${command.label} ${command.keywords} ${command.shortcut}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const run = (action: () => void, label: string) => {
+    if (label === 'Request a feature') { setFeatureDraft(''); setQuery(''); return; }
+    action();
+    setExpanded(false);
+  };
+  const onKeys = (event: KeyboardEvent<HTMLInputElement>) => {
+    event.stopPropagation();
+    if (event.key === 'Escape') { event.preventDefault(); setExpanded(false); }
+    else if (event.key === 'ArrowDown') { event.preventDefault(); setIndex((value) => Math.min(value + 1, visible.length - 1)); }
+    else if (event.key === 'ArrowUp') { event.preventDefault(); setIndex((value) => Math.max(value - 1, 0)); }
+    else if (event.key === 'Enter' && visible[index]) { event.preventDefault(); run(visible[index].run, visible[index].label); }
+  };
+  const saveFeature = async () => {
+    const title = featureDraft?.trim() || '';
+    if (!onRequestFeature || title.length < 2 || featureBusy) return;
+    setFeatureBusy(true);
+    setMessage('');
+    try {
+      setMessage(await onRequestFeature(title));
+      setFeatureDraft(null);
+      setQuery('');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not save the feature request.');
+    } finally { setFeatureBusy(false); }
   };
 
-  return <nav ref={shellRef} className={styles.shell} data-workspace-ui aria-label="Canvas tools" onPointerDown={(event) => event.stopPropagation()}>
-    <div className={styles.tools} role="toolbar" aria-label="Create and edit" onKeyDown={moveFocus}>
-      {tools.map(({ id, label, shortcut, icon: Icon }) => <button
-        key={id}
-        type="button"
-        className={styles.tool}
-        aria-label={`${label} · ${shortcut}`}
-        aria-pressed={activeTool === id}
-        disabled={disabled}
-        onClick={() => onToolChange(id)}
-      >
-        <Icon size={18} weight={activeTool === id ? 'fill' : 'regular'} aria-hidden="true" />
-        <span>{label}</span>
-        <kbd>{shortcut}</kbd>
-      </button>)}
-      <span className={styles.divider} aria-hidden="true" />
-      <button type="button" className={styles.more} aria-label="Canvas utilities" aria-expanded={menuOpen} aria-controls="hii-canvas-utilities" onClick={() => setMenuOpen((open) => !open)}>
-        <DotsThree size={19} weight="bold" aria-hidden="true" />
-        <span>More</span>
-      </button>
-    </div>
-    {menuOpen && <section id="hii-canvas-utilities" className={styles.menu} aria-label="Canvas utilities">
-      <div className={styles.menuGroup} role="group" aria-label="Zoom">
-        <button type="button" onClick={() => run(onZoomOut)} disabled={!onZoomOut}><Minus size={16} aria-hidden="true" />Zoom out<kbd>−</kbd></button>
-        <button type="button" onClick={() => run(onZoomIn)} disabled={!onZoomIn}><Plus size={16} aria-hidden="true" />Zoom in<kbd>+</kbd></button>
-        <button type="button" onClick={() => run(onFitView)} disabled={!onFitView}><CornersOut size={16} aria-hidden="true" />Fit canvas<kbd>0</kbd></button>
-      </div>
-      {(capabilities.scenes || capabilities.export) && <div className={styles.menuGroup} role="group" aria-label="Canvas output">
-        {capabilities.scenes && <button type="button" onClick={() => run(onOpenScenes)} disabled={!onOpenScenes}><PresentationChart size={16} aria-hidden="true" />Scenes</button>}
-        {capabilities.export && <button type="button" onClick={() => run(onExport)} disabled={!onExport}><Export size={16} aria-hidden="true" />Export</button>}
-      </div>}
-      <div className={styles.menuGroup} role="group" aria-label="HII utilities">
-        {capabilities.nativeTerminal && <button type="button" onClick={() => run(onOpenTerminal)} disabled={!onOpenTerminal}><TerminalWindow size={16} aria-hidden="true" />Terminal</button>}
-        {capabilities.search && <button type="button" onClick={() => run(onSearch)} disabled={!onSearch}><MagnifyingGlass size={16} aria-hidden="true" />Search</button>}
-        {capabilities.activity && <button type="button" onClick={() => run(onOpenActivity)} disabled={!onOpenActivity}><Pulse size={16} aria-hidden="true" />Activity</button>}
-        {capabilities.remote && <button type="button" onClick={() => run(onOpenRemote)} disabled={!onOpenRemote}><ArrowUpRight size={16} aria-hidden="true" />HII Remote</button>}
-      </div>
+  return <nav className={styles.shell} data-workspace-ui aria-label="Information terminal" onPointerDown={(event) => event.stopPropagation()}>
+    <button className={styles.trigger} type="button" aria-label="Open information terminal" aria-expanded={expanded} aria-controls="hii-information-terminal" onClick={() => setExpanded(!expanded)}>
+      <span>hii</span><kbd>⌘K</kbd>
+    </button>
+    {expanded && <section id="hii-information-terminal" className={styles.palette} aria-label="Information terminal">
+      {featureDraft === null ? <>
+        <input ref={input} aria-label="Search HII commands" placeholder="Type a command, tool, or request..." value={query} onChange={(event) => { setQuery(event.target.value); setIndex(0); }} onKeyDown={onKeys} disabled={disabled} />
+        <div className={styles.results} role="listbox" aria-label="Commands">
+          {visible.map((command, position) => <button key={command.label} type="button" role="option" aria-selected={position === index} onMouseEnter={() => setIndex(position)} onClick={() => run(command.run, command.label)}>
+            <span>{command.label}{command.id === activeTool && toolCommands.some((tool) => tool.label === command.label) ? ' ✓' : ''}</span><kbd>{command.shortcut}</kbd>
+          </button>)}
+          {!visible.length && <p>No matching command.</p>}
+        </div>
+      </> : <form onSubmit={(event) => { event.preventDefault(); void saveFeature(); }}>
+        <label htmlFor="hii-feature-request">Request a feature</label>
+        <input id="hii-feature-request" ref={input} value={featureDraft} maxLength={240} placeholder="What should HII do?" onChange={(event) => setFeatureDraft(event.target.value)} onKeyDown={(event) => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); setFeatureDraft(null); } }} />
+        <div className={styles.formActions}><button type="button" onClick={() => setFeatureDraft(null)}>Back</button><button type="submit" disabled={featureBusy || featureDraft.trim().length < 2}>{featureBusy ? 'Saving…' : 'Save to board'}</button></div>
+      </form>}
+      {message && <p role="status" className={styles.message}>{message}</p>}
+      <small>↑↓ choose · Enter run · Esc close</small>
     </section>}
   </nav>;
 }

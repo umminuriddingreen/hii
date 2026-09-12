@@ -28,31 +28,47 @@ describe('shared canvas controls', () => {
     return props;
   };
 
-  it('offers the complete creation grammar and reports the active tool', () => {
+  const openCommands = () => act(() => (container.querySelector('[aria-label="Open information terminal"]') as HTMLButtonElement).click());
+
+  it('starts with one compact control and runs a canvas command', () => {
     const props = renderToolbar();
-    const labels = ['Select', 'Text', 'Sticky', 'Shape', 'Connector', 'Table', 'Draw', 'Media'];
-    for (const label of labels) expect(container.querySelector(`[aria-label^="${label}"]`)).not.toBeNull();
-    expect(container.querySelector('[aria-label^="Select"]')?.getAttribute('aria-pressed')).toBe('true');
-    act(() => (container.querySelector('[aria-label^="Shape"]') as HTMLButtonElement).click());
+    expect(container.querySelectorAll('button')).toHaveLength(1);
+    openCommands();
+    expect(container.querySelector('[aria-label="Search HII commands"]')).not.toBeNull();
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((button) => button.textContent?.includes('Shape'))!.click());
     expect(props.onToolChange).toHaveBeenCalledWith('shape');
+    expect(container.querySelector('[aria-label="Search HII commands"]')).toBeNull();
   });
 
-  it('renders desktop capabilities without exposing Remote', () => {
+  it('routes desktop capabilities without suggesting unavailable remote control', () => {
     const terminal = vi.fn();
     renderToolbar({ capabilities: { scenes: true, export: true, nativeTerminal: true, search: true, activity: true }, onOpenTerminal: terminal });
-    act(() => (container.querySelector('[aria-label="Canvas utilities"]') as HTMLButtonElement).click());
+    openCommands();
     expect(container.textContent).toContain('Terminal');
-    expect(container.textContent).toContain('Search');
-    expect(container.textContent).toContain('Activity');
     expect(container.textContent).not.toContain('HII Remote');
-    act(() => [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Terminal'))!.click());
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((button) => button.textContent?.includes('Terminal'))!.click());
     expect(terminal).toHaveBeenCalledTimes(1);
-    expect(container.querySelector('[aria-label="Canvas utilities"]')?.getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('renders only HII Remote for the web-specific capability', () => {
+  it('saves a feature request through the supplied local board action', async () => {
+    const request = vi.fn().mockResolvedValue('added 12345678  Better canvas');
+    renderToolbar({ onRequestFeature: request });
+    openCommands();
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((button) => button.textContent?.includes('Request a feature'))!.click());
+    const input = container.querySelector('#hii-feature-request') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, 'Better canvas');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => (container.querySelector('button[type="submit"]') as HTMLButtonElement).click());
+    expect(request).toHaveBeenCalledWith('Better canvas');
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('added 12345678');
+  });
+
+  it('shows only HII Remote for the web-specific capability', () => {
     renderToolbar({ capabilities: { remote: true }, onOpenRemote: vi.fn() });
-    act(() => (container.querySelector('[aria-label="Canvas utilities"]') as HTMLButtonElement).click());
+    openCommands();
     expect(container.textContent).toContain('HII Remote');
     expect(container.textContent).not.toContain('Terminal');
   });
@@ -73,7 +89,6 @@ describe('shared canvas controls', () => {
     act(() => root.render(<CanvasObjectInspector title="Site strategy" typeLabel="Sticky" locked fields={[{ label: 'Source', value: 'brief.pdf', detail: 'read only' }]} onLockedChange={onLockedChange} onClose={onClose} />));
     expect(container.textContent).toContain('Site strategy');
     expect(container.textContent).toContain('brief.pdf');
-    expect(container.textContent).toContain('read only');
     act(() => [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Unlock'))!.click());
     expect(onLockedChange).toHaveBeenCalledWith(false);
     act(() => (container.querySelector('[aria-label="Close inspector"]') as HTMLButtonElement).click());

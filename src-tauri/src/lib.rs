@@ -620,6 +620,23 @@ fn notification_read(app: tauri::AppHandle, id: String) -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+fn feature_request_add(app: tauri::AppHandle, title: String) -> Result<String, String> {
+    let title = title.trim();
+    if title.chars().count() < 2 || title.chars().count() > 240 {
+        return Err("Describe the feature in 2 to 240 characters.".into());
+    }
+    let output = Command::new(hii_binary(&app)?)
+        .args(["board", "add", title, "--lane", "backlog", "--owner", "operator", "--coordinate", "HII product", "--tags", "feature-request"])
+        .output()
+        .map_err(|error| format!("HII could not save the request: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    let line = String::from_utf8_lossy(&output.stdout);
+    Ok(line.lines().next().unwrap_or("Saved to your HII board.").to_string())
+}
+
 fn hii_json(app: &tauri::AppHandle, arguments: &[&str]) -> Result<Value, String> {
     let output = Command::new(hii_binary(app)?)
         .args(arguments)
@@ -853,6 +870,7 @@ pub fn run() {
             account_sync::account_workspace_write,
             account_sync::account_workspace_selection_get,
             account_sync::account_workspace_selection_set,
+            feature_request_add,
             workspace_asset_store,
             information_capture,
             information_find,

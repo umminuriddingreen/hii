@@ -178,8 +178,6 @@ export function DesktopHiiAccess() {
       creatorId={identity ? `account:${identity.handle}` : 'human:local'}
       persistence={persistence}
       persistentChrome={false}
-      openTerminalOnReady={ready && !onboardingComplete}
-      onTerminalReady={finishOnboarding}
       onUnsavedChanges={setUnsaved}
     /> : <div className={styles.loading} role="status">{ready ? 'Your account canvas could not be opened.' : 'Opening HII...'}</div>}
     </div>

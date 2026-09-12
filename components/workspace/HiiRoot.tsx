@@ -37,6 +37,7 @@ import {
   findInformation,
   listenAgentEvents,
   readAgentHome,
+  requestFeature,
   runtimeSpaceId,
   startAgent,
   stopTerminalSession,
@@ -208,7 +209,7 @@ function CanvasChrome({
         <button type="button" onClick={onTerminal}><TerminalWindow size={17} />Terminal <kbd>⌘ Space</kbd></button>
         <button type="button" onClick={onSearch}><Globe size={17} />Web search <kbd>⌘ T</kbd></button>
         <button type="button" onClick={onPresentation}><PresentationChart size={17} />Presentation</button>
-        <button type="button" onClick={onAsk}><Sparkle size={17} />Quick terminal <kbd>⌘ K</kbd></button>
+        <button type="button" onClick={onAsk}><Sparkle size={17} />Information terminal <kbd>⌘ K</kbd></button>
         <button type="button" onClick={onActivity}><ListBullets size={17} />Activity & proof <kbd>⌘ 2</kbd></button>
         <button type="button" onClick={onArrangeImages}><SlidersHorizontal size={17} />Arrange images</button>
         <hr />
@@ -251,11 +252,12 @@ const promptSlashCommands = [
   ['/terminal [folder]', 'Create a local terminal'],
   ['/browser [url]', 'Open the native browser'],
   ['/search <query>', 'Search inside the native browser'],
-  ['/marketplace', 'Open apps, skills, and runtimes']
+  ['/marketplace', 'Open apps, skills, and runtimes'],
+  ['/feature <request>', 'Save a feature request to your HII board']
 ] as const;
 
 const promptKeyboardCommands = [
-  ['⌘ K', 'Quick terminal'],
+  ['⌘ K', 'Information terminal'],
   ['⌘ T', 'Search Google on the canvas'],
   ['⌘ Space / ⌥ Space', 'Open or hide the HII terminal'],
   ['⌘ ⇧ T', 'Move the terminal between dock and canvas'],
@@ -263,7 +265,7 @@ const promptKeyboardCommands = [
   ['⌘ U', 'Import files'],
   ['⌘ Z / ⇧ ⌘ Z', 'Undo / redo'],
   ['⇧ Tab', 'Cycle Build, Plan, Browse, See, Present'],
-  ['?', 'Show all commands'],
+  ['?', 'Information terminal'],
   ['0', 'Fit the canvas'],
   ['Arrow keys', 'Pan, or move selected objects'],
   ['Delete', 'Remove selected objects'],
@@ -2033,6 +2035,12 @@ export function HiiRoot({
     } : current);
     const at = camera.toWorld(anchor.x, anchor.y);
     try {
+      const featureRequest = intent.match(/^\/feature\s+(.+)$/i);
+      if (featureRequest) {
+        const receipt = await requestFeature(featureRequest[1]);
+        setPrompt((current) => current ? { ...current, response: receipt, status: 'completed' } : current);
+        return;
+      }
       const terminalSeed = terminalSeedFromCommand(intent);
       if (terminalSeed) {
         if (mode !== 'build') {
@@ -2284,7 +2292,7 @@ export function HiiRoot({
         setPromptVisible(false);
         return;
       }
-      if (isAccount && canvasCommandsOpen && event.key === 'Escape') {
+      if (canvasCommandsOpen && event.key === 'Escape') {
         event.preventDefault();
         setCanvasCommandsOpen(false);
         setToolMessage('Commands closed.');
@@ -2296,12 +2304,11 @@ export function HiiRoot({
         setToolMessage('Opened HII Remote.');
         return;
       }
-      if (runtimeEnabled && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        ensureWorkspaceTerminal('quick');
+        setCanvasCommandsOpen((open) => !open);
         setWebSearchOpen(false);
         setPromptVisible(false);
-        setSelected([]);
         return;
       }
       if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 't') {
@@ -2313,10 +2320,7 @@ export function HiiRoot({
       }
       if ((event.metaKey || event.ctrlKey) && event.key === '?') {
         event.preventDefault();
-        setPrompt({ anchor: mouse.current, initialValue: '', response: '', status: 'idle', menu: 'commands' });
-        setPromptPresentation('floating');
-        setPromptVisible(true);
-        setWebSearchOpen(false);
+        setCanvasCommandsOpen((open) => !open);
         return;
       }
       if (inField(event.target)) return;
@@ -2354,6 +2358,11 @@ export function HiiRoot({
         event.preventDefault();
         setCanvasCommandsOpen((open) => !open);
         return;
+      }
+      if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat) {
+        const key = event.key.toLowerCase();
+        const tool = ({ v: 'select', s: 'shape', c: 'connector', b: 'table', ...(!isAccount ? { t: 'text', n: 'sticky', d: 'draw' } : {}) } as Record<string, CanvasTool>)[key];
+        if (tool) { event.preventDefault(); chooseCanvasTool(tool); return; }
       }
       if (isAccount && event.key === 'Escape') {
         // Escape keeps its old job first: it clears. Only an already-idle
@@ -2409,15 +2418,7 @@ export function HiiRoot({
       }
       if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && event.key === '?') {
         event.preventDefault();
-        setPrompt({
-          anchor: mouse.current,
-          initialValue: '',
-          response: '',
-          status: 'idle',
-          menu: 'commands'
-        });
-        setPromptPresentation('floating');
-        setPromptVisible(true);
+        setCanvasCommandsOpen((open) => !open);
         return;
       }
       if (event.key === 'Tab' && event.shiftKey) {
@@ -2512,7 +2513,7 @@ export function HiiRoot({
     addEventListener('pointermove', pointermove);
     addEventListener('paste', paste);
     return () => { removeEventListener('keydown', keydown); removeEventListener('pointermove', pointermove); removeEventListener('paste', paste); };
-  }, [allowPhoto, camera, canvasCommandsOpen, canvasManagerOpen, deleteSelection, drawing, ensureWorkspaceTerminal, fitCanvas, importFiles, isAccount, isSpace, isTouchCanvas, mode, onRequestDevice, openCanvasManager, openDevBrowser, promptVisible, runtimeEnabled, selected, spawnCenteredSeed, spawnInformation, spawnSeeds, toggleDrawing, webSearchOpen, workspace, workspaceTerminal]);
+  }, [allowPhoto, camera, canvasCommandsOpen, canvasManagerOpen, chooseCanvasTool, deleteSelection, drawing, ensureWorkspaceTerminal, fitCanvas, importFiles, isAccount, isSpace, isTouchCanvas, mode, onRequestDevice, openCanvasManager, openDevBrowser, promptVisible, runtimeEnabled, selected, spawnCenteredSeed, spawnInformation, spawnSeeds, toggleDrawing, webSearchOpen, workspace, workspaceTerminal]);
 
   const canvasFeedback = toolMessage || (drawing
     ? 'Drawing on · drag anywhere · Esc to stop.'
@@ -2706,12 +2707,17 @@ export function HiiRoot({
       {runtimeEnabled && persistentChrome && <UpdateBanner />}
       <CanvasToolbar
         activeTool={activeTool}
+        open={canvasCommandsOpen}
+        onOpenChange={setCanvasCommandsOpen}
         onToolChange={chooseCanvasTool}
         capabilities={{ scenes: true, export: selected.length === 1, nativeTerminal: runtimeEnabled, search: runtimeEnabled, activity: runtimeEnabled, remote: !runtimeEnabled }}
         onZoomOut={() => camera.zoomBy(1 / KEY_ZOOM_STEP)} onZoomIn={() => camera.zoomBy(KEY_ZOOM_STEP)} onFitView={fitCanvas}
         onOpenScenes={openPresentationPanel} onExport={() => setExportOpen(true)}
         onOpenTerminal={() => ensureWorkspaceTerminal('docked')} onSearch={openSearchPanel} onOpenActivity={openActivityPanel}
         onOpenRemote={() => { onRequestDevice?.(); setToolMessage('Opened HII Remote.'); }}
+        onOpenSiteViews={() => setSiteViewsOpen(true)}
+        onOpenParameters={visibleNodes.some((node) => node.type === 'image') ? () => setParametricLayoutOpen(true) : undefined}
+        onRequestFeature={runtimeEnabled ? requestFeature : undefined}
       />
       <CanvasSelectionBar selectionCount={selected.length} canConnect={selected.length <= 2} canAskHii={Boolean(runtimeEnabled || onRequestDevice)} onAction={selectionAction} />
       {inspectorOpen && selectedNodes.length > 0 && <CanvasObjectInspector
@@ -2736,20 +2742,6 @@ export function HiiRoot({
         onFocusNode={focusCanvasNode}
         onClose={closeCanvasManager}
       />}
-      {visibleNodes.some((node) => node.type === 'image') && !parametricLayoutOpen && <button
-        type="button"
-        className="hii-parametric-trigger"
-        data-workspace-ui
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={() => setParametricLayoutOpen(true)}
-      ><SlidersHorizontal size={16} />parameters</button>}
-      {!siteViewsOpen && <button
-        type="button"
-        className="hii-site-views-trigger"
-        data-workspace-ui
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={() => setSiteViewsOpen(true)}
-      ><Globe size={16} />site views</button>}
       {selected.length === 1 && !exportOpen && <button
         type="button"
         className="hii-export-trigger"

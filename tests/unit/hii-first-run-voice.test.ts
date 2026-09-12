@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('HII first-run and voice input', () => {
-  it('uses the visual gate on web and a real persistent PTY terminal on desktop', () => {
+  it('uses the visual gate on web and keeps desktop first-run canvas-first', () => {
     const firstRun = readFileSync('components/auth/HiiFirstRunTerminal.tsx', 'utf8');
     const desktop = readFileSync('components/desktop/DesktopHiiAccess.tsx', 'utf8');
     const web = readFileSync('components/auth/HiiWebAccess.tsx', 'utf8');
@@ -18,7 +18,7 @@ describe('HII first-run and voice input', () => {
     expect(web).toContain('onTerminalReady={completeFirstRun}');
     expect(web).toContain("params.get('first-run') === '1'");
     expect(desktop).not.toContain('<HiiFirstRunTerminal');
-    expect(desktop).toContain('openTerminalOnReady={ready && !onboardingComplete}');
+    expect(desktop).not.toContain('openTerminalOnReady={ready && !onboardingComplete}');
     expect(canvas).toContain("terminalInitialInput: '/providers\\r'");
     expect(canvas).toContain('/login codex');
     expect(canvas).toContain('initialInput={text(node.payload.terminalInitialInput)}');

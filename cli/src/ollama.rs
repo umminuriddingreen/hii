@@ -191,6 +191,7 @@ pub struct Ollama {
     base_url: String,
     provider: ModelProvider,
     agent: ureq::Agent,
+    model_api_key: Result<Option<String>, String>,
 }
 
 impl Ollama {
@@ -205,6 +206,15 @@ impl Ollama {
             base_url,
             provider,
             agent,
+            model_api_key: load_model_api_key_from_env(),
+        }
+    }
+
+    fn authorize(&self, request: ureq::Request) -> Result<ureq::Request, String> {
+        match &self.model_api_key {
+            Ok(Some(key)) => Ok(request.set("Authorization", &format!("Bearer {key}"))),
+            Ok(None) => Ok(request),
+            Err(error) => Err(error.clone()),
         }
     }
 
@@ -283,8 +293,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         match self.provider {
             ModelProvider::Ollama => {
                 let response: TagsResponse = self
-                    .agent
-                    .get(&format!("{}/api/tags", self.base_url))
+                    .authorize(self.agent.get(&format!("{}/api/tags", self.base_url)))?
                     .call()
                     .map_err(format_ureq)?
                     .into_json()
@@ -297,8 +306,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             }
             ModelProvider::LmStudio | ModelProvider::Native | ModelProvider::RapidMlx => {
                 let response: OpenAiModels = self
-                    .agent
-                    .get(&format!("{}/v1/models", self.base_url))
+                    .authorize(self.agent.get(&format!("{}/v1/models", self.base_url)))?
                     .call()
                     .map_err(format_ureq)?
                     .into_json()
@@ -327,8 +335,9 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             .timeout_read(Duration::from_secs(2))
             .timeout_write(Duration::from_secs(2))
             .build();
-        let response: RunningModelsResponse = agent
-            .get(&format!("{}/api/ps", self.base_url))
+        let response = agent.get(&format!("{}/api/ps", self.base_url));
+        let response: RunningModelsResponse = self
+            .authorize(response)?
             .call()
             .map_err(format_ureq)?
             .into_json()
@@ -354,8 +363,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             return Ok(None);
         }
         let value: Value = self
-            .agent
-            .post(&format!("{}/api/show", self.base_url))
+            .authorize(self.agent.post(&format!("{}/api/show", self.base_url)))?
             .send_json(json!({ "model": model }))
             .map_err(format_ureq)?
             .into_json()
@@ -420,8 +428,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             body["format"] = format;
         }
         let response: ChatResponse = self
-            .agent
-            .post(&format!("{}/api/chat", self.base_url))
+            .authorize(self.agent.post(&format!("{}/api/chat", self.base_url)))?
             .send_json(body)
             .map_err(format_ureq)?
             .into_json()
@@ -462,8 +469,10 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         }
         let started = Instant::now();
         let value: Value = self
-            .agent
-            .post(&format!("{}/v1/chat/completions", self.base_url))
+            .authorize(
+                self.agent
+                    .post(&format!("{}/v1/chat/completions", self.base_url)),
+            )?
             .send_json(body)
             .map_err(format_ureq)?
             .into_json()
@@ -597,10 +606,8 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             };
         }
         let response = match self
-            .agent
-            .post(&format!("{}/api/chat", self.base_url))
-            .send_json(body)
-            .map_err(format_ureq)
+            .authorize(self.agent.post(&format!("{}/api/chat", self.base_url)))
+            .and_then(|request| request.send_json(body).map_err(format_ureq))
         {
             Ok(response) => response,
             Err(error) => {
@@ -714,10 +721,11 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
                     json!({ "type": "json_object" })
                 };
             }
-            self.agent
-                .post(&format!("{}/v1/chat/completions", self.base_url))
-                .send_json(body)
-                .map_err(format_ureq)
+            self.authorize(
+                self.agent
+                    .post(&format!("{}/v1/chat/completions", self.base_url)),
+            )
+            .and_then(|request| request.send_json(body).map_err(format_ureq))
         };
         let response = match request {
             Ok(response) => response,
@@ -732,6 +740,39 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         }
         let _ = sender.send(ChatStreamEvent::Done(result));
     }
+}
+
+fn load_model_api_key_from_env() -> Result<Option<String>, String> {
+    load_model_api_key(
+        std::env::var_os("HII_MODEL_API_KEY_FILE").map(PathBuf::from),
+        std::env::var("HII_MODEL_API_KEY").ok(),
+    )
+}
+
+fn load_model_api_key(
+    key_file: Option<PathBuf>,
+    fallback: Option<String>,
+) -> Result<Option<String>, String> {
+    let raw = if let Some(path) = key_file {
+        std::fs::read_to_string(&path).map_err(|error| {
+            format!(
+                "failed to read HII_MODEL_API_KEY_FILE at {}: {error}",
+                path.display()
+            )
+        })?
+    } else if let Some(value) = fallback {
+        value
+    } else {
+        return Ok(None);
+    };
+    let key = raw.trim();
+    if key.is_empty() {
+        return Err("model API credential is empty".to_string());
+    }
+    if key.contains(['\r', '\n']) {
+        return Err("model API credential must be a single line".to_string());
+    }
+    Ok(Some(key.to_string()))
 }
 
 fn ox_alpha_browser_adapter() -> Result<PathBuf, String> {
@@ -1315,9 +1356,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        acquired_native_model, apply_thinking, openai_messages, openai_reasoning_delta,
-        openai_reported_durations, ox_alpha_browser_prompt, provider_messages, ChatUsage, Message,
-        Ollama, RepetitionGuard,
+        acquired_native_model, apply_thinking, load_model_api_key, openai_messages,
+        openai_reasoning_delta, openai_reported_durations, ox_alpha_browser_prompt,
+        provider_messages, ChatUsage, Message, Ollama, RepetitionGuard,
     };
     use crate::attachments::ImagePayload;
     use crate::config::ModelProvider;
@@ -1520,6 +1561,40 @@ mod tests {
         let client = Ollama::for_mode("auto");
         assert_eq!(client.base_url(), "http://127.0.0.1:11435");
         assert_eq!(client.provider(), ModelProvider::Native);
+    }
+
+    #[test]
+    fn model_api_key_file_wins_over_environment_fallback() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let path = directory.path().join("model-api-key");
+        std::fs::write(&path, "file-token\n").expect("write key fixture");
+
+        assert_eq!(
+            load_model_api_key(Some(path), Some("fallback-token".into())).unwrap(),
+            Some("file-token".into())
+        );
+    }
+
+    #[test]
+    fn configured_model_api_key_file_fails_closed() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let missing = directory.path().join("missing");
+
+        let error = load_model_api_key(Some(missing), Some("fallback-token".into()))
+            .expect_err("a configured file must not fall back");
+        assert!(error.contains("failed to read HII_MODEL_API_KEY_FILE"));
+        assert!(!error.contains("fallback-token"));
+    }
+
+    #[test]
+    fn model_requests_receive_bearer_authorization() {
+        let mut client = Ollama::new("http://127.0.0.1:11435".into());
+        client.model_api_key = Ok(Some("test-token".into()));
+        let request = client
+            .authorize(client.agent.get("http://127.0.0.1:11435/v1/models"))
+            .expect("authorization");
+
+        assert_eq!(request.header("Authorization"), Some("Bearer test-token"));
     }
 
     #[test]

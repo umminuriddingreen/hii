@@ -631,6 +631,12 @@ export async function markNotificationRead(id: string): Promise<void> {
   await invoke('notification_read', { id });
 }
 
+export async function requestFeature(title: string): Promise<string> {
+  if (!isTauri()) throw new Error('Feature requests can be saved to your local board in the HII desktop app.');
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('feature_request_add', { title });
+}
+
 export async function listApplications(): Promise<HiiApplicationManifest[]> {
   if (!isTauri()) return [];
   const { invoke } = await import('@tauri-apps/api/core');

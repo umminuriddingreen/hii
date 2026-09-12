@@ -711,6 +711,8 @@ enum StateCommand {
         #[arg(long, help = "Sequence shown in the preview; required with --apply")]
         expected_sequence: Option<u64>,
     },
+    #[command(about = "Clear canvas objects after saving a recoverable state")]
+    Clear,
 }
 
 #[derive(Subcommand, Debug)]
@@ -5712,6 +5714,37 @@ fn state_command(space: Option<String>, action: StateCommand) -> Result<(), Stri
             } else {
                 serde_json::json!({"applied":false,"preview":checkpoints::preview(&runtime, space, &state)?,"next":"Repeat with --apply --expected-sequence <preview.expectedSequence>. Only canvas state is restored; external files and processes are not rewound."})
             }
+        }
+        StateCommand::Clear => {
+            let safety = checkpoints::save(
+                &runtime,
+                space,
+                &format!(
+                    "before-clear-{}",
+                    chrono::Utc::now().format("%Y%m%d-%H%M%S")
+                ),
+                current.sequence,
+            )?;
+            let mut document = current.document.clone();
+            document["nodes"] = serde_json::json!([]);
+            document["links"] = serde_json::json!([]);
+            document["viewport"] = serde_json::json!({"x":0,"y":0,"zoom":1});
+            document["nextZ"] = serde_json::json!(1);
+            document["updatedAt"] = serde_json::json!(chrono::Utc::now().to_rfc3339());
+            let snapshot = hii_core::runtime_space_apply(hii_core::runtime::RuntimeSpaceApplyV1 {
+                version: 1,
+                space_id: Some(space.clone()),
+                expected_sequence: current.sequence,
+                actor: hii_core::runtime::IdentityRefV1 {
+                    id: "human:local".into(),
+                    kind: "human".into(),
+                },
+                authority_grant_id: None,
+                run_id: None,
+                idempotency_key: format!("cli:state-clear:{}", hii_core::new_run_id()),
+                document,
+            })?;
+            serde_json::json!({"cleared":true,"spaceId":space,"sequence":snapshot.sequence,"safetyCheckpoint":safety.id,"objects":snapshot.document["nodes"].as_array().map_or(0, Vec::len)})
         }
     };
     println!(
