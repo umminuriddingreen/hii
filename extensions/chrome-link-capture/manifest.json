@@ -1,20 +1,20 @@
 {
   "manifest_version": 3,
-  "name": "HII Link Capture",
+  "name": "Save to HII",
   "version": "0.1.0",
-  "description": "Capture browser links into the local HII offline feed.",
+  "description": "Save web pages, selections, and references into your local HII workspace.",
   "permissions": ["activeTab", "contextMenus", "storage", "tabs"],
   "host_permissions": [
     "http://localhost:3000/*",
-    "http://127.0.0.1:3000/*",
-    "https://umminuriddingreen.com/*"
+    "http://127.0.0.1:3000/*"
   ],
   "action": {
     "default_title": "Save to HII",
     "default_popup": "popup.html"
   },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "options_page": "options.html"
 }
