@@ -9,6 +9,7 @@ import {
   type CanvasManagerHit
 } from '@/lib/workspace/canvas-manager';
 import type { WorkspaceNode } from '@/lib/workspace/types';
+import { searchCanvasWorkspaces, type SearchableWorkspace, type CrossWorkspaceHit } from '@/lib/workspace/cross-workspace-search';
 import styles from './CanvasManager.module.css';
 
 /**
@@ -25,9 +26,9 @@ export type CanvasManagerContext = {
   query: string;
   nodes: WorkspaceNode[];
   boards: CanvasManagerBoard[];
-  hits: CanvasManagerHit[];
+  hits: (CanvasManagerHit | CrossWorkspaceHit)[];
   focusBoard: (board: CanvasManagerBoard) => void;
-  focusNode: (node: WorkspaceNode) => void;
+  focusNode: (node: WorkspaceNode, workspaceId?: string) => void;
   close: () => void;
 };
 
@@ -60,10 +61,10 @@ const searchSection: CanvasManagerSection = {
       <ul className={styles.hits}>
         {hits.map((hit) => (
           <li key={hit.node.id}>
-            <button type="button" className={styles.hit} onClick={() => focusNode(hit.node)}>
+            <button type="button" className={styles.hit} onClick={() => focusNode(hit.node, 'workspaceId' in hit ? hit.workspaceId : undefined)}>
               <span className={styles.hitTitle}>{hit.title}</span>
               <span className={styles.hitMeta}>{hit.node.type.replaceAll('-', ' ')}</span>
-              <span className={styles.hitBoard}>{hit.boardTitle}</span>
+              <span className={styles.hitBoard}>{'workspaceTitle' in hit ? `${hit.workspaceTitle} · ` : ''}{'boardTitle' in hit ? hit.boardTitle : ''}</span>
             </button>
           </li>
         ))}
@@ -141,15 +142,30 @@ export function CanvasManager({
   onFocusBoard,
   onFocusNode,
   onClose,
+  searchWorkspaces,
+  currentWorkspaceId,
+  onFocusExternalNode,
   sections = CANVAS_MANAGER_SECTIONS
 }: {
   nodes: WorkspaceNode[];
   onFocusBoard: (board: CanvasManagerBoard) => void;
   onFocusNode: (node: WorkspaceNode) => void;
   onClose: () => void;
+  searchWorkspaces?: () => Promise<SearchableWorkspace[]>;
+  currentWorkspaceId?: string;
+  onFocusExternalNode?: (workspaceId: string, nodeId: string) => void;
   sections?: CanvasManagerSection[];
 }) {
   const [query, setQuery] = useState('');
+  const [external, setExternal] = useState<SearchableWorkspace[]>([]);
+  const [searchError, setSearchError] = useState('');
+  useEffect(() => {
+    if (!searchWorkspaces) return;
+    let cancelled = false;
+    void searchWorkspaces().then((documents) => { if (!cancelled) setExternal(documents); })
+      .catch(() => { if (!cancelled) setSearchError('Other workspaces could not be searched.'); });
+    return () => { cancelled = true; };
+  }, [searchWorkspaces]);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -199,7 +215,13 @@ export function CanvasManager({
   }, [onClose]);
 
   const boards = useMemo(() => canvasManagerBoards(nodes, query), [nodes, query]);
-  const hits = useMemo(() => canvasManagerHits(nodes, query), [nodes, query]);
+  const hits = useMemo(() => searchWorkspaces
+    ? searchCanvasWorkspaces(external.map((document) => document.id === currentWorkspaceId ? { ...document, nodes } : document), query)
+    : canvasManagerHits(nodes, query), [nodes, external, query, searchWorkspaces, currentWorkspaceId]);
+  const focusNode = (node: WorkspaceNode, workspaceId?: string) => {
+    if (workspaceId && onFocusExternalNode) onFocusExternalNode(workspaceId, node.id);
+    else onFocusNode(node);
+  };
 
   const context: CanvasManagerContext = {
     query,
@@ -207,7 +229,7 @@ export function CanvasManager({
     boards,
     hits,
     focusBoard: onFocusBoard,
-    focusNode: onFocusNode,
+    focusNode,
     close: onClose
   };
 
@@ -236,7 +258,7 @@ export function CanvasManager({
             if (event.key !== 'Enter') return;
             event.preventDefault();
             const first = hits[0];
-            if (first) onFocusNode(first.node);
+            if (first) focusNode(first.node, 'workspaceId' in first ? first.workspaceId : undefined);
             else if (boards[0]) onFocusBoard(boards[0]);
           }}
         />
@@ -248,6 +270,7 @@ export function CanvasManager({
           <section key={section.id} className={styles.section}>
             <h2 className={styles.sectionTitle}>{section.title}</h2>
             {content}
+            {section.id === 'search' && searchError ? <p className={styles.empty} role="status">{searchError}</p> : null}
           </section>
         ))}
       </div>
