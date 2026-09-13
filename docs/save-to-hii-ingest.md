@@ -61,30 +61,28 @@ uses `capture.selectedText`, then `capture.note`, then an empty reference body.
 If the sender provides `content.contentHash`, HII verifies it against that
 chosen text before writing anything.
 
-## Current transport gap
+## Browser extension transport
 
-`extensions/chrome-link-capture` still posts the legacy URL/title/note shape to
-the Next.js-oriented `/api/links` endpoint. `scripts/hii-link-cache.mjs` also
-reads checkout-local `.hii/link-posts.jsonl`. Those are link feed/cache and
-optional publish prototypes; they are not the canonical Save to HII authority.
+`extensions/chrome-link-capture` builds the documented `hii.web.capture` payload
+and sends it to Chrome native host `com.hii.save_to_hii`. The host lives at
+`scripts/hii-chrome-native-host.mjs`; its only mutation is spawning
+`hii info ingest-web --input - --json` and passing one bounded payload over
+stdin. The extension default path no longer posts captures to a public-site or
+checkout-local link endpoint.
 
-The next transport change should preserve the command above as the authority:
+Install the local development native host with:
 
-1. Add a small native-messaging host whose only mutation is spawning
-   `hii info ingest-web --json` and passing one bounded payload over stdin.
-2. Change `extensions/chrome-link-capture/background.js` and `popup.js` to build
-   the documented payload and call that host.
-3. Change `manifest.json` to declare the native-messaging permission and remove
-   public-site host permission from the default capture path.
-4. Change `options.js`/`options.html` so publishing endpoints and tokens are not
-   Save to HII settings.
-5. Add extension payload tests plus a native-host-to-CLI smoke using an isolated
-   `HII_RUNTIME_DIR`.
+```sh
+node scripts/hii-chrome-native-host-install.mjs
+```
 
-Native messaging is preferred over inventing another long-lived daemon or
-making a development web route authoritative. A loopback HTTP adapter can be
-added later as a projection if HII already has a supervised local service, but
-it must call this same core function and must not become a second store.
+The installer writes a platform launcher plus a native-host manifest template.
+Register that manifest with Chrome after replacing the unpacked extension ID
+placeholder with the installed extension ID. Native messaging is preferred over
+inventing another long-lived daemon or making a development web route
+authoritative. A loopback HTTP adapter can be added later as a projection if HII
+already has a supervised local service, but it must call this same core function
+and must not become a second store.
 
 Canvas placement is intentionally separate. The canonical source can already
 be found and inspected; a later inbox or `canvas_add` action should reference
