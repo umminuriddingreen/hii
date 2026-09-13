@@ -69,6 +69,17 @@ const packagingFossils = [
 const nodeTestRunner = ['tests/codex-memory-context.test.mjs', 'tests/remote-test-gateway.test.mjs'];
 
 export default defineConfig({
+  plugins: [{
+    // On Windows, Vite can hoist ESM imports ahead of a Node script's shebang
+    // and then parse the shebang as an invalid mid-line token.
+    name: 'strip-imported-node-script-shebang',
+    enforce: 'pre',
+    transform(source, id) {
+      if (/[\\/]scripts[\\/].*\.mjs(?:\?.*)?$/.test(id) && source.startsWith('#!')) {
+        return source.replace(/^#![^\r\n]*/, '');
+      }
+    }
+  }],
   // tsconfig sets `jsx: preserve` for Next's own compiler, which leaves esbuild
   // unable to parse a `.tsx` test. Transforming JSX here keeps the app build
   // untouched while letting component tests run.
