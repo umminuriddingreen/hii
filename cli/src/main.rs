@@ -78,7 +78,7 @@ use runlog::StreamPolicy;
 use serde::{Deserialize, Serialize};
 use std::{
     env, fs,
-    io::{self, IsTerminal, Write},
+    io::{self, IsTerminal, Read, Write},
     path::PathBuf,
     process::{Command, ExitCode},
     time::{Duration, Instant},
@@ -929,6 +929,13 @@ enum InfoCommand {
     #[command(about = "Capture a web source with content, images, lineage, and a receipt")]
     Capture {
         url: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Ingest one explicit hii.web.capture payload from a file or stdin")]
+    IngestWeb {
+        #[arg(long, default_value = "-", value_name = "PATH")]
+        input: String,
         #[arg(long)]
         json: bool,
     },
@@ -4174,6 +4181,36 @@ fn information_command(
                 println!("url        {}", result.source.url);
                 println!("images     {}", result.images.len());
                 println!("changed    {}", if result.changed { "yes" } else { "no" });
+                println!("hash       {}", result.source.content_hash);
+                println!("proof      hii proof {}", result.receipt_id);
+            }
+        }
+        InfoCommand::IngestWeb { input, json } => {
+            let raw = if input == "-" {
+                let mut raw = String::new();
+                io::stdin()
+                    .take(8 * 1024 * 1024 + 1)
+                    .read_to_string(&mut raw)
+                    .map_err(|error| error.to_string())?;
+                raw
+            } else {
+                fs::read_to_string(&input)
+                    .map_err(|error| format!("could not read {input}: {error}"))?
+            };
+            if raw.len() > 8 * 1024 * 1024 {
+                return Err("hii.web.capture payload exceeds 8 MiB".into());
+            }
+            let payload: information::WebCapturePayload = serde_json::from_str(&raw)
+                .map_err(|error| format!("invalid hii.web.capture payload: {error}"))?;
+            let result = information::ingest_web_capture(&paths.runtime, workspace, payload)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&result).map_err(|error| error.to_string())?
+                );
+            } else {
+                println!("saved      {}", result.source.title);
+                println!("source     {}", result.source.id);
                 println!("hash       {}", result.source.content_hash);
                 println!("proof      hii proof {}", result.receipt_id);
             }
