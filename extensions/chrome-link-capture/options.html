@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>HII Link Capture Options</title>
+    <title>Save to HII Options</title>
     <style>
       body {
         max-width: 560px;
@@ -34,13 +34,13 @@
     </style>
   </head>
   <body>
-    <h1>HII Link Capture</h1>
+    <h1>Save to HII</h1>
     <label>
-      HII endpoint (local feed or public stream)
+      Local HII ingest endpoint
       <input id="endpoint" />
     </label>
     <label style="display: block; margin-top: 12px;">
-      Post token (required for the public stream, blank for local)
+      Ingest token (leave blank when your local endpoint does not require one)
       <input id="token" type="password" />
     </label>
     <button id="save">Save options</button>

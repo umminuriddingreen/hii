@@ -1,3 +1,5 @@
+import { buildWebCapture } from "./capture-payload.js";
+
 async function activeTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab;
@@ -17,16 +19,16 @@ document.getElementById("form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const status = document.getElementById("status");
   status.textContent = "Saving...";
-  const payload = {
+  const payload = buildWebCapture({
     title: document.getElementById("title").value,
     url: document.getElementById("url").value,
     note: document.getElementById("note").value,
     tags: tagsFromInput(document.getElementById("tags").value),
-    source: "chrome-popup"
-  };
-  chrome.runtime.sendMessage({ type: "save-link", payload }, (response) => {
+    method: "extension-action"
+  });
+  chrome.runtime.sendMessage({ type: "save-capture", payload }, (response) => {
     if (response?.ok) {
-      status.textContent = "Saved. Run hii links cache to make it offline.";
+      status.textContent = "Saved to your HII workspace.";
     } else {
       status.textContent = response?.error || "Could not save link.";
     }
