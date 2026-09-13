@@ -848,6 +848,7 @@ pub fn run() {
             account_sync::account_sync_link,
             account_sync::account_workspace_list,
             local_workspaces::local_workspace_list,
+            local_workspaces::local_workspace_read,
             local_workspaces::local_workspace_select,
             account_sync::account_workspace_read,
             account_sync::account_workspace_write,

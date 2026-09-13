@@ -3,6 +3,8 @@ export function normalizedBrowserUrl(value: string) {
   if (!trimmed) return 'https://developer.mozilla.org';
   if (/\s/.test(trimmed)) return null;
   const localBare = /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(trimmed);
+  const publicHost = /^(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?(?:[/?#]|$)/i.test(trimmed);
+  if (!localBare && !publicHost && !/^https?:\/\//i.test(trimmed)) return null;
   if (!localBare && /^[a-z][a-z0-9+.-]*:/i.test(trimmed) && !/^https?:\/\//i.test(trimmed)) return null;
   try {
     const withProtocol = /^https?:\/\//i.test(trimmed)
@@ -23,6 +25,14 @@ export function browserNavigationTarget(value: string) {
   const query = value.trim();
   if (!query || /^[a-z][a-z0-9+.-]*:/i.test(query)) return null;
   return `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+}
+
+export function localBrowserSearchTarget(value: string) {
+  const normalized = normalizedBrowserUrl(value);
+  if (normalized) return normalized;
+  const query = value.trim();
+  if (!query || /^(?:[a-z][a-z0-9+.-]*:\/\/|javascript:|data:|file:|about:)/i.test(query)) return null;
+  return `http://127.0.0.1:8888/search?q=${encodeURIComponent(query)}`;
 }
 
 export function browserTargetKind(value: string) {

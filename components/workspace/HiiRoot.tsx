@@ -100,6 +100,7 @@ import { trackPointerGesture } from '@/lib/workspace/gestures';
 import { fitWorkspaceViewport } from '@/lib/workspace/viewport';
 import { canvasManagerFocusNodes, type CanvasManagerBoard } from '@/lib/workspace/canvas-manager';
 import { CanvasManager } from './CanvasManager';
+import type { SearchableWorkspace } from '@/lib/workspace/cross-workspace-search';
 const WorkspaceScene3D = dynamic(() => import('./WorkspaceScene3D').then((m) => m.WorkspaceScene3D), {
   ssr: false,
   loading: () => <div className="hii-scene3d-loading">Opening 3D view…</div>
@@ -1069,7 +1070,12 @@ export function HiiRoot({
   onRequestDevice,
   fileSeeder,
   canvasImportRequest = null,
-  projectionRequest = null
+  projectionRequest = null,
+  searchWorkspaces,
+  searchWorkspaceId,
+  onFocusExternalNode,
+  searchFocusNodeId = null,
+  canvasManagerRequest = 0
 }: {
   surface?: 'workspace' | 'space' | 'account';
   spaceId?: string;
@@ -1085,6 +1091,11 @@ export function HiiRoot({
   fileSeeder?: (files: File[]) => Promise<NodeSeed[]>;
   canvasImportRequest?: CanvasImportRequest | null;
   projectionRequest?: WorkspaceProjectionRequest | null;
+  searchWorkspaces?: () => Promise<SearchableWorkspace[]>;
+  searchWorkspaceId?: string;
+  onFocusExternalNode?: (workspaceId: string, nodeId: string) => void;
+  searchFocusNodeId?: string | null;
+  canvasManagerRequest?: number;
 } = {}) {
   const isSpace = surface === 'space';
   const isAccount = surface === 'account';
@@ -1464,6 +1475,9 @@ export function HiiRoot({
   }, []);
 
   const closeCanvasManager = useCallback(() => setCanvasManagerOpen(false), []);
+  useEffect(() => {
+    if (canvasManagerRequest > 0) openCanvasManager();
+  }, [canvasManagerRequest, openCanvasManager]);
 
   const focusCanvasBoard = useCallback((board: CanvasManagerBoard) => {
     setCanvasManagerOpen(false);
@@ -1482,6 +1496,13 @@ export function HiiRoot({
     setFocusNodeId(node.id);
     focusNodes([node], 'Jumped to the object.');
   }, [focusNodes]);
+
+  const handledSearchFocus = useRef<string | null>(null);
+  useEffect(() => {
+    if (!workspace.ready || !searchFocusNodeId || handledSearchFocus.current === searchFocusNodeId) return;
+    const node = workspace.nodes.find((entry) => entry.id === searchFocusNodeId);
+    if (node) { handledSearchFocus.current = searchFocusNodeId; focusCanvasNode(node); }
+  }, [workspace.ready, workspace.nodes, searchFocusNodeId, focusCanvasNode]);
 
   const toggleDrawing = useCallback(() => {
     setDrawing((current) => {
@@ -2641,6 +2662,9 @@ export function HiiRoot({
       />}
       {canvasManagerOpen && <CanvasManager
         nodes={workspace.nodes}
+        searchWorkspaces={searchWorkspaces}
+        currentWorkspaceId={searchWorkspaceId ?? spaceId ?? 'local'}
+        onFocusExternalNode={onFocusExternalNode ? (workspaceId, nodeId) => { setCanvasManagerOpen(false); onFocusExternalNode(workspaceId, nodeId); } : undefined}
         onFocusBoard={focusCanvasBoard}
         onFocusNode={focusCanvasNode}
         onClose={closeCanvasManager}
