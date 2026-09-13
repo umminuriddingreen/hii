@@ -284,7 +284,9 @@ impl WorkspaceFileLock {
         let mut lock_name = workspace_path.as_os_str().to_os_string();
         lock_name.push(".lock");
         let lock_path = PathBuf::from(lock_name);
-        for _ in 0..40 {
+        // A writer can be pre-empted while another process holds this lock.
+        // Give it a bounded five seconds before reporting contention.
+        for _ in 0..200 {
             match fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
