@@ -123,13 +123,14 @@ describe('preparing a variant branch', () => {
     ).rejects.toThrow(/Select an object/);
   });
 
+  // Windows CI can spend over five seconds on the cold SQLite/module setup.
   it('states the goal the run receives, including not touching the source', async () => {
     await seed();
     const { variantRunGoal } = await import('../../lib/server/workspace-variant');
     const goal = variantRunGoal(await proposal());
     expect(goal).toContain('Make it shorter and warmer.');
     expect(goal).toContain('Do not modify the source.');
-  });
+  }, 15_000);
 });
 
 describe('materializing a variant branch', () => {
