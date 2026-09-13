@@ -1074,7 +1074,8 @@ export function HiiRoot({
   searchWorkspaces,
   searchWorkspaceId,
   onFocusExternalNode,
-  searchFocusNodeId = null
+  searchFocusNodeId = null,
+  canvasManagerRequest = 0
 }: {
   surface?: 'workspace' | 'space' | 'account';
   spaceId?: string;
@@ -1094,6 +1095,7 @@ export function HiiRoot({
   searchWorkspaceId?: string;
   onFocusExternalNode?: (workspaceId: string, nodeId: string) => void;
   searchFocusNodeId?: string | null;
+  canvasManagerRequest?: number;
 } = {}) {
   const isSpace = surface === 'space';
   const isAccount = surface === 'account';
@@ -1473,6 +1475,9 @@ export function HiiRoot({
   }, []);
 
   const closeCanvasManager = useCallback(() => setCanvasManagerOpen(false), []);
+  useEffect(() => {
+    if (canvasManagerRequest > 0) openCanvasManager();
+  }, [canvasManagerRequest, openCanvasManager]);
 
   const focusCanvasBoard = useCallback((board: CanvasManagerBoard) => {
     setCanvasManagerOpen(false);

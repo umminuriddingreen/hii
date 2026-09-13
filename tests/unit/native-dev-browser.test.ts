@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { browserNavigationTarget, browserTargetKind, normalizedBrowserUrl } from '@/lib/workspace/browser-target';
+import { browserNavigationTarget, browserTargetKind, localBrowserSearchTarget, normalizedBrowserUrl } from '@/lib/workspace/browser-target';
 
 describe('HII interactive browser targets', () => {
   it('defaults bare localhost services to http', () => {
@@ -11,6 +11,7 @@ describe('HII interactive browser targets', () => {
 
   it('defaults public hosts to https and rejects non-web protocols', () => {
     expect(normalizedBrowserUrl('example.com/docs')).toBe('https://example.com/docs');
+    expect(normalizedBrowserUrl('youtube')).toBeNull();
     expect(normalizedBrowserUrl('file:///tmp/private')).toBeNull();
   });
 
@@ -29,6 +30,9 @@ describe('HII interactive browser targets', () => {
       'https://www.google.com/search?q=spatial%20computing%20interfaces'
     );
     expect(browserNavigationTarget('file:///tmp/private')).toBeNull();
+    expect(localBrowserSearchTarget('youtube')).toBe('http://127.0.0.1:8888/search?q=youtube');
+    expect(localBrowserSearchTarget('example.com')).toBe('https://example.com/');
+    expect(localBrowserSearchTarget('file:///tmp/private')).toBeNull();
   });
 
   it('projects search sources and live pages as independent canvas objects', () => {
@@ -45,9 +49,9 @@ describe('HII interactive browser targets', () => {
     expect(browser).toContain('className="hii-browser-hover-search"');
     expect(browser).toContain('aria-label="Search or open another page"');
     expect(browser).toContain('void navigate()');
-    expect(browser).toContain('/api/search?q=');
     expect(browser).toContain('className="hii-browser-results"');
-    expect(browser).toContain('void navigate(result.url)');
+    expect(browser).toContain('localBrowserSearchTarget(nextValue)');
+    expect(browser).toContain('Open web results in a new tab');
     expect(css).toContain('.hii-node[data-node-type="browser"] { overflow: visible; contain: none; }');
   });
 });

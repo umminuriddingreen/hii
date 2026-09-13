@@ -155,7 +155,7 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
             if !rate_limit(request, env, &db, "web-search", 100_000).await? {
                 return secure_no_store(api_error(429, "rate_limited")?);
             }
-            return secure_no_store(search::handle_search(request, env).await?);
+            return secure_no_store(search::handle_search(request).await?);
         }
         if remote::is_remote_host_socket(&path) {
             return remote::handle_host_socket(request, env).await;

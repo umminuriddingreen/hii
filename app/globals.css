@@ -244,7 +244,7 @@ button, input, textarea { font: inherit; }
 .hii-sticker { display: grid; width: 100%; height: 100%; place-items: center; font-size: min(18vw, 96px); line-height: 1; }
 .hii-entry-loading { position: fixed; inset: 0; background: var(--field); }
 .hii-canvas[data-surface="space"], .hii-canvas[data-surface="account"] { background: #fff; }
-.hii-space-toolbar { position: fixed; z-index: 2147482000; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); display: flex; align-items: stretch; max-width: calc(100vw - 24px); border: 1px solid #d8d8d8; background: rgba(255, 255, 255, .98); color: #111; transform: translateX(-50%); }
+.hii-space-toolbar { position: fixed; z-index: 2147482000; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); display: flex; align-items: stretch; max-width: calc(100vw - 24px); border: 1px solid rgba(255,255,255,.8); border-radius: 14px; background: rgba(248,249,249,.76); color: #111; box-shadow: 0 18px 48px rgba(20,29,35,.13), inset 0 1px rgba(255,255,255,.85); -webkit-backdrop-filter: blur(30px) saturate(1.45); backdrop-filter: blur(30px) saturate(1.45); transform: translateX(-50%); }
 .hii-space-toolbar strong { display: flex; align-items: center; padding: 0 14px; border-right: 1px solid #d8d8d8; font: 10px/1 "SF Mono", ui-monospace, monospace; font-weight: 400; white-space: nowrap; }
 .hii-space-toolbar button { display: inline-flex; min-width: 72px; min-height: 44px; align-items: center; justify-content: center; gap: 8px; padding: 0 12px; border: 0; border-right: 1px solid #d8d8d8; border-radius: 0; background: transparent; color: inherit; font: 10px/1 "SF Mono", ui-monospace, monospace; font-weight: 400; }
 .hii-space-toolbar button:last-child { border-right: 0; }
@@ -257,7 +257,7 @@ button, input, textarea { font: inherit; }
 .hii-canvas-command-trigger[aria-expanded="true"] { background: #111; color: #fff; }
 .hii-canvas-touch-tools { display: contents; }
 .hii-space-toolbar[data-account-tools="true"] .hii-canvas-touch-tools { display: none; }
-.hii-account-tools { position: absolute; right: 0; bottom: calc(100% + 8px); display: grid; width: min(320px, calc(100vw - 20px)); border: 1px solid #d8d8d8; background: rgba(255, 255, 255, .99); color: #111; }
+.hii-account-tools { position: absolute; right: 0; bottom: calc(100% + 8px); display: grid; width: min(320px, calc(100vw - 20px)); border: 1px solid rgba(255,255,255,.8); border-radius: 14px; background: rgba(248,249,249,.78); color: #111; box-shadow: 0 18px 48px rgba(20,29,35,.13), inset 0 1px rgba(255,255,255,.85); -webkit-backdrop-filter: blur(30px) saturate(1.45); backdrop-filter: blur(30px) saturate(1.45); overflow: hidden; }
 .hii-canvas-command-search { display: block; border-bottom: 1px solid #d8d8d8; }
 .hii-canvas-command-search input { width: 100%; min-height: 44px; padding: 0 12px; border: 0; outline: 0; background: transparent; color: inherit; font: 10px/1 "SF Mono", ui-monospace, monospace; }
 .hii-canvas-command-search input:focus-visible { outline: 1px solid #111; outline-offset: -3px; }
@@ -270,7 +270,7 @@ button, input, textarea { font: inherit; }
 .hii-canvas-command-list button kbd { opacity: .55; }
 .hii-canvas-command-list small { display: block; padding: 14px 12px; }
 .hii-canvas-touch-secondary { display: none; }
-.hii-canvas-touch-secondary button { min-height: 44px; border-radius: 0; background: #fff; font-size: 10px; font-weight: 400; }
+.hii-canvas-touch-secondary button { min-height: 44px; border-radius: 0; background: transparent; font-size: 10px; font-weight: 400; }
 .hii-canvas-touch-link { display: none; grid-template-columns: minmax(0, 1fr) auto; border-top: 1px solid #d8d8d8; }
 .hii-canvas-touch-link input { min-width: 0; min-height: 44px; padding: 0 12px; border: 0; outline: 0; background: transparent; color: inherit; font: 10px/1 "SF Mono", ui-monospace, monospace; }
 .hii-canvas-touch-link button { min-width: 76px; padding: 0; background: transparent; font-size: 10px; font-weight: 400; }
@@ -341,10 +341,19 @@ button, input, textarea { font: inherit; }
 .hii-dev-browser button { border: 0; background: transparent; color: var(--browser-muted); cursor: pointer; }
 .hii-dev-browser button:hover { color: var(--browser-ink); }
 .hii-browser-tabs button { padding: 4px 7px; border: 1px solid var(--browser-line); border-radius: 4px; font: 9px/1 "SF Mono", ui-monospace, monospace; }
-.hii-browser-nav { gap: 3px; padding: 5px 8px; background: rgba(248, 249, 249, .74); }
+.hii-browser-nav { gap: 3px; padding: 5px 8px; background: rgba(248,249,249,.74); -webkit-backdrop-filter: blur(24px) saturate(1.35); backdrop-filter: blur(24px) saturate(1.35); }
 .hii-browser-nav > button { width: 30px; height: 30px; border-radius: 5px; font-size: 15px; }
 .hii-browser-nav > button:disabled { cursor: default; opacity: .28; }
 .hii-browser-location { flex: 1; min-width: 0; margin: 0 8px; overflow: hidden; color: var(--browser-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.hii-dev-browser[data-docked="true"] { overflow: hidden; border-radius: 0; }
+.hii-dev-browser[data-docked="true"] .hii-browser-nav { gap: 1px; padding: 4px 7px; }
+.hii-browser-dock-address { flex: 1; min-width: 0; }
+.hii-browser-dock-address input { width: 100%; min-height: 30px; padding: 0 9px; border: 1px solid rgba(25,35,42,.14); border-radius: 8px; outline: 0; background: rgba(255,255,255,.68); color: #242424; font: 11px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
+.hii-browser-dock-address input:focus-visible { border-color: rgba(25,35,42,.5); }
+.hii-browser-empty { display: grid; align-content: center; justify-items: center; gap: 8px; height: 100%; padding: 24px; text-align: center; }
+.hii-browser-empty span { color: #69747a; font-size: 28px; }
+.hii-browser-empty strong { font-size: 17px; font-weight: 550; }
+.hii-browser-empty p { margin: 0; color: #737b80; font-size: 11px; }
 .hii-browser-open { padding: 0 8px; color: var(--browser-muted); font: 9px/30px "SF Mono", ui-monospace, monospace; text-decoration: none; white-space: nowrap; }
 .hii-browser-open:hover { color: var(--browser-ink); }
 .hii-browser-nav .hii-browser-capture { color: #555; }
@@ -352,14 +361,15 @@ button, input, textarea { font: inherit; }
 .hii-dev-browser[data-agent="true"] .hii-browser-workarea { grid-template-columns: minmax(0, 1fr) 260px; }
 .hii-dev-browser[data-device="desktop"] .hii-browser-viewport { width: min(1280px, 100%); justify-self: center; border-inline: 1px solid var(--browser-line); }
 .hii-dev-browser[data-device="mobile"] .hii-browser-viewport { width: 390px; justify-self: center; border-inline: 1px solid var(--browser-line); }
-.hii-browser-viewport { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #fff; }
+.hii-browser-viewport { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: rgba(255,255,255,.58); }
 .hii-browser-viewport iframe { width: 100%; height: 100%; border: 0; background: #fff; }
 .hii-browser-loading { position: absolute; left: 50%; top: 50%; z-index: 1; transform: translate(-50%, -50%); color: #5d6572; font: 10px/1.4 "SF Mono", ui-monospace, monospace; pointer-events: none; }
-.hii-browser-results { height: 100%; overflow: auto; padding: 38px clamp(28px, 6vw, 76px) 56px; background: #fff; }
+.hii-browser-results { height: 100%; overflow: auto; padding: 38px clamp(28px, 6vw, 76px) 56px; background: rgba(255,255,255,.58); }
 .hii-browser-results header { display: grid; gap: 7px; margin-bottom: 30px; }
 .hii-browser-results header span { color: #818181; font: 10px/1 "SF Mono", ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
 .hii-browser-results header strong { color: #181818; font: 500 clamp(24px, 3vw, 38px)/1.08 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; letter-spacing: -.03em; }
 .hii-browser-results a { display: block; max-width: 760px; padding: 17px 0 19px; border-top: 1px solid #e8e8e5; color: inherit; text-decoration: none; }
+.hii-browser-results .hii-browser-search-external { display: inline-flex; align-items: center; min-height: 38px; margin-top: 18px; padding: 0 14px; border: 1px solid rgba(25,35,42,.18); border-radius: 9px; background: rgba(255,255,255,.72); color: #111; font: 11px/1.2 "SF Mono", ui-monospace, monospace; }
 .hii-browser-results a:hover h3 { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .hii-browser-results small { color: #737373; font: 10px/1.2 "SF Mono", ui-monospace, monospace; }
 .hii-browser-results h3 { margin: 5px 0 6px; color: #171717; font: 500 18px/1.25 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; letter-spacing: -.015em; }
