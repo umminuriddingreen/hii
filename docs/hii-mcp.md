@@ -9,6 +9,12 @@ hii mcp --authority workspace --client-identity <client>
 It uses line-delimited JSON-RPC 2.0 over stdio. There is no second HII MCP
 command or independently maintained canvas server.
 
+Explicit browser capture has the same CLI/core ownership rule. The canonical
+non-MCP ingest seam is `hii info ingest-web --input - --json`; see
+[`save-to-hii-ingest.md`](save-to-hii-ingest.md). Browser adapters pass one
+`hii.web.capture` payload to that command and do not write a parallel feed or
+invoke publishing.
+
 ## Surface
 
 `hii mcp` publishes the executable subset of HII's central tool manifest:
