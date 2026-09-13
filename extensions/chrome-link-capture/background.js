@@ -1,6 +1,6 @@
 import { buildWebCapture } from "./capture-payload.js";
 
-const DEFAULT_ENDPOINT = "http://localhost:3000/api/links";
+const NATIVE_HOST = "com.hii.save_to_hii";
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
@@ -15,23 +15,25 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
-async function settings() {
-  const values = await chrome.storage.sync.get({ endpoint: DEFAULT_ENDPOINT, token: "" });
-  return { endpoint: values.endpoint || DEFAULT_ENDPOINT, token: values.token || "" };
+function sendNative(message) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendNativeMessage(NATIVE_HOST, message, (response) => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        reject(new Error(error.message));
+        return;
+      }
+      if (!response?.ok) {
+        reject(new Error(response?.error || "HII native host did not accept the capture."));
+        return;
+      }
+      resolve(response.data);
+    });
+  });
 }
 
 async function saveCapture(payload) {
-  const { endpoint, token } = await settings();
-  const headers = { "content-type": "application/json" };
-  if (token) headers.authorization = `Bearer ${token}`;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload)
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `HII returned ${response.status}`);
-  return data;
+  return sendNative({ type: "save-capture", payload });
 }
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {

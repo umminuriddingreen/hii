@@ -1,14 +1,16 @@
-const DEFAULT_ENDPOINT = "http://localhost:3000/api/links";
+const NATIVE_HOST = "com.hii.save_to_hii";
 
-document.addEventListener("DOMContentLoaded", async () => {
-  const values = await chrome.storage.sync.get({ endpoint: DEFAULT_ENDPOINT, token: "" });
-  document.getElementById("endpoint").value = values.endpoint || DEFAULT_ENDPOINT;
-  document.getElementById("token").value = values.token || "";
-});
-
-document.getElementById("save").addEventListener("click", async () => {
-  const endpoint = document.getElementById("endpoint").value.trim() || DEFAULT_ENDPOINT;
-  const token = document.getElementById("token").value.trim();
-  await chrome.storage.sync.set({ endpoint, token });
-  document.getElementById("status").textContent = "Saved.";
+document.getElementById("check").addEventListener("click", () => {
+  const status = document.getElementById("status");
+  status.textContent = "Checking native host...";
+  chrome.runtime.sendNativeMessage(NATIVE_HOST, { type: "ping" }, (response) => {
+    const error = chrome.runtime.lastError;
+    if (error) {
+      status.textContent = `Native host is not registered: ${error.message}`;
+      return;
+    }
+    status.textContent = response?.ok
+      ? "Native host responded."
+      : `Native host responded with: ${response?.error || "unknown error"}`;
+  });
 });
