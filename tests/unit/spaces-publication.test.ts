@@ -65,6 +65,7 @@ async function fixture(policy?: Parameters<typeof createSpace>[0]['policy']) {
 }
 
 afterEach(async () => {
+  (await import('../../lib/server/operational-object-store.ts')).resetOperationalObjectStoreForTests();
   delete process.env.HII_RUNTIME_DIR;
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });

@@ -103,7 +103,7 @@ describe('public web surface', () => {
   });
 
   describe('delivery headers', () => {
-    const headers = read('public/_headers');
+    const headers = read('public/_headers').replaceAll('\r\n', '\n');
 
     it('pins HTTPS for the domain and its subdomains', () => {
       expect(headers).toMatch(/Strict-Transport-Security: max-age=\d+; includeSubDomains; preload/);
