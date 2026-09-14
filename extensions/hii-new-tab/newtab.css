@@ -1,0 +1,10 @@
+:root { color-scheme: light dark; font-family: Arial, Helvetica, sans-serif; }
+* { box-sizing: border-box; }
+body { display: grid; min-height: 100vh; margin: 0; place-items: center; background: #f8f7f3; color: #30322d; }
+main { width: min(360px, calc(100vw - 40px)); text-align: center; }
+.wordmark { font-size: 12px; letter-spacing: .25em; }
+h1 { margin: 44px 0 9px; font-size: 32px; font-weight: 400; letter-spacing: -.04em; }
+p { margin: 0 0 26px; color: #777970; font-size: 13px; }
+a, button { display: inline-grid; min-height: 36px; margin: 0 4px; padding: 0 13px; place-items: center; border: 1px solid #d6d8ce; border-radius: 7px; background: #fff; color: #41443d; font: 12px Arial, Helvetica, sans-serif; text-decoration: none; cursor: pointer; }
+button[hidden] { display: none; }
+@media (prefers-color-scheme: dark) { body { background: #20211f; color: #eeeeea; } p { color: #aaa9a1; } a, button { border-color: #51534e; background: #2b2d29; color: #eeeeea; } }

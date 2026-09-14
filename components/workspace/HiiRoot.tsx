@@ -52,7 +52,7 @@ import { workspaceNodeTitle } from '@/lib/workspace/search';
 import { seedsFromRunOutput } from '@/lib/workspace/stdout-types';
 import { TypedOutput } from '@/components/workspace/TypedOutput';
 import { renderedBrowserSeed } from '@/lib/workspace/browser-seed';
-import { canvasTextSeed, canvasTextSize, clipboardFiles, directPasteSeeds, makeNode, nodeSeedFromResourceProjection, seedFor, seedFromFile, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
+import { canvasTextSeed, canvasTextSize, clipboardFiles, directPasteSeeds, makeNode, nodeSeedFromResourceProjection, seedFor, seedFromFile, seedFromString, seedFromUrl, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
 import { flowSeedPlacements } from '@/lib/workspace/placement';
 import { HII_PROJECTION_MIME, type ProjectionIntent, type ResourceProjectionSeed } from '@/lib/ecosystem/contracts';
 import {
@@ -115,6 +115,8 @@ import { SiteViewsPanel } from './SiteViewsPanel';
 import { downloadWorkspaceOutput, ExportOutputPanel } from './ExportOutputPanel';
 import { parametricImageLayout } from '@/lib/workspace/parametric-layout';
 import { CanvasToolbar, type CanvasTool } from './CanvasToolbar';
+import { CanvasOasis } from './CanvasOasis';
+import { DEFAULT_WEB_COMMAND_SHORTCUT, commandShortcutLabel, matchesCommandShortcut, readCommandShortcut, saveCommandShortcut } from '@/lib/workspace/command-shortcut';
 import { CanvasSelectionBar, type CanvasSelectionAction } from './CanvasSelectionBar';
 import { CanvasObjectInspector } from './CanvasObjectInspector';
 import { canvasObjectPayload, canvasObjectState, type CanvasShapeKind } from '@/lib/workspace/canvas-objects';
@@ -1159,6 +1161,8 @@ export function HiiRoot({
   const [connectorStartId, setConnectorStartId] = useState<string | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [canvasCommandsOpen, setCanvasCommandsOpen] = useState(false);
+  const [commandShortcut, setCommandShortcut] = useState(DEFAULT_WEB_COMMAND_SHORTCUT);
+  useEffect(() => setCommandShortcut(readCommandShortcut()), []);
   const [canvasManagerOpen, setCanvasManagerOpen] = useState(false);
   const [parametricLayoutOpen, setParametricLayoutOpen] = useState(false);
   const [siteViewsOpen, setSiteViewsOpen] = useState(false);
@@ -1191,6 +1195,7 @@ export function HiiRoot({
   const [toolMessage, setToolMessage] = useState('');
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [dropActive, setDropActive] = useState(false);
+  const [fileAccept, setFileAccept] = useState('');
   const [devFixtureState, setDevFixtureState] = useState<'normal' | 'minimized' | 'maximized'>('normal');
   const mouse = useRef<Point>({ x: 400, y: 280 });
   const activeRun = useRef<string | null>(null);
@@ -1480,6 +1485,16 @@ export function HiiRoot({
         ),
     [isAccount, isSpace, spaceId, workspace.nodes]
   );
+  const oasisSpaces = useMemo(() => visibleNodes.filter((node) => node.type === 'frame').map((node) => ({
+    id: node.id,
+    title: titleFor(node),
+    count: visibleNodes.filter((item) => item.frameId === node.id).length
+  })).slice(0, 6), [visibleNodes]);
+  const oasisRecent = useMemo(() => [...visibleNodes]
+    .filter((node) => node.type !== 'frame' && node.type !== 'terminal')
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    .slice(0, 4)
+    .map((node) => ({ id: node.id, title: titleFor(node) })), [visibleNodes]);
 
   const fitCanvas = useCallback(() => {
     const viewport = camera.viewportRef.current;
@@ -1520,6 +1535,12 @@ export function HiiRoot({
     if (fitted) camera.setViewport(fitted);
     setToolMessage(label);
   }, [camera]);
+  const focusOasisTarget = useCallback((id: string) => {
+    const node = visibleNodes.find((item) => item.id === id);
+    if (!node) return;
+    const members = node.type === 'frame' ? visibleNodes.filter((item) => item.frameId === id) : [];
+    focusNodes([node, ...members], `Focused ${titleFor(node)}.`);
+  }, [focusNodes, visibleNodes]);
 
   const openCanvasManager = useCallback(() => {
     setDrawing(false);
@@ -2229,6 +2250,13 @@ export function HiiRoot({
       // The manager is a full-screen surface with its own keymap; nothing on
       // the canvas beneath it should react while it is up.
       if (canvasManagerOpen) return;
+      if (isAccount && matchesCommandShortcut(event, commandShortcut)) {
+        event.preventDefault();
+        setCanvasCommandsOpen((open) => !open);
+        setWebSearchOpen(false);
+        setPromptVisible(false);
+        return;
+      }
       if (runtimeEnabled && isAssistantShortcut(event)) {
         event.preventDefault();
         if (workspaceTerminal?.payload.terminalPresentation === 'docked') {
@@ -2243,12 +2271,6 @@ export function HiiRoot({
         event.preventDefault();
         setCanvasCommandsOpen(false);
         setToolMessage('Commands closed.');
-        return;
-      }
-      if (isAccount && isAssistantShortcut(event)) {
-        event.preventDefault();
-        onRequestDevice?.();
-        setToolMessage('Opened HII Remote.');
         return;
       }
       if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {
@@ -2460,7 +2482,7 @@ export function HiiRoot({
     addEventListener('pointermove', pointermove);
     addEventListener('paste', paste);
     return () => { removeEventListener('keydown', keydown); removeEventListener('pointermove', pointermove); removeEventListener('paste', paste); };
-  }, [allowPhoto, camera, canvasCommandsOpen, canvasManagerOpen, chooseCanvasTool, deleteSelection, drawing, ensureWorkspaceTerminal, fitCanvas, importFiles, isAccount, isSpace, isTouchCanvas, mode, onRequestDevice, openCanvasManager, openDevBrowser, promptVisible, runtimeEnabled, selected, spawnCenteredSeed, spawnInformation, spawnSeeds, toggleDrawing, webSearchOpen, workspace, workspaceTerminal]);
+  }, [allowPhoto, camera, canvasCommandsOpen, canvasManagerOpen, commandShortcut, chooseCanvasTool, deleteSelection, drawing, ensureWorkspaceTerminal, fitCanvas, importFiles, isAccount, isSpace, isTouchCanvas, mode, onRequestDevice, openCanvasManager, openDevBrowser, promptVisible, runtimeEnabled, selected, spawnCenteredSeed, spawnInformation, spawnSeeds, toggleDrawing, webSearchOpen, workspace, workspaceTerminal]);
 
   const canvasFeedback = toolMessage || (drawing
     ? 'Drawing on · drag anywhere · Esc to stop.'
@@ -2478,6 +2500,13 @@ export function HiiRoot({
     });
     setPromptVisible(true);
   }, []);
+  const startFromCommand = useCallback((intent: string) => {
+    const anchor = { x: window.innerWidth / 2, y: window.innerHeight - 72 };
+    setPromptPresentation('floating');
+    setPrompt({ anchor, initialValue: intent, response: '', status: 'idle' });
+    setPromptVisible(true);
+    void submit(intent, anchor);
+  }, [submit]);
 
   const openPresentationPanel = useCallback(() => {
     setMode('show');
@@ -2555,6 +2584,7 @@ export function HiiRoot({
     <main
       ref={camera.viewportRef}
       className="hii-canvas"
+      data-zoom-level="detail"
       data-surface={surface}
       data-chrome={persistentChrome ? 'persistent' : 'adaptive'}
       data-commands-open={canvasCommandsOpen || undefined}
@@ -2661,8 +2691,23 @@ export function HiiRoot({
         onOpenSiteViews={() => setSiteViewsOpen(true)}
         onOpenParameters={visibleNodes.some((node) => node.type === 'image') ? () => setParametricLayoutOpen(true) : undefined}
         onRequestFeature={runtimeEnabled ? requestFeature : undefined}
-        onStartWork={runtimeEnabled ? openAssistantPanel : undefined}
+        onStartWork={runtimeEnabled ? startFromCommand : undefined}
+        selectionLabels={selectedNodes.map(titleFor)}
+        workUnavailableReason={!runtimeEnabled ? 'Agent work needs a connected HII executor. Canvas commands remain available here.' : undefined}
+        shortcutLabel={isAccount ? commandShortcutLabel(commandShortcut) : '⌘K'}
+        onShortcutChange={isAccount ? (shortcut) => { saveCommandShortcut(shortcut); setCommandShortcut(shortcut); } : undefined}
       />
+      {isAccount && workspace.ready && !canvasManagerOpen && <CanvasOasis
+        empty={visibleNodes.length === 0}
+        recent={oasisRecent}
+        spaces={oasisSpaces}
+        onCommand={() => setCanvasCommandsOpen(true)}
+        onNote={() => { spawnCenteredSeed(seedFor('note', { content: '', name: 'Note' })); }}
+        onFile={(imagesOnly) => { setFileAccept(imagesOnly ? 'image/*' : ''); window.setTimeout(() => fileInput.current?.click(), 0); }}
+        onLink={(url) => { spawnCenteredSeed(seedFromUrl(url)); }}
+        onFocus={focusOasisTarget}
+        onFit={fitCanvas}
+      />}
       <CanvasSelectionBar selectionCount={selected.length} canConnect={selected.length <= 2} onAction={selectionAction} />
       {inspectorOpen && selectedNodes.length > 0 && <CanvasObjectInspector
         title={selectedNodes.length === 1 ? titleFor(selectedNodes[0]) : 'Multiple selection'} typeLabel={selectedNodes[0]?.type || 'objects'} selectionCount={selectedNodes.length}
@@ -2868,7 +2913,7 @@ export function HiiRoot({
         className="hii-file-input"
         type="file"
         multiple={!isSpace}
-        accept={isSpace ? 'image/*' : undefined}
+        accept={isSpace ? 'image/*' : fileAccept || undefined}
         capture={isSpace ? 'environment' : undefined}
         aria-label={isSpace ? 'Take or choose a Space photo' : 'Import files to HII'}
         onChange={(event) => {

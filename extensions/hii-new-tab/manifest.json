@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "HII New Tab",
+  "version": "0.1.0",
+  "description": "Open your HII canvas in each new tab.",
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "new-tab@humaninformationinterface.com"
+    }
+  }
+}

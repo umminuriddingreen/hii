@@ -66,6 +66,21 @@ describe('shared canvas controls', () => {
     expect(container.querySelector('[aria-label="Search HII commands"]')).toBeNull();
   });
 
+  it('shows selected context and submits free-form work from the same field', () => {
+    const startWork = vi.fn();
+    renderToolbar({ selectionLabels: ['Facade PDF', 'Section drawing'], onStartWork: startWork });
+    openCommands();
+    expect(container.querySelector('[aria-label="2 selected canvas objects"]')?.textContent).toContain('Facade PDF');
+    const input = container.querySelector('[aria-label="Search HII commands"]') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, 'compare these references');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    expect(startWork).toHaveBeenCalledWith('compare these references');
+  });
+
   it('saves a feature request through the supplied local board action', async () => {
     const request = vi.fn().mockResolvedValue('added 12345678  Better canvas');
     renderToolbar({ onRequestFeature: request });

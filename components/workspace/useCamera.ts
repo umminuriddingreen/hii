@@ -19,6 +19,15 @@ export const KEY_PAN_COARSE = 4;
 /** Keyboard zoom ratio per press. */
 export const KEY_ZOOM_STEP = 1.2;
 
+export type SemanticZoomLevel = 'territory' | 'space' | 'objects' | 'detail';
+
+export function semanticZoomLevel(zoom: number): SemanticZoomLevel {
+  if (zoom < 0.18) return 'territory';
+  if (zoom < 0.45) return 'space';
+  if (zoom < 0.9) return 'objects';
+  return 'detail';
+}
+
 export function clampZoom(z: number) {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
 }
@@ -120,6 +129,8 @@ export function useCamera(onSettle?: () => void) {
     if (viewportRef.current) {
       viewportRef.current.style.backgroundPosition = `${x}px ${y}px`;
       viewportRef.current.style.backgroundSize = `${GRID * z}px ${GRID * z}px`;
+      viewportRef.current.style.setProperty('--hii-camera-zoom', String(z));
+      viewportRef.current.dataset.zoomLevel = semanticZoomLevel(z);
     }
   }, []);
 

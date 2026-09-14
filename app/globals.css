@@ -264,6 +264,20 @@ button, input, textarea { font: inherit; }
 }
 
 .hii-node[data-selected="true"] .hii-node-caption { opacity: 1; }
+.hii-node-overview-label { display: none; }
+.hii-canvas[data-surface="account"] { background: #f8f7f3; }
+.hii-canvas[data-surface="account"] .hii-node:not([data-chromeless="true"]) { border-color: rgba(49, 50, 43, .11); background: rgba(255, 255, 253, .92); box-shadow: 0 8px 24px rgba(36, 38, 32, .055); backdrop-filter: none; }
+.hii-canvas[data-zoom-level="territory"] .hii-canvas-connectors { opacity: .12; }
+.hii-canvas[data-zoom-level="territory"] .hii-node[data-in-scene="true"]:not([data-selected="true"]) { visibility: hidden; }
+.hii-canvas[data-zoom-level="territory"] .hii-node,
+.hii-canvas[data-zoom-level="space"] .hii-node { overflow: visible; }
+.hii-canvas[data-zoom-level="territory"] .hii-node-body,
+.hii-canvas[data-zoom-level="space"] .hii-node-body { visibility: hidden; pointer-events: none; }
+.hii-canvas[data-zoom-level="territory"] .hii-node-overview-label,
+.hii-canvas[data-zoom-level="space"] .hii-node-overview-label { display: block; position: absolute; top: 12px; left: 12px; z-index: 2; max-width: 260px; overflow: hidden; color: #31332e; font: 500 15px/1.25 Arial, Helvetica, sans-serif; text-overflow: ellipsis; white-space: nowrap; transform: scale(calc(1 / var(--hii-camera-zoom, 1))); transform-origin: top left; pointer-events: none; }
+.hii-canvas[data-zoom-level="territory"] .hii-node:not([data-node-type="frame"]),
+.hii-canvas[data-zoom-level="space"] .hii-node:not([data-node-type="frame"]) { background: rgba(255,255,253,.88); }
+.hii-canvas[data-zoom-level="territory"] .hii-node[data-node-type="frame"] { background: rgba(229, 230, 222, .36); }
 .hii-selection-marquee { position: absolute; z-index: 2147483646; border: 1px solid rgba(17,17,17,.72); background: rgba(17,17,17,.055); pointer-events: none; }
 .hii-node-touch-controls { position: absolute; z-index: 8; inset: auto 0 -46px auto; display: flex; gap: 8px; pointer-events: auto; }
 .hii-node-touch-controls button { min-width: 72px; min-height: 38px; border: 1px solid var(--ink); border-radius: 999px; background: var(--field); color: var(--ink); font-size: 11px; }
@@ -288,7 +302,8 @@ button, input, textarea { font: inherit; }
 .hii-ink-canvas { display: block; width: 100%; height: 100%; pointer-events: none; }
 .hii-sticker { display: grid; width: 100%; height: 100%; place-items: center; font-size: min(18vw, 96px); line-height: 1; }
 .hii-entry-loading { position: fixed; inset: 0; background: var(--field); }
-.hii-canvas[data-surface="space"], .hii-canvas[data-surface="account"] { background: #fff; }
+.hii-canvas[data-surface="space"] { background: #fff; }
+.hii-canvas[data-surface="account"] { background: #f8f7f3; }
 .hii-space-toolbar { position: fixed; z-index: 2147482000; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); display: flex; align-items: stretch; max-width: calc(100vw - 24px); border: 1px solid #d8d8d8; background: rgba(255, 255, 255, .98); color: #111; transform: translateX(-50%); }
 .hii-space-toolbar strong { display: flex; align-items: center; padding: 0 14px; border-right: 1px solid #d8d8d8; font: 10px/1 "SF Mono", ui-monospace, monospace; font-weight: 400; white-space: nowrap; }
 .hii-space-toolbar button { display: inline-flex; min-width: 72px; min-height: 44px; align-items: center; justify-content: center; gap: 8px; padding: 0 12px; border: 0; border-right: 1px solid #d8d8d8; border-radius: 0; background: transparent; color: inherit; font: 10px/1 "SF Mono", ui-monospace, monospace; font-weight: 400; }

@@ -121,6 +121,7 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, 
       className="hii-node"
       data-node-id={node.id}
       data-node-type={node.type}
+      data-in-scene={Boolean(node.frameId) || undefined}
       data-selected={selected}
       data-chromeless={chromeless || undefined}
       data-content-active={contentActive || undefined}
@@ -149,6 +150,7 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, 
       }}
     >
       {node.type !== 'image' && <span className="hii-node-caption">{title}</span>}
+      <span className="hii-node-overview-label" aria-hidden="true">{title}</span>
       {node.type === 'terminal' && <>
         <div className="hii-terminal-window-controls" role="group" aria-label={`${title} window controls`}>
           <button
