@@ -208,6 +208,7 @@ export function DesktopHiiAccess() {
       onFocusExternalNode={(workspaceId, nodeId) => { void focusSearchResult(workspaceId, nodeId); }}
       searchFocusNodeId={searchFocusNodeId}
       persistentChrome={false}
+      allowLocalRuntime
       openTerminalOnReady={ready && !onboardingComplete}
       onTerminalReady={finishOnboarding}
       onUnsavedChanges={setUnsaved}

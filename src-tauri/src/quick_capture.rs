@@ -3,7 +3,7 @@
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
-const MAX_CAPTURE_CHARS: usize = 128_000;
+const MAX_CAPTURE_CHARS: usize = 100_000;
 
 fn require_capture_window(window: &WebviewWindow) -> Result<(), String> {
     if window.label() == "capture" {
@@ -40,7 +40,7 @@ pub fn quick_capture_save(
     require_capture_window(&window)?;
     let value = text.trim();
     if value.is_empty() || value.chars().count() > MAX_CAPTURE_CHARS {
-        return Err("quick capture needs 1 to 128,000 characters".into());
+        return Err("quick capture needs 1 to 100,000 characters".into());
     }
     if capture_id.is_empty() || capture_id.len() > 128 || !capture_id.is_ascii() {
         return Err("invalid quick capture identifier".into());

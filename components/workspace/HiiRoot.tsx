@@ -1064,6 +1064,7 @@ export function HiiRoot({
   persistence,
   allowPhoto = true,
   persistentChrome = true,
+  allowLocalRuntime = false,
   openTerminalOnReady = false,
   onTerminalReady,
   onUnsavedChanges,
@@ -1084,6 +1085,7 @@ export function HiiRoot({
   persistence?: WorkspacePersistence;
   allowPhoto?: boolean;
   persistentChrome?: boolean;
+  allowLocalRuntime?: boolean;
   openTerminalOnReady?: boolean;
   onTerminalReady?: () => void;
   onUnsavedChanges?: (unsaved: boolean) => void;
@@ -1101,7 +1103,7 @@ export function HiiRoot({
   const isSpace = surface === 'space';
   const isAccount = surface === 'account';
   const isTouchCanvas = isSpace || isAccount;
-  const runtimeEnabled = !isTouchCanvas;
+  const runtimeEnabled = !isTouchCanvas || allowLocalRuntime;
   const startupTerminalHandled = useRef(false);
   const save = useRef<() => void>(() => {});
   const settleCamera = useCallback(() => save.current(), []);

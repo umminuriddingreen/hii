@@ -107,6 +107,7 @@ export default function QuickCapturePage() {
           placeholder="Capture an idea, link, or anything you need to return to…"
           aria-label="Quick capture content"
           rows={4}
+          maxLength={100_000}
         />
         <div className={styles.bottomline}>
           <span className={styles.hint}>{error || 'Saved to your current HII Space'}</span>
