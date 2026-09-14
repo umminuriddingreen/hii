@@ -300,16 +300,17 @@ async fn upload_inner(
             return api_error(400, "invalid_recipient");
         }
     }
-    let existing = db
-        .prepare("SELECT 1 AS present FROM browser_snapshots WHERE account_id=?1 AND id=?2")
-        .bind(&[account_id.into(), envelope.id.clone().into()])?
-        .first::<serde_json::Value>(None)
-        .await?
-        .is_some();
-    if existing {
+    let size = body.len() as i64;
+    // Claim the unique ID before writing R2. A concurrent retry must not be
+    // allowed to overwrite and later delete another request's blob.
+    let inserted = db.prepare("INSERT OR IGNORE INTO browser_snapshots(id,account_id,source_id,sender_device_id,bytes_used,created_at) VALUES (?1,?2,?3,?4,?5,?6)")
+        .bind(&[
+            envelope.id.clone().into(), account_id.into(), envelope.source_id.into(),
+            envelope.sender_device_id.into(), JsValue::from_f64(size as f64), JsValue::from_f64(envelope.created_at as f64),
+        ])?.run().await?;
+    if changes(&inserted)? != 1 {
         return api_error(409, "snapshot_exists");
     }
-    let size = body.len() as i64;
     db.prepare("INSERT OR IGNORE INTO browser_snapshot_usage(account_id,bytes_used) VALUES (?1,0)")
         .bind(&[account_id.into()])?
         .run()
@@ -317,29 +318,25 @@ async fn upload_inner(
     let reserved = db.prepare("UPDATE browser_snapshot_usage SET bytes_used=bytes_used+?1 WHERE account_id=?2 AND bytes_used+?1<=?3")
         .bind(&[JsValue::from_f64(size as f64), account_id.into(), JsValue::from_f64(ACCOUNT_QUOTA_BYTES as f64)])?.run().await?;
     if changes(&reserved)? != 1 {
+        discard_claim(db, account_id, &envelope.id).await?;
         return api_error(413, "account_quota_exceeded");
     }
     let bucket = env.bucket("DOWNLOADS")?;
     let key = object_key(account_id, &envelope.id);
     if let Err(error) = bucket.put(&key, body).execute().await {
         refund(db, account_id, size).await?;
+        discard_claim(db, account_id, &envelope.id).await?;
         return Err(error);
     }
-    let inserted = db.prepare("INSERT OR IGNORE INTO browser_snapshots(id,account_id,source_id,sender_device_id,bytes_used,created_at) VALUES (?1,?2,?3,?4,?5,?6)")
-        .bind(&[
-            envelope.id.clone().into(), account_id.into(), envelope.source_id.into(),
-            envelope.sender_device_id.into(), JsValue::from_f64(size as f64), JsValue::from_f64(envelope.created_at as f64),
-        ])?.run().await;
-    match inserted {
-        Ok(result) if changes(&result)? == 1 => {
-            json_response(201, json!({"id": envelope.id, "bytesUsed": size}))
-        }
-        _ => {
-            bucket.delete(&key).await?;
-            refund(db, account_id, size).await?;
-            api_error(409, "snapshot_exists")
-        }
-    }
+    json_response(201, json!({"id": envelope.id, "bytesUsed": size}))
+}
+
+async fn discard_claim(db: &D1Database, account_id: &str, id: &str) -> Result<()> {
+    db.prepare("DELETE FROM browser_snapshots WHERE account_id=?1 AND id=?2")
+        .bind(&[account_id.into(), id.into()])?
+        .run()
+        .await?;
+    Ok(())
 }
 
 async fn download(env: &Env, db: &D1Database, account_id: &str, id: &str) -> Result<Response> {
