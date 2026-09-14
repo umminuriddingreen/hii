@@ -21,6 +21,13 @@ export function RemoteBrowserViewer() {
   const lastPointer = useRef(0);
 
   useEffect(() => {
+    const requestedUrl = new URLSearchParams(window.location.search).get('url');
+    if (requestedUrl) {
+      try {
+        const requested = new URL(requestedUrl);
+        if (requested.protocol === 'http:' || requested.protocol === 'https:') setUrl(requested.href);
+      } catch { /* Keep the editable address field for malformed links. */ }
+    }
     void Promise.all([
       fetch('/api/auth/session', { credentials: 'same-origin' }).then((response) => response.json()),
       fetch('/api/remote/hosts', { credentials: 'same-origin' }).then((response) => response.json()),
