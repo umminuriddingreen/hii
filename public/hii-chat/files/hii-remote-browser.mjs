@@ -6,7 +6,13 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const PROFILE_ROOT = process.env.HII_REMOTE_BROWSER_PROFILE_ROOT ?? join(homedir(), '.hii', 'remote', 'browser-profiles');
-const CHROME = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Helium.app/Contents/MacOS/Helium'].find(existsSync);
+const CHROME = [
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/Applications/Helium.app/Contents/MacOS/Helium',
+  process.env.ProgramFiles && join(process.env.ProgramFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+  process.env['ProgramFiles(x86)'] && join(process.env['ProgramFiles(x86)'], 'Google', 'Chrome', 'Application', 'chrome.exe'),
+  process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+].filter(Boolean).find(existsSync);
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const safeUrl = (value) => {
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) ? url.href : null; }
