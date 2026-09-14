@@ -25,6 +25,7 @@ import {
   type AccountWorkspaceSummary
 } from '@/lib/web/account-workspace';
 import { nodeSeedFromFeedSnapshot, type FeedItem } from '@/lib/web/feed-contract';
+import { canvasTextSeed, type NodeSeed } from '@/lib/workspace/ingest';
 import { HiiWebPanel, type WebPanel } from './HiiWebPanels';
 import styles from './HiiWebAccess.module.css';
 
@@ -243,7 +244,8 @@ export function HiiWebAccess() {
   const [ready, setReady] = useState(false);
   const [panel, setPanel] = useState<WebPanel | null>(null);
   const [shareNode, setShareNode] = useState<WorkspaceNode | null>(null);
-  const [canvasImport, setCanvasImport] = useState<{ id: string; seed: ReturnType<typeof nodeSeedFromFeedSnapshot> } | null>(null);
+  const [agentContextNodes, setAgentContextNodes] = useState<WorkspaceNode[]>([]);
+  const [canvasImport, setCanvasImport] = useState<{ id: string; seed: NodeSeed } | null>(null);
   const [workspaces, setWorkspaces] = useState<AccountWorkspaceSummary[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
   const [searchFocusNodeId, setSearchFocusNodeId] = useState<string | null>(null);
@@ -677,7 +679,7 @@ export function HiiWebAccess() {
           allowPhoto
           persistentChrome={false}
           fileSeeder={canvasFileSeeder}
-          onRequestDevice={() => setPanel('models')}
+          onRequestDevice={(selection) => { setAgentContextNodes(selection); setPanel('say-hi'); }}
           onShareNode={(node) => { setShareNode(node); setPanel('feed'); }}
           canvasImportRequest={canvasImport}
           searchWorkspaces={searchWorkspaces}
@@ -707,12 +709,18 @@ export function HiiWebAccess() {
           accountId={canvasAccountId}
           csrfToken={session.csrfToken ?? ''}
           shareNode={shareNode}
+          contextNodes={agentContextNodes}
           onClose={() => { setPanel(null); setShareNode(null); }}
           onPanel={(nextPanel) => setPanel(nextPanel)}
           onImport={(item: FeedItem) => {
             setCanvasImport({ id: crypto.randomUUID(), seed: nodeSeedFromFeedSnapshot(item) });
             setPanel(null);
             setShareNode(null);
+          }}
+          onPlaceResult={(text) => {
+            setCanvasImport({ id: crypto.randomUUID(), seed: canvasTextSeed(text.slice(0, 100_000)) });
+            setPanel(null);
+            setAgentContextNodes([]);
           }}
         /> : null}
         {accountOpen ? (

@@ -96,7 +96,7 @@ class Host {
   }
 
   sendHello() {
-    this.sendJSON({ t: 'hello', platform: 'macos', capabilities: ['chat', 'isolated-browser'] });
+    this.sendJSON({ t: 'hello', platform: process.platform === 'win32' ? 'windows' : 'macos', capabilities: ['chat', 'isolated-browser'] });
   }
 
   handleControl(text) {
@@ -199,7 +199,16 @@ class Host {
     ];
     const child = spawn(this.config.hii, args, {
       cwd: this.config.chatCwd,
-      env: { HOME, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin' },
+      env: process.platform === 'win32'
+        ? {
+            HOME,
+            USERPROFILE: process.env.USERPROFILE ?? HOME,
+            APPDATA: process.env.APPDATA ?? '',
+            LOCALAPPDATA: process.env.LOCALAPPDATA ?? '',
+            SystemRoot: process.env.SystemRoot ?? 'C:\\Windows',
+            PATH: process.env.PATH ?? ''
+          }
+        : { HOME, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     this.chatProcess = child;

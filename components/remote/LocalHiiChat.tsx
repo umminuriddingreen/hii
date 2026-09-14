@@ -4,6 +4,8 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import styles from '@/components/auth/HiiWebAccess.module.css';
 import { VoiceInputButton } from '@/components/workspace/VoiceInputButton';
+import type { WorkspaceNode } from '@/lib/workspace/types';
+import { workspaceNodeTitle } from '@/lib/workspace/search';
 
 type Host = { id: string; name: string; online: boolean; lastSeenAt: number | null };
 type Message = { id: string; role: 'user' | 'assistant'; text: string; state: 'complete' | 'streaming' | 'failed' };
@@ -21,7 +23,7 @@ function humanError(value: string) {
   return value.replaceAll('_', ' ').slice(0, 240) || 'The local HII run stopped.';
 }
 
-export function LocalHiiChat({ onOpenDevices }: { onOpenDevices: () => void }) {
+export function LocalHiiChat({ onOpenDevices, contextNodes = [], onPlaceResult }: { onOpenDevices: () => void; contextNodes?: WorkspaceNode[]; onPlaceResult?: (text: string) => void }) {
   const [devices, setDevices] = useState<Host[]>([]);
   const [activeHostId, setActiveHostId] = useState('');
   const [connection, setConnection] = useState<'looking' | 'offline' | 'connecting' | 'online'>('looking');
@@ -94,10 +96,16 @@ export function LocalHiiChat({ onOpenDevices }: { onOpenDevices: () => void }) {
     const prompt = draft.trim();
     if (!prompt || connection !== 'online' || socket.current?.readyState !== WebSocket.OPEN) return;
     const requestId = crypto.randomUUID();
+    const selection = contextNodes.slice(0, 3).map((node) => {
+      const payload = node.payload as Record<string, unknown>;
+      const body = [payload.content, payload.text, payload.title].find((value) => typeof value === 'string' && value.trim());
+      return `${workspaceNodeTitle(node)} (${node.type})${typeof body === 'string' ? `: ${body.slice(0, 1200)}` : ''}`;
+    });
     const context = messages
       .filter((message) => message.state === 'complete' && message.text)
-      .slice(-10)
+      .slice(-8)
       .map(({ role, text }) => ({ role, text }));
+    if (selection.length) context.push({ role: 'user', text: `Selected HII canvas objects (read-only context):\n${selection.join('\n').slice(0, 3800)}` });
     socket.current.send(JSON.stringify({ t: 'chat.run', requestId, prompt, context }));
     setMessages((current) => [
       ...current,
@@ -124,11 +132,13 @@ export function LocalHiiChat({ onOpenDevices }: { onOpenDevices: () => void }) {
       </select>
       <span data-state={connection}>{connection}</span>
     </header>
+    {contextNodes.length > 0 && <small className={styles.localChatContext}>Using {Math.min(contextNodes.length, 3)} selected canvas object{contextNodes.length === 1 ? '' : 's'} as text context. Media bytes stay on this device.</small>}
     <div className={styles.localChatMessages} aria-live="polite">
       {!messages.length ? <p className={styles.localChatEmpty}>Your workspace is connected to HII on {activeHost.name}. Ask directly; actions remain governed by that computer’s local authority.</p> : null}
       {messages.map((message) => <article key={message.id} data-role={message.role} data-state={message.state}>
         <small>{message.role === 'user' ? 'you' : 'hii'}</small>
         <p>{message.text || (message.state === 'streaming' ? '…' : '')}</p>
+        {message.role === 'assistant' && message.state === 'complete' && message.text && onPlaceResult ? <button type="button" onClick={() => onPlaceResult(message.text)}>Place on canvas</button> : null}
       </article>)}
       <div ref={end} />
     </div>

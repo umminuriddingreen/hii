@@ -80,7 +80,7 @@ describe('HII web access gate', () => {
     expect(source).toContain('fileSeeder={canvasFileSeeder}');
     expect(source).toContain('persistentChrome={false}');
     expect(source).toContain("event.code !== 'Digit1'");
-    expect(source).toContain("onRequestDevice={() => setPanel('models')}");
+    expect(source).toContain("onRequestDevice={(selection) => { setAgentContextNodes(selection); setPanel('say-hi'); }}");
     // The panel must distinguish synchronized from device-local storage. The
     // wording is editorial; the distinction is the contract.
     expect(source).toMatch(/accountSync \? '[^']+' : 'stored on this device'/);
@@ -103,7 +103,7 @@ describe('HII web access gate', () => {
     expect(css).toContain('min-height: 44px');
 
     const canvas = readFileSync('components/workspace/HiiRoot.tsx', 'utf8');
-    expect(canvas).toContain('{(!isSpace || allowPhoto) && <input');
+    expect(canvas).toContain('{(!isSpace || allowPhoto) && <>');
     expect(canvas).toContain('if (!files.length || (isSpace && !allowPhoto)) return;');
     expect(canvas).toContain('canvasTextSeed(value.slice(0, 100_000))');
     expect(canvas).toContain("surface?: 'workspace' | 'space' | 'account'");

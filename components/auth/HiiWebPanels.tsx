@@ -170,12 +170,12 @@ function ChatPanel({ accountId, csrfToken }: { accountId: string; csrfToken: str
   </>;
 }
 
-export function HiiWebPanel({ panel, accountId, csrfToken, shareNode, onClose, onImport, onPanel }: { panel: WebPanel; accountId: string; csrfToken: string; shareNode: WorkspaceNode | null; onClose: () => void; onImport: (item: FeedItem) => void; onPanel: (panel: WebPanel) => void }) {
+export function HiiWebPanel({ panel, accountId, csrfToken, shareNode, contextNodes, onClose, onImport, onPanel, onPlaceResult }: { panel: WebPanel; accountId: string; csrfToken: string; shareNode: WorkspaceNode | null; contextNodes?: WorkspaceNode[]; onClose: () => void; onImport: (item: FeedItem) => void; onPanel: (panel: WebPanel) => void; onPlaceResult?: (text: string) => void }) {
   return <aside className={styles.webPanel} aria-label={`HII ${panel}`} data-workspace-ui>
     <header><span>{panel === 'say-hi' ? 'Ask HII' : panel === 'chat' ? 'HII Social' : panel === 'models' ? 'HII Remote' : panel}</span><button type="button" onClick={onClose}>close</button></header>
     {panel === 'feed' ? <FeedPanel csrfToken={csrfToken} shareNode={shareNode} onImport={onImport} /> : null}
     {panel === 'chat' ? <ChatPanel accountId={accountId} csrfToken={csrfToken} /> : null}
-    {panel === 'say-hi' ? <LocalHiiChat onOpenDevices={() => onPanel('models')} /> : null}
+    {panel === 'say-hi' ? <LocalHiiChat contextNodes={contextNodes} onPlaceResult={onPlaceResult} onOpenDevices={() => onPanel('models')} /> : null}
     {panel === 'models' ? <>
       <section className={styles.modelState}>
         <p>Bring your own computer into HII.</p>

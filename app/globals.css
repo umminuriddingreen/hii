@@ -24,6 +24,9 @@ button, input, textarea { font: inherit; }
 .hii-file-reference small { color: var(--muted); font: 10px/1.3 "SF Mono", ui-monospace, monospace; }
 .hii-file-reference p { margin: 4px 0; color: var(--muted); font-size: 11px; line-height: 1.35; }
 .hii-file-reference button { justify-self: start; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 11px; text-decoration: underline; }
+.hii-upload-chooser { position: fixed; z-index: 2147483500; left: 50%; bottom: max(20px, env(safe-area-inset-bottom)); display: flex; width: min(360px, calc(100vw - 24px)); padding: 6px; gap: 4px; border: 1px solid #d8d8d8; border-radius: 14px; background: #fff; box-shadow: 0 12px 36px rgba(0, 0, 0, .13); transform: translateX(-50%); }
+.hii-upload-chooser button { flex: 1; min-width: 0; min-height: 48px; padding: 4px; border: 0; border-radius: 9px; background: transparent; color: #111; font: 12px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
+.hii-upload-chooser button:hover, .hii-upload-chooser button:focus-visible { background: #f1f1ef; outline: none; }
 .hii-html { width: 100%; height: 100%; border: 0; background: white; }
 .hii-intent-object { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; width: 100%; height: 100%; padding: 16px 18px 13px; }
 .hii-intent-object header, .hii-intent-object footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; color: var(--muted); font: 9px/1.35 "SF Mono", ui-monospace, monospace; }
@@ -281,6 +284,7 @@ button, input, textarea { font: inherit; }
 .hii-canvas-touch-link button { min-width: 76px; padding: 0; background: transparent; font-size: 10px; font-weight: 400; }
 .hii-account-tools > small { padding: 10px 12px; color: currentColor; font: 9px/1.45 "SF Mono", ui-monospace, monospace; opacity: .58; }
 .hii-canvas-feedback { position: fixed; z-index: 2147481900; left: 50%; bottom: max(72px, calc(env(safe-area-inset-bottom) + 72px)); max-width: calc(100vw - 28px); padding: 7px 10px; border: 1px solid #d8d8d8; background: rgba(255, 255, 255, .96); color: #111; transform: translateX(-50%); font: 9px/1.3 "SF Mono", ui-monospace, monospace; text-align: center; pointer-events: none; }
+.hii-canvas-tap-hint { display: none; }
 
 @media (min-width: 561px) and (hover: hover) and (pointer: fine) {
   .hii-canvas[data-surface="account"] .hii-node-touch-controls { display: none; }
@@ -296,6 +300,11 @@ button, input, textarea { font: inherit; }
   .hii-space-toolbar button kbd { display: none; }
   .hii-space-toolbar[data-account-tools="true"] .hii-canvas-command-trigger { display: none; }
   .hii-space-toolbar[data-account-tools="true"] .hii-canvas-touch-tools { display: flex; width: 100%; }
+  .hii-space-toolbar[data-account-tools="true"] { right: 12px; left: auto; width: auto; border-radius: 999px; transform: none; }
+  .hii-space-toolbar[data-account-tools="true"] .hii-canvas-touch-tools { width: auto; }
+  .hii-space-toolbar[data-account-tools="true"] .hii-canvas-touch-tools button:not(:last-child) { display: none; }
+  .hii-space-toolbar[data-account-tools="true"] .hii-canvas-touch-tools button:last-child { min-width: 54px; border-radius: 999px; }
+  .hii-canvas-tap-hint { position: fixed; z-index: 90; bottom: max(82px, calc(env(safe-area-inset-bottom) + 82px)); left: 50%; display: block; margin: 0; color: #777; transform: translateX(-50%); white-space: nowrap; font: 11px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; pointer-events: none; }
   .hii-account-tools { gap: 0; }
   .hii-canvas-command-search,
   .hii-canvas-command-list { display: none; }

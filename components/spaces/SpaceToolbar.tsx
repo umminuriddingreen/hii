@@ -126,6 +126,10 @@ export function SpaceToolbar({
         {!visibleCommands.length && <li><small>No matching command.</small></li>}
       </ul>
       <div className="hii-canvas-touch-secondary">
+        {photo && <button type="button" onClick={() => run(onAddImage)}>file</button>}
+        <button type="button" onClick={() => run(onAddText)}>text</button>
+        <button type="button" onClick={() => run(onAddNote)}>note</button>
+        <button type="button" onClick={() => run(onToggleDrawing)}>{drawing ? 'stop drawing' : 'draw'}</button>
         <button type="button" onClick={onUndo}>undo</button>
         <button type="button" onClick={onRedo}>redo</button>
         <button type="button" onClick={onFitView}>fit canvas</button>
