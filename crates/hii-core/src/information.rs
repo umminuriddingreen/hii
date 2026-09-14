@@ -94,6 +94,10 @@ pub struct WebCaptureSource {
 #[serde(rename_all = "camelCase")]
 pub struct WebCaptureDetails {
     pub method: String,
+    #[serde(default)]
+    pub browser_name: Option<String>,
+    #[serde(default)]
+    pub browser_tab_id: Option<i64>,
     pub selected_text: Option<String>,
     pub note: Option<String>,
     #[serde(default)]
@@ -122,6 +126,8 @@ pub struct WebCaptureAuthority {
 #[serde(rename_all = "camelCase")]
 pub struct SearchResult {
     pub id: Option<String>,
+    pub version_id: Option<String>,
+    pub browser_name: Option<String>,
     pub url: String,
     pub title: String,
     pub excerpt: String,
@@ -641,6 +647,15 @@ fn validate_web_capture(payload: &WebCapturePayload) -> Result<(), String> {
     if !METHODS.contains(&payload.capture.method.as_str()) {
         return Err("capture.method is not supported".into());
     }
+    if payload
+        .capture
+        .browser_name
+        .as_ref()
+        .is_some_and(|name| name.len() > 64)
+        || payload.capture.browser_tab_id.is_some_and(|id| id < 0)
+    {
+        return Err("browser capture identity is invalid".into());
+    }
     if !payload.authority.local_only {
         return Err("Save to HII ingest requires authority.localOnly=true".into());
     }
@@ -697,7 +712,9 @@ pub fn search(runtime: &Path, query: &str, limit: usize) -> Result<Vec<SearchRes
     let connection = database(runtime)?;
     let mut statement = connection
         .prepare(
-            r#"SELECT s.id,s.url,s.title,s.excerpt,s.site_name,s.content_hash,s.captured_at
+            r#"SELECT s.id,s.url,s.title,s.excerpt,s.site_name,s.content_hash,s.captured_at,
+                      (SELECT v.id FROM information_versions v WHERE v.source_id=s.id AND v.content_hash=s.content_hash LIMIT 1),
+                      (SELECT json_extract(c.payload_json,'$.capture.browserName') FROM information_web_captures c WHERE c.source_id=s.id ORDER BY c.captured_at DESC LIMIT 1)
                FROM information_fts f JOIN information_sources s ON s.id=f.source_id
                WHERE information_fts MATCH ?1 ORDER BY bm25(information_fts) LIMIT ?2"#,
         )
@@ -706,6 +723,8 @@ pub fn search(runtime: &Path, query: &str, limit: usize) -> Result<Vec<SearchRes
         .query_map(params![terms.join(" AND "), limit.clamp(1, 100)], |row| {
             Ok(SearchResult {
                 id: Some(row.get(0)?),
+                version_id: row.get(7)?,
+                browser_name: row.get(8)?,
                 url: row.get(1)?,
                 title: row.get(2)?,
                 excerpt: row.get(3)?,
@@ -800,6 +819,8 @@ fn parse_search_html(raw: &str, limit: usize) -> Result<Vec<SearchResult>, Strin
             .unwrap_or_default();
         results.push(SearchResult {
             id: None,
+            version_id: None,
+            browser_name: None,
             url,
             title,
             excerpt,
@@ -1153,6 +1174,8 @@ mod tests {
             },
             capture: WebCaptureDetails {
                 method: "context-selection".into(),
+                browser_name: None,
+                browser_tab_id: None,
                 selected_text: Some("A selected claim with provenance.".into()),
                 note: Some("Use in the brief".into()),
                 tags: vec!["research".into()],
@@ -1254,6 +1277,8 @@ mod tests {
         let workspace = tempfile::tempdir().unwrap();
         let mut first = web_payload();
         first.capture.method = "extension-page-index".into();
+        first.capture.browser_name = Some("Helium".into());
+        first.capture.browser_tab_id = Some(42);
         first.capture.selected_text = None;
         first.content = Some(WebCaptureContent {
             text: Some("Original rendered bridge specification".into()),
@@ -1268,7 +1293,13 @@ mod tests {
         let saved = ingest_web_capture(runtime.path(), workspace.path(), second).unwrap();
         assert!(saved.changed);
         assert_eq!(versions(runtime.path(), &saved.source.id).unwrap().len(), 2);
-        assert_eq!(search(runtime.path(), "lidar", 10).unwrap().len(), 1);
+        let found = search(runtime.path(), "lidar", 10).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].browser_name.as_deref(), Some("Helium"));
+        assert!(found[0]
+            .version_id
+            .as_ref()
+            .is_some_and(|id| id.starts_with("version:")));
         assert!(search(runtime.path(), "bridge", 10).unwrap().is_empty());
     }
 

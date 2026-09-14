@@ -62,10 +62,14 @@ describe("Save to HII capture payload", () => {
       title: "Page",
       method: "extension-page-index",
       contentText: "Visible page text",
+      browserName: "Helium",
+      browserTabId: 42,
       tags: ["browser", "page-index"]
     });
     expect(payload.content).toEqual({ text: "Visible page text" });
     expect(payload.capture.method).toBe("extension-page-index");
+    expect(payload.capture.browserName).toBe("Helium");
+    expect(payload.capture.browserTabId).toBe(42);
     expect(payload.authority.localOnly).toBe(true);
   });
 });

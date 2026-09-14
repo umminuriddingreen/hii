@@ -2,6 +2,7 @@ import { buildWebCapture } from "./capture-payload.js";
 
 const NATIVE_HOST = "com.hii.save_to_hii";
 const PAGE_SCRIPT = "hii-page-index";
+const PAGE_ORIGINS = ["http://*/*", "https://*/*"];
 
 async function indexEnabled() {
   const state = await chrome.storage.local.get({ pageIndexEnabled: false });
@@ -9,6 +10,10 @@ async function indexEnabled() {
 }
 
 async function registerPageIndex() {
+  if (!await chrome.permissions.contains({ origins: PAGE_ORIGINS })) {
+    await chrome.storage.local.set({ pageIndexEnabled: false });
+    throw new Error("Website access is required for page indexing");
+  }
   const registered = await chrome.scripting.getRegisteredContentScripts({ ids: [PAGE_SCRIPT] });
   if (registered.length) return;
   await chrome.scripting.registerContentScripts([{
@@ -41,6 +46,12 @@ chrome.runtime.onInstalled.addListener(() => {
 
 chrome.runtime.onStartup.addListener(async () => {
   if (await indexEnabled()) await registerPageIndex();
+});
+
+chrome.permissions.onRemoved.addListener((permissions) => {
+  if (permissions.origins?.some((origin) => PAGE_ORIGINS.includes(origin))) {
+    disablePageIndex().catch(console.warn);
+  }
 });
 
 function sendNative(message) {
@@ -101,9 +112,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!_sender.tab || _sender.tab.incognito || !/^https?:\/\//.test(page?.url || "") ||
         page.url !== _sender.tab.url || typeof page.text !== "string" || page.text.length > 500_000 ||
         page.text.length < 40) return false;
-    indexEnabled()
-      .then((enabled) => {
+    Promise.all([indexEnabled(), chrome.permissions.contains({ origins: PAGE_ORIGINS }), chrome.storage.local.get({ browserName: "Chrome" })])
+      .then(([enabled, allowed, settings]) => {
         if (!enabled) throw new Error("Page indexing is off");
+        if (!allowed) throw new Error("Website access is not granted");
         const sourceUrl = new URL(page.url);
         sourceUrl.username = "";
         sourceUrl.password = "";
@@ -114,6 +126,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           title: page.title || _sender.tab.title || page.url,
           method: "extension-page-index",
           contentText: page.text,
+          browserName: settings.browserName,
+          browserTabId: _sender.tab.id,
           tags: ["browser", "page-index"]
         }));
       })

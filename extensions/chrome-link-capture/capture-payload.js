@@ -13,6 +13,8 @@ export function buildWebCapture({
   method,
   selectedText,
   contentText,
+  browserName,
+  browserTabId,
   note,
   tags = [],
   capturedAt = new Date().toISOString(),
@@ -23,6 +25,8 @@ export function buildWebCapture({
 
   const capture = {
     method,
+    ...(cleanOptional(browserName) ? { browserName: cleanOptional(browserName) } : {}),
+    ...(Number.isSafeInteger(browserTabId) && browserTabId >= 0 ? { browserTabId } : {}),
     tags: normalizeTags(tags)
   };
   const selection = cleanOptional(selectedText);

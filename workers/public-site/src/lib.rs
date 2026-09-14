@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod admin;
+mod browser_snapshot;
 mod chat;
 mod device;
 mod feed;
@@ -172,6 +173,7 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
         if path.starts_with("/api/chat")
             || device::is_account_device_path(&path)
             || workspace::is_workspace_api_path(&path)
+            || browser_snapshot::is_browser_snapshot_path(&path)
             || feed::is_feed_api_path(&path)
             || remote::is_remote_api_path(&path)
         {
@@ -188,6 +190,8 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
                     "device-write"
                 } else if workspace::is_workspace_api_path(&path) {
                     "workspace-write"
+                } else if browser_snapshot::is_browser_snapshot_path(&path) {
+                    "browser-snapshot-write"
                 } else if remote::is_remote_api_path(&path) {
                     "remote-write"
                 } else {
@@ -233,6 +237,11 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
                 return secure_no_store(
                     workspace::handle_workspace_api(request, &db, &session).await?,
                 );
+            }
+            if browser_snapshot::is_browser_snapshot_path(&path) {
+                return secure_no_store(browser_snapshot::handle_browser_snapshot_api(
+                    request, env, &db, &session.account_id, &session.csrf_token,
+                ).await?);
             }
             let actor =
                 feed::FeedActor::new(&session.account_id, &session.handle, &session.csrf_token);

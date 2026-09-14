@@ -102,11 +102,26 @@ after it settles and at most once every 20 seconds while its visible text
 changes. The local HII store keeps distinct content versions and searches the
 latest one with `hii info find`.
 
+The page-index payload includes the configured browser label and transient tab
+ID for provenance. The URL saved for continuous indexing omits credentials,
+query parameters, and fragments.
+
 This implementation uses Chrome native messaging registration. A Helium install
 needs a native-host manifest registered in Helium's own browser profile; that
 installation path has not been automated or verified. Safari needs its own
-packaged WebExtension and is not covered by this Chromium package. There is
-no cross-device encrypted sync or website browser relay in this change.
+packaged WebExtension and is not covered by this Chromium package.
+
+The account snapshot transport is available separately at
+`/api/browser-snapshots`. It stores an opaque client-encrypted envelope in a
+private R2 prefix and an account-scoped D1 manifest. A paired device uses its
+existing HII chat ECDH key to unwrap the content key. Clients can build a local
+search index after decryption. `lib/web/browser-snapshot-sync.ts` exposes upload,
+incremental pull, and deletion helpers. The account quota is 1 GiB; exceeding
+it rejects new uploads without deleting local data. Deletion emits a manifest
+tombstone and removes the encrypted blob. Browser extension ingestion is not
+yet wired to this account transport, so indexing remains local until an
+authenticated HII client explicitly calls the helpers. There is no website
+live-browser relay in this change.
 
 Publishing remains the explicit `hii links publish` family until it is migrated
 to select canonical capture objects. It is never invoked by local ingest.

@@ -17,6 +17,14 @@ document.getElementById("check").addEventListener("click", () => {
 
 const ORIGINS = ["http://*/*", "https://*/*"];
 const indexStatus = document.getElementById("index-status");
+const browserName = document.getElementById("browser-name");
+
+chrome.storage.local.get({ browserName: "Chrome" }).then((settings) => {
+  browserName.value = settings.browserName;
+});
+browserName.addEventListener("change", () => {
+  chrome.storage.local.set({ browserName: browserName.value });
+});
 
 async function refresh() {
   const { pageIndexEnabled = false } = await chrome.storage.local.get({ pageIndexEnabled: false });
