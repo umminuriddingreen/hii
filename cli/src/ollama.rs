@@ -327,6 +327,17 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
     /// rather than "nothing loaded". The short timeout keeps status surfaces
     /// from hanging behind a stalled local provider.
     pub fn running_models(&self) -> Result<Option<Vec<String>>, String> {
+        if self.provider == ModelProvider::Native {
+            let agent = ureq::AgentBuilder::new()
+                .timeout_connect(Duration::from_secs(1))
+                .timeout_read(Duration::from_secs(2))
+                .build();
+            let response: Value = self.authorize(agent.get(&format!("{}/health", self.base_url)))?
+                .call().map_err(format_ureq)?.into_json()
+                .map_err(|error| format!("invalid native runner health response: {error}"))?;
+            return Ok(Some(response.get("loaded_model").and_then(Value::as_str)
+                .filter(|name| !name.is_empty()).map(str::to_string).into_iter().collect()));
+        }
         if self.provider != ModelProvider::Ollama {
             return Ok(None);
         }

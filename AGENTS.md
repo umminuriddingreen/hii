@@ -33,6 +33,10 @@ Selected object + text/voice intent -> bounded capability -> visible result -> p
 - Deepen only when needed with `hii context --json`, `hii work --json`,
   `hii caps show`, or `hii og status`. The shared cross-agent contract is
   always available at `hii agents guide`.
+- Set `HII_AGENT_ID` to your agent name. If `hii home --json` reports pending
+  handoffs, read `hii agents inbox --for <agent>` and acknowledge incorporated
+  messages. Use `hii agents send` for task, workspace, context, and proof
+  handoffs to another local agent.
 - Check `git status --short` and targeted diffs before editing.
 - Do not reset, delete, format, or rewrite files outside your scoped task.
 - Treat broad untracked folders such as `.claude/`, `.hermes/`, screenshots, and `life/` as possibly owned by another agent or the user.
@@ -124,10 +128,11 @@ Giving a task tier a `memoryGiBMax` puts an unconditional `null` match ahead of
 every size and silently resolves the whole machine to `noop`.
 
 - Do not hardcode a routing table in Rust. A future router reads the config.
-- The auto advisor (`conversation.rs::auto_advisor_suggestion`, Tab when no command completion is active) is
-  the only automatic routing surface, and it only ever suggests: it renders the
-  route, waits for `y`, and turns a hosted route into literal `/codex …` or
-  `/claude …` text the operator runs. An unrecognised route resolves to local.
+- The auto advisor (`conversation.rs::auto_advisor_suggestion`, Tab when no command completion is active)
+  suggests hosted routes only: it waits for `y` and turns a hosted route into
+  literal `/codex …` or `/claude …` text the operator runs. Interactive local
+  routing may prefer the loaded model and use the configured local task tier 2
+  for explicit deep work or failed actions. It never escalates to hosted work.
 - Nothing may escalate to a hosted model on its own. `hostedTransmission` is
   `explicit-only`, and `/mode` promises that to the operator on every switch.
 

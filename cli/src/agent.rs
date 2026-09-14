@@ -153,12 +153,18 @@ fn push_feedback(messages: &mut Vec<Message>, feedback: Feedback) {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum Action {
+    Batch {
+        #[serde(default)]
+        flow: Option<FlowProjection>,
+        calls: Vec<BatchCall>,
+    },
     Tool {
         #[serde(default)]
         flow: Option<FlowProjection>,
         tool: String,
         path: Option<String>,
         query: Option<String>,
+        arguments: Option<Value>,
         command: Option<String>,
         content: Option<String>,
         url: Option<String>,
@@ -199,6 +205,18 @@ pub(crate) enum Action {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+pub(crate) struct BatchCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub tool: String,
+    pub path: Option<String>,
+    pub query: Option<String>,
+    pub url: Option<String>,
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FlowProjection {
     pub title: String,
@@ -222,6 +240,11 @@ impl Action {
     /// `Respond`. Closing that gap is a change to the loop, not to this map.
     pub(crate) fn as_proposal(&self) -> InteractionProposalV1 {
         match self {
+            Self::Batch { calls, .. } => InteractionProposalV1::Capability {
+                phase: "observe".into(),
+                capability_id: "batch".into(),
+                input: json!({ "calls": calls }),
+            },
             Self::Message { message, .. } => InteractionProposalV1::Respond {
                 text: message.clone(),
             },
@@ -232,6 +255,7 @@ impl Action {
                 tool,
                 path,
                 query,
+                arguments,
                 command,
                 content,
                 url,
@@ -242,6 +266,7 @@ impl Action {
                 input: json!({
                     "path": path,
                     "query": query,
+                    "arguments": arguments,
                     "command": command,
                     "content": content,
                     "url": url,
@@ -262,7 +287,8 @@ impl Action {
 
     pub(crate) fn flow(&self) -> Option<&FlowProjection> {
         match self {
-            Self::Tool { flow, .. }
+            Self::Batch { flow, .. }
+            | Self::Tool { flow, .. }
             | Self::Final { flow, .. }
             | Self::Message { flow, .. }
             | Self::McpCall { flow, .. } => flow.as_ref(),
@@ -468,7 +494,8 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         .map(|id| crate::skill_runtime::load(paths, id))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let tools = Toolbelt::new(options.workspace)?;
+    let mut tools = Toolbelt::new(options.workspace)?;
+    tools.set_personal_local(options.authority == Authority::PersonalLocal);
     if !options.allow_missing_verify_deps {
         validate_declared_verification(&options.verify, Some(tools.workspace()))?;
     }
@@ -889,10 +916,28 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             }
         };
         match action {
+            Action::Batch { calls, .. } => {
+                journal.emit(Event::new("batch.started").data(json!({
+                    "step": steps, "calls": calls.iter().map(|call| &call.id).collect::<Vec<_>>()
+                })))?;
+                let results = execute_read_batch(&tools, &calls);
+                let mut feedback = Vec::new();
+                for (id, result) in results {
+                    let output = redact_text(&result.output);
+                    journal.emit(Event::new("tool.result").data(json!({
+                        "step": steps, "call_id": id, "ok": result.ok,
+                        "output": output, "verification": false
+                    })))?;
+                    feedback.push(format!("[{id} {}] {output}", if result.ok { "ok" } else { "error" }));
+                }
+                messages.push(Message::assistant(raw));
+                messages.push(Message::user(format!("BATCH RESULTS (same order):\n{}", feedback.join("\n\n"))));
+            }
             Action::Tool {
                 tool,
                 path,
                 query,
+                arguments,
                 command,
                 content,
                 url,
@@ -989,7 +1034,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                     continue;
                 }
-                let mutates = matches!(tool.as_str(), "write" | "edit")
+                let mutates = matches!(tool.as_str(), "write" | "edit" | "app_uninstall")
                     || (tool == "shell"
                         && command
                             .as_deref()
@@ -1050,7 +1095,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     continue;
                 }
                 let result = if is_hii {
-                    let args = json!({ "query": query.as_deref().unwrap_or("") });
+                    let args = json!({ "query": query.as_deref().unwrap_or(""), "arguments": arguments });
                     crate::hii_tools::execute(&paths.repo, &tool, Some(&args))
                 } else {
                     execute_tool(
@@ -1943,7 +1988,7 @@ fn system_prompt(
     let autonomy = match autonomy_level {
         AutonomyLevel::Approval => "Ask for sensitive/destructive/external actions.",
         AutonomyLevel::LocalFull => {
-            "Local-full: act/test/commit. Ask: delete/push/publish/spend/message/secrets/access."
+            "Local-full: act/test/commit. Use reversible native local actions within granted authority. Ask before irreversible actions, spending, or messaging."
         }
     };
     format!(
@@ -1955,6 +2000,8 @@ Loop: intent -> context -> bounded work -> verify -> receipt. No plan narration.
 Habits: inspect real files, preserve unclear work, patch narrowly, repair failed checks.
 Proof: one flat {{"type":"verify","command":"npm test"}} or http; shell/read/list/search never count.
 JSON only; no native tool tags. T:{tool_names}. F:path,query,command,content,old,new,replace_all,offset,limit,url.
+For 2-4 independent read-only observations, use {{"type":"batch","calls":[{{"id":"a","type":"read","path":"file"}},{{"id":"b","type":"search","query":"term"}}]}}. Mutations remain serial.
+Coordinate local agents with {{"type":"agent_send","arguments":{{"to":"codex","task":"specific task","message":"concise handoff","workspace":"/absolute/path","contextRefs":["source reference"]}}}} when the task calls for a handoff.
 Write: {{"type":"write","path":"relative-file.md","content":"complete file text"}}; file text only.
 Finish: {{"type":"final","summary":"result","verification":["checks run"],"next":null}}
 Read AGENTS.md. Stay in workspace. Never claim unrun proof."#,
@@ -2517,6 +2564,25 @@ pub(crate) fn parse_action_with_repair(
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default()
         .to_string();
+    if action_type == "batch" {
+        let calls = value.get("calls").and_then(serde_json::Value::as_array)
+            .ok_or("batch requires calls")?;
+        if !(2..=4).contains(&calls.len()) {
+            return Err("batch requires 2 to 4 independent read-only calls".into());
+        }
+        let mut ids = std::collections::HashSet::new();
+        for call in calls {
+            let tool = call.get("type").and_then(serde_json::Value::as_str).unwrap_or_default();
+            if !matches!(tool, "read" | "list" | "search" | "web_search" | "image_search" | "web_fetch" | "http") {
+                return Err(format!("batch does not allow {tool}; use one serial action for mutations"));
+            }
+            let id = call.get("id").and_then(serde_json::Value::as_str).unwrap_or_default();
+            if id.is_empty() || id.len() > 24 || !id.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')) || !ids.insert(id.to_string()) {
+                return Err("batch call ids must be unique, 1-24 ASCII letters, digits, '-' or '_'".into());
+            }
+            crate::acp::validate_action_params(tool, call)?;
+        }
+    }
     // Which flat `{"type":"read"}` spellings normalize to a tool call comes
     // from the manifest, not a copy of it. A hand-maintained copy had already
     // lost canvas_*, info_find, info_capture, object_*, and system_* — ten
@@ -2533,6 +2599,29 @@ pub(crate) fn parse_action_with_repair(
     }
     let action = serde_json::from_value(value).map_err(|error| error.to_string())?;
     Ok((action, repair))
+}
+
+pub(crate) fn execute_read_batch(tools: &Toolbelt, calls: &[BatchCall]) -> Vec<(String, ToolResult)> {
+    std::thread::scope(|scope| {
+        let handles = calls.iter().map(|call| scope.spawn(move || {
+            let result = execute_tool(tools, ToolCall {
+                tool: &call.tool,
+                path: call.path.as_deref(),
+                query: call.query.as_deref(),
+                command: None,
+                content: None,
+                url: call.url.as_deref(),
+                old: None,
+                new: None,
+                replace_all: false,
+                offset: call.offset,
+                limit: call.limit,
+                allow_delete: false,
+            }, false);
+            (call.id.clone(), result)
+        })).collect::<Vec<_>>();
+        handles.into_iter().map(|handle| handle.join().expect("bounded read-only tool thread panicked")).collect()
+    })
 }
 
 /// Local models occasionally emit otherwise valid JSON tool actions with
@@ -2634,6 +2723,8 @@ pub(crate) fn execute_tool(tools: &Toolbelt, call: ToolCall, dry_run: bool) -> T
             call.new.unwrap_or(""),
             call.replace_all,
         ),
+        "app_uninstall" if dry_run => blocked("app_uninstall"),
+        "app_uninstall" => tools.app_uninstall(call.query.unwrap_or("")),
         "shell" | "verify" if call.command.is_none_or(|command| command.trim().is_empty()) => {
             malformed("command")
         }
@@ -3415,6 +3506,22 @@ mod tests {
         ] {
             assert!(!is_transient_provider_error(error), "{error}");
         }
+    }
+
+    #[test]
+    fn batch_accepts_parallel_reads_but_refuses_mutation() {
+        let good = r#"{"type":"batch","calls":[{"id":"one","type":"read","path":"a.txt"},{"id":"two","type":"search","query":"needle"}]}"#;
+        assert!(matches!(parse_action_with_repair(good).unwrap().0, Action::Batch { .. }));
+        let unsafe_batch = r#"{"type":"batch","calls":[{"id":"one","type":"read","path":"a.txt"},{"id":"two","type":"write","path":"b.txt","content":"x"}]}"#;
+        assert!(parse_action_with_repair(unsafe_batch).is_err());
+    }
+
+    #[test]
+    fn agent_handoff_keeps_structured_task_context() {
+        let raw = r#"{"type":"agent_send","arguments":{"to":"claude","task":"review","message":"check proof","workspace":"/tmp/work","contextRefs":["receipt:1"]}}"#;
+        let action = parse_action_with_repair(raw).unwrap().0;
+        assert!(matches!(action, Action::Tool { tool, arguments: Some(value), .. }
+            if tool == "agent_send" && value["task"] == "review" && value["contextRefs"][0] == "receipt:1"));
     }
 }
 #[test]

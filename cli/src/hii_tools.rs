@@ -38,6 +38,7 @@ pub const HII_TOOLS: &[&str] = &[
     "schedule_write",
     "system_status",
     "system_observe",
+    "agent_send",
     "bridge_send",
     "bridge_read",
     "object_list",
@@ -56,6 +57,7 @@ pub fn is_mutating(tool: &str) -> bool {
             | "config_write"
             | "board_write"
             | "schedule_write"
+            | "agent_send"
             | "bridge_send"
             | "canvas_add"
             | "canvas_update"
@@ -149,6 +151,29 @@ pub fn execute_as(
         }
         "system_status" => system_status(repo, arguments),
         "system_observe" => system_observe(repo, arguments),
+        "agent_send" => {
+            let handoff = arguments.and_then(|value| value.get("arguments"));
+            let to = argument_field(handoff, "to").unwrap_or_default();
+            let task = argument_field(handoff, "task").unwrap_or_default();
+            let message = argument_field(handoff, "message").unwrap_or_default();
+            if to.trim().is_empty() || task.trim().is_empty() || message.trim().is_empty() {
+                Err("agent_send needs arguments.to, arguments.task, and arguments.message".to_string())
+            } else {
+                let mut command = vec!["agents".to_string(), "send".into(), "--from".into(), "hii-agent".into(),
+                    "--to".into(), to, "--task".into(), task, "--message".into(), message];
+                for field in ["workspace", "receipt"] {
+                    if let Some(value) = argument_field(handoff, field) {
+                        command.push(format!("--{field}")); command.push(value);
+                    }
+                }
+                if let Some(contexts) = handoff.and_then(|value| value.get("contextRefs")).and_then(Value::as_array) {
+                    for context in contexts.iter().filter_map(Value::as_str) {
+                        command.push("--context".into()); command.push(context.into());
+                    }
+                }
+                hii(repo, &command.iter().map(String::as_str).collect::<Vec<_>>())
+            }
+        }
         "bridge_send" => {
             if arg.is_empty() {
                 Err("bridge_send needs a message in `query`".to_string())

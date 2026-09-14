@@ -1,0 +1,7 @@
+# CLI visual direction: cyberpunk without noise
+
+Adobe's [Retro Active trend](https://stock.adobe.com/pages/artisthub/get-inspired/creative-trends/retro-active) identifies renewed Gen Z interest in 1990s and Y2K visual language. Its [2026 prompt analysis](https://blog.adobe.com/en/publish/2026/01/08/halftone-nostalgia-more-2025-top-firefly-prompt-trends) finds rising static, halftone, and grain references alongside persistent minimalism. Canva's [2026 creator survey](https://www.canva.com/newsroom/news/design-trends-2026/) also associates nostalgia with a desire for expressive, imperfect work, while its “Opt-Out Era” points toward simpler layouts and less digital noise. These are design signals, not proof that every Gen Z user wants a colorful terminal.
+
+For HII, the useful MySpace-era quality is personal ownership: a selectable visual signature. The terminal stays conversation-first. `/theme cyberpunk` adds magenta and cyan to existing HII hierarchy; `/theme mono` remains available. Short ASCII `|/-\` motion appears only during actual inference or tool work, clears on completion, and obeys `HII_MOTION=off`. Status names a factual phase and elapsed time, never invented model thoughts, tokens, or progress. Help and inventory come from the command and capability manifest instead of a decorative splash screen.
+
+This keeps the nostalgic signal in user-controlled theme and motion while retaining readable scrollback, keyboard speed, and truthful action feedback.

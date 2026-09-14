@@ -9,7 +9,7 @@ use std::{
     process::{Child, Command, Stdio},
 };
 
-const MAX_ACTIVE_JOBS: usize = 1;
+const MAX_ACTIVE_JOBS: usize = 2;
 const LOG_TAIL_BYTES: u64 = 32 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -60,7 +60,7 @@ impl BackgroundJobs {
         self.refresh()?;
         if self.active_records()?.len() >= MAX_ACTIVE_JOBS {
             return Err(
-                "One background job is already active in this workspace. Use /jobs or /job <id> cancel."
+                "Two background jobs are already active. Use /jobs or /job <id> cancel."
                     .into(),
             );
         }

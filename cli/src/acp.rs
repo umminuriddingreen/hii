@@ -21,7 +21,7 @@ use std::process::ExitCode;
 /// unchanged for existing readers and `reach` carries the accurate answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reach {
-    /// Reads or writes inside the workspace.
+    /// Reads or writes on the local filesystem, bounded by the active authority.
     Local,
     /// Opens a network connection.
     Network,
@@ -122,6 +122,13 @@ const TOOLS: &[ToolSpec] = &[
         Reach::Local,
         true,
         "exact unique string replacement in a file",
+    ),
+    tool(
+        "app_uninstall",
+        "fs",
+        Reach::Local,
+        true,
+        "move one macOS application and its identified app data to recoverable Trash",
     ),
     tool(
         "shell",
@@ -292,6 +299,13 @@ const TOOLS: &[ToolSpec] = &[
         "read one object through an approved HII grant",
     ),
     tool(
+        "agent_send",
+        "hii",
+        Reach::Hii,
+        true,
+        "send a durable task and context handoff to another local agent",
+    ),
+    tool(
         "bridge_send",
         "hii",
         Reach::Hii,
@@ -324,7 +338,7 @@ pub fn action_tool_names(include_hii: bool) -> Vec<&'static str> {
 ///
 /// Deliberately outside [`TOOLS`]: the manifest describes capabilities, and a
 /// downstream MCP client has no use for "the agent decided it was done".
-pub const CONTROL_ACTIONS: &[&str] = &["final", "message"];
+pub const CONTROL_ACTIONS: &[&str] = &["batch", "final", "message"];
 
 /// Every `"type"` an action may carry — tools plus control actions.
 ///
@@ -373,6 +387,17 @@ pub fn input_schema(name: &str) -> Value {
             }),
             json!(["path", "old", "new"]),
         ),
+        "app_uninstall" => object(json!({ "query": string }), json!(["query"])),
+        "agent_send" => object(json!({ "arguments": {
+            "type": "object",
+            "properties": {
+                "to": string, "task": string, "message": string,
+                "workspace": string, "receipt": string,
+                "contextRefs": { "type": "array", "items": string }
+            },
+            "required": ["to", "task", "message"],
+            "additionalProperties": false
+        } }), json!(["arguments"])),
         "shell" | "verify" => object(json!({ "command": string }), json!(["command"])),
         "http" => object(json!({ "url": string }), json!(["url"])),
         "config_read" => object(json!({}), json!([])),
@@ -467,7 +492,7 @@ pub fn has_declared_input_schema(name: &str) -> bool {
 /// Keys every action may carry regardless of which tool it names: the
 /// discriminator itself, the explicit `{"type":"tool","tool":"read"}` spelling,
 /// a free-text justification, and the optional flow projection.
-pub const ACTION_ENVELOPE_KEYS: &[&str] = &["type", "tool", "reason", "flow"];
+pub const ACTION_ENVELOPE_KEYS: &[&str] = &["type", "tool", "reason", "flow", "id"];
 
 /// The complete action grammar, as one JSON Schema.
 ///
@@ -513,6 +538,19 @@ pub fn action_schema() -> Value {
             })
         })
         .collect();
+    branches.push(json!({
+        "type": "object",
+        "properties": {
+            "type": { "const": "batch" },
+            "calls": { "type": "array", "minItems": 2, "maxItems": 4, "items": {
+                "type": "object",
+                "properties": { "id": string, "type": { "enum": ["read", "list", "search", "web_search", "image_search", "web_fetch", "http"] }, "path": string, "query": string, "url": string, "offset": { "type": "integer" }, "limit": { "type": "integer" } },
+                "required": ["id", "type"]
+            }}
+        },
+        "required": ["type", "calls"],
+        "additionalProperties": false
+    }));
     branches.push(json!({
         "type": "object",
         "properties": {
@@ -645,9 +683,9 @@ pub fn annotations(spec: &ToolSpec) -> Value {
     let open_world = matches!(spec.reach, Reach::Network | Reach::Mcp)
         || matches!(
             spec.name,
-            "system_status" | "system_observe" | "bridge_send" | "bridge_read"
+            "system_status" | "system_observe" | "agent_send" | "bridge_send" | "bridge_read"
         );
-    let destructive = matches!(spec.name, "write" | "edit" | "shell");
+    let destructive = matches!(spec.name, "write" | "edit" | "app_uninstall" | "shell");
     json!({
         "readOnlyHint": read_only,
         "destructiveHint": destructive,
@@ -680,10 +718,12 @@ pub fn manifest() -> Value {
         "authority_levels": [
             "read-only",
             "workspace",
+            "personal-local",
             "external-preview",
             "external-commit",
             "yolo"
         ],
+        "commands": crate::route::manifest(),
         "tools": tools,
     })
 }

@@ -39,6 +39,8 @@ features:
 
   - { id: harness.context-pack, name: Previewable minimal context packs, classification: capability, product: harness, status: now }
   - { id: harness.memory, name: Source-linked retrieval and project memory, classification: capability, product: harness, status: now }
+  - { id: harness.conversation-import, name: Local ChatGPT export and Codex conversation archive, classification: capability, product: harness, status: now }
+  - { id: harness.agent-coordination, name: Durable local agent task and context handoffs, classification: capability, product: harness, status: now }
   - { id: harness.browser-research, name: Verified browser research, classification: capability, product: harness, status: next }
   - { id: harness.mail-import, name: Mail importer and actions, classification: capability, product: harness, status: later }
   - { id: harness.rhino, name: Rhino and Grasshopper adapter, classification: capability, product: harness, status: next }

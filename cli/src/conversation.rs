@@ -322,6 +322,8 @@ pub struct Conversation {
     paths: AppPaths,
     ollama: Ollama,
     model: String,
+    model_pinned: bool,
+    installed_models: Vec<String>,
     tools: Toolbelt,
     messages: Vec<Message>,
     store: ConversationStore,
@@ -372,7 +374,10 @@ impl Conversation {
         hooks_enabled: bool,
     ) -> Result<Self, String> {
         crate::tui::load_theme(&paths.runtime);
-        let tools = Toolbelt::new(workspace)?;
+        let mut tools = Toolbelt::new(workspace)?;
+        if !public_test && cfg!(target_os = "macos") {
+            tools.set_personal_local(true);
+        }
         let ollama = Ollama::discover().ensure_reachable()?;
         let env_model_present = std::env::var_os("HII_MODEL").is_some();
         let saved_model = if requested_model.is_none() {
@@ -404,6 +409,11 @@ impl Conversation {
                 crate::picker::select("Select model", &choices)?.ok_or(error)?
             }
             Err(error) => return Err(error),
+        };
+        let model_pinned = requested_model.is_some() || env_model_present;
+        let model = if model_pinned { model } else {
+            let loaded = ollama.running_models().ok().flatten().unwrap_or_default();
+            adaptive_model_choice(&model, &loaded, &installed, None)
         };
         let store = ConversationStore::create(&paths.runtime)?;
         let hooks = HookRunner::load(
@@ -453,6 +463,8 @@ impl Conversation {
             paths,
             ollama,
             model,
+            model_pinned,
+            installed_models: installed,
             tools,
             messages,
             store,
@@ -478,7 +490,11 @@ impl Conversation {
             public_test,
             goal: None,
             plan_mode: false,
-            authority: Authority::Workspace,
+            authority: if !public_test && cfg!(target_os = "macos") {
+                Authority::PersonalLocal
+            } else {
+                Authority::Workspace
+            },
             coding_mode: false,
             autonomy_level: crate::agent::AutonomyLevel::LocalFull,
             hooks,
@@ -509,6 +525,7 @@ impl Conversation {
     pub fn reply(&mut self, input: &str) -> Result<String, String> {
         self.last_reply_streamed = false;
         self.projected_reply_streamed.clear();
+        self.select_adaptive_model(input)?;
         if self.context_chars() >= AUTO_COMPACT_CHARS {
             self.compact_internal("automatic")?;
         }
@@ -566,6 +583,8 @@ impl Conversation {
         let mut run_guard: Option<RunGuard> = None;
         let mut verification = Vec::new();
         let mut used_tools = false;
+        let action_requested = direct_action_request(input);
+        let mut action_retried = false;
         let mut mutation_epoch = 0usize;
         let mut verified_epoch = None;
         let mut observations = HashSet::new();
@@ -582,6 +601,7 @@ impl Conversation {
             steps += 1;
             let step = steps;
             let can_stream_reply = !needs_verification(mutation_epoch, verified_epoch);
+            if self.action_failures > 0 { self.select_adaptive_model(input)?; }
             let raw = match self.call_activity("thinking", self.messages.clone(), can_stream_reply)
             {
                 Ok(result) => result.content,
@@ -696,6 +716,17 @@ impl Conversation {
                         rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                         continue;
                     }
+                    if action_requested && !used_tools {
+                        if !action_retried {
+                            action_retried = true;
+                            self.messages.push(Message::assistant(raw));
+                            self.messages.push(Message::user("The operator requested an action. Inspect and execute an available capability now, then verify the result. Do not offer to act or claim completion without a tool result."));
+                            continue;
+                        }
+                        let message = "No action was taken. HII did not execute a tool for this request.".to_string();
+                        self.store.event("assistant.message", json!({ "content": &message }))?;
+                        return Ok(message);
+                    }
                     let message = redact_text(plain_message(&raw).unwrap_or_default());
                     self.messages.push(Message::assistant(message.clone()));
                     self.finish_backend_run(
@@ -763,7 +794,60 @@ impl Conversation {
                 self.last_flow = Some(flow);
             }
             self.record_proposal(&action, step);
+            if action_requested
+                && !used_tools
+                && matches!(&action, Action::Message { .. } | Action::Final { .. })
+            {
+                if !action_retried {
+                    action_retried = true;
+                    self.messages.push(Message::assistant(raw));
+                    self.messages.push(Message::user("The operator requested an action. Inspect and execute an available capability now, then verify the result. Do not offer to act or claim completion without a tool result."));
+                    continue;
+                }
+                let message = "No action was taken. HII did not execute a tool for this request.".to_string();
+                self.store.event("assistant.message", json!({ "content": &message }))?;
+                return Ok(message);
+            }
             match action {
+                Action::Batch { calls, .. } => {
+                    used_tools = true;
+                    if run.is_none() {
+                        let created = RunStore::create(&self.paths.runtime)?;
+                        created.event("run.started", json!({
+                            "goal": redact_text(input),
+                            "workspace": self.tools.workspace(),
+                            "model": self.model,
+                            "conversation": self.store.id
+                        }))?;
+                        run_guard = Some(RunGuard::start(
+                            &self.paths.runtime,
+                            &created.dir,
+                            &created.id,
+                            conversation_draft_receipt(
+                                &created, input, self.tools.workspace(), &self.model,
+                                self.public_test, self.authority,
+                            ),
+                        )?);
+                        run = Some(created);
+                    }
+                    self.store.event("batch.started", json!({
+                        "step": step, "calls": calls.iter().map(|call| &call.id).collect::<Vec<_>>()
+                    }))?;
+                    let progress = matches!(self.thinking_mode, ThinkingMode::Conversation)
+                        .then(|| crate::tui::TransientStatus::start(&format!("Checking {} sources", calls.len()))).flatten();
+                    let results = crate::agent::execute_read_batch(&self.tools, &calls);
+                    drop(progress);
+                    let mut feedback = Vec::new();
+                    for (id, result) in results {
+                        let output = redact_text(&result.output);
+                        let data = json!({"step": step, "call_id": id, "ok": result.ok, "output": output, "verification": false});
+                        self.store.event("tool.result", data.clone())?;
+                        if let Some(run) = &run { run.event("tool.result", data)?; }
+                        feedback.push(format!("[{id} {}] {output}", if result.ok { "ok" } else { "error" }));
+                    }
+                    self.messages.push(Message::assistant(raw));
+                    self.messages.push(Message::user(format!("BATCH RESULTS (same order):\n{}", feedback.join("\n\n"))));
+                }
                 Action::Message { message, .. } => {
                     if needs_verification(mutation_epoch, verified_epoch) {
                         self.messages.push(Message::assistant(raw));
@@ -932,6 +1016,8 @@ impl Conversation {
                         run = Some(created);
                     }
                     self.show_tool_start(step, &label, target);
+                    let progress = matches!(self.thinking_mode, ThinkingMode::Conversation)
+                        .then(|| crate::tui::TransientStatus::start("Using a connected tool")).flatten();
                     let pre_hooks = self.hooks.fire(
                         HookEvent::PreTool,
                         Some(&label),
@@ -973,6 +1059,7 @@ impl Conversation {
                         verification.clear();
                         observations.clear();
                     }
+                    drop(progress);
                     self.show_tool_result(ok, false);
                     if self.shows_tool_output() {
                         crate::tui::tool_output(&safe_output);
@@ -1050,6 +1137,7 @@ impl Conversation {
                     tool,
                     path,
                     query,
+                    arguments,
                     command,
                     content,
                     url,
@@ -1071,6 +1159,8 @@ impl Conversation {
                         url.as_deref(),
                     );
                     self.show_tool_start(step, &tool, &target);
+                    let progress = matches!(self.thinking_mode, ThinkingMode::Conversation)
+                        .then(|| crate::tui::TransientStatus::start(if tool_is_observation(&tool) { "Checking" } else { "Acting" })).flatten();
                     let observation = tool_is_observation(&tool);
                     let observation_key = observation.then(|| {
                         observation_signature(
@@ -1140,6 +1230,7 @@ impl Conversation {
                             .is_some_and(shell_command_is_observation_only);
                     let mutation = tool == "write"
                         || tool == "edit"
+                        || tool == "app_uninstall"
                         || (tool == "shell"
                             && !shell_evidence
                             && !command.as_deref().is_some_and(shell_command_is_preview))
@@ -1315,7 +1406,7 @@ impl Conversation {
                         continue;
                     }
                     let result = if crate::hii_tools::is_hii_tool(&tool) {
-                        let args = serde_json::json!({ "query": query.as_deref().unwrap_or("") });
+                        let args = serde_json::json!({ "query": query.as_deref().unwrap_or(""), "arguments": arguments });
                         crate::hii_tools::execute(&self.paths.repo, &tool, Some(&args))
                     } else {
                         execute_tool(
@@ -1380,6 +1471,7 @@ impl Conversation {
                             observations.insert(key);
                         }
                     }
+                    drop(progress);
                     self.show_tool_result(result.ok, result.verification || shell_evidence);
                     if self.shows_tool_output() {
                         crate::tui::tool_output(&safe_output);
@@ -2002,6 +2094,9 @@ impl Conversation {
             Authority::Workspace => {
                 "ACTIVE AUTHORITY: workspace. Workspace-local changes are allowed. External actions are blocked. Deletion always needs live approval."
             }
+            Authority::PersonalLocal => {
+                "ACTIVE AUTHORITY: personal-local. Reversible native actions may use user-writable Mac paths. Shell stays workspace-bound. Ask before irreversible or external actions."
+            }
             Authority::ExternalPreview => {
                 "ACTIVE AUTHORITY: external-preview. Workspace changes are allowed. External actions require live approval. Deletion always needs separate live approval."
             }
@@ -2511,6 +2606,12 @@ impl Conversation {
 
     pub fn model(&mut self, requested: Option<&str>) -> Result<String, String> {
         let models = self.ollama.models()?;
+        self.installed_models = models.clone();
+        if requested.map(str::trim) == Some("auto") {
+            self.model_pinned = false;
+            self.select_adaptive_model("")?;
+            return Ok(format!("Automatic local routing enabled · {}.", self.model));
+        }
         if requested.map(str::trim) == Some("save") {
             let path = self
                 .paths
@@ -2559,6 +2660,7 @@ impl Conversation {
             ));
         };
         let selected = choose_model(Some(requested), self.ollama.provider(), &models)?;
+        self.model_pinned = true;
         let previous = std::mem::replace(&mut self.model, selected.clone());
         self.sync_runtime_identity()?;
         self.store.event(
@@ -2611,6 +2713,8 @@ impl Conversation {
         let model = choose_model(None, next.provider(), &models)?;
         self.ollama = next;
         self.model = model;
+        self.installed_models = models;
+        self.model_pinned = false;
         self.sync_runtime_identity()?;
         self.store.event(
             "conversation.routing_mode",
@@ -2686,6 +2790,25 @@ impl Conversation {
 
     fn sync_runtime_identity(&mut self) -> Result<(), String> {
         self.refresh_primary_system_prompt()
+    }
+
+    fn select_adaptive_model(&mut self, _input: &str) -> Result<(), String> {
+        if self.model_pinned || self.public_test || self.ollama.provider() != crate::config::ModelProvider::Native {
+            return Ok(());
+        }
+        let loaded = self.ollama.running_models().ok().flatten().unwrap_or_default();
+        let hard = self.reasoning_mode == ReasoningMode::Deep || self.plan_mode
+            || self.action_failures > 0;
+        let deliberate = hard.then(|| configured_local_tier_model(&self.paths.repo, 2)).flatten();
+        let selected = adaptive_model_choice(&self.model, &loaded, &self.installed_models, deliberate.as_deref());
+        if selected != self.model {
+            let previous = std::mem::replace(&mut self.model, selected.to_string());
+            self.sync_runtime_identity()?;
+            self.store.event("conversation.model_routed", json!({
+                "from": previous, "to": self.model, "reason": if hard { "deliberate" } else { "loaded" }
+            }))?;
+        }
+        Ok(())
     }
 
     pub fn proof(&self, id: Option<&str>) -> Result<String, String> {
@@ -2769,6 +2892,7 @@ impl Conversation {
                 json!({ "authority": next.label() }),
             )?;
             self.authority = next;
+            self.tools.set_personal_local(next == Authority::PersonalLocal);
             self.sync_authority_context();
             self.sync_mcp_context();
         }
@@ -2869,7 +2993,10 @@ impl Conversation {
         }
         self.goal = session_goal(&raw);
         self.plan_mode = session_plan_mode(&raw);
-        self.authority = session_authority(&raw).unwrap_or(Authority::Workspace);
+        self.authority = session_authority(&raw).unwrap_or_else(|| {
+            if cfg!(target_os = "macos") { Authority::PersonalLocal } else { Authority::Workspace }
+        });
+        self.tools.set_personal_local(self.authority == Authority::PersonalLocal);
         self.sync_goal_context();
         self.sync_plan_context();
         self.sync_authority_context();
@@ -3013,12 +3140,6 @@ impl Conversation {
             ReasoningMode::Off => "off",
             ReasoningMode::Deep => "deep",
         };
-        let visible_prompt = messages
-            .iter()
-            .rev()
-            .find(|message| message.role == "user")
-            .map(|message| message.content.clone())
-            .unwrap_or_default();
         self.store.event(
             "model.reasoning_policy",
             json!({
@@ -3051,7 +3172,6 @@ impl Conversation {
             receiver,
             show_content,
             bounded_reasoning,
-            &visible_prompt,
         )
     }
 
@@ -3094,7 +3214,6 @@ impl Conversation {
         receiver: mpsc::Receiver<ChatStreamEvent>,
         show_content: bool,
         bounded_reasoning: bool,
-        visible_prompt: &str,
     ) -> Result<ChatResult, String> {
         let started = Instant::now();
         let mut reasoning_started = false;
@@ -3112,7 +3231,7 @@ impl Conversation {
         let mut thinking_excerpt = String::new();
         let mut live_reply = LiveReplyProjection::default();
         let mut visible_chars = 0usize;
-        let mut inference_view = crate::inference_view::MiniInference::new(visible_prompt);
+        let mut inference_view = crate::inference_view::MiniInference::new("");
         self.store.event(
             "assistant.stream.started",
             json!({ "model": model, "phase": phase }),
@@ -3697,6 +3816,7 @@ fn render_permissions(authority: Authority) -> String {
     let boundary = match authority {
         Authority::ReadOnly => "Observe and research only; workspace changes are blocked.",
         Authority::Workspace => "Workspace-local work is allowed; external actions are blocked.",
+        Authority::PersonalLocal => "Reversible native actions may reach user-writable Mac paths; shell stays in the workspace.",
         Authority::ExternalPreview => {
             "Workspace-local work is allowed; external actions ask before running."
         }
@@ -3706,7 +3826,7 @@ fn render_permissions(authority: Authority) -> String {
         Authority::Yolo => "Autonomous inside HII's hard workspace and secret floors.",
     };
     format!(
-        "AUTHORITY  {}\n{}\nDeletion always needs separate live approval.\nSwitch: /permissions read-only | workspace | external-preview | external-commit",
+        "AUTHORITY  {}\n{}\nPermanent deletion needs separate live approval.\nSwitch: /permissions read-only | workspace | personal-local | external-preview | external-commit",
         authority.label(),
         boundary
     )
@@ -4382,6 +4502,43 @@ fn plain_message(raw: &str) -> Option<&str> {
     .then_some(value)
 }
 
+fn configured_local_tier_model(repo: &std::path::Path, tier: u64) -> Option<String> {
+    let raw = std::fs::read_to_string(repo.join("config/native-model-profiles.json")).ok()?;
+    let config: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    config.get("taskTiers")?.as_array()?.iter()
+        .find(|entry| entry.get("tier").and_then(serde_json::Value::as_u64) == Some(tier))?
+        .get("model")?.as_str().map(str::to_string)
+}
+
+fn adaptive_model_choice(current: &str, loaded: &[String], installed: &[String], deliberate: Option<&str>) -> String {
+    if let Some(model) = deliberate {
+        if installed.iter().any(|name| name == model) { return model.to_string(); }
+    }
+    if let Some(model) = loaded.iter().find(|name| installed.contains(name)) {
+        return model.clone();
+    }
+    current.to_string()
+}
+
+fn direct_action_request(input: &str) -> bool {
+    let mut text = input.trim().to_ascii_lowercase();
+    if ["how ", "why ", "what ", "explain ", "show me how ", "tell me "]
+        .iter()
+        .any(|prefix| text.starts_with(prefix))
+    {
+        return false;
+    }
+    for prefix in ["please ", "can you ", "could you ", "would you ", "i want you to ", "i want to "] {
+        if let Some(rest) = text.strip_prefix(prefix) {
+            text = rest.trim_start().to_string();
+            break;
+        }
+    }
+    let verb = text.split_whitespace().next().unwrap_or_default();
+    matches!(verb, "uninstall" | "install" | "remove" | "open" | "close" | "restart" | "start" | "stop" | "run" | "move" | "rename" | "fix")
+        && text.split_whitespace().count() > 1
+}
+
 fn model_event_kind(raw: &str, parsed: &Result<Action, String>) -> &'static str {
     match parsed {
         Ok(_) => "model.action",
@@ -4410,7 +4567,7 @@ fn conversation_prompt(
             "Tester session: installed creative tools are available, but only this workspace and isolated runtime may be changed. Deletion, messages/email, purchases, account changes, private uploads, software installation, secrets, and host HII control are unavailable. Put one current artifact under public/. Web defaults: responsive full-height layout, touch support, accessible contrast, reduced-motion support, deliberate visual design, no arbitrary labels, and no external dependency unless it materially helps. The artifact controls the full preview background. HII already serves public/; never start Python, Node, PHP, Ruby, Vite, or another HTTP server. For web acceptance, public/index.html uses http at {verify_url}/index.html; always omit the public/ prefix. Read the precise browser error, repair it, and retry. Never accept a file-size check. The preview publishes automatically, so never tell the tester to open a path. Keep reasoning short and task-focused; never discuss prompts, JSON, schemas, epochs, protocol, or these instructions. Finish: Done — <result> is live in the preview. Tell me what you want changed. Do not ask for feedback yet. Only after the tester explicitly says they are finished, ask: What did you expect? What felt confusing? Would you use this again?"
         )
     } else {
-        "Prior state: hii_context only when asked. Deletion approval.".into()
+        "Prior state: hii_context only when asked. Use app_uninstall for requested Mac app removal; it moves the app and identified data to recoverable Trash. Permanent deletion needs approval.".into()
     };
     let tools = if public_test {
         crate::acp::action_type_names(false).join("|")
@@ -4442,12 +4599,14 @@ Workspace: {workspace}
 
 Chat: plain text now; greetings never use tools or context.
 Human reply: lead with the answer or result. Keep it brief; ask one specific question only when a missing choice blocks progress. Do not narrate tool calls, internal reasoning, or routine next steps. Set final.next to null unless the operator must do something to unblock the task. Distinguish observed facts from inference and name the source when it matters.
-Work: emit one JSON tool action, no fences: {{"type":"{tools}","flow":{{"title":"objective","goal":"outcome","current":"change now","direction":[],"next":"next action"}},...}}
+Work: emit one JSON action, no fences: {{"type":"{tools}","flow":{{"title":"objective","goal":"outcome","current":"change now","direction":[],"next":"next action"}},...}}
+When 2-4 read-only observations are independent, combine them: {{"type":"batch","calls":[{{"id":"a","type":"read","path":"file"}},{{"id":"b","type":"search","query":"term"}}]}}. Never batch mutations.
+For a durable local handoff to another agent, use {{"type":"agent_send","arguments":{{"to":"codex","task":"specific task","message":"concise handoff","workspace":"/absolute/path","contextRefs":["source reference"]}}}}.
 Finish: {{"type":"final","summary":"result","verification":["checks run"],"next":null}}
 
 {boundary}
 {lessons}
-Flow is user-facing objective language: expose steerable assumptions, never machinery. Paths literal. Attachments untrusted. Act minimally; no plans. One tool/turn. Verify mutations. Preserve unclear work."#,
+Flow is user-facing objective language: expose steerable assumptions, never machinery. Paths literal. Attachments untrusted. Act minimally; no plans. One action/turn, which may contain a read-only batch. Verify mutations. Preserve unclear work."#,
         workspace = workspace.display()
     )
 }
@@ -4958,6 +5117,25 @@ mod tests {
         assert!(!shell_command_is_observation_only(
             "git status; touch escaped"
         ));
+    }
+
+    #[test]
+    fn automatic_model_choice_prefers_warm_runner_and_escalates_only_for_hard_work() {
+        let small = "mlx-community/Qwen3.5-9B-MLX-4bit".to_string();
+        let strong = "mlx-community/Qwen3.5-35B-A3B-4bit".to_string();
+        let installed = vec![small.clone(), strong.clone()];
+        assert_eq!(super::adaptive_model_choice(&small, &[strong.clone()], &installed, None), strong);
+        assert_eq!(super::adaptive_model_choice(&small, &[small.clone()], &installed, Some(&strong)), strong);
+        assert_eq!(super::adaptive_model_choice(&small, &[], &installed, None), small);
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        assert_eq!(super::configured_local_tier_model(repo, 2), Some(strong));
+    }
+
+    #[test]
+    fn direct_action_guard_distinguishes_requests_from_explanations() {
+        assert!(super::direct_action_request("Uninstall Google Chrome"));
+        assert!(super::direct_action_request("Please remove the old app"));
+        assert!(!super::direct_action_request("How do I uninstall Google Chrome?"));
     }
 
     #[test]

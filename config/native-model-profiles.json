@@ -34,7 +34,7 @@
       "backend": "mlx"
     }
   ],
-  "taskTiersDoc": "Task difficulty only: how much brain a request deserves. Never keyed by memory. Declarative today — no automatic router consumes this yet, and reaching tier 3 stays an explicit operator act per hostedTransmission.",
+  "taskTiersDoc": "Task difficulty only: how much brain a request deserves. Never keyed by memory. Interactive HII uses local tier 2 for explicit deep work or a failed action when its model is installed; it prefers the already loaded local model otherwise. Tier 3 stays an explicit operator act.",
   "taskTiers": [
     {
       "tier": 0,

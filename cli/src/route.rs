@@ -136,6 +136,8 @@ pub const CHAT_NATIVE_VERBS: &[&str] = &["list", "show", "new", "settings", "sen
 
 /// Every command `hii` answers to, and who answers it.
 pub const ROUTES: &[Route] = &[
+    delegated("inventory", Extended, Context, "inspect source, installed, device, and live evidence"),
+    delegated("archive", Extended, Context, "sync ChatGPT exports and local Codex conversations"),
     native(
         "session-backup",
         Extended,
@@ -500,6 +502,24 @@ pub const ROUTES: &[Route] = &[
         "print this message or a command's help",
     ),
 ];
+
+/// Structured command catalog shared with the evidence inventory and help.
+pub fn manifest() -> serde_json::Value {
+    serde_json::Value::Array(ROUTES.iter().filter(|route| route.group != Group::Internal).map(|route| {
+        let implementation = match route.surface {
+            Surface::Native => "native",
+            Surface::Delegated => "delegated",
+            Surface::Split(_) => "split",
+        };
+        serde_json::json!({
+            "name": route.name,
+            "description": route.blurb,
+            "group": route.group.title(),
+            "implementation": implementation,
+            "visibility": if route.visibility == Visibility::Core { "core" } else { "extended" },
+        })
+    }).collect())
+}
 
 pub fn lookup(command: &str) -> Option<&'static Route> {
     ROUTES.iter().find(|route| route.name == command)

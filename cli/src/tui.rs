@@ -6,10 +6,51 @@
 
 use std::{
     env, fs,
-    io::{self, IsTerminal},
+    io::{self, IsTerminal, Write},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU8, AtomicUsize, Ordering},
+    sync::{atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering}, Arc},
+    thread,
+    time::{Duration, Instant},
 };
+
+/// One disappearing status line while a synchronous tool is running.
+pub struct TransientStatus {
+    stop: Arc<AtomicBool>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
+impl TransientStatus {
+    pub fn start(label: &str) -> Option<Self> {
+        if !io::stdout().is_terminal() { return None; }
+        let label = label.to_string();
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_stop = stop.clone();
+        let worker = thread::spawn(move || {
+            let started = Instant::now();
+            let mut frame = 0usize;
+            while !worker_stop.load(Ordering::Relaxed) {
+                let glyph = if env::var("HII_MOTION").as_deref() == Ok("off") { "*" }
+                    else { ["|", "/", "-", "\\"][frame % 4] };
+                let line = format!("  {glyph} HII  {label}  {}s", started.elapsed().as_secs());
+                let clipped = crate::text::clip(&line, terminal_width());
+                print!("\r\x1b[2K{}", paint(&clipped, &[palette().primary]));
+                let _ = io::stdout().flush();
+                frame = frame.wrapping_add(1);
+                thread::sleep(Duration::from_millis(180));
+            }
+        });
+        Some(Self { stop, worker: Some(worker) })
+    }
+}
+
+impl Drop for TransientStatus {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(worker) = self.worker.take() { let _ = worker.join(); }
+        print!("\r\x1b[2K");
+        let _ = io::stdout().flush();
+    }
+}
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
@@ -21,6 +62,7 @@ enum Theme {
     Heritage = 0,
     Midnight = 1,
     Mono = 2,
+    Cyberpunk = 3,
 }
 
 struct Palette {
@@ -51,6 +93,13 @@ const MONO: Palette = Palette {
     warning: "\x1b[38;5;250m",
     error: "\x1b[38;5;255m",
     muted: "\x1b[38;5;245m",
+};
+const CYBERPUNK: Palette = Palette {
+    primary: "\x1b[38;5;199m",
+    secondary: "\x1b[38;5;51m",
+    warning: "\x1b[38;5;226m",
+    error: "\x1b[38;5;203m",
+    muted: "\x1b[38;5;250m",
 };
 
 static ACTIVE_THEME: AtomicU8 = AtomicU8::new(Theme::Heritage as u8);
@@ -134,8 +183,9 @@ impl Theme {
             "heritage" | "default" => Ok(Theme::Heritage),
             "midnight" => Ok(Theme::Midnight),
             "mono" | "monochrome" => Ok(Theme::Mono),
+            "cyberpunk" => Ok(Theme::Cyberpunk),
             other => Err(format!(
-                "unknown theme '{other}'; use heritage | midnight | mono"
+                "unknown theme '{other}'; use heritage | midnight | mono | cyberpunk"
             )),
         }
     }
@@ -145,6 +195,7 @@ impl Theme {
             Theme::Heritage => "heritage",
             Theme::Midnight => "midnight",
             Theme::Mono => "mono",
+            Theme::Cyberpunk => "cyberpunk",
         }
     }
 
@@ -153,16 +204,18 @@ impl Theme {
             Theme::Heritage => "HII signature · warm gold, violet, and signal green.",
             Theme::Midnight => "Cool cyan and blue for low-light terminals.",
             Theme::Mono => "High-clarity monochrome for constrained terminals.",
+            Theme::Cyberpunk => "Electric magenta and cyan with a restrained signal accent.",
         }
     }
 }
 
-const THEMES: [Theme; 3] = [Theme::Heritage, Theme::Midnight, Theme::Mono];
+const THEMES: [Theme; 4] = [Theme::Heritage, Theme::Midnight, Theme::Mono, Theme::Cyberpunk];
 
 fn active_theme() -> Theme {
     match ACTIVE_THEME.load(Ordering::Relaxed) {
         1 => Theme::Midnight,
         2 => Theme::Mono,
+        3 => Theme::Cyberpunk,
         _ => Theme::Heritage,
     }
 }
@@ -176,6 +229,7 @@ fn palette() -> &'static Palette {
         Theme::Heritage => &HERITAGE,
         Theme::Midnight => &MIDNIGHT,
         Theme::Mono => &MONO,
+        Theme::Cyberpunk => &CYBERPUNK,
     }
 }
 
@@ -211,7 +265,7 @@ pub fn set_theme(runtime: &Path, requested: Option<&str>) -> Result<String, Stri
     }
     let theme = active_theme();
     Ok(format!(
-        "THEME  {}\n{}\nSwitch: /theme heritage | midnight | mono",
+        "THEME  {}\n{}\nSwitch: /theme heritage | midnight | mono | cyberpunk",
         theme.name(),
         theme.description()
     ))
@@ -666,7 +720,7 @@ pub fn tool_output(output: &str) {
 }
 
 pub fn model_activity(frame: usize, phase: &str, detail: Option<&str>) -> String {
-    const FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
+    const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
     let phase = match phase {
         "thinking" => "Thinking",
         "reviewing" => "Reviewing",
@@ -687,7 +741,7 @@ pub fn model_activity(frame: usize, phase: &str, detail: Option<&str>) -> String
         .unwrap_or_default();
     format!(
         "  {}  {}{}",
-        paint(FRAMES[frame % FRAMES.len()], &[BOLD, palette().primary]),
+        paint(if std::env::var("HII_MOTION").as_deref() == Ok("off") { "*" } else { FRAMES[frame % FRAMES.len()] }, &[BOLD, palette().primary]),
         paint(phase, &[BOLD]),
         paint(&detail, &[DIM, palette().muted])
     )
@@ -897,7 +951,7 @@ mod tests {
     fn theme_choices_offer_every_theme_and_mark_the_active_one() {
         let choices = theme_choices(Theme::Midnight);
         let names: Vec<_> = choices.iter().map(|choice| choice.value.as_str()).collect();
-        assert_eq!(names, vec!["heritage", "midnight", "mono"]);
+        assert_eq!(names, vec!["heritage", "midnight", "mono", "cyberpunk"]);
         let current: Vec<_> = choices
             .iter()
             .filter(|choice| choice.current)
@@ -1164,6 +1218,7 @@ mod tests {
         assert_eq!(Theme::parse("default").unwrap(), Theme::Heritage);
         assert_eq!(Theme::parse("midnight").unwrap().name(), "midnight");
         assert_eq!(Theme::parse("monochrome").unwrap(), Theme::Mono);
+        assert_eq!(Theme::parse("cyberpunk").unwrap(), Theme::Cyberpunk);
         assert!(Theme::parse("neon-chaos").is_err());
     }
 }

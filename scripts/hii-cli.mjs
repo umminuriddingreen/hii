@@ -9,6 +9,9 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import url from "node:url";
 import { runSkillCommand } from "../aii/skills/registry.mjs";
 import { observeInstances } from "./lib/instance-observation.mjs";
+import { buildInventory, renderDocs, renderHelp } from "./hii-inventory.mjs";
+import { archiveCommand } from "./hii-conversation-archive.mjs";
+import { mailboxCommand } from "./hii-agent-mailbox.mjs";
 
 // The repository this CLI belongs to. Derived from this file's own location so
 // a checkout anywhere works; HII_ROOT overrides it. Hardcoding ~/hii made every
@@ -1353,6 +1356,9 @@ function agentCommandCatalog() {
     { command: "hii home --json", purpose: "Token-efficient agent landing snapshot; full detail when brief is not enough." },
     { command: "hii agents status", purpose: "Show which installed agent instruction adapters are configured." },
     { command: "hii agents guide", purpose: "Print the compact HII-first operating contract shared by agents." },
+    { command: "hii agents inbox --for <agent>", purpose: "Read durable task, workspace, context, and receipt handoffs addressed to an agent." },
+    { command: "hii agents send --to <agent> --task <task> --message <text>", purpose: "Send one local, source-linked handoff to another agent or all agents." },
+    { command: "hii archive sync", purpose: "Incrementally import configured ChatGPT exports and local Codex sessions." },
     { command: "hii context --json", purpose: "Full machine-readable repo, runtime, and capability context." },
     { command: "hii probe", purpose: "Print the full HII worktree probe and stale-runtime warnings." },
     { command: "hii caps show", purpose: "List backend-owned capabilities." },
@@ -1413,7 +1419,7 @@ function agentCommandCatalog() {
     { command: "hii jobs cancel <id> --reason <reason>", purpose: "Append a cancellation receipt for one stale local capability job." },
     { command: "hii doctor", purpose: "Run status plus registry doctor." },
     { command: "hii ship", purpose: "Typecheck and commit locally; does not push." },
-    { command: "hii ship --push <message>", purpose: "Explicit external push; use only after user approval." },
+    { command: "hii ship --push <message>", purpose: "Validate, commit, and push when the active user contract authorizes it." },
     { command: "npm run build", purpose: "Validate the Next.js product app." }
   ];
 }
@@ -1484,7 +1490,7 @@ function agentContextPayload() {
       "Leave .claude, .hermes, life, screenshots, and other local/generated state untracked unless explicitly scoped.",
       "Keep secrets reference-only; report env presence, never raw values.",
       "Complete work locally by default; do not fetch, push, publish, upload, or call external services unless the user explicitly asks.",
-      "Use hii ship for local typecheck and commit only; use hii ship --push only after explicit external publish approval.",
+      "Use hii ship for local validation and commit; hii ship --push is authorized by the active user contract for reversible branch pushes.",
       "Run npm run build after meaningful HII product edits.",
       `Use ${ROOT} as the only HII product/runtime surface; legacy patterns are migrated into this repo before old checkouts are discarded.`
     ],
@@ -1500,6 +1506,7 @@ function agentContextPayload() {
 
 function agentHomePayload() {
   const context = agentContextPayload();
+  const pendingHandoffs = mailboxCommand(["inbox", "--for", process.env.HII_AGENT_ID || "hii"]).messages;
   const activeJobs = context.localState.recentJobs.filter((job) =>
     ["queued", "running", "working", "attention"].includes(job.status)
   );
@@ -1516,7 +1523,13 @@ function agentHomePayload() {
     },
     work: {
       board: context.localState.boardTasks,
-      activeJobs
+      activeJobs,
+      handoffs: {
+        pending: pendingHandoffs.length,
+        recent: pendingHandoffs.slice(-5).map(({ id, from, to, task, workspace, contextRefs, receipt, createdAt, body }) => ({
+          id, from, to, task, workspace, contextRefs, receipt, createdAt, summary: body.slice(0, 240)
+        }))
+      }
     },
     context: context.localState.personalContext,
     activeState: activeStatePayload(context),
@@ -1526,6 +1539,7 @@ function agentHomePayload() {
     commands: [
       "hii home --json",
       "hii agents guide",
+      "hii agents inbox --for <agent>",
       "hii context --json",
       "hii work --json",
       "hii caps show",
@@ -1547,6 +1561,7 @@ function agentHomeBriefPayload(payload = agentHomePayload()) {
     changes: payload.workspace.changes.total,
     openTasks: payload.work.board.open,
     activeJobs: payload.work.activeJobs.length,
+    pendingHandoffs: payload.work.handoffs.pending,
     activeInstances: payload.activeState.activeInstanceProjection.total,
     activeInstanceSample: payload.activeState.activeInstanceProjection.returned,
     activeDomains: domains.filter((domain) => domain.state === "active").map((domain) => domain.id),
@@ -1576,6 +1591,7 @@ function cmdHome(args) {
   console.log(`runtime: ${payload.identity.runtime}`);
   console.log(`git:     ${payload.workspace.branch}${payload.workspace.clean ? " (clean)" : ` (${payload.workspace.changes.total} changes)`}`);
   console.log(`work:    ${payload.work.board.open} open tasks · ${payload.work.activeJobs.length} active jobs`);
+  if (payload.work.handoffs.pending) console.log(`handoffs: ${payload.work.handoffs.pending} pending · hii agents inbox --for ${process.env.HII_AGENT_ID || 'hii'}`);
   console.log(`context: profile=${payload.context.profile.exists ? "ready" : "missing"} · ${payload.context.schedules.active} schedules · knowledge=${payload.context.knowledge.exists ? "ready" : "missing"} · ${payload.context.skills.hii.indexed} HII skills`);
   console.log(`caps:    ${payload.capabilities.length} ready or partial`);
   if (payload.nextActions.length) {
@@ -2661,15 +2677,20 @@ function cmdProof(args = []) {
 
 function cmdAgents(args = []) {
   const sub = args.find((arg) => !arg.startsWith("-")) || "status";
+  if (["send", "inbox", "ack", "thread"].includes(sub)) {
+    console.log(JSON.stringify(mailboxCommand(args), null, 2));
+    return;
+  }
   const guide = [
     "Use HII as the local home for meaningful work on this Mac.",
     "1. Start with `hii home --json`; use its live workspace, work, and capability coordinates before broader discovery.",
     "2. Deepen only as needed with `hii context --json`, `hii work --json`, `hii caps show`, or `hii og status`.",
     "3. Keep human intent and local changes visible. Verify work, inspect `hii proof`, and preserve unclear concurrent work.",
-    "4. `hii ship` may validate and commit locally. Push, publish, spend, message, delete, or widen access only with explicit authority."
+    "4. Set `HII_AGENT_ID` to your agent name. Read pending handoffs with `hii agents inbox --for <agent>`; send task, workspace, context references, and receipt ids with `hii agents send`, then acknowledge incorporated messages.",
+    "5. `hii ship` may validate and commit locally. Follow the active user authority for external actions."
   ];
   const adapters = [
-    { agent: "codex", path: path.join(os.homedir(), ".codex", "AGENTS.md") },
+    { agent: "codex", path: path.join(os.homedir(), "AGENTS.md") },
     { agent: "claude", path: path.join(os.homedir(), ".claude", "CLAUDE.md") },
     { agent: "gemini", path: path.join(os.homedir(), ".gemini", "GEMINI.md") },
     { agent: "hermes", path: path.join(os.homedir(), ".hermes", "config.yaml") }
@@ -2686,7 +2707,7 @@ function cmdAgents(args = []) {
     return;
   }
   if (sub !== "status") {
-    console.error("usage: hii agents [status|guide] [--json]");
+    console.error("usage: hii agents [status|guide|send|inbox|ack|thread] [--json]");
     process.exit(1);
   }
   if (args.includes("--json")) {
@@ -2701,11 +2722,18 @@ function cmdAgents(args = []) {
 }
 
 function cmdHelp(topic) {
+  const inventory = buildInventory({ live: false });
+  if (topic === "--all") {
+    console.log(renderHelp(inventory, { all: true }));
+    return;
+  }
   if (topic) {
+    const route = inventory.commands.find((item) => item.name === topic);
     const entries = agentCommandCatalog().filter((item) =>
       item.command === `hii ${topic}` || item.command.startsWith(`hii ${topic} `)
     );
     console.log(`\n${GLYPH.mark}  HII ${topic.toUpperCase()}\n`);
+    if (route) console.log(`  ${route.description} · ${route.implementation} · ${route.state}\n`);
     if (entries.length) {
       for (const item of entries) {
         console.log(`  ${item.command}`);
@@ -2717,24 +2745,7 @@ function cmdHelp(topic) {
     }
     return;
   }
-  console.log(`\n${GLYPH.mark}  HII COMMAND MAP\n`);
-  console.log("  hii                         open the interactive HII terminal");
-  console.log("  hii chat                    explicitly open the interactive terminal");
-  console.log("  hii home [--json|--brief]   compact live coordinate for agents and humans");
-  console.log("  hii now [--json]            control-plane snapshot; add --full for receipts");
-  console.log("  hii task <intent>           capture a bounded task in the local board");
-  console.log("  hii work [--json|--brief]   active tasks and governed agent work");
-  console.log("  hii proof [receipt-id]      inspect logs, artifacts, and receipts");
-  console.log("  hii agents [status|guide]   show the shared instruction contract");
-  console.log("  hii board | jobs | context  detailed state surfaces");
-  console.log("  hii codex run <prompt>      managed run through HII daemon");
-  console.log("  hii skill report            write a post-verification action receipt");
-  console.log("  hii model ...               discover, install, switch, benchmark, or remove local models");
-  console.log("  hii open app|web|site       launch the desktop, local web, or canonical website");
-  console.log("  hii ui web start|status     control the CLI-owned local web runtime");
-  console.log("  hii ui app status           inspect the installed desktop app");
-  console.log("  hii slash add|list|remove   hot-update slash controls without restarting HII");
-  console.log("\n  Boundary: HII captures intent and proof locally. Execution remains explicitly\n  operator-controlled; shipping, pushing, publishing, and payment are never implicit.\n");
+  console.log(renderHelp(inventory));
 }
 
 function cmdKnowledge(args) {
@@ -3119,6 +3130,14 @@ switch (cmd) {
   case "--help":
   case "-h":
     cmdHelp(rest[0]);
+    break;
+  case "inventory": {
+    const inventory = buildInventory();
+    console.log(rest.includes("--markdown") ? renderDocs(inventory) : JSON.stringify(inventory, null, 2));
+    break;
+  }
+  case "archive":
+    console.log(JSON.stringify(await archiveCommand(rest), null, 2));
     break;
   case "task":
   case "capture":

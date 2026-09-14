@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 pub enum Authority {
     ReadOnly,
     Workspace,
+    PersonalLocal,
     ExternalPreview,
     ExternalCommit,
     Yolo,
@@ -36,11 +37,12 @@ impl Authority {
         match value.trim().to_ascii_lowercase().as_str() {
             "read-only" | "readonly" => Ok(Authority::ReadOnly),
             "workspace" => Ok(Authority::Workspace),
+            "personal-local" | "personal" | "mac" => Ok(Authority::PersonalLocal),
             "external-preview" | "preview" => Ok(Authority::ExternalPreview),
             "external-commit" | "commit" => Ok(Authority::ExternalCommit),
             "yolo" => Ok(Authority::Yolo),
             other => Err(format!(
-                "unknown authority '{other}'; use read-only | workspace | external-preview | external-commit | yolo"
+                "unknown authority '{other}'; use read-only | workspace | personal-local | external-preview | external-commit | yolo"
             )),
         }
     }
@@ -49,6 +51,7 @@ impl Authority {
         match self {
             Authority::ReadOnly => "read-only",
             Authority::Workspace => "workspace",
+            Authority::PersonalLocal => "personal-local",
             Authority::ExternalPreview => "external-preview",
             Authority::ExternalCommit => "external-commit",
             Authority::Yolo => "YOLO (unbounded)",
@@ -65,6 +68,8 @@ impl Authority {
             Authority::ReadOnly => Decision::Allow,
             Authority::Workspace if sensitive => Decision::Deny,
             Authority::Workspace => Decision::Allow,
+            Authority::PersonalLocal if sensitive => Decision::Prompt,
+            Authority::PersonalLocal => Decision::Allow,
             Authority::ExternalPreview if sensitive => Decision::Prompt,
             Authority::ExternalPreview => Decision::Allow,
             Authority::ExternalCommit => Decision::Allow,
