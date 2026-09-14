@@ -63,9 +63,9 @@ export function packagePlacementSeed(pkg: HiiMarketplacePackage, destination: st
       kind: 'interface',
       owner: 'human',
       status: 'ready',
-      source: pkg.source.manifestUrl,
-      capabilityId: 'hii.marketplace.install',
-      audit: [{ ts: now, actor: 'human', action: `installed ${pkg.name} ${pkg.version} to ${destination}` }]
+      source: 'HII marketplace concept preview',
+      capabilityId: 'hii.marketplace.preview',
+      audit: [{ ts: now, actor: 'human', action: `placed ${pkg.name} ${pkg.version} concept preview in ${destination}` }]
     },
     payload: {
       surface: pkg.surface,

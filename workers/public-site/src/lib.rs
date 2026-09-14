@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use wasm_bindgen::JsValue;
-use worker::{Context, D1Database, Date, Env, Method, Request, Response, Result, event};
+use worker::{Context, D1Database, Date, Env, Headers, Method, Request, Response, Result, event};
 
 const RP_ID: &str = "humaninformationinterface.com";
 const RP_ORIGIN: &str = "https://humaninformationinterface.com";
@@ -339,7 +339,20 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
         return secure(download_ui(request, env, asset).await?);
     }
 
-    env.assets("ASSETS")?.fetch_request(request.clone()?).await
+    let response = env.assets("ASSETS")?.fetch_request(request.clone()?).await?;
+    if path == "/site-analysis" || path == "/site-analysis.html" {
+        // Asset responses have immutable fetch headers. Copy them before adding
+        // route-specific map permissions, preserving status and streaming body.
+        let headers = Headers::new();
+        for (name, value) in response.headers().entries() {
+            headers.append(&name, &value)?;
+        }
+        headers.set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googleapis.com https://*.gstatic.com *.google.com https://*.ggpht.com *.googleusercontent.com blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://tile.openstreetmap.org https://gibs.earthdata.nasa.gov https://*.googleapis.com https://*.gstatic.com *.google.com *.googleusercontent.com; media-src 'self' blob:; connect-src 'self' https://tile.openstreetmap.org https://gibs.earthdata.nasa.gov https://*.googleapis.com *.google.com https://*.gstatic.com data: blob:; font-src 'self' https://fonts.gstatic.com; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; frame-src *.google.com; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests")?;
+        headers.set("Referrer-Policy", "strict-origin-when-cross-origin")?;
+        let (builder, body) = response.into_parts();
+        return Ok(builder.with_headers(headers).body(body));
+    }
+    Ok(response)
 }
 
 async fn register_start(request: &mut Request, db: &D1Database) -> Result<Response> {
