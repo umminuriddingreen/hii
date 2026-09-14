@@ -1186,7 +1186,7 @@ export function HiiRoot({
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [dropActive, setDropActive] = useState(false);
   const [uploadChooser, setUploadChooser] = useState(false);
-  const touchTap = useRef<{ count: number; at: Point; time: number; pointerId: number | null; start: Point | null }>({ count: 0, at: { x: 0, y: 0 }, time: 0, pointerId: null, start: null });
+  const touchTap = useRef<{ count: number; at: Point; time: number; pointerId: number | null; start: Point | null; active: Set<number>; blocked: boolean }>({ count: 0, at: { x: 0, y: 0 }, time: 0, pointerId: null, start: null, active: new Set(), blocked: false });
   const textTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTouchTap = useRef(0);
   const uploadAt = useRef<Point | null>(null);
@@ -2635,7 +2635,15 @@ export function HiiRoot({
         showUploadAt({ x: event.clientX, y: event.clientY });
       }}
       onPointerUp={(event) => {
-        if (event.pointerType !== 'touch' || touchTap.current.pointerId !== event.pointerId) return;
+        if (event.pointerType !== 'touch') return;
+        touchTap.current.active.delete(event.pointerId);
+        if (touchTap.current.blocked) {
+          if (!touchTap.current.active.size) touchTap.current.blocked = false;
+          touchTap.current.pointerId = null;
+          touchTap.current.start = null;
+          return;
+        }
+        if (touchTap.current.pointerId !== event.pointerId) return;
         const start = touchTap.current.start;
         touchTap.current.pointerId = null;
         touchTap.current.start = null;
@@ -2656,7 +2664,9 @@ export function HiiRoot({
         }
       }}
       onPointerCancel={(event) => {
-        if (event.pointerType === 'touch' && touchTap.current.pointerId === event.pointerId) {
+        if (event.pointerType === 'touch') {
+          touchTap.current.active.delete(event.pointerId);
+          if (!touchTap.current.active.size) touchTap.current.blocked = false;
           touchTap.current.pointerId = null;
           touchTap.current.start = null;
           touchTap.current.count = 0;
@@ -2665,9 +2675,16 @@ export function HiiRoot({
       onPointerDown={(event) => {
         if ((event.target as Element).closest('[data-node-id],input,textarea,button,audio,video,a,[data-workspace-ui]')) return;
         if (event.pointerType === 'touch') {
-          if (touchTap.current.pointerId !== null) touchTap.current.count = 0;
-          touchTap.current.pointerId = event.pointerId;
-          touchTap.current.start = { x: event.clientX, y: event.clientY };
+          touchTap.current.active.add(event.pointerId);
+          if (touchTap.current.active.size > 1) {
+            touchTap.current.count = 0;
+            touchTap.current.blocked = true;
+            if (textTapTimer.current) clearTimeout(textTapTimer.current);
+            textTapTimer.current = null;
+          } else if (!touchTap.current.blocked) {
+            touchTap.current.pointerId = event.pointerId;
+            touchTap.current.start = { x: event.clientX, y: event.clientY };
+          }
         }
         setActiveDocumentId(null);
         setToolMessage('');
