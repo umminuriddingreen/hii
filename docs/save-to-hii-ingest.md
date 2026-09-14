@@ -106,9 +106,11 @@ The page-index payload includes the configured browser label and transient tab
 ID for provenance. The URL saved for continuous indexing omits credentials,
 query parameters, and fragments.
 
-This implementation uses Chrome native messaging registration. A Helium install
-needs a native-host manifest registered in Helium's own browser profile; that
-installation path has not been automated or verified. Safari needs its own
+This implementation uses Chromium native messaging registration. On macOS,
+`node scripts/hii-chrome-native-host-install.mjs --browser helium --extension-id ID`
+registers the host in Helium's observed `net.imput.helium/NativeMessagingHosts`
+profile; use `--browser chrome` for Chrome. Replace `ID` with the installed
+extension ID from that browser. Safari needs its own
 packaged WebExtension and is not covered by this Chromium package.
 
 The account snapshot transport is available separately at
