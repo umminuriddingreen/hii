@@ -19,6 +19,8 @@ export function RemoteBrowserViewer() {
   const grant = useRef<Grant | null>(null);
   const image = useRef<HTMLImageElement | null>(null);
   const lastPointer = useRef(0);
+  const autoOpened = useRef(false);
+  const openRef = useRef<(event?: FormEvent, address?: string) => Promise<void>>(async () => {});
 
   useEffect(() => {
     const requestedUrl = new URLSearchParams(window.location.search).get('url');
@@ -39,6 +41,14 @@ export function RemoteBrowserViewer() {
     return () => { socket.current?.close(); };
   }, []);
 
+  useEffect(() => {
+    if (!session?.csrfToken || !hostId || autoOpened.current) return;
+    const requestedUrl = new URLSearchParams(window.location.search).get('url');
+    if (!requestedUrl) return;
+    autoOpened.current = true;
+    void openRef.current(undefined, requestedUrl);
+  }, [session?.csrfToken, hostId]);
+
   const revoke = async () => {
     socket.current?.close();
     socket.current = null;
@@ -58,11 +68,11 @@ export function RemoteBrowserViewer() {
     }
   };
 
-  const open = async (event: FormEvent) => {
-    event.preventDefault();
+  const open = async (event?: FormEvent, address = url) => {
+    event?.preventDefault();
     if (!session?.csrfToken || !hostId) return;
     let target;
-    try { target = new URL(url); } catch { setStatus('Enter a full http or https address.'); return; }
+    try { target = new URL(address); } catch { setStatus('Enter a full http or https address.'); return; }
     if (!['http:', 'https:'].includes(target.protocol)) { setStatus('Only web addresses can open here.'); return; }
     if (socket.current?.readyState === WebSocket.OPEN) {
       send({ t: 'browser.navigate', url: target.href });
@@ -103,6 +113,7 @@ export function RemoteBrowserViewer() {
       window.setTimeout(() => { if (grant.current?.grantId === issued.grantId) void revoke(); }, Math.max(0, issued.expiresAt - Date.now()));
     } catch (error) { setStatus(error instanceof Error ? error.message : 'Browser unavailable.'); }
   };
+  openRef.current = open;
 
   const point = (event: MouseEvent<HTMLImageElement> | WheelEvent<HTMLImageElement>) => {
     const bounds = image.current?.getBoundingClientRect();
