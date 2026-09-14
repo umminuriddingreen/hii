@@ -19,6 +19,11 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 body { background: var(--field); color: var(--ink); }
 button, input, textarea { font: inherit; }
 .hii-file-input { display: none; }
+.hii-file-reference { display: grid; align-content: center; gap: 5px; width: 100%; height: 100%; padding: 13px 16px; overflow: hidden; }
+.hii-file-reference strong, .hii-file-reference small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hii-file-reference small { color: var(--muted); font: 10px/1.3 "SF Mono", ui-monospace, monospace; }
+.hii-file-reference p { margin: 4px 0; color: var(--muted); font-size: 11px; line-height: 1.35; }
+.hii-file-reference button { justify-self: start; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 11px; text-decoration: underline; }
 .hii-html { width: 100%; height: 100%; border: 0; background: white; }
 .hii-intent-object { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; width: 100%; height: 100%; padding: 16px 18px 13px; }
 .hii-intent-object header, .hii-intent-object footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; color: var(--muted); font: 9px/1.35 "SF Mono", ui-monospace, monospace; }
@@ -681,6 +686,9 @@ button, input, textarea { font: inherit; }
 .hii-docked-terminal .hii-job-terminal[data-kind="shell"] header { padding-left: 14px; }
 .hii-docked-terminal .hii-job-terminal header small { margin-right: 64px; }
 .hii-docked-terminal-actions { position: absolute; z-index: 14; top: 5px; right: 8px; display: flex; gap: 2px; }
+.hii-docked-terminal-context { position: absolute; z-index: 14; top: 8px; left: 44px; display: flex; align-items: center; gap: 8px; max-width: calc(100% - 160px); color: #aeb8c3; font: 10px/1 "SF Mono", ui-monospace, monospace; }
+.hii-docked-terminal-context span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hii-docked-terminal-context button { padding: 2px 5px; border: 1px solid rgba(255,255,255,.2); border-radius: 5px; background: rgba(255,255,255,.08); color: #e8edf2; cursor: pointer; white-space: nowrap; }
 .hii-docked-terminal-actions button { position: relative; display: grid; width: 30px; height: 30px; padding: 0; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #777b84; cursor: pointer; }
 .hii-docked-terminal-actions button:hover { background: #1b1d21; color: #fff; }
 .hii-docked-terminal[data-compact="true"] { right: auto; bottom: 18px; left: 50%; width: min(760px, calc(100vw - 32px)); height: min(28vh, 260px); transform: translateX(-50%); border-radius: 10px; }

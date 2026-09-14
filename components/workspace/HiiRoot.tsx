@@ -39,6 +39,7 @@ import {
   runtimeSpaceId,
   startAgent,
   stopTerminalSession,
+  writeTerminalSession,
   type AgentEventV1,
   type ContextPackV1,
   type HiiApplicationManifest,
@@ -795,6 +796,12 @@ function NodeBody({
   if (node.type === 'ink') return <InkBody node={node} />;
   if (node.type === 'image' && payload.sticker === true) return <div className="hii-sticker" role="img" aria-label={name}>{text(payload.emoji) || '✦'}</div>;
   if (node.type === 'image' || node.type === 'document' || node.type === 'media') return <AssetNodeBody node={node} />;
+  if (node.type === 'file') return <article className="hii-file-reference" aria-label={`${name} file reference`}>
+    <strong>{name}</strong>
+    <small>{text(payload.label) || 'File'} · {typeof payload.size === 'number' ? `${Math.round(payload.size / 1024)} KB` : 'size unknown'}</small>
+    <p>{text(payload.description) || 'Select this file to include its reference when asking HII.'}</p>
+    {typeof payload.path === 'string' && payload.path ? <button type="button" onClick={() => void navigator.clipboard.writeText(payload.path as string)}>Copy file path</button> : null}
+  </article>;
   if (node.type === 'note' || node.type === 'canvas-text') {
     return (
       <CanvasEditor
@@ -2794,6 +2801,14 @@ export function HiiRoot({
             workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, terminalPresentation: 'hidden' } });
           }}
         >
+          <div className="hii-docked-terminal-context" aria-label="Terminal context">
+            <span>{spaceId || runtimeSpaceId() || 'default'}</span>
+            {selectedNodes.find((node) => typeof node.payload.path === 'string' && node.payload.path) && <button type="button" onClick={() => {
+              const source = selectedNodes.find((node) => typeof node.payload.path === 'string' && node.payload.path);
+              if (!source) return;
+              void writeTerminalSession(text(workspaceTerminal.payload.sessionId), ` ${text(source.payload.path)} `);
+            }}>Insert selected file path</button>}
+          </div>
           <div className="hii-docked-terminal-actions">
             <button type="button" data-tooltip="Move to canvas · ⌘⇧T" aria-label="Move terminal to canvas" onClick={() => ensureWorkspaceTerminal('canvas')}><CornersOut size={16} /></button>
             <button type="button" data-tooltip="Hide · ⌘J" aria-label="Hide terminal" onClick={() => workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, terminalPresentation: 'hidden' } })}>×</button>
