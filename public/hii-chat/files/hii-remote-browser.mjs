@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-BSL-1.1
 // A dedicated Chromium profile exposes only a page, never the host desktop.
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, closeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-const PROFILE_ROOT = join(homedir(), '.hii', 'remote', 'browser-sessions');
+const PROFILE_ROOT = process.env.HII_REMOTE_BROWSER_PROFILE_ROOT ?? join(homedir(), '.hii', 'remote', 'browser-profiles');
 const CHROME = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Helium.app/Contents/MacOS/Helium'].find(existsSync);
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const safeUrl = (value) => {
@@ -14,8 +14,10 @@ const safeUrl = (value) => {
 };
 
 export class BrowserSession {
-  constructor(grantId, send) {
+  constructor(grantId, send, pairedHostId) {
     this.grantId = grantId;
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(pairedHostId ?? '')) throw new Error('invalid_paired_host');
+    this.pairedHostId = pairedHostId;
     this.send = (message) => send({ grantId, ...message });
     this.nextId = 0;
     this.pending = new Map();
@@ -26,19 +28,22 @@ export class BrowserSession {
     const target = safeUrl(url);
     if (!target || !CHROME) throw new Error(CHROME ? 'invalid_url' : 'chromium_unavailable');
     mkdirSync(PROFILE_ROOT, { recursive: true, mode: 0o700 });
-    this.profile = mkdtempSync(join(PROFILE_ROOT, 'session-'));
+    this.profile = join(PROFILE_ROOT, this.pairedHostId);
+    mkdirSync(this.profile, { recursive: true, mode: 0o700 });
+    this.lock = join(this.profile, '.hii-browser.lock');
+    this.acquireLock();
     const portFile = join(this.profile, 'DevToolsActivePort');
-    this.process = spawn(CHROME, [
-      `--user-data-dir=${this.profile}`, '--remote-debugging-port=0',
-      '--no-first-run', '--no-default-browser-check',
-      '--new-window', 'about:blank',
-    ], { stdio: 'ignore' });
-    let port;
+    let port = await this.livePort(portFile);
+    if (!port) {
+      this.process = spawn(CHROME, [
+        `--user-data-dir=${this.profile}`, '--remote-debugging-port=0',
+        '--no-first-run', '--no-default-browser-check',
+        '--new-window', 'about:blank',
+      ], { stdio: 'ignore' });
+    }
     for (let attempt = 0; attempt < 50; attempt++) {
-      if (existsSync(portFile)) {
-        port = Number(readFileSync(portFile, 'utf8').split('\n')[0]);
-        if (port > 0) break;
-      }
+      port = await this.livePort(portFile);
+      if (port) break;
       await wait(100);
     }
     if (!port) throw new Error('chromium_start_failed');
@@ -58,6 +63,37 @@ export class BrowserSession {
     await this.command('Page.startScreencast', { format: 'jpeg', quality: 55, maxWidth: 1280, maxHeight: 800, everyNthFrame: 1 });
     await this.navigate(target);
     this.send({ t: 'browser.started', url: target });
+  }
+
+  acquireLock() {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const fd = openSync(this.lock, 'wx', 0o600);
+        writeFileSync(fd, String(process.pid));
+        closeSync(fd);
+        this.lockOwned = true;
+        return;
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+        const owner = Number(readFileSync(this.lock, 'utf8'));
+        if (Number.isSafeInteger(owner) && owner > 0) {
+          try { process.kill(owner, 0); throw new Error('browser_profile_in_use'); }
+          catch (cause) { if (cause.code !== 'ESRCH') throw cause; }
+        }
+        rmSync(this.lock, { force: true });
+      }
+    }
+    throw new Error('browser_profile_in_use');
+  }
+
+  async livePort(portFile) {
+    if (!existsSync(portFile)) return null;
+    const port = Number(readFileSync(portFile, 'utf8').split('\n')[0]);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(500) });
+      return response.ok ? port : null;
+    } catch { return null; }
   }
 
   command(method, params = {}) {
@@ -111,11 +147,20 @@ export class BrowserSession {
     }
   }
 
-  close() {
+  async close() {
     for (const pending of this.pending.values()) pending.reject(new Error('browser_closed'));
     this.pending.clear();
     this.cdp?.close();
-    this.process?.kill('SIGTERM');
-    if (this.profile) setTimeout(() => rmSync(this.profile, { recursive: true, force: true }), 2000);
+    if (this.process && this.process.exitCode === null) {
+      this.process.kill('SIGTERM');
+      await Promise.race([
+        new Promise((resolve) => this.process.once('exit', resolve)),
+        wait(3000),
+      ]);
+    }
+    if (this.lockOwned) {
+      rmSync(this.lock, { force: true });
+      this.lockOwned = false;
+    }
   }
 }

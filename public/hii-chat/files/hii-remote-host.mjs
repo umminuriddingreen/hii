@@ -138,27 +138,40 @@ class Host {
   async openBrowser(event) {
     const grantId = typeof event.grantId === 'string' ? event.grantId : '';
     if (!grantId || this.browsers.has(grantId)) return;
+    if (this.browserOpening) {
+      this.sendJSON({ t: 'browser.error', grantId, error: 'browser_is_starting' });
+      return;
+    }
+    this.browserOpening = true;
     // One isolated browser session at a time prevents parallel CDP processes
     // sharing the same profile and avoids accidental cross-grant control.
-    this.closeBrowsers();
-    const browser = new BrowserSession(grantId, (message) => this.sendJSON(message));
-    this.browsers.set(grantId, browser);
-    try { await browser.open(event.url); }
+    await this.browserClosing;
+    await this.closeBrowsers();
+    let browser;
+    try {
+      browser = new BrowserSession(grantId, (message) => this.sendJSON(message), this.config.token.split('.')[0]);
+      this.browsers.set(grantId, browser);
+      await browser.open(event.url);
+    }
     catch (error) {
       this.sendJSON({ t: 'browser.error', grantId, error: error.message });
-      this.closeBrowser(grantId);
+      await this.closeBrowser(grantId);
     }
+    finally { this.browserOpening = false; }
   }
 
-  closeBrowser(grantId) {
+  async closeBrowser(grantId) {
     const browser = this.browsers.get(grantId);
     if (!browser) return;
     this.browsers.delete(grantId);
-    browser.close();
+    await browser.close();
   }
 
-  closeBrowsers() {
-    for (const grantId of this.browsers.keys()) this.closeBrowser(grantId);
+  async closeBrowsers() {
+    const closing = Promise.all([...this.browsers.keys()].map((grantId) => this.closeBrowser(grantId)));
+    this.browserClosing = closing;
+    await closing;
+    if (this.browserClosing === closing) this.browserClosing = null;
   }
 
   startChat(event) {

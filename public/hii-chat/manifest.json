@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "version": "1.647349100701697533",
+  "version": "1.39027084160958617",
   "files": {
-    "hii-remote-host.mjs": "09da202cc2d6eac8a627046e23e56891edcab2b3c43a353fee2c131059903e26",
-    "hii-remote-browser.mjs": "b2d9ed7b85e327d656a07c81a0b998e0b5bb85075af2c9c093592cb8428b0672",
+    "hii-remote-host.mjs": "d14f23318e9177a1f1c111bac23cbe24d95dba5554153bd31b203e15d047455c",
+    "hii-remote-browser.mjs": "064d2b3382c35773019fb2ecbe0249a894e4b5d53ff6d84281ac51adf1be65a9",
     "install-local.sh": "3ec3353e344cedaea932286be19cc9e77af732d2404bdb4823073d0aeb227a24",
     "update.sh": "de37fa87ec8f1fb89ca273ba428ac3833d47e905ff162f6725b0b0da45593751"
   }
