@@ -139,6 +139,12 @@ pub const ROUTES: &[Route] = &[
     delegated("inventory", Extended, Context, "inspect source, installed, device, and live evidence"),
     delegated("archive", Extended, Context, "sync ChatGPT exports and local Codex conversations"),
     native(
+        "memory",
+        Extended,
+        Context,
+        "save, watch, search, and restore local file memory",
+    ),
+    native(
         "session-backup",
         Extended,
         Infra,

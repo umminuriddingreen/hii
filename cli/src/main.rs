@@ -35,6 +35,7 @@ mod legacy;
 mod local_chat;
 mod mcp;
 mod mcp_client;
+mod memory;
 mod network;
 mod notification;
 mod ollama;
@@ -177,6 +178,12 @@ enum DoctorCommand {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    #[command(about = "Save, watch, search, and restore local file memory")]
+    #[command(hide = true)]
+    Memory {
+        #[command(subcommand)]
+        action: memory::MemoryCommand,
+    },
     #[command(about = "Back up and restore local Codex, Claude and Pi session logs")]
     #[command(hide = true)]
     SessionBackup {
@@ -1891,6 +1898,10 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         );
     }
     match cli.command {
+        Some(Commands::Memory { action }) => {
+            memory::execute(action)?;
+            Ok(ExitCode::SUCCESS)
+        }
         Some(Commands::SessionBackup { action }) => {
             session_backup::execute(action)?;
             Ok(ExitCode::SUCCESS)

@@ -13,6 +13,7 @@ pub mod adaptive;
 pub mod checkpoints;
 pub mod context_pack;
 pub mod information;
+pub mod memory;
 pub mod operational;
 pub mod runtime;
 pub mod session_backup;
