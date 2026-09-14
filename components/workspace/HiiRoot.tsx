@@ -43,6 +43,7 @@ import {
   type AgentEventV1,
   type ContextPackV1,
   type HiiApplicationManifest,
+  type InformationSearchResult,
   type InformationCaptureResult
 } from '@/lib/client/hii-bridge';
 import { RunBody } from '@/components/workspace/RunBody';
@@ -319,41 +320,63 @@ function PromptResponse({
   );
 }
 
-function QuickWebSearch({
+export function QuickWebSearch({
   onDismiss,
-  onSearch
+  onSearch,
+  onOpen
 }: {
   onDismiss: () => void;
   onSearch: (query: string) => void;
+  onOpen: (url: string) => void;
 }) {
   const [query, setQuery] = useState('');
+  const [results, setResults] = useState<InformationSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  useEffect(() => {
+    const value = query.trim();
+    if (value.length < 2) { setResults([]); setSearching(false); return; }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setSearching(true);
+      void findInformation(value, { web: false, limit: 8 })
+        .then((matches) => { if (!cancelled) setResults(matches.filter((item) => /^https?:\/\//i.test(item.url))); })
+        .catch(() => { if (!cancelled) setResults([]); })
+        .finally(() => { if (!cancelled) setSearching(false); });
+    }, 180);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [query]);
   return (
-    <form
-      className="hii-canvas-search-text"
-      data-workspace-ui
-      onPointerDown={(event) => event.stopPropagation()}
-      onSubmit={(event) => {
-        event.preventDefault();
-        const value = query.trim();
-        if (value) onSearch(value);
-      }}
-    >
-      <input
-        autoFocus
-        aria-label="Write a web search on the canvas"
-        autoComplete="off"
-        spellCheck={false}
-        value={query}
-        placeholder="Search the web"
-        onChange={(event) => setQuery(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key !== 'Escape') return;
-          event.preventDefault();
-          event.stopPropagation();
-          onDismiss();
-        }}
-      />
-    </form>
+    <div className="hii-canvas-search-text" data-workspace-ui onPointerDown={(event) => event.stopPropagation()}>
+      <form onSubmit={(event) => { event.preventDefault(); if (query.trim()) onSearch(query.trim()); }}>
+        <input
+          autoFocus
+          aria-label="Write a web search on the canvas"
+          autoComplete="off"
+          spellCheck={false}
+          value={query}
+          placeholder="Search HII and the web"
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            event.stopPropagation();
+            onDismiss();
+          }}
+        />
+      </form>
+      {query.trim().length >= 2 && <section className="hii-canvas-search-results" aria-label="Saved pages and sources">
+        <header><strong>Saved pages and sources</strong><small>{searching ? 'Searching…' : `${results.length} found`}</small></header>
+        {results.map((result) => <article key={result.versionId || result.id || result.url}>
+          <button type="button" onClick={() => onOpen(result.url)}>
+            <strong>{result.title || result.url}</strong>
+            <small>{result.browserName || result.siteName || 'Saved source'}{result.capturedAt ? ` · ${new Date(result.capturedAt).toLocaleDateString()}` : ''}{result.versionId ? ` · ${result.versionId.slice(-8)}` : ''}</small>
+            {result.excerpt && <span>{result.excerpt}</span>}
+          </button>
+          {typeof window !== 'undefined' && !('__TAURI_INTERNALS__' in window) && <a href={`/remote/browser?url=${encodeURIComponent(result.url)}`}>Open live in HII ↗</a>}
+        </article>)}
+        {!searching && !results.length && <p>No saved page matches. Press Return to search the web.</p>}
+      </section>}
+    </div>
   );
 }
 
@@ -2816,7 +2839,11 @@ export function HiiRoot({
           <TerminalBody node={workspaceTerminal} onPayload={(patch) => workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, ...patch } })} onAgentSubmit={(intent) => void startObjectiveAgent(workspaceTerminal.id, intent)} />
         </aside>
       )}
-      {webSearchOpen && <QuickWebSearch onDismiss={() => setWebSearchOpen(false)} onSearch={submitQuickWebSearch} />}
+      {webSearchOpen && <QuickWebSearch onDismiss={() => setWebSearchOpen(false)} onSearch={submitQuickWebSearch} onOpen={(url) => {
+        const center = camera.toWorld(window.innerWidth / 2, window.innerHeight / 2);
+        openDevBrowser({ x: center.x - 380, y: center.y - 270 }, url);
+        setWebSearchOpen(false);
+      }} />}
       {runtimeEnabled && promptVisible && prompt && (
         <Prompt
           key={`${prompt.anchor.x}:${prompt.anchor.y}:${prompt.initialValue}:${prompt.menu || 'closed'}`}

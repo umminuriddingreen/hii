@@ -129,6 +129,8 @@ export type InformationSearchResult = {
   siteName: string;
   contentHash?: string;
   capturedAt?: string;
+  browserName?: string;
+  versionId?: string;
 };
 
 export type HiiApplicationManifest = {
