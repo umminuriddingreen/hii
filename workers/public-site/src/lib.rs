@@ -161,6 +161,12 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
         if remote::is_remote_host_socket(&path) {
             return remote::handle_host_socket(request, env).await;
         }
+        if browser_snapshot::is_native_browser_snapshot_path(&path) {
+            if request.headers().get("origin")?.is_some() {
+                return secure_no_store(api_error(403, "native_device_required")?);
+            }
+            return secure_no_store(browser_snapshot::handle_native_browser_snapshot_api(request, env, &db).await?);
+        }
         if device::is_native_device_path(&path) {
             if request.headers().get("origin")?.is_some() {
                 return secure_no_store(api_error(403, "native_device_required")?);

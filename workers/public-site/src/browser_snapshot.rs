@@ -1,6 +1,6 @@
 //! Opaque, account-private browser snapshot storage. Plaintext never reaches this worker.
 
-use crate::{api_error, json_response, now_ms};
+use crate::{api_error, hash_token, json_response, now_ms};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use wasm_bindgen::JsValue;
@@ -83,6 +83,67 @@ pub fn is_browser_snapshot_path(path: &str) -> bool {
     path == "/api/browser-snapshots" || path.starts_with("/api/browser-snapshots/")
 }
 
+pub fn is_native_browser_snapshot_path(path: &str) -> bool {
+    path == "/api/device/browser-snapshots/keys"
+        || path == "/api/device/browser-snapshots/devices"
+        || path == "/api/device/browser-snapshots"
+}
+
+#[derive(Deserialize)]
+struct NativeDeviceRow {
+    id: String,
+    account_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RegisterNativeKeys {
+    ecdh_public_jwk: serde_json::Value,
+    signing_public_jwk: serde_json::Value,
+}
+
+pub async fn handle_native_browser_snapshot_api(request: &mut Request, env: &Env, db: &D1Database) -> Result<Response> {
+    let token = request.headers().get("authorization")?
+        .and_then(|value| value.strip_prefix("Bearer ").map(str::to_owned));
+    let Some(token) = token else { return api_error(401, "authentication_required"); };
+    let device = db.prepare("SELECT id,account_id FROM account_devices WHERE token_hash=?1 AND revoked_at IS NULL")
+        .bind(&[hash_token(&token).into()])?.first::<NativeDeviceRow>(None).await?;
+    let Some(device) = device else { return api_error(401, "authentication_required"); };
+    let path = request.url()?.path().to_owned();
+    match (request.method(), path.as_str()) {
+        (Method::Post, "/api/device/browser-snapshots/keys") => {
+            let body = request.bytes().await?;
+            if body.len() > 4096 { return api_error(413, "body_too_large"); }
+            let keys: RegisterNativeKeys = match serde_json::from_slice(&body) {
+                Ok(value) => value,
+                Err(_) => return api_error(400, "invalid_keys"),
+            };
+            let valid = [&keys.ecdh_public_jwk, &keys.signing_public_jwk].iter().all(|jwk| {
+                jwk.get("kty").and_then(|value| value.as_str()) == Some("EC")
+                    && jwk.get("crv").and_then(|value| value.as_str()) == Some("P-256")
+                    && ["x", "y"].iter().all(|field| jwk.get(field).and_then(|value| value.as_str()).is_some_and(|value| value.len() == 43))
+            });
+            if !valid { return api_error(400, "invalid_keys"); }
+            let ecdh = serde_json::to_string(&keys.ecdh_public_jwk)?;
+            let signing = serde_json::to_string(&keys.signing_public_jwk)?;
+            db.prepare("INSERT OR IGNORE INTO chat_devices(id,account_id,ecdh_public_jwk,signing_public_jwk,created_at) VALUES (?1,?2,?3,?4,?5)")
+                .bind(&[device.id.clone().into(), device.account_id.clone().into(), ecdh.clone().into(), signing.clone().into(), JsValue::from_f64(now_ms() as f64)])?.run().await?;
+            let existing = db.prepare("SELECT id,ecdh_public_jwk,signing_public_jwk FROM chat_devices WHERE id=?1 AND account_id=?2 AND revoked_at IS NULL")
+                .bind(&[device.id.clone().into(), device.account_id.into()])?.first::<DeviceRow>(None).await?;
+            if !existing.is_some_and(|row| row.ecdh_public_jwk == ecdh && row.signing_public_jwk == signing) {
+                return api_error(409, "device_key_conflict");
+            }
+            json_response(200, json!({"deviceId": device.id}))
+        }
+        (Method::Get, "/api/device/browser-snapshots/devices") => devices(db, &device.account_id).await,
+        (Method::Post, "/api/device/browser-snapshots") => {
+            // A native link token is bound to one device; the envelope cannot impersonate another.
+            upload_for_device(request, env, db, &device.account_id, &device.id).await
+        }
+        _ => api_error(404, "not_found"),
+    }
+}
+
 pub async fn handle_browser_snapshot_api(
     request: &mut Request,
     env: &Env,
@@ -108,7 +169,7 @@ pub async fn handle_browser_snapshot_api(
 }
 
 async fn devices(db: &D1Database, account_id: &str) -> Result<Response> {
-    let rows = db.prepare("SELECT id,ecdh_public_jwk,signing_public_jwk FROM chat_devices WHERE account_id=?1 AND revoked_at IS NULL ORDER BY created_at")
+    let rows = db.prepare("SELECT id,ecdh_public_jwk,signing_public_jwk FROM chat_devices WHERE account_id=?1 AND revoked_at IS NULL AND (NOT EXISTS (SELECT 1 FROM account_devices ad WHERE ad.id=chat_devices.id) OR EXISTS (SELECT 1 FROM account_devices ad WHERE ad.id=chat_devices.id AND ad.revoked_at IS NULL)) ORDER BY created_at")
         .bind(&[account_id.into()])?.all().await?.results::<DeviceRow>()?;
     let devices: Vec<_> = rows.into_iter().filter_map(|row| {
         Some(json!({
@@ -134,6 +195,14 @@ async fn list(request: &Request, db: &D1Database, account_id: &str) -> Result<Re
 }
 
 async fn upload(request: &mut Request, env: &Env, db: &D1Database, account_id: &str) -> Result<Response> {
+    upload_inner(request, env, db, account_id, None).await
+}
+
+async fn upload_for_device(request: &mut Request, env: &Env, db: &D1Database, account_id: &str, device_id: &str) -> Result<Response> {
+    upload_inner(request, env, db, account_id, Some(device_id)).await
+}
+
+async fn upload_inner(request: &mut Request, env: &Env, db: &D1Database, account_id: &str, required_device_id: Option<&str>) -> Result<Response> {
     if request.headers().get("content-length")?.and_then(|value| value.parse::<usize>().ok()).is_some_and(|length| length > MAX_BODY_BYTES) {
         return api_error(413, "body_too_large");
     }
@@ -143,6 +212,9 @@ async fn upload(request: &mut Request, env: &Env, db: &D1Database, account_id: &
         Ok(value) if valid_envelope(&value) => value,
         _ => return api_error(400, "invalid_envelope"),
     };
+    if required_device_id.is_some_and(|id| id != envelope.sender_device_id) {
+        return api_error(403, "device_mismatch");
+    }
     let active = db.prepare("SELECT 1 AS present FROM chat_devices WHERE id=?1 AND account_id=?2 AND revoked_at IS NULL")
         .bind(&[envelope.sender_device_id.clone().into(), account_id.into()])?.first::<serde_json::Value>(None).await?.is_some();
     if !active { return api_error(403, "device_revoked"); }

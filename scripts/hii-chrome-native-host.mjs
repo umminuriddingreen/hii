@@ -4,6 +4,7 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { syncIndexedCapture } from "./hii-browser-snapshot-sync.mjs";
 
 const MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
 
@@ -101,7 +102,9 @@ export async function handleNativeMessage(message) {
   if (message?.type === "ping") return { ok: true, data: { host: "com.hii.save_to_hii" } };
   const payload = validateMessage(message);
   const data = await ingestCapture(payload);
-  return { ok: true, data };
+  if (payload.capture?.method !== "extension-page-index") return { ok: true, data };
+  const sync = await syncIndexedCapture(payload);
+  return { ok: true, data: { ...data, browserSync: sync } };
 }
 
 async function main() {

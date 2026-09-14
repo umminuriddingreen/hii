@@ -118,10 +118,16 @@ existing HII chat ECDH key to unwrap the content key. Clients can build a local
 search index after decryption. `lib/web/browser-snapshot-sync.ts` exposes upload,
 incremental pull, and deletion helpers. The account quota is 1 GiB; exceeding
 it rejects new uploads without deleting local data. Deletion emits a manifest
-tombstone and removes the encrypted blob. Browser extension ingestion is not
-yet wired to this account transport, so indexing remains local until an
-authenticated HII client explicitly calls the helpers. There is no website
-live-browser relay in this change.
+tombstone and removes the encrypted blob. When the Mac has an HII account-device
+link, the native messaging host automatically encrypts each successfully
+indexed page and uploads it with the linked device token. Its private ECDH key
+is stored locally with mode `0600`; the server receives only public keys and
+ciphertext. If the Mac is not linked, indexing remains local. The signed-in
+website can call `searchSyncedBrowserSnapshots` to pull and decrypt snapshots
+into its own IndexedDB and search their text locally. A browser device added
+after a snapshot was uploaded cannot yet decrypt that older snapshot because
+key rewrapping is not implemented. There is no website live-browser relay in
+this change.
 
 Publishing remains the explicit `hii links publish` family until it is migrated
 to select canonical capture objects. It is never invoked by local ingest.
