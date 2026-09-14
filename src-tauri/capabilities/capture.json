@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "quick-capture",
+  "description": "Minimal local quick-capture window. Native commands enforce this webview label.",
+  "webviews": ["capture"],
+  "permissions": ["core:default"],
+  "remote": {
+    "urls": [
+      "hiiui://localhost/*",
+      "http://hiiui.localhost/*",
+      "http://127.0.0.1:*",
+      "http://localhost:*"
+    ]
+  }
+}
