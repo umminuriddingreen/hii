@@ -102,6 +102,7 @@ export async function searchSyncedBrowserSnapshots(query: string, limit = 20) {
         id: `browser-snapshot:${id}`, versionId: id, browserName: snapshot.browser,
         url: snapshot.url, title: snapshot.title,
         excerpt: snapshot.content.slice(0, 360), siteName: new URL(snapshot.url).hostname,
+        contentHash: id,
         capturedAt: snapshot.capturedAt,
       }));
   } finally { database.close(); }

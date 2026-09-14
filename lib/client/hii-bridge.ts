@@ -691,6 +691,10 @@ export async function findInformation(query: string, options: { web?: boolean; l
       limit: options.limit || 10
     });
   }
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    const { searchSyncedBrowserSnapshots } = await import('../web/browser-snapshot-search');
+    return searchSyncedBrowserSnapshots(query, options.limit || 10);
+  }
   const value = await developmentRequest<{ results: InformationSearchResult[] }>('/information/find', {
     method: 'POST',
     body: JSON.stringify({ query, web: Boolean(options.web), limit: options.limit || 10 })
