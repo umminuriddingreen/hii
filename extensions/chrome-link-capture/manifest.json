@@ -3,7 +3,8 @@
   "name": "Save to HII",
   "version": "0.1.0",
   "description": "Save web pages, selections, and references into your local HII workspace.",
-  "permissions": ["activeTab", "contextMenus", "nativeMessaging", "tabs"],
+  "permissions": ["activeTab", "contextMenus", "nativeMessaging", "tabs", "storage", "scripting"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
   "action": {
     "default_title": "Save to HII",
     "default_popup": "popup.html"

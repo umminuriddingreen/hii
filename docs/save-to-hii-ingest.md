@@ -1,7 +1,8 @@
 # Save to HII: canonical local ingest
 
-Save to HII is an explicit local capture operation. It is not publishing,
-sharing, browser-history collection, or a public link-stream write.
+Save to HII is a local capture operation. A user can save one page explicitly
+or opt into continuous page indexing in the extension Options. It is not
+publishing, sharing, browser-history import, or a public link-stream write.
 
 ## Canonical path
 
@@ -88,6 +89,24 @@ Canvas placement is intentionally separate. The canonical source can already
 be found and inspected; a later inbox or `canvas_add` action should reference
 its stable source ID and produce its own Runtime Space receipt. Capture must not
 silently choose or mutate a canvas.
+
+## Continuous rendered-page indexing
+
+The same Chromium extension can index the rendered text of ordinary HTTP(S)
+pages in Chrome or a compatible Chromium browser such as Helium. In Options,
+the user must explicitly enable indexing and grant website access. Pause
+unregisters the script and removes its host permissions. The extension does not
+index private windows, internal URLs, sign-in/payment pages, pages containing
+password or card-number fields, or form and editable contents. A page is sent
+after it settles and at most once every 20 seconds while its visible text
+changes. The local HII store keeps distinct content versions and searches the
+latest one with `hii info find`.
+
+This implementation uses Chrome native messaging registration. A Helium install
+needs a native-host manifest registered in Helium's own browser profile; that
+installation path has not been automated or verified. Safari needs its own
+packaged WebExtension and is not covered by this Chromium package. There is
+no cross-device encrypted sync or website browser relay in this change.
 
 Publishing remains the explicit `hii links publish` family until it is migrated
 to select canonical capture objects. It is never invoked by local ingest.

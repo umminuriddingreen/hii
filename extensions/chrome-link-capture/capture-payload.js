@@ -12,6 +12,7 @@ export function buildWebCapture({
   title,
   method,
   selectedText,
+  contentText,
   note,
   tags = [],
   capturedAt = new Date().toISOString(),
@@ -39,6 +40,7 @@ export function buildWebCapture({
       ...(cleanOptional(title) ? { title: cleanOptional(title) } : {})
     },
     capture,
+    ...(typeof contentText === "string" ? { content: { text: contentText } } : {}),
     authority: {
       client: "chrome-extension",
       localOnly: true

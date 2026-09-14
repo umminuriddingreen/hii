@@ -71,6 +71,13 @@ const payload = {
 };
 
 describe("Save to HII native messaging host", () => {
+  it("reports local host availability without invoking HII", async () => {
+    const { code, response } = await runHost({ type: "ping" }, {
+      HII_CHROME_NATIVE_HII: "missing-hii-command"
+    });
+    expect(code).toBe(0);
+    expect(response).toEqual({ ok: true, data: { host: "com.hii.save_to_hii" } });
+  });
   it("passes one hii.web.capture payload to the CLI ingest command", async () => {
     const command = await fakeHiiCommand();
     const { code, response } = await runHost({ type: "save-capture", payload }, {

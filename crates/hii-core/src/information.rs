@@ -630,8 +630,9 @@ fn validate_web_capture(payload: &WebCapturePayload) -> Result<(), String> {
     if payload.capture_id.trim().is_empty() || payload.capture_id.len() > 200 {
         return Err("captureId is required and must be at most 200 characters".into());
     }
-    const METHODS: [&str; 5] = [
+    const METHODS: [&str; 6] = [
         "extension-action",
+        "extension-page-index",
         "context-selection",
         "context-page",
         "context-image",
@@ -1245,6 +1246,30 @@ mod tests {
                 .unwrap_err()
                 .contains("different content")
         );
+    }
+
+    #[test]
+    fn indexed_browser_pages_keep_versions_and_search_latest_rendered_text() {
+        let runtime = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let mut first = web_payload();
+        first.capture.method = "extension-page-index".into();
+        first.capture.selected_text = None;
+        first.content = Some(WebCaptureContent {
+            text: Some("Original rendered bridge specification".into()),
+            html: None,
+            screenshot_asset_id: None,
+            content_hash: None,
+        });
+        ingest_web_capture(runtime.path(), workspace.path(), first.clone()).unwrap();
+        let mut second = first;
+        second.capture_id = "capture-test-2".into();
+        second.content.as_mut().unwrap().text = Some("Revised rendered lidar specification".into());
+        let saved = ingest_web_capture(runtime.path(), workspace.path(), second).unwrap();
+        assert!(saved.changed);
+        assert_eq!(versions(runtime.path(), &saved.source.id).unwrap().len(), 2);
+        assert_eq!(search(runtime.path(), "lidar", 10).unwrap().len(), 1);
+        assert!(search(runtime.path(), "bridge", 10).unwrap().is_empty());
     }
 
     #[test]

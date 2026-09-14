@@ -98,6 +98,7 @@ export function ingestCapture(payload) {
 }
 
 export async function handleNativeMessage(message) {
+  if (message?.type === "ping") return { ok: true, data: { host: "com.hii.save_to_hii" } };
   const payload = validateMessage(message);
   const data = await ingestCapture(payload);
   return { ok: true, data };
