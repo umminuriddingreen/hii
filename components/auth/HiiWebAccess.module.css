@@ -197,7 +197,7 @@
   backdrop-filter: blur(30px) saturate(1.35);
   font: 11px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
 }
-.workspaceRail { left: 0; display: flex; flex-direction: column; width: 220px; padding: 24px 14px 16px; border-right: 1px solid rgba(25,35,42,.12); box-shadow: 12px 0 40px rgba(20,29,35,.055); }
+.workspaceRail { left: 12px; top: 58px; bottom: 12px; display: flex; flex-direction: column; width: min(250px, calc(100vw - 24px)); padding: 16px 12px; border: 1px solid rgba(255,255,255,.8); border-radius: 16px; box-shadow: 0 18px 48px rgba(20,29,35,.13); }
 .railBrand { display: grid; gap: 3px; margin: 6px 10px 35px; }
 .railBrand strong { font-size: 18px; font-weight: 600; letter-spacing: -.04em; }
 .railBrand span, .workspaceRail section > small, .workspaceRail footer small { color: #737b80; font: 9px/1.3 "SF Mono", ui-monospace, monospace; }
@@ -212,17 +212,13 @@
 .workspaceRail footer { display: grid; gap: 4px; margin-top: auto; border-top: 1px solid rgba(25,35,42,.12); padding-top: 12px; }
 .workspaceRail footer small { padding: 0 10px; }
 .railToggle, .browserToggle { position: fixed; z-index: 2147481600; top: 12px; display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid rgba(25,35,42,.12); border-radius: 9px; background: rgba(248,249,249,.78); color: #30383b; cursor: pointer; -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
-.railToggle { left: 184px; }
-.railToggle[data-open="false"] { left: 12px; }
-.browserToggle { right: 14px; }
-.browserDock { right: 0; display: grid; grid-template-rows: 48px minmax(0, 1fr); width: min(390px, 34vw); border-left: 1px solid rgba(25,35,42,.12); box-shadow: -12px 0 40px rgba(20,29,35,.055); }
+.railToggle { left: 12px; }
+.browserToggle { right: 14px; top: 58px; }
+.browserDock { right: 12px; top: 100px; bottom: 12px; display: grid; grid-template-rows: 48px minmax(0, 1fr); width: min(440px, calc(100vw - 24px)); border: 1px solid rgba(255,255,255,.8); border-radius: 16px; box-shadow: 0 18px 48px rgba(20,29,35,.13); overflow: hidden; }
 .browserDock > header { display: flex; align-items: center; justify-content: space-between; padding: 0 54px 0 16px; border-bottom: 1px solid rgba(25,35,42,.1); }
 .browserDock > header span { font-weight: 600; }
 .browserDock > header small { color: #737b80; font: 9px/1 "SF Mono", ui-monospace, monospace; }
-.canvasShell:has(.browserDock) .canvasHeader { right: calc(min(390px, 34vw) + 16px); }
-@media (max-width: 980px) { .workspaceRail { width: 180px; } .railToggle { left: 144px; } .browserDock { width: min(330px, 40vw); } }
-@media (max-width: 980px) { .canvasShell:has(.browserDock) .canvasHeader { right: calc(min(330px, 40vw) + 16px); } }
-@media (max-width: 680px) { .workspaceRail { width: min(250px, 80vw); } .railToggle { left: 12px; } .browserDock { width: min(360px, 100vw); } .canvasShell:has(.browserDock) .canvasHeader { right: 16px; } }
+@media (max-width: 680px) { .workspaceRail { width: min(250px, calc(100vw - 24px)); } .browserDock { width: calc(100vw - 24px); } }
 
 .canvasShell :global(.hii-canvas[data-surface="space"]),
 .canvasShell :global(.hii-canvas[data-surface="account"]) {

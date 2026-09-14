@@ -38,8 +38,8 @@ function HiiCanvasFrame({ accountName, workspaces, activeWorkspaceId, onWorkspac
   onAccount: () => void;
   onFindObjects: () => void;
 }) {
-  const [railOpen, setRailOpen] = useState(true);
-  const [browserOpen, setBrowserOpen] = useState(true);
+  const [railOpen, setRailOpen] = useState(false);
+  const [browserOpen, setBrowserOpen] = useState(false);
   const [browserUrl, setBrowserUrl] = useState('');
   return <>
     <button type="button" className={styles.railToggle} data-open={railOpen} data-workspace-ui aria-label={railOpen ? 'Hide navigation' : 'Show navigation'} onClick={() => setRailOpen((value) => !value)}>{railOpen ? '‹' : '☰'}</button>

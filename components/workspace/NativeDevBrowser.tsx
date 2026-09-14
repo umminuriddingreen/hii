@@ -41,17 +41,29 @@ export function NativeDevBrowser({ nodeId, initialUrl, startEmpty = false, docke
   const [showAgent, setShowAgent] = useState(false);
   const viewport = useRef<HTMLDivElement | null>(null);
   const webview = useRef<import('@tauri-apps/api/webview').Webview | null>(null);
+  const lastBounds = useRef('');
+  const boundsInFlight = useRef(false);
   const label = `hii-browser-${nodeId.replace(/[^a-zA-Z0-9-]/g, '-')}`;
 
   const syncBounds = useCallback(async () => {
-    if (!webview.current || !viewport.current) return;
+    if (!webview.current || !viewport.current || boundsInFlight.current) return;
     const rect = viewport.current.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2) return;
-    const { LogicalPosition, LogicalSize } = await import('@tauri-apps/api/dpi');
-    await Promise.all([
-      webview.current.setPosition(new LogicalPosition(rect.left, rect.top)),
-      webview.current.setSize(new LogicalSize(rect.width, rect.height))
-    ]);
+    const bounds = [rect.left, rect.top, rect.width, rect.height].map((value) => Math.round(value)).join(':');
+    if (bounds === lastBounds.current) return;
+    boundsInFlight.current = true;
+    try {
+      const { LogicalPosition, LogicalSize } = await import('@tauri-apps/api/dpi');
+      const current = webview.current;
+      if (!current) return;
+      await Promise.all([
+        current.setPosition(new LogicalPosition(rect.left, rect.top)),
+        current.setSize(new LogicalSize(rect.width, rect.height))
+      ]);
+      lastBounds.current = bounds;
+    } finally {
+      boundsInFlight.current = false;
+    }
   }, []);
 
   useEffect(() => {
@@ -74,6 +86,7 @@ export function NativeDevBrowser({ nodeId, initialUrl, startEmpty = false, docke
         height: rect.height
       });
       webview.current = next;
+      lastBounds.current = existing ? '' : [rect.left, rect.top, rect.width, rect.height].map((value) => Math.round(value)).join(':');
       if (existing) await existing.show();
       else {
         await next.once('tauri://created', () => setStatus('ready'));
@@ -86,6 +99,7 @@ export function NativeDevBrowser({ nodeId, initialUrl, startEmpty = false, docke
       window.clearInterval(timer);
       const current = webview.current;
       webview.current = null;
+      lastBounds.current = '';
       if (current) void current.close();
     };
   // The webview belongs to this durable node for its full mounted lifetime.

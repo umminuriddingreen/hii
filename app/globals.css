@@ -676,7 +676,7 @@ button, input, textarea { font: inherit; }
 .hii-terminal-find input { width: 180px; border: 0; outline: 0; background: transparent; color: #eee; padding: 0 7px; font: 11px/1 "SF Mono", ui-monospace, monospace; }
 .hii-terminal-find button { width: 26px; height: 26px; padding: 0; border: 0; background: transparent; color: #999; cursor: pointer; }
 .hii-terminal-find button:hover { color: #fff; }
-.hii-docked-terminal { position: fixed; z-index: 2147482400; right: 12px; bottom: 12px; left: 12px; height: min(42vh, 480px); overflow: hidden; border: 1px solid #26282d; border-radius: 13px; background: #050505; box-shadow: 0 20px 70px rgba(0,0,0,.28); }
+.hii-docked-terminal { position: fixed; z-index: 2147482400; right: 12px; bottom: 12px; left: 12px; height: min(42vh, 300px); overflow: hidden; border: 1px solid rgba(255,255,255,.28); border-radius: 13px; background: rgba(5,8,12,.84); -webkit-backdrop-filter: blur(30px) saturate(1.4); backdrop-filter: blur(30px) saturate(1.4); box-shadow: 0 20px 70px rgba(0,0,0,.28); }
 .hii-docked-terminal .hii-job-terminal { height: 100%; }
 .hii-docked-terminal .hii-job-terminal[data-kind="shell"] header { padding-left: 14px; }
 .hii-docked-terminal .hii-job-terminal header small { margin-right: 64px; }

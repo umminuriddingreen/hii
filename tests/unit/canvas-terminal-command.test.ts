@@ -80,16 +80,16 @@ describe('canvas terminal command', () => {
     expect(root).not.toContain('Make presentation');
   });
 
-  it('opens Command-K as the compact persistent PTY', () => {
+  it('opens Command-K as intent and Command-J as the bounded local PTY', () => {
     const root = readFileSync(resolve(process.cwd(), 'components/workspace/HiiRoot.tsx'), 'utf8');
     const css = readFileSync(resolve(process.cwd(), 'app/globals.css'), 'utf8');
-    expect(root).toContain("ensureWorkspaceTerminal('quick')");
-    expect(root).toContain("runtimeEnabled && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k'");
+    expect(root).toContain("event.key.toLowerCase() === 'k'");
+    expect(root).toContain("setPromptPresentation('terminal')");
+    expect(root).toContain("event.key.toLowerCase() === 'j'");
+    expect(root).toContain("ensureWorkspaceTerminal('docked')");
     expect(root).toContain("presentation: 'canvas' | 'docked' | 'quick'");
-    expect(root).toContain("data-compact={workspaceTerminal.payload.terminalPresentation === 'quick' || undefined}");
     expect(root).toContain('onKeyDownCapture={(event) => {');
-    expect(css).toContain('.hii-docked-terminal[data-compact="true"]');
-    expect(css).toContain('height: min(28vh, 260px);');
+    expect(css).toContain('height: min(42vh, 300px);');
   });
 
   it('turns Command-T search text into a live browser object on the canvas', () => {

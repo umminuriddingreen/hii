@@ -42,28 +42,44 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onOpenConv
     const origin = { x: node.x, y: node.y, w: node.w, h: node.h };
     let next = { ...origin };
     const resize = forceResize || event.altKey;
+    let frameRequest = 0;
+    const paint = () => {
+      frameRequest = 0;
+      if (!frame.current) return;
+      if (resize) {
+        frame.current.style.width = `${next.w}px`;
+        frame.current.style.height = `${next.h}px`;
+      } else {
+        frame.current.style.transform = workspaceNodeTransform({ ...next, rotation: node.rotation });
+      }
+    };
     const move = (current: PointerEvent) => {
+      if (current.pointerId !== event.pointerId) return;
       const zoom = getZoom();
       if (resize) {
         next.w = Math.max(80, origin.w + (current.clientX - startX) / zoom);
         next.h = Math.max(40, origin.h + (current.clientY - startY) / zoom);
-        if (frame.current) {
-          frame.current.style.width = `${next.w}px`;
-          frame.current.style.height = `${next.h}px`;
-        }
       } else {
         next.x = origin.x + (current.clientX - startX) / zoom;
         next.y = origin.y + (current.clientY - startY) / zoom;
-        if (frame.current) frame.current.style.transform = workspaceNodeTransform({ ...next, rotation: node.rotation });
       }
+      if (!frameRequest) frameRequest = requestAnimationFrame(paint);
     };
-    const up = () => {
+    const finish = (commit: boolean) => {
       removeEventListener('pointermove', move);
       removeEventListener('pointerup', up);
-      onCommit(resize ? { w: next.w, h: next.h } : { x: next.x, y: next.y });
+      removeEventListener('pointercancel', cancel);
+      removeEventListener('blur', cancel);
+      if (frameRequest) cancelAnimationFrame(frameRequest);
+      if (commit) onCommit(resize ? { w: next.w, h: next.h } : { x: next.x, y: next.y });
+      else paint();
     };
+    const up = (current: PointerEvent) => { if (current.pointerId === event.pointerId) finish(true); };
+    const cancel = () => finish(true);
     addEventListener('pointermove', move);
     addEventListener('pointerup', up);
+    addEventListener('pointercancel', cancel);
+    addEventListener('blur', cancel);
   };
 
   const pointerDown = (event: React.PointerEvent) => beginGesture(event);

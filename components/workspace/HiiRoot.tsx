@@ -242,7 +242,8 @@ const promptSlashCommands = [
 ] as const;
 
 const promptKeyboardCommands = [
-  ['⌘ K', 'Quick terminal'],
+  ['⌘ K', 'Ask HII or enter a command'],
+  ['⌘ J', 'Open or hide the HII terminal'],
   ['⌘ T', 'Search Google on the canvas'],
   ['⌘ Space / ⌥ Space', 'Open or hide the HII terminal'],
   ['⌘ ⇧ T', 'Move the terminal between dock and canvas'],
@@ -1340,6 +1341,33 @@ export function HiiRoot({
     return spawnSeeds([seed], { x: center.x - seed.w / 2, y: center.y - seed.h / 2 });
   }, [camera, spawnSeeds]);
 
+  // The small native capture window sends its committed text here. Wait until
+  // the active Space has loaded so a capture cannot land in a transient board.
+  const pendingQuickCaptures = useRef<Array<{ text: string; captureId?: string }>>([]);
+  const quickCaptureSink = useRef<(capture: { text: string; captureId?: string }) => void>(() => {});
+  quickCaptureSink.current = (capture) => {
+    if (!workspace.ready) { pendingQuickCaptures.current.push(capture); return; }
+    const [nodeId] = spawnCenteredSeed(isSpace ? canvasTextSeed(capture.text) : seedFromString(capture.text));
+    if (!capture.captureId || !nodeId) return;
+    void workspace.flush().then(() => import('@tauri-apps/api/event').then(({ emit }) => emit('hii:quick-capture-saved', { captureId: capture.captureId, nodeId })))
+      .catch((error) => void import('@tauri-apps/api/event').then(({ emit }) => emit('hii:quick-capture-failed', { captureId: capture.captureId, error: error instanceof Error ? error.message : String(error) })));
+  };
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return;
+    let disposed = false;
+    let unlisten = () => {};
+    void import('@tauri-apps/api/event').then(({ listen }) => listen<{ text: string; captureId?: string }>('hii:quick-capture', (event) => {
+      const value = event.payload?.text;
+      if (typeof value !== 'string' || !value.trim()) return;
+      quickCaptureSink.current({ text: value.slice(0, 100_000), captureId: event.payload.captureId });
+    })).then((dispose) => { if (disposed) dispose(); else unlisten = dispose; });
+    return () => { disposed = true; unlisten(); };
+  }, []);
+  useEffect(() => {
+    if (!workspace.ready || !pendingQuickCaptures.current.length) return;
+    for (const capture of pendingQuickCaptures.current.splice(0)) quickCaptureSink.current(capture);
+  }, [workspace.ready]);
+
   const importFiles = useCallback(async (files: File[], at: Point, direct = false) => {
     try {
       const seeds = await (fileSeeder ? fileSeeder(files) : seedsFromFiles(files));
@@ -2206,12 +2234,21 @@ export function HiiRoot({
         setToolMessage('Opened HII Remote.');
         return;
       }
-      if (runtimeEnabled && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      if (runtimeEnabled && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        ensureWorkspaceTerminal('quick');
+        setPrompt({ anchor: { x: window.innerWidth / 2, y: window.innerHeight - 72 }, initialValue: '', response: '', status: 'idle' });
+        setPromptPresentation('terminal');
+        setPromptVisible(true);
         setWebSearchOpen(false);
-        setPromptVisible(false);
         setSelected([]);
+        return;
+      }
+      if (runtimeEnabled && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
+        event.preventDefault();
+        if (workspaceTerminal?.payload.terminalPresentation === 'docked') {
+          workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, terminalPresentation: 'hidden' } });
+        } else ensureWorkspaceTerminal('docked');
+        setPromptVisible(false);
         return;
       }
       if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 't') {
@@ -2742,14 +2779,14 @@ export function HiiRoot({
           }}
         />}
       </div>
-      {runtimeEnabled && persistentChrome && (workspaceTerminal?.payload.terminalPresentation === 'docked' || workspaceTerminal?.payload.terminalPresentation === 'quick') && (
+      {runtimeEnabled && (workspaceTerminal?.payload.terminalPresentation === 'docked' || workspaceTerminal?.payload.terminalPresentation === 'quick') && (
         <aside
           className="hii-docked-terminal"
           data-compact={workspaceTerminal.payload.terminalPresentation === 'quick' || undefined}
           data-workspace-ui
           onPointerDown={(event) => event.stopPropagation()}
           onKeyDownCapture={(event) => {
-            if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return;
+            if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'j') return;
             event.preventDefault();
             event.stopPropagation();
             workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, terminalPresentation: 'hidden' } });
@@ -2757,7 +2794,7 @@ export function HiiRoot({
         >
           <div className="hii-docked-terminal-actions">
             <button type="button" data-tooltip="Move to canvas · ⌘⇧T" aria-label="Move terminal to canvas" onClick={() => ensureWorkspaceTerminal('canvas')}><CornersOut size={16} /></button>
-            <button type="button" data-tooltip="Hide · ⌘Space" aria-label="Hide terminal" onClick={() => workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, terminalPresentation: 'hidden' } })}>×</button>
+            <button type="button" data-tooltip="Hide · ⌘J" aria-label="Hide terminal" onClick={() => workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, terminalPresentation: 'hidden' } })}>×</button>
           </div>
           <TerminalBody node={workspaceTerminal} onPayload={(patch) => workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, ...patch } })} onAgentSubmit={(intent) => void startObjectiveAgent(workspaceTerminal.id, intent)} />
         </aside>
