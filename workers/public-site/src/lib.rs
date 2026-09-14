@@ -6,6 +6,7 @@ mod device;
 mod feed;
 mod remote;
 mod search;
+mod site_records;
 mod workspace;
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -151,6 +152,21 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
     let db = env.d1("IDENTITY")?;
 
     if path.starts_with("/api/") {
+        if method == Method::Get && path == "/api/site-osm" {
+            if !rate_limit(request, env, &db, "site-osm", 1_000_000).await? {
+                return secure_no_store(api_error(429, "rate_limited")?);
+            }
+            return secure_no_store(site_records::osm_map(request).await?);
+        }
+        if method == Method::Get && path == "/api/site-history" {
+            if !rate_limit(request, env, &db, "site-history", 1_000_000).await? {
+                return secure_no_store(api_error(429, "rate_limited")?);
+            }
+            return secure_no_store(site_records::nearby_history(request).await?);
+        }
+        if method == Method::Get && path == "/api/site-records" {
+            return secure_no_store(site_records::list(request, &db).await?);
+        }
         if method == Method::Get && path == "/api/search" {
             if !rate_limit(request, env, &db, "web-search", 100_000).await? {
                 return secure_no_store(api_error(429, "rate_limited")?);
@@ -174,6 +190,7 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
             || workspace::is_workspace_api_path(&path)
             || feed::is_feed_api_path(&path)
             || remote::is_remote_api_path(&path)
+            || site_records::is_path(&path)
         {
             let Some(token) = cookie(request, SESSION_COOKIE)? else {
                 return secure_no_store(api_error(401, "authentication_required")?);
@@ -190,6 +207,8 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
                     "workspace-write"
                 } else if remote::is_remote_api_path(&path) {
                     "remote-write"
+                } else if site_records::is_path(&path) {
+                    "site-record-write"
                 } else {
                     "feed-write"
                 };
@@ -205,6 +224,9 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
                     return Ok(response);
                 }
                 return secure_no_store(response);
+            }
+            if site_records::is_path(&path) {
+                return secure_no_store(site_records::write(request, &db, &session).await?);
             }
             if path.starts_with("/api/chat") {
                 let passkey_recent = now_ms().saturating_sub(session.created_at) <= CEREMONY_TTL_MS;

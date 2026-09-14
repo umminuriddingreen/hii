@@ -152,6 +152,7 @@ function ProsumerLanding({ onLogin, onCreateAccount }: { onLogin: () => void; on
           <div className={styles.heroActions}>
             <button type="button" onClick={onCreateAccount}>create your HII</button>
             <a href="/">try the canvas</a>
+            <a href="/site-analysis">site analysis for students</a>
           </div>
           <p className={styles.heroNote}>Start in your browser. No account needed.</p>
         </div>
