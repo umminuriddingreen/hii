@@ -22,10 +22,10 @@ fi
 # Keep this list aligned with scripts/build-hii-chat-bundle.mjs. The old
 # screen-streaming files were removed from the product and must not remain as
 # phantom update requirements.
-files="hii-remote-host.mjs install-local.sh update.sh"
+files="hii-remote-host.mjs hii-remote-browser.mjs install-local.sh update.sh"
 for file in $files; do
   case "$file" in
-    hii-remote-host.mjs|install-local.sh|update.sh) ;;
+    hii-remote-host.mjs|hii-remote-browser.mjs|install-local.sh|update.sh) ;;
     *) exit 3 ;;
   esac
   curl -fsSL "$origin/files/$file" -o "$stage/$file"

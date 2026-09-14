@@ -7,16 +7,14 @@
 // running the local `hii` CLI. Nothing listens on this machine: the connection
 // is dial-out only, and the relay only ever reaches a host an account paired.
 //
-// This host does not capture the screen and does not replay remote input.
-// Screen streaming was removed deliberately: the remote surface HII wants is
-// live canvas synchronisation over this same paired link, not a remote
-// desktop. The pairing, token discipline, and relay socket below are the
-// transport that canvas sync is meant to reuse.
+// A separately granted browser channel can render an isolated Chromium page.
+// It never captures the machine display or accepts general desktop input.
 
 import { spawn } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { BrowserSession } from './hii-remote-browser.mjs';
 
 const HOME = homedir();
 const CONFIG_PATH = process.env.HII_REMOTE_CONFIG ?? join(HOME, '.hii', 'remote', 'host.json');
@@ -47,6 +45,7 @@ class Host {
     this.chatProcess = null;
     this.chatRequestId = null;
     this.retryDelay = 1000;
+    this.browsers = new Map();
   }
 
   async start() {
@@ -77,6 +76,7 @@ class Host {
       settled = true;
       console.log(`relay closed (${code})`);
       if (this.socket === socket) this.socket = null;
+      this.closeBrowsers();
       // 4003 is an explicit revoke: the pairing is gone, so stop retrying.
       if (code === 4003) {
         console.error('this host was revoked from the account; exiting');
@@ -96,7 +96,7 @@ class Host {
   }
 
   sendHello() {
-    this.sendJSON({ t: 'hello', platform: 'macos', capabilities: ['chat'] });
+    this.sendJSON({ t: 'hello', platform: 'macos', capabilities: ['chat', 'isolated-browser'] });
   }
 
   handleControl(text) {
@@ -117,9 +117,48 @@ class Host {
       case 'chat.cancel':
         if (event.requestId === this.chatRequestId) this.stopChat('cancelled');
         break;
+      case 'browser.open':
+        this.openBrowser(event);
+        break;
+      case 'browser.navigate':
+        this.browsers.get(event.grantId)?.navigate(event.url).catch(() => this.sendJSON({ t: 'browser.error', grantId: event.grantId, error: 'navigation_failed' }));
+        break;
+      case 'browser.input':
+        this.browsers.get(event.grantId)?.input(event).catch(() => {});
+        break;
+      case 'browser.close':
+      case 'browser.revoked':
+        this.closeBrowser(event.grantId);
+        break;
       default:
         break;
     }
+  }
+
+  async openBrowser(event) {
+    const grantId = typeof event.grantId === 'string' ? event.grantId : '';
+    if (!grantId || this.browsers.has(grantId)) return;
+    // One isolated browser session at a time prevents parallel CDP processes
+    // sharing the same profile and avoids accidental cross-grant control.
+    this.closeBrowsers();
+    const browser = new BrowserSession(grantId, (message) => this.sendJSON(message));
+    this.browsers.set(grantId, browser);
+    try { await browser.open(event.url); }
+    catch (error) {
+      this.sendJSON({ t: 'browser.error', grantId, error: error.message });
+      this.closeBrowser(grantId);
+    }
+  }
+
+  closeBrowser(grantId) {
+    const browser = this.browsers.get(grantId);
+    if (!browser) return;
+    this.browsers.delete(grantId);
+    browser.close();
+  }
+
+  closeBrowsers() {
+    for (const grantId of this.browsers.keys()) this.closeBrowser(grantId);
   }
 
   startChat(event) {
@@ -206,6 +245,7 @@ host.start().catch((error) => {
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(signal, () => {
     host.stopChat('host_stopping');
+    host.closeBrowsers();
     process.exit(0);
   });
 }
