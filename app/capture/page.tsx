@@ -13,6 +13,18 @@ export default function QuickCapturePage() {
   const pending = useRef<string | null>(null);
   const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  useEffect(() => {
+    if (!isTauri()) return;
+    const previousHtml = document.documentElement.style.background;
+    const previousBody = document.body.style.background;
+    document.documentElement.style.setProperty('background', 'transparent', 'important');
+    document.body.style.setProperty('background', 'transparent', 'important');
+    return () => {
+      document.documentElement.style.background = previousHtml;
+      document.body.style.background = previousBody;
+    };
+  }, []);
+
   const prefill = useCallback(async () => {
     if (!isTauri()) return;
     try {

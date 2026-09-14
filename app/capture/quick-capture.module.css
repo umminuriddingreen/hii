@@ -1,5 +1,3 @@
-:global(html:has(.frame)), :global(body:has(.frame)) { background: transparent !important; }
-
 .frame, .unavailable {
   min-height: 100vh;
   display: grid;
