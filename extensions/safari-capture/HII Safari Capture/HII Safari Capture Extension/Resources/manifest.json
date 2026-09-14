@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "HII Safari Capture",
+  "version": "0.1.0",
+  "description": "Save web pages, selections, and references into your local HII workspace.",
+  "permissions": ["activeTab", "contextMenus", "nativeMessaging", "tabs", "storage", "scripting"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "action": {
+    "default_title": "Save to HII",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "options_page": "options.html"
+}
