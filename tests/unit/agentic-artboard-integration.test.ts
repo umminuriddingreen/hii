@@ -135,8 +135,8 @@ describe('agentic artboard vertical slice', () => {
       {
         generatedAt: new Date().toISOString(),
         models: [
-          { provider: 'ollama', id: 'qwen3:8b', key: 'ollama:qwen3:8b', label: 'qwen3:8b', runtimeState: 'ready', privacy: 'local', inputModalities: ['text'], outputModalities: ['text'], acceptsImages: null, streaming: true, contextTokens: null, sizeBytes: null, latencyMs: null, quality: null, costPerMTokens: null, load: null },
-          { provider: 'claude', id: 'claude-code', key: 'claude:claude-code', label: 'Claude Code', runtimeState: 'ready', privacy: 'external', inputModalities: ['text'], outputModalities: ['text'], acceptsImages: null, streaming: null, contextTokens: null, sizeBytes: null, latencyMs: null, quality: null, costPerMTokens: null, load: null }
+          { provider: 'ollama', id: 'qwen3:8b', key: 'ollama:qwen3:8b', label: 'qwen3:8b', runtimeState: 'ready', privacy: 'local', inputModalities: ['text'], outputModalities: ['text'], acceptsImages: null, streaming: true, contextTokens: null, sizeBytes: null, latencyMs: null, lastMeasuredTTFTMs: null, lastMeasuredAt: null, switchPenaltyMs: null, latencyClass: 'unknown', quality: null, costPerMTokens: null, load: null },
+          { provider: 'claude', id: 'claude-code', key: 'claude:claude-code', label: 'Claude Code', runtimeState: 'ready', privacy: 'external', inputModalities: ['text'], outputModalities: ['text'], acceptsImages: null, streaming: null, contextTokens: null, sizeBytes: null, latencyMs: null, lastMeasuredTTFTMs: null, lastMeasuredAt: null, switchPenaltyMs: null, latencyClass: 'unknown', quality: null, costPerMTokens: null, load: null }
         ],
         providers: [],
         unsupported: []

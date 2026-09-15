@@ -1569,8 +1569,12 @@ enum OnCommand {
     Run {
         #[arg(required = true, num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
-        #[arg(long, value_name = "PATH")]
-        cwd: Option<String>,
+        #[arg(
+            long = "remote-cwd",
+            value_name = "PATH",
+            help = "Working directory on the enrolled executor"
+        )]
+        remote_cwd: Option<String>,
         #[arg(long, help = "Emit the dispatch plan as JSON")]
         json: bool,
     },
@@ -4708,24 +4712,41 @@ fn on_command(paths: &AppPaths, system: &str, action: OnCommand) -> Result<ExitC
     let registry = load_systems(paths)?;
     let record = find_system(&registry, system)?;
     match action {
-        OnCommand::Run { command, cwd, json } => {
-            render_system_dispatch(&record, "run", Some(command.join(" ")), cwd, json)?;
-        }
+        OnCommand::Run {
+            command,
+            remote_cwd,
+            json,
+        } => execute_system_command(&record, command.join(" "), remote_cwd, json),
         OnCommand::Files { action } => match action {
-            OnFilesCommand::Ls { path, json } => {
-                render_system_dispatch(&record, "files.ls", Some(path), None, json)?;
-            }
+            OnFilesCommand::Ls { path, json } => execute_system_command(
+                &record,
+                format!("ls -la -- {}", shell_quote(&path)),
+                None,
+                json,
+            ),
         },
         OnCommand::Apps { action } => match action {
             OnAppsCommand::List { json } => {
-                render_system_dispatch(&record, "apps.list", None, None, json)?;
+                let command = if record.os.to_ascii_lowercase().contains("mac") {
+                    "osascript -e 'tell application \"System Events\" to get name of every process whose background only is false'".to_string()
+                } else {
+                    "powershell -NoProfile -Command \"Get-Process | Where-Object MainWindowTitle | Select-Object ProcessName,MainWindowTitle\"".to_string()
+                };
+                execute_system_command(&record, command, None, json)
             }
         },
         OnCommand::Proof { id, json } => {
-            render_system_dispatch(&record, "proof", id, None, json)?;
+            let mut command = "/Users/ummi/hii/target/release/hii proof".to_string();
+            if let Some(id) = id {
+                command.push(' ');
+                command.push_str(&shell_quote(&id));
+            }
+            if json {
+                command.push_str(" --json");
+            }
+            execute_system_command(&record, command, None, json)
         }
     }
-    Ok(ExitCode::SUCCESS)
 }
 
 fn find_system(registry: &SystemsRegistry, id: &str) -> Result<SystemRecord, String> {
@@ -4784,6 +4805,109 @@ fn render_system_dispatch(
         println!("receipt   required");
     }
     Ok(())
+}
+
+fn execute_system_command(
+    system: &SystemRecord,
+    command: String,
+    cwd: Option<String>,
+    json: bool,
+) -> Result<ExitCode, String> {
+    if system.local {
+        return execute_process(
+            local_shell(),
+            local_shell_args(&command, cwd.as_deref()),
+            json,
+            system,
+        );
+    }
+    if !matches!(system.transport.as_str(), "ssh" | "tailscale-ssh") {
+        render_system_dispatch(system, "run", Some(command), cwd, json)?;
+        return Ok(ExitCode::FAILURE);
+    }
+
+    let remote = match cwd {
+        Some(cwd) => format!("cd {} && {}", shell_quote(&cwd), command),
+        None => command,
+    };
+    execute_process(
+        "ssh".into(),
+        vec![
+            "-o".into(),
+            "BatchMode=yes".into(),
+            "-o".into(),
+            "ConnectTimeout=15".into(),
+            system.host.clone(),
+            remote,
+        ],
+        json,
+        system,
+    )
+}
+
+fn execute_process(
+    program: String,
+    args: Vec<String>,
+    json: bool,
+    system: &SystemRecord,
+) -> Result<ExitCode, String> {
+    let output = Command::new(&program)
+        .args(&args)
+        .output()
+        .map_err(|error| format!("failed to start {program}: {error}"))?;
+    let status = output.status.code().unwrap_or(1);
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if json {
+        let value = serde_json::json!({
+            "system": system.id,
+            "host": system.host,
+            "transport": system.transport,
+            "status": status,
+            "ok": output.status.success(),
+            "stdout": stdout,
+            "stderr": stderr,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?
+        );
+    } else {
+        print!("{stdout}");
+        if !stderr.is_empty() {
+            eprint!("{stderr}");
+        }
+    }
+
+    Ok(ExitCode::from(status.clamp(0, 255) as u8))
+}
+
+fn local_shell() -> String {
+    if cfg!(windows) {
+        "cmd".into()
+    } else {
+        "sh".into()
+    }
+}
+
+fn local_shell_args(command: &str, cwd: Option<&str>) -> Vec<String> {
+    let command = match cwd {
+        Some(cwd) => format!("cd {} && {}", shell_quote(cwd), command),
+        None => command.to_string(),
+    };
+    if cfg!(windows) {
+        vec!["/C".into(), command]
+    } else {
+        vec!["-lc".into(), command]
+    }
+}
+
+fn shell_quote(value: &str) -> String {
+    if value.is_empty() {
+        return "''".into();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn default_system_capabilities(os: &str, local: bool) -> Vec<String> {

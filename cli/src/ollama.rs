@@ -4,6 +4,7 @@ use crate::config::{ModelProvider, OX_ALPHA_WEB_MODEL, OX_ALPHA_WEB_URL};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
+    env, fs,
     io::{BufRead, BufReader, Write},
     net::ToSocketAddrs,
     path::PathBuf,
@@ -461,9 +462,11 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             body["response_format"] = json!({ "type": "json_object" });
         }
         let started = Instant::now();
-        let value: Value = self
-            .agent
-            .post(&format!("{}/v1/chat/completions", self.base_url))
+        let request = with_openai_auth(
+            self.agent
+                .post(&format!("{}/v1/chat/completions", self.base_url)),
+        );
+        let value: Value = request
             .send_json(body)
             .map_err(format_ureq)?
             .into_json()
@@ -714,8 +717,11 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
                     json!({ "type": "json_object" })
                 };
             }
-            self.agent
-                .post(&format!("{}/v1/chat/completions", self.base_url))
+            let request = with_openai_auth(
+                self.agent
+                    .post(&format!("{}/v1/chat/completions", self.base_url)),
+            );
+            request
                 .send_json(body)
                 .map_err(format_ureq)
         };
@@ -732,6 +738,29 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         }
         let _ = sender.send(ChatStreamEvent::Done(result));
     }
+}
+
+fn with_openai_auth(request: ureq::Request) -> ureq::Request {
+    match model_api_key() {
+        Some(key) => request.set("Authorization", &format!("Bearer {key}")),
+        None => request,
+    }
+}
+
+fn model_api_key() -> Option<String> {
+    if let Some(key) = env::var("HII_MODEL_API_KEY")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        return Some(key);
+    }
+
+    let path = env::var_os("HII_MODEL_API_KEY_FILE").map(PathBuf::from)?;
+    fs::read_to_string(path)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn ox_alpha_browser_adapter() -> Result<PathBuf, String> {

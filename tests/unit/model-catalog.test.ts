@@ -1,4 +1,7 @@
 // @vitest-environment node
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { routeModel, type CatalogModel, type ModelCatalog } from '../../lib/server/model-catalog';
 
@@ -11,6 +14,10 @@ const base: Omit<CatalogModel, 'provider' | 'id' | 'key' | 'label' | 'privacy'> 
   contextTokens: null,
   sizeBytes: null,
   latencyMs: null,
+  lastMeasuredTTFTMs: null,
+  lastMeasuredAt: null,
+  switchPenaltyMs: null,
+  latencyClass: 'unknown',
   quality: null,
   costPerMTokens: null,
   load: null
@@ -47,6 +54,26 @@ describe('model routing', () => {
     );
     expect(decision.chosen?.id).toBe('warm');
     expect(decision.eligible).toHaveLength(2);
+  });
+
+  it('prefers the faster ready model for first-answer routing', () => {
+    const decision = routeModel(
+      catalog([
+        model({ id: 'slow-ready', provider: 'llama-serve', latencyMs: 5500, latencyClass: 'slow' }),
+        model({ id: 'fast-ready', provider: 'llama-serve', latencyMs: 250, latencyClass: 'fast' })
+      ])
+    );
+    expect(decision.chosen?.id).toBe('fast-ready');
+  });
+
+  it('does not choose an unloaded model over a warm model just because its estimate is low', () => {
+    const decision = routeModel(
+      catalog([
+        model({ id: 'cold-fast', provider: 'llama-serve', runtimeState: 'loadable', latencyMs: 250, switchPenaltyMs: 25_000, latencyClass: 'slow' }),
+        model({ id: 'warm-ok', provider: 'llama-serve', runtimeState: 'ready', latencyMs: 900, switchPenaltyMs: 0, latencyClass: 'fast' })
+      ])
+    );
+    expect(decision.chosen?.id).toBe('warm-ok');
   });
 
   it('excludes external models when the context is local-only', () => {
@@ -135,6 +162,7 @@ describe('model discovery', () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    vi.unstubAllEnvs();
   });
 
   it('reads both local providers and reports each one honestly', async () => {
@@ -146,14 +174,36 @@ describe('model discovery', () => {
           { status: 200 }
         );
       }
+      if (url.includes('127.0.0.1:8080/v1/models')) {
+        return new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: 'qwen3.6-35b-a3b-agent',
+                status: { value: 'loaded' },
+                architecture: { input_modalities: ['text'], output_modalities: ['text'] },
+                meta: { n_ctx: 65536, size: 13_676_723_168 }
+              }
+            ]
+          }),
+          { status: 200 }
+        );
+      }
       throw new Error('unreachable');
     }) as typeof fetch;
 
     const { readModelCatalog } = await import('../../lib/server/model-catalog');
     const result = await readModelCatalog();
     expect(result.models.map((entry) => entry.key)).toEqual(
-      expect.arrayContaining(['ollama:qwen3:8b', 'ollama:llava:13b', 'hii-native:hii-cli'])
+      expect.arrayContaining(['ollama:qwen3:8b', 'ollama:llava:13b', 'llama-serve:qwen3.6-35b-a3b-agent', 'hii-native:hii-cli'])
     );
+    expect(result.models.find((entry) => entry.key === 'llama-serve:qwen3.6-35b-a3b-agent')).toMatchObject({
+      runtimeState: 'ready',
+      contextTokens: 65536,
+      sizeBytes: 13_676_723_168,
+      latencyClass: 'fast',
+      switchPenaltyMs: 0
+    });
     // A vision family is recognised; a text model stays unknown rather than false.
     expect(result.models.find((entry) => entry.id === 'llava:13b')?.acceptsImages).toBe(true);
     expect(result.models.find((entry) => entry.id === 'qwen3:8b')?.acceptsImages).toBeNull();
@@ -170,6 +220,34 @@ describe('model discovery', () => {
     const { readModelCatalog } = await import('../../lib/server/model-catalog');
     const result = await readModelCatalog();
     expect(result.unsupported.map((entry) => entry.provider)).toEqual(['mlx', 'llama.cpp']);
+    expect(result.unsupported.find((entry) => entry.provider === 'llama.cpp')?.reason).toContain('llama-serve');
     expect(result.providers.every((entry) => entry.provider === 'hii-native' || !entry.reachable)).toBe(true);
+  });
+
+  it('discovers an authenticated HII llama rail through HII_MODEL_URL and bearer-file auth', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'hii-model-catalog-'));
+    const keyFile = path.join(directory, 'api-key');
+    await writeFile(keyFile, 'test-token\n');
+    vi.stubEnv('HII_MODEL_URL', 'http://100.81.69.126:8080');
+    vi.stubEnv('HII_MODEL_API_KEY_FILE', keyFile);
+
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/tags') || url.includes('127.0.0.1:1234')) throw new Error('unreachable');
+      expect(url).toBe('http://100.81.69.126:8080/v1/models');
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer test-token');
+      return new Response(JSON.stringify({ data: [{ id: 'qwen3.5-9b-balanced', status: { value: 'loaded' } }] }), { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      const { readModelCatalog } = await import('../../lib/server/model-catalog');
+      const result = await readModelCatalog();
+      expect(result.models.find((entry) => entry.key === 'llama-serve:qwen3.5-9b-balanced')).toMatchObject({
+        runtimeState: 'ready',
+        latencyClass: 'fast'
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

@@ -21,8 +21,8 @@ export { previewWorkspaceRunContext } from './hii-workspace-run-context.ts';
 
 const execFileAsync = promisify(execFile);
 const capabilityId = 'hii.agent.workspace_run';
-export const defaultWorkspaceRunModel = 'qwen3.6:35b-mlx';
-const preferredModels = [defaultWorkspaceRunModel, 'qwen3.6:27b-mlx'];
+export const defaultWorkspaceRunModel = 'qwen3.6-35b-a3b-agent';
+const preferredModels = [defaultWorkspaceRunModel, 'qwen3.8-27b-agent'];
 
 function clean(value: unknown, max: number) {
   return String(value ?? '')
@@ -49,7 +49,7 @@ export type WorkspaceRunModels = {
   models: string[];
   defaultModel: string | null;
   available: boolean;
-  source: 'environment' | 'ollama' | 'unavailable';
+  source: 'environment' | 'local-runtime' | 'unavailable';
   message: string;
 };
 
@@ -83,19 +83,24 @@ export async function discoverWorkspaceRunModels(): Promise<WorkspaceRunModels> 
   // are not eligible without an explicit widening.
   const routed = routeModel(catalog, { privacy: 'local', outputModalities: ['text'] });
   const models = normalizeModelNames(
-    routed.eligible.filter((model) => model.provider === 'ollama' || model.provider === 'lm-studio').map((model) => model.id)
+    routed.eligible
+      .filter((model) => model.provider === 'ollama' || model.provider === 'lm-studio' || model.provider === 'llama-serve')
+      .map((model) => model.id)
   );
-  const defaultModel = preferredModels.find((model) => models.includes(model)) || models[0] || null;
-  const ollama = catalog.providers.find((provider) => provider.provider === 'ollama');
+  const routedDefault = routed.chosen && models.includes(routed.chosen.id) ? routed.chosen.id : null;
+  const defaultModel = routedDefault || preferredModels.find((model) => models.includes(model)) || models[0] || null;
+  const localRuntime = catalog.providers.find(
+    (provider) => ['ollama', 'lm-studio', 'llama-serve'].includes(provider.provider) && provider.reachable
+  );
   return {
     models,
     defaultModel,
     available: models.length > 0,
-    source: models.length ? 'ollama' : 'unavailable',
+    source: models.length ? 'local-runtime' : 'unavailable',
     message: models.length
       ? `${models.length} installed local model${models.length === 1 ? '' : 's'} available.`
-      : ollama?.reachable
-        ? 'Ollama is reachable, but no local models are installed.'
+      : localRuntime
+        ? `${localRuntime.provider} is reachable, but no local chat models are available.`
         : 'No local model runtime is available. Start Ollama or install a model before approval.'
   };
 }

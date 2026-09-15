@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+
 /**
  * One provider-neutral view of the models HII can actually use.
  *
@@ -15,13 +17,14 @@
  * cannot decide.
  */
 
-export type ModelProvider = 'ollama' | 'lm-studio' | 'hii-native' | 'codex' | 'claude';
+export type ModelProvider = 'ollama' | 'lm-studio' | 'llama-serve' | 'hii-native' | 'codex' | 'claude';
 
 export type ModelModality = 'text' | 'image' | 'audio' | 'embedding';
 
 export type ModelPrivacy = 'local' | 'external';
 
 export type ModelRuntimeState = 'ready' | 'loadable' | 'unreachable';
+export type ModelLatencyClass = 'fast' | 'interactive' | 'slow' | 'unknown';
 
 export type CatalogModel = {
   provider: ModelProvider;
@@ -41,8 +44,16 @@ export type CatalogModel = {
   contextTokens: number | null;
   /** Parameter count or on-disk size, where reported. Not a hardware promise. */
   sizeBytes: number | null;
-  /** Measured, not estimated. Null until something has actually timed it. */
+  /** Routing latency hint in milliseconds; measured values should also populate lastMeasuredTTFTMs. */
   latencyMs: number | null;
+  /** Last measured time to first streamed data, when known. */
+  lastMeasuredTTFTMs: number | null;
+  /** ISO timestamp for the measurement, when known. */
+  lastMeasuredAt: string | null;
+  /** Expected cold-switch/load penalty before first answer, when known. */
+  switchPenaltyMs: number | null;
+  /** Coarse fast-first routing hint. */
+  latencyClass: ModelLatencyClass;
   /** Quality metadata HII has actually recorded. Null when nothing has. */
   quality: Record<string, unknown> | null;
   /** Cost per million tokens, only where reliably known. Local models: null. */
@@ -61,6 +72,60 @@ export type ModelCatalog = {
 
 const OLLAMA_URL = () => String(process.env.HII_OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
 const LM_STUDIO_URL = () => String(process.env.HII_LM_STUDIO_URL || 'http://127.0.0.1:1234').replace(/\/+$/, '');
+const LLAMA_SERVE_URL = () => openAiBaseUrl(process.env.HII_LLAMA_SERVE_URL || process.env.HII_MODEL_URL || 'http://127.0.0.1:8080/v1');
+
+function openAiBaseUrl(value: string) {
+  const trimmed = String(value).replace(/\/+$/, '');
+  return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`;
+}
+
+async function modelApiHeaders(): Promise<HeadersInit> {
+  const keyFile = process.env.HII_MODEL_API_KEY_FILE;
+  if (keyFile) {
+    const key = (await readFile(keyFile, 'utf8')).trim();
+    return key ? { Authorization: `Bearer ${key}` } : {};
+  }
+  const key = process.env.HII_MODEL_API_KEY?.trim();
+  return key ? { Authorization: `Bearer ${key}` } : {};
+}
+
+function latencyClass(latencyMs: number | null, runtimeState: ModelRuntimeState): ModelLatencyClass {
+  if (runtimeState !== 'ready') return 'slow';
+  if (latencyMs == null) return 'unknown';
+  if (latencyMs <= 1500) return 'fast';
+  if (latencyMs <= 5000) return 'interactive';
+  return 'slow';
+}
+
+function localTimingHints(provider: ModelProvider, id: string, runtimeState: ModelRuntimeState) {
+  const lower = id.toLowerCase();
+  let latencyMs: number | null = null;
+  let switchPenaltyMs: number | null = runtimeState === 'ready' ? 0 : null;
+
+  if (provider === 'llama-serve') {
+    if (lower.includes('qwen3.6-35b-a3b-agent')) {
+      latencyMs = runtimeState === 'ready' ? 250 : 900;
+      switchPenaltyMs = runtimeState === 'ready' ? 0 : 25_000;
+    } else if (lower.includes('qwen3.5-9b-balanced')) {
+      latencyMs = runtimeState === 'ready' ? 400 : 1500;
+      switchPenaltyMs = runtimeState === 'ready' ? 0 : 25_000;
+    }
+  }
+
+  if (provider === 'hii-native') {
+    if (lower.includes('4b')) latencyMs = 900;
+    if (lower.includes('9b')) latencyMs = 4000;
+    if (lower.includes('27b') || lower.includes('35b')) latencyMs = 5500;
+  }
+
+  return {
+    latencyMs,
+    lastMeasuredTTFTMs: null,
+    lastMeasuredAt: null,
+    switchPenaltyMs,
+    latencyClass: latencyClass(latencyMs, runtimeState)
+  };
+}
 
 /**
  * Model families that genuinely accept image input.
@@ -86,11 +151,11 @@ function modalities(id: string): { input: ModelModality[]; output: ModelModality
   return { input, output: ['text'] };
 }
 
-async function fetchJson(url: string, timeoutMs = 2500): Promise<unknown> {
+async function fetchJson(url: string, timeoutMs = 2500, headers?: HeadersInit): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(url, { signal: controller.signal, headers });
     if (!response.ok) throw new Error(`${response.status}`);
     return await response.json();
   } finally {
@@ -123,6 +188,10 @@ async function discoverOllama(): Promise<{ models: CatalogModel[]; reachable: bo
           contextTokens: null,
           sizeBytes: Number(payload.models?.[index]?.size) || null,
           latencyMs: null,
+          lastMeasuredTTFTMs: null,
+          lastMeasuredAt: null,
+          switchPenaltyMs: null,
+          latencyClass: latencyClass(null, 'loadable'),
           quality: null,
           costPerMTokens: null,
           load: null
@@ -163,6 +232,10 @@ async function discoverLmStudio(): Promise<{ models: CatalogModel[]; reachable: 
           contextTokens: null,
           sizeBytes: null,
           latencyMs: null,
+          lastMeasuredTTFTMs: null,
+          lastMeasuredAt: null,
+          switchPenaltyMs: 0,
+          latencyClass: latencyClass(null, 'ready'),
           quality: null,
           costPerMTokens: null,
           load: null
@@ -175,6 +248,62 @@ async function discoverLmStudio(): Promise<{ models: CatalogModel[]; reachable: 
     };
   } catch {
     return { models: [], reachable: false, message: 'LM Studio is not reachable.' };
+  }
+}
+
+async function discoverLlamaServe(): Promise<{ models: CatalogModel[]; reachable: boolean; message: string }> {
+  try {
+    const payload = (await fetchJson(`${LLAMA_SERVE_URL()}/models`, 2500, await modelApiHeaders())) as {
+      data?: {
+        id?: string;
+        architecture?: { input_modalities?: string[]; output_modalities?: string[] };
+        meta?: { n_ctx?: number; size?: number };
+        status?: { value?: string };
+      }[];
+    };
+    const models = (payload.data ?? [])
+      .map((entry) => ({ entry, id: String(entry.id ?? '').trim() }))
+      .filter(({ id }) => Boolean(id))
+      .map(({ entry, id }): CatalogModel => {
+        const shape = modalities(id);
+        const runtimeState = entry.status?.value === 'loaded' ? 'ready' : 'loadable';
+        const timing = localTimingHints('llama-serve', id, runtimeState);
+        const input = entry.architecture?.input_modalities?.filter((value): value is ModelModality =>
+          ['text', 'image', 'audio', 'embedding'].includes(value)
+        ) ?? shape.input;
+        const output = entry.architecture?.output_modalities?.filter((value): value is ModelModality =>
+          ['text', 'image', 'audio', 'embedding'].includes(value)
+        ) ?? shape.output;
+        return {
+          provider: 'llama-serve',
+          id,
+          key: `llama-serve:${id}`,
+          label: id,
+          runtimeState,
+          privacy: 'local',
+          inputModalities: input.length ? input : shape.input,
+          outputModalities: output.length ? output : shape.output,
+          acceptsImages: input.includes('image') ? true : acceptsImages(id),
+          streaming: true,
+          contextTokens: Number(entry.meta?.n_ctx) || null,
+          sizeBytes: Number(entry.meta?.size) || null,
+          latencyMs: timing.latencyMs,
+          lastMeasuredTTFTMs: timing.lastMeasuredTTFTMs,
+          lastMeasuredAt: timing.lastMeasuredAt,
+          switchPenaltyMs: timing.switchPenaltyMs,
+          latencyClass: timing.latencyClass,
+          quality: null,
+          costPerMTokens: null,
+          load: null
+        };
+      });
+    return {
+      models,
+      reachable: true,
+      message: models.length ? `${models.length} served model${models.length === 1 ? '' : 's'}.` : 'llama-server is reachable but serving nothing.'
+    };
+  } catch {
+    return { models: [], reachable: false, message: 'llama-server is not reachable.' };
   }
 }
 
@@ -192,40 +321,49 @@ function agentRuntimes(): CatalogModel[] {
     { provider: 'codex', id: 'codex', label: 'Codex CLI', privacy: 'external' },
     { provider: 'claude', id: 'claude-code', label: 'Claude Code', privacy: 'external' }
   ];
-  return entries.map((entry) => ({
-    provider: entry.provider,
-    id: entry.id,
-    key: `${entry.provider}:${entry.id}`,
-    label: entry.label,
-    runtimeState: 'loadable',
-    privacy: entry.privacy,
-    inputModalities: ['text'],
-    outputModalities: ['text'],
-    acceptsImages: null,
-    streaming: null,
-    contextTokens: null,
-    sizeBytes: null,
-    latencyMs: null,
-    quality: null,
-    costPerMTokens: null,
-    load: null
-  }));
+  return entries.map((entry) => {
+    const runtimeState: ModelRuntimeState = 'loadable';
+    const timing = localTimingHints(entry.provider, entry.id, runtimeState);
+    return {
+      provider: entry.provider,
+      id: entry.id,
+      key: `${entry.provider}:${entry.id}`,
+      label: entry.label,
+      runtimeState,
+      privacy: entry.privacy,
+      inputModalities: ['text'],
+      outputModalities: ['text'],
+      acceptsImages: null,
+      streaming: null,
+      contextTokens: null,
+      sizeBytes: null,
+      latencyMs: timing.latencyMs,
+      lastMeasuredTTFTMs: timing.lastMeasuredTTFTMs,
+      lastMeasuredAt: timing.lastMeasuredAt,
+      switchPenaltyMs: timing.switchPenaltyMs,
+      latencyClass: timing.latencyClass,
+      quality: null,
+      costPerMTokens: null,
+      load: null
+    };
+  });
 }
 
 /** Runtimes HII does not support, stated so nobody infers otherwise. */
 const unsupportedProviders = [
-  { provider: 'mlx', reason: 'HII has no MLX runtime adapter. Models served through Ollama or LM Studio are discovered normally.' },
-  { provider: 'llama.cpp', reason: 'HII has no direct llama.cpp adapter. Use LM Studio or Ollama in front of it.' }
+  { provider: 'mlx', reason: 'Use HII Native or an OpenAI-compatible local server in front of MLX models.' },
+  { provider: 'llama.cpp', reason: 'Use the HII llama-server rail discovered as provider llama-serve.' }
 ];
 
 export async function readModelCatalog(): Promise<ModelCatalog> {
-  const [ollama, lmStudio] = await Promise.all([discoverOllama(), discoverLmStudio()]);
+  const [ollama, lmStudio, llamaServe] = await Promise.all([discoverOllama(), discoverLmStudio(), discoverLlamaServe()]);
   return {
     generatedAt: new Date().toISOString(),
-    models: [...ollama.models, ...lmStudio.models, ...agentRuntimes()],
+    models: [...ollama.models, ...lmStudio.models, ...llamaServe.models, ...agentRuntimes()],
     providers: [
       { provider: 'ollama', reachable: ollama.reachable, message: ollama.message },
       { provider: 'lm-studio', reachable: lmStudio.reachable, message: lmStudio.message },
+      { provider: 'llama-serve', reachable: llamaServe.reachable, message: llamaServe.message },
       { provider: 'hii-native', reachable: true, message: 'The local HII agent loop is always available.' }
     ],
     unsupported: unsupportedProviders
@@ -322,8 +460,7 @@ export function routeModel(catalog: ModelCatalog, requirements: RoutingRequireme
     return true;
   });
 
-  const ready = eligible.filter((model) => model.runtimeState === 'ready');
-  const chosen = ready[0] ?? eligible[0] ?? null;
+  const chosen = [...eligible].sort(compareFastFirstModels)[0] ?? null;
   return {
     eligible,
     chosen,
@@ -333,4 +470,13 @@ export function routeModel(catalog: ModelCatalog, requirements: RoutingRequireme
       ? `${eligible.length} eligible model${eligible.length === 1 ? '' : 's'}; using ${chosen.label}.`
       : 'No available model meets these requirements. Start a local runtime or relax the requirements.'
   };
+}
+
+function compareFastFirstModels(a: CatalogModel, b: CatalogModel) {
+  const stateRank = (model: CatalogModel) => model.runtimeState === 'ready' ? 0 : model.runtimeState === 'loadable' ? 1 : 2;
+  const latencyRank = (model: CatalogModel) => model.latencyMs ?? Number.MAX_SAFE_INTEGER;
+  const switchRank = (model: CatalogModel) => model.switchPenaltyMs ?? (model.runtimeState === 'ready' ? 0 : 60_000);
+  return stateRank(a) - stateRank(b)
+    || latencyRank(a) - latencyRank(b)
+    || switchRank(a) - switchRank(b);
 }

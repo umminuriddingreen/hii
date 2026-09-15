@@ -180,7 +180,7 @@ describe('agentic workspace interaction contract', () => {
 
   it('uses the installed HII model default and preserves truthful terminal failures', () => {
     expect(workspace).toContain("model:''");
-    expect(workspaceRuns).toContain("defaultWorkspaceRunModel = 'qwen3.6:35b-mlx'");
+    expect(workspaceRuns).toContain("defaultWorkspaceRunModel = 'qwen3.6-35b-a3b-agent'");
     expect(workspaceRuns).toContain('discoverWorkspaceRunModels');
     expect(workspaceRuns).toContain('is not installed');
     expect(workspaceRunRoute).toContain("params.get('mode') === 'models'");
