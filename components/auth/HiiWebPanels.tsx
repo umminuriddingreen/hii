@@ -6,6 +6,7 @@ import type { WorkspaceNode } from '@/lib/workspace/types';
 import { feedSnapshotFromNode, type FeedItem, type FeedSnapshot } from '@/lib/web/feed-contract';
 import styles from './HiiWebAccess.module.css';
 import { PairedMachines } from '@/components/remote/PairedMachines';
+import { LocalHiiChat } from '@/components/remote/LocalHiiChat';
 
 export type WebPanel = 'feed' | 'models';
 
@@ -77,18 +78,15 @@ function FeedPanel({ csrfToken, shareNode, onImport }: { csrfToken: string; shar
   </>;
 }
 
-export function HiiWebPanel({ panel, csrfToken, shareNode, onClose, onImport }: { panel: WebPanel; csrfToken: string; shareNode: WorkspaceNode | null; onClose: () => void; onImport: (item: FeedItem) => void }) {
+export function HiiWebPanel({ panel, csrfToken, shareNode, contextNodes, onClose, onImport, onPlaceResult }: { panel: WebPanel; csrfToken: string; shareNode: WorkspaceNode | null; contextNodes?: WorkspaceNode[]; onClose: () => void; onImport: (item: FeedItem) => void; onPlaceResult?: (text: string) => void }) {
+  const [showDevices, setShowDevices] = useState(false);
   return <aside className={styles.webPanel} aria-label={`HII ${panel}`} data-workspace-ui>
     <header><span>{panel === 'models' ? 'HII Remote' : panel}</span><button type="button" onClick={onClose}>close</button></header>
     {panel === 'feed' ? <FeedPanel csrfToken={csrfToken} shareNode={shareNode} onImport={onImport} /> : null}
     {panel === 'models' ? <>
-      <section className={styles.modelState}>
-        <p>Bring your own computer into HII.</p>
-        <small>Your private bridge to local apps, models, files, and compute.</small>
-        <p>Pair a computer once, then choose an allowed app when you want to work with it from your signed-in HII.</p>
-        <small>Connections are outbound, account-scoped, and revocable. Pairing never grants the browser an unrestricted shell.</small>
-      </section>
-      <PairedMachines embedded authenticatedSession={{ authenticated: true, csrfToken }} />
+      <LocalHiiChat contextNodes={contextNodes} onPlaceResult={onPlaceResult} onOpenDevices={() => setShowDevices(true)} />
+      <button type="button" className={styles.remoteDevicesToggle} onClick={() => setShowDevices((value) => !value)}>{showDevices ? 'Hide computers' : 'Connect or manage computers'}</button>
+      {showDevices && <PairedMachines embedded authenticatedSession={{ authenticated: true, csrfToken }} />}
     </> : null}
   </aside>;
 }

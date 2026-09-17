@@ -80,7 +80,9 @@ describe('HII web access gate', () => {
     expect(source).toContain('fileSeeder={canvasFileSeeder}');
     expect(source).toContain('persistentChrome={false}');
     expect(source).toContain("event.code !== 'Digit1'");
-    expect(source).toContain("onRequestDevice={() => setPanel('models')}");
+    expect(source).toContain("onRequestDevice={(selection) => { setAgentContextNodes(selection); setPanel('models'); }}");
+    expect(source).toContain('onClose={() => { setPanel(null); setShareNode(null); setAgentContextNodes([]); }}');
+    expect(source).toContain("onClick={() => { setAgentContextNodes([]); setPanel('models'); setAccountOpen(false); }}");
     // The panel must distinguish synchronized from device-local storage. The
     // wording is editorial; the distinction is the contract.
     expect(source).toMatch(/accountSync \? '[^']+' : 'stored on this device'/);
@@ -103,7 +105,7 @@ describe('HII web access gate', () => {
     expect(css).toContain('min-height: 44px');
 
     const canvas = readFileSync('components/workspace/HiiRoot.tsx', 'utf8');
-    expect(canvas).toContain('{(!isSpace || allowPhoto) && <input');
+    expect(canvas).toContain('{(!isSpace || allowPhoto) && <>');
     expect(canvas).toContain('if (!files.length || (isSpace && !allowPhoto)) return;');
     expect(canvas).toContain('canvasTextSeed(value.slice(0, 100_000))');
     expect(canvas).toContain("surface?: 'workspace' | 'space' | 'account'");
@@ -118,7 +120,7 @@ describe('HII web access gate', () => {
     expect(toolbar).not.toContain('device terminal');
     expect(toolbar).not.toContain('double-click for text');
     expect(toolbar).toContain('onToolChange');
-    expect(canvas).toContain('isAccount && isAssistantShortcut(event)');
+    expect(canvas).toContain('isAccount && matchesCommandShortcut(event, commandShortcut)');
     expect(canvas).toContain("event.key.toLowerCase() === 'u'");
     expect(canvas).toContain("event.key.toLowerCase() === 't'");
     expect(canvas).toContain("event.key.toLowerCase() === 'd'");
@@ -129,6 +131,8 @@ describe('HII web access gate', () => {
     expect(canvas).toContain('fitWorkspaceViewport');
     expect(canvas).toContain('hii-canvas-feedback');
     expect(canvas).toContain("setToolMessage('Opened HII Remote.')");
+    expect(canvas).toContain('activeTouchPointers.current.size > 1');
+    expect(canvas).toContain('if (multiTouchSequence.current)');
     expect(source).toContain('>HII Remote</button>');
     expect(source).not.toContain('>ask HII</button>');
     expect(source).not.toContain('>social</button>');

@@ -5,7 +5,7 @@
 //! shell at runtime. This module resolves where the main window loads its interface
 //! from, in priority order:
 //!
-//! 1. `HII_UI_URL` — a live dev server, so `next dev` HMR lands in the installed app.
+//! 1. `HII_UI_URL` — a loopback live dev server, so `next dev` HMR lands in the installed app.
 //! 2. `~/.hii/ui/state.json` with `mode: "live"` — the same, made sticky by
 //!    `npm run ui:live` so a running app follows the dev server across restarts.
 //! 3. An installed UI bundle in `~/.hii/ui/bundles/<version>` — served over the
@@ -144,11 +144,27 @@ fn write_state(state: &ChannelState) -> Result<(), String> {
     fs::write(&path, body).map_err(|error| format!("ui_state_write_failed: {error}"))
 }
 
+fn validate_live_url(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    let parsed = trimmed
+        .parse::<tauri::Url>()
+        .map_err(|error| format!("ui_live_url_invalid: {error}"))?;
+    if parsed.scheme() != "http" {
+        return Err("ui_live_url_rejected".into());
+    }
+    if !matches!(parsed.host_str(), Some("127.0.0.1" | "localhost")) {
+        return Err("ui_live_url_rejected".into());
+    }
+    if parsed.port().is_none() {
+        return Err("ui_live_url_rejected".into());
+    }
+    Ok(trimmed.to_string())
+}
+
 /// Where the main window should load the interface from right now.
 pub fn resolve_source(state: &ChannelState) -> UiSource {
     if let Ok(url) = env::var("HII_UI_URL") {
-        let url = url.trim().to_string();
-        if !url.is_empty() {
+        if let Ok(url) = validate_live_url(&url) {
             return UiSource::Live(url);
         }
     }
@@ -156,11 +172,9 @@ pub fn resolve_source(state: &ChannelState) -> UiSource {
         if let Some(url) = state
             .live_url
             .as_ref()
-            .map(|value| value.trim().to_string())
+            .and_then(|value| validate_live_url(value).ok())
         {
-            if !url.is_empty() {
-                return UiSource::Live(url);
-            }
+            return UiSource::Live(url);
         }
     }
     if let Some(version) = state.version.as_deref() {
@@ -555,12 +569,7 @@ pub fn ui_channel_set_live(app: tauri::AppHandle, url: Option<String>) -> Result
         .filter(|v| !v.is_empty())
     {
         Some(url) => {
-            if !url.starts_with("http://127.0.0.1")
-                && !url.starts_with("http://localhost")
-                && !url.starts_with("https://")
-            {
-                return Err("ui_live_url_rejected".into());
-            }
+            let url = validate_live_url(&url)?;
             state.mode = "live".into();
             state.live_url = Some(url);
         }
@@ -717,6 +726,24 @@ mod tests {
             UiSource::Live("http://127.0.0.1:3042".into())
         );
         env::remove_var("HII_UI_URL");
+    }
+
+    #[test]
+    fn live_sources_are_loopback_http_only() {
+        assert!(validate_live_url("http://127.0.0.1:3042").is_ok());
+        assert!(validate_live_url("http://localhost:3042").is_ok());
+        assert_eq!(
+            validate_live_url("https://example.com/ui").unwrap_err(),
+            "ui_live_url_rejected"
+        );
+        assert_eq!(
+            validate_live_url("http://localhost.evil:3042").unwrap_err(),
+            "ui_live_url_rejected"
+        );
+        assert_eq!(
+            validate_live_url("http://localhost").unwrap_err(),
+            "ui_live_url_rejected"
+        );
     }
 
     #[test]

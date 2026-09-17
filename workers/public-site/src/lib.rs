@@ -171,7 +171,7 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
             if !rate_limit(request, env, &db, "web-search", 100_000).await? {
                 return secure_no_store(api_error(429, "rate_limited")?);
             }
-            return secure_no_store(search::handle_search(request, env).await?);
+            return secure_no_store(search::handle_search(request).await?);
         }
         if remote::is_remote_host_socket(&path) {
             return remote::handle_host_socket(request, env).await;
@@ -306,16 +306,16 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
         } else {
             Response::ok(include_str!("../../../scripts/install.sh"))?
         };
-        response.headers_mut().set("Content-Type", "text/plain; charset=utf-8")?;
+        response
+            .headers_mut()
+            .set("Content-Type", "text/plain; charset=utf-8")?;
         return secure_no_store(response);
     }
 
-    if let Some(target) = path.strip_prefix("/download/").filter(|target| {
-        matches!(
-            *target,
-            "windows" | "macos" | "windows.json" | "macos.json"
-        )
-    }) {
+    if let Some(target) = path
+        .strip_prefix("/download/")
+        .filter(|target| matches!(*target, "windows" | "macos" | "windows.json" | "macos.json"))
+    {
         let Some(token) = cookie(request, SESSION_COOKIE)? else {
             return secure_no_store(api_error(401, "authentication_required")?);
         };
@@ -966,11 +966,16 @@ fn valid_cli_asset(asset: &str) -> bool {
         "hii-windows-x64.zip.sha256",
     ];
     const TARGETS: &[&str] = &[
-        "aarch64-apple-darwin", "x86_64-apple-darwin",
-        "aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu",
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-unknown-linux-gnu",
     ];
-    asset == "SHA256SUMS" || LEGACY_ASSETS.contains(&asset)
-        || TARGETS.iter().any(|target| asset == format!("hii-{target}.tar.gz"))
+    asset == "SHA256SUMS"
+        || LEGACY_ASSETS.contains(&asset)
+        || TARGETS
+            .iter()
+            .any(|target| asset == format!("hii-{target}.tar.gz"))
 }
 
 async fn download_ui(request: &Request, env: &Env, asset: &str) -> Result<Response> {
@@ -1057,14 +1062,30 @@ fn valid_cli_tag(tag: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{SessionResponse, normalize_handle, valid_cli_asset, valid_cli_tag, valid_ui_asset};
+    use super::{
+        SessionResponse, normalize_handle, valid_cli_asset, valid_cli_tag, valid_ui_asset,
+    };
 
     #[test]
     fn cli_distribution_accepts_installer_contract_and_legacy_assets_only() {
-        for asset in ["SHA256SUMS", "hii-aarch64-apple-darwin.tar.gz", "hii-x86_64-apple-darwin.tar.gz", "hii-aarch64-unknown-linux-gnu.tar.gz", "hii-x86_64-unknown-linux-gnu.tar.gz", "hii-macos-arm64.tar.gz", "hii-macos-arm64.tar.gz.sha256", "hii-windows-x64.zip"] {
+        for asset in [
+            "SHA256SUMS",
+            "hii-aarch64-apple-darwin.tar.gz",
+            "hii-x86_64-apple-darwin.tar.gz",
+            "hii-aarch64-unknown-linux-gnu.tar.gz",
+            "hii-x86_64-unknown-linux-gnu.tar.gz",
+            "hii-macos-arm64.tar.gz",
+            "hii-macos-arm64.tar.gz.sha256",
+            "hii-windows-x64.zip",
+        ] {
             assert!(valid_cli_asset(asset), "{asset}");
         }
-        for asset in ["../SHA256SUMS", "latest.json", "hii-unknown.tar.gz", "hii-aarch64-apple-darwin.tar.gz/extra"] {
+        for asset in [
+            "../SHA256SUMS",
+            "latest.json",
+            "hii-unknown.tar.gz",
+            "hii-aarch64-apple-darwin.tar.gz/extra",
+        ] {
             assert!(!valid_cli_asset(asset), "{asset}");
         }
     }

@@ -23,9 +23,9 @@ use std::{
 use tauri::{Emitter, Manager};
 
 mod account_sync;
-mod local_workspaces;
 mod browser;
 mod chat;
+mod local_workspaces;
 mod terminal;
 mod ui_channel;
 
@@ -627,14 +627,30 @@ fn feature_request_add(app: tauri::AppHandle, title: String) -> Result<String, S
         return Err("Describe the feature in 2 to 240 characters.".into());
     }
     let output = Command::new(hii_binary(&app)?)
-        .args(["board", "add", title, "--lane", "backlog", "--owner", "operator", "--coordinate", "HII product", "--tags", "feature-request"])
+        .args([
+            "board",
+            "add",
+            title,
+            "--lane",
+            "backlog",
+            "--owner",
+            "operator",
+            "--coordinate",
+            "HII product",
+            "--tags",
+            "feature-request",
+        ])
         .output()
         .map_err(|error| format!("HII could not save the request: {error}"))?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
     let line = String::from_utf8_lossy(&output.stdout);
-    Ok(line.lines().next().unwrap_or("Saved to your HII board.").to_string())
+    Ok(line
+        .lines()
+        .next()
+        .unwrap_or("Saved to your HII board.")
+        .to_string())
 }
 
 fn hii_json(app: &tauri::AppHandle, arguments: &[&str]) -> Result<Value, String> {

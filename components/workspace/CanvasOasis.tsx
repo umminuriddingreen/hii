@@ -51,6 +51,7 @@ export function CanvasOasis({ empty, recent, spaces, onCommand, onNote, onFile, 
       <span className={styles.wordmark}>hii</span>
       <h1>{greeting()}</h1>
       <p>What are you working on?</p>
+      <p className={styles.gestureHint}>Double tap to write · Triple tap to add</p>
     </>}
     <button type="button" className={styles.command} onClick={onCommand}>Ask or do anything <span aria-hidden="true">↗</span></button>
     {recent.length > 0 && <div className={styles.section}>

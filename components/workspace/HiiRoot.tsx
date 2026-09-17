@@ -1127,7 +1127,7 @@ export function HiiRoot({
   onTerminalReady?: () => void;
   onUnsavedChanges?: (unsaved: boolean) => void;
   onShareNode?: (node: WorkspaceNode) => void;
-  onRequestDevice?: () => void;
+  onRequestDevice?: (selection: WorkspaceNode[]) => void;
   fileSeeder?: (files: File[]) => Promise<NodeSeed[]>;
   canvasImportRequest?: CanvasImportRequest | null;
   projectionRequest?: WorkspaceProjectionRequest | null;
@@ -1196,6 +1196,16 @@ export function HiiRoot({
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [dropActive, setDropActive] = useState(false);
   const [fileAccept, setFileAccept] = useState('');
+  const [uploadChooser, setUploadChooser] = useState(false);
+  const touchTap = useRef<{ count: number; at: Point; time: number; pointerId: number | null; start: Point | null }>({ count: 0, at: { x: 0, y: 0 }, time: 0, pointerId: null, start: null });
+  const activeTouchPointers = useRef(new Set<number>());
+  const multiTouchSequence = useRef(false);
+  const textTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTouchTap = useRef(0);
+  const uploadAt = useRef<Point | null>(null);
+  const cameraInput = useRef<HTMLInputElement | null>(null);
+  const photosInput = useRef<HTMLInputElement | null>(null);
+  useEffect(() => () => { if (textTapTimer.current) clearTimeout(textTapTimer.current); }, []);
   const [devFixtureState, setDevFixtureState] = useState<'normal' | 'minimized' | 'maximized'>('normal');
   const mouse = useRef<Point>({ x: 400, y: 280 });
   const activeRun = useRef<string | null>(null);
@@ -1400,6 +1410,31 @@ export function HiiRoot({
             : 'could not store that file on this device.');
     }
   }, [fileSeeder, spawnSeeds]);
+
+  const addTextAt = useCallback((at: Point) => {
+    const [id] = spawnSeeds([canvasTextSeed()], camera.toWorld(at.x, at.y));
+    setFocusNodeId(id ?? null);
+  }, [camera, spawnSeeds]);
+  const queueTextAt = useCallback((at: Point) => {
+    if (textTapTimer.current) clearTimeout(textTapTimer.current);
+    textTapTimer.current = setTimeout(() => { textTapTimer.current = null; addTextAt(at); }, 340);
+  }, [addTextAt]);
+  const showUploadAt = useCallback((at: Point) => {
+    if (textTapTimer.current) clearTimeout(textTapTimer.current);
+    textTapTimer.current = null;
+    uploadAt.current = camera.toWorld(at.x, at.y);
+    setUploadChooser(true);
+  }, [camera]);
+  const acceptChosenFiles = useCallback((files: File[]) => {
+    if (!files.length) { uploadAt.current = null; return; }
+    const at = uploadAt.current ?? camera.centerWorld();
+    uploadAt.current = null;
+    if (isSpace) {
+      void Promise.all(files.map((file) => seedFromFile(file, { spaceId }))).then((seeds) => spawnSeeds(seeds, at));
+    } else {
+      void importFiles(files, at);
+    }
+  }, [camera, importFiles, isSpace, spaceId, spawnSeeds]);
 
   useEffect(() => {
     if (!workspace.ready || !projectionRequest || handledProjectionRequest.current === projectionRequest.id) return;
@@ -2594,12 +2629,73 @@ export function HiiRoot({
       onDoubleClick={(event) => {
         if ((event.target as Element).closest('[data-node-id],input,textarea,button,a,[data-workspace-ui]')) return;
         if (isTouchCanvas && drawing) return;
+        if (Date.now() - lastTouchTap.current < 800) return;
         event.preventDefault();
-        const [id] = spawnSeeds([canvasTextSeed()], camera.toWorld(event.clientX, event.clientY));
-        setFocusNodeId(id ?? null);
+        queueTextAt({ x: event.clientX, y: event.clientY });
+      }}
+      onClick={(event) => {
+        if (event.detail !== 3 || Date.now() - lastTouchTap.current < 800) return;
+        if ((event.target as Element).closest('[data-node-id],input,textarea,button,a,[data-workspace-ui]')) return;
+        if (drawing || (isSpace && !allowPhoto)) return;
+        event.preventDefault();
+        showUploadAt({ x: event.clientX, y: event.clientY });
+      }}
+      onPointerUp={(event) => {
+        if (event.pointerType !== 'touch') return;
+        activeTouchPointers.current.delete(event.pointerId);
+        if (multiTouchSequence.current) {
+          touchTap.current.pointerId = null;
+          touchTap.current.start = null;
+          touchTap.current.count = 0;
+          if (activeTouchPointers.current.size === 0) multiTouchSequence.current = false;
+          return;
+        }
+        if (touchTap.current.pointerId !== event.pointerId) return;
+        const start = touchTap.current.start;
+        touchTap.current.pointerId = null;
+        touchTap.current.start = null;
+        if (drawing || !start || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 12) {
+          touchTap.current.count = 0;
+          return;
+        }
+        lastTouchTap.current = Date.now();
+        const at = { x: event.clientX, y: event.clientY };
+        const nearby = Math.hypot(at.x - touchTap.current.at.x, at.y - touchTap.current.at.y) < 32;
+        touchTap.current.count = nearby && lastTouchTap.current - touchTap.current.time < 340 ? touchTap.current.count + 1 : 1;
+        touchTap.current.at = at;
+        touchTap.current.time = lastTouchTap.current;
+        if (touchTap.current.count === 2) queueTextAt(at);
+        if (touchTap.current.count === 3) {
+          touchTap.current.count = 0;
+          if (!isSpace || allowPhoto) showUploadAt(at);
+        }
+      }}
+      onPointerCancel={(event) => {
+        if (event.pointerType === 'touch') {
+          activeTouchPointers.current.delete(event.pointerId);
+          if (activeTouchPointers.current.size === 0) multiTouchSequence.current = false;
+          touchTap.current.pointerId = null;
+          touchTap.current.start = null;
+          touchTap.current.count = 0;
+        }
       }}
       onPointerDown={(event) => {
-        if ((event.target as Element).closest('[data-node-id],input,textarea,audio,video,a')) return;
+        if (event.pointerType === 'touch') {
+          activeTouchPointers.current.add(event.pointerId);
+          if (activeTouchPointers.current.size > 1) {
+            multiTouchSequence.current = true;
+            touchTap.current.pointerId = null;
+            touchTap.current.start = null;
+            touchTap.current.count = 0;
+            if (textTapTimer.current) clearTimeout(textTapTimer.current);
+            textTapTimer.current = null;
+          }
+        }
+        if ((event.target as Element).closest('[data-node-id],input,textarea,button,audio,video,a,[data-workspace-ui]')) return;
+        if (event.pointerType === 'touch' && !multiTouchSequence.current) {
+          touchTap.current.pointerId = event.pointerId;
+          touchTap.current.start = { x: event.clientX, y: event.clientY };
+        }
         setActiveDocumentId(null);
         setToolMessage('');
         setPromptVisible(false);
@@ -2687,7 +2783,7 @@ export function HiiRoot({
         onZoomOut={() => camera.zoomBy(1 / KEY_ZOOM_STEP)} onZoomIn={() => camera.zoomBy(KEY_ZOOM_STEP)} onFitView={fitCanvas}
         onOpenScenes={openPresentationPanel} onExport={() => setExportOpen(true)}
         onOpenTerminal={() => ensureWorkspaceTerminal('docked')} onSearch={openSearchPanel} onOpenActivity={openActivityPanel}
-        onOpenRemote={() => { onRequestDevice?.(); setToolMessage('Opened HII Remote.'); }}
+        onOpenRemote={() => { onRequestDevice?.(selectedNodes); setToolMessage('Opened HII Remote.'); }}
         onOpenSiteViews={() => setSiteViewsOpen(true)}
         onOpenParameters={visibleNodes.some((node) => node.type === 'image') ? () => setParametricLayoutOpen(true) : undefined}
         onRequestFeature={runtimeEnabled ? requestFeature : undefined}
@@ -2908,25 +3004,29 @@ export function HiiRoot({
           onSubmit={(value) => void submit(value, prompt.anchor, prompt.objectId, prompt.conversationId)}
         />
       )}
-      {(!isSpace || allowPhoto) && <input
+      {uploadChooser && <div className="hii-upload-chooser" data-workspace-ui role="dialog" aria-label="Add to canvas" onPointerDown={(event) => event.stopPropagation()}>
+        <button type="button" onClick={() => { setUploadChooser(false); cameraInput.current?.click(); }}>Camera</button>
+        <button type="button" onClick={() => { setUploadChooser(false); photosInput.current?.click(); }}>Photos</button>
+        <button type="button" onClick={() => { setUploadChooser(false); fileInput.current?.click(); }}>Files</button>
+        <button type="button" onClick={() => { setUploadChooser(false); uploadAt.current = null; }}>Cancel</button>
+      </div>}
+      {(!isSpace || allowPhoto) && <>
+      <input ref={cameraInput} className="hii-file-input" type="file" accept="image/*" capture="environment" aria-label="Take a photo for HII" onChange={(event) => { const files = [...(event.currentTarget.files || [])]; event.currentTarget.value = ''; acceptChosenFiles(files); }} />
+      <input ref={photosInput} className="hii-file-input" type="file" accept="image/*" multiple={!isSpace} aria-label="Choose photos for HII" onChange={(event) => { const files = [...(event.currentTarget.files || [])]; event.currentTarget.value = ''; acceptChosenFiles(files); }} />
+      <input
         ref={fileInput}
         className="hii-file-input"
         type="file"
         multiple={!isSpace}
         accept={isSpace ? 'image/*' : fileAccept || undefined}
-        capture={isSpace ? 'environment' : undefined}
         aria-label={isSpace ? 'Take or choose a Space photo' : 'Import files to HII'}
         onChange={(event) => {
           const files = [...(event.currentTarget.files || [])];
           event.currentTarget.value = '';
           if (!files.length || (isSpace && !allowPhoto)) return;
-          if (isSpace) {
-            void Promise.all(files.map((file) => seedFromFile(file, { spaceId }))).then((seeds) => spawnSeeds(seeds, camera.centerWorld()));
-          } else {
-            void importFiles(files, camera.centerWorld());
-          }
+          acceptChosenFiles(files);
         }}
-      />}
+      /></>}
     </main>
   );
 }

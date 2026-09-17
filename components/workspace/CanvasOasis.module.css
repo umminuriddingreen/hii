@@ -22,5 +22,7 @@
 .linkForm button { min-height: 30px; border: 0; background: transparent; color: #454840; cursor: pointer; }
 .linkForm small { width: 100%; color: #a24b3c; }
 .empty .capture { margin-top: 34px; }
+.gestureHint { display: none; }
 @media (prefers-reduced-motion: reduce) { .overview, .empty, .overviewTrigger { scroll-behavior: auto; transition: none; } }
 @media (max-width: 760px) { .overview { top: 12px; left: 12px; max-height: calc(100vh - 88px); } .overviewTrigger { top: 12px; left: 12px; } .empty { top: 43%; } }
+@media (max-width: 760px) and (pointer: coarse) { .empty .gestureHint { display: block; margin: 0 0 24px; color: #777870; font-size: 12px; } .empty .capture { display: none; } }

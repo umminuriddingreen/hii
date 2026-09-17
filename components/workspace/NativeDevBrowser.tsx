@@ -13,8 +13,6 @@ type Props = {
   onOpenObject?: (url: string) => void;
 };
 
-type WebSearchResult = { title: string; url: string; description: string };
-
 function searchQuery(value: string) {
   try {
     const parsed = new URL(value);
@@ -39,8 +37,6 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onCapture, onOpenO
   const [showMore, setShowMore] = useState(false);
   const [omniboxOpen, setOmniboxOpen] = useState(false);
   const [omniboxIndex, setOmniboxIndex] = useState(0);
-  const [searchResults, setSearchResults] = useState<WebSearchResult[] | null>(null);
-  const [searchError, setSearchError] = useState('');
   const viewport = useRef<HTMLDivElement | null>(null);
   const webview = useRef<import('@tauri-apps/api/webview').Webview | null>(null);
   const label = `hii-browser-${nodeId.replace(/[^a-zA-Z0-9-]/g, '-')}`;
@@ -113,27 +109,6 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onCapture, onOpenO
     }
     return options;
   }, [draftUrl, history, omniboxOpen]);
-
-  useEffect(() => {
-    if (isTauri() || !activeSearchQuery) { setSearchResults(null); setSearchError(''); return; }
-    const controller = new AbortController();
-    setSearchResults(null);
-    setSearchError('');
-    setStatus('loading');
-    void fetch(`/api/search?q=${encodeURIComponent(activeSearchQuery)}`, { signal: controller.signal })
-      .then(async (response) => {
-        const value = await response.json() as { results?: WebSearchResult[]; error?: string };
-        if (!response.ok) throw new Error(value.error || `Search failed (${response.status})`);
-        setSearchResults(value.results || []);
-        setStatus('ready');
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        setSearchError(error instanceof Error ? error.message : 'Search failed');
-        setStatus('error');
-      });
-    return () => controller.abort();
-  }, [activeSearchQuery]);
 
   const commitUrl = useCallback((next: string, pushHistory = true) => {
     setUrl(next);
@@ -217,18 +192,13 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onCapture, onOpenO
       </nav>
       <section className="hii-browser-workarea">
         <div ref={viewport} className="hii-browser-viewport">
-          {!isTauri() && activeSearchQuery && searchResults && <div className="hii-browser-results" aria-label={`Search results for ${activeSearchQuery}`}>
-            <header><span>Web results</span><strong>{activeSearchQuery}</strong></header>
-            {searchResults.map((result) => <a key={result.url} href={result.url} onClick={(event) => { event.preventDefault(); void navigate(result.url); }}>
-              <small>{new URL(result.url).hostname.replace(/^www\./, '')}</small>
-              <h3>{result.title}</h3>
-              {result.description && <p>{result.description}</p>}
-            </a>)}
-            {!searchResults.length && <p className="hii-browser-results-empty">No results found.</p>}
+          {!isTauri() && activeSearchQuery && <div className="hii-browser-results" aria-label={`Search request for ${activeSearchQuery}`}>
+            <header><span>Local search</span><strong>{activeSearchQuery}</strong></header>
+            <p className="hii-browser-results-empty">Web search runs through your local HII runtime in the desktop app or CLI.</p>
           </div>}
           {!isTauri() && !activeSearchQuery && <iframe key={`${url}:${reloadKey}`} src={normalizedBrowserUrl(url) || undefined} title="HII interactive browser" sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-scripts" allow="clipboard-read; clipboard-write; fullscreen" onLoad={() => setStatus('ready')} onError={() => setStatus('error')} />}
-          {status === 'loading' && <span className="hii-browser-loading">{activeSearchQuery ? `Searching for ${activeSearchQuery}…` : `Opening ${targetKind === 'local-service' ? 'local service' : 'website'}…`}</span>}
-          {status === 'error' && <span className="hii-browser-loading">{searchError || 'This page refused the embedded view. Open it in its own window or check the local service.'}</span>}
+          {status === 'loading' && !activeSearchQuery && <span className="hii-browser-loading">{`Opening ${targetKind === 'local-service' ? 'local service' : 'website'}…`}</span>}
+          {status === 'error' && <span className="hii-browser-loading">This page refused the embedded view. Open it in its own window or check the local service.</span>}
         </div>
       </section>
     </article>

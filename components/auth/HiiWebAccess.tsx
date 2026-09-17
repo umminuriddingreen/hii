@@ -23,6 +23,7 @@ import {
   type AccountWorkspaceSummary
 } from '@/lib/web/account-workspace';
 import { nodeSeedFromFeedSnapshot, type FeedItem } from '@/lib/web/feed-contract';
+import { canvasTextSeed } from '@/lib/workspace/ingest';
 import { HiiWebPanel, type WebPanel } from './HiiWebPanels';
 import styles from './HiiWebAccess.module.css';
 
@@ -213,6 +214,7 @@ export function HiiWebAccess() {
   const [ready, setReady] = useState(false);
   const [panel, setPanel] = useState<WebPanel | null>(null);
   const [shareNode, setShareNode] = useState<WorkspaceNode | null>(null);
+  const [agentContextNodes, setAgentContextNodes] = useState<WorkspaceNode[]>([]);
   const [canvasImport, setCanvasImport] = useState<{ id: string; seed: ReturnType<typeof nodeSeedFromFeedSnapshot> } | null>(null);
   const [workspaces, setWorkspaces] = useState<AccountWorkspaceSummary[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
@@ -607,6 +609,7 @@ export function HiiWebAccess() {
     setBrowserOnly(local);
     setWorkspaceMessage('');
     setPanel(null);
+    setAgentContextNodes([]);
   };
 
   if (ready && session.authenticated && !browserOnly && !productSite) {
@@ -639,8 +642,8 @@ export function HiiWebAccess() {
           allowPhoto
           persistentChrome={false}
           fileSeeder={canvasFileSeeder}
-          onRequestDevice={() => setPanel('models')}
-          onShareNode={(node) => { setShareNode(node); setPanel('feed'); }}
+          onRequestDevice={(selection) => { setAgentContextNodes(selection); setPanel('models'); }}
+          onShareNode={(node) => { setAgentContextNodes([]); setShareNode(node); setPanel('feed'); }}
           canvasImportRequest={canvasImport}
         />
         <header className={styles.canvasHeader} data-workspace-ui aria-label="HII account access">
@@ -659,11 +662,18 @@ export function HiiWebAccess() {
           panel={panel}
           csrfToken={session.csrfToken ?? ''}
           shareNode={shareNode}
-          onClose={() => { setPanel(null); setShareNode(null); }}
+          contextNodes={agentContextNodes}
+          onClose={() => { setPanel(null); setShareNode(null); setAgentContextNodes([]); }}
           onImport={(item: FeedItem) => {
             setCanvasImport({ id: crypto.randomUUID(), seed: nodeSeedFromFeedSnapshot(item) });
             setPanel(null);
             setShareNode(null);
+            setAgentContextNodes([]);
+          }}
+          onPlaceResult={(text) => {
+            setCanvasImport({ id: crypto.randomUUID(), seed: canvasTextSeed(text.slice(0, 100_000)) });
+            setPanel(null);
+            setAgentContextNodes([]);
           }}
         /> : null}
         {accountOpen ? (
@@ -735,7 +745,7 @@ export function HiiWebAccess() {
             </section> : null}
             <p role="status" aria-live="polite">{workspaceMessage}</p>
             <nav className={styles.platformLinks} aria-label="Open HII on a computer">
-              <button type="button" onClick={() => { setPanel('models'); setAccountOpen(false); }}>HII Remote</button>
+              <button type="button" onClick={() => { setAgentContextNodes([]); setPanel('models'); setAccountOpen(false); }}>HII Remote</button>
               <a href="/download#mac">HII for Mac</a>
               <a href="/download#windows">HII for Windows</a>
             </nav>

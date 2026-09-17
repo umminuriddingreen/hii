@@ -4,7 +4,8 @@ import { SiteAnalysis } from './site-analysis';
 
 export const metadata: Metadata = {
   title: 'Site analysis',
-  description: 'A source-linked site workspace for architecture students.'
+  description: 'A source-linked site workspace for architecture students.',
+  alternates: { canonical: '/site-analysis' }
 };
 
 export default function SiteAnalysisPage() {
