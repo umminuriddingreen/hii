@@ -26,7 +26,8 @@ use std::path::Path;
 use std::process::ExitCode;
 
 /// The MCP protocol revision we speak. Bumped when the surface changes.
-const PROTOCOL_VERSION: &str = "2024-11-05";
+const PROTOCOL_VERSION: &str = "2026-07-28";
+const LEGACY_PROTOCOL_VERSION: &str = "2024-11-05";
 
 /// Non-standard JSON-RPC error code for an action the authority envelope
 /// refuses. Inside the implementation-defined server range (-32000..-32099).
@@ -121,6 +122,7 @@ pub fn serve(
         if let Some(response) = handle_line(
             &line,
             &tools,
+            &paths.runtime,
             &paths.repo,
             authority,
             client_identity,
@@ -139,6 +141,7 @@ pub fn serve(
 fn handle_line(
     line: &str,
     tools: &Toolbelt,
+    runtime: &Path,
     repo: &Path,
     authority: Authority,
     client_identity: Option<&str>,
@@ -154,6 +157,7 @@ fn handle_line(
         &request,
         id,
         tools,
+        runtime,
         repo,
         authority,
         client_identity,
@@ -167,26 +171,45 @@ fn dispatch(
     request: &Request,
     id: Value,
     tools: &Toolbelt,
+    runtime: &Path,
     repo: &Path,
     authority: Authority,
     client_identity: Option<&str>,
     acl_config: Option<&AclConfig>,
 ) -> Response {
     match request.method.as_str() {
-        "initialize" => Response::ok(
+        "initialize" => {
+            let requested = request.params["protocolVersion"].as_str();
+            let negotiated = match requested {
+                Some(PROTOCOL_VERSION) => PROTOCOL_VERSION,
+                Some(LEGACY_PROTOCOL_VERSION) => LEGACY_PROTOCOL_VERSION,
+                _ => PROTOCOL_VERSION,
+            };
+            Response::ok(
+                id,
+                json!({
+                    "protocolVersion": negotiated,
+                    "serverInfo": { "name": "hii", "version": env!("CARGO_PKG_VERSION") },
+                    "capabilities": { "tools": { "listChanged": false } },
+                    // Advertise client governance when a config was loaded.
+                    "governance": acl_config.map(|_| true),
+                }),
+            )
+        }
+        "server/discover" => Response::ok(
             id,
             json!({
                 "protocolVersion": PROTOCOL_VERSION,
                 "serverInfo": { "name": "hii", "version": env!("CARGO_PKG_VERSION") },
-                "capabilities": { "tools": { "listChanged": false } },
-                // Advertise client governance when a config was loaded.
-                "governance": acl_config.map(|_| true),
+                "transports": ["stdio"],
+                "capabilities": { "tools": true, "governance": acl_config.is_some() }
             }),
         ),
         "tools/list" => Response::ok(id, json!({ "tools": tool_specs() })),
         "tools/call" => match tools_call(
             &request.params,
             tools,
+            runtime,
             repo,
             authority,
             client_identity.unwrap_or("anonymous"),
@@ -229,6 +252,53 @@ fn tool_specs() -> Vec<Value> {
 /// real handler. On refusal or malformed input returns `(code, message)` for a
 /// JSON-RPC error; otherwise the MCP `content` result.
 fn tools_call(
+    params: &Value,
+    tools: &Toolbelt,
+    runtime: &Path,
+    repo: &Path,
+    authority: Authority,
+    client_identity: &str,
+    acl_config: Option<&AclConfig>,
+) -> Result<Value, (i64, String)> {
+    let mut ledger = hii_core::run_ledger::RunLedger::create(runtime, "mcp", "mcp")
+        .map_err(|error| (-32002, format!("run ledger unavailable: {error}")))?;
+    ledger
+        .set_authority(authority.label())
+        .map_err(|error| (-32002, format!("run ledger unavailable: {error}")))?;
+    ledger
+        .event(
+            "tool.request",
+            json!({
+                "clientIdentity": client_identity,
+                "authority": authority.label(),
+                "request": params
+            }),
+        )
+        .map_err(|error| (-32002, format!("run ledger unavailable: {error}")))?;
+    let result = tools_call_inner(params, tools, repo, authority, client_identity, acl_config);
+    let (status, detail) = match &result {
+        Ok(value) => ("completed", value.clone()),
+        Err((code, message)) => ("denied", json!({"code": code, "message": message})),
+    };
+    ledger
+        .event("tool.result", json!({"status": status, "result": detail}))
+        .map_err(|error| (-32002, format!("run ledger unavailable: {error}")))?;
+    ledger
+        .finish(json!({
+            "schemaVersion": 2,
+            "id": ledger.envelope.run_id,
+            "status": status,
+            "surface": "mcp",
+            "tool": params["name"],
+            "clientIdentity": client_identity,
+            "authority": authority.label(),
+            "summary": if status == "completed" { "MCP tool call completed." } else { "MCP tool call was denied or failed." }
+        }))
+        .map_err(|error| (-32002, format!("receipt persistence failed: {error}")))?;
+    result
+}
+
+fn tools_call_inner(
     params: &Value,
     tools: &Toolbelt,
     repo: &Path,
@@ -383,6 +453,7 @@ mod tests {
         let error = tools_call(
             &params,
             &tools,
+            &path.join(".hii"),
             &path,
             Authority::ReadOnly,
             "anonymous",
@@ -400,8 +471,16 @@ mod tests {
         let (tools, path) = tempbelt("nested-delete");
         std::fs::write(path.join("f.txt"), "keep").unwrap();
         let params = json!({ "name": "shell", "arguments": { "command": "rm f.txt" } });
-        let error =
-            tools_call(&params, &tools, &path, Authority::Yolo, "anonymous", None).unwrap_err();
+        let error = tools_call(
+            &params,
+            &tools,
+            &path.join(".hii"),
+            &path,
+            Authority::Yolo,
+            "anonymous",
+            None,
+        )
+        .unwrap_err();
         assert_eq!(error.0, AUTHORITY_DENIED);
         assert!(path.join("f.txt").exists());
         let _ = std::fs::remove_dir_all(path);
@@ -415,6 +494,7 @@ mod tests {
         let result = tools_call(
             &params,
             &tools,
+            &path.join(".hii"),
             &path,
             Authority::ReadOnly,
             "anonymous",
@@ -430,8 +510,16 @@ mod tests {
         let (tools, path) = tempbelt("delete");
         std::fs::write(path.join("f.txt"), "keep").unwrap();
         let params = json!({ "name": "shell", "arguments": { "command": "rm f.txt" } });
-        let error =
-            tools_call(&params, &tools, &path, Authority::Yolo, "anonymous", None).unwrap_err();
+        let error = tools_call(
+            &params,
+            &tools,
+            &path.join(".hii"),
+            &path,
+            Authority::Yolo,
+            "anonymous",
+            None,
+        )
+        .unwrap_err();
         assert_eq!(error.0, AUTHORITY_DENIED);
         assert!(path.join("f.txt").exists());
         let _ = std::fs::remove_dir_all(path);

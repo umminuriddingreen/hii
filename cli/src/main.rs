@@ -31,6 +31,7 @@ mod inference_view;
 mod keyboard;
 mod keymap;
 mod learning;
+mod ledger_audit;
 mod legacy;
 mod local_chat;
 mod mcp;
@@ -445,8 +446,18 @@ enum Commands {
     )]
     Proof {
         id: Option<String>,
+        #[arg(value_name = "ARCHIVE_ID")]
+        argument: Option<String>,
         #[arg(long)]
         json: bool,
+        #[arg(long, help = "Preview legacy files outside current ledger limits")]
+        preview: bool,
+        #[arg(long, help = "Archive and replace verified oversized legacy files")]
+        execute: bool,
+        #[arg(long, hide = true, help = "Legacy alias for --execute")]
+        repair: bool,
+        #[arg(long, value_name = "ARCHIVE_ID", hide = true)]
+        restore: Option<String>,
     },
     #[command(about = "Watch the continuously legible HII run stream")]
     Stream {
@@ -2389,7 +2400,58 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             }
             Ok(ExitCode::SUCCESS)
         }
-        Some(Commands::Proof { id, json }) => {
+        Some(Commands::Proof {
+            id,
+            argument,
+            json,
+            preview,
+            execute,
+            repair,
+            restore,
+        }) => {
+            let action = id.as_deref();
+            if matches!(action, Some("audit" | "archive-legacy" | "restore-legacy")) {
+                let report = match action {
+                    Some("restore-legacy") => {
+                        let archive_id = argument
+                            .as_deref()
+                            .or(restore.as_deref())
+                            .ok_or("usage: hii proof restore-legacy <surface/run-id>")?;
+                        ledger_audit::restore(&paths.runtime, archive_id)?;
+                        ledger_audit::audit(&paths.runtime, false)?
+                    }
+                    Some("archive-legacy") => {
+                        if preview && (execute || repair) {
+                            return Err("choose either --preview or --execute".into());
+                        }
+                        if !preview && !execute && !repair {
+                            return Err(
+                                "usage: hii proof archive-legacy --preview|--execute".into()
+                            );
+                        }
+                        ledger_audit::audit(&paths.runtime, execute || repair)?
+                    }
+                    Some("audit") => {
+                        if let Some(archive_id) = restore.as_deref() {
+                            ledger_audit::restore(&paths.runtime, archive_id)?;
+                        }
+                        ledger_audit::audit(&paths.runtime, execute || repair)?
+                    }
+                    _ => unreachable!(),
+                };
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?
+                    );
+                } else {
+                    ledger_audit::print_report(&report);
+                }
+                return Ok(ExitCode::SUCCESS);
+            }
+            if argument.is_some() || preview || execute || repair || restore.is_some() {
+                return Err("archive flags require `hii proof archive-legacy` or `hii proof restore-legacy`".into());
+            }
             let workspace = workspace(cli.cwd.clone())?;
             proof(&paths, &workspace, id.as_deref(), json)?;
             Ok(ExitCode::SUCCESS)

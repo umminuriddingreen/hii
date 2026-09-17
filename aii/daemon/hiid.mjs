@@ -5,7 +5,7 @@ import { execFile, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import {
@@ -25,6 +25,7 @@ const ROOT = process.env.HII_ROOT || path.resolve(path.dirname(fileURLToPath(imp
 const RUNTIME = process.env.HII_RUNTIME_DIR || path.join(os.homedir(), ".hii");
 const DAEMON_DIR = path.join(RUNTIME, "daemon");
 const RUNS_DIR = path.join(DAEMON_DIR, "runs");
+const CONTROLLED_RUNS_DIR = path.join(RUNTIME, "runs", "daemon");
 const EVENTS = path.join(DAEMON_DIR, "events.jsonl");
 const ACTIONS = path.join(DAEMON_DIR, "actions.jsonl");
 const INSTANCES = path.join(DAEMON_DIR, "instances.json");
@@ -508,7 +509,15 @@ function executeWorkspaceIntent(intent) {
   const child = execFile(HII_BIN, args, {
     cwd: workspaceRoot,
     timeout: 30 * 60 * 1000,
-    maxBuffer: 2 * 1024 * 1024
+    maxBuffer: 2 * 1024 * 1024,
+    env: {
+      ...process.env,
+      HII_EXTERNAL_REQUEST_ID: intent.id,
+      HII_INTERACTION_ID: intent.id,
+      HII_SURFACE: "daemon-workspace",
+      HII_AUTHORITY: "workspace",
+      HII_ACTOR: "hii.daemon"
+    }
   }, (error, stdout, stderr) => {
     activeWorkspaceRuns.delete(intent.id);
     const terminal = latestCapabilityJob(intent.id);
@@ -861,7 +870,7 @@ function safeReadJsonl(file) {
 function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`);
+  fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   fs.renameSync(tmp, file);
 }
 
@@ -1725,6 +1734,115 @@ function writeRun(run) {
   });
 }
 
+const controlledLedgerState = new Map();
+
+function redactLedgerText(value) {
+  return String(value || "").split(/\r?\n/).map((line) => {
+    const upper = line.toUpperCase();
+    const sensitive = ["API_KEY", "ACCESS_KEY", "SECRET", "TOKEN", "PASSWORD", "PRIVATE KEY", "AUTHORIZATION:"]
+      .some((marker) => upper.includes(marker))
+      || line.includes("sk-") || line.includes("ghp_") || line.includes("hii_runner_");
+    return sensitive ? "[redacted]" : line;
+  }).join("\n");
+}
+
+// Rust's serde_json::Map serializes object keys in lexical order. Hash the
+// same canonical representation so daemon-authored events verify in the
+// shared Rust ledger auditor regardless of JavaScript insertion order.
+function canonicalLedgerJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalLedgerJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) =>
+      `${JSON.stringify(key)}:${canonicalLedgerJson(value[key])}`
+    ).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function appendControlledEvent(id, kind, data) {
+  const dir = path.join(CONTROLLED_RUNS_DIR, id);
+  const state = controlledLedgerState.get(id) || { sequence: 0, previousHash: null };
+  state.sequence += 1;
+  const entry = {
+    ts_unix_ms: Date.now(),
+    run_id: id,
+    sequence: state.sequence,
+    previous_hash: state.previousHash,
+    kind,
+    data
+  };
+  const eventHash = createHash("sha256").update(canonicalLedgerJson(entry)).digest("hex");
+  entry.event_hash = eventHash;
+  fs.appendFileSync(path.join(dir, "events.jsonl"), `${JSON.stringify(entry)}\n`, { mode: 0o600 });
+  state.previousHash = eventHash;
+  controlledLedgerState.set(id, state);
+}
+
+function startControlledLedger(run) {
+  fs.mkdirSync(CONTROLLED_RUNS_DIR, { recursive: true, mode: 0o700 });
+  const dir = path.join(CONTROLLED_RUNS_DIR, run.id);
+  fs.mkdirSync(dir, { recursive: false, mode: 0o700 });
+  const envelope = {
+    version: 2,
+    runId: run.id,
+    interactionId: run.id,
+    traceId: run.id,
+    spanId: randomUUID().replaceAll("-", "").slice(0, 16),
+    surface: "daemon",
+    actor: "hii.daemon",
+    authority: "reversible-local",
+    createdAtUnixMs: Date.now()
+  };
+  writeJson(path.join(dir, "run.json"), envelope);
+  controlledLedgerState.set(run.id, { sequence: 0, previousHash: null });
+  appendControlledEvent(run.id, "run.started", {
+    goal: redactLedgerText(run.prompt),
+    workspace: run.coordinate,
+    observability: "process-boundary-only"
+  });
+}
+
+async function sha256File(file) {
+  const hash = createHash("sha256");
+  await new Promise((resolve, reject) => {
+    const stream = fs.createReadStream(file);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("error", reject);
+    stream.on("end", resolve);
+  });
+  return hash.digest("hex");
+}
+
+async function finishControlledLedger(run, code) {
+  const dir = path.join(CONTROLLED_RUNS_DIR, run.id);
+  const logBytes = fs.statSync(run.log).size;
+  const logSha256 = await sha256File(run.log);
+  appendControlledEvent(run.id, "run.finished", {
+    status: code === 0 ? "completed" : "failed",
+    exitCode: code,
+    log: run.log,
+    logBytes,
+    logSha256
+  });
+  const state = controlledLedgerState.get(run.id);
+  writeJson(path.join(dir, "receipt.json"), {
+    schemaVersion: 2,
+    id: run.id,
+    status: code === 0 ? "completed" : "failed",
+    goal: redactLedgerText(run.prompt),
+    workspace: run.coordinate,
+    surface: "daemon",
+    actor: "hii.daemon",
+    authority: "reversible-local",
+    observability: "process-boundary-only; external Codex internal model calls are not claimed as HII-observed",
+    artifact: { path: run.log, bytes: logBytes, sha256: logSha256 },
+    eventChainRoot: state?.previousHash || null,
+    createdAt: run.createdAt,
+    finishedAt: now()
+  });
+  controlledLedgerState.delete(run.id);
+}
+
 function codexInstances() {
   return readRuns().slice(0, 12).map((run) => ({
     id: `codex:${run.id}`,
@@ -1834,6 +1952,7 @@ function enqueueCodex(prompt, options = {}) {
     log: path.join(RUNS_DIR, `${id}.log`)
   };
   writeRun(run);
+  startControlledLedger(run);
   event("codex.queued", {
     actor: "hii.daemon",
     target: id,
@@ -1858,13 +1977,26 @@ function startQueuedRuns() {
       coordinate: run.coordinate || ROOT,
       memoryPack
     });
+    appendControlledEvent(run.id, "backend.request", {
+      backend: "codex",
+      workspace: run.coordinate || ROOT,
+      promptBytes: Buffer.byteLength(run.prompt || "", "utf8"),
+      memoryStrategy: memoryPack.ok ? memoryPack.strategy : "codex-native-memories"
+    });
     // Managed runs target coordinates a human already approved (activation wizard
     // or operator queue), which may not be trusted git repos — e.g. a partner's
     // plain project folder — so codex's repo trust check must be bypassed here.
     const child = spawn(codexBin(), invocation.args, {
       cwd: run.coordinate || ROOT,
       stdio: ["ignore", logFd, logFd],
-      env: { ...process.env, HII_DAEMON_RUN_ID: run.id }
+      env: {
+        ...process.env,
+        HII_DAEMON_RUN_ID: run.id,
+        HII_INTERACTION_ID: run.id,
+        HII_SURFACE: "daemon-codex",
+        HII_AUTHORITY: "reversible-local",
+        HII_ACTOR: "hii.daemon"
+      }
     });
     activeRuns.set(run.id, child);
     const running = {
@@ -1905,7 +2037,7 @@ function startQueuedRuns() {
       text: `Started HII Codex run ${run.id}`,
       loop: "observed -> decided -> acted"
     });
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       activeRuns.delete(run.id);
       fs.closeSync(logFd);
       const previous = safeReadJson(path.join(RUNS_DIR, `${run.id}.json`), running);
@@ -1927,6 +2059,16 @@ function startQueuedRuns() {
         text: `${done.status}: HII Codex run ${run.id}`,
         loop: "observed -> decided -> acted -> verified -> next"
       });
+      try {
+        await finishControlledLedger(done, code);
+      } catch (error) {
+        event("codex.ledger_failed", {
+          actor: "hii.daemon",
+          target: run.id,
+          status: "failed",
+          text: `Could not finalize controlled run ledger: ${error.message}`
+        });
+      }
     });
   }
 }

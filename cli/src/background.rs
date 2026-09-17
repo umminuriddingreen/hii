@@ -60,8 +60,7 @@ impl BackgroundJobs {
         self.refresh()?;
         if self.active_records()?.len() >= MAX_ACTIVE_JOBS {
             return Err(
-                "Two background jobs are already active. Use /jobs or /job <id> cancel."
-                    .into(),
+                "Two background jobs are already active. Use /jobs or /job <id> cancel.".into(),
             );
         }
         let id = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
@@ -89,7 +88,15 @@ impl BackgroundJobs {
             .stdin(Stdio::null())
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr))
-            .env("HII_BACKGROUND_JOB_ID", &id);
+            .env("HII_BACKGROUND_JOB_ID", &id)
+            .env("HII_EXTERNAL_REQUEST_ID", &id)
+            .env("HII_INTERACTION_ID", &id)
+            .env("HII_SURFACE", "background")
+            .env("HII_AUTHORITY", "workspace")
+            .env("HII_ACTOR", "operator");
+        if let Some(parent) = crate::run_context::run_id() {
+            command.env("HII_PARENT_RUN_ID", parent);
+        }
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;

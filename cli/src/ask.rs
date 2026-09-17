@@ -5,6 +5,9 @@ use crate::{
     budget::Cancel,
     config::AppPaths,
     ollama::{ChatStreamEvent, Message, Ollama},
+    receipt::{
+        classify_error, redact_text, Outcome, Receipt, RunGuard, RunStore, TokenUsageRecord,
+    },
 };
 use serde_json::json;
 use std::{
@@ -27,89 +30,244 @@ pub fn run(
         return Err("ask needs a prompt".into());
     }
 
-    let ollama = Ollama::discover().ensure_reachable()?;
-    let models = ollama.models()?;
-    let env_model_present = std::env::var_os("HII_MODEL").is_some();
-    let saved_model = if requested_model.is_none() {
-        agent::saved_model_for_provider(paths, ollama.provider())?
-    } else {
-        None
-    };
-    let (requested, _) = agent::requested_model_selection(
-        requested_model,
-        saved_model.as_deref(),
-        env_model_present,
-    );
-    let model = agent::choose_model(requested, ollama.provider(), &models)?;
-    let system = format!(
-        "{SYSTEM_PROMPT}\n\n{}",
-        crate::config::runtime_identity_context(ollama.provider(), &model, ollama.base_url(),)
-    );
-    let messages = vec![Message::system(system), Message::user(prompt)];
-    let cancel = Cancel::new();
-    let (sender, receiver) = mpsc::channel();
-    let worker_ollama = ollama.clone();
-    let worker_model = model.clone();
-    let worker_cancel = cancel.clone();
-    thread::spawn(move || {
-        worker_ollama.chat_with_stream(
-            &worker_model,
-            &messages,
-            false,
-            false,
-            &worker_cancel,
-            sender,
-        );
-    });
+    let workspace = std::env::current_dir().map_err(|error| error.to_string())?;
+    if crate::run_context::conversation_id().is_none() {
+        crate::run_context::set_conversation_id(&hii_core::run_ledger::new_run_id());
+    }
+    let mut store = RunStore::create(&paths.runtime)?;
+    crate::run_context::set_run_id(&store.id);
+    store.set_authority("read-only")?;
+    crate::run_context::set_origin(crate::run_context::WriteOrigin::Operator);
+    let mut guard = Some(RunGuard::start(
+        &paths.runtime,
+        &store.dir,
+        &store.id,
+        ask_receipt(
+            &store,
+            prompt,
+            &workspace,
+            requested_model.unwrap_or("unresolved"),
+            Outcome::Running,
+            "Ask run in progress.",
+            None,
+        ),
+    )?);
+    store.event(
+        "run.started",
+        json!({
+            "goal": redact_text(prompt),
+            "workspace": workspace,
+            "surface": store.envelope().surface,
+            "conversationId": crate::run_context::conversation_id()
+        }),
+    )?;
 
-    let mut stdout = io::stdout().lock();
-    while let Ok(event) = receiver.recv() {
-        match event {
-            ChatStreamEvent::Thinking(_) => {}
-            ChatStreamEvent::Content(text) => {
-                if jsonl {
-                    writeln!(
-                        stdout,
-                        "{}",
-                        json!({
-                            "schemaVersion": 1,
-                            "event": "model.delta",
-                            "data": { "channel": "content", "text": text }
-                        })
-                    )
-                    .map_err(|error| error.to_string())?;
-                } else {
-                    write!(stdout, "{text}").map_err(|error| error.to_string())?;
+    let result = (|| -> Result<(), String> {
+        let ollama = Ollama::discover().ensure_reachable()?;
+        let models = ollama.models()?;
+        let env_model_present = std::env::var_os("HII_MODEL").is_some();
+        let saved_model = if requested_model.is_none() {
+            agent::saved_model_for_provider(paths, ollama.provider())?
+        } else {
+            None
+        };
+        let (requested, _) = agent::requested_model_selection(
+            requested_model,
+            saved_model.as_deref(),
+            env_model_present,
+        );
+        let model = agent::choose_model(requested, ollama.provider(), &models)?;
+        crate::run_context::set_model_route(requested, &model, "ask selection");
+        store.set_model_route(requested, &model, &model, "ask selection")?;
+        let system = format!(
+            "{SYSTEM_PROMPT}\n\n{}",
+            crate::config::runtime_identity_context(ollama.provider(), &model, ollama.base_url(),)
+        );
+        let messages = vec![Message::system(system), Message::user(prompt)];
+        let transcript = messages
+            .iter()
+            .map(|message| {
+                json!({
+                    "role": message.role,
+                    "content": redact_text(&message.content),
+                    "imageCount": message.images.len()
+                })
+            })
+            .collect::<Vec<_>>();
+        store.event(
+            "model.request",
+            json!({
+                "provider": ollama.provider().id(),
+                "requestedModel": requested,
+                "routedModel": model,
+                "messages": transcript
+            }),
+        )?;
+        let cancel = Cancel::new();
+        let (sender, receiver) = mpsc::channel();
+        let worker_ollama = ollama.clone();
+        let worker_model = model.clone();
+        let worker_cancel = cancel.clone();
+        thread::spawn(move || {
+            worker_ollama.chat_with_stream(
+                &worker_model,
+                &messages,
+                false,
+                false,
+                &worker_cancel,
+                sender,
+            );
+        });
+
+        let mut stdout = io::stdout().lock();
+        let mut answer = String::new();
+        while let Ok(event) = receiver.recv() {
+            match event {
+                ChatStreamEvent::Thinking(_) => {}
+                ChatStreamEvent::Content(text) => {
+                    answer.push_str(&text);
+                    if jsonl {
+                        writeln!(
+                            stdout,
+                            "{}",
+                            json!({
+                                "schemaVersion": 1,
+                                "event": "model.delta",
+                                "data": { "channel": "content", "text": text }
+                            })
+                        )
+                        .map_err(|error| error.to_string())?;
+                    } else {
+                        write!(stdout, "{text}").map_err(|error| error.to_string())?;
+                    }
+                    stdout.flush().map_err(|error| error.to_string())?;
                 }
-                stdout.flush().map_err(|error| error.to_string())?;
-            }
-            ChatStreamEvent::Done(Ok(result)) => {
-                if jsonl {
-                    writeln!(
-                        stdout,
-                        "{}",
+                ChatStreamEvent::Done(Ok(result)) => {
+                    store.event(
+                        "model.response",
                         json!({
-                            "schemaVersion": 1,
-                            "event": "ask.finished",
-                            "data": {
-                                "model": model,
-                                "promptTokens": result.usage.prompt_tokens,
-                                "completionTokens": result.usage.completion_tokens,
-                                "durationMs": result.usage.total_duration_ms,
-                                "tokensPerSecond": result.usage.tokens_per_second()
-                            }
-                        })
-                    )
-                    .map_err(|error| error.to_string())?;
-                } else {
-                    writeln!(stdout).map_err(|error| error.to_string())?;
+                            "provider": ollama.provider().id(),
+                            "model": model,
+                            "content": redact_text(&answer),
+                            "promptTokens": result.usage.prompt_tokens,
+                            "completionTokens": result.usage.completion_tokens,
+                            "durationMs": result.usage.total_duration_ms
+                        }),
+                    )?;
+                    let receipt = ask_receipt(
+                        &store,
+                        prompt,
+                        &workspace,
+                        &model,
+                        Outcome::Completed,
+                        &answer,
+                        Some(TokenUsageRecord {
+                            prompt_tokens: result.usage.prompt_tokens,
+                            completion_tokens: result.usage.completion_tokens,
+                            budget: 0,
+                        }),
+                    );
+                    store.event(
+                        "run.finished",
+                        json!({
+                            "status": receipt.status,
+                            "summary": receipt.summary
+                        }),
+                    )?;
+                    let proof = guard
+                        .take()
+                        .ok_or("HII ask receipt guard was already finalized")?
+                        .finalize(&receipt)?;
+                    if jsonl {
+                        writeln!(
+                            stdout,
+                            "{}",
+                            json!({
+                                "schemaVersion": 1,
+                                "event": "ask.finished",
+                                "data": {
+                                    "model": model,
+                                    "promptTokens": result.usage.prompt_tokens,
+                                    "completionTokens": result.usage.completion_tokens,
+                                    "durationMs": result.usage.total_duration_ms,
+                                    "tokensPerSecond": result.usage.tokens_per_second(),
+                                    "runId": store.id,
+                                    "proof": proof
+                                }
+                            })
+                        )
+                        .map_err(|error| error.to_string())?;
+                    } else {
+                        writeln!(stdout).map_err(|error| error.to_string())?;
+                    }
+                    return Ok(());
                 }
-                return Ok(());
+                ChatStreamEvent::Done(Err(error)) => return Err(error),
             }
-            ChatStreamEvent::Done(Err(error)) => return Err(error),
+        }
+        Err("local model stream ended without a result".into())
+    })();
+    if let Err(error) = &result {
+        let outcome = classify_error(error);
+        let _ = store.event(
+            "run.failed",
+            json!({
+                "outcome": outcome.label(),
+                "error": redact_text(error)
+            }),
+        );
+        if let Some(guard) = guard.as_mut() {
+            guard.checkpoint_error(outcome, error, 1)?;
         }
     }
-    Err("local model stream ended without a result".into())
+    result
+}
+
+fn ask_receipt(
+    store: &RunStore,
+    prompt: &str,
+    workspace: &std::path::Path,
+    model: &str,
+    outcome: Outcome,
+    summary: &str,
+    token_usage: Option<TokenUsageRecord>,
+) -> Receipt {
+    Receipt {
+        schema_version: 9,
+        id: store.id.clone(),
+        created_at_unix_ms: store.started_at_unix_ms,
+        finished_at_unix_ms: if outcome == Outcome::Running { 0 } else { crate::clock::unix_ms() },
+        status: outcome.status().into(),
+        goal: redact_text(prompt),
+        workspace: workspace.display().to_string(),
+        model: model.to_string(),
+        review_model: None,
+        steps: 1,
+        summary: redact_text(summary),
+        verification: Vec::new(),
+        git_status: "not captured (ask is read-only)".into(),
+        next: None,
+        review: None,
+        risk: "Local no-tools inference; operational transcript is retained in the private run ledger.".into(),
+        authority: Some("read-only".into()),
+        done_when: None,
+        approvals: Vec::new(),
+        artifacts: Vec::new(),
+        reversible: Some(true),
+        context_sources: Vec::new(),
+        preexisting_changes: Vec::new(),
+        hooks: Vec::new(),
+        outcome: outcome.label().into(),
+        exit_code: outcome.exit_code(),
+        completion: None,
+        model_source: Some("ask".into()),
+        autonomy_level: Some("read-only".into()),
+        learning_candidates: Vec::new(),
+        user_corrections: Vec::new(),
+        failure_patterns: Vec::new(),
+        skill_draft_ref: None,
+        token_usage,
+    }
 }
 
 #[cfg(test)]

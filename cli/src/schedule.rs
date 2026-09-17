@@ -112,6 +112,11 @@ impl ScheduleService {
             let output = Command::new(std::env::current_exe().map_err(|error| error.to_string())?)
                 .args(["--cwd", &workspace.display().to_string(), "run", &item.task])
                 .current_dir(workspace)
+                .env("HII_EXTERNAL_REQUEST_ID", &item.id)
+                .env("HII_INTERACTION_ID", &item.id)
+                .env("HII_SURFACE", "schedule")
+                .env("HII_AUTHORITY", "workspace")
+                .env("HII_ACTOR", "scheduler")
                 .output()
                 .map_err(|error| error.to_string())?;
             self.event(

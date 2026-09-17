@@ -67,11 +67,43 @@ impl ConversationService {
         provider: Arc<dyn InferenceProvider>,
     ) -> Result<Generation> {
         validate_settings(&settings)?;
+        let runtime = self.store.runtime_root();
+        let mut ledger = hii_core::run_ledger::RunLedger::create_linked(
+            runtime,
+            "chat",
+            "chat",
+            Some(&request.conversation_id),
+            None,
+        )
+        .map_err(|error| anyhow!(error))?;
+        ledger
+            .set_model_route(
+                Some(&settings.model),
+                &settings.model,
+                &settings.model,
+                "durable chat settings",
+            )
+            .map_err(|error| anyhow!(error))?;
+        ledger
+            .set_authority("read-only")
+            .map_err(|error| anyhow!(error))?;
+        let ledger = Arc::new(ledger);
         let mut active = self
             .active
             .lock()
             .map_err(|_| anyhow!("Generation lock poisoned"))?;
         let generation = self.store.begin(&request, &settings)?;
+        ledger
+            .event(
+                "run.started",
+                serde_json::json!({
+                    "conversationId": generation.conversation_id,
+                    "generationId": generation.id,
+                    "model": settings.model,
+                    "endpoint": settings.endpoint
+                }),
+            )
+            .map_err(|error| anyhow!(error))?;
         let cancel = CancellationToken::new();
         active.insert(generation.id.clone(), cancel.clone());
         let service = self.clone();
@@ -79,7 +111,14 @@ impl ConversationService {
         tokio::spawn(async move {
             let mut parts = Vec::new();
             let outcome = service
-                .generate(&running, settings, provider, cancel.clone(), &mut parts)
+                .generate(
+                    &running,
+                    settings,
+                    provider,
+                    cancel.clone(),
+                    &mut parts,
+                    &ledger,
+                )
                 .await;
             let (status, reason, error) = match outcome {
                 Ok(reason) => ("completed", reason, None),
@@ -106,6 +145,36 @@ impl ConversationService {
             if let Err(error) = service.publish(&running.conversation_id) {
                 eprintln!("generation event failed: {error}");
             }
+            let visible = parts
+                .iter()
+                .filter_map(|part| match part {
+                    MessagePart::Text { text } => {
+                        Some(hii_core::run_ledger::redact_sensitive_text(text))
+                    }
+                    MessagePart::Reasoning { .. } => None,
+                })
+                .collect::<String>();
+            let _ = ledger.event(
+                "run.finished",
+                serde_json::json!({
+                    "status": status,
+                    "summary": visible,
+                    "error": error.clone()
+                }),
+            );
+            let _ = ledger.finish(serde_json::json!({
+                "schemaVersion": 2,
+                "id": ledger.envelope.run_id,
+                "status": status,
+                "conversationId": running.conversation_id,
+                "generationId": running.id,
+                "model": running.model,
+                "surface": ledger.envelope.surface,
+                "summary": visible,
+                "error": error,
+                "createdAtUnixMs": ledger.envelope.created_at_unix_ms,
+                "finishedAtUnixMs": now()
+            }));
         });
         Ok(generation)
     }
@@ -136,6 +205,7 @@ impl ConversationService {
         provider: Arc<dyn InferenceProvider>,
         cancel: CancellationToken,
         parts: &mut Vec<MessagePart>,
+        ledger: &hii_core::run_ledger::RunLedger,
     ) -> Result<Option<String>> {
         let snapshot = self.store.snapshot(&generation.conversation_id)?;
         // Resolve history through parent IDs; siblings never enter the prompt.
@@ -145,10 +215,35 @@ impl ConversationService {
             .find(|m| m.id == generation.message_id)
             .ok_or_else(|| anyhow!("Assistant missing"))?;
         let branch = crate::store::ancestry(&snapshot.messages, assistant.parent_id.as_deref())?;
-        let messages = branch
+        let messages: Vec<Message> = branch
             .iter()
             .filter_map(|id| snapshot.messages.iter().find(|m| &m.id == id).cloned())
             .collect();
+        let model_messages = messages
+            .iter()
+            .map(|message| {
+                serde_json::json!({
+                    "role": message.role,
+                    "parts": message.parts.iter().filter_map(|part| match part {
+                        MessagePart::Text { text } => Some(serde_json::json!({
+                            "type": "text",
+                            "text": hii_core::run_ledger::redact_sensitive_text(text)
+                        })),
+                        MessagePart::Reasoning { .. } => None,
+                    }).collect::<Vec<_>>()
+                })
+            })
+            .collect::<Vec<_>>();
+        ledger
+            .event(
+                "model.request",
+                serde_json::json!({
+                    "provider": "openai-compatible",
+                    "model": settings.model,
+                    "messages": model_messages
+                }),
+            )
+            .map_err(|error| anyhow!(error))?;
         self.sink.publish(snapshot);
         let mut stream = tokio::select! {
             biased;
@@ -158,6 +253,7 @@ impl ConversationService {
         let mut checkpoint = tokio::time::interval(Duration::from_millis(250));
         checkpoint.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut dirty = false;
+        let mut reasoning_chars = 0usize;
         let idle = tokio::time::sleep(Duration::from_secs(120));
         tokio::pin!(idle);
         loop {
@@ -173,8 +269,26 @@ impl ConversationService {
                 event = stream.next() => {
                     idle.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(120));
                     match event.ok_or_else(|| anyhow!("Provider ended without completion"))?? {
+                        InferenceEvent::Part(MessagePart::Reasoning { text }) => {
+                            // Hidden provider reasoning is operational metadata,
+                            // not durable conversation content.
+                            reasoning_chars += text.chars().count();
+                        },
                         InferenceEvent::Part(part) => { append(parts, part); dirty = true; },
-                        InferenceEvent::Completed { reason } => return Ok(reason),
+                        InferenceEvent::Completed { reason } => {
+                            let content = parts.iter().filter_map(|part| match part {
+                                MessagePart::Text { text } => Some(hii_core::run_ledger::redact_sensitive_text(text)),
+                                MessagePart::Reasoning { .. } => None,
+                            }).collect::<String>();
+                            ledger.event("model.response", serde_json::json!({
+                                "model": generation.model,
+                                "content": content,
+                                "finishReason": reason,
+                                "thinkingChars": reasoning_chars,
+                                "thinkingRetained": false
+                            })).map_err(|error| anyhow!(error))?;
+                            return Ok(reason)
+                        },
                     }
                 }
             }

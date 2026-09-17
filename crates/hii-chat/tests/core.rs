@@ -351,10 +351,10 @@ async fn orchestration_streams_committed_parts_and_cancellation_keeps_output() -
     let snapshot = wait_done(&store, &conversation).await?;
     assert_eq!(snapshot.generations[0].status, "completed");
     assert_eq!(
-        snapshot.messages[1].parts[1],
-        MessagePart::Text {
+        snapshot.messages[1].parts,
+        vec![MessagePart::Text {
             text: "hello world".into()
-        }
+        }]
     );
     assert!(sink
         .events
@@ -379,10 +379,10 @@ async fn orchestration_streams_committed_parts_and_cancellation_keeps_output() -
     let snapshot = wait_done(&store, &conversation).await?;
     assert_eq!(snapshot.generations[1].status, "cancelled");
     assert_eq!(
-        snapshot.messages[3].parts[1],
-        MessagePart::Text {
+        snapshot.messages[3].parts,
+        vec![MessagePart::Text {
             text: "hello".into()
-        }
+        }]
     );
     let requests = captured.lock().unwrap();
     assert_eq!(requests[1].messages.len(), 3);

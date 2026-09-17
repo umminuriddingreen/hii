@@ -58,6 +58,14 @@ struct Context {
     run_id: Option<String>,
     conversation_id: Option<String>,
     origin: Option<WriteOrigin>,
+    model_route: Option<ModelRoute>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelRoute {
+    pub requested: Option<String>,
+    pub routed: String,
+    pub reason: String,
 }
 
 fn context() -> &'static RwLock<Context> {
@@ -65,6 +73,7 @@ fn context() -> &'static RwLock<Context> {
         run_id: None,
         conversation_id: None,
         origin: None,
+        model_route: None,
     });
     &CONTEXT
 }
@@ -89,6 +98,16 @@ pub fn set_origin(origin: WriteOrigin) {
     }
 }
 
+pub fn set_model_route(requested: Option<&str>, routed: &str, reason: &str) {
+    if let Ok(mut context) = context().write() {
+        context.model_route = Some(ModelRoute {
+            requested: requested.map(str::to_owned),
+            routed: routed.to_string(),
+            reason: reason.to_string(),
+        });
+    }
+}
+
 pub fn run_id() -> Option<String> {
     context()
         .read()
@@ -101,6 +120,13 @@ pub fn conversation_id() -> Option<String> {
         .read()
         .ok()
         .and_then(|context| context.conversation_id.clone())
+}
+
+pub fn model_route() -> Option<ModelRoute> {
+    context()
+        .read()
+        .ok()
+        .and_then(|context| context.model_route.clone())
 }
 
 /// The active origin, defaulting to `Operator`.

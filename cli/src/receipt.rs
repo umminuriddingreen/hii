@@ -192,7 +192,7 @@ pub struct RunStore {
     pub id: String,
     pub dir: PathBuf,
     pub started_at_unix_ms: u128,
-    events: PathBuf,
+    ledger: hii_core::run_ledger::RunLedger,
 }
 
 pub struct ConversationStore {
@@ -206,6 +206,7 @@ impl ConversationStore {
         let id = new_store_id(now);
         let dir = runtime.join("conversations").join("cli");
         fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+        crate::run_context::set_conversation_id(&id);
         Ok(Self {
             id: id.clone(),
             events: dir.join(format!("{id}.jsonl")),
@@ -231,42 +232,60 @@ impl ConversationStore {
 
 impl RunStore {
     pub fn create(runtime: &Path) -> Result<Self, String> {
-        let now = crate::clock::unix_ms();
-        let id = new_store_id(now);
-        let dir = runtime.join("runs").join("cli").join(&id);
-        fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-        // Bind the ambient run identity at the moment it exists, so model-call
-        // traces and skill attribution can name the receipt they belong to
-        // without threading the id through every call site.
-        crate::run_context::set_run_id(&id);
+        let conversation_id = crate::run_context::conversation_id();
+        let mut ledger = hii_core::run_ledger::RunLedger::create_linked(
+            runtime,
+            "cli",
+            "cli",
+            conversation_id.as_deref(),
+            None,
+        )?;
+        if let Some(route) = crate::run_context::model_route() {
+            ledger.set_model_route(
+                route.requested.as_deref(),
+                &route.routed,
+                &route.routed,
+                &route.reason,
+            )?;
+        }
+        let id = ledger.envelope.run_id.clone();
+        let dir = ledger.dir.clone();
+        let started_at_unix_ms = ledger.envelope.created_at_unix_ms;
         Ok(Self {
             id,
-            started_at_unix_ms: now,
-            events: dir.join("events.jsonl"),
+            started_at_unix_ms,
             dir,
+            ledger,
         })
+    }
+
+    pub fn envelope(&self) -> &hii_core::run_ledger::RunEnvelopeV2 {
+        &self.ledger.envelope
+    }
+
+    pub fn set_model_route(
+        &mut self,
+        requested: Option<&str>,
+        routed: &str,
+        served: &str,
+        reason: &str,
+    ) -> Result<(), String> {
+        self.ledger
+            .set_model_route(requested, routed, served, reason)
+    }
+
+    pub fn set_authority(&mut self, authority: &str) -> Result<(), String> {
+        self.ledger.set_authority(authority)
     }
 
     /// Location of this run's append-only event log.
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn events_path(&self) -> &Path {
-        &self.events
+        self.ledger.events_path()
     }
 
     pub fn event(&self, kind: &str, data: Value) -> Result<(), String> {
-        let entry = serde_json::json!({
-            "ts_unix_ms": crate::clock::unix_ms(),
-            "run_id": self.id,
-            "kind": kind,
-            "data": data
-        });
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.events)
-            .map_err(|error| error.to_string())?;
-        serde_json::to_writer(&mut file, &entry).map_err(|error| error.to_string())?;
-        file.write_all(b"\n").map_err(|error| error.to_string())
+        self.ledger.event(kind, data)
     }
 
     pub fn finish(&self, runtime: &Path, receipt: &Receipt) -> Result<PathBuf, String> {
@@ -285,7 +304,8 @@ fn write_receipt(
     receipt: &Receipt,
 ) -> Result<PathBuf, String> {
     let receipt_path = dir.join("receipt.json");
-    crate::store::write_json_private_atomic(&receipt_path, receipt)?;
+    let value = bounded_receipt_value(runtime, dir, receipt)?;
+    crate::store::write_json_private_atomic(&receipt_path, &value)?;
     // The global pointer stays: cli/scripts/local-model-eval.sh and
     // scripts/hii-activation-smoke.mjs both read it.
     let latest = runtime.join("runs").join("cli").join("latest");
@@ -298,6 +318,92 @@ fn write_receipt(
         crate::store::write_private_atomic(&scoped.join("latest"), format!("{id}\n").as_bytes())?;
     }
     Ok(receipt_path)
+}
+
+fn bounded_receipt_value(runtime: &Path, dir: &Path, receipt: &Receipt) -> Result<Value, String> {
+    let mut complete = serde_json::to_value(receipt).map_err(|error| error.to_string())?;
+    attach_ledger_metadata(dir, &mut complete)?;
+    let original = serde_json::to_vec(&complete).map_err(|error| error.to_string())?;
+    if original.len() <= hii_core::run_ledger::RECEIPT_MAX_BYTES {
+        return Ok(complete);
+    }
+    let blob =
+        hii_core::run_ledger::store_blob(runtime, "application/vnd.hii.receipt+json", &original)?;
+    let mut compact = receipt.clone();
+    compact.goal = clipped(&compact.goal, 16_384);
+    compact.summary = clipped(&compact.summary, 16_384);
+    compact.git_status = clipped(&compact.git_status, 65_536);
+    compact.risk = clipped(&compact.risk, 8_192);
+    compact.review = compact.review.map(|value| clipped(&value, 8_192));
+    compact.next = compact.next.map(|value| clipped(&value, 4_096));
+    compact.verification.truncate(128);
+    for check in &mut compact.verification {
+        check.command = clipped(&check.command, 2_048);
+        check.output = clipped(&check.output, 4_096);
+    }
+    compact.hooks.truncate(128);
+    for hook in &mut compact.hooks {
+        hook.command = clipped(&hook.command, 2_048);
+        hook.output = clipped(&hook.output, 2_048);
+    }
+    for values in [
+        &mut compact.approvals,
+        &mut compact.artifacts,
+        &mut compact.context_sources,
+        &mut compact.preexisting_changes,
+        &mut compact.learning_candidates,
+        &mut compact.user_corrections,
+        &mut compact.failure_patterns,
+    ] {
+        values.truncate(256);
+        for value in values {
+            *value = clipped(value, 2_048);
+        }
+    }
+    let mut value = serde_json::to_value(&compact).map_err(|error| error.to_string())?;
+    attach_ledger_metadata(dir, &mut value)?;
+    value["contentBlobs"] = serde_json::json!([blob]);
+    value["receiptCompacted"] = serde_json::json!(true);
+    let bytes = serde_json::to_vec(&value).map_err(|error| error.to_string())?;
+    if bytes.len() > hii_core::run_ledger::RECEIPT_MAX_BYTES {
+        return Err(format!(
+            "compact HII receipt is still {} bytes (limit {})",
+            bytes.len(),
+            hii_core::run_ledger::RECEIPT_MAX_BYTES
+        ));
+    }
+    Ok(value)
+}
+
+fn attach_ledger_metadata(dir: &Path, value: &mut Value) -> Result<(), String> {
+    let run_path = dir.join("run.json");
+    if let Ok(bytes) = fs::read(&run_path) {
+        value["run"] = serde_json::from_slice(&bytes).map_err(|error| {
+            format!(
+                "invalid HII run envelope at {}: {error}",
+                run_path.display()
+            )
+        })?;
+    }
+    value["eventChainRoot"] = serde_json::to_value(hii_core::run_ledger::event_chain_root(
+        &dir.join("events.jsonl"),
+    )?)
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn clipped(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_string();
+    }
+    let mut end = max_bytes.min(value.len());
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!(
+        "{}\n[truncated; full value stored in contentBlobs]",
+        &value[..end]
+    )
 }
 
 // Retain the sortable timestamp prefix and add independent identity for runs

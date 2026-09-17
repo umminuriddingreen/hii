@@ -14,6 +14,7 @@
 // transport that canvas sync is meant to reuse.
 
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -145,6 +146,15 @@ class Host {
       '--token-budget', '4096',
       'ask', '--jsonl', transcript,
     ];
+    const runId = randomUUID();
+    const ledgerEnv = {
+      HII_RUN_ID: runId,
+      HII_SURFACE: 'remote-host',
+      HII_EXTERNAL_REQUEST_ID: requestId,
+      HII_INTERACTION_ID: requestId,
+      HII_AUTHORITY: 'read-only',
+      HII_ACTOR: 'operator',
+    };
     const child = spawn(this.config.hii, args, {
       cwd: this.config.chatCwd,
       env: process.platform === 'win32'
@@ -154,16 +164,21 @@ class Host {
             APPDATA: process.env.APPDATA ?? '',
             LOCALAPPDATA: process.env.LOCALAPPDATA ?? '',
             SystemRoot: process.env.SystemRoot ?? 'C:\\Windows',
-            PATH: process.env.PATH ?? ''
+            PATH: process.env.PATH ?? '',
+            ...ledgerEnv,
           }
-        : { HOME, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin' },
+        : {
+            HOME,
+            PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
+            ...ledgerEnv,
+          },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     this.chatProcess = child;
     this.chatRequestId = requestId;
     let stdout = '';
     let stderr = '';
-    this.sendJSON({ t: 'chat.started', requestId, provider: 'local-hii', cwd: this.config.chatCwd });
+    this.sendJSON({ t: 'chat.started', requestId, runId, provider: 'local-hii', cwd: this.config.chatCwd });
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString('utf8');
       let index;

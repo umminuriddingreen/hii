@@ -332,11 +332,21 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
                 .timeout_connect(Duration::from_secs(1))
                 .timeout_read(Duration::from_secs(2))
                 .build();
-            let response: Value = self.authorize(agent.get(&format!("{}/health", self.base_url)))?
-                .call().map_err(format_ureq)?.into_json()
+            let response: Value = self
+                .authorize(agent.get(&format!("{}/health", self.base_url)))?
+                .call()
+                .map_err(format_ureq)?
+                .into_json()
                 .map_err(|error| format!("invalid native runner health response: {error}"))?;
-            return Ok(Some(response.get("loaded_model").and_then(Value::as_str)
-                .filter(|name| !name.is_empty()).map(str::to_string).into_iter().collect()));
+            return Ok(Some(
+                response
+                    .get("loaded_model")
+                    .and_then(Value::as_str)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_string)
+                    .into_iter()
+                    .collect(),
+            ));
         }
         if self.provider != ModelProvider::Ollama {
             return Ok(None);
@@ -410,8 +420,9 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             }
             ModelProvider::OxAlphaWeb => self.chat_website(model, &messages),
         };
-        if let Ok(chat) = &result {
-            log_llm_request(model, self.provider, &chat.usage);
+        match &result {
+            Ok(chat) => log_llm_request(model, self.provider, &chat.usage),
+            Err(error) => log_llm_failure(model, self.provider, error),
         }
         result
     }
@@ -585,8 +596,9 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
     ) {
         if self.provider == ModelProvider::OxAlphaWeb {
             let result = run_ox_alpha_browser(model, messages, cancel, Some(&sender));
-            if let Ok(result) = &result {
-                log_llm_request(model, self.provider, &result.usage);
+            match &result {
+                Ok(result) => log_llm_request(model, self.provider, &result.usage),
+                Err(error) => log_llm_failure(model, self.provider, error),
             }
             let _ = sender.send(ChatStreamEvent::Done(result));
             return;
@@ -622,6 +634,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         {
             Ok(response) => response,
             Err(error) => {
+                log_llm_failure(model, self.provider, &error);
                 let _ = sender.send(ChatStreamEvent::Done(Err(error)));
                 return;
             }
@@ -637,30 +650,32 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         let mut content_repetition = RepetitionGuard::default();
         for line in BufReader::new(response.into_reader()).lines() {
             if cancel.is_cancelled() {
+                log_llm_failure(model, self.provider, CANCELLED);
                 let _ = sender.send(ChatStreamEvent::Done(Err(CANCELLED.into())));
                 return;
             }
             let line = match line {
                 Ok(line) => line,
                 Err(error) => {
-                    let _ = sender.send(ChatStreamEvent::Done(Err(format!(
-                        "failed to read Ollama stream: {error}"
-                    ))));
+                    let error = format!("failed to read Ollama stream: {error}");
+                    log_llm_failure(model, self.provider, &error);
+                    let _ = sender.send(ChatStreamEvent::Done(Err(error)));
                     return;
                 }
             };
             let chunk: ChatResponse = match serde_json::from_str(&line) {
                 Ok(chunk) => chunk,
                 Err(error) => {
-                    let _ = sender.send(ChatStreamEvent::Done(Err(format!(
-                        "invalid Ollama stream response: {error}"
-                    ))));
+                    let error = format!("invalid Ollama stream response: {error}");
+                    log_llm_failure(model, self.provider, &error);
+                    let _ = sender.send(ChatStreamEvent::Done(Err(error)));
                     return;
                 }
             };
             if !chunk.message.thinking.is_empty() {
                 thinking.push_str(&chunk.message.thinking);
                 if thinking_repetition.observe(&chunk.message.thinking) {
+                    log_llm_failure(model, self.provider, "model loop detected in thinking");
                     let _ = sender.send(ChatStreamEvent::Done(Err(
                         "MODEL LOOP DETECTED — the current generation repeated the same substantial block three times. The session is preserved; revise or retry the request."
                             .into(),
@@ -671,6 +686,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             }
             if !chunk.message.content.is_empty() {
                 if content_repetition.observe(&chunk.message.content) {
+                    log_llm_failure(model, self.provider, "model loop detected in content");
                     let _ = sender.send(ChatStreamEvent::Done(Err(
                         "MODEL LOOP DETECTED — the current generation repeated the same substantial block three times. The session is preserved; revise or retry the request."
                             .into(),
@@ -741,13 +757,15 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         let response = match request {
             Ok(response) => response,
             Err(error) => {
+                log_llm_failure(model, self.provider, &error);
                 let _ = sender.send(ChatStreamEvent::Done(Err(error)));
                 return;
             }
         };
         let result = consume_openai_sse(response, started, cancel, Some(&sender));
-        if let Ok(result) = &result {
-            log_llm_request(model, self.provider, &result.usage);
+        match &result {
+            Ok(result) => log_llm_request(model, self.provider, &result.usage),
+            Err(error) => log_llm_failure(model, self.provider, error),
         }
         let _ = sender.send(ChatStreamEvent::Done(result));
     }
@@ -1320,11 +1338,17 @@ fn log_llm_request(model: &str, provider: ModelProvider, usage: &ChatUsage) {
     if std::fs::create_dir_all(&dir).is_err() {
         return;
     }
+    let route = crate::run_context::model_route();
     let mut entry = json!({
         "ts": chrono_now(),
         "source": "hii-cli",
         "provider": provider.id(),
         "model": model,
+        "requested_model": route.as_ref().and_then(|route| route.requested.as_deref()).unwrap_or(model),
+        "routed_model": route.as_ref().map(|route| route.routed.as_str()).unwrap_or(model),
+        "served_model": model,
+        "routing_reason": route.as_ref().map(|route| route.reason.as_str()).unwrap_or("selected by HII provider routing"),
+        "status": "completed",
         "prompt_tokens": usage.prompt_tokens,
         "completion_tokens": usage.completion_tokens,
         "total_duration_ms": usage.total_duration_ms,
@@ -1345,6 +1369,49 @@ fn log_llm_request(model: &str, provider: ModelProvider, usage: &ChatUsage) {
         .open(dir.join("llm_requests.jsonl"))
     {
         let _ = writeln!(file, "{entry}");
+        let _ = file.sync_data();
+    }
+}
+
+fn log_llm_failure(model: &str, provider: ModelProvider, error: &str) {
+    use std::io::Write;
+    let runtime = std::env::var_os("HII_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| crate::config::home_dir().ok().map(|home| home.join(".hii")));
+    let Some(runtime) = runtime else {
+        return;
+    };
+    let dir = runtime.join("traces");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let route = crate::run_context::model_route();
+    let mut entry = json!({
+        "ts": chrono_now(),
+        "source": "hii-cli",
+        "provider": provider.id(),
+        "model": model,
+        "requested_model": route.as_ref().and_then(|route| route.requested.as_deref()).unwrap_or(model),
+        "routed_model": route.as_ref().map(|route| route.routed.as_str()).unwrap_or(model),
+        "served_model": Value::Null,
+        "routing_reason": route.as_ref().map(|route| route.reason.as_str()).unwrap_or("selected by HII provider routing"),
+        "status": "failed",
+        "error": crate::receipt::redact_text(error),
+        "origin": crate::run_context::origin().label(),
+    });
+    if let Some(run_id) = crate::run_context::run_id() {
+        entry["receipt_id"] = json!(run_id);
+    }
+    if let Some(conversation_id) = crate::run_context::conversation_id() {
+        entry["conversation_id"] = json!(conversation_id);
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("llm_requests.jsonl"))
+    {
+        let _ = writeln!(file, "{entry}");
+        let _ = file.sync_data();
     }
 }
 

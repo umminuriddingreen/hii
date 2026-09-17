@@ -22,7 +22,7 @@ use crate::{
     tools::Toolbelt,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::{
     collections::{HashSet, VecDeque},
     io::{self, IsTerminal, Write},
@@ -104,12 +104,6 @@ pub(crate) fn operator_stop(error: &str) -> Option<OperatorStop> {
 }
 const REASONING_BUDGET_RETRY: &str = "adaptive reasoning budget ended";
 const ADAPTIVE_REASONING_MAX_CHARS: usize = 4_096;
-/// Bound on reasoning kept in the conversation record.
-///
-/// Separate from [`ADAPTIVE_REASONING_MAX_CHARS`], which bounds generation: a
-/// turn can legitimately reason past the budget, and the record needs enough of
-/// it to replay the turn rather than summarize it.
-const MODEL_THINKING_RECORD_MAX_CHARS: usize = 16_384;
 const ADAPTIVE_REASONING_MAX_TIME: Duration = Duration::from_secs(12);
 
 fn clean_final_output(message: &str, raw_streamed: bool, projected: &str) -> String {
@@ -411,10 +405,13 @@ impl Conversation {
             Err(error) => return Err(error),
         };
         let model_pinned = requested_model.is_some() || env_model_present;
-        let model = if model_pinned { model } else {
+        let model = if model_pinned {
+            model
+        } else {
             let loaded = ollama.running_models().ok().flatten().unwrap_or_default();
             adaptive_model_choice(&model, &loaded, &installed, None)
         };
+        crate::run_context::set_model_route(requested, &model, "conversation selection");
         let store = ConversationStore::create(&paths.runtime)?;
         let hooks = HookRunner::load(
             &paths.runtime,
@@ -574,13 +571,36 @@ impl Conversation {
             attachment_payload.images,
         ));
 
-        let mut run: Option<RunStore> = None;
-        // A conversational tool turn used to create its receipt only after a
-        // clean final response. Provider errors, interrupts, and step ceilings
-        // therefore left a plausible-looking event log with no result for
-        // `hii proof` to inspect. Claim a draft as soon as the first tool run
-        // exists; RunGuard rewrites it on every non-happy exit.
-        let mut run_guard: Option<RunGuard> = None;
+        // Every model turn is a run, including a direct no-tools answer. This
+        // makes provider failures and ordinary conversation equally joinable
+        // to one conversation, trace, event chain, and receipt.
+        let mut created = RunStore::create(&self.paths.runtime)?;
+        crate::run_context::set_run_id(&created.id);
+        created.set_authority(self.authority.label())?;
+        created.event(
+            "run.started",
+            json!({
+                "goal": redact_text(input),
+                "workspace": self.tools.workspace(),
+                "model": self.model,
+                "conversation": self.store.id,
+                "surface": created.envelope().surface
+            }),
+        )?;
+        let mut run_guard = Some(RunGuard::start(
+            &self.paths.runtime,
+            &created.dir,
+            &created.id,
+            conversation_draft_receipt(
+                &created,
+                input,
+                self.tools.workspace(),
+                &self.model,
+                self.public_test,
+                self.authority,
+            ),
+        )?);
+        let run = Some(created);
         let mut verification = Vec::new();
         let mut used_tools = false;
         let action_requested = direct_action_request(input);
@@ -601,9 +621,15 @@ impl Conversation {
             steps += 1;
             let step = steps;
             let can_stream_reply = !needs_verification(mutation_epoch, verified_epoch);
-            if self.action_failures > 0 { self.select_adaptive_model(input)?; }
-            let raw = match self.call_activity("thinking", self.messages.clone(), can_stream_reply)
-            {
+            if self.action_failures > 0 {
+                self.select_adaptive_model(input)?;
+            }
+            let raw = match self.call_activity(
+                "thinking",
+                self.messages.clone(),
+                can_stream_reply,
+                run.as_ref(),
+            ) {
                 Ok(result) => result.content,
                 Err(error) if error == STEERING_RESTART => {
                     if let Some(steering) = self.steering.take() {
@@ -618,7 +644,16 @@ impl Conversation {
                         steps = steps.saturating_sub(1);
                         continue;
                     }
-                    return Err(error);
+                    return self.fail_backend_run(
+                        run,
+                        run_guard,
+                        input,
+                        steps,
+                        &error,
+                        Outcome::Aborted,
+                        verification,
+                        hook_records,
+                    );
                 }
                 Err(error) if error == REASONING_BUDGET_RETRY => {
                     self.force_action_once = true;
@@ -632,8 +667,31 @@ impl Conversation {
                     steps = steps.saturating_sub(1);
                     continue;
                 }
-                Err(error) if error == OPERATOR_INTERRUPTED => return Err(error),
-                Err(error) => return Err(error),
+                Err(error) if error == OPERATOR_INTERRUPTED => {
+                    return self.fail_backend_run(
+                        run,
+                        run_guard,
+                        input,
+                        steps,
+                        &error,
+                        Outcome::Interrupted,
+                        verification,
+                        hook_records,
+                    );
+                }
+                Err(error) => {
+                    let outcome = crate::receipt::classify_error(&error);
+                    return self.fail_backend_run(
+                        run,
+                        run_guard,
+                        input,
+                        steps,
+                        &error,
+                        outcome,
+                        verification,
+                        hook_records,
+                    );
+                }
             };
             if let Some(steering) = self.steering.take() {
                 rejected_actions.reset();
@@ -723,8 +781,19 @@ impl Conversation {
                             self.messages.push(Message::user("The operator requested an action. Inspect and execute an available capability now, then verify the result. Do not offer to act or claim completion without a tool result."));
                             continue;
                         }
-                        let message = "No action was taken. HII did not execute a tool for this request.".to_string();
-                        self.store.event("assistant.message", json!({ "content": &message }))?;
+                        let message =
+                            "No action was taken. HII did not execute a tool for this request."
+                                .to_string();
+                        self.finish_backend_run(
+                            run,
+                            run_guard,
+                            input,
+                            step,
+                            &message,
+                            BackendOutcome::stopped(Outcome::Aborted, verification, hook_records),
+                        )?;
+                        self.store
+                            .event("assistant.message", json!({ "content": &message }))?;
                         return Ok(message);
                     }
                     let message = redact_text(plain_message(&raw).unwrap_or_default());
@@ -804,37 +873,34 @@ impl Conversation {
                     self.messages.push(Message::user("The operator requested an action. Inspect and execute an available capability now, then verify the result. Do not offer to act or claim completion without a tool result."));
                     continue;
                 }
-                let message = "No action was taken. HII did not execute a tool for this request.".to_string();
-                self.store.event("assistant.message", json!({ "content": &message }))?;
+                let message =
+                    "No action was taken. HII did not execute a tool for this request.".to_string();
+                self.finish_backend_run(
+                    run,
+                    run_guard,
+                    input,
+                    step,
+                    &message,
+                    BackendOutcome::stopped(Outcome::Aborted, verification, hook_records),
+                )?;
+                self.store
+                    .event("assistant.message", json!({ "content": &message }))?;
                 return Ok(message);
             }
             match action {
                 Action::Batch { calls, .. } => {
                     used_tools = true;
-                    if run.is_none() {
-                        let created = RunStore::create(&self.paths.runtime)?;
-                        created.event("run.started", json!({
-                            "goal": redact_text(input),
-                            "workspace": self.tools.workspace(),
-                            "model": self.model,
-                            "conversation": self.store.id
-                        }))?;
-                        run_guard = Some(RunGuard::start(
-                            &self.paths.runtime,
-                            &created.dir,
-                            &created.id,
-                            conversation_draft_receipt(
-                                &created, input, self.tools.workspace(), &self.model,
-                                self.public_test, self.authority,
-                            ),
-                        )?);
-                        run = Some(created);
-                    }
                     self.store.event("batch.started", json!({
                         "step": step, "calls": calls.iter().map(|call| &call.id).collect::<Vec<_>>()
                     }))?;
                     let progress = matches!(self.thinking_mode, ThinkingMode::Conversation)
-                        .then(|| crate::tui::TransientStatus::start(&format!("Checking {} sources", calls.len()))).flatten();
+                        .then(|| {
+                            crate::tui::TransientStatus::start(&format!(
+                                "Checking {} sources",
+                                calls.len()
+                            ))
+                        })
+                        .flatten();
                     let results = crate::agent::execute_read_batch(&self.tools, &calls);
                     drop(progress);
                     let mut feedback = Vec::new();
@@ -842,11 +908,19 @@ impl Conversation {
                         let output = redact_text(&result.output);
                         let data = json!({"step": step, "call_id": id, "ok": result.ok, "output": output, "verification": false});
                         self.store.event("tool.result", data.clone())?;
-                        if let Some(run) = &run { run.event("tool.result", data)?; }
-                        feedback.push(format!("[{id} {}] {output}", if result.ok { "ok" } else { "error" }));
+                        if let Some(run) = &run {
+                            run.event("tool.result", data)?;
+                        }
+                        feedback.push(format!(
+                            "[{id} {}] {output}",
+                            if result.ok { "ok" } else { "error" }
+                        ));
                     }
                     self.messages.push(Message::assistant(raw));
-                    self.messages.push(Message::user(format!("BATCH RESULTS (same order):\n{}", feedback.join("\n\n"))));
+                    self.messages.push(Message::user(format!(
+                        "BATCH RESULTS (same order):\n{}",
+                        feedback.join("\n\n")
+                    )));
                 }
                 Action::Message { message, .. } => {
                     if needs_verification(mutation_epoch, verified_epoch) {
@@ -989,35 +1063,10 @@ impl Conversation {
                         rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                         continue;
                     }
-                    if run.is_none() {
-                        let created = RunStore::create(&self.paths.runtime)?;
-                        created.event(
-                            "run.started",
-                            json!({
-                                "goal": redact_text(input),
-                                "workspace": self.tools.workspace(),
-                                "model": self.model,
-                                "conversation": self.store.id
-                            }),
-                        )?;
-                        run_guard = Some(RunGuard::start(
-                            &self.paths.runtime,
-                            &created.dir,
-                            &created.id,
-                            conversation_draft_receipt(
-                                &created,
-                                input,
-                                self.tools.workspace(),
-                                &self.model,
-                                self.public_test,
-                                self.authority,
-                            ),
-                        )?);
-                        run = Some(created);
-                    }
                     self.show_tool_start(step, &label, target);
                     let progress = matches!(self.thinking_mode, ThinkingMode::Conversation)
-                        .then(|| crate::tui::TransientStatus::start("Using a connected tool")).flatten();
+                        .then(|| crate::tui::TransientStatus::start("Using a connected tool"))
+                        .flatten();
                     let pre_hooks = self.hooks.fire(
                         HookEvent::PreTool,
                         Some(&label),
@@ -1160,7 +1209,14 @@ impl Conversation {
                     );
                     self.show_tool_start(step, &tool, &target);
                     let progress = matches!(self.thinking_mode, ThinkingMode::Conversation)
-                        .then(|| crate::tui::TransientStatus::start(if tool_is_observation(&tool) { "Checking" } else { "Acting" })).flatten();
+                        .then(|| {
+                            crate::tui::TransientStatus::start(if tool_is_observation(&tool) {
+                                "Checking"
+                            } else {
+                                "Acting"
+                            })
+                        })
+                        .flatten();
                     let observation = tool_is_observation(&tool);
                     let observation_key = observation.then(|| {
                         observation_signature(
@@ -1352,32 +1408,6 @@ impl Conversation {
                         ));
                         rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                         continue;
-                    }
-                    if run.is_none() {
-                        let created = RunStore::create(&self.paths.runtime)?;
-                        created.event(
-                            "run.started",
-                            json!({
-                                "goal": redact_text(input),
-                                "workspace": self.tools.workspace(),
-                                "model": self.model,
-                                "conversation": self.store.id
-                            }),
-                        )?;
-                        run_guard = Some(RunGuard::start(
-                            &self.paths.runtime,
-                            &created.dir,
-                            &created.id,
-                            conversation_draft_receipt(
-                                &created,
-                                input,
-                                self.tools.workspace(),
-                                &self.model,
-                                self.public_test,
-                                self.authority,
-                            ),
-                        )?);
-                        run = Some(created);
                     }
                     let pre_hooks = self.hooks.fire(
                         HookEvent::PreTool,
@@ -1633,21 +1663,19 @@ impl Conversation {
             }
         }
 
-        if used_tools {
-            let message = "The operator step ceiling was reached before I could finish cleanly.";
-            if let Some(guard) = run_guard.as_mut() {
-                guard.checkpoint_error(Outcome::StepCeiling, message, steps)?;
-            }
-            self.finish_backend_run(
-                run,
-                run_guard,
-                input,
-                steps,
-                message,
-                BackendOutcome::stopped(Outcome::StepCeiling, verification, hook_records),
-            )?;
+        let message = "The operator step ceiling was reached before I could finish cleanly.";
+        if let Some(guard) = run_guard.as_mut() {
+            guard.checkpoint_error(Outcome::StepCeiling, message, steps)?;
         }
-        Ok("The operator step ceiling was reached before I could finish cleanly.".into())
+        self.finish_backend_run(
+            run,
+            run_guard,
+            input,
+            steps,
+            message,
+            BackendOutcome::stopped(Outcome::StepCeiling, verification, hook_records),
+        )?;
+        Ok(message.into())
     }
 
     pub fn compact(&mut self) -> Result<String, String> {
@@ -2289,8 +2317,95 @@ impl Conversation {
             ),
             Message::user(self.overview()),
         ];
-        let raw = self.ollama.chat_text(&advisor_model, &messages)?;
-        let (route, action, command, reason) = advisor_suggestion(&raw)?;
+        let mut ledger = hii_core::run_ledger::RunLedger::create_linked(
+            &self.paths.runtime,
+            "cli",
+            "cli-auto-advisor",
+            Some(&self.store.id),
+            None,
+        )?;
+        ledger.set_model_route(
+            configured.as_deref(),
+            &advisor_model,
+            &advisor_model,
+            "auto advisor selection",
+        )?;
+        ledger.set_authority("read-only")?;
+        crate::run_context::set_run_id(&ledger.envelope.run_id);
+        crate::run_context::set_model_route(
+            configured.as_deref(),
+            &advisor_model,
+            "auto advisor selection",
+        );
+        ledger.event(
+            "model.request",
+            json!({
+                "phase": "auto-advisor",
+                "requestedModel": configured,
+                "routedModel": advisor_model,
+                "servedModel": advisor_model,
+                "routingReason": "auto advisor selection",
+                "messages": messages.iter().map(|message| json!({
+                    "role": message.role,
+                    "content": redact_text(&message.content),
+                    "imageCount": message.images.len()
+                })).collect::<Vec<_>>()
+            }),
+        )?;
+        let raw = match self.ollama.chat_text(&advisor_model, &messages) {
+            Ok(raw) => raw,
+            Err(error) => {
+                ledger.event(
+                    "model.failed",
+                    json!({"phase": "auto-advisor", "error": redact_text(&error)}),
+                )?;
+                ledger.finish(json!({
+                    "schemaVersion": 2,
+                    "id": ledger.envelope.run_id,
+                    "status": "failed",
+                    "surface": ledger.envelope.surface,
+                    "conversationId": self.store.id,
+                    "model": advisor_model,
+                    "summary": format!("Auto Advisor failed: {}", redact_text(&error))
+                }))?;
+                return Err(error);
+            }
+        };
+        ledger.event(
+            "model.response",
+            json!({
+                "phase": "auto-advisor",
+                "model": advisor_model,
+                "content": redact_text(&raw)
+            }),
+        )?;
+        let parsed = advisor_suggestion(&raw);
+        let (status, summary) = match &parsed {
+            Ok(_) => (
+                "completed",
+                "Auto Advisor suggestion completed.".to_string(),
+            ),
+            Err(error) => {
+                ledger.event(
+                    "protocol.failed",
+                    json!({"phase": "auto-advisor", "error": redact_text(error)}),
+                )?;
+                (
+                    "failed",
+                    format!("Auto Advisor response was invalid: {}", redact_text(error)),
+                )
+            }
+        };
+        ledger.finish(json!({
+            "schemaVersion": 2,
+            "id": ledger.envelope.run_id,
+            "status": status,
+            "surface": ledger.envelope.surface,
+            "conversationId": self.store.id,
+            "model": advisor_model,
+            "summary": summary
+        }))?;
+        let (route, action, command, reason) = parsed?;
         let (route, action) = (route.as_str(), action.as_str());
         let reason = reason.as_str();
         self.store.event(
@@ -2793,16 +2908,41 @@ impl Conversation {
     }
 
     fn select_adaptive_model(&mut self, _input: &str) -> Result<(), String> {
-        if self.model_pinned || self.public_test || self.ollama.provider() != crate::config::ModelProvider::Native {
+        if self.model_pinned
+            || self.public_test
+            || self.ollama.provider() != crate::config::ModelProvider::Native
+        {
             return Ok(());
         }
-        let loaded = self.ollama.running_models().ok().flatten().unwrap_or_default();
-        let hard = self.reasoning_mode == ReasoningMode::Deep || self.plan_mode
+        let loaded = self
+            .ollama
+            .running_models()
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let hard = self.reasoning_mode == ReasoningMode::Deep
+            || self.plan_mode
             || self.action_failures > 0;
-        let deliberate = hard.then(|| configured_local_tier_model(&self.paths.repo, 2)).flatten();
-        let selected = adaptive_model_choice(&self.model, &loaded, &self.installed_models, deliberate.as_deref());
+        let deliberate = hard
+            .then(|| configured_local_tier_model(&self.paths.repo, 2))
+            .flatten();
+        let selected = adaptive_model_choice(
+            &self.model,
+            &loaded,
+            &self.installed_models,
+            deliberate.as_deref(),
+        );
         if selected != self.model {
             let previous = std::mem::replace(&mut self.model, selected.to_string());
+            crate::run_context::set_model_route(
+                Some(&previous),
+                &self.model,
+                if hard {
+                    "adaptive deliberate"
+                } else {
+                    "adaptive loaded"
+                },
+            );
             self.sync_runtime_identity()?;
             self.store.event("conversation.model_routed", json!({
                 "from": previous, "to": self.model, "reason": if hard { "deliberate" } else { "loaded" }
@@ -2848,7 +2988,11 @@ impl Conversation {
             ),
             Message::user(diff),
         ];
-        let review = redact_text(&self.call_activity("reviewing", messages, true)?.content);
+        let review = redact_text(
+            &self
+                .call_activity("reviewing", messages, true, None)?
+                .content,
+        );
         self.store
             .event("conversation.review", json!({ "content": review }))?;
         Ok(review)
@@ -2860,7 +3004,11 @@ impl Conversation {
             return Err("usage: /side <question>".into());
         }
         let messages = side_context(&self.messages, prompt);
-        let answer = redact_text(&self.call_activity("side chat", messages, true)?.content);
+        let answer = redact_text(
+            &self
+                .call_activity("side chat", messages, true, None)?
+                .content,
+        );
         self.store.event(
             "conversation.side",
             json!({ "prompt": redact_text(prompt), "answer": redact_text(&answer) }),
@@ -2892,7 +3040,8 @@ impl Conversation {
                 json!({ "authority": next.label() }),
             )?;
             self.authority = next;
-            self.tools.set_personal_local(next == Authority::PersonalLocal);
+            self.tools
+                .set_personal_local(next == Authority::PersonalLocal);
             self.sync_authority_context();
             self.sync_mcp_context();
         }
@@ -2994,9 +3143,14 @@ impl Conversation {
         self.goal = session_goal(&raw);
         self.plan_mode = session_plan_mode(&raw);
         self.authority = session_authority(&raw).unwrap_or_else(|| {
-            if cfg!(target_os = "macos") { Authority::PersonalLocal } else { Authority::Workspace }
+            if cfg!(target_os = "macos") {
+                Authority::PersonalLocal
+            } else {
+                Authority::Workspace
+            }
         });
-        self.tools.set_personal_local(self.authority == Authority::PersonalLocal);
+        self.tools
+            .set_personal_local(self.authority == Authority::PersonalLocal);
         self.sync_goal_context();
         self.sync_plan_context();
         self.sync_authority_context();
@@ -3062,7 +3216,7 @@ impl Conversation {
             ];
             redact_text(
                 &self
-                    .call_activity("compacting", summary_messages, true)?
+                    .call_activity("compacting", summary_messages, true, None)?
                     .content,
             )
         };
@@ -3129,9 +3283,56 @@ impl Conversation {
         phase: &str,
         messages: Vec<Message>,
         show_content: bool,
+        run: Option<&RunStore>,
     ) -> Result<ChatResult, String> {
         let ollama = self.ollama.clone();
         let model = self.model.clone();
+        let mut owned_run = if run.is_none() {
+            let mut ledger = hii_core::run_ledger::RunLedger::create_linked(
+                &self.paths.runtime,
+                "cli",
+                "cli-conversation-activity",
+                Some(&self.store.id),
+                None,
+            )?;
+            ledger.set_model_route(
+                Some(&model),
+                &model,
+                &model,
+                &format!("conversation {phase}"),
+            )?;
+            ledger.set_authority("read-only")?;
+            crate::run_context::set_run_id(&ledger.envelope.run_id);
+            Some(ledger)
+        } else {
+            None
+        };
+        if let Some(run) = run {
+            crate::run_context::set_run_id(&run.id);
+        }
+        let transcript = messages
+            .iter()
+            .map(|message| {
+                json!({
+                    "role": message.role,
+                    "content": redact_text(&message.content),
+                    "imageCount": message.images.len()
+                })
+            })
+            .collect::<Vec<_>>();
+        activity_event(
+            run,
+            owned_run.as_ref(),
+            "model.request",
+            json!({
+                "phase": phase,
+                "requestedModel": model,
+                "routedModel": model,
+                "servedModel": model,
+                "routingReason": format!("conversation {phase}"),
+                "messages": transcript
+            }),
+        )?;
         let model_for_thread = model.clone();
         let (sender, receiver) = mpsc::channel();
         let (request_reasoning, bounded_reasoning) = self.take_reasoning_request(phase);
@@ -3166,13 +3367,59 @@ impl Conversation {
         // Conversation turns may be either direct prose or a typed JSON action.
         // The provider must be free to choose between them; the client projection
         // streams prose and keeps protocol bytes inside the kernel.
-        self.receive_activity(
+        let result = self.receive_activity(
             phase,
-            model,
+            model.clone(),
             receiver,
             show_content,
             bounded_reasoning,
-        )
+        );
+        match &result {
+            Ok(result) => activity_event(
+                run,
+                owned_run.as_ref(),
+                "model.response",
+                json!({
+                    "phase": phase,
+                    "model": model,
+                    "content": redact_text(&result.content),
+                    "promptTokens": result.usage.prompt_tokens,
+                    "completionTokens": result.usage.completion_tokens,
+                    "durationMs": result.usage.total_duration_ms,
+                    "thinkingChars": result.thinking.chars().count(),
+                    "thinkingRetained": false
+                }),
+            )?,
+            Err(error) => activity_event(
+                run,
+                owned_run.as_ref(),
+                "model.failed",
+                json!({
+                    "phase": phase,
+                    "model": model,
+                    "error": redact_text(error)
+                }),
+            )?,
+        }
+        if let Some(ledger) = owned_run.take() {
+            let (status, summary) = match &result {
+                Ok(_) => ("completed", format!("Conversation {phase} completed.")),
+                Err(error) => (
+                    "failed",
+                    format!("Conversation {phase} failed: {}", redact_text(error)),
+                ),
+            };
+            ledger.finish(json!({
+                "schemaVersion": 2,
+                "id": ledger.envelope.run_id,
+                "status": status,
+                "surface": ledger.envelope.surface,
+                "conversationId": self.store.id,
+                "model": model,
+                "summary": summary
+            }))?;
+        }
+        result
     }
 
     fn take_reasoning_request(&mut self, phase: &str) -> (bool, bool) {
@@ -3449,17 +3696,17 @@ impl Conversation {
                             "thinking_chars": result.thinking.chars().count()
                         }),
                     )?;
+                    // Private chain-of-thought is never durable transcript
+                    // content. Counts preserve operational diagnostics without
+                    // retaining the hidden reasoning itself.
                     if !result.thinking.is_empty() {
                         self.store.event(
-                            "model.thinking",
+                            "model.reasoning.completed",
                             json!({
                                 "model": model,
                                 "phase": phase,
-                                "content": crate::text::clip_hard(
-                                    &redact_text(&result.thinking),
-                                    MODEL_THINKING_RECORD_MAX_CHARS,
-                                ),
-                                "chars": result.thinking.chars().count()
+                                "chars": result.thinking.chars().count(),
+                                "contentRetained": false
                             }),
                         )?;
                     }
@@ -3485,6 +3732,37 @@ impl Conversation {
                 }
             }
         }
+    }
+
+    fn fail_backend_run(
+        &mut self,
+        run: Option<RunStore>,
+        mut run_guard: Option<RunGuard>,
+        input: &str,
+        steps: usize,
+        error: &str,
+        outcome: Outcome,
+        verification: Vec<VerificationRecord>,
+        hook_records: Vec<HookRecord>,
+    ) -> Result<String, String> {
+        if let Some(run) = run.as_ref() {
+            run.event(
+                "run.failed",
+                json!({ "outcome": outcome.label(), "error": redact_text(error) }),
+            )?;
+        }
+        if let Some(guard) = run_guard.as_mut() {
+            guard.checkpoint_error(outcome, error, steps)?;
+        }
+        self.finish_backend_run(
+            run,
+            run_guard,
+            input,
+            steps,
+            error,
+            BackendOutcome::stopped(outcome, verification, hook_records),
+        )?;
+        Err(error.to_string())
     }
 
     fn finish_backend_run(
@@ -3595,7 +3873,7 @@ impl Conversation {
             );
             let explicit = explicit_skill_signal(input);
             match self
-                .call_activity("learning", messages, true)
+                .call_activity("learning", messages, true, None)
                 .and_then(|result| skills::parse_candidate(&result.content))
             {
                 Ok(candidate) if candidate.repeatable || explicit => {
@@ -3667,6 +3945,19 @@ impl Conversation {
             }
         }
         Ok(())
+    }
+}
+
+fn activity_event(
+    run: Option<&RunStore>,
+    owned: Option<&hii_core::run_ledger::RunLedger>,
+    kind: &str,
+    data: Value,
+) -> Result<(), String> {
+    match (run, owned) {
+        (Some(run), None) => run.event(kind, data),
+        (None, Some(run)) => run.event(kind, data),
+        _ => Err("conversation activity must have exactly one run ledger".into()),
     }
 }
 
@@ -4505,14 +4796,26 @@ fn plain_message(raw: &str) -> Option<&str> {
 fn configured_local_tier_model(repo: &std::path::Path, tier: u64) -> Option<String> {
     let raw = std::fs::read_to_string(repo.join("config/native-model-profiles.json")).ok()?;
     let config: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    config.get("taskTiers")?.as_array()?.iter()
+    config
+        .get("taskTiers")?
+        .as_array()?
+        .iter()
         .find(|entry| entry.get("tier").and_then(serde_json::Value::as_u64) == Some(tier))?
-        .get("model")?.as_str().map(str::to_string)
+        .get("model")?
+        .as_str()
+        .map(str::to_string)
 }
 
-fn adaptive_model_choice(current: &str, loaded: &[String], installed: &[String], deliberate: Option<&str>) -> String {
+fn adaptive_model_choice(
+    current: &str,
+    loaded: &[String],
+    installed: &[String],
+    deliberate: Option<&str>,
+) -> String {
     if let Some(model) = deliberate {
-        if installed.iter().any(|name| name == model) { return model.to_string(); }
+        if installed.iter().any(|name| name == model) {
+            return model.to_string();
+        }
     }
     if let Some(model) = loaded.iter().find(|name| installed.contains(name)) {
         return model.clone();
@@ -4522,21 +4825,48 @@ fn adaptive_model_choice(current: &str, loaded: &[String], installed: &[String],
 
 fn direct_action_request(input: &str) -> bool {
     let mut text = input.trim().to_ascii_lowercase();
-    if ["how ", "why ", "what ", "explain ", "show me how ", "tell me "]
-        .iter()
-        .any(|prefix| text.starts_with(prefix))
+    if [
+        "how ",
+        "why ",
+        "what ",
+        "explain ",
+        "show me how ",
+        "tell me ",
+    ]
+    .iter()
+    .any(|prefix| text.starts_with(prefix))
     {
         return false;
     }
-    for prefix in ["please ", "can you ", "could you ", "would you ", "i want you to ", "i want to "] {
+    for prefix in [
+        "please ",
+        "can you ",
+        "could you ",
+        "would you ",
+        "i want you to ",
+        "i want to ",
+    ] {
         if let Some(rest) = text.strip_prefix(prefix) {
             text = rest.trim_start().to_string();
             break;
         }
     }
     let verb = text.split_whitespace().next().unwrap_or_default();
-    matches!(verb, "uninstall" | "install" | "remove" | "open" | "close" | "restart" | "start" | "stop" | "run" | "move" | "rename" | "fix")
-        && text.split_whitespace().count() > 1
+    matches!(
+        verb,
+        "uninstall"
+            | "install"
+            | "remove"
+            | "open"
+            | "close"
+            | "restart"
+            | "start"
+            | "stop"
+            | "run"
+            | "move"
+            | "rename"
+            | "fix"
+    ) && text.split_whitespace().count() > 1
 }
 
 fn model_event_kind(raw: &str, parsed: &Result<Action, String>) -> &'static str {
@@ -4939,7 +5269,7 @@ mod tests {
         // served tools, including HII-owned information actions, must be named
         // to be callable by providers that only honor json_object mode.
         assert!(
-            prompt.len() <= 1_550,
+            prompt.len() <= 2_200,
             "conversation prompt grew to {} bytes",
             prompt.len()
         );
@@ -5124,10 +5454,21 @@ mod tests {
         let small = "mlx-community/Qwen3.5-9B-MLX-4bit".to_string();
         let strong = "mlx-community/Qwen3.5-35B-A3B-4bit".to_string();
         let installed = vec![small.clone(), strong.clone()];
-        assert_eq!(super::adaptive_model_choice(&small, &[strong.clone()], &installed, None), strong);
-        assert_eq!(super::adaptive_model_choice(&small, &[small.clone()], &installed, Some(&strong)), strong);
-        assert_eq!(super::adaptive_model_choice(&small, &[], &installed, None), small);
-        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        assert_eq!(
+            super::adaptive_model_choice(&small, &[strong.clone()], &installed, None),
+            strong
+        );
+        assert_eq!(
+            super::adaptive_model_choice(&small, &[small.clone()], &installed, Some(&strong)),
+            strong
+        );
+        assert_eq!(
+            super::adaptive_model_choice(&small, &[], &installed, None),
+            small
+        );
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap();
         assert_eq!(super::configured_local_tier_model(repo, 2), Some(strong));
     }
 
@@ -5135,7 +5476,9 @@ mod tests {
     fn direct_action_guard_distinguishes_requests_from_explanations() {
         assert!(super::direct_action_request("Uninstall Google Chrome"));
         assert!(super::direct_action_request("Please remove the old app"));
-        assert!(!super::direct_action_request("How do I uninstall Google Chrome?"));
+        assert!(!super::direct_action_request(
+            "How do I uninstall Google Chrome?"
+        ));
     }
 
     #[test]

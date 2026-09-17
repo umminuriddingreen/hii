@@ -454,6 +454,13 @@ fn agent_start(
     // source-tool evidence, which remains incidental and cannot unlock high trust.
     command
         .arg(goal)
+        .env("HII_RUN_ID", &run_id)
+        .env("HII_SURFACE", "tauri-canvas")
+        .env(
+            "HII_AUTHORITY",
+            if read_only { "read-only" } else { "workspace" },
+        )
+        .env("HII_ACTOR", "operator")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = command

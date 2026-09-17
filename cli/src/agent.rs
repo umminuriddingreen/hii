@@ -529,6 +529,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         env_model_present,
     );
     let model = choose_model(requested_model, ollama.provider(), &models)?;
+    crate::run_context::set_model_route(requested_model, &model, &model_source);
     let review_model = if options.review {
         Some(choose_review_model(
             options.review_model.as_deref(),
@@ -539,7 +540,9 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         None
     };
     let invocation_context_sources = bounded_context_sources(&options.context_sources);
-    let store = RunStore::create(&paths.runtime)?;
+    let mut store = RunStore::create(&paths.runtime)?;
+    crate::run_context::set_run_id(&store.id);
+    store.set_authority(options.authority.label())?;
     crate::run_context::set_origin(crate::run_context::WriteOrigin::Operator);
     let run_id = store.id.clone();
     let started_at = store.started_at_unix_ms;
@@ -746,6 +749,25 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         }
         steps += 1;
         let request_reasoning = action_failures >= 1;
+        let model_messages = messages
+            .iter()
+            .map(|message| {
+                json!({
+                    "role": message.role,
+                    "content": redact_text(&message.content),
+                    "imageCount": message.images.len()
+                })
+            })
+            .collect::<Vec<_>>();
+        journal.emit(Event::new("model.request").data(json!({
+            "step": steps,
+            "provider": ollama.provider().id(),
+            "requestedModel": requested_model,
+            "routedModel": model,
+            "servedModel": model,
+            "routingReason": model_source,
+            "messages": model_messages
+        })))?;
         journal.emit(Event::new("model.reasoning_policy").data(json!({
             "step": steps,
             "mode": "auto",
@@ -928,10 +950,16 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                         "step": steps, "call_id": id, "ok": result.ok,
                         "output": output, "verification": false
                     })))?;
-                    feedback.push(format!("[{id} {}] {output}", if result.ok { "ok" } else { "error" }));
+                    feedback.push(format!(
+                        "[{id} {}] {output}",
+                        if result.ok { "ok" } else { "error" }
+                    ));
                 }
                 messages.push(Message::assistant(raw));
-                messages.push(Message::user(format!("BATCH RESULTS (same order):\n{}", feedback.join("\n\n"))));
+                messages.push(Message::user(format!(
+                    "BATCH RESULTS (same order):\n{}",
+                    feedback.join("\n\n")
+                )));
             }
             Action::Tool {
                 tool,
@@ -1095,7 +1123,8 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     continue;
                 }
                 let result = if is_hii {
-                    let args = json!({ "query": query.as_deref().unwrap_or(""), "arguments": arguments });
+                    let args =
+                        json!({ "query": query.as_deref().unwrap_or(""), "arguments": arguments });
                     crate::hii_tools::execute(&paths.repo, &tool, Some(&args))
                 } else {
                     execute_tool(
@@ -1648,23 +1677,45 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     &diff
                 }
             );
-            Some(
-                match ollama.chat_text(
-                    reviewer,
-                    &[
-                        Message::system("You are HII's strict final proof reviewer."),
-                        Message::user(prompt),
-                    ],
-                ) {
-                    Ok(review) => redact_text(&review),
-                    Err(error) => {
-                        let fallback = format!(
-                            "Review unavailable; the run receipt and verification remain preserved. {error}"
-                        );
-                        redact_text(&fallback)
-                    }
-                },
-            )
+            let review_messages = [
+                Message::system("You are HII's strict final proof reviewer."),
+                Message::user(prompt),
+            ];
+            journal.emit(Event::new("model.request").data(json!({
+                "phase": "review",
+                "provider": ollama.provider().id(),
+                "requestedModel": options.review_model,
+                "routedModel": reviewer,
+                "servedModel": reviewer,
+                "routingReason": "final proof review",
+                "messages": review_messages.iter().map(|message| json!({
+                    "role": message.role,
+                    "content": redact_text(&message.content),
+                    "imageCount": message.images.len()
+                })).collect::<Vec<_>>()
+            })))?;
+            Some(match ollama.chat_text(reviewer, &review_messages) {
+                Ok(review) => {
+                    let review = redact_text(&review);
+                    journal.emit(Event::new("model.response").data(json!({
+                        "phase": "review",
+                        "model": reviewer,
+                        "content": review
+                    })))?;
+                    review
+                }
+                Err(error) => {
+                    journal.emit(Event::new("model.failed").data(json!({
+                        "phase": "review",
+                        "model": reviewer,
+                        "error": redact_text(&error)
+                    })))?;
+                    let fallback = format!(
+                        "Review unavailable; the run receipt and verification remain preserved. {error}"
+                    );
+                    redact_text(&fallback)
+                }
+            })
         }
         None => None,
     };
@@ -2565,20 +2616,41 @@ pub(crate) fn parse_action_with_repair(
         .unwrap_or_default()
         .to_string();
     if action_type == "batch" {
-        let calls = value.get("calls").and_then(serde_json::Value::as_array)
+        let calls = value
+            .get("calls")
+            .and_then(serde_json::Value::as_array)
             .ok_or("batch requires calls")?;
         if !(2..=4).contains(&calls.len()) {
             return Err("batch requires 2 to 4 independent read-only calls".into());
         }
         let mut ids = std::collections::HashSet::new();
         for call in calls {
-            let tool = call.get("type").and_then(serde_json::Value::as_str).unwrap_or_default();
-            if !matches!(tool, "read" | "list" | "search" | "web_search" | "image_search" | "web_fetch" | "http") {
-                return Err(format!("batch does not allow {tool}; use one serial action for mutations"));
+            let tool = call
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            if !matches!(
+                tool,
+                "read" | "list" | "search" | "web_search" | "image_search" | "web_fetch" | "http"
+            ) {
+                return Err(format!(
+                    "batch does not allow {tool}; use one serial action for mutations"
+                ));
             }
-            let id = call.get("id").and_then(serde_json::Value::as_str).unwrap_or_default();
-            if id.is_empty() || id.len() > 24 || !id.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')) || !ids.insert(id.to_string()) {
-                return Err("batch call ids must be unique, 1-24 ASCII letters, digits, '-' or '_'".into());
+            let id = call
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            if id.is_empty()
+                || id.len() > 24
+                || !id
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+                || !ids.insert(id.to_string())
+            {
+                return Err(
+                    "batch call ids must be unique, 1-24 ASCII letters, digits, '-' or '_'".into(),
+                );
             }
             crate::acp::validate_action_params(tool, call)?;
         }
@@ -2601,26 +2673,45 @@ pub(crate) fn parse_action_with_repair(
     Ok((action, repair))
 }
 
-pub(crate) fn execute_read_batch(tools: &Toolbelt, calls: &[BatchCall]) -> Vec<(String, ToolResult)> {
+pub(crate) fn execute_read_batch(
+    tools: &Toolbelt,
+    calls: &[BatchCall],
+) -> Vec<(String, ToolResult)> {
     std::thread::scope(|scope| {
-        let handles = calls.iter().map(|call| scope.spawn(move || {
-            let result = execute_tool(tools, ToolCall {
-                tool: &call.tool,
-                path: call.path.as_deref(),
-                query: call.query.as_deref(),
-                command: None,
-                content: None,
-                url: call.url.as_deref(),
-                old: None,
-                new: None,
-                replace_all: false,
-                offset: call.offset,
-                limit: call.limit,
-                allow_delete: false,
-            }, false);
-            (call.id.clone(), result)
-        })).collect::<Vec<_>>();
-        handles.into_iter().map(|handle| handle.join().expect("bounded read-only tool thread panicked")).collect()
+        let handles = calls
+            .iter()
+            .map(|call| {
+                scope.spawn(move || {
+                    let result = execute_tool(
+                        tools,
+                        ToolCall {
+                            tool: &call.tool,
+                            path: call.path.as_deref(),
+                            query: call.query.as_deref(),
+                            command: None,
+                            content: None,
+                            url: call.url.as_deref(),
+                            old: None,
+                            new: None,
+                            replace_all: false,
+                            offset: call.offset,
+                            limit: call.limit,
+                            allow_delete: false,
+                        },
+                        false,
+                    );
+                    (call.id.clone(), result)
+                })
+            })
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .map(|handle| {
+                handle
+                    .join()
+                    .expect("bounded read-only tool thread panicked")
+            })
+            .collect()
     })
 }
 
@@ -3085,14 +3176,14 @@ mod tests {
         // reliability as the system prompt grows, so additions must be paid for
         // deliberately rather than accumulating.
         //
-        // Raised from 1_250 to cover the native tool list. `web_search`,
+        // Raised from 1_250 to 1_900 to cover the native tool list. `web_search`,
         // `web_fetch`, `canvas_*`, `object_*` and `bridge_*` became native
         // tools, and a model cannot call a tool the `T:` line never names, so
         // those bytes buy capability rather than prose. The `T:`/`F:` line is
         // now ~30% of the prompt and is the first place to look if this needs
         // to come back down -- by dropping tools, not by describing them less.
         assert!(
-            prompt.len() <= 1_350,
+            prompt.len() <= 1_900,
             "agent prompt grew to {} bytes",
             prompt.len()
         );
@@ -3511,7 +3602,10 @@ mod tests {
     #[test]
     fn batch_accepts_parallel_reads_but_refuses_mutation() {
         let good = r#"{"type":"batch","calls":[{"id":"one","type":"read","path":"a.txt"},{"id":"two","type":"search","query":"needle"}]}"#;
-        assert!(matches!(parse_action_with_repair(good).unwrap().0, Action::Batch { .. }));
+        assert!(matches!(
+            parse_action_with_repair(good).unwrap().0,
+            Action::Batch { .. }
+        ));
         let unsafe_batch = r#"{"type":"batch","calls":[{"id":"one","type":"read","path":"a.txt"},{"id":"two","type":"write","path":"b.txt","content":"x"}]}"#;
         assert!(parse_action_with_repair(unsafe_batch).is_err());
     }
@@ -3520,8 +3614,10 @@ mod tests {
     fn agent_handoff_keeps_structured_task_context() {
         let raw = r#"{"type":"agent_send","arguments":{"to":"claude","task":"review","message":"check proof","workspace":"/tmp/work","contextRefs":["receipt:1"]}}"#;
         let action = parse_action_with_repair(raw).unwrap().0;
-        assert!(matches!(action, Action::Tool { tool, arguments: Some(value), .. }
-            if tool == "agent_send" && value["task"] == "review" && value["contextRefs"][0] == "receipt:1"));
+        assert!(
+            matches!(action, Action::Tool { tool, arguments: Some(value), .. }
+            if tool == "agent_send" && value["task"] == "review" && value["contextRefs"][0] == "receipt:1")
+        );
     }
 }
 #[test]

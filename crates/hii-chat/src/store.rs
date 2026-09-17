@@ -4,12 +4,13 @@ use anyhow::{anyhow, bail, ensure, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::{
     collections::HashSet,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Mutex, MutexGuard},
 };
 
 pub struct Store {
     db: Mutex<Connection>,
+    runtime: PathBuf,
 }
 
 fn conversation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation> {
@@ -97,7 +98,14 @@ impl Store {
             )?;
         }
         tx.commit()?;
-        Ok(Self { db: Mutex::new(db) })
+        Ok(Self {
+            db: Mutex::new(db),
+            runtime: path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+        })
+    }
+
+    pub fn runtime_root(&self) -> &Path {
+        &self.runtime
     }
 
     fn lock(&self) -> Result<MutexGuard<'_, Connection>> {

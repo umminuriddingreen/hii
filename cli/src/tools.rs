@@ -451,7 +451,10 @@ impl Toolbelt {
 
     pub fn app_uninstall(&self, name: &str) -> ToolResult {
         if !self.personal_local {
-            return tool_result(Err("app_uninstall requires personal-local authority".into()), false);
+            return tool_result(
+                Err("app_uninstall requires personal-local authority".into()),
+                false,
+            );
         }
         #[cfg(target_os = "macos")]
         {
@@ -462,10 +465,16 @@ impl Toolbelt {
             let Some(home) = dirs::home_dir() else {
                 return tool_result(Err("cannot resolve the current user's home".into()), false);
             };
-            return tool_result(uninstall_mac_app(name, &home, Path::new("/Applications")), false);
+            return tool_result(
+                uninstall_mac_app(name, &home, Path::new("/Applications")),
+                false,
+            );
         }
         #[cfg(not(target_os = "macos"))]
-        tool_result(Err("app_uninstall is available only on macOS".into()), false)
+        tool_result(
+            Err("app_uninstall is available only on macOS".into()),
+            false,
+        )
     }
 
     pub fn shell_with_delete_approval(
@@ -487,7 +496,9 @@ impl Toolbelt {
         deletion_approved: bool,
         family: ShellFamily,
     ) -> ToolResult {
-        let _lock = if verification { None } else {
+        let _lock = if verification {
+            None
+        } else {
             match self.lock_workspace_write() {
                 Ok(lock) => Some(lock),
                 Err(error) => return tool_result(Err(error), false),
@@ -577,16 +588,38 @@ impl Toolbelt {
     }
 
     pub fn git_snapshot(&self) -> String {
-        let output = Command::new("git")
+        let mut child = match Command::new("git")
             .args(["status", "--short", "--untracked-files=all", "--", "."])
             .current_dir(&self.workspace)
-            .output();
-        match output {
-            Ok(output) if output.status.success() => {
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(_) => return "not a git workspace".into(),
+        };
+        let mut bytes = Vec::new();
+        if let Some(mut stdout) = child.stdout.take() {
+            let _ = stdout
+                .by_ref()
+                .take((MAX_OUTPUT_BYTES + 1) as u64)
+                .read_to_end(&mut bytes);
+        }
+        if bytes.len() > MAX_OUTPUT_BYTES {
+            let _ = child.kill();
+            let _ = child.wait();
+            bytes.truncate(MAX_OUTPUT_BYTES);
+            let mut value = String::from_utf8_lossy(&bytes).to_string();
+            value.push_str("\n[truncated; git snapshot exceeded 96 KiB]");
+            return value;
+        }
+        let status = child.wait();
+        match status {
+            Ok(status) if status.success() => {
                 // Preserve porcelain's leading status columns. Trimming the whole
                 // value turns ` M file` into `M file`, so downstream path parsing
                 // drops the first character of the filename.
-                let value = String::from_utf8_lossy(&output.stdout)
+                let value = String::from_utf8_lossy(&bytes)
                     .trim_end_matches(['\r', '\n'])
                     .to_string();
                 if value.is_empty() {
@@ -780,7 +813,10 @@ impl Toolbelt {
     fn lock_workspace_write(&self) -> Result<fs::File, String> {
         let digest = Sha256::digest(self.workspace.as_os_str().as_encoded_bytes());
         let lock_path = std::env::temp_dir().join(format!("hii-workspace-{:x}.lock", digest));
-        let file = OpenOptions::new().write(true).create(true).open(lock_path)
+        let file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(lock_path)
             .map_err(|error| error.to_string())?;
         file.lock_exclusive().map_err(|error| error.to_string())?;
         Ok(file)
@@ -788,13 +824,18 @@ impl Toolbelt {
 }
 
 fn personal_local_path(path: &Path) -> bool {
-    let Some(home) = dirs::home_dir() else { return false };
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
     let local_root = path.starts_with(&home)
         || path.starts_with("/Applications")
         || path.starts_with("/Library")
         || path.starts_with("/Volumes");
     let protected = [".ssh", ".gnupg", ".aws", ".azure", ".kube", "Keychains"];
-    local_root && !path.components().any(|part| protected.iter().any(|name| part.as_os_str() == *name))
+    local_root
+        && !path
+            .components()
+            .any(|part| protected.iter().any(|name| part.as_os_str() == *name))
 }
 
 #[cfg(target_os = "macos")]
@@ -803,15 +844,20 @@ fn uninstall_mac_app(name: &str, home: &Path, applications: &Path) -> Result<Str
     if name.is_empty()
         || name == "."
         || name == ".."
-        || !name.chars().all(|ch| ch.is_alphanumeric() || matches!(ch, ' ' | '-' | '_' | '.'))
+        || !name
+            .chars()
+            .all(|ch| ch.is_alphanumeric() || matches!(ch, ' ' | '-' | '_' | '.'))
     {
         return Err("provide one application name, such as Google Chrome".into());
     }
     let app_file = format!("{name}.app");
-    let app = [applications.join(&app_file), home.join("Applications").join(&app_file)]
-        .into_iter()
-        .find(|path| path.exists())
-        .ok_or_else(|| format!("{name} is not installed in Applications"))?;
+    let app = [
+        applications.join(&app_file),
+        home.join("Applications").join(&app_file),
+    ]
+    .into_iter()
+    .find(|path| path.exists())
+    .ok_or_else(|| format!("{name} is not installed in Applications"))?;
     let metadata = fs::symlink_metadata(&app).map_err(|error| error.to_string())?;
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
         return Err("application must be a real .app directory".into());
@@ -819,7 +865,12 @@ fn uninstall_mac_app(name: &str, home: &Path, applications: &Path) -> Result<Str
     let bundle_id = plist::Value::from_file(app.join("Contents/Info.plist"))
         .ok()
         .and_then(|value| value.as_dictionary().cloned())
-        .and_then(|dictionary| dictionary.get("CFBundleIdentifier").and_then(plist::Value::as_string).map(str::to_owned));
+        .and_then(|dictionary| {
+            dictionary
+                .get("CFBundleIdentifier")
+                .and_then(plist::Value::as_string)
+                .map(str::to_owned)
+        });
     let mut data_paths = Vec::new();
     if let Some(id) = bundle_id.as_deref() {
         let library = home.join("Library");
@@ -827,7 +878,9 @@ fn uninstall_mac_app(name: &str, home: &Path, applications: &Path) -> Result<Str
             library.join("Caches").join(id),
             library.join("Preferences").join(format!("{id}.plist")),
             library.join("Application Support").join(id),
-            library.join("Saved Application State").join(format!("{id}.savedState")),
+            library
+                .join("Saved Application State")
+                .join(format!("{id}.savedState")),
         ]);
         // Many apps group their profile under Vendor/Product instead of the
         // bundle ID. Derive the candidate from Info.plist, then move it only
@@ -851,13 +904,16 @@ fn uninstall_mac_app(name: &str, home: &Path, applications: &Path) -> Result<Str
     ));
     fs::create_dir_all(&trash).map_err(|error| error.to_string())?;
     let mut moved = Vec::new();
-    let paths = std::iter::once(app.clone()).chain(data_paths.into_iter().filter(|path| path.exists()));
+    let paths =
+        std::iter::once(app.clone()).chain(data_paths.into_iter().filter(|path| path.exists()));
     for source in paths {
-        let relative = source.strip_prefix(home).map(Path::to_path_buf).unwrap_or_else(|_| {
-            source.strip_prefix("/").unwrap_or(&source).to_path_buf()
-        });
+        let relative = source
+            .strip_prefix(home)
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|_| source.strip_prefix("/").unwrap_or(&source).to_path_buf());
         let destination = trash.join(relative);
-        let result = destination.parent()
+        let result = destination
+            .parent()
             .ok_or_else(|| "invalid Trash destination".to_string())
             .and_then(|parent| fs::create_dir_all(parent).map_err(|error| error.to_string()))
             .and_then(|_| fs::rename(&source, &destination).map_err(|error| error.to_string()));
@@ -865,16 +921,25 @@ fn uninstall_mac_app(name: &str, home: &Path, applications: &Path) -> Result<Str
             for (from, to) in moved.iter().rev() {
                 let _ = fs::rename(to, from);
             }
-            return Err(format!("uninstall stopped while moving {}: {error}; inspect {}", source.display(), trash.display()));
+            return Err(format!(
+                "uninstall stopped while moving {}: {error}; inspect {}",
+                source.display(),
+                trash.display()
+            ));
         }
         moved.push((source, destination));
     }
     if app.exists() {
-        return Err(format!("application still exists at {}; inspect {}", app.display(), trash.display()));
+        return Err(format!(
+            "application still exists at {}; inspect {}",
+            app.display(),
+            trash.display()
+        ));
     }
     Ok(format!(
         "Uninstalled {name}; moved {} item(s) to {}. Restore from Trash if needed.",
-        moved.len(), trash.display()
+        moved.len(),
+        trash.display()
     ))
 }
 
@@ -897,19 +962,31 @@ fn stop_mac_app_processes(app: &Path) -> Result<(), String> {
     let mut pids = Vec::new();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let line = line.trim_start();
-        let Some((pid, executable)) = line.split_once(char::is_whitespace) else { continue };
+        let Some((pid, executable)) = line.split_once(char::is_whitespace) else {
+            continue;
+        };
         if executable.trim_start().starts_with(&prefix) {
-            if let Ok(pid) = pid.parse::<i32>() { pids.push(pid); }
+            if let Ok(pid) = pid.parse::<i32>() {
+                pids.push(pid);
+            }
         }
     }
     for pid in &pids {
-        unsafe { libc::kill(*pid, libc::SIGTERM); }
+        unsafe {
+            libc::kill(*pid, libc::SIGTERM);
+        }
     }
     for _ in 0..15 {
-        if pids.iter().all(|pid| unsafe { libc::kill(*pid, 0) } != 0) { return Ok(()); }
+        if pids.iter().all(|pid| unsafe { libc::kill(*pid, 0) } != 0) {
+            return Ok(());
+        }
         thread::sleep(Duration::from_millis(200));
     }
-    if pids.is_empty() { Ok(()) } else { Err(format!("{app:?} is still running; quit it and retry")) }
+    if pids.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{app:?} is still running; quit it and retry"))
+    }
 }
 
 fn format_search_results(query: &str, body: &serde_json::Value) -> Result<String, String> {
@@ -1633,9 +1710,20 @@ mod tests {
         assert!(!bundle.exists());
         assert!(!profile.exists());
         assert!(unrelated.exists());
-        let trash = fs::read_dir(home.join(".Trash")).unwrap().next().unwrap().unwrap().path();
+        let trash = fs::read_dir(home.join(".Trash"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
         assert!(trash.join(bundle.strip_prefix("/").unwrap()).exists());
-        assert_eq!(fs::read_to_string(trash.join("Library/Application Support/Example/Browser/profile.txt")).unwrap(), "keep this recoverable");
+        assert_eq!(
+            fs::read_to_string(
+                trash.join("Library/Application Support/Example/Browser/profile.txt")
+            )
+            .unwrap(),
+            "keep this recoverable"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
