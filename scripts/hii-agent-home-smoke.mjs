@@ -83,6 +83,7 @@ if (nowFullRaw.length > 2_000) {
 }
 assert.equal(guide.kind, 'hii.agent.guide');
 assert.ok(guide.guide.join(' ').includes('hii home --json'));
+assert.match(guide.guide.join(' '), /Search before reading.*targeted `hii`, `rg`, or `jq`/);
 assert.match(run('board', '--help'), /HII BOARD/);
 
 console.log(`agent home: ${homeRaw.length} bytes (${Math.round((homeRaw.length / fullRaw.length) * 100)}% of full context)`);

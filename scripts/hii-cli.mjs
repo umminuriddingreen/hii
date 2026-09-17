@@ -2685,9 +2685,10 @@ function cmdAgents(args = []) {
     "Use HII as the local home for meaningful work on this Mac.",
     "1. Start with `hii home --json`; use its live workspace, work, and capability coordinates before broader discovery.",
     "2. Deepen only as needed with `hii context --json`, `hii work --json`, `hii caps show`, or `hii og status`.",
-    "3. Keep human intent and local changes visible. Verify work, inspect `hii proof`, and preserve unclear concurrent work.",
-    "4. Set `HII_AGENT_ID` to your agent name. Read pending handoffs with `hii agents inbox --for <agent>`; send task, workspace, context references, and receipt ids with `hii agents send`, then acknowledge incorporated messages.",
-    "5. `hii ship` may validate and commit locally. Follow the active user authority for external actions."
+    "3. Search before reading. Query registries and configuration with targeted `hii`, `rg`, or `jq` commands instead of injecting whole index or config files into model context.",
+    "4. Keep human intent and local changes visible. Verify work, inspect `hii proof`, and preserve unclear concurrent work.",
+    "5. Set `HII_AGENT_ID` to your agent name. Read pending handoffs with `hii agents inbox --for <agent>`; send task, workspace, context references, and receipt ids with `hii agents send`, then acknowledge incorporated messages.",
+    "6. `hii ship` may validate and commit locally. Follow the active user authority for external actions."
   ];
   const adapters = [
     { agent: "codex", path: path.join(os.homedir(), "AGENTS.md") },
