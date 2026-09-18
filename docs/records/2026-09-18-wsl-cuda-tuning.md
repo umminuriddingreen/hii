@@ -102,6 +102,13 @@ After the operator unlocked the existing Mac SSH key, the installed Mac CLI
 successfully invoked the installed Windows CLI. Receipt on Mac:
 `/Users/ummi/.hii/runs/remote/5f6935a7-6e0b-4bd0-a14c-aa93b38fff7d.json`.
 The previous Windows-to-Mac proof remains in the 2026-09-17 handoff.
+At the final recheck, Windows-to-Mac passed again (receipt
+`f9648848-62ca-4082-8277-e2b9d6004d04`), but reverse SSH authentication had become
+unavailable again. Windows still accepted the existing public key; signing
+could not complete noninteractively. The later failed Mac receipt is
+`2e02efd5-3c1c-4df3-9ecf-ce087d1740cd`. The successful unlock-time proof is not
+a claim of persistent unattended authentication. No authentication weakening
+or private-key change was attempted.
 
 Windows-to-WSL loopback connectivity failed independently of the CUDA build.
 The active WSL Codex session was preserved; a distro restart was not assumed.
