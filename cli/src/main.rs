@@ -37,6 +37,7 @@ mod local_chat;
 mod mcp;
 mod mcp_client;
 mod memory;
+mod mirror;
 mod network;
 mod notification;
 mod ollama;
@@ -74,7 +75,7 @@ mod web_cmd;
 use agent::{AutonomyLevel, RunOptions, RunOutput};
 use budget::{Budgets, DEFAULT_WALL_CLOCK_SECS};
 use clap::{Parser, Subcommand, ValueEnum};
-use config::{AppPaths, DEFAULT_MAX_STEPS};
+use config::{AppPaths, ModelProvider, DEFAULT_MAX_STEPS};
 use conversation::Conversation;
 use ollama::Ollama;
 use receipt::{find_receipt, Receipt};
@@ -227,6 +228,12 @@ enum Commands {
     Context {
         #[command(subcommand)]
         action: ContextCommand,
+    },
+    #[command(about = "Inspect and use the local, source-linked Personal Mirror")]
+    #[command(hide = true)]
+    Mirror {
+        #[command(subcommand)]
+        action: MirrorCommand,
     },
     #[command(about = "Save, inspect, and restore named local canvas states")]
     #[command(hide = true)]
@@ -795,6 +802,73 @@ enum ContextCommand {
         limit: usize,
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum MirrorCommand {
+    #[command(about = "Inspect the local Mirror, its sources, weights, and connections")]
+    Show {
+        #[arg(long, value_enum, default_value_t = mirror::MirrorStrength::Balanced)]
+        strength: mirror::MirrorStrength,
+        #[arg(long, value_enum, default_value_t = mirror::MirrorAuthority::Answer)]
+        authority: mirror::MirrorAuthority,
+        #[arg(long, help = "Emit the complete source-labelled Mirror snapshot")]
+        json: bool,
+    },
+    #[command(about = "Answer one question through the source-linked Mirror")]
+    Ask {
+        #[arg(required = true, num_args = 1..)]
+        question: Vec<String>,
+        #[arg(long, value_enum, default_value_t = mirror::MirrorStrength::Balanced)]
+        strength: mirror::MirrorStrength,
+        #[arg(long, value_enum, default_value_t = mirror::MirrorAuthority::Answer)]
+        authority: mirror::MirrorAuthority,
+        #[arg(
+            long,
+            conflicts_with = "jsonl",
+            help = "Print one machine-readable final result"
+        )]
+        json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Stream machine-readable run events"
+        )]
+        jsonl: bool,
+    },
+    #[command(about = "Steer the source-linked Mirror toward one bounded local goal")]
+    Run {
+        #[arg(required = true, num_args = 1..)]
+        goal: Vec<String>,
+        #[arg(long, value_enum, default_value_t = mirror::MirrorStrength::Balanced)]
+        strength: mirror::MirrorStrength,
+        #[arg(long, value_enum, default_value_t = mirror::MirrorAuthority::Prepare)]
+        authority: mirror::MirrorAuthority,
+        #[arg(
+            long,
+            value_name = "CRITERIA",
+            help = "Completion criterion recorded in the receipt"
+        )]
+        done_when: Option<String>,
+        #[arg(
+            long,
+            value_name = "COMMAND",
+            help = "Deterministic local check; repeatable"
+        )]
+        verify: Vec<String>,
+        #[arg(
+            long,
+            conflicts_with = "jsonl",
+            help = "Print one machine-readable final result"
+        )]
+        json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Stream machine-readable run events"
+        )]
+        jsonl: bool,
     },
 }
 
@@ -1941,6 +2015,118 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             context_command(&paths, cli.cwd, action)?;
             Ok(ExitCode::SUCCESS)
         }
+        Some(Commands::Mirror { action }) => {
+            let workspace = workspace(cli.cwd.clone())?;
+            let (
+                intent,
+                strength,
+                authority,
+                done_when,
+                verify,
+                outcome_requirements,
+                json,
+                jsonl,
+            ) = match action {
+                MirrorCommand::Show {
+                    strength,
+                    authority,
+                    json,
+                } => {
+                    let snapshot = mirror::inspect(&paths, &workspace, strength, authority);
+                    println!("{}", mirror::render(&snapshot, json)?);
+                    return Ok(ExitCode::SUCCESS);
+                }
+                MirrorCommand::Ask {
+                    question,
+                    strength,
+                    authority,
+                    json,
+                    jsonl,
+                } => (
+                    question.join(" "),
+                    strength,
+                    authority,
+                    Some("a final answer is returned; verification is not claimed".into()),
+                    Vec::new(),
+                    Some(contract::OutcomeRequirements::informational_response()),
+                    json,
+                    jsonl,
+                ),
+                MirrorCommand::Run {
+                    goal,
+                    strength,
+                    authority,
+                    done_when,
+                    verify,
+                    json,
+                    jsonl,
+                } => (
+                    goal.join(" "),
+                    strength,
+                    authority,
+                    done_when,
+                    verify,
+                    None,
+                    json,
+                    jsonl,
+                ),
+            };
+            if ModelProvider::discover(&AppPaths::model_url()) == ModelProvider::OxAlphaWeb {
+                return Err("Personal Mirror runs require a local HII model provider; select HII Native, Ollama, LM Studio, or a private local-network runtime".into());
+            }
+            let snapshot = mirror::inspect(&paths, &workspace, strength, authority);
+            let mut context_sources = if strength.uses_personal_context() {
+                snapshot.source_refs()
+            } else {
+                Vec::new()
+            };
+            context_sources.push(format!("hii-mirror:strength={}", strength.label()));
+            context_sources.push(format!("hii-mirror:authority={}", authority.label()));
+            let receipt = agent::run(
+                &paths,
+                RunOptions {
+                    goal: intent,
+                    workspace,
+                    model: cli.model,
+                    review: false,
+                    review_model: None,
+                    max_steps: cli.max_steps,
+                    dry_run: authority.is_read_only(),
+                    verbose: false,
+                    authority: authority.execution_authority(),
+                    done_when,
+                    verify,
+                    outcome_requirements,
+                    use_context: strength.uses_personal_context(),
+                    context_sources,
+                    system_context: vec![snapshot.system_context()],
+                    output: if jsonl {
+                        RunOutput::Jsonl
+                    } else if json {
+                        RunOutput::Json
+                    } else {
+                        RunOutput::Human
+                    },
+                    stream: StreamPolicy::Auto,
+                    allow_missing_verify_deps: false,
+                    budgets: Budgets {
+                        max_steps: cli.max_steps,
+                        max_tokens: cli.token_budget,
+                        wall_clock: match cli.deadline.as_deref() {
+                            Some(value) => parse_duration(value)?,
+                            None => Some(Duration::from_secs(DEFAULT_WALL_CLOCK_SECS)),
+                        },
+                        ..Budgets::default()
+                    },
+                    last_message: None,
+                    hooks: lifecycle_hooks_enabled(cli.no_hooks, cli.session_profile),
+                    coding: false,
+                    skill_ids: Vec::new(),
+                    autonomy_level: AutonomyLevel::LocalFull,
+                },
+            )?;
+            Ok(ExitCode::from(receipt.exit_code))
+        }
         Some(Commands::State { space, action }) => {
             state_command(space, action)?;
             Ok(ExitCode::SUCCESS)
@@ -2058,6 +2244,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     )?,
                     use_context: !no_context,
                     context_sources,
+                    system_context: Vec::new(),
                     output,
                     stream,
                     allow_missing_verify_deps,
@@ -2549,6 +2736,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                             outcome_requirements: None,
                             use_context: true,
                             context_sources: Vec::new(),
+                            system_context: Vec::new(),
                             output: RunOutput::Human,
                             stream: StreamPolicy::Auto,
                             allow_missing_verify_deps: false,
@@ -2692,6 +2880,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                         outcome_requirements: None,
                         use_context: true,
                         context_sources: Vec::new(),
+                        system_context: Vec::new(),
                         output: if json {
                             RunOutput::Json
                         } else {
@@ -2819,6 +3008,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                         outcome_requirements: None,
                         use_context: true,
                         context_sources: vec![format!("hii-service-request:{}", request.id)],
+                        system_context: Vec::new(),
                         output: if json {
                             RunOutput::Quiet
                         } else {
@@ -6683,6 +6873,70 @@ mod tests {
                     "app-scripting:document-path:/tmp/tower.3dm"
                 ]
         ));
+    }
+
+    #[test]
+    fn mirror_commands_parse_strength_authority_and_machine_output_independently() {
+        let show = Cli::try_parse_from([
+            "hii",
+            "mirror",
+            "show",
+            "--strength",
+            "light",
+            "--authority",
+            "suggest",
+            "--json",
+        ])
+        .expect("parse mirror show");
+        assert!(matches!(
+            show.command,
+            Some(Commands::Mirror {
+                action: MirrorCommand::Show {
+                    strength: mirror::MirrorStrength::Light,
+                    authority: mirror::MirrorAuthority::Suggest,
+                    json: true,
+                }
+            })
+        ));
+
+        let run = Cli::try_parse_from([
+            "hii",
+            "mirror",
+            "run",
+            "prepare",
+            "the",
+            "brief",
+            "--strength",
+            "strong",
+            "--authority",
+            "prepare",
+            "--verify",
+            "test -f brief.md",
+            "--jsonl",
+        ])
+        .expect("parse mirror run");
+        assert!(matches!(
+            run.command,
+            Some(Commands::Mirror {
+                action: MirrorCommand::Run {
+                    goal,
+                    strength: mirror::MirrorStrength::Strong,
+                    authority: mirror::MirrorAuthority::Prepare,
+                    verify,
+                    json: false,
+                    jsonl: true,
+                    ..
+                }
+            }) if goal == ["prepare", "the", "brief"] && verify == ["test -f brief.md"]
+        ));
+    }
+
+    #[test]
+    fn mirror_is_a_native_inspectable_route_without_expanding_the_core_map() {
+        let route = route::lookup("mirror").expect("mirror route");
+        assert_eq!(route.surface, route::Surface::Native);
+        assert_eq!(route.visibility, route::Visibility::Extended);
+        assert!(route::full_command_list().contains("mirror"));
     }
 
     #[test]

@@ -217,7 +217,10 @@ pub fn assess(input: CompletionInput<'_>) -> CompletionAssessment {
         .declared_checks
         .iter()
         .any(|check| !crate::declaration::is_vacuous(check));
-    let proof_strength = if requirements.is_some() || substantive_checks {
+    let declared_evidence = requirements.is_some_and(|requirements| {
+        requirements.declared_checks_required || !requirements.artifacts.is_empty()
+    });
+    let proof_strength = if declared_evidence || substantive_checks {
         ProofStrength::Declared
     } else if input.verification.iter().any(|entry| entry.ok) {
         ProofStrength::Incidental
@@ -515,6 +518,17 @@ mod tests {
         ));
         assert!(assessment.satisfied, "{assessment:?}");
         assert_eq!(assessment.proof_strength, ProofStrength::Declared);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn direct_answer_completes_without_becoming_verified_evidence() {
+        let dir = workspace();
+        let requirements = OutcomeRequirements::informational_response();
+        let assessment = assess(input(&dir, Some(&requirements), &[], &[], &[]));
+        assert!(assessment.satisfied, "{assessment:?}");
+        assert_eq!(assessment.proof_strength, ProofStrength::None);
+        assert!(!assessment.qualifies_for_high_trust());
         let _ = fs::remove_dir_all(dir);
     }
 

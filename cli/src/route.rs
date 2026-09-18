@@ -164,6 +164,12 @@ pub const ROUTES: &[Route] = &[
         Work,
         "stream one answer from the fastest local model",
     ),
+    native(
+        "mirror",
+        Extended,
+        Context,
+        "inspect or steer the source-linked Personal Mirror",
+    ),
     delegated("work", Core, Work, "show and advance the work queue"),
     delegated("task", Core, Work, "capture a task into the queue"),
     delegated("now", Core, Work, "show what to do next"),

@@ -245,6 +245,7 @@ pub fn run(paths: &AppPaths, options: BenchmarkOptions) -> Result<BenchmarkRepor
                     .iter()
                     .map(|fixture| format!("benchmark-fixture:{}:{}", case.id, fixture.path))
                     .collect(),
+                system_context: Vec::new(),
                 output: RunOutput::Quiet,
                 stream: StreamPolicy::Never,
                 allow_missing_verify_deps: false,

@@ -281,6 +281,18 @@ fn default_requirements_version() -> u8 {
 }
 
 impl OutcomeRequirements {
+    /// A direct answer can finish when it returns a final response, but it does
+    /// not become verified evidence merely by existing.
+    pub fn informational_response() -> Self {
+        OutcomeRequirements {
+            version: 1,
+            kind: OutcomeKind::Informational,
+            final_response_required: true,
+            declared_checks_required: false,
+            artifacts: Vec::new(),
+        }
+    }
+
     pub fn build(kind: OutcomeKind, artifacts: Vec<ArtifactRequirement>) -> Result<Self, String> {
         if kind == OutcomeKind::WorkspaceObject {
             return Err(

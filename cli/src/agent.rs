@@ -71,6 +71,9 @@ pub struct RunOptions {
     /// surface (for example HII Bar's frontmost-app observer). These are
     /// recorded even when the run exits before model execution completes.
     pub context_sources: Vec<String>,
+    /// Bounded, host-authored system context for a typed HII invocation
+    /// surface. This is policy/context, not hidden model reasoning.
+    pub system_context: Vec<String>,
     pub output: RunOutput,
     pub stream: StreamPolicy,
     pub budgets: Budgets,
@@ -102,6 +105,8 @@ pub enum AutonomyLevel {
 
 const MAX_INVOCATION_CONTEXT_SOURCES: usize = 32;
 const MAX_INVOCATION_CONTEXT_SOURCE_CHARS: usize = 1_024;
+const MAX_SYSTEM_CONTEXTS: usize = 8;
+const MAX_SYSTEM_CONTEXT_CHARS: usize = 12_000;
 
 fn bounded_context_sources(sources: &[String]) -> Vec<String> {
     let mut bounded = Vec::new();
@@ -119,6 +124,17 @@ fn bounded_context_sources(sources: &[String]) -> Vec<String> {
         }
     }
     bounded
+}
+
+fn bounded_system_contexts(contexts: &[String]) -> Vec<String> {
+    contexts
+        .iter()
+        .take(MAX_SYSTEM_CONTEXTS)
+        .filter_map(|context| {
+            let context = redact_text(context.trim());
+            (!context.is_empty()).then(|| crate::text::clip(&context, MAX_SYSTEM_CONTEXT_CHARS))
+        })
+        .collect()
 }
 
 impl AutonomyLevel {
@@ -540,6 +556,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         None
     };
     let invocation_context_sources = bounded_context_sources(&options.context_sources);
+    let invocation_system_context = bounded_system_contexts(&options.system_context);
     let mut store = RunStore::create(&paths.runtime)?;
     crate::run_context::set_run_id(&store.id);
     store.set_authority(options.authority.label())?;
@@ -599,6 +616,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         "authority": options.authority.label(),
         "max_steps": options.max_steps,
         "dry_run": options.dry_run,
+        "system_contexts": invocation_system_context.len(),
         "skills": loaded_skills.iter().map(|skill| skill.id.as_str()).collect::<Vec<_>>()
     })))?;
     let mut hook_records: Vec<HookRecord> = Vec::new();
@@ -695,6 +713,9 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     }
     if !capsule.text.is_empty() {
         messages.push(Message::system(capsule.text.clone()));
+    }
+    for context in invocation_system_context {
+        messages.push(Message::system(context));
     }
     let mcp_context = mcp_clients.catalog_context();
     if !mcp_context.is_empty() {
