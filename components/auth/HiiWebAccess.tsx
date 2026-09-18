@@ -23,7 +23,8 @@ import {
   type AccountWorkspaceSummary
 } from '@/lib/web/account-workspace';
 import { nodeSeedFromFeedSnapshot, type FeedItem } from '@/lib/web/feed-contract';
-import { canvasTextSeed } from '@/lib/workspace/ingest';
+import { comfyOutputUrl, compileCanvasContext, localComfyStatus, queueCanvasPrompt, waitForCanvasOutput } from '@/lib/web/comfy-create';
+import { canvasTextSeed, type NodeSeed } from '@/lib/workspace/ingest';
 import { HiiWebPanel, type WebPanel } from './HiiWebPanels';
 import styles from './HiiWebAccess.module.css';
 
@@ -38,6 +39,41 @@ type Session = {
 };
 
 const LOCAL_OWNER_ACCOUNT_ID = 'z1zLugCcqYOu8FfOK51CCmatt6Q19nJrmEyqKZLi5Js';
+
+function ComfyCreatePanel({ nodes, onClose, onOutput }: { nodes: WorkspaceNode[]; onClose: () => void; onOutput: (seed: NodeSeed) => void }) {
+  const context = useMemo(() => compileCanvasContext(nodes), [nodes]);
+  const [direction, setDirection] = useState('Create a coherent architectural visualization from this selected HII canvas context. Preserve the core intent, spatial relationships, material logic, atmosphere, and human scale.');
+  const [status, setStatus] = useState('Checking local ComfyUI…');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { void localComfyStatus().then(() => setStatus('Local ComfyUI ready on this computer.')).catch(() => setStatus('Local ComfyUI bridge is not reachable on this computer.')); }, []);
+  async function generate() {
+    if (!context || busy) return;
+    setBusy(true);
+    setStatus('Queued on local hardware…');
+    try {
+      const fullPrompt = `${direction.trim()}\n\nHII CANVAS CONTEXT:\n${context}`.slice(0, 16_000);
+      const promptId = await queueCanvasPrompt(fullPrompt);
+      setStatus(`Rendering locally · ${promptId.slice(0, 8)}`);
+      const output = await waitForCanvasOutput(promptId);
+      const url = comfyOutputUrl(output);
+      onOutput({
+        type: 'image', w: 520, h: 520,
+        object: { kind: 'artifact', owner: 'hii', status: 'completed', source: url, capabilityId: 'hii.create.workflow', proofRefs: [`comfy-prompt:${promptId}`], audit: [{ ts: new Date().toISOString(), actor: 'hii', action: 'generated from explicit canvas selection through local ComfyUI' }] },
+        payload: { title: 'HII Create output', name: output.filename, url, prompt: fullPrompt, promptId }
+      });
+      setStatus('Complete · output placed back on the canvas.');
+    } catch (error) { setStatus(error instanceof Error ? error.message : 'Local generation failed.'); }
+    finally { setBusy(false); }
+  }
+  return <aside className={styles.comfyPanel} data-workspace-ui aria-label="Create with local ComfyUI">
+    <header><strong>HII Create</strong><button type="button" onClick={onClose}>close</button></header>
+    <small>selected canvas context · {nodes.length} object{nodes.length === 1 ? '' : 's'} · local hardware only</small>
+    <pre>{context || 'Select one or more canvas objects first.'}</pre>
+    <label>creative direction<textarea value={direction} onChange={(event) => setDirection(event.target.value)} /></label>
+    <button type="button" disabled={!context || busy} onClick={() => void generate()}>{busy ? 'rendering…' : 'review and render locally'}</button>
+    <p role="status" aria-live="polite">{status}</p>
+  </aside>;
+}
 
 function localOwnerSession(hostname: string): Session | null {
   const normalized = hostname.toLocaleLowerCase();
@@ -216,6 +252,8 @@ export function HiiWebAccess() {
   const [shareNode, setShareNode] = useState<WorkspaceNode | null>(null);
   const [agentContextNodes, setAgentContextNodes] = useState<WorkspaceNode[]>([]);
   const [canvasImport, setCanvasImport] = useState<{ id: string; seed: ReturnType<typeof nodeSeedFromFeedSnapshot> } | null>(null);
+  const [comfyOpen, setComfyOpen] = useState(false);
+  const [selectedCanvasNodes, setSelectedCanvasNodes] = useState<WorkspaceNode[]>([]);
   const [workspaces, setWorkspaces] = useState<AccountWorkspaceSummary[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
@@ -639,6 +677,7 @@ export function HiiWebAccess() {
           creatorId={`account:${canvasAccountId}`}
           persistence={canvasPersistence}
           onUnsavedChanges={setCanvasUnsaved}
+          onSelectionChange={setSelectedCanvasNodes}
           allowPhoto
           persistentChrome={false}
           fileSeeder={canvasFileSeeder}
@@ -648,6 +687,7 @@ export function HiiWebAccess() {
         />
         <header className={styles.canvasHeader} data-workspace-ui aria-label="HII account access">
           <nav aria-label="HII account actions">
+            <button type="button" disabled={!selectedCanvasNodes.length} onClick={() => setComfyOpen(true)}>Create{selectedCanvasNodes.length ? ` · ${selectedCanvasNodes.length}` : ''}</button>
             <button
               type="button"
               aria-expanded={accountOpen}
@@ -658,6 +698,7 @@ export function HiiWebAccess() {
             </button>
           </nav>
         </header>
+        {comfyOpen ? <ComfyCreatePanel nodes={selectedCanvasNodes} onClose={() => setComfyOpen(false)} onOutput={(seed) => { setCanvasImport({ id: crypto.randomUUID(), seed }); setComfyOpen(false); }} /> : null}
         {panel ? <HiiWebPanel
           panel={panel}
           csrfToken={session.csrfToken ?? ''}
