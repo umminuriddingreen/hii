@@ -33,6 +33,7 @@ try {
     const calls = [];
     const report = await nvidiaDoctor({ ...base, models, run(command, args) { calls.push([command, args]); if (args.includes("WSL_DISTRO_NAME")) return { status: 0, stdout: "Ubuntu-24.04\n" }; return { status: 0, stdout: command === "nvidia-smi" ? "0, GPU-test, RTX test, 591.01, 16384, 14000, 2384, 0" : "version 1" }; } });
     assert.equal(report.backends["wsl-cuda"].distro, "Ubuntu-24.04"); assert.equal(report.backends["wsl-cuda"].available, true); assert(!JSON.stringify(calls).includes("install"));
+    assert(JSON.stringify(calls).includes("/usr/lib/wsl/lib/nvidia-smi"), "WSL GPU discovery must not depend on a login-shell PATH");
   });
   await test("dry run does not write configuration or launch", async () => { const report = await nvidiaStart({ ...base, fetch: unavailable, dryRun: true, inventory: { gpus, models, backends: { "native-cuda": { available: true } } } }); assert.equal(report.dryRun, true); assert(!fs.existsSync(path.join(runtimeRoot, "config/inference.json"))); });
   await test("external runtime adopted without engine launch or ownership claim", async () => {

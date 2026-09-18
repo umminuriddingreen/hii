@@ -66,7 +66,9 @@ export async function nvidiaDoctor(options = {}) {
   const gpus = g.status === 0 ? parseGpuCsv(g.stdout) : [];
   const defaultDistro = s.platform === "win32" && !s.env.HII_WSL_DISTRO ? s.run("wsl.exe", ["--exec", "printenv", "WSL_DISTRO_NAME"]) : null;
   const distro = s.env.HII_WSL_DISTRO || (defaultDistro?.status === 0 ? defaultDistro.stdout.trim() : null);
-  const wsl = s.platform === "win32" ? s.run("wsl.exe", wslArgs(distro, ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"])) : null;
+  // WSL --exec does not load the login shell PATH. The driver ships this binary
+  // outside /usr/bin; do not mistake a missing PATH entry for an absent GPU.
+  const wsl = s.platform === "win32" ? s.run("wsl.exe", wslArgs(distro, [s.env.HII_WSL_NVIDIA_SMI_BIN || "/usr/lib/wsl/lib/nvidia-smi", "--query-gpu=name", "--format=csv,noheader"])) : null;
   let llama = s.env.HII_LLAMA_SERVER_BIN || "llama-server";
   let native = s.run(llama, ["--version"]);
   if (native.status !== 0 && !s.env.HII_LLAMA_SERVER_BIN) {

@@ -36,6 +36,42 @@ credentials are never reused for a different endpoint override.
 
 ## Adaptation and evidence
 
+### Isolated WSL CUDA installation
+
+The reproducible installer is `scripts/hii-wsl-cuda-install.py`. It uses the
+official NVIDIA CUDA 12.9.1 redistributables (nvcc, cudart, CCCL and cuBLAS),
+checks each archive's SHA-256, and builds llama.cpp revision `6a1a922d2`
+(`b10819`) for the RTX 5080's SM 120 architecture. It does not install a Linux
+NVIDIA driver, download weights, or replace system CUDA. CMake, Ninja and GCC
+must already be available in Ubuntu. Ask before the approximately 970 MiB SDK
+download and several GiB installation.
+
+Clone the pinned source into `<prefix>/llama.cpp`, then run in WSL:
+
+```text
+python3 scripts/hii-wsl-cuda-install.py --prefix /absolute/isolated/prefix --jobs 4
+```
+
+For WSL without working internet, run the script's `--download-only` mode on
+Windows, clone the pinned source through Windows, and pass the shared download
+directory with `--cache /mnt/c/.../downloads` during the Linux build. Configure
+`HII_WSL_LLAMA_SERVER_BIN` to the resulting `llama.cpp/build-hii/bin/llama-server`.
+Doctor uses `/usr/lib/wsl/lib/nvidia-smi`, not a login-shell PATH assumption.
+
+`hii-cuda-benchmark.py` measures the same local weights on native and WSL CUDA,
+with three repetitions each of prompt processing, generation, and mixed work.
+`hii-cuda-server-smoke.py` separately verifies JSON, long-context retrieval and
+tool-call correctness in a temporary loopback server; it stops only its own
+child. Neither proof script changes the production endpoint or selects a winner.
+Run them serially after unloading an idle serving model, never alongside it.
+
+WSL engine availability is separate from Windows-to-WSL endpoint connectivity.
+Do not promote WSL if its networking is unavailable. Do not restart a distro
+containing another active session without the operator's approval.
+
+For this machine's measured results and native context tradeoff, see
+`docs/records/2026-09-18-wsl-cuda-tuning.md`.
+
 Fast, Deep, and Shared GPU profiles bound context, KV precision and batch sizes.
 Adaptive profiles choose at task boundaries; active tasks keep one model. A
 per-runtime lease coordinates HII CLI tasks and detects stale owners. Other

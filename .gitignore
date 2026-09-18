@@ -52,3 +52,6 @@ life/
 /.venv-mlx/
 /.venv-mlx312/
 src-tauri/tauri.no-updater.json
+
+# Local bytecode from the isolated CUDA installation/proof scripts.
+/scripts/__pycache__/
