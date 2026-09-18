@@ -127,6 +127,7 @@ import type { NodeTransformDetail } from './nodeTransform';
 const MusicPlaylistPanel = lazy(() => import('./MusicPlaylistPanel').then((module) => ({ default: module.MusicPlaylistPanel })));
 const NativeDevBrowser = lazy(() => import('./NativeDevBrowser').then((module) => ({ default: module.NativeDevBrowser })));
 const HiiMarketplace = lazy(() => import('./HiiMarketplace').then((module) => ({ default: module.HiiMarketplace })));
+const NatirarProjectSurface = lazy(() => import('./NatirarProjectSurface').then((module) => ({ default: module.NatirarProjectSurface })));
 
 const FIRST_RUN_TERMINAL_PREFACE = [
   '\x1b[1;97m ██╗  ██╗██╗██╗',
@@ -255,6 +256,7 @@ const promptSlashCommands = [
   ['/browser [url]', 'Open the native browser'],
   ['/search <query>', 'Search inside the native browser'],
   ['/marketplace', 'Open apps, skills, and runtimes'],
+  ['/natirar', 'Open the live Natirar project field'],
   ['/feature <request>', 'Save a feature request to your HII board']
 ] as const;
 
@@ -832,6 +834,7 @@ function NodeBody({
     return <DeferredSurface><MusicPlaylistPanel payload={payload} onPayload={onPayload} onRequestCuration={onCurationRequest} /></DeferredSurface>;
   }
   if (node.type === 'surface' && payload.surface === 'hii-marketplace') return <DeferredSurface><HiiMarketplace onInstall={onInstallPackage} /></DeferredSurface>;
+  if (node.type === 'surface' && payload.surface === 'natirar-project') return <DeferredSurface><NatirarProjectSurface /></DeferredSurface>;
   if (node.type === 'app' && payload.surface === 'waymark-location') return <DeferredSurface><WaymarkApp destination={text(payload.destination) || 'this canvas'} onPayload={onPayload} /></DeferredSurface>;
   if (node.type === 'app' && payload.surface === 'hii-link') return <DeferredSurface><HiiLinkApp /></DeferredSurface>;
   if (node.type === 'app') return <DeferredSurface><RegisteredApplication name={name} summary={content || 'Registered HII application'} entryUrl={text(payload.entryUrl) || undefined} /></DeferredSurface>;
@@ -1938,6 +1941,20 @@ export function HiiRoot({
     }], at)[0];
   }, [spawnSeeds, workspace]);
 
+  const openNatirarProject = useCallback((at: Point) => {
+    const existing = workspace.nodes.find((node) => node.type === 'surface' && node.payload.surface === 'natirar-project');
+    if (existing) {
+      setSelected([existing.id]);
+      workspace.bringToFront(existing.id);
+      return existing.id;
+    }
+    return spawnSeeds([{
+      type: 'surface', w: 1180, h: 760,
+      object: { kind: 'interface', owner: 'hii', status: 'ready', source: 'Local Natirar project manifest', capabilityId: 'hii.natirar.project', audit: [{ ts: new Date().toISOString(), actor: 'human', action: 'opened the Natirar project field' }] },
+      payload: { surface: 'natirar-project', title: 'Natirar project field' }
+    }], at)[0];
+  }, [spawnSeeds, workspace]);
+
   const installPackage = useCallback((pkg: HiiMarketplacePackage, destination: string) => {
     const placement = packagePlacementSeed(pkg, destination);
     const at = camera.toWorld(window.innerWidth / 2, window.innerHeight / 2);
@@ -2068,6 +2085,11 @@ export function HiiRoot({
         setPromptVisible(false);
         return;
       }
+      if (canMutateCanvas(mode) && /^(?:\/natirar|natirar|open (?:the )?natirar project)$/i.test(intent)) {
+        openNatirarProject(at);
+        setPromptVisible(false);
+        return;
+      }
       if (/^\/?(?:status|state)$/i.test(intent)) {
         const home = await readAgentHome();
         setPrompt((current) => current ? { ...current, response: formatActiveState(home), status: 'completed' } : current);
@@ -2152,7 +2174,7 @@ export function HiiRoot({
     } catch (error) {
       setPrompt((current) => current ? { ...current, response: error instanceof Error ? error.message : 'HII could not start the model.', status: 'failed' } : current);
     }
-  }, [camera, ensureWorkspaceTerminal, mode, openDevBrowser, openMarketplace, openMusicPanel, searchWeb, selected, spawnInformation, startWithContext]);
+  }, [camera, ensureWorkspaceTerminal, mode, openDevBrowser, openMarketplace, openMusicPanel, openNatirarProject, searchWeb, selected, spawnInformation, startWithContext]);
 
   useEffect(() => {
     if (!runtimeEnabled) return;

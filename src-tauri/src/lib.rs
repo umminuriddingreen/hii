@@ -26,6 +26,7 @@ mod account_sync;
 mod browser;
 mod chat;
 mod local_workspaces;
+mod natirar;
 mod terminal;
 mod ui_channel;
 
@@ -895,6 +896,9 @@ pub fn run() {
             account_sync::account_workspace_list,
             local_workspaces::local_workspace_list,
             local_workspaces::local_workspace_select,
+            natirar::natirar_project_read,
+            natirar::natirar_project_select,
+            natirar::natirar_rhino_action,
             account_sync::account_workspace_read,
             account_sync::account_workspace_write,
             account_sync::account_workspace_selection_get,
