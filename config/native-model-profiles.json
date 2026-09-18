@@ -149,6 +149,19 @@
       "status": "hii runner model status"
     }
   },
+  "nvidia": {
+    "defaultBackend": "native-cuda",
+    "defaultProfile": "adaptive",
+    "headroomMiB": 1536,
+    "switchCooldownMs": 120000,
+    "backends": ["native-cuda", "wsl-cuda", "wsl-vllm"],
+    "profiles": {
+      "fast": { "modelAliases": ["qwen3.5-9b-balanced"], "contextTokens": 16384, "batchSize": 1024, "microBatchSize": 256, "kvCacheType": "q8_0" },
+      "deep": { "modelAliases": ["qwen3.6-35b-a3b-agent"], "contextTokens": 32768, "batchSize": 1024, "microBatchSize": 256, "kvCacheType": "q4_0" },
+      "shared-gpu": { "modelAliases": ["qwen3.5-9b-balanced"], "contextTokens": 8192, "batchSize": 512, "microBatchSize": 128, "kvCacheType": "q4_0" }
+    },
+    "notes": "Candidate profiles, not measured performance claims. GPU capacity is separate from taskTiers. Adaptive selection happens only at explicit start boundaries; active tasks never switch models. Existing external rails are observation-only."
+  },
   "performanceGate": {
     "maxWallMs": 120000,
     "minCompletionTokensPerSecond": 8,

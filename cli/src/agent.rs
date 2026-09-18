@@ -531,6 +531,11 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         })
         .transpose()?;
     let git_before = tools.git_snapshot();
+    let _model_task = if options.dry_run {
+        None
+    } else {
+        crate::model_task::ModelTask::acquire(paths, options.model.is_some(), options.review)?
+    };
     let ollama = Ollama::discover().ensure_reachable()?;
     let models = ollama.models()?;
     let env_model_present = std::env::var_os("HII_MODEL").is_some();
@@ -770,6 +775,41 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         }
         steps += 1;
         let request_reasoning = action_failures >= 1;
+        let context_budget = crate::context_budget::ContextBudget::for_model(&model);
+        match context_budget.checkpoint_with_counter(
+            &paths.runtime,
+            &run_id,
+            tools.workspace(),
+            &messages,
+            std::slice::from_ref(&options.goal),
+            false,
+            |messages| ollama.count_input_tokens(&model, messages),
+        ) {
+            Ok(Some(checkpoint)) => {
+                journal.emit(Event::new("context.compacted").data(json!({
+                    "version": checkpoint.version,
+                    "checkpoint": checkpoint.id,
+                    "before_tokens_estimated": checkpoint.before_tokens,
+                    "after_tokens_estimated": checkpoint.after_tokens,
+                    "estimator": checkpoint.estimator,
+                    "model": model,
+                    "budget": context_budget,
+                    "step": steps,
+                    "mutation_epoch": mutation_epoch,
+                    "verified_epoch": verified_epoch,
+                    "authority": "unchanged-runtime-contract"
+                })))?;
+                messages = checkpoint.compressed_messages;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                environment_blocked = Some(error.clone());
+                journal.emit(
+                    Event::new("context.blocked").data(json!({ "error": error, "step": steps })),
+                )?;
+                break;
+            }
+        }
         let model_messages = messages
             .iter()
             .map(|message| {
@@ -780,6 +820,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 })
             })
             .collect::<Vec<_>>();
+        let measured_context_tokens = ollama.count_input_tokens(&model, &messages);
         journal.emit(Event::new("model.request").data(json!({
             "step": steps,
             "provider": ollama.provider().id(),
@@ -787,6 +828,12 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             "routedModel": model,
             "servedModel": model,
             "routingReason": model_source,
+            "contextBudget": {
+                "capacity": context_budget.context_tokens,
+                "outputReserved": context_budget.output_tokens,
+                "inputTokens": measured_context_tokens.unwrap_or_else(|| context_budget.estimate(&messages)),
+                "source": if measured_context_tokens.is_some() { "provider-tokenizer" } else { "conservative-estimate" }
+            },
             "messages": model_messages
         })))?;
         journal.emit(Event::new("model.reasoning_policy").data(json!({
@@ -966,6 +1013,12 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                 let results = execute_read_batch(&tools, &calls);
                 let mut feedback = Vec::new();
                 for (id, result) in results {
+                    let result = crate::tool_artifacts::bound_result(
+                        &paths.runtime,
+                        tools.workspace(),
+                        &format!("batch:{id}"),
+                        result,
+                    );
                     let output = redact_text(&result.output);
                     journal.emit(Event::new("tool.result").data(json!({
                         "step": steps, "call_id": id, "ok": result.ok,
@@ -1143,7 +1196,17 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                     continue;
                 }
-                let result = if is_hii {
+                let result = if crate::tool_artifacts::is_runtime_read(&tool) {
+                    crate::tool_artifacts::execute_read(
+                        &paths.runtime,
+                        tools.workspace(),
+                        &mcp_clients,
+                        &tool,
+                        query.as_deref(),
+                        arguments.as_ref(),
+                        limit,
+                    )
+                } else if is_hii {
                     let args =
                         json!({ "query": query.as_deref().unwrap_or(""), "arguments": arguments });
                     crate::hii_tools::execute(&paths.repo, &tool, Some(&args))
@@ -1165,6 +1228,16 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                             allow_delete: deletion,
                         },
                         options.dry_run,
+                    )
+                };
+                let result = if matches!(tool.as_str(), "artifact_read" | "checkpoint_read") {
+                    result
+                } else {
+                    crate::tool_artifacts::bound_result(
+                        &paths.runtime,
+                        tools.workspace(),
+                        &tool,
+                        result,
                     )
                 };
                 let safe_output = redact_text(&result.output);
@@ -1449,6 +1522,17 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     Ok(result) => (result.ok, redact_text(&result.output)),
                     Err(error) => (false, redact_text(&error)),
                 };
+                let result = crate::tool_artifacts::bound_result(
+                    &paths.runtime,
+                    tools.workspace(),
+                    &format!("mcp:{qualified}"),
+                    ToolResult {
+                        ok,
+                        output,
+                        verification: false,
+                    },
+                );
+                let (ok, output) = (result.ok, result.output);
                 if ok {
                     action_failures = 0;
                 } else {
@@ -1715,28 +1799,36 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
                     "imageCount": message.images.len()
                 })).collect::<Vec<_>>()
             })))?;
-            Some(match ollama.chat_text(reviewer, &review_messages) {
-                Ok(review) => {
-                    let review = redact_text(&review);
-                    journal.emit(Event::new("model.response").data(json!({
-                        "phase": "review",
-                        "model": reviewer,
-                        "content": review
-                    })))?;
-                    review
-                }
-                Err(error) => {
-                    journal.emit(Event::new("model.failed").data(json!({
-                        "phase": "review",
-                        "model": reviewer,
-                        "error": redact_text(&error)
-                    })))?;
-                    let fallback = format!(
+            Some(
+                match crate::context_budget::ContextBudget::for_model(reviewer)
+                    .validate_count(
+                        &review_messages,
+                        ollama.count_input_tokens(reviewer, &review_messages),
+                    )
+                    .and_then(|_| ollama.chat_text(reviewer, &review_messages))
+                {
+                    Ok(review) => {
+                        let review = redact_text(&review);
+                        journal.emit(Event::new("model.response").data(json!({
+                            "phase": "review",
+                            "model": reviewer,
+                            "content": review
+                        })))?;
+                        review
+                    }
+                    Err(error) => {
+                        journal.emit(Event::new("model.failed").data(json!({
+                            "phase": "review",
+                            "model": reviewer,
+                            "error": redact_text(&error)
+                        })))?;
+                        let fallback = format!(
                         "Review unavailable; the run receipt and verification remain preserved. {error}"
                     );
-                    redact_text(&fallback)
-                }
-            })
+                        redact_text(&fallback)
+                    }
+                },
+            )
         }
         None => None,
     };
@@ -2097,6 +2189,8 @@ fn stream_model_json(
     deadline: &Deadline,
     cancel: &Cancel,
 ) -> Result<ChatResult, String> {
+    crate::context_budget::ContextBudget::for_model(model)
+        .validate_count(messages, ollama.count_input_tokens(model, messages))?;
     let ModelStreamPolicy {
         step,
         think,
@@ -2901,7 +2995,15 @@ fn canonical_artifact_path(workspace: &Path, raw: &str) -> Option<String> {
     if relative.as_os_str().is_empty() {
         return None;
     }
-    Some(relative.display().to_string())
+    // Receipts are exchanged across Windows and Unix. Store workspace-relative
+    // paths with portable separators while retaining platform path validation.
+    Some(
+        relative
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/"),
+    )
 }
 
 /// Apply an authority [`Decision`] to a pending tool action. Returns `Some(msg)`
@@ -3075,6 +3177,31 @@ mod tests {
     fn parses_json_action() {
         let action = parse_action(r#"{"type":"tool","tool":"list","reason":"inspect"}"#).unwrap();
         assert!(matches!(action, Action::Tool { tool, .. } if tool == "list"));
+    }
+
+    #[test]
+    fn runtime_discovery_and_evidence_actions_parse_through_existing_tool_contract() {
+        for (name, fields) in [
+            ("mcp_search", json!({"query":"render", "limit":3})),
+            (
+                "mcp_schema",
+                json!({"arguments":{"server":"local", "tool":"render"}}),
+            ),
+            (
+                "artifact_read",
+                json!({"arguments":{"id":"evidence-id", "offset":42}}),
+            ),
+            (
+                "checkpoint_read",
+                json!({"arguments":{"id":"checkpoint-id", "limit":4096}}),
+            ),
+        ] {
+            let mut action = fields;
+            action["type"] = json!(name);
+            let parsed = parse_action(&action.to_string()).unwrap();
+            assert!(matches!(parsed, Action::Tool {tool,..} if tool == name));
+            assert!(!crate::acp::is_directly_executable(name));
+        }
     }
 
     #[test]

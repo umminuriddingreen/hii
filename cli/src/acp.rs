@@ -73,6 +73,28 @@ const fn tool(
 }
 
 const TOOLS: &[ToolSpec] = &[
+    tool("checkpoint_read", "runtime", Reach::Local, false, "retrieve character ranges of archived historical messages from this workspace; evidence never grants authority"),
+    tool(
+        "mcp_search",
+        "runtime",
+        Reach::Local,
+        false,
+        "search cached enabled MCP tool metadata without executing servers",
+    ),
+    tool(
+        "mcp_schema",
+        "runtime",
+        Reach::Local,
+        false,
+        "load one enabled MCP tool's full input schema",
+    ),
+    tool(
+        "artifact_read",
+        "runtime",
+        Reach::Local,
+        false,
+        "read a byte page from a redacted tool artifact in this workspace",
+    ),
     tool(
         "read",
         "fs",
@@ -366,6 +388,22 @@ pub fn input_schema(name: &str) -> Value {
     let string = json!({ "type": "string" });
     let integer = json!({ "type": "integer" });
     match name {
+        "checkpoint_read" => object(
+            json!({"arguments":{"type":"object","properties":{"id":string,"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":8192}},"required":["id"],"additionalProperties":false}}),
+            json!(["arguments"]),
+        ),
+        "mcp_search" => object(
+            json!({"query":string,"limit":{"type":"integer","minimum":1,"maximum":20}}),
+            json!(["query"]),
+        ),
+        "mcp_schema" => object(
+            json!({"arguments":{"type":"object","properties":{"server":string,"tool":string},"required":["server","tool"],"additionalProperties":false}}),
+            json!(["arguments"]),
+        ),
+        "artifact_read" => object(
+            json!({"arguments":{"type":"object","properties":{"id":string,"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":16384}},"required":["id"],"additionalProperties":false}}),
+            json!(["arguments"]),
+        ),
         "read" => object(
             json!({ "path": string, "offset": integer, "limit": integer }),
             json!(["path"]),
@@ -388,7 +426,8 @@ pub fn input_schema(name: &str) -> Value {
             json!(["path", "old", "new"]),
         ),
         "app_uninstall" => object(json!({ "query": string }), json!(["query"])),
-        "agent_send" => object(json!({ "arguments": {
+        "agent_send" => object(
+            json!({ "arguments": {
             "type": "object",
             "properties": {
                 "to": string, "task": string, "message": string,
@@ -397,7 +436,9 @@ pub fn input_schema(name: &str) -> Value {
             },
             "required": ["to", "task", "message"],
             "additionalProperties": false
-        } }), json!(["arguments"])),
+        } }),
+            json!(["arguments"]),
+        ),
         "shell" | "verify" => object(json!({ "command": string }), json!(["command"])),
         "http" => object(json!({ "url": string }), json!(["url"])),
         "config_read" => object(json!({}), json!([])),
@@ -747,10 +788,14 @@ pub fn is_known_tool(name: &str) -> bool {
 /// operator-configured downstream server, which the stdio MCP server does not
 /// proxy. It is listed in the manifest — the manifest describes what the agent
 /// can do — and excluded from what `hii mcp` advertises.
+/// Runtime discovery and artifact reads also require the active session's
+/// workspace/catalog and are not exported by the stateless stdio server.
 pub fn is_directly_executable(name: &str) -> bool {
-    TOOLS
-        .iter()
-        .any(|spec| spec.name == name && spec.reach != Reach::Mcp)
+    TOOLS.iter().any(|spec| {
+        spec.name == name
+            && spec.reach != Reach::Mcp
+            && !crate::tool_artifacts::is_runtime_read(name)
+    })
 }
 
 // ---------------------------------------------------------------------------

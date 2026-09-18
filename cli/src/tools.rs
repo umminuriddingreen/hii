@@ -7,6 +7,7 @@ use std::{
     net::{IpAddr, ToSocketAddrs},
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
+    sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
@@ -450,6 +451,8 @@ impl Toolbelt {
     }
 
     pub fn app_uninstall(&self, name: &str) -> ToolResult {
+        #[cfg(not(target_os = "macos"))]
+        let _ = name;
         if !self.personal_local {
             return tool_result(
                 Err("app_uninstall requires personal-local authority".into()),
@@ -694,28 +697,30 @@ impl Toolbelt {
             .stderr(Stdio::piped());
         let result = (|| {
             let mut child = command.spawn().map_err(|error| error.to_string())?;
+            // Drain both pipes while the child runs. Waiting for exit before
+            // reading deadlocks as soon as either OS pipe buffer fills.
+            let stdout = drain_pipe(child.stdout.take().ok_or("missing child stdout")?);
+            let stderr = drain_pipe(child.stderr.take().ok_or("missing child stderr")?);
             let started = Instant::now();
-            loop {
+            let (status, timed_out) = loop {
                 match child.try_wait().map_err(|error| error.to_string())? {
-                    Some(_) => break,
+                    Some(status) => break (status, false),
                     None if started.elapsed() >= Duration::from_secs(timeout_secs) => {
                         let _ = child.kill();
-                        let output = child
-                            .wait_with_output()
-                            .map_err(|error| error.to_string())?;
-                        return Err(format!(
-                            "command timed out after {timeout_secs}s\n{}",
-                            combine_output(&output.stdout, &output.stderr)
-                        ));
+                        break (child.wait().map_err(|error| error.to_string())?, true);
                     }
                     None => thread::sleep(Duration::from_millis(50)),
                 }
+            };
+            let stdout = collect_pipe(stdout)?;
+            let stderr = collect_pipe(stderr)?;
+            let combined = combine_output(&stdout, &stderr);
+            if timed_out {
+                return Err(format!(
+                    "command timed out after {timeout_secs}s\n{combined}"
+                ));
             }
-            let output = child
-                .wait_with_output()
-                .map_err(|error| error.to_string())?;
-            let combined = combine_output(&output.stdout, &output.stderr);
-            if output.status.success() {
+            if status.success() {
                 Ok(if combined.is_empty() {
                     "ok".into()
                 } else {
@@ -724,7 +729,7 @@ impl Toolbelt {
             } else {
                 Err(format!(
                     "exit {}\n{}",
-                    output.status.code().unwrap_or(-1),
+                    status.code().unwrap_or(-1),
                     combined
                 ))
             }
@@ -1376,12 +1381,50 @@ pub(crate) fn which_on_path(program: &str) -> bool {
     } else {
         &[""]
     };
-    std::env::split_paths(&paths).any(|dir| {
+    let found = std::env::split_paths(&paths).any(|dir| {
         exe_suffixes.iter().any(|suffix| {
             let candidate = dir.join(format!("{program}{suffix}"));
             candidate.is_file()
         })
-    })
+    });
+    // Windows can put a Microsoft Store launcher named python3.exe on PATH
+    // even though it cannot run Python. Treat this as a missing interpreter,
+    // not a missing module or a failing project test. Do not silently switch
+    // interpreters: virtual environments and versions belong to the command.
+    #[cfg(windows)]
+    if found && program.trim_end_matches(".exe").starts_with("python") {
+        return python_runs(program);
+    }
+    found
+}
+
+#[cfg(windows)]
+fn python_runs(program: &str) -> bool {
+    use std::os::windows::process::CommandExt;
+    let Ok(mut child) = Command::new(program)
+        .args(["-I", "-S", "-c", "pass"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(0x08000000)
+        .spawn()
+    else {
+        return false;
+    };
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if started.elapsed() < Duration::from_secs(2) => {
+                thread::sleep(Duration::from_millis(10))
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
 }
 
 /// Build the OS-appropriate shell invocation. Honors `HII_SHELL` when set
@@ -1635,10 +1678,61 @@ fn combine_output(stdout: &[u8], stderr: &[u8]) -> String {
         combined.push_str(&String::from_utf8_lossy(stderr));
     }
     if combined.len() > MAX_OUTPUT_BYTES {
-        combined.truncate(MAX_OUTPUT_BYTES);
-        combined.push_str("\n… output truncated");
+        let head = crate::text::clip_bytes(&combined, MAX_OUTPUT_BYTES / 2);
+        let mut tail_start = combined.len() - MAX_OUTPUT_BYTES / 2;
+        while !combined.is_char_boundary(tail_start) {
+            tail_start += 1;
+        }
+        combined = format!(
+            "{head}\n[output truncated; beginning and end retained]\n{}",
+            &combined[tail_start..]
+        );
     }
     combined.trim().to_string()
+}
+
+fn drain_pipe(mut pipe: impl Read + Send + 'static) -> mpsc::Receiver<Result<Vec<u8>, String>> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let mut captured = Vec::new();
+        let mut total = 0usize;
+        let mut buffer = [0u8; 8192];
+        let result = (|| {
+            loop {
+                let size = pipe.read(&mut buffer).map_err(|error| error.to_string())?;
+                if size == 0 {
+                    break;
+                }
+                total = total.saturating_add(size);
+                let available = MAX_OUTPUT_BYTES.saturating_sub(captured.len());
+                captured.extend_from_slice(&buffer[..size.min(available)]);
+            }
+            if total > captured.len() {
+                captured.extend_from_slice(
+                    format!(
+                        "\n[stream truncated: captured {} of {total} bytes]",
+                        captured.len()
+                    )
+                    .as_bytes(),
+                );
+            }
+            Ok(captured)
+        })();
+        let _ = sender.send(result);
+    });
+    receiver
+}
+
+fn collect_pipe(receiver: mpsc::Receiver<Result<Vec<u8>, String>>) -> Result<Vec<u8>, String> {
+    // A descendant can inherit a pipe after the foreground command exits.
+    // Do not let that descendant defeat the command timeout.
+    match receiver.recv_timeout(Duration::from_millis(500)) {
+        Ok(result) => result.map_err(|error| format!("output read failed: {error}")),
+        Err(_) => Err(
+            "output incomplete: pipe remained open after command exit; completion is unverified"
+                .into(),
+        ),
+    }
 }
 
 fn tool_result(result: Result<String, String>, verification: bool) -> ToolResult {
@@ -1791,11 +1885,20 @@ mod tests {
     #[test]
     fn preflight_checks_interpreter_modules_not_just_programs() {
         let path = workspace();
-        if which_on_path("python3") {
-            let missing = preflight_command("python3 -m definitely_not_a_module_xyz", &path)
-                .expect_err("a missing module is a missing dependency");
+        let interpreters = if cfg!(windows) {
+            ["python", "python3"]
+        } else {
+            ["python3", "python"]
+        };
+        if let Some(interpreter) = interpreters.into_iter().find(|name| which_on_path(name)) {
+            let missing = preflight_command(
+                &format!("{interpreter} -m definitely_not_a_module_xyz"),
+                &path,
+            )
+            .expect_err("a missing module is a missing dependency");
             assert_eq!(missing.program, "definitely_not_a_module_xyz");
-            preflight_command("python3 -m json.tool", &path).expect("stdlib module resolves");
+            preflight_command(&format!("{interpreter} -m json.tool"), &path)
+                .expect("stdlib module resolves");
         }
         let _ = fs::remove_dir_all(path);
     }
@@ -2189,6 +2292,45 @@ mod tests {
         assert!(result.verification);
         assert!(result.output.contains("exit 7"), "{}", result.output);
         let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn command_drains_stdout_and_stderr_before_exit() {
+        let path = workspace();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        #[cfg(windows)]
+        let command = {
+            let mut command = Command::new("powershell.exe");
+            command.args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "[Console]::Out.Write('x' * 200000); [Console]::Error.Write('y' * 200000)",
+            ]);
+            command
+        };
+        #[cfg(not(windows))]
+        let command = {
+            let mut command = Command::new("sh");
+            command.args(["-c", "i=0; while [ $i -lt 12000 ]; do printf 'stdout0123456789\\n'; printf 'stderr0123456789\\n' >&2; i=$((i+1)); done"]);
+            command
+        };
+        let result = tools.run_command(command, true, 10);
+        assert!(result.ok, "{}", result.output);
+        assert!(result.verification);
+        assert!(result.output.contains("truncated"));
+        assert!(result.output.len() < MAX_OUTPUT_BYTES + 256);
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn output_clipping_preserves_unicode_boundaries_and_error_tail() {
+        let output = combine_output(
+            "é".repeat(MAX_OUTPUT_BYTES).as_bytes(),
+            b"important stderr diagnosis",
+        );
+        assert!(output.contains("important stderr diagnosis"));
+        assert!(output.contains("truncated"));
     }
 
     /// A process killed by a signal has no exit code at all. It must never be

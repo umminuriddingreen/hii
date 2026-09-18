@@ -8,7 +8,7 @@ use std::{
     net::ToSocketAddrs,
     path::PathBuf,
     process::{Command, Stdio},
-    sync::mpsc,
+    sync::{mpsc, Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -192,11 +192,19 @@ pub struct Ollama {
     provider: ModelProvider,
     agent: ureq::Agent,
     model_api_key: Result<Option<String>, String>,
+    token_counts: Arc<Mutex<TokenCountCache>>,
+}
+
+#[derive(Default)]
+struct TokenCountCache {
+    unavailable: std::collections::HashMap<String, Instant>,
+    entries: std::collections::VecDeque<(String, [u8; 32], usize)>,
 }
 
 impl Ollama {
     pub fn new(base_url: String) -> Self {
         let provider = ModelProvider::discover(&base_url);
+        let model_api_key = load_model_api_key_for_endpoint(&base_url);
         let agent = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(2))
             .timeout_read(Duration::from_secs(600))
@@ -206,7 +214,8 @@ impl Ollama {
             base_url,
             provider,
             agent,
-            model_api_key: load_model_api_key_from_env(),
+            model_api_key,
+            token_counts: Arc::new(Mutex::new(TokenCountCache::default())),
         }
     }
 
@@ -228,6 +237,9 @@ impl Ollama {
         {
             return Self::new(crate::config::AppPaths::model_url());
         }
+        if let Some(config) = crate::config::inference_config() {
+            return Self::new(config.endpoint);
+        }
         if crate::config::AppPaths::discover()
             .ok()
             .and_then(|paths| paths.user_model_preference().ok().flatten())
@@ -241,7 +253,7 @@ impl Ollama {
     }
 
     pub fn for_mode(_mode: &str) -> Self {
-        Self::new("http://127.0.0.1:11435".to_string())
+        Self::new(crate::config::AppPaths::model_url())
     }
 
     pub fn provider_label(&self) -> &'static str {
@@ -254,6 +266,77 @@ impl Ollama {
 
     pub fn provider(&self) -> ModelProvider {
         self.provider
+    }
+
+    /// Count the provider's rendered text prompt without generating tokens.
+    /// Unsupported providers/images use the caller's explicit conservative
+    /// estimate. Probe failures are cached per model so optional capability
+    /// discovery cannot add repeated network delays to each agent step.
+    pub fn count_input_tokens(&self, model: &str, messages: &[Message]) -> Option<usize> {
+        use sha2::{Digest, Sha256};
+        if !matches!(
+            self.provider,
+            ModelProvider::Native | ModelProvider::LmStudio
+        ) || messages.iter().any(|message| !message.images.is_empty())
+        {
+            return None;
+        }
+        let body = json!({"model": model, "messages": provider_messages(messages), "add_generation_prompt": true});
+        let key: [u8; 32] = Sha256::digest(serde_json::to_vec(&body).ok()?).into();
+        {
+            let cache = self.token_counts.lock().ok()?;
+            if cache
+                .unavailable
+                .get(model)
+                .is_some_and(|time| time.elapsed() < Duration::from_secs(300))
+            {
+                return None;
+            }
+            if let Some((_, _, count)) = cache
+                .entries
+                .iter()
+                .find(|(cached_model, cached_key, _)| cached_model == model && *cached_key == key)
+            {
+                return Some(*count);
+            }
+        }
+        let result = (|| -> Option<usize> {
+            // No redirect can carry this request or bearer credential away from
+            // the exact configured inference endpoint.
+            let agent = ureq::AgentBuilder::new()
+                .redirects(0)
+                .timeout(Duration::from_secs(2))
+                .build();
+            let base = self.base_url.trim_end_matches('/');
+            let rendered: Value = self
+                .authorize(agent.post(&format!("{base}/apply-template")))
+                .ok()?
+                .send_json(body)
+                .ok()?
+                .into_json()
+                .ok()?;
+            let prompt = rendered.get("prompt")?.as_str()?;
+            let tokens: Value = self.authorize(agent.post(&format!("{base}/tokenize"))).ok()?
+                .send_json(json!({"model": model,"content":prompt,"add_special":true,"parse_special":true,"with_pieces":false}))
+                .ok()?.into_json().ok()?;
+            let count = tokens.get("tokens")?.as_array()?.len();
+            (count > 0).then_some(count)
+        })();
+        if let Ok(mut cache) = self.token_counts.lock() {
+            match result {
+                Some(count) => {
+                    cache.unavailable.remove(model);
+                    cache.entries.push_back((model.to_string(), key, count));
+                    while cache.entries.len() > 8 {
+                        cache.entries.pop_front();
+                    }
+                }
+                None => {
+                    cache.unavailable.insert(model.to_string(), Instant::now());
+                }
+            }
+        }
+        result
     }
 
     /// Bring a local provider up when none is listening yet, preferring HII's
@@ -441,7 +524,8 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             "keep_alive": "10m",
             "options": {
                 "temperature": 0.1,
-                "num_ctx": 32768,
+                "num_ctx": crate::context_budget::ContextBudget::for_model(model).context_tokens,
+                "num_predict": crate::context_budget::ContextBudget::for_model(model).output_tokens,
                 "repeat_penalty": 1.1,
                 "repeat_last_n": 256
             }
@@ -481,6 +565,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             "model": model,
             "messages": openai_messages(messages),
             "stream": false,
+            "max_tokens": crate::context_budget::ContextBudget::for_model(model).output_tokens,
             "temperature": 0.1,
         });
         // The blocking path is the structured/JSON path; it mirrors the Ollama
@@ -616,7 +701,8 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             "keep_alive": "10m",
             "options": {
                 "temperature": 0.1,
-                "num_ctx": 32768,
+                "num_ctx": crate::context_budget::ContextBudget::for_model(model).context_tokens,
+                "num_predict": crate::context_budget::ContextBudget::for_model(model).output_tokens,
                 "repeat_penalty": 1.1,
                 "repeat_last_n": 256
             }
@@ -728,6 +814,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
                 "messages": openai_messages(messages),
                 "stream": true,
                 "stream_options": { "include_usage": true },
+                "max_tokens": crate::context_budget::ContextBudget::for_model(model).output_tokens,
                 "temperature": 0.1,
             });
             apply_thinking(&mut body, format.think);
@@ -771,11 +858,21 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
     }
 }
 
-fn load_model_api_key_from_env() -> Result<Option<String>, String> {
-    load_model_api_key(
-        std::env::var_os("HII_MODEL_API_KEY_FILE").map(PathBuf::from),
-        std::env::var("HII_MODEL_API_KEY").ok(),
-    )
+fn load_model_api_key_for_endpoint(endpoint: &str) -> Result<Option<String>, String> {
+    let explicit_key = std::env::var("HII_MODEL_API_KEY").ok();
+    let key_file = std::env::var_os("HII_MODEL_API_KEY_FILE")
+        .map(PathBuf::from)
+        .or_else(|| {
+            if explicit_key.is_some() {
+                return None;
+            }
+            crate::config::inference_config()
+                .filter(|config| {
+                    config.endpoint.trim_end_matches('/') == endpoint.trim_end_matches('/')
+                })
+                .and_then(|config| config.api_key_file)
+        });
+    load_model_api_key(key_file, explicit_key)
 }
 
 fn load_model_api_key(
@@ -1018,6 +1115,7 @@ fn pinned_model_url() -> bool {
     std::env::var_os("HII_MODEL_URL").is_some()
         || std::env::var_os("HII_OLLAMA_URL").is_some()
         || std::env::var_os("HII_RAPID_MLX_URL").is_some()
+        || crate::config::inference_config().is_some()
 }
 
 /// Wait for the native runner while showing the operator that startup is
@@ -1440,6 +1538,122 @@ mod tests {
     };
     use crate::attachments::ImagePayload;
     use crate::config::ModelProvider;
+
+    fn tokenizer_fixture(
+        responses: Vec<(&'static str, &'static str)>,
+    ) -> (Ollama, std::thread::JoinHandle<Vec<String>>) {
+        use std::io::{BufRead, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let worker = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let mut requests = Vec::new();
+            for (status, body) in responses {
+                let (mut stream, _) = loop {
+                    match listener.accept() {
+                        Ok(connection) => break connection,
+                        Err(error)
+                            if error.kind() == std::io::ErrorKind::WouldBlock
+                                && std::time::Instant::now() < deadline =>
+                        {
+                            std::thread::sleep(std::time::Duration::from_millis(5))
+                        }
+                        Err(error) => panic!("tokenizer fixture accept failed: {error}"),
+                    }
+                };
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+                    .unwrap();
+                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                let mut headers = String::new();
+                let mut content_length = 0;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        content_length = value.trim().parse::<usize>().unwrap();
+                    }
+                    headers.push_str(&line);
+                }
+                let mut bytes = vec![0; content_length];
+                reader.read_exact(&mut bytes).unwrap();
+                requests.push(format!("{headers}\n{}", String::from_utf8(bytes).unwrap()));
+                write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+            requests
+        });
+        let mut client = Ollama::new(format!("http://{address}"));
+        client.provider = ModelProvider::Native;
+        client.model_api_key = Ok(Some("fixture-token".into()));
+        (client, worker)
+    }
+
+    #[test]
+    fn tokenizer_counts_rendered_prompt_and_caches_by_model_and_messages() {
+        let (client, worker) = tokenizer_fixture(vec![
+            ("200 OK", r#"{"prompt":"rendered prompt"}"#),
+            ("200 OK", r#"{"tokens":[1,2,3,4,5]}"#),
+        ]);
+        let messages = vec![
+            Message::system("HII instructions"),
+            Message::user("x".repeat(30_000)),
+        ];
+        assert_eq!(
+            client.count_input_tokens("fixture-model", &messages),
+            Some(5)
+        );
+        assert_eq!(
+            client
+                .clone()
+                .count_input_tokens("fixture-model", &messages),
+            Some(5)
+        );
+        let requests = worker.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].starts_with("POST /apply-template "));
+        assert!(requests[1].starts_with("POST /tokenize "));
+        assert!(requests[1].contains("rendered prompt"));
+        assert!(requests
+            .iter()
+            .all(|request| request.contains("Bearer fixture-token")));
+        assert!(requests
+            .iter()
+            .all(|request| request.contains("fixture-model")));
+    }
+
+    #[test]
+    fn tokenizer_failure_is_cached_and_images_do_not_probe_text_tokenizer() {
+        let (client, worker) = tokenizer_fixture(vec![("404 Not Found", "{}")]);
+        let messages = vec![Message::user("hello")];
+        assert_eq!(client.count_input_tokens("model", &messages), None);
+        assert_eq!(client.count_input_tokens("model", &messages), None);
+        let images = vec![Message::user_with_images(
+            "image",
+            vec![ImagePayload {
+                mime_type: "image/png".into(),
+                base64: "fixture".into(),
+            }],
+        )];
+        assert_eq!(client.count_input_tokens("other-model", &images), None);
+        assert_eq!(worker.join().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn tokenizer_does_not_follow_redirects_with_credentials() {
+        let (client, worker) = tokenizer_fixture(vec![(
+            "302 Found\r\nLocation: http://127.0.0.1:9/tokenize",
+            "{}",
+        )]);
+        assert_eq!(
+            client.count_input_tokens("model", &[Message::user("hello")]),
+            None
+        );
+        assert_eq!(worker.join().unwrap().len(), 1);
+    }
 
     #[test]
     fn reported_durations_are_absent_for_backends_that_do_not_time_themselves() {

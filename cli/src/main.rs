@@ -17,6 +17,7 @@ mod clock;
 mod completion;
 mod config;
 mod context;
+mod context_budget;
 mod contract;
 mod conversation;
 mod declaration;
@@ -38,6 +39,7 @@ mod mcp;
 mod mcp_client;
 mod memory;
 mod mirror;
+mod model_task;
 mod network;
 mod notification;
 mod ollama;
@@ -47,6 +49,7 @@ mod pipe;
 mod presence;
 mod project;
 mod receipt;
+mod remote_cli;
 mod route;
 mod run_context;
 mod runlog;
@@ -66,6 +69,7 @@ mod system_monitor;
 mod terminal_image;
 mod text;
 mod timeline;
+mod tool_artifacts;
 mod tools;
 mod tui;
 mod usefulness;
@@ -1669,6 +1673,20 @@ enum NetworkCertificateCommand {
 
 #[derive(Subcommand, Debug)]
 enum OnCommand {
+    #[command(about = "Call the installed HII CLI over authenticated SSH and save a receipt")]
+    Cli {
+        #[arg(
+            long,
+            help = "Explicitly authorize this invocation to change remote state"
+        )]
+        allow_write: bool,
+        #[arg(long, default_value_t = 120)]
+        timeout: u64,
+        #[arg(long)]
+        json: bool,
+        #[arg(required = true, num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     #[command(about = "Run a shell command on an enrolled executor")]
     Run {
         #[arg(required = true, num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
@@ -2017,60 +2035,52 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         }
         Some(Commands::Mirror { action }) => {
             let workspace = workspace(cli.cwd.clone())?;
-            let (
-                intent,
-                strength,
-                authority,
-                done_when,
-                verify,
-                outcome_requirements,
-                json,
-                jsonl,
-            ) = match action {
-                MirrorCommand::Show {
-                    strength,
-                    authority,
-                    json,
-                } => {
-                    let snapshot = mirror::inspect(&paths, &workspace, strength, authority);
-                    println!("{}", mirror::render(&snapshot, json)?);
-                    return Ok(ExitCode::SUCCESS);
-                }
-                MirrorCommand::Ask {
-                    question,
-                    strength,
-                    authority,
-                    json,
-                    jsonl,
-                } => (
-                    question.join(" "),
-                    strength,
-                    authority,
-                    Some("a final answer is returned; verification is not claimed".into()),
-                    Vec::new(),
-                    Some(contract::OutcomeRequirements::informational_response()),
-                    json,
-                    jsonl,
-                ),
-                MirrorCommand::Run {
-                    goal,
-                    strength,
-                    authority,
-                    done_when,
-                    verify,
-                    json,
-                    jsonl,
-                } => (
-                    goal.join(" "),
-                    strength,
-                    authority,
-                    done_when,
-                    verify,
-                    None,
-                    json,
-                    jsonl,
-                ),
-            };
+            let (intent, strength, authority, done_when, verify, outcome_requirements, json, jsonl) =
+                match action {
+                    MirrorCommand::Show {
+                        strength,
+                        authority,
+                        json,
+                    } => {
+                        let snapshot = mirror::inspect(&paths, &workspace, strength, authority);
+                        println!("{}", mirror::render(&snapshot, json)?);
+                        return Ok(ExitCode::SUCCESS);
+                    }
+                    MirrorCommand::Ask {
+                        question,
+                        strength,
+                        authority,
+                        json,
+                        jsonl,
+                    } => (
+                        question.join(" "),
+                        strength,
+                        authority,
+                        Some("a final answer is returned; verification is not claimed".into()),
+                        Vec::new(),
+                        Some(contract::OutcomeRequirements::informational_response()),
+                        json,
+                        jsonl,
+                    ),
+                    MirrorCommand::Run {
+                        goal,
+                        strength,
+                        authority,
+                        done_when,
+                        verify,
+                        json,
+                        jsonl,
+                    } => (
+                        goal.join(" "),
+                        strength,
+                        authority,
+                        done_when,
+                        verify,
+                        None,
+                        json,
+                        jsonl,
+                    ),
+                };
             if ModelProvider::discover(&AppPaths::model_url()) == ModelProvider::OxAlphaWeb {
                 return Err("Personal Mirror runs require a local HII model provider; select HII Native, Ollama, LM Studio, or a private local-network runtime".into());
             }
@@ -4989,6 +4999,44 @@ fn on_command(paths: &AppPaths, system: &str, action: OnCommand) -> Result<ExitC
     let registry = load_systems(paths)?;
     let record = find_system(&registry, system)?;
     match action {
+        OnCommand::Cli {
+            args,
+            allow_write,
+            timeout,
+            json,
+        } => {
+            if record.local || !matches!(record.transport.as_str(), "ssh" | "tailscale-ssh") {
+                return Err("remote CLI requires an enrolled SSH peer".into());
+            }
+            let result = remote_cli::run(
+                &paths.runtime,
+                &record.host,
+                &record.os,
+                &args,
+                allow_write,
+                timeout,
+            )?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&result).map_err(|e| e.to_string())?
+                );
+            } else {
+                print!("{}", result["stdout"].as_str().unwrap_or_default());
+                eprint!("{}", result["stderr"].as_str().unwrap_or_default());
+                eprintln!(
+                    "remote {} · {} · receipt {}",
+                    record.id,
+                    result["status"].as_str().unwrap_or("unknown"),
+                    result["receipt"].as_str().unwrap_or_default()
+                );
+            }
+            return Ok(if result["status"] == "completed" {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            });
+        }
         OnCommand::Run { command, cwd, json } => {
             render_system_dispatch(&record, "run", Some(command.join(" ")), cwd, json)?;
         }

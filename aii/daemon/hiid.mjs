@@ -8,6 +8,7 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { nvidiaOptions, nvidiaDoctor, nvidiaStatus, nvidiaStart, nvidiaStop, nvidiaBench, nvidiaPrepareTask, nvidiaFinishTask } from "../model-runtime/nvidia.mjs";
 import {
   cleanupWorkspaceRunContext,
   stageWorkspaceRunContext
@@ -1628,6 +1629,16 @@ async function benchModelRuntime(args) {
 
 async function cmdModelRuntime(args) {
   const sub = args[0] || "recommend";
+  const backend = cliOption(args, "--backend", process.env.HII_NVIDIA_BACKEND);
+  const nvidia = backend ? ["native-cuda", "wsl-cuda", "wsl-vllm"].includes(backend) : process.platform === "win32";
+  if (nvidia && ["start", "stop", "status", "doctor", "bench", "recommend", "choose", "models", "installed", "prepare-task", "finish-task"].includes(sub)) {
+    const options = { ...nvidiaOptions(args.slice(1)), root: ROOT, runtimeRoot: RUNTIME };
+    const handlers = { start: nvidiaStart, stop: nvidiaStop, status: nvidiaStatus, doctor: nvidiaDoctor, bench: nvidiaBench, recommend: nvidiaDoctor, choose: nvidiaDoctor, models: nvidiaStatus, installed: nvidiaDoctor, "prepare-task": nvidiaPrepareTask, "finish-task": nvidiaFinishTask };
+    const report = await handlers[sub](options);
+    console.log(JSON.stringify(report, null, 2));
+    if (report.ok === false || report.state === "failed" || (sub === "prepare-task" && (!report.acquired || report.state !== "ready"))) process.exitCode = 1;
+    return;
+  }
   if (sub === "start") {
     if (!currentDaemonPid()) startDaemon();
     await startModelRuntime(args.slice(1));

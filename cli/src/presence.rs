@@ -458,7 +458,31 @@ fn process_is_alive(pid: u32) -> bool {
     {
         unsafe { libc::kill(pid as i32, 0) == 0 }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        // Windows has no kill(pid, 0). Query a process handle without invoking
+        // a shell, and always close it. This checks liveness, not ownership.
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut std::ffi::c_void;
+            fn GetExitCodeProcess(handle: *mut std::ffi::c_void, code: *mut u32) -> i32;
+            fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
+        }
+        if pid == 0 {
+            return false;
+        }
+        unsafe {
+            let handle = OpenProcess(0x1000, 0, pid);
+            if handle.is_null() {
+                return false;
+            }
+            let mut code = 0;
+            let ok = GetExitCodeProcess(handle, &mut code) != 0 && code == 259;
+            CloseHandle(handle);
+            ok
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = pid;
         false

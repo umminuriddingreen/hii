@@ -57,6 +57,12 @@ impl ModelProvider {
             .and_then(|value| Self::from_env_value(value.trim()))
         {
             Some(provider) => provider,
+            None if inference_config().is_some_and(|config| {
+                config.endpoint.trim_end_matches('/') == url.trim_end_matches('/')
+            }) =>
+            {
+                ModelProvider::Native
+            }
             None if env::var("HII_RAPID_MLX_URL").is_ok() => ModelProvider::RapidMlx,
             _ if url.contains("oxalpha.com") => ModelProvider::OxAlphaWeb,
             _ if url.contains(":11435") => ModelProvider::Native,
@@ -69,6 +75,7 @@ impl ModelProvider {
         match value.to_ascii_lowercase().as_str() {
             "lmstudio" | "lm-studio" | "lm_studio" => Some(ModelProvider::LmStudio),
             "hii" | "native" | "hii-native" | "hii_native" => Some(ModelProvider::Native),
+            "llama.cpp" | "llamacpp" | "llama-cpp" | "vllm" => Some(ModelProvider::Native),
             "ollama" => Some(ModelProvider::Ollama),
             "rapid-mlx" | "rapidmlx" | "rapid_mlx" | "rapid" => Some(ModelProvider::RapidMlx),
             "ox-alpha-web" | "oxalpha-web" | "oxalpha" | "ox-alpha" => {
@@ -158,7 +165,9 @@ impl AppPaths {
                 {
                     OX_ALPHA_WEB_URL.to_string()
                 } else {
-                    "http://127.0.0.1:11435".to_string()
+                    inference_config()
+                        .map(|config| config.endpoint)
+                        .unwrap_or_else(|| "http://127.0.0.1:11435".to_string())
                 }
             })
             .trim_end_matches('/')
@@ -168,7 +177,10 @@ impl AppPaths {
     pub fn user_model_preference(&self) -> Result<Option<UserModelPreference>, String> {
         let path = self.runtime.join("config/model.json");
         if !path.exists() {
-            return Ok(None);
+            return Ok(inference_config().map(|config| UserModelPreference {
+                provider: Some("native".into()),
+                model: config.model,
+            }));
         }
         let raw = fs::read_to_string(path).map_err(|error| error.to_string())?;
         let preference: UserModelPreference =
@@ -195,6 +207,33 @@ impl AppPaths {
         fs::write(&path, format!("{raw}\n")).map_err(|error| error.to_string())?;
         Ok(path)
     }
+}
+
+/// Reference-only connection selected by the managed runner. Credentials never
+/// enter this manifest. Explicit environment settings retain precedence.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InferenceConfig {
+    pub endpoint: String,
+    pub model: String,
+    pub api_key_file: Option<PathBuf>,
+    pub context_tokens: Option<usize>,
+    pub backend: Option<String>,
+    pub profile: Option<String>,
+}
+
+pub fn inference_config() -> Option<InferenceConfig> {
+    let root = hii_core::runtime_root().ok()?;
+    let config: InferenceConfig = crate::store::read_json(&root.join("config/inference.json"))?;
+    let url = url::Url::parse(&config.endpoint).ok()?;
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || config.model.trim().is_empty()
+    {
+        return None;
+    }
+    Some(config)
 }
 
 /// Cross-platform home directory. Uses `dirs::home_dir()` so it resolves

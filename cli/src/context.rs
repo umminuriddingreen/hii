@@ -530,8 +530,12 @@ mod tests {
         assert!(capsule.text.contains("Finish the context loop"));
         assert!(capsule.text.contains("review goals"));
         assert!(capsule.text.contains("local-planning"));
+        // Windows accepts both separators; compare source paths as paths rather
+        // than requiring identical display spelling from independent producers.
+        let board_path = runtime.0.join("board").join("tasks.jsonl");
         assert!(capsule
             .sources
-            .contains(&runtime.0.join("board/tasks.jsonl").display().to_string()));
+            .iter()
+            .any(|source| Path::new(source) == board_path));
     }
 }

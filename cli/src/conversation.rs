@@ -33,8 +33,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-const AUTO_COMPACT_CHARS: usize = 64 * 1024;
-const COMPACTION_TRANSCRIPT_CHARS: usize = 56 * 1024;
 const GOAL_CONTEXT_PREFIX: &str = "ACTIVE SESSION GOAL:";
 const PLAN_CONTEXT_PREFIX: &str = "PLAN MODE:";
 const AUTHORITY_CONTEXT_PREFIX: &str = "ACTIVE AUTHORITY:";
@@ -216,8 +214,9 @@ impl SessionUsage {
         self.latest_tokens_per_second = usage.tokens_per_second();
     }
 
-    fn summary(&self) -> String {
-        let context_percent = (self.latest_prompt_tokens as f64 / 32_768.0 * 100.0).min(100.0);
+    fn summary(&self, context_tokens: usize) -> String {
+        let context_percent =
+            (self.latest_prompt_tokens as f64 / context_tokens.max(1) as f64 * 100.0).min(100.0);
         format!(
             "{} in · {} out · {:.1} tok/s · {:.1}s · {:.0}% context",
             format_count(self.prompt_tokens),
@@ -320,6 +319,7 @@ pub struct Conversation {
     installed_models: Vec<String>,
     tools: Toolbelt,
     messages: Vec<Message>,
+    operator_messages: Vec<String>,
     store: ConversationStore,
     max_steps: usize,
     usage: SessionUsage,
@@ -464,6 +464,7 @@ impl Conversation {
             installed_models: installed,
             tools,
             messages,
+            operator_messages: Vec::new(),
             store,
             max_steps,
             usage: SessionUsage::default(),
@@ -522,10 +523,25 @@ impl Conversation {
     pub fn reply(&mut self, input: &str) -> Result<String, String> {
         self.last_reply_streamed = false;
         self.projected_reply_streamed.clear();
-        self.select_adaptive_model(input)?;
-        if self.context_chars() >= AUTO_COMPACT_CHARS {
-            self.compact_internal("automatic")?;
+        let model_task = crate::model_task::ModelTask::acquire(
+            &self.paths,
+            self.model_pinned || self.public_test,
+            self.reasoning_mode == ReasoningMode::Deep || self.plan_mode,
+        )?;
+        if let Some(task) = &model_task {
+            self.store
+                .event("model.task_prepared", task.report.clone())?;
+            if let Some(config) = crate::config::inference_config() {
+                if config.model != self.model {
+                    let previous = std::mem::replace(&mut self.model, config.model);
+                    self.ollama = Ollama::discover().ensure_reachable()?;
+                    self.installed_models = self.ollama.models()?;
+                    self.sync_runtime_identity()?;
+                    self.store.event("conversation.model_routed", json!({"from":previous,"to":self.model,"reason":"measured GPU task profile"}))?;
+                }
+            }
         }
+        self.select_adaptive_model(input)?;
         if self.attachments.has_images()
             && self.ollama.model_supports_vision(&self.model)? == Some(false)
         {
@@ -558,6 +574,7 @@ impl Conversation {
             }),
         )?;
         let model_input = format!("{input}{}", attachment_payload.text_context);
+        self.operator_messages.push(input.to_string());
         self.messages.retain(|message| {
             message.role != "system" || !crate::design::is_design_context(&message.content)
         });
@@ -621,9 +638,8 @@ impl Conversation {
             steps += 1;
             let step = steps;
             let can_stream_reply = !needs_verification(mutation_epoch, verified_epoch);
-            if self.action_failures > 0 {
-                self.select_adaptive_model(input)?;
-            }
+            // Keep one model throughout a task. Failures may influence the next
+            // task's route, but cannot silently change this run's executor.
             let raw = match self.call_activity(
                 "thinking",
                 self.messages.clone(),
@@ -634,6 +650,7 @@ impl Conversation {
                 Err(error) if error == STEERING_RESTART => {
                     if let Some(steering) = self.steering.take() {
                         rejected_actions.reset();
+                        self.operator_messages.push(steering.clone());
                         self.messages.push(Message::user(format!(
                             "OPERATOR STEERING (latest instruction): {steering}\nApply this instruction before choosing the next action."
                         )));
@@ -905,6 +922,12 @@ impl Conversation {
                     drop(progress);
                     let mut feedback = Vec::new();
                     for (id, result) in results {
+                        let result = crate::tool_artifacts::bound_result(
+                            &self.paths.runtime,
+                            self.tools.workspace(),
+                            &format!("batch:{id}"),
+                            result,
+                        );
                         let output = redact_text(&result.output);
                         let data = json!({"step": step, "call_id": id, "ok": result.ok, "output": output, "verification": false});
                         self.store.event("tool.result", data.clone())?;
@@ -1097,6 +1120,17 @@ impl Conversation {
                         Ok(result) => (result.ok, redact_text(&result.output)),
                         Err(error) => (false, redact_text(&error)),
                     };
+                    let result = crate::tool_artifacts::bound_result(
+                        &self.paths.runtime,
+                        self.tools.workspace(),
+                        &label,
+                        crate::tools::ToolResult {
+                            ok,
+                            output: safe_output,
+                            verification: false,
+                        },
+                    );
+                    let (ok, safe_output) = (result.ok, result.output);
                     if ok {
                         self.action_failures = 0;
                     } else {
@@ -1435,7 +1469,27 @@ impl Conversation {
                         rejected_actions.reject(&rejected_raw, mutation_epoch, verified_epoch);
                         continue;
                     }
-                    let result = if crate::hii_tools::is_hii_tool(&tool) {
+                    let result = if crate::tool_artifacts::is_runtime_read(&tool) {
+                        if self.public_test && matches!(tool.as_str(), "mcp_search" | "mcp_schema")
+                        {
+                            crate::tools::ToolResult {
+                                ok: false,
+                                verification: false,
+                                output: "Host MCP catalog is unavailable in this isolated test."
+                                    .into(),
+                            }
+                        } else {
+                            crate::tool_artifacts::execute_read(
+                                &self.paths.runtime,
+                                self.tools.workspace(),
+                                &self.mcp_clients,
+                                &tool,
+                                query.as_deref(),
+                                arguments.as_ref(),
+                                limit,
+                            )
+                        }
+                    } else if crate::hii_tools::is_hii_tool(&tool) {
                         let args = serde_json::json!({ "query": query.as_deref().unwrap_or(""), "arguments": arguments });
                         crate::hii_tools::execute(&self.paths.repo, &tool, Some(&args))
                     } else {
@@ -1464,6 +1518,16 @@ impl Conversation {
                         self.thinking_mode = Self::thinking_mode_for(&configured)
                             .unwrap_or(ThinkingMode::Conversation);
                     }
+                    let result = if matches!(tool.as_str(), "artifact_read" | "checkpoint_read") {
+                        result
+                    } else {
+                        crate::tool_artifacts::bound_result(
+                            &self.paths.runtime,
+                            self.tools.workspace(),
+                            &tool,
+                            result,
+                        )
+                    };
                     let mut safe_output = redact_text(&result.output);
                     let repeated_failure = (!result.ok)
                         .then(|| repeated_tool_failures.record(&tool, &safe_output, mutation_epoch))
@@ -1681,7 +1745,7 @@ impl Conversation {
     pub fn compact(&mut self) -> Result<String, String> {
         let stats = self.compact_internal("manual")?;
         Ok(format!(
-            "Compacted {} messages ({} characters) into a {}-character checkpoint.",
+            "Context checked: {} messages, {} characters before, {} characters after. Complete recent exchanges and operator instructions are retained.",
             stats.before_messages, stats.before_chars, stats.after_chars
         ))
     }
@@ -1705,6 +1769,7 @@ impl Conversation {
             .cloned()
             .ok_or_else(|| "conversation system context is missing".to_string())?;
         self.messages = vec![system];
+        self.operator_messages.clear();
         self.sync_goal_context();
         self.sync_plan_context();
         self.sync_authority_context();
@@ -1734,6 +1799,7 @@ impl Conversation {
                 self.messages.pop();
             }
         }
+        self.operator_messages.pop();
         self.store
             .event("conversation.undo", json!({ "removed_messages": removed }))?;
         let dirty = self.tools.git_snapshot();
@@ -1750,6 +1816,9 @@ impl Conversation {
     /// leaving the live session untouched (plan Phase 8). Returns the fork id.
     pub fn fork(&self) -> Result<String, String> {
         let fork = ConversationStore::create(&self.paths.runtime)?;
+        fork.event("conversation.operator_context", json!({
+            "messages": self.operator_messages.iter().map(|s| redact_text(s)).collect::<Vec<_>>()
+        }))?;
         for message in &self.messages {
             fork.event(
                 "forked.message",
@@ -1846,7 +1915,7 @@ impl Conversation {
             self.context_chars(),
             self.model,
             self.tools.workspace().display(),
-            self.usage.summary(),
+            self.usage.summary(crate::context_budget::ContextBudget::for_model(&self.model).context_tokens),
             self.attachments.count(),
             format_attachment_bytes(self.attachments.total_bytes()),
             self.mcp_clients.tool_count(),
@@ -2470,7 +2539,13 @@ impl Conversation {
         if self.usage.calls == 0 {
             "No model activity in this session yet.".into()
         } else {
-            format!("{} calls · {}", self.usage.calls, self.usage.summary())
+            format!(
+                "{} calls · {}",
+                self.usage.calls,
+                self.usage.summary(
+                    crate::context_budget::ContextBudget::for_model(&self.model).context_tokens
+                )
+            )
         }
     }
 
@@ -3107,6 +3182,19 @@ impl Conversation {
             .cloned()
             .ok_or_else(|| "conversation system context is missing".to_string())?;
         let count = restored.len();
+        let operator_messages = resumable_operator_messages(&raw);
+        // The resumed session has a new log. Save its starting history so a
+        // second restart can resume this session without losing the first one.
+        self.store.event(
+            "conversation.context_restored",
+            json!({
+                "version": 1,
+                "source": id,
+                "operator_messages": operator_messages,
+                "messages": restored,
+            }),
+        )?;
+        self.operator_messages = operator_messages;
         self.messages = std::iter::once(system).chain(restored).collect();
         if let Some(flow) = session_flow(&raw) {
             self.messages.push(Message::system(format!(
@@ -3195,55 +3283,49 @@ impl Conversation {
     fn compact_internal(&mut self, reason: &str) -> Result<CompactionStats, String> {
         let before_messages = self.messages.len().saturating_sub(1);
         let before_chars = self.context_chars();
-        if before_messages == 0 {
+        let budget = crate::context_budget::ContextBudget::for_model(&self.model);
+        let Some(checkpoint) = budget.checkpoint_with_counter(
+            &self.paths.runtime,
+            &self.store.id,
+            self.tools.workspace(),
+            &self.messages,
+            &self.operator_messages,
+            reason == "manual",
+            |messages| self.ollama.count_input_tokens(&self.model, messages),
+        )?
+        else {
             return Ok(CompactionStats {
                 before_messages,
                 before_chars,
-                after_chars: 0,
+                after_chars: before_chars,
             });
-        }
-
-        let transcript = self.compaction_transcript();
-        let summary = if before_chars <= 8_000 {
-            transcript
-        } else {
-            let prompt = format!(
-                "Compact this HII conversation into a durable checkpoint for continuing the same session. Preserve the user's goals, preferences, decisions, commitments, exact workspace facts, completed tool outcomes, unresolved questions, and next actions. Remove greetings, repetition, protocol JSON, hidden bookkeeping, run identifiers, and low-value chatter. Do not invent facts. Write concise plain text with short sections when useful.\n\n{transcript}"
-            );
-            let summary_messages = vec![
-                Message::system("You compact conversation context faithfully and economically."),
-                Message::user(prompt),
-            ];
-            redact_text(
-                &self
-                    .call_activity("compacting", summary_messages, true, None)?
-                    .content,
-            )
         };
-        let system = self
-            .messages
-            .first()
-            .cloned()
-            .ok_or_else(|| "conversation system context is missing".to_string())?;
-        let checkpoint = format!(
-            "Conversation checkpoint. Treat this as prior context, not a new user request:\n{summary}"
-        );
-        let after_chars = checkpoint.chars().count();
-        self.messages = vec![system, Message::system(checkpoint)];
+        // Persist both the checkpoint and replay event before replacing live state.
+        self.store.event(
+            "conversation.compacted",
+            json!({
+                "version": checkpoint.version,
+                "reason": reason,
+                "checkpoint": checkpoint.id,
+                "before_messages": before_messages,
+                "before_tokens_estimated": checkpoint.before_tokens,
+                "after_tokens_estimated": checkpoint.after_tokens,
+                "estimator": checkpoint.estimator,
+                "model": self.model,
+                "budget": budget,
+                "operator_messages": checkpoint.operator_messages,
+                "messages": checkpoint.compressed_messages.iter().map(|message| json!({
+                    "role": message.role, "content": redact_text(&message.content)
+                })).collect::<Vec<_>>()
+            }),
+        )?;
+        self.messages = checkpoint.compressed_messages;
+        // Authority is rebuilt from live runtime state, never checkpoint excerpts.
         self.sync_goal_context();
         self.sync_plan_context();
         self.sync_authority_context();
         self.sync_mcp_context();
-        self.store.event(
-            "conversation.compacted",
-            json!({
-                "reason": reason,
-                "before_messages": before_messages,
-                "before_chars": before_chars,
-                "after_chars": after_chars,
-                "summary": summary
-            }),
-        )?;
+        let after_chars = self.context_chars();
         Ok(CompactionStats {
             before_messages,
             before_chars,
@@ -3260,31 +3342,28 @@ impl Conversation {
     }
 
     fn compaction_transcript(&self) -> String {
-        let mut transcript = self
-            .messages
+        self.messages
             .iter()
             .skip(1)
             .map(|message| format!("{}: {}", message.role, redact_text(&message.content)))
             .collect::<Vec<_>>()
-            .join("\n\n");
-        let length = transcript.chars().count();
-        if length > COMPACTION_TRANSCRIPT_CHARS {
-            let tail: String = transcript
-                .chars()
-                .skip(length - COMPACTION_TRANSCRIPT_CHARS)
-                .collect();
-            transcript = format!("[older low-priority context omitted]\n\n{tail}");
-        }
-        transcript
+            .join("\n\n")
     }
 
     fn call_activity(
         &mut self,
         phase: &str,
-        messages: Vec<Message>,
+        mut messages: Vec<Message>,
         show_content: bool,
         run: Option<&RunStore>,
     ) -> Result<ChatResult, String> {
+        let budget = crate::context_budget::ContextBudget::for_model(&self.model);
+        if phase == "thinking" {
+            self.compact_internal("automatic")?;
+            messages = self.messages.clone();
+        }
+        let measured_tokens = self.ollama.count_input_tokens(&self.model, &messages);
+        budget.validate_count(&messages, measured_tokens)?;
         let ollama = self.ollama.clone();
         let model = self.model.clone();
         let mut owned_run = if run.is_none() {
@@ -3330,6 +3409,12 @@ impl Conversation {
                 "routedModel": model,
                 "servedModel": model,
                 "routingReason": format!("conversation {phase}"),
+                "contextBudget": {
+                    "capacity": budget.context_tokens,
+                    "outputReserved": budget.output_tokens,
+                    "inputTokens": measured_tokens.unwrap_or_else(|| budget.estimate(&messages)),
+                    "source": if measured_tokens.is_some() { "provider-tokenizer" } else { "conservative-estimate" }
+                },
                 "messages": transcript
             }),
         )?;
@@ -4100,7 +4185,8 @@ fn plan_tool_allowed(tool: &str, shell_evidence: bool) -> bool {
     matches!(
         tool,
         "read" | "list" | "search" | "web_search" | "image_search" | "web_fetch" | "http"
-    ) || (tool == "shell" && shell_evidence)
+    ) || crate::tool_artifacts::is_runtime_read(tool)
+        || (tool == "shell" && shell_evidence)
 }
 
 fn render_permissions(authority: Authority) -> String {
@@ -4569,24 +4655,84 @@ fn verification_failure_signature(output: &str) -> String {
 }
 
 fn resumable_messages(raw: &str) -> Vec<Message> {
-    raw.lines()
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .filter_map(|event| {
-            let kind = event.get("kind").and_then(|value| value.as_str())?;
-            let data = event.get("data")?;
-            match kind {
-                "forked.message" => Some(Message {
-                    role: data.get("role")?.as_str()?.to_string(),
-                    content: data.get("content")?.as_str()?.to_string(),
-                    images: Vec::new(),
-                    image_mime_types: Vec::new(),
-                }),
-                "user.message" => Some(Message::user(data.get("content")?.as_str()?)),
-                "assistant.message" => Some(Message::assistant(data.get("content")?.as_str()?)),
-                _ => None,
+    let mut messages = Vec::new();
+    for event in raw
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+    {
+        let data = &event["data"];
+        match event["kind"].as_str().unwrap_or_default() {
+            "conversation.compacted" | "conversation.context_restored" if data["version"] == 1 => {
+                if let Ok(restored) =
+                    serde_json::from_value::<Vec<Message>>(data["messages"].clone())
+                {
+                    // Runtime prompts, authority, goals and plan mode are reconstructed
+                    // by resume; persisted model history can never grant authority.
+                    messages = restored
+                        .into_iter()
+                        .filter(|m| m.role != "system")
+                        .collect();
+                }
             }
-        })
-        .collect()
+            "conversation.cleared" => messages.clear(),
+            "conversation.undo" => {
+                let removed = data["removed_messages"].as_u64().unwrap_or(2) as usize;
+                messages.truncate(messages.len().saturating_sub(removed));
+            }
+            "forked.message" => {
+                if let Ok(message) = serde_json::from_value::<Message>(data.clone()) {
+                    if message.role != "system" {
+                        messages.push(message);
+                    }
+                }
+            }
+            "user.message" | "conversation.steered" => {
+                if let Some(content) = data["content"].as_str() {
+                    messages.push(Message::user(content));
+                }
+            }
+            "assistant.message" => {
+                if let Some(content) = data["content"].as_str() {
+                    messages.push(Message::assistant(content));
+                }
+            }
+            _ => {}
+        }
+    }
+    messages
+}
+
+fn resumable_operator_messages(raw: &str) -> Vec<String> {
+    let mut messages = Vec::new();
+    for event in raw
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+    {
+        let data = &event["data"];
+        match event["kind"].as_str().unwrap_or_default() {
+            "user.message" | "conversation.steered" => {
+                if let Some(content) = data["content"].as_str() {
+                    messages.push(content.to_string());
+                }
+            }
+            "conversation.compacted" | "conversation.context_restored" if data["version"] == 1 => {
+                if let Ok(restored) = serde_json::from_value(data["operator_messages"].clone()) {
+                    messages = restored;
+                }
+            }
+            "conversation.operator_context" => {
+                if let Ok(restored) = serde_json::from_value(data["messages"].clone()) {
+                    messages = restored;
+                }
+            }
+            "conversation.cleared" => messages.clear(),
+            "conversation.undo" => {
+                messages.pop();
+            }
+            _ => {}
+        }
+    }
+    messages
 }
 
 fn session_title(raw: &str) -> Option<String> {
@@ -5402,6 +5548,47 @@ mod tests {
             "{\"kind\":\"conversation.renamed\",\"data\":{\"title\":\"Release prep\"}}\n",
         );
         assert_eq!(session_title(raw).as_deref(), Some("Release prep"));
+    }
+
+    #[test]
+    fn restart_replays_checkpoint_and_later_correction_without_saved_authority() {
+        let raw = [
+            serde_json::json!({"kind":"user.message","data":{"content":"old bulky input"}}),
+            serde_json::json!({"kind":"conversation.compacted","data":{
+                "version":1,"operator_messages":["inspect only"],"messages":[
+                    {"role":"system","content":"saved authority must not survive"},
+                    {"role":"user","content":"inspect only"},
+                    {"role":"user","content":"historical checkpoint"}
+                ]
+            }}),
+            serde_json::json!({"kind":"conversation.steered","data":{"content":"only project A"}}),
+        ]
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+        let messages = resumable_messages(&raw);
+        assert_eq!(messages.len(), 3);
+        assert!(messages.iter().all(|message| message.role != "system"));
+        assert_eq!(messages.last().unwrap().content, "only project A");
+        assert_eq!(
+            super::resumable_operator_messages(&raw),
+            vec!["inspect only", "only project A"]
+        );
+    }
+
+    #[test]
+    fn restart_does_not_resurrect_cleared_or_undone_exchanges() {
+        let raw = [
+            r#"{"kind":"user.message","data":{"content":"old"}}"#,
+            r#"{"kind":"conversation.cleared","data":{}}"#,
+            r#"{"kind":"user.message","data":{"content":"new"}}"#,
+            r#"{"kind":"assistant.message","data":{"content":"answer"}}"#,
+            r#"{"kind":"conversation.undo","data":{"removed_messages":2}}"#,
+        ]
+        .join("\n");
+        assert!(resumable_messages(&raw).is_empty());
+        assert!(super::resumable_operator_messages(&raw).is_empty());
     }
 
     #[test]
