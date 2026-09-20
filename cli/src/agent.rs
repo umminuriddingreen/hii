@@ -7,8 +7,8 @@ use crate::{
     mcp_client::McpClients,
     ollama::{ChatResult, ChatStreamEvent, Message, Ollama},
     receipt::{
-        classify_error, record_verification, redact_text, HookRecord, Outcome, Receipt, RunGuard,
-        RunStore, TokenUsageRecord, VerificationRecord,
+        classify_error, record_verification, redact_text, EngineRecord, HookRecord, Outcome,
+        Receipt, RunGuard, RunStore, TokenUsageRecord, VerificationRecord,
     },
     runlog::{Delta, Event, Feedback, Human, Journal, OutputMode, StreamPolicy},
     tools::{ToolResult, Toolbelt},
@@ -36,14 +36,14 @@ const TRANSIENT_PROVIDER_RETRY_DELAY: Duration = Duration::from_millis(200);
 /// streaming thread all observe one decision. It used to be a bare bool checked
 /// only between steps, which meant Ctrl-C could not stop a generation already in
 /// flight.
-fn interrupt_signal() -> &'static Cancel {
+pub(crate) fn interrupt_signal() -> &'static Cancel {
     static SIGNAL: OnceLock<Cancel> = OnceLock::new();
     SIGNAL.get_or_init(Cancel::new)
 }
 
 /// Install the interrupt handler once per process. Idempotent and best-effort:
 /// if the host already owns the signal, the run simply won't be interruptible.
-fn arm_interrupt() {
+pub(crate) fn arm_interrupt() {
     static ARMED: OnceLock<()> = OnceLock::new();
     ARMED.get_or_init(|| {
         let _ = ctrlc::set_handler(|| interrupt_signal().cancel(CancelReason::Interrupt));
@@ -103,7 +103,7 @@ pub enum AutonomyLevel {
 const MAX_INVOCATION_CONTEXT_SOURCES: usize = 32;
 const MAX_INVOCATION_CONTEXT_SOURCE_CHARS: usize = 1_024;
 
-fn bounded_context_sources(sources: &[String]) -> Vec<String> {
+pub(crate) fn bounded_context_sources(sources: &[String]) -> Vec<String> {
     let mut bounded = Vec::new();
     for source in sources.iter().take(MAX_INVOCATION_CONTEXT_SOURCES) {
         let source = redact_text(source.trim());
@@ -131,7 +131,7 @@ impl AutonomyLevel {
 }
 
 impl RunOutput {
-    fn mode(self, verbose: bool) -> OutputMode {
+    pub(crate) fn mode(self, verbose: bool) -> OutputMode {
         match self {
             RunOutput::Human => OutputMode::Human { verbose },
             RunOutput::Json => OutputMode::Json,
@@ -1729,7 +1729,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
         }
     };
     let mut receipt = Receipt {
-        schema_version: 8,
+        schema_version: 9,
         id: run_id.clone(),
         created_at_unix_ms: started_at,
         finished_at_unix_ms: unix_ms(),
@@ -1766,6 +1766,15 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             prompt_tokens,
             completion_tokens,
             budget: options.budgets.max_tokens,
+        }),
+        engine: Some(EngineRecord {
+            id: "native".into(),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
+            commit: option_env!("HII_BUILD_COMMIT").map(str::to_string),
+            run_id: None,
+            session_id: None,
+            events: steps,
+            termination_reason: Some(outcome.label().into()),
         }),
     };
     if let Ok(Some(path)) =
@@ -2164,7 +2173,7 @@ fn draft_receipt(
     context_sources: &[String],
 ) -> Receipt {
     Receipt {
-        schema_version: 8,
+        schema_version: 9,
         id: run_id.to_string(),
         created_at_unix_ms: started_at,
         finished_at_unix_ms: 0,
@@ -2198,6 +2207,15 @@ fn draft_receipt(
         failure_patterns: Vec::new(),
         skill_draft_ref: None,
         token_usage: None,
+        engine: Some(EngineRecord {
+            id: "native".into(),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
+            commit: option_env!("HII_BUILD_COMMIT").map(str::to_string),
+            run_id: None,
+            session_id: None,
+            events: 0,
+            termination_reason: None,
+        }),
     }
 }
 
@@ -2223,7 +2241,7 @@ fn indent_for(human: bool, delta: String) -> String {
     }
 }
 
-fn validate_declared_verification(
+pub(crate) fn validate_declared_verification(
     commands: &[String],
     workspace: Option<&Path>,
 ) -> Result<(), String> {
@@ -2251,7 +2269,10 @@ fn validate_declared_verification(
     Ok(())
 }
 
-fn resolve_last_message_path(workspace: &Path, requested: &Path) -> Result<PathBuf, String> {
+pub(crate) fn resolve_last_message_path(
+    workspace: &Path,
+    requested: &Path,
+) -> Result<PathBuf, String> {
     let relative = if requested.is_absolute() {
         requested.strip_prefix(workspace).map_err(|_| {
             format!(
@@ -2629,7 +2650,7 @@ pub(crate) fn execute_tool(tools: &Toolbelt, call: ToolCall, dry_run: bool) -> T
 /// Derive only newly dirty paths between two porcelain snapshots. Direct
 /// write/edit targets are added separately, which also catches edits to files
 /// that were already dirty before the run.
-fn artifact_inventory(before: &str, after: &str) -> Vec<String> {
+pub(crate) fn artifact_inventory(before: &str, after: &str) -> Vec<String> {
     let paths = |snapshot: &str| {
         if matches!(snapshot, "clean" | "not a git workspace") {
             return BTreeSet::new();
@@ -2651,7 +2672,7 @@ fn artifact_inventory(before: &str, after: &str) -> Vec<String> {
     paths(after).difference(&before).cloned().collect()
 }
 
-fn canonical_artifact_path(workspace: &Path, raw: &str) -> Option<String> {
+pub(crate) fn canonical_artifact_path(workspace: &Path, raw: &str) -> Option<String> {
     let raw = Path::new(raw.trim());
     if raw.as_os_str().is_empty()
         || raw
@@ -2732,7 +2753,7 @@ pub(crate) fn request_deletion_approval(command: &str) -> bool {
     io::stdin().read_line(&mut answer).is_ok() && matches!(answer.trim(), "y" | "Y" | "yes")
 }
 
-fn print_receipt(receipt: &Receipt, path: &std::path::Path) {
+pub(crate) fn print_receipt(receipt: &Receipt, path: &std::path::Path) {
     println!("\nDone: {}", receipt.summary);
     println!(
         "Verified: {}",
