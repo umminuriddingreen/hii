@@ -881,6 +881,16 @@ fn load_model_api_key_for_endpoint(endpoint: &str) -> Result<Option<String>, Str
                     config.endpoint.trim_end_matches('/') == endpoint.trim_end_matches('/')
                 })
                 .and_then(|config| config.api_key_file)
+        })
+        .or_else(|| {
+            if explicit_key.is_some()
+                || ModelProvider::discover(endpoint) != ModelProvider::LlamaCpp
+            {
+                return None;
+            }
+            crate::config::AppPaths::discover()
+                .ok()
+                .map(|paths| paths.runtime.join("network/model-rail/api-key"))
         });
     load_model_api_key(key_file, explicit_key)
 }

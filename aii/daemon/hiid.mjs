@@ -1087,7 +1087,8 @@ function modelRuntimeBackend() {
 }
 
 function modelRequestHeaders() {
-  const keyFile = process.env.HII_MODEL_API_KEY_FILE;
+  const keyFile = process.env.HII_MODEL_API_KEY_FILE
+    || path.join(RUNTIME, "network", "model-rail", "api-key");
   if (!keyFile || !fs.existsSync(keyFile)) return {};
   const key = fs.readFileSync(keyFile, "utf8").trim();
   return key ? { authorization: `Bearer ${key}` } : {};
