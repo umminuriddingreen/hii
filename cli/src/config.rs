@@ -309,11 +309,26 @@ mod tests {
 
     #[test]
     fn ox_alpha_website_provider_is_explicit_and_truthful() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous_provider = env::var_os("HII_MODEL_PROVIDER");
+        let previous_rapid_mlx = env::var_os("HII_RAPID_MLX_URL");
+        env::remove_var("HII_MODEL_PROVIDER");
+        env::remove_var("HII_RAPID_MLX_URL");
+
         let provider = ModelProvider::discover("https://oxalpha.com");
         assert_eq!(provider, ModelProvider::OxAlphaWeb);
         assert_eq!(provider.id(), "ox-alpha-web");
         assert_eq!(provider.label(), "Ox Alpha Website (external)");
         assert_eq!(provider.default_model(), super::OX_ALPHA_WEB_MODEL);
+
+        match previous_provider {
+            Some(value) => env::set_var("HII_MODEL_PROVIDER", value),
+            None => env::remove_var("HII_MODEL_PROVIDER"),
+        }
+        match previous_rapid_mlx {
+            Some(value) => env::set_var("HII_RAPID_MLX_URL", value),
+            None => env::remove_var("HII_RAPID_MLX_URL"),
+        }
     }
 
     #[test]

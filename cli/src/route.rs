@@ -233,7 +233,12 @@ pub const ROUTES: &[Route] = &[
     ),
     delegated("model", Core, Infra, "fully manage the HII model backend"),
     delegated("rhino", Core, Tools, "control Rhino and Grasshopper through HII"),
-    delegated("git-map", Core, Context, "explore commit topology, time, and diffs in the terminal"),
+    delegated(
+        "git-map",
+        Extended,
+        Context,
+        "explore commit topology, time, and diffs in the terminal",
+    ),
     delegated(
         "open",
         Core,
@@ -252,7 +257,12 @@ pub const ROUTES: &[Route] = &[
         Infra,
         "open or inspect the installed HII desktop app",
     ),
-    delegated("slash", Core, Infra, "hot-reload CLI-backed slash controls"),
+    delegated(
+        "slash",
+        Extended,
+        Infra,
+        "hot-reload CLI-backed slash controls",
+    ),
     native(
         "providers",
         Core,
