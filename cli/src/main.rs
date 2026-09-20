@@ -1628,6 +1628,18 @@ enum SystemsCommand {
         #[arg(long)]
         json: bool,
     },
+    #[command(about = "Select the safest ready executor for a workload")]
+    Route {
+        #[arg(
+            long = "cap",
+            value_name = "CAPABILITY",
+            default_value = "agent",
+            help = "Required capability (agent, rhino, grasshopper, macos, or an enrolled capability)"
+        )]
+        capability: String,
+        #[arg(long, help = "Emit the routing decision as JSON")]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -5074,7 +5086,98 @@ fn systems_command(paths: &AppPaths, action: Option<SystemsCommand>) -> Result<E
             }
             Ok(ExitCode::SUCCESS)
         }
+        SystemsCommand::Route { capability, json } => {
+            let registry = load_systems(paths)?;
+            let decision = select_system_route(&registry, &capability, env::consts::OS);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&decision).map_err(|error| error.to_string())?
+                );
+            } else {
+                println!(
+                    "target     {}",
+                    decision["target"].as_str().unwrap_or("local")
+                );
+                println!(
+                    "execution  {}",
+                    decision["execution"].as_str().unwrap_or("local")
+                );
+                println!(
+                    "capability {}",
+                    decision["capability"].as_str().unwrap_or("agent")
+                );
+                println!(
+                    "reason     {}",
+                    decision["reason"].as_str().unwrap_or("local fallback")
+                );
+            }
+            Ok(ExitCode::SUCCESS)
+        }
     }
+}
+
+/// Select an executor from declared, current enrollment state. A peer is never
+/// selected merely because it exists: it must be non-local, `ready`, use an
+/// executable SSH transport, and advertise the requested capability (general
+/// agent work accepts `shell`). If that proof is absent, execution stays local.
+fn select_system_route(
+    registry: &SystemsRegistry,
+    capability: &str,
+    local_os: &str,
+) -> serde_json::Value {
+    let requested = capability.trim().to_ascii_lowercase();
+    let required_os = if matches!(requested.as_str(), "rhino" | "grasshopper" | "powershell") {
+        Some("windows")
+    } else if matches!(requested.as_str(), "macos" | "applescript") {
+        Some("macos")
+    } else {
+        match local_os {
+            "windows" => Some("macos"),
+            "macos" => Some("windows"),
+            _ => None,
+        }
+    };
+    let supports = |system: &SystemRecord| {
+        system.capabilities.iter().any(|cap| {
+            cap.eq_ignore_ascii_case(&requested)
+                || (requested == "agent" && cap.eq_ignore_ascii_case("shell"))
+                || (requested == "rhino" && cap.eq_ignore_ascii_case("grasshopper"))
+                || (requested == "grasshopper" && cap.eq_ignore_ascii_case("rhino"))
+        })
+    };
+    let peer = registry.systems.iter().find(|system| {
+        !system.local
+            && system.status == "ready"
+            && matches!(system.transport.as_str(), "ssh" | "tailscale-ssh")
+            && required_os.is_none_or(|os| system.os.eq_ignore_ascii_case(os))
+            && supports(system)
+    });
+    if let Some(system) = peer {
+        return serde_json::json!({
+            "schemaVersion": 1,
+            "kind": "hii.system-route",
+            "capability": requested,
+            "target": system.id,
+            "execution": "remote",
+            "host": system.host,
+            "os": system.os,
+            "transport": system.transport,
+            "status": system.status,
+            "reason": format!("ready opposite-system executor advertises {}", capability),
+            "fallback": "local"
+        });
+    }
+    serde_json::json!({
+        "schemaVersion": 1,
+        "kind": "hii.system-route",
+        "capability": requested,
+        "target": "local",
+        "execution": "local",
+        "os": local_os,
+        "reason": "no ready, transport-capable enrolled peer satisfies the OS and capability policy",
+        "fallback": true
+    })
 }
 
 fn on_command(paths: &AppPaths, system: &str, action: OnCommand) -> Result<ExitCode, String> {
@@ -6627,6 +6730,42 @@ mod tests {
         let mac = default_system_capabilities("macos", false);
         assert!(mac.contains(&"applescript".to_string()));
         assert!(mac.contains(&"windows".to_string()));
+    }
+
+    fn route_fixture(id: &str, os: &str, status: &str, capabilities: &[&str]) -> SystemRecord {
+        SystemRecord {
+            id: id.into(),
+            host: id.into(),
+            os: os.into(),
+            transport: "tailscale-ssh".into(),
+            capabilities: capabilities.iter().map(|value| (*value).into()).collect(),
+            local: false,
+            status: status.into(),
+        }
+    }
+
+    #[test]
+    fn general_agents_prefer_the_ready_opposite_system() {
+        let registry = SystemsRegistry {
+            systems: vec![route_fixture("studio-mac", "macos", "ready", &["shell"])],
+        };
+        let route = select_system_route(&registry, "agent", "windows");
+        assert_eq!(route["target"], "studio-mac");
+        assert_eq!(route["execution"], "remote");
+    }
+
+    #[test]
+    fn affinity_overrides_and_unready_peers_fall_back_local() {
+        let registry = SystemsRegistry {
+            systems: vec![
+                route_fixture("studio-mac", "macos", "ready", &["shell", "applescript"]),
+                route_fixture("studio-pc", "windows", "pending-agent", &["shell", "rhino"]),
+            ],
+        };
+        let rhino = select_system_route(&registry, "rhino", "macos");
+        assert_eq!(rhino["target"], "local");
+        let apple = select_system_route(&registry, "applescript", "windows");
+        assert_eq!(apple["target"], "studio-mac");
     }
 
     /// The routing table and the clap surface are two descriptions of the same
