@@ -403,6 +403,7 @@ mod tests {
             failure_patterns: Vec::new(),
             skill_draft_ref: None,
             token_usage: None,
+            engine: None,
         };
         let run_dir = runtime.0.join("runs/cli/prior-run");
         fs::create_dir_all(&run_dir).expect("create run");
@@ -470,6 +471,7 @@ mod tests {
             failure_patterns: Vec::new(),
             skill_draft_ref: None,
             token_usage: None,
+            engine: None,
         };
         let run_dir = runtime.0.join("runs/cli/unfinished-run");
         fs::create_dir_all(&run_dir).expect("create run");

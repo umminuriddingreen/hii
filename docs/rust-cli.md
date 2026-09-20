@@ -150,6 +150,36 @@ execution remain proof-backed operator decisions.
 Explicit `hii run` uses the same live model stream. Add `--verbose` for the
 full contract and backend receipt details.
 
+### Replaceable agent engines
+
+`hii run` uses HII's native Rust loop by default. An installed Hermes Agent can
+be selected explicitly without transferring authority or proof ownership:
+
+```sh
+hii run --engine hermes \
+  --verify "npm test" \
+  "implement the bounded change"
+```
+
+The Hermes path is deliberately subordinate to HII. For each run, HII creates
+an isolated Hermes home, starts a loopback-only API with a random key, and
+exposes exactly one model-facing integration: the current `hii mcp` process,
+bound to the selected workspace and authority. Native Hermes terminal,
+filesystem, browser, memory, delegation, and network toolsets are not enabled.
+HII validates the discovered MCP schema, runs every `--verify` command itself,
+and writes the canonical receipt. Receipts use schema 9 and identify the
+engine, installed Hermes version/commit, upstream run/session IDs, event count,
+and termination reason.
+
+This mode requires `hermes` on `PATH` (or `HII_HERMES_BIN`) and at least one
+deterministic `--verify` command. It honors HII's existing `--model`,
+`HII_MODEL_URL`, and `HII_MODEL_API_KEY_FILE` settings. The model endpoint and
+Hermes API stay local; the latter never reuses the user's normal Hermes profile.
+Hermes is an optional separately installed MIT-licensed runtime and is not
+vendored into HII. DeepSeek Harness remains an unintegrated fallback until its
+developer-preview API has a stable event, cancellation, and tool-boundary
+contract.
+
 Native runs preload a bounded, source-labelled context capsule containing the
 workspace's `AGENTS.md`, current Git state, and up to three prior HII receipts
 for the same workspace. Historical context is evidence, never a replacement

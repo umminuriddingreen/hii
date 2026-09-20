@@ -23,8 +23,10 @@ mod conversation;
 mod declaration;
 mod design;
 mod ecosystem_catalog;
+mod engine;
 mod file_explorer;
 mod governance;
+mod hermes_engine;
 mod hii_tools;
 mod hooks;
 mod identity;
@@ -284,6 +286,13 @@ enum Commands {
     Run {
         #[arg(required = true, num_args = 1..)]
         goal: Vec<String>,
+        #[arg(
+            long,
+            value_enum,
+            default_value_t = EngineArg::Native,
+            help = "Agent execution engine: native | hermes"
+        )]
+        engine: EngineArg,
         #[arg(
             long,
             help = "Ask the stronger local model to review the final receipt"
@@ -1960,6 +1969,22 @@ enum AutonomyArg {
     LocalFull,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+enum EngineArg {
+    #[default]
+    Native,
+    Hermes,
+}
+
+impl From<EngineArg> for engine::EngineKind {
+    fn from(value: EngineArg) -> Self {
+        match value {
+            EngineArg::Native => engine::EngineKind::Native,
+            EngineArg::Hermes => engine::EngineKind::Hermes,
+        }
+    }
+}
+
 impl From<AutonomyArg> for AutonomyLevel {
     fn from(value: AutonomyArg) -> Self {
         match value {
@@ -2211,6 +2236,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         }
         Some(Commands::Run {
             goal,
+            engine,
             review,
             review_model,
             dry_run,
@@ -2252,7 +2278,8 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             } else {
                 StreamPolicy::Auto
             };
-            let receipt = agent::run(
+            let receipt = engine::run(
+                engine.into(),
                 &paths,
                 RunOptions {
                     goal: goal.join(" "),
@@ -6902,6 +6929,8 @@ mod tests {
             "build",
             "the",
             "site",
+            "--engine",
+            "hermes",
             "--jsonl",
             "--last-message",
             "output/final.txt",
@@ -6911,6 +6940,7 @@ mod tests {
             cli.command,
             Some(Commands::Run {
                 goal,
+                engine: EngineArg::Hermes,
                 json: false,
                 jsonl: true,
                 last_message: Some(path),

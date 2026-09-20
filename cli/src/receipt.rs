@@ -34,6 +34,26 @@ pub struct TokenUsageRecord {
     pub budget: u64,
 }
 
+/// Provenance for a replaceable agent engine used beneath HII's authority
+/// boundary. The engine may reason and orchestrate, but the surrounding
+/// [`Receipt`] remains HII's canonical proof record.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EngineRecord {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub events: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub termination_reason: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Receipt {
     pub schema_version: u8,
@@ -98,6 +118,9 @@ pub struct Receipt {
     // --- schema v8: objective-bound inference usage ---
     #[serde(default)]
     pub token_usage: Option<TokenUsageRecord>,
+    // --- schema v9: replaceable engine provenance ---
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<EngineRecord>,
 }
 
 /// Why a run ended, at the granularity the exit code reports.
@@ -794,6 +817,7 @@ mod tests {
             failure_patterns: Vec::new(),
             skill_draft_ref: None,
             token_usage: None,
+            engine: None,
         }
     }
 
