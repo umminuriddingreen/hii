@@ -545,11 +545,11 @@
     "trustLevel": "first-party"
   },
   {
-    "id": "termite.rhino.managed_job",
-    "name": "Managed Termite Rhino Job",
-    "owner": "termite",
+    "id": "hii.rhino.managed_job",
+    "name": "Managed HII Rhino Job",
+    "owner": "hii",
     "runtime": "trusted-runner",
-    "summary": "Queue a quoted Rhino/Termite workflow for approved runner machines with logs, proof artifacts, and ledger receipts.",
+    "summary": "Queue a governed Rhino workflow through HII-owned RhinoCode execution with logs, proof artifacts, and ledger receipts.",
     "inputs": [
       "workflow",
       "Rhino task",
@@ -566,7 +566,7 @@
     "permissions": [
       "authenticated account",
       "approved owned runner",
-      "whitelisted Termite handler only",
+      "whitelisted HII Rhino handler only",
       "no arbitrary shell execution"
     ],
     "visibility": "authenticated",
@@ -575,8 +575,8 @@
       "currency": "usd"
     },
     "runnerSupport": {
-      "requiredCapabilityId": "termite.rhino.managed_job",
-      "handler": "termite.rhino.managed_job",
+      "requiredCapabilityId": "hii.rhino.managed_job",
+      "handler": "hii.rhino.managed_job",
       "expectedInputs": [
         "workflow",
         "prompt",
@@ -595,37 +595,37 @@
       ]
     },
     "evidence": [
-      "app/api/termite/jobs",
+      "scripts/hii-rhino.mjs",
       "app/api/runners/jobs/next",
       "supabase capability_jobs",
-      ".hii/termite-jobs.jsonl"
+      ".hii/rhino-jobs.jsonl"
     ],
     "status": "partial",
     "trustLevel": "operator-reviewed"
   },
   {
-    "id": "termite.rhino.installer_action",
-    "name": "Termite Installer Action",
-    "owner": "termite",
+    "id": "hii.rhino.bootstrap_action",
+    "name": "HII Rhino Bootstrap Action",
+    "owner": "hii",
     "runtime": "next-route",
-    "summary": "Serve the Mac alpha installer and surface install instructions for Termite.",
+    "summary": "Discover RhinoCode, bind a live Rhino document, and validate HII-owned Rhino execution without a second bridge product.",
     "inputs": [
-      "download request"
+      "local Rhino discovery request"
     ],
     "outputs": [
-      "installer metadata",
-      "download link"
+      "RhinoCode path",
+      "live document advertisement"
     ],
     "permissions": [
-      "public alpha asset only"
+      "local observation only"
     ],
-    "visibility": "public",
+    "visibility": "local",
     "costModel": {
       "type": "free"
     },
     "evidence": [
-      "app/api/termite/installer",
-      "public/downloads/termite-alpha-macos.zip"
+      "scripts/hii-rhino.mjs",
+      "RhinoCode.exe list"
     ],
     "status": "ready",
     "trustLevel": "first-party"

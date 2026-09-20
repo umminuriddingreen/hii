@@ -173,7 +173,7 @@ HII — Human Information Interface
 |   |   `-- desktop/window control through AeroSpace     [PARTIAL]
 |   |
 |   `-- External capabilities
-|       +-- Termite/Rhino managed work                   [PARTIAL]
+|       +-- HII Rhino managed work                       [PARTIAL]
 |       +-- browser capture and offline link cache       [BUILT]
 |       +-- Apple context tools                          [PARTIAL]
 |       +-- Blender and third-party MCP sources          [PARTIAL]
@@ -287,7 +287,7 @@ spatial human workspace
   + durable receipts
 ```
 
-Termite, browser capture, desktop control, music, trading experiments, public
+HII Rhino, browser capture, desktop control, music, trading experiments, public
 streams, commerce, and future machine runners are capabilities or experiments.
 They are not separate HII products and they should not obscure the core loop.
 

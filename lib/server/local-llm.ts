@@ -82,7 +82,7 @@ export async function askLocalInstallerModel(prompt: string): Promise<LocalLlmRe
   } catch {
     return {
       text:
-        'Local model unavailable. Use the installer actions in order: build, stage release, install Rhino bridge, open Rhino, run StartTermiteBridge, then doctor.',
+        'Local model unavailable. Open Rhino, confirm RhinoCode is enabled, then run npm run hii:rhino -- status.',
       model: modelPreferenceChain()[0],
       available: false
     };

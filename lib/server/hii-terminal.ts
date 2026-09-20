@@ -115,7 +115,7 @@ function parsePsLine(line: string): ProcessLine | null {
       mem: '',
       command: redactProcessLine(trimmed),
       raw: redactProcessLine(trimmed),
-      agent: /claude|codex|hii|aii|termite|ollama|rhino/i.test(trimmed)
+      agent: /claude|codex|hii|aii|ollama|rhino/i.test(trimmed)
     };
   }
 
@@ -128,7 +128,7 @@ function parsePsLine(line: string): ProcessLine | null {
     mem: parts[3],
     command: redactProcessLine(command),
     raw,
-    agent: /claude|codex|hii|aii|termite|ollama|rhino|node.*next|python.*hii/i.test(trimmed)
+    agent: /claude|codex|hii|aii|ollama|rhino|node.*next|python.*hii/i.test(trimmed)
   };
 }
 
@@ -214,7 +214,7 @@ function cleanSessionName(value: string) {
 // hiid (AII) picks it up within its 3s tick, runs the claude CLI, and updates
 // the capability job record (same id, last-write-wins in the jobs ledger).
 export async function spawnClaudeAgent(request: SpawnRequest) {
-  const preset = ['observer', 'shipper', 'termite-demo', 'custom'].includes(request.preset)
+  const preset = ['observer', 'shipper', 'rhino-demo', 'custom'].includes(request.preset)
     ? request.preset
     : 'observer';
   if (request.prompt.trim().length < 8) throw new Error('Prompt must be at least 8 characters.');

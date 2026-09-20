@@ -154,8 +154,8 @@ function inferNextActions(input: string) {
   actions.push(
     {
       score: 62,
-      track: 'Termite capability',
-      next: 'keep Termite as the first proof capability with logs and artifacts'
+      track: 'HII Rhino capability',
+      next: 'keep HII Rhino execution proof-bearing with logs and artifacts'
     },
     {
       score: 76,
@@ -179,7 +179,7 @@ export function getHiiAgentContext() {
       role: 'local-first human interface for source-linked context and verified agent work'
     },
     git,
-    commands: ['/og', '/context', '/console', '/boards', '/credits', '/termite', '/upload'],
+    commands: ['/og', '/context', '/console', '/boards', '/credits', '/rhino', '/upload'],
     capabilities: listCapabilities().map((capability) => ({
       id: capability.id,
       name: capability.name,

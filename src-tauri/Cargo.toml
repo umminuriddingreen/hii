@@ -27,7 +27,6 @@ ureq = { version = "2.12.1", features = ["json"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 minisign-verify = "0.2"
 portable-pty = "0.9"
-tungstenite = "0.24"
 
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-updater = "2"

@@ -202,7 +202,7 @@ function cleanSessionName(value) {
 const SPAWN_PRESETS = {
   observer: [
     "You are a read-only HII observer agent.",
-    "Watch the local HII/AII/Termite workstation state and report actionable status.",
+    "Watch the local HII and HII Rhino workstation state and report actionable status.",
     "Do not edit files, do not touch secrets, do not push or commit."
   ],
   shipper: [
@@ -216,9 +216,9 @@ const SPAWN_PRESETS = {
     "Never install anything, push, publish, or contact the network.",
     "Complete exactly the one bounded task given and verify the result before claiming completion."
   ],
-  "termite-demo": [
-    "You are a Termite demo operator for HII.",
-    "Prepare or monitor a Rhino/Termite alpha demo and report exact blockers and proof artifacts.",
+  "rhino-demo": [
+    "You are the HII Rhino demo operator.",
+    "Prepare or monitor an HII-owned Rhino workflow and report exact blockers and proof artifacts.",
     "Do not edit files unless explicitly asked. Do not touch secrets."
   ]
 };
@@ -2091,7 +2091,7 @@ function parseProcessLine(line) {
   const pid = Number(parts[1]);
   const command = redact(parts.slice(10).join(" "));
   const owned = OWNED_PATTERNS.some((pattern) => command.includes(pattern)) || pid === appServerPid();
-  const relevant = owned || /claude|codex|hii|aii|termite|ollama|rhino|node.*next|python.*hii/i.test(command);
+  const relevant = owned || /claude|codex|hii|aii|ollama|rhino|node.*next|python.*hii/i.test(command);
   if (!relevant) return null;
   return {
     id: `process:${parts[1]}`,

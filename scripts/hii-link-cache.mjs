@@ -15,10 +15,10 @@ const OLLAMA_URL = process.env.HII_OLLAMA_URL || "http://127.0.0.1:11434/api/gen
 const seedPosts = [
   {
     id: "seed-hii-runner-proof",
-    url: "/termite",
+    url: "/rhino",
     title: "Durable HII runner proof",
-    note: "A paid Termite capability job was quoted, reserved, claimed by a local runner, completed, and returned ledger/proof artifacts.",
-    tags: ["hii", "proof", "termite"],
+    note: "A paid HII Rhino capability job was quoted, reserved, claimed by a local runner, completed, and returned ledger/proof artifacts.",
+    tags: ["hii", "proof", "rhino"],
     source: "local proof",
     createdAt: "2026-07-05T10:17:19.662Z"
   },

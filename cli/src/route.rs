@@ -232,6 +232,8 @@ pub const ROUTES: &[Route] = &[
         "detect OS, architecture, model format, and runtime",
     ),
     delegated("model", Core, Infra, "fully manage the HII model backend"),
+    delegated("rhino", Core, Tools, "control Rhino and Grasshopper through HII"),
+    delegated("git-map", Core, Context, "explore commit topology, time, and diffs in the terminal"),
     delegated(
         "open",
         Core,

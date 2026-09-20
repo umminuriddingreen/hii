@@ -8,7 +8,7 @@ HII is a local-first control plane for verified agent work. The SDK surface is d
 
 Describes one action HII can expose. Required fields include `id`, `name`, `owner`, `runtime`, `summary`, `inputs`, `outputs`, `permissions`, `visibility`, `costModel`, `evidence`, `status`, and `trustLevel`.
 
-Current examples include `hii.terminal.observe`, `hii.board.task_kanban`, `hii.credits.quote`, `termite.rhino.managed_job`, and `hii.links.publish_stream`.
+Current examples include `hii.terminal.observe`, `hii.board.task_kanban`, `hii.credits.quote`, `hii.rhino.managed_job`, and `hii.links.publish_stream`.
 
 ### CapabilityJob
 

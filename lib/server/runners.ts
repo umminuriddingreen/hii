@@ -4,7 +4,7 @@ import type { CapabilityJobStatus } from '@/lib/capabilities/types';
 import { finalizeCapabilityJob, type CreditCurrency, type DurableCapabilityJob } from './credits';
 import { supabaseAdmin } from './supabase';
 
-export const defaultRunnerCapabilities = ['termite.rhino.managed_job'];
+export const defaultRunnerCapabilities = ['hii.rhino.managed_job'];
 
 export type CapabilityRunner = {
   id: string;

@@ -54,6 +54,7 @@
     "hii:contextdock:check": "node --experimental-strip-types scripts/hii-contextdock-smoke.mjs",
     "hii:activation:check": "node --experimental-strip-types scripts/hii-activation-smoke.mjs",
     "hii:windows:check": "node --experimental-strip-types scripts/hii-window-state-smoke.mjs",
+    "hii:rhino": "node scripts/hii-rhino.mjs",
     "hii:windows:preserve": "node --experimental-strip-types scripts/hii-windows-preservation-audit.mjs",
     "hii:windows:preserve:check": "vitest run tests/unit/windows-preservation-manifest.test.ts",
     "hii:workspace:check": "node --experimental-strip-types scripts/hii-workspace-store-smoke.mjs",

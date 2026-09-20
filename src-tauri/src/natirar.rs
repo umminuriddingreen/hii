@@ -3,9 +3,9 @@ use serde_json::{json, Value};
 use std::{
     env, fs,
     path::PathBuf,
+    process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tungstenite::{connect, Message};
 
 const DEFAULT_PROJECT: &str = "/Users/ummi/Documents/Natirar-Shell-Study/hii/natirar.project.json";
 
@@ -111,41 +111,56 @@ pub struct NatirarRhinoResult {
 #[tauri::command]
 pub fn natirar_rhino_action(action: NatirarRhinoAction) -> Result<NatirarRhinoResult, String> {
     let project = read_project()?;
-    let (tool, permission, payload) = match action {
-        NatirarRhinoAction::Ping => ("rhino.ping", "READ_ONLY", json!({})),
+    let build_script = project["files"]["rhinoBuildScript"]
+        .as_str()
+        .unwrap_or("/Users/ummi/Documents/Natirar-Shell-Study/site_data/build_parametric_rhino.py");
+    let grasshopper = project["files"]["grasshopperMaster"]
+        .as_str()
+        .ok_or("natirar_grasshopper_master_missing")?;
+    let (tool, permission, args): (&str, &str, Vec<String>) = match action {
+        NatirarRhinoAction::Ping => ("hii.rhino.status", "READ_ONLY", vec!["status".into()]),
         NatirarRhinoAction::BuildStudy => (
-            "rhino.run_command",
+            "hii.rhino.script",
             "EDIT_SAFE",
-            json!({"command":"-_RunPythonScript \"/Users/ummi/Documents/Natirar-Shell-Study/site_data/build_parametric_rhino.py\"", "echo":false}),
+            vec!["script".into(), build_script.into()],
         ),
-        NatirarRhinoAction::Undo => ("rhino.undo", "EDIT_SAFE", json!({})),
+        NatirarRhinoAction::Undo => (
+            "hii.rhino.command",
+            "EDIT_SAFE",
+            vec!["command".into(), "_Undo".into()],
+        ),
         NatirarRhinoAction::OpenGrasshopper => (
-            "grasshopper.open_definition",
+            "hii.rhino.grasshopper",
             "EDIT_SAFE",
-            json!({"path":project["files"]["grasshopperMaster"]}),
+            vec!["grasshopper".into(), grasshopper.into()],
         ),
-        NatirarRhinoAction::SolveGrasshopper => {
-            ("grasshopper.solve_definition", "EDIT_SAFE", json!({}))
-        }
+        NatirarRhinoAction::SolveGrasshopper => (
+            "hii.rhino.command",
+            "EDIT_SAFE",
+            vec!["command".into(), "_-Grasshopper _Solver _Recompute _Enter".into()],
+        ),
     };
-    let request = json!({"version":"0.1", "request_id":format!("hii-natirar-{}",now_millis()), "tool":tool, "permission_level":permission, "payload":payload});
-    let (mut socket, _) = connect("ws://127.0.0.1:5977/ws")
-        .map_err(|e| format!("termite_bridge_unavailable: {e}"))?;
-    socket
-        .send(Message::Text(request.to_string().into()))
-        .map_err(|e| e.to_string())?;
-    let message = socket.read().map_err(|e| e.to_string())?;
-    let response: Value = serde_json::from_str(message.to_text().map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    let success = response["success"].as_bool().unwrap_or(false);
+    let request = json!({"version":"1", "request_id":format!("hii-natirar-{}",now_millis()), "tool":tool, "permission_level":permission, "args":args});
+    let hii = env::var_os("HII_CLI_BIN").unwrap_or_else(|| "hii".into());
+    let output = Command::new(hii)
+        .arg("rhino")
+        .args(&args)
+        .output()
+        .map_err(|e| format!("hii_rhino_executor_unavailable: {e}"))?;
+    let success = output.status.success();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let response = json!({
+        "success": success,
+        "exitCode": output.status.code(),
+        "stdout": stdout,
+        "stderr": stderr,
+    });
     let receipt = json!({"schema":"hii.receipt/1", "kind":"natirar.rhino", "atMs":now_millis(), "request":request, "response":response});
     let receipt_path = write_receipt("rhino", &receipt)?;
     Ok(NatirarRhinoResult {
         success,
-        message: response["message"]
-            .as_str()
-            .unwrap_or("Rhino action returned")
-            .to_string(),
+        message: if success { "HII Rhino action completed".into() } else { stderr },
         response,
         receipt_path,
     })

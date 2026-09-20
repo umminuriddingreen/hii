@@ -58,7 +58,7 @@ const CODEX_SCHEMA_PIN = path.join(ROOT, "scripts", "hii-codex-schema-pin.mjs");
 const CODEX_THREADS = path.join(ROOT, "scripts", "hii-codex-threads.mjs");
 const LINK_POSTS = path.join(ROOT, ".hii", "link-posts.jsonl");
 const LINK_CACHE = path.join(ROOT, ".hii", "link-cache.jsonl");
-const RUNNER_CAPABILITIES = ["termite.rhino.managed_job"];
+const RUNNER_CAPABILITIES = ["hii.rhino.managed_job"];
 const BOARD_LANES = ["backlog", "next", "doing", "blocked", "done"];
 const BOARD_PRIORITIES = ["low", "normal", "high", "urgent"];
 
@@ -820,12 +820,12 @@ function inferNextActions({ prompt, git, capabilities, jobs, bridge }) {
       action: "capture this turn as an OG event and use local context to rank the next path"
     });
   }
-  if (capabilities.some((capability) => capability.id === "termite.rhino.managed_job")) {
+  if (capabilities.some((capability) => capability.id === "hii.rhino.managed_job")) {
     actions.push({
-      score: text.includes("termite") || text.includes("rhino") ? 90 : 62,
-      track: "Termite capability",
-      coordinate: "/termite + termite.rhino.managed_job",
-      action: "keep Termite as the first proof capability with logs and artifacts"
+      score: text.includes("rhino") || text.includes("grasshopper") ? 90 : 62,
+      track: "HII Rhino capability",
+      coordinate: "hii rhino + hii.rhino.managed_job",
+      action: "use HII-owned RhinoCode execution with logs, artifacts, and receipts"
     });
   }
   if (text.includes("build") || text.includes("ci") || text.includes("local")) {
@@ -2117,7 +2117,7 @@ function moneyPrompt({ idea, model, flags }) {
     "",
     "Constraints:",
     "- Optimize for making money soon, not abstract strategy.",
-    "- Prefer local-first workflows, HII, Codex, Claude Code, Ollama, Rhino/Termite, web intelligence, small business services, and packaged digital outputs when relevant.",
+    "- Prefer local-first workflows, HII, Codex, Claude Code, Ollama, HII Rhino, web intelligence, small business services, and packaged digital outputs when relevant.",
     "- Be concrete, direct, and short enough to act on today.",
     "- Return final answer only. Do not include thinking, reasoning traces, or terminal control output.",
     "- Do not claim buyers exist unless this prompt gives evidence. Frame buyer/pain as hypotheses when needed.",
@@ -3023,23 +3023,41 @@ async function cmdRunner(args) {
         continue;
       }
 
-      if (job.capability_id !== "termite.rhino.managed_job") {
+      if (job.capability_id !== "hii.rhino.managed_job") {
         throw new Error(`No whitelisted handler for ${job.capability_id}`);
       }
 
-      const started = `Runner claimed Termite job ${job.id}: ${job.input_summary}`;
+      const started = `Runner claimed HII Rhino job ${job.id}: ${job.input_summary}`;
       console.log(started);
       await runnerFetch(`/api/runners/jobs/${job.id}/events`, {
         method: "POST",
         body: JSON.stringify({
           events: [
             { actor: "agent", text: started },
-            { actor: "operator", text: "Termite runner v1 is operator-reviewed; Rhino execution is whitelisted to termite.rhino.managed_job." }
+            { actor: "operator", text: "HII Rhino execution is operator-reviewed and whitelisted to hii.rhino.managed_job." }
           ]
         })
       });
 
-      const summary = "Termite runner accepted the managed Rhino job and produced an initial operator-reviewed log proof.";
+      let request;
+      try {
+        request = JSON.parse(job.input_summary);
+      } catch {
+        request = null;
+      }
+      const allowed = new Set(["status", "command", "script", "grasshopper"]);
+      const action = typeof request?.action === "string" ? request.action : "";
+      const value = typeof request?.value === "string" ? request.value : "";
+      if (!allowed.has(action) || (action !== "status" && !value)) {
+        throw new Error(`HII Rhino job ${job.id} requires JSON input_summary {"action":"status|command|script|grasshopper","value":"..."}`);
+      }
+      const invocation = [path.join(ROOT, "scripts", "hii-rhino.mjs"), action, ...(action === "status" ? [] : [value])];
+      const execution = spawnSync(process.execPath, invocation, { cwd: ROOT, encoding: "utf8", env: process.env });
+      const output = [execution.stdout, execution.stderr].filter(Boolean).join("\n").trim();
+      if (execution.error || execution.status !== 0) {
+        throw new Error(`HII Rhino execution failed (${execution.status ?? "spawn"}): ${execution.error?.message ?? output}`);
+      }
+      const summary = `HII Rhino completed ${action} through RhinoCode.`;
       const complete = await runnerFetch(`/api/runners/jobs/${job.id}/complete`, {
         method: "POST",
         body: JSON.stringify({
@@ -3050,11 +3068,11 @@ async function cmdRunner(args) {
           proof: [
             {
               kind: "log",
-              label: "Termite runner log",
-              summary
+              label: "HII Rhino runner log",
+              summary: output || summary
             }
           ],
-          transcript: [{ actor: "agent", text: summary }]
+          transcript: [{ actor: "agent", text: output || summary }]
         })
       });
       console.log(`completed: ${complete.job?.id ?? job.id}`);
@@ -3247,6 +3265,22 @@ switch (cmd) {
     const { cmdSpace } = await import("./hii-space.mjs");
     process.exit(cmdSpace(rest));
   }
+  case "git-map": {
+    const { cmdGitMap } = await import("./hii-git-map.mjs");
+    try { cmdGitMap(rest); } catch (error) {
+      console.error(`hii git-map: ${error instanceof Error ? error.message : String(error)}`);
+      process.exit(1);
+    }
+    break;
+  }
+  case "rhino": {
+    const result = spawnSync(process.execPath, [path.join(ROOT, "scripts", "hii-rhino.mjs"), ...rest], {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: "inherit"
+    });
+    process.exit(result.status ?? 1);
+  }
   case "board": cmdBoard(rest); break;
   case "money": cmdMoney(rest); break;
   case "links": cmdLinks(rest); break;
@@ -3329,6 +3363,8 @@ usage: hii <command>
   space health        inspect the deterministic macOS workspace layer
   space snapshot      show monitors, workspaces, and windows
   space apps          list visible desktop applications
+  git-map             2D terminal map of commit topology and time
+  git-map diff <n>    inspect a numbered commit; add --patch for full diff
   board               show local kanban/todo board
   board add <title>   create a task with lane/priority/owner/coordinate
   board move <id> <lane>
@@ -3368,6 +3404,7 @@ usage: hii <command>
   model bench|logs    benchmark or inspect the active backend
   model start|stop    control the HII-owned model runtime
   model remove <id>   preview removal; add --yes to apply
+  rhino status        inspect Rhino/RhinoCode; also command, script, grasshopper
   open app            launch the installed HII desktop app
   open web            start and open HII's local web instance
   open site           open the configured canonical HII website
