@@ -33,9 +33,8 @@ export default function DownloadPage() {
         <p>Apple Silicon, macOS 13 or newer. Open the disk image and drag HII to Applications.</p>
         <DesktopRelease platform="macos" label="Download for Mac" />
         <p>
-          HII keeps itself current after that. It checks for a new version on launch, installs
-          only when you say so, and verifies every update against HII&rsquo;s signing key before
-          applying it.
+          Published builds appear here with their version and SHA-256. Check this page for
+          available releases; automatic update delivery is not yet verified for the private beta.
         </p>
       </section>
       <section id="windows">

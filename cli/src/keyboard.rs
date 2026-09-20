@@ -885,7 +885,7 @@ mod tests {
 
     #[test]
     fn completing_a_picker_choice_keeps_the_command_open_for_arguments() {
-        let mut buf = String::from("/cl");
+        let mut buf = String::from("/clau");
         let mut cursor = buf.len();
         let matches = crate::tui::command_matches(&buf, false);
         assert_eq!(matches[0].0, "/claude");

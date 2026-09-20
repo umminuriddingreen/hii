@@ -2,7 +2,7 @@
 
 `hii-native-runner` is HII's owned local-inference service. On Apple Silicon it
 supervises a private, pinned MLX-VLM engine; on other supported hardware the
-portable mistral.rs path remains available. Users interact with HII Native,
+portable mistral.rs path remains available. Users interact with HII,
 not either engine directly. The HII layer owns:
 
 - loopback-only serving on `127.0.0.1:11435`;

@@ -12,15 +12,15 @@ describe('HII web access gate', () => {
     expect(source).toContain('if (localSession)');
   });
 
-  it('opens on the landing with both account paths and no shell surface', () => {
+  it('offers both account paths and a guest canvas from the product site', () => {
     const source = readFileSync('components/auth/HiiWebAccess.tsx', 'utf8');
 
-    // The unauthenticated gate renders the landing, and the landing owns both
-    // ways in. Asserting the wiring rather than the marketing copy, so a
-    // rewrite of the words does not read as a regression.
+    // The explicit product site remains available to signed-in visitors too.
     expect(source).toContain('<ProsumerLanding');
-    expect(source).toMatch(/onLogin=\{\(\) => chooseMode\('login'\)\}/);
-    expect(source).toMatch(/onCreateAccount=\{\(\) => chooseMode\('signup'\)\}/);
+    expect(source).toContain("onLogin={() => session.authenticated ? setProductSite(false) : chooseMode('login')}");
+    expect(source).toContain("onCreateAccount={() => session.authenticated ? setProductSite(false) : chooseMode('signup')}");
+    expect(source).toContain('<a href="/">try the canvas</a>');
+    expect(source).not.toContain('<HiiFirstRunTerminal');
 
     // A public, unauthenticated page must never reach a shell.
     expect(source).not.toContain('ShellTerminal');
@@ -42,7 +42,7 @@ describe('HII web access gate', () => {
     expect([...new Set(referenced)].filter((name) => !defined.has(name))).toEqual([]);
   });
 
-  it('uses HII passkey APIs and reveals the canvas only for an authenticated session', () => {
+  it('uses HII passkey APIs for the account canvas while preserving the product site', () => {
     const source = readFileSync('components/auth/HiiWebAccess.tsx', 'utf8');
 
     expect(source).toContain("api<Session>('/api/auth/session')");
@@ -50,7 +50,7 @@ describe('HII web access gate', () => {
     expect(source).toContain("'/api/auth/login/start'");
     expect(source).toContain('navigator.credentials.create');
     expect(source).toContain('navigator.credentials.get');
-    expect(source).toContain('if (ready && session.authenticated)');
+    expect(source).toContain('if (ready && session.authenticated && !browserOnly && !productSite)');
     expect(source).not.toMatch(/supabase/i);
     expect(source).not.toContain('type="password"');
   });
@@ -149,7 +149,7 @@ describe('HII web access gate', () => {
     expect(css).not.toContain('.canvasHeader { display: none; }');
     expect(css).toContain('backdrop-filter: blur(24px) saturate(1.4);');
     expect(globalCss).toContain('.hii-node[data-node-type="note"]');
-    expect(globalCss).toContain('background: rgba(255, 255, 255, .99)');
+    expect(globalCss).toContain('background: rgba(248,249,249,.76)');
     expect(css).toContain('@media (max-width: 560px)');
   });
 

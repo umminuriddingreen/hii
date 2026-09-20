@@ -12,6 +12,9 @@ export function buildWebCapture({
   title,
   method,
   selectedText,
+  contentText,
+  browserName,
+  browserTabId,
   note,
   tags = [],
   capturedAt = new Date().toISOString(),
@@ -22,6 +25,8 @@ export function buildWebCapture({
 
   const capture = {
     method,
+    ...(cleanOptional(browserName) ? { browserName: cleanOptional(browserName) } : {}),
+    ...(Number.isSafeInteger(browserTabId) && browserTabId >= 0 ? { browserTabId } : {}),
     tags: normalizeTags(tags)
   };
   const selection = cleanOptional(selectedText);
@@ -39,6 +44,7 @@ export function buildWebCapture({
       ...(cleanOptional(title) ? { title: cleanOptional(title) } : {})
     },
     capture,
+    ...(typeof contentText === "string" ? { content: { text: contentText } } : {}),
     authority: {
       client: "chrome-extension",
       localOnly: true

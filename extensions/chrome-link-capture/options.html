@@ -12,12 +12,9 @@
         font: 14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         color: #111;
       }
-      input {
-        box-sizing: border-box;
-        width: 100%;
-        border: 1px solid #cfcfcf;
-        padding: 9px;
-        font: inherit;
+      code {
+        background: #f2f2f2;
+        padding: 2px 5px;
       }
       button {
         margin-top: 12px;
@@ -35,16 +32,24 @@
   </head>
   <body>
     <h1>Save to HII</h1>
-    <label>
-      Local HII ingest endpoint
-      <input id="endpoint" />
-    </label>
-    <label style="display: block; margin-top: 12px;">
-      Ingest token (leave blank when your local endpoint does not require one)
-      <input id="token" type="password" />
-    </label>
-    <button id="save">Save options</button>
+    <p>
+      Captures are saved locally through the native host
+      <code>com.hii.save_to_hii</code>, which calls
+      <code>hii info ingest-web</code>.
+    </p>
+    <p>
+      Run <code>node scripts/hii-chrome-native-host-install.mjs</code> from the HII checkout,
+      then register the generated native-host manifest with Chrome for this unpacked extension.
+    </p>
+    <button id="check">Check native host</button>
     <div id="status"></div>
+    <h2>Page indexing</h2>
+    <label for="browser-name">Browser</label>
+    <select id="browser-name"><option>Chrome</option><option>Helium</option><option>Chromium</option></select>
+    <p>When enabled, HII saves the visible text of ordinary pages as local, searchable versions. Private windows, sign-in and payment pages, form values, and browser-internal pages are excluded. Only new browsing after enabling is captured.</p>
+    <button id="enable-index">Enable and grant website access</button>
+    <button id="disable-index">Pause indexing</button>
+    <div id="index-status" role="status"></div>
     <script src="options.js"></script>
   </body>
 </html>

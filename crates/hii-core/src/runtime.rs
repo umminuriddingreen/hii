@@ -7,7 +7,7 @@
 use crate::operational::{database, migrate};
 use chrono::Utc;
 use ring::digest::{digest, SHA256};
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -188,8 +188,20 @@ pub fn read_space(
     space_id: &str,
 ) -> Result<Option<RuntimeSpaceSnapshotV1>, String> {
     validate_space_id(space_id)?;
-    let connection = database(runtime)?;
+    let mut connection = database(runtime)?;
     migrate(&connection)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
+    read_space_snapshot(&transaction, space_id)
+}
+
+// All components of a snapshot must come from the same database revision.
+// Mutation callers hold an IMMEDIATE transaction before reading this state.
+fn read_space_snapshot(
+    connection: &Connection,
+    space_id: &str,
+) -> Result<Option<RuntimeSpaceSnapshotV1>, String> {
     let exists = connection
         .query_row(
             "SELECT 1 FROM runtime_spaces WHERE id = ?1",
@@ -202,7 +214,7 @@ pub fn read_space(
     if !exists {
         return Ok(None);
     }
-    snapshot(&connection, space_id).map(Some)
+    snapshot(connection, space_id).map(Some)
 }
 
 pub fn initialize_space(
@@ -214,7 +226,10 @@ pub fn initialize_space(
     validate_document(document)?;
     let mut connection = database(runtime)?;
     migrate(&connection)?;
-    if connection
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    if transaction
         .query_row(
             "SELECT 1 FROM runtime_spaces WHERE id = ?1",
             [space_id],
@@ -224,7 +239,7 @@ pub fn initialize_space(
         .map_err(|error| error.to_string())?
         .is_some()
     {
-        return snapshot(&connection, space_id);
+        return snapshot(&transaction, space_id);
     }
 
     let now = document_timestamp(document);
@@ -232,9 +247,6 @@ pub fn initialize_space(
         .get("revision")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    let transaction = connection
-        .transaction()
-        .map_err(|error| error.to_string())?;
     transaction
         .execute(
             "INSERT INTO runtime_spaces
@@ -276,8 +288,9 @@ pub fn initialize_space(
         },
     )?;
     write_projection(&transaction, space_id, document, "migration", &now)?;
+    let result = snapshot(&transaction, space_id)?;
     transaction.commit().map_err(|error| error.to_string())?;
-    snapshot(&connection, space_id)
+    Ok(result)
 }
 
 pub fn apply_space(
@@ -287,24 +300,69 @@ pub fn apply_space(
 ) -> Result<RuntimeSpaceSnapshotV1, String> {
     validate_space_id(space_id)?;
     validate_apply_request(request)?;
+    if request.space_id.as_deref().is_some_and(|id| id != space_id) {
+        return Err("Runtime request spaceId does not match target Space".into());
+    }
     validate_document(&request.document)?;
     let mut connection = database(runtime)?;
     migrate(&connection)?;
-    let Some(current) = read_space(runtime, space_id)? else {
+    // Reserve the writer before reading the revision: checking first and
+    // acquiring the lock later permits two writers to overwrite the same epoch.
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let Some(current) = read_space_snapshot(&transaction, space_id)? else {
         return Err(format!("runtime space {space_id} is not initialized"));
     };
+    authorize_space_action(
+        &transaction,
+        space_id,
+        &request.actor,
+        request.authority_grant_id.as_deref(),
+        "space.mutate",
+        request.run_id.as_deref(),
+    )?;
 
-    let duplicate = connection
+    let request_hash = digest(
+        &SHA256,
+        &serde_json::to_vec(&(
+            space_id,
+            request.version,
+            request.expected_sequence,
+            &request.actor,
+            &request.authority_grant_id,
+            &request.run_id,
+            &request.idempotency_key,
+            &request.document,
+        ))
+        .map_err(|error| error.to_string())?,
+    )
+    .as_ref()
+    .iter()
+    .map(|byte| format!("{byte:02x}"))
+    .collect::<String>();
+    let duplicate = transaction
         .query_row(
-            "SELECT 1 FROM operational_operations WHERE space_id = ?1 AND idempotency_key = ?2",
+            "SELECT actor_id, payload_json FROM operational_operations
+             WHERE space_id = ?1 AND idempotency_key = ?2 AND type = 'space.transaction.applied'",
             params![space_id, request.idempotency_key],
-            |_| Ok(()),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )
         .optional()
-        .map_err(|error| error.to_string())?
-        .is_some();
-    if duplicate {
-        return snapshot(&connection, space_id);
+        .map_err(|error| error.to_string())?;
+    if let Some((actor, payload)) = duplicate {
+        let payload: Value = serde_json::from_str(&payload).map_err(|error| error.to_string())?;
+        // Older receipts have no request hash. Preserve their retry behavior,
+        // but never let another actor claim their idempotency identity.
+        if actor != request.actor.id
+            || payload
+                .get("requestHash")
+                .and_then(Value::as_str)
+                .is_some_and(|hash| hash != request_hash)
+        {
+            return Err("Runtime idempotencyKey was already used for a different request".into());
+        }
+        return Ok(current);
     }
     if current.sequence != request.expected_sequence {
         return Err(format!(
@@ -325,21 +383,13 @@ pub fn apply_space(
         PendingEvent {
             event_type: "space.transaction.applied",
             target_id: Some(format!("space:{space_id}")),
-            payload: json!({"mutationCount": events.len()}),
+            payload: json!({"mutationCount": events.len(), "requestHash": request_hash}),
         },
     );
 
     let next_sequence = current.sequence + 1;
     let now = document_timestamp(&request.document);
-    let transaction = connection
-        .transaction()
-        .map_err(|error| error.to_string())?;
     for (index, event) in events.iter().enumerate() {
-        let idempotency = if index == 0 {
-            request.idempotency_key.clone()
-        } else {
-            format!("{}:{index}", request.idempotency_key)
-        };
         insert_event(
             &transaction,
             EventInsert {
@@ -351,7 +401,9 @@ pub fn apply_space(
                 payload: &event.payload,
                 authority_grant_id: request.authority_grant_id.as_deref(),
                 run_id: request.run_id.as_deref(),
-                idempotency_key: Some(&idempotency),
+                // Only the transaction owns a retry key. Its atomic child
+                // events need no separate keys in the caller's namespace.
+                idempotency_key: (index == 0).then_some(request.idempotency_key.as_str()),
                 created_at: &now,
             },
         )?;
@@ -375,8 +427,9 @@ pub fn apply_space(
         "human_authored",
         &now,
     )?;
+    let result = snapshot(&transaction, space_id)?;
     transaction.commit().map_err(|error| error.to_string())?;
-    snapshot(&connection, space_id)
+    Ok(result)
 }
 
 pub fn history(
@@ -387,6 +440,48 @@ pub fn history(
     let connection = database(runtime)?;
     migrate(&connection)?;
     read_events(&connection, space_id, limit.clamp(1, 500))
+}
+
+/// Resolve durable IDs or exact, explicitly assigned handles. Derived display
+/// names are intentionally not an authority input; their normalization belongs
+/// to the UI until there is one shared resolver across surfaces.
+pub fn resolve_space_object_id(
+    snapshot: &RuntimeSpaceSnapshotV1,
+    reference: &str,
+) -> Result<String, String> {
+    let handle = reference.strip_prefix('@');
+    let nodes = snapshot
+        .document
+        .get("nodes")
+        .and_then(Value::as_array)
+        .ok_or("Runtime Space has no object projection")?;
+    let matches = nodes
+        .iter()
+        .filter(|node| {
+            if let Some(handle) = handle {
+                !handle.is_empty() && node.get("handle").and_then(Value::as_str) == Some(handle)
+            } else {
+                node.get("id").and_then(Value::as_str).is_some_and(|id| {
+                    id == reference || object_id(&snapshot.space_id, id) == reference
+                })
+            }
+        })
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [node] => node
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| "Runtime object has no ID".into()),
+        [] => Err(format!(
+            "object not found in Space {}: {reference}",
+            snapshot.space_id
+        )),
+        _ => Err(format!(
+            "ambiguous object reference in Space {}: {reference}",
+            snapshot.space_id
+        )),
+    }
 }
 
 pub fn create_share_bundle(
@@ -418,14 +513,20 @@ pub fn create_share_bundle(
     }
     let space_id = request.space_id.as_deref().unwrap_or("default");
     validate_space_id(space_id)?;
-    let current = read_space(runtime, space_id)?
+    let mut connection = database(runtime)?;
+    migrate(&connection)?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let current = read_space_snapshot(&transaction, space_id)?
         .ok_or_else(|| format!("runtime space {space_id} is not initialized"))?;
-    authorize_share_action(
-        runtime,
+    authorize_space_action(
+        &transaction,
         space_id,
         &request.actor,
         request.authority_grant_id.as_deref(),
         "object.share",
+        None,
     )?;
     let selected = selected_object_ids(&current, &request.object_ids)?;
     let objects = current
@@ -461,11 +562,6 @@ pub fn create_share_bundle(
     };
     bundle.content_hash = share_bundle_hash(&bundle)?;
 
-    let mut connection = database(runtime)?;
-    migrate(&connection)?;
-    let transaction = connection
-        .transaction()
-        .map_err(|error| error.to_string())?;
     let next_sequence = current.sequence + 1;
     let event_type = match request.mode {
         RuntimeShareModeV1::Export => "artifact.exported",
@@ -565,7 +661,10 @@ pub fn revoke_share(
     }
     let mut connection = database(runtime)?;
     migrate(&connection)?;
-    let existing = connection
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let existing = transaction
         .query_row(
             "SELECT source_space_id, mode, recipient_id, created_at, revoked_at
              FROM runtime_shares WHERE id=?1",
@@ -594,19 +693,17 @@ pub fn revoke_share(
             revoked_at: Some(revoked_at),
         });
     }
-    let current = read_space(runtime, &existing.0)?
+    let current = read_space_snapshot(&transaction, &existing.0)?
         .ok_or_else(|| "share source Space does not exist".to_string())?;
-    authorize_share_action(
-        runtime,
+    authorize_space_action(
+        &transaction,
         &existing.0,
         &request.actor,
         request.authority_grant_id.as_deref(),
         "object.share.revoke",
+        None,
     )?;
     let now = Utc::now().to_rfc3339();
-    let transaction = connection
-        .transaction()
-        .map_err(|error| error.to_string())?;
     transaction
         .execute(
             "UPDATE runtime_shares SET revoked_at=?2 WHERE id=?1 AND revoked_at IS NULL",
@@ -678,15 +775,125 @@ fn selected_object_ids(
     Ok(selected)
 }
 
-fn authorize_share_action(
+/// Issue an immutable local grant after the caller's transport/ACL authority
+/// check. Only the Space owner may issue it. Reusing a revoked or differently
+/// scoped identity fails; an adapter must never silently resurrect permission.
+pub fn grant_space_mutation(
     runtime: &Path,
+    space_id: &str,
+    issuer: &IdentityRefV1,
+    subject: &IdentityRefV1,
+    grant_id: &str,
+    run_id: Option<&str>,
+) -> Result<(), String> {
+    validate_space_id(space_id)?;
+    if grant_id.trim().is_empty()
+        || subject.id.trim().is_empty()
+        || !matches!(subject.kind.as_str(), "agent" | "service")
+    {
+        return Err("a grant identity and agent or service subject are required".into());
+    }
+    let mut connection = database(runtime)?;
+    migrate(&connection)?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    require_space_owner(&transaction, space_id, issuer)?;
+    let resource = format!("space:{space_id}");
+    let conditions =
+        json_string(&json!({"issuedBy": issuer, "subjectKind": subject.kind, "runId": run_id}))?;
+    transaction
+        .execute(
+            "INSERT OR IGNORE INTO runtime_grants
+         (id, subject_id, action, resource_id, conditions_json, issued_at)
+         VALUES (?1, ?2, 'space.mutate', ?3, ?4, ?5)",
+            params![
+                grant_id,
+                subject.id,
+                resource,
+                conditions,
+                Utc::now().to_rfc3339()
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    let stored: String = transaction
+        .query_row(
+            "SELECT conditions_json FROM runtime_grants WHERE id=?1",
+            [grant_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if stored != conditions {
+        return Err("Runtime grant identity already has different conditions".into());
+    }
+    authorize_space_action(
+        &transaction,
+        space_id,
+        subject,
+        Some(grant_id),
+        "space.mutate",
+        run_id,
+    )?;
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+pub fn revoke_space_mutation_grant(
+    runtime: &Path,
+    space_id: &str,
+    issuer: &IdentityRefV1,
+    grant_id: &str,
+) -> Result<(), String> {
+    validate_space_id(space_id)?;
+    let mut connection = database(runtime)?;
+    migrate(&connection)?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    require_space_owner(&transaction, space_id, issuer)?;
+    let changed = transaction
+        .execute(
+            "UPDATE runtime_grants SET revoked_at=COALESCE(revoked_at, ?3)
+         WHERE id=?1 AND resource_id=?2 AND action='space.mutate'",
+            params![
+                grant_id,
+                format!("space:{space_id}"),
+                Utc::now().to_rfc3339()
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    if changed == 0 {
+        return Err("Runtime mutation grant does not exist in this Space".into());
+    }
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+fn require_space_owner(
+    connection: &Connection,
+    space_id: &str,
+    actor: &IdentityRefV1,
+) -> Result<(), String> {
+    let owner: String = connection
+        .query_row(
+            "SELECT owner_actor_id FROM runtime_spaces WHERE id=?1",
+            [space_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if actor.kind == "human" && actor.id == owner {
+        Ok(())
+    } else {
+        Err("only the local Space owner may issue or revoke Runtime grants".into())
+    }
+}
+
+fn authorize_space_action(
+    connection: &Connection,
     space_id: &str,
     actor: &IdentityRefV1,
     grant_id: Option<&str>,
     action: &str,
+    run_id: Option<&str>,
 ) -> Result<(), String> {
-    let connection = database(runtime)?;
-    migrate(&connection)?;
     let owner: String = connection
         .query_row(
             "SELECT owner_actor_id FROM runtime_spaces WHERE id=?1",
@@ -698,26 +905,42 @@ fn authorize_share_action(
         return Ok(());
     }
     let Some(grant_id) = grant_id.filter(|id| !id.is_empty()) else {
-        return Err("sharing requires the Space owner or an explicit Runtime grant".into());
+        return Err("the action requires the Space owner or an explicit Runtime grant".into());
     };
     let now = Utc::now().to_rfc3339();
     let resource = format!("space:{space_id}");
-    let valid = connection
+    let conditions = connection
         .query_row(
-            "SELECT 1 FROM runtime_grants
+            "SELECT conditions_json FROM runtime_grants
              WHERE id=?1 AND subject_id=?2 AND action=?3 AND resource_id=?4
                AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?5)",
             params![grant_id, actor.id, action, resource, now],
-            |_| Ok(()),
+            |row| row.get::<_, String>(0),
         )
         .optional()
         .map_err(|error| error.to_string())?
-        .is_some();
-    if valid {
-        Ok(())
-    } else {
-        Err("Runtime grant does not authorize this share action".into())
+        .ok_or_else(|| {
+            "Runtime grant does not authorize this action (scope, subject, expiry, or revocation)"
+                .to_string()
+        })?;
+    let conditions: Value = serde_json::from_str(&conditions)
+        .map_err(|_| "Runtime grant conditions are invalid".to_string())?;
+    let conditions = conditions
+        .as_object()
+        .ok_or("Runtime grant conditions must be an object")?;
+    for (key, value) in conditions {
+        match key.as_str() {
+            "issuedBy" => {}
+            "subjectKind" if value.as_str() == Some(actor.kind.as_str()) => {}
+            "runId"
+                if value.is_null()
+                    || value
+                        .as_str()
+                        .is_some_and(|expected| Some(expected) == run_id) => {}
+            _ => return Err("Runtime grant conditions do not authorize this actor or run".into()),
+        }
     }
+    Ok(())
 }
 
 fn filtered_share_document(document: &Value, selected: &BTreeSet<String>) -> Value {
@@ -817,7 +1040,7 @@ fn validate_apply_request(request: &RuntimeSpaceApplyV1) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_space_id(space_id: &str) -> Result<(), String> {
+pub(crate) fn validate_space_id(space_id: &str) -> Result<(), String> {
     if space_id.is_empty()
         || space_id.len() > 120
         || !space_id
@@ -895,6 +1118,7 @@ fn semantic_node(node: &Value) -> Value {
         "object",
         "objectRef",
         "frameId",
+        "handle",
         "payload",
     ] {
         if let Some(entry) = node.get(key) {
@@ -914,6 +1138,49 @@ fn spatial_node(node: &Value) -> Value {
         "z": node.get("z").cloned().unwrap_or(json!(1)),
         "rotation": node.get("rotation").cloned().unwrap_or(json!(0)),
     })
+}
+
+/// Normalize a remote document to the exact fields retained by the local
+/// projection, without importing it or changing the selected local workspace.
+pub fn canonical_space_document(document: &Value) -> Result<Value, String> {
+    validate_document(document)?;
+    let mut nodes = document["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|node| {
+            let mut projected = semantic_node(node);
+            let spatial = spatial_node(node);
+            for key in ["x", "y", "w", "h", "z", "rotation"] {
+                projected[key] = spatial[key].clone();
+            }
+            projected
+        })
+        .collect::<Vec<_>>();
+    nodes.sort_by(|left, right| {
+        left["createdAt"]
+            .as_str()
+            .cmp(&right["createdAt"].as_str())
+            .then_with(|| left["id"].as_str().cmp(&right["id"].as_str()))
+    });
+    let mut links = document["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|link| {
+            json!({
+                "id":link["id"], "fromId":link["fromId"], "toId":link["toId"],
+                "label":link.get("label").cloned().unwrap_or(Value::Null),
+                "arrow":link.get("arrow").cloned().unwrap_or(json!("end")),
+            })
+        })
+        .collect::<Vec<_>>();
+    links.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
+    Ok(json!({
+        "version":1, "revision":document["revision"], "updatedAt":document_timestamp(document),
+        "viewport":document.get("viewport").cloned().unwrap_or(json!({"x":0,"y":0,"zoom":1})),
+        "nextZ":document.get("nextZ").cloned().unwrap_or(json!(1)), "nodes":nodes, "links":links,
+    }))
 }
 
 fn diff_documents(before: &Value, after: &Value, space_id: &str) -> Vec<PendingEvent> {
@@ -1588,6 +1855,58 @@ mod tests {
     }
 
     #[test]
+    fn assigned_handles_survive_canonical_round_trips_and_retitle() {
+        let runtime = TempRuntime::new();
+        let mut named = node("one", 0);
+        named["handle"] = json!("facade");
+        let initial = initialize_space(&runtime.0, "default", &document(0, vec![named])).unwrap();
+        assert_eq!(initial.document["nodes"][0]["handle"], "facade");
+
+        let mut request = RuntimeSpaceApplyV1 {
+            version: 1,
+            space_id: Some("default".into()),
+            expected_sequence: initial.sequence,
+            actor: IdentityRefV1 {
+                id: "human:local".into(),
+                kind: "human".into(),
+            },
+            authority_grant_id: None,
+            run_id: None,
+            idempotency_key: "rename-handle".into(),
+            document: initial.document,
+        };
+        // A handle change alone must be a semantic mutation, without needing a
+        // timestamp change to accidentally make it through the diff boundary.
+        request.document["nodes"][0]["handle"] = json!("scheme-a");
+        let renamed = apply_space(&runtime.0, "default", &request).unwrap();
+        assert_eq!(renamed.sequence, 1);
+        assert_eq!(renamed.document["nodes"][0]["handle"], "scheme-a");
+        assert!(renamed
+            .recent_events
+            .iter()
+            .any(|event| event.event_type == "object.updated"));
+
+        request.expected_sequence = renamed.sequence;
+        request.idempotency_key = "retitle-object".into();
+        request.document = renamed.document;
+        request.document["nodes"][0]["payload"]["title"] = json!("Different title");
+        apply_space(&runtime.0, "default", &request).unwrap();
+        let reopened = read_space(&runtime.0, "default").unwrap().unwrap();
+        assert_eq!(reopened.document["nodes"][0]["handle"], "scheme-a");
+
+        request.expected_sequence = reopened.sequence;
+        request.idempotency_key = "clear-handle".into();
+        request.document = reopened.document;
+        request.document["nodes"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("handle");
+        let cleared = apply_space(&runtime.0, "default", &request).unwrap();
+        assert_eq!(cleared.sequence, 3);
+        assert!(cleared.document["nodes"][0].get("handle").is_none());
+    }
+
+    #[test]
     fn agent_mutations_require_a_run_bound_grant() {
         let runtime = TempRuntime::new();
         initialize_space(&runtime.0, "default", &document(0, vec![])).unwrap();
@@ -1610,6 +1929,140 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("explicit authority grant"));
+    }
+
+    #[test]
+    fn mutation_grants_enforce_subject_space_run_expiry_and_revocation() {
+        let runtime = TempRuntime::new();
+        for space in ["default", "other"] {
+            initialize_space(&runtime.0, space, &document(0, vec![])).unwrap();
+        }
+        let owner = IdentityRefV1 {
+            id: "human:local".into(),
+            kind: "human".into(),
+        };
+        let agent = IdentityRefV1 {
+            id: "agent:test".into(),
+            kind: "agent".into(),
+        };
+        let mut request = RuntimeSpaceApplyV1 {
+            version: 1,
+            space_id: Some("default".into()),
+            expected_sequence: 0,
+            actor: agent.clone(),
+            authority_grant_id: Some("forged".into()),
+            run_id: Some("run:one".into()),
+            idempotency_key: "authorized-write".into(),
+            document: document(0, vec![node("one", 0)]),
+        };
+        assert!(apply_space(&runtime.0, "default", &request)
+            .unwrap_err()
+            .contains("does not authorize"));
+        assert!(grant_space_mutation(
+            &runtime.0,
+            "default",
+            &agent,
+            &agent,
+            "grant",
+            Some("run:one")
+        )
+        .is_err());
+        grant_space_mutation(
+            &runtime.0,
+            "default",
+            &owner,
+            &agent,
+            "grant",
+            Some("run:one"),
+        )
+        .unwrap();
+        request.authority_grant_id = Some("grant".into());
+        request.actor.id = "agent:other".into();
+        assert!(apply_space(&runtime.0, "default", &request).is_err());
+        request.actor = agent.clone();
+        request.run_id = Some("run:other".into());
+        assert!(apply_space(&runtime.0, "default", &request)
+            .unwrap_err()
+            .contains("conditions"));
+        request.run_id = Some("run:one".into());
+        request.space_id = Some("other".into());
+        assert!(apply_space(&runtime.0, "other", &request)
+            .unwrap_err()
+            .contains("does not authorize"));
+        request.space_id = Some("default".into());
+        let connection = database(&runtime.0).unwrap();
+        connection
+            .execute(
+                "UPDATE runtime_grants SET expires_at='2000-01-01T00:00:00Z' WHERE id='grant'",
+                [],
+            )
+            .unwrap();
+        assert!(apply_space(&runtime.0, "default", &request)
+            .unwrap_err()
+            .contains("does not authorize"));
+        connection
+            .execute(
+                "UPDATE runtime_grants SET expires_at=NULL WHERE id='grant'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            read_space(&runtime.0, "default").unwrap().unwrap().sequence,
+            0
+        );
+        assert_eq!(
+            apply_space(&runtime.0, "default", &request)
+                .unwrap()
+                .sequence,
+            1
+        );
+        revoke_space_mutation_grant(&runtime.0, "default", &owner, "grant").unwrap();
+        assert!(apply_space(&runtime.0, "default", &request)
+            .unwrap_err()
+            .contains("does not authorize"));
+        assert!(grant_space_mutation(
+            &runtime.0,
+            "default",
+            &owner,
+            &agent,
+            "grant",
+            Some("run:one")
+        )
+        .is_err());
+        assert_eq!(
+            read_space(&runtime.0, "default").unwrap().unwrap().sequence,
+            1
+        );
+    }
+
+    #[test]
+    fn exact_assigned_handle_resolution_rejects_missing_and_ambiguous_names() {
+        let runtime = TempRuntime::new();
+        let mut first = node("one", 0);
+        first["handle"] = json!("facade");
+        first["payload"]["title"] = json!("Derived title");
+        let snapshot =
+            initialize_space(&runtime.0, "default", &document(0, vec![first.clone()])).unwrap();
+        assert_eq!(
+            resolve_space_object_id(&snapshot, "@facade").unwrap(),
+            "one"
+        );
+        assert_eq!(
+            resolve_space_object_id(&snapshot, "workspace:default:object:one").unwrap(),
+            "one"
+        );
+        for name in ["@Facade", "@derived-title", "@missing", "@"] {
+            assert!(resolve_space_object_id(&snapshot, name).is_err());
+        }
+        let mut ambiguous = snapshot;
+        first["id"] = json!("two");
+        ambiguous.document["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(first);
+        assert!(resolve_space_object_id(&ambiguous, "@facade")
+            .unwrap_err()
+            .contains("ambiguous"));
     }
 
     #[test]
@@ -1730,6 +2183,175 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_initialization_keeps_one_import_and_returns_its_state() {
+        let runtime = TempRuntime::new();
+        initialize_space(&runtime.0, "seed", &document(0, vec![])).unwrap();
+        let barrier = std::sync::Barrier::new(4);
+        let results = std::thread::scope(|scope| {
+            (0..4)
+                .map(|index| {
+                    let runtime = &runtime.0;
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        initialize_space(
+                            runtime,
+                            "shared",
+                            &document(0, vec![node(&format!("node-{index}"), 0)]),
+                        )
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|thread| thread.join().unwrap().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert!(results
+            .iter()
+            .all(|result| result.document == results[0].document));
+        assert_eq!(history(&runtime.0, "shared", 50).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn concurrent_proposals_accept_only_one_writer_for_a_revision() {
+        let runtime = TempRuntime::new();
+        initialize_space(&runtime.0, "shared", &document(0, vec![])).unwrap();
+        let barrier = std::sync::Barrier::new(8);
+        let results = std::thread::scope(|scope| {
+            (0..8)
+                .map(|index| {
+                    let runtime = &runtime.0;
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        apply_space(
+                            runtime,
+                            "shared",
+                            &RuntimeSpaceApplyV1 {
+                                version: 1,
+                                space_id: Some("shared".into()),
+                                expected_sequence: 0,
+                                actor: IdentityRefV1 {
+                                    id: "human:local".into(),
+                                    kind: "human".into(),
+                                },
+                                authority_grant_id: None,
+                                run_id: None,
+                                idempotency_key: format!("writer-{index}"),
+                                document: document(0, vec![node(&format!("node-{index}"), 0)]),
+                            },
+                        )
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|thread| thread.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert!(
+            results
+                .iter()
+                .filter_map(|result| result.as_ref().err())
+                .all(|error| error.contains("sequence changed")),
+            "{results:?}"
+        );
+        let winner = results
+            .iter()
+            .find_map(|result| result.as_ref().ok())
+            .unwrap();
+        let persisted = read_space(&runtime.0, "shared").unwrap().unwrap();
+        assert_eq!(persisted.sequence, 1);
+        assert_eq!(persisted.document, winner.document);
+        assert_eq!(
+            persisted
+                .recent_events
+                .iter()
+                .filter(|event| event.event_type == "space.transaction.applied")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn concurrent_share_and_revoke_operations_preserve_every_revision() {
+        let runtime = TempRuntime::new();
+        initialize_space(&runtime.0, "shared", &document(0, vec![node("one", 0)])).unwrap();
+        let barrier = std::sync::Barrier::new(4);
+        let shares = std::thread::scope(|scope| {
+            (0..4)
+                .map(|_| {
+                    let runtime = &runtime.0;
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        create_share_bundle(
+                            runtime,
+                            &RuntimeShareRequestV1 {
+                                version: 1,
+                                space_id: Some("shared".into()),
+                                mode: RuntimeShareModeV1::Snapshot,
+                                object_ids: vec![],
+                                actor: IdentityRefV1 {
+                                    id: "human:local".into(),
+                                    kind: "human".into(),
+                                },
+                                recipient_id: None,
+                                authority_grant_id: None,
+                            },
+                        )
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|thread| thread.join().unwrap().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(
+            read_space(&runtime.0, "shared").unwrap().unwrap().sequence,
+            4
+        );
+        std::thread::scope(|scope| {
+            let workers = shares
+                .iter()
+                .map(|share| {
+                    let runtime = &runtime.0;
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        revoke_share(
+                            runtime,
+                            &RuntimeShareRevokeRequestV1 {
+                                version: 1,
+                                share_id: share.id.clone(),
+                                actor: IdentityRefV1 {
+                                    id: "human:local".into(),
+                                    kind: "human".into(),
+                                },
+                                authority_grant_id: None,
+                            },
+                        )
+                        .unwrap();
+                    })
+                })
+                .collect::<Vec<_>>();
+            for worker in workers {
+                worker.join().unwrap();
+            }
+        });
+        let persisted = read_space(&runtime.0, "shared").unwrap().unwrap();
+        assert_eq!(persisted.sequence, 8);
+        assert_eq!(
+            persisted
+                .recent_events
+                .iter()
+                .map(|event| event.sequence)
+                .collect::<BTreeSet<_>>(),
+            (0..=8).collect()
+        );
+    }
+
+    #[test]
     fn stale_and_duplicate_mutations_are_handled_deterministically() {
         let runtime = TempRuntime::new();
         initialize_space(&runtime.0, "default", &document(0, vec![])).unwrap();
@@ -1738,7 +2360,7 @@ mod tests {
             space_id: Some("default".into()),
             expected_sequence: 0,
             actor: IdentityRefV1 {
-                id: "human:test".into(),
+                id: "human:local".into(),
                 kind: "human".into(),
             },
             authority_grant_id: None,
@@ -1749,6 +2371,31 @@ mod tests {
         let first = apply_space(&runtime.0, "default", &request).unwrap();
         let duplicate = apply_space(&runtime.0, "default", &request).unwrap();
         assert_eq!(first.sequence, duplicate.sequence);
+        let mut reused = request.clone();
+        reused.document = document(0, vec![node("different", 0)]);
+        assert!(apply_space(&runtime.0, "default", &reused)
+            .unwrap_err()
+            .contains("different request"));
+        reused = request.clone();
+        reused.actor.id = "human:other".into();
+        assert!(apply_space(&runtime.0, "default", &reused)
+            .unwrap_err()
+            .contains("explicit Runtime grant"));
+        reused = request.clone();
+        reused.space_id = Some("another-space".into());
+        assert!(apply_space(&runtime.0, "default", &reused)
+            .unwrap_err()
+            .contains("does not match"));
+
+        // A derived event uses `same-request:1`; it must not consume a future
+        // caller's transaction key and silently skip that caller's mutation.
+        reused = request.clone();
+        reused.idempotency_key = "same-request:1".into();
+        reused.expected_sequence = first.sequence;
+        reused.document = document(first.sequence, vec![node("two", 0)]);
+        let next = apply_space(&runtime.0, "default", &reused).unwrap();
+        assert_eq!(next.sequence, first.sequence + 1);
+        assert_eq!(next.document["nodes"][0]["id"], "two");
         let mut stale = request;
         stale.idempotency_key = "different-request".into();
         assert!(apply_space(&runtime.0, "default", &stale)

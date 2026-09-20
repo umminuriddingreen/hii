@@ -37,6 +37,9 @@ pub struct ContextCompileRequestV1 {
     pub intent: String,
     #[serde(default)]
     pub selected_object_ids: Vec<String>,
+    /// Explicit review removals override selection and ambient retrieval.
+    #[serde(default)]
+    pub excluded_object_ids: Vec<String>,
     pub actor: IdentityRefV1,
     #[serde(default = "default_authority")]
     pub authority: String,
@@ -367,17 +370,40 @@ fn build(
         .budget_tokens
         .unwrap_or(DEFAULT_CONTEXT_BUDGET)
         .clamp(512, MAX_CONTEXT_BUDGET);
+    let excluded_ids = request
+        .excluded_object_ids
+        .iter()
+        .map(|id| canonical_object_id(&space_id, id))
+        .collect::<BTreeSet<_>>();
     let selected = request
         .selected_object_ids
         .iter()
+        .filter(|id| !excluded_ids.contains(&canonical_object_id(&space_id, id)))
         .take(MAX_SELECTED_OBJECTS)
         .cloned()
         .collect::<BTreeSet<_>>();
     let query_terms = terms(&request.intent);
     let mut candidates = Vec::new();
     let mut source_errors = Vec::new();
+    // Hosted account work is not permission to retrieve unrelated private
+    // machine context. This persisted binding is set by authenticated sync,
+    // not by a model-supplied request flag, and is checked again on approval.
+    let has_account_bindings: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='hii_account_workspace_sync')",
+        [], |row| row.get(0),
+    ).map_err(|error| error.to_string())?;
+    let account_bound: bool = has_account_bindings
+        && connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM hii_account_workspace_sync WHERE workspace_id=?1)",
+                [&space_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
 
-    collect_workspace_instructions(&workspace_root, &mut candidates, &mut source_errors);
+    if !account_bound {
+        collect_workspace_instructions(&workspace_root, &mut candidates, &mut source_errors);
+    }
     collect_runtime(
         &connection,
         &space_id,
@@ -386,57 +412,85 @@ fn build(
         &mut candidates,
         &mut source_errors,
     );
-    collect_context_dock(
-        &connection,
-        &workspace_root,
-        &request.intent,
-        &mut candidates,
-        &mut source_errors,
-    );
-    collect_knowledge(
-        &connection,
-        &request.intent,
-        &mut candidates,
-        &mut source_errors,
-    );
-    collect_information(
-        &connection,
-        &request.intent,
-        &mut candidates,
-        &mut source_errors,
-    );
-    collect_board(
-        runtime,
-        &workspace_root,
-        &query_terms,
-        &mut candidates,
-        &mut source_errors,
-    );
-    collect_skills(runtime, &query_terms, &mut candidates, &mut source_errors);
-    collect_capability_jobs(
-        runtime,
-        &workspace_root,
-        &query_terms,
-        &mut candidates,
-        &mut source_errors,
-    );
-    collect_receipts(
-        runtime,
-        &workspace_root,
-        &query_terms,
-        &mut candidates,
-        &mut source_errors,
-    );
-    collect_operations(
-        &connection,
-        &space_id,
-        &query_terms,
-        &mut candidates,
-        &mut source_errors,
-    );
+    if !account_bound {
+        collect_context_dock(
+            &connection,
+            &workspace_root,
+            &request.intent,
+            &mut candidates,
+            &mut source_errors,
+        );
+        collect_knowledge(
+            &connection,
+            &request.intent,
+            &mut candidates,
+            &mut source_errors,
+        );
+        collect_information(
+            &connection,
+            &request.intent,
+            &mut candidates,
+            &mut source_errors,
+        );
+        collect_board(
+            runtime,
+            &workspace_root,
+            &query_terms,
+            &mut candidates,
+            &mut source_errors,
+        );
+        collect_skills(runtime, &query_terms, &mut candidates, &mut source_errors);
+        collect_capability_jobs(
+            runtime,
+            &workspace_root,
+            &query_terms,
+            &mut candidates,
+            &mut source_errors,
+        );
+        collect_receipts(
+            runtime,
+            &workspace_root,
+            &query_terms,
+            &mut candidates,
+            &mut source_errors,
+        );
+        collect_operations(
+            &connection,
+            &space_id,
+            &query_terms,
+            &mut candidates,
+            &mut source_errors,
+        );
+    } else {
+        candidates.retain(|candidate| candidate.item.selected);
+    }
 
+    let mut excluded = excluded_ids
+        .iter()
+        .map(|id| ContextExclusionV1 {
+            context_ref: ContextRefV1 {
+                kind: "runtime-object".into(),
+                id: id.clone(),
+                scope: Some(space_id.clone()),
+                anchor: None,
+            },
+            title: id.clone(),
+            reason: "explicitly excluded from this ContextPack by the user".into(),
+        })
+        .collect::<Vec<_>>();
     let mut deduped = BTreeMap::<String, Candidate>::new();
     for candidate in candidates {
+        let excluded_object = candidate.item.context_ref.kind == "runtime-object"
+            && excluded_ids.contains(&candidate.item.context_ref.id);
+        let excluded_event = candidate.item.context_ref.kind == "runtime-event"
+            && candidate
+                .item
+                .source
+                .as_ref()
+                .is_some_and(|target| excluded_ids.contains(target));
+        if excluded_object || excluded_event {
+            continue;
+        }
         let key = format!(
             "{}:{}:{}",
             candidate.item.context_ref.kind,
@@ -462,7 +516,6 @@ fn build(
     });
 
     let mut items = Vec::new();
-    let mut excluded = Vec::new();
     let mut used: u64 = 180;
     let mut selected_budget_block = false;
     for candidate in candidates {
@@ -605,6 +658,14 @@ fn build(
         approved_at: None,
         approved_by: None,
     })
+}
+
+fn canonical_object_id(space_id: &str, id: &str) -> String {
+    if id.starts_with("workspace:") {
+        id.to_string()
+    } else {
+        format!("workspace:{space_id}:object:{id}")
+    }
 }
 
 fn persist(
@@ -1488,6 +1549,11 @@ fn validate_request(request: &ContextCompileRequestV1) -> Result<(), String> {
             "Context compilation accepts at most {MAX_SELECTED_OBJECTS} selected objects."
         ));
     }
+    if request.excluded_object_ids.len() > MAX_SELECTED_OBJECTS {
+        return Err(format!(
+            "Context compilation accepts at most {MAX_SELECTED_OBJECTS} excluded objects."
+        ));
+    }
     if !matches!(
         request.mode.as_str(),
         "build" | "plan" | "browse" | "see" | "show"
@@ -1672,6 +1738,7 @@ mod tests {
             workspace_root: Some(root.display().to_string()),
             intent: "continue the launch decision".into(),
             selected_object_ids: vec!["launch".into()],
+            excluded_object_ids: Vec::new(),
             actor: IdentityRefV1 {
                 id: "human:local".into(),
                 kind: "human".into(),
@@ -1693,6 +1760,116 @@ mod tests {
             "links": []
         });
         crate::runtime::initialize_space(runtime, "default", &document).unwrap();
+    }
+
+    #[test]
+    fn account_context_never_retrieves_ambient_machine_instructions() {
+        let runtime = runtime();
+        let root = runtime.join("workspace");
+        initialize(&runtime, &root);
+        let connection = database(&runtime).unwrap();
+        connection.execute_batch("CREATE TABLE hii_account_workspace_sync (workspace_id TEXT PRIMARY KEY); INSERT INTO hii_account_workspace_sync VALUES ('default');").unwrap();
+        let pack = compile(&runtime, &request(&root)).unwrap();
+        assert!(!pack.items.is_empty());
+        assert!(pack
+            .items
+            .iter()
+            .all(|item| item.selected && item.context_ref.kind == "runtime-object"));
+        assert!(!serde_json::to_string(&pack)
+            .unwrap()
+            .contains("Keep proof source-linked"));
+        fs::remove_dir_all(runtime).unwrap();
+    }
+
+    #[test]
+    fn review_exclusions_override_selection_and_ambient_retrieval() {
+        let runtime = runtime();
+        let root = runtime.join("workspace");
+        initialize(&runtime, &root);
+        let original = compile(&runtime, &request(&root)).unwrap();
+        for (selected, excluded) in [
+            (vec![], "launch"),
+            (vec!["launch".into()], "workspace:default:object:launch"),
+            (vec!["workspace:default:object:launch".into()], "launch"),
+        ] {
+            let mut reviewed = request(&root);
+            reviewed.selected_object_ids = selected;
+            reviewed.excluded_object_ids = vec![excluded.into()];
+            reviewed.previous_fingerprint = Some(original.fingerprint.clone());
+            let pack = compile(&runtime, &reviewed).unwrap();
+            assert!(!pack
+                .items
+                .iter()
+                .any(|item| item.context_ref.id == "workspace:default:object:launch"));
+            assert!(!pack
+                .items
+                .iter()
+                .any(|item| item.summary.contains("bounded context spine")));
+            assert!(pack.excluded.iter().any(|item| item.context_ref.id
+                == "workspace:default:object:launch"
+                && item.reason.contains("explicitly excluded")));
+            assert_ne!(pack.risk.action, ContextRiskActionV1::Blocked);
+            assert!(pack.changed_since_previous);
+            let approved = approve(
+                &runtime,
+                &ContextApproveRequestV1 {
+                    version: 1,
+                    pack_id: pack.id.clone(),
+                    fingerprint: pack.fingerprint.clone(),
+                    approved_by: reviewed.actor.clone(),
+                },
+            )
+            .unwrap();
+            assert!(require_approved(&runtime, &approved.id, &approved.fingerprint).is_ok());
+        }
+        fs::remove_dir_all(runtime).unwrap();
+    }
+
+    #[test]
+    fn excluded_objects_cannot_return_through_targeted_operational_history() {
+        let runtime = runtime();
+        let root = runtime.join("workspace");
+        initialize(&runtime, &root);
+        let mut snapshot = crate::runtime::read_space(&runtime, "default")
+            .unwrap()
+            .unwrap();
+        snapshot.document["nodes"][0]["payload"]["content"] = json!("updated launch content");
+        crate::runtime::apply_space(
+            &runtime,
+            "default",
+            &crate::runtime::RuntimeSpaceApplyV1 {
+                version: 1,
+                space_id: Some("default".into()),
+                expected_sequence: 0,
+                actor: request(&root).actor,
+                authority_grant_id: None,
+                run_id: None,
+                idempotency_key: "context-exclusion-history".into(),
+                document: snapshot.document,
+            },
+        )
+        .unwrap();
+        let mut reviewed = request(&root);
+        reviewed.selected_object_ids.clear();
+        reviewed.excluded_object_ids = vec!["launch".into()];
+        reviewed.authority = "external-preview".into();
+        let pack = compile(&runtime, &reviewed).unwrap();
+        assert!(pack.items.iter().all(|item| item.context_ref.id
+            != "workspace:default:object:launch"
+            && item.source.as_deref() != Some("workspace:default:object:launch")));
+        assert!(pack
+            .items
+            .iter()
+            .all(|item| !item.summary.contains("launch content")));
+        fs::remove_dir_all(runtime).unwrap();
+    }
+
+    #[test]
+    fn legacy_requests_default_to_no_explicit_exclusions() {
+        let mut value = serde_json::to_value(request(Path::new("."))).unwrap();
+        value.as_object_mut().unwrap().remove("excludedObjectIds");
+        let decoded: ContextCompileRequestV1 = serde_json::from_value(value).unwrap();
+        assert!(decoded.excluded_object_ids.is_empty());
     }
 
     #[test]

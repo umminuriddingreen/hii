@@ -142,6 +142,13 @@ pub enum ChatStreamEvent {
     Done(Result<ChatResult, String>),
 }
 
+#[derive(Clone, Copy, Debug)]
+struct ChatStreamFormat {
+    json_format: bool,
+    strict_json_schema: bool,
+    think: bool,
+}
+
 #[derive(Debug, Deserialize)]
 struct TagsResponse {
     #[serde(default)]
@@ -167,7 +174,7 @@ struct RunningModel {
     model: String,
 }
 
-/// OpenAI-compatible `/v1/models` listing used by LM Studio and HII Native.
+/// OpenAI-compatible `/v1/models` listing used by LM Studio and HII.
 #[derive(Debug, Deserialize)]
 struct OpenAiModels {
     #[serde(default)]
@@ -202,7 +209,7 @@ impl Ollama {
     }
 
     /// Choose the lowest-friction local runtime. An explicit model URL always
-    /// wins; otherwise a ready HII Native endpoint wins over Ollama.
+    /// wins; otherwise a ready HII endpoint wins over Ollama.
     pub fn discover() -> Self {
         if std::env::var_os("HII_MODEL_URL").is_some()
             || std::env::var_os("HII_OLLAMA_URL").is_some()
@@ -433,7 +440,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
     }
 
     /// OpenAI-compatible chat (`/v1/chat/completions`), used for LM Studio and
-    /// HII Native. A requested JSON schema maps to `response_format:
+    /// HII. A requested JSON schema maps to `response_format:
     /// json_object` since not all backends honor a full schema constraint.
     fn chat_openai(
         &self,
@@ -447,6 +454,9 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             "stream": false,
             "temperature": 0.1,
         });
+        // The blocking path is the structured/JSON path; it mirrors the Ollama
+        // branch's `"think": false` and asks for an answer directly.
+        apply_thinking(&mut body, false);
         if format.is_some() {
             body["response_format"] = json!({ "type": "json_object" });
         }
@@ -508,7 +518,17 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         cancel: &Cancel,
         sender: mpsc::Sender<ChatStreamEvent>,
     ) {
-        self.chat_with_stream_format(model, messages, json_format, true, think, cancel, sender);
+        self.chat_with_stream_format(
+            model,
+            messages,
+            ChatStreamFormat {
+                json_format,
+                strict_json_schema: true,
+                think,
+            },
+            cancel,
+            sender,
+        );
     }
 
     /// Retry a structured action request without a provider-side grammar.
@@ -522,17 +542,24 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         cancel: &Cancel,
         sender: mpsc::Sender<ChatStreamEvent>,
     ) {
-        self.chat_with_stream_format(model, messages, false, false, think, cancel, sender);
+        self.chat_with_stream_format(
+            model,
+            messages,
+            ChatStreamFormat {
+                json_format: false,
+                strict_json_schema: false,
+                think,
+            },
+            cancel,
+            sender,
+        );
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn chat_with_stream_format(
         &self,
         model: &str,
         messages: &[Message],
-        json_format: bool,
-        strict_json_schema: bool,
-        think: bool,
+        format: ChatStreamFormat,
         cancel: &Cancel,
         sender: mpsc::Sender<ChatStreamEvent>,
     ) {
@@ -545,7 +572,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             return;
         }
         if self.provider != ModelProvider::Ollama {
-            self.chat_openai_with_stream(model, messages, json_format, cancel, sender);
+            self.chat_openai_with_stream(model, messages, format, cancel, sender);
             return;
         }
 
@@ -553,7 +580,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             "model": model,
             "messages": messages,
             "stream": true,
-            "think": think,
+            "think": format.think,
             "keep_alive": "10m",
             "options": {
                 "temperature": 0.1,
@@ -562,8 +589,8 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
                 "repeat_last_n": 256
             }
         });
-        if json_format {
-            body["format"] = if strict_json_schema {
+        if format.json_format {
+            body["format"] = if format.strict_json_schema {
                 action_schema()
             } else {
                 json!("json")
@@ -656,7 +683,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         &self,
         model: &str,
         messages: &[Message],
-        json_format: bool,
+        format: ChatStreamFormat,
         cancel: &Cancel,
         sender: mpsc::Sender<ChatStreamEvent>,
     ) {
@@ -669,8 +696,23 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
                 "stream_options": { "include_usage": true },
                 "temperature": 0.1,
             });
-            if json_format {
-                body["response_format"] = json!({ "type": "json_object" });
+            apply_thinking(&mut body, format.think);
+            if format.json_format {
+                // `json_object` only promises *some* JSON object: every action
+                // parameter is optional and unbounded under it, which is how a
+                // `read` carrying an invented file body stayed legal all the
+                // way to the completion cap. The action schema constrains
+                // decoding to one real action instead.
+                body["response_format"] = if format.strict_json_schema
+                    && strict_action_schema_enabled()
+                {
+                    json!({
+                        "type": "json_schema",
+                        "json_schema": { "name": "hii_action", "strict": true, "schema": action_schema() },
+                    })
+                } else {
+                    json!({ "type": "json_object" })
+                };
             }
             self.agent
                 .post(&format!("{}/v1/chat/completions", self.base_url))
@@ -938,14 +980,14 @@ fn wait_ready_verbose(
                 eprint!("\r\x1b[2K");
                 let _ = std::io::stderr().flush();
             }
-            eprintln!("hii: HII Native exited during startup — {}", log_tail(log));
+            eprintln!("hii: HII exited during startup — {}", log_tail(log));
             eprintln!("hii: full startup log at {}", log.display());
             return false;
         }
         if show {
             let detail = log_tail(log);
             eprint!(
-                "\r\x1b[2K{} starting HII Native ({}s){}",
+                "\r\x1b[2K{} starting HII ({}s){}",
                 frames[tick % frames.len()],
                 started.elapsed().as_secs(),
                 if detail.is_empty() {
@@ -999,7 +1041,7 @@ fn acquired_native_model(manifest: &Value) -> Option<String> {
     (!model.is_empty()).then(|| model.to_string())
 }
 
-/// Start HII Native only when weights were acquired explicitly beforehand.
+/// Start HII only when weights were acquired explicitly beforehand.
 /// Missing, malformed, or pending manifests fail closed without spawning the
 /// runner, network access, or a model download.
 fn start_native_runner() -> Option<Ollama> {
@@ -1068,7 +1110,7 @@ fn endpoint_ready(base_url: &str) -> bool {
 }
 
 /// Durations an OpenAI-compatible backend reported itself, in milliseconds.
-/// Ollama-style backends report nanoseconds here; HII Native and LM Studio
+/// Ollama-style backends report nanoseconds here; HII and LM Studio
 /// report nothing, which is why callers fall back to client-side wall clock.
 fn openai_reported_durations(usage: &Value) -> Option<(u64, u64, u64)> {
     let prompt = usage["prompt_eval_duration"].as_u64();
@@ -1082,6 +1124,23 @@ fn openai_reported_durations(usage: &Value) -> Option<(u64, u64, u64)> {
         completion.unwrap_or(0) / 1_000_000,
         total.unwrap_or(0) / 1_000_000,
     ))
+}
+
+/// Apply the operator's reasoning setting to an OpenAI-compatible request body.
+///
+/// Ollama has a first-class `"think"` field; the OpenAI wire format has none,
+/// so each server invents its own. HII's runner (mlx-vlm) reads a **top-level**
+/// `enable_thinking` and, failing that, the OpenAI-standard `reasoning_effort`;
+/// it then splits the model's `<think>` block out into `reasoning_content`,
+/// which [`openai_reasoning_delta`] already understands. `chat_template_kwargs`
+/// — the spelling vLLM uses — is silently ignored there: sending it produced
+/// byte-identical output for `true` and `false` against the live 9B runner,
+/// which is exactly how this stayed unnoticed. Send both keys so the setting
+/// lands on either server, and pair them so a backend that honors only one
+/// still agrees with the other.
+fn apply_thinking(body: &mut Value, think: bool) {
+    body["enable_thinking"] = json!(think);
+    body["reasoning_effort"] = json!(if think { "medium" } else { "none" });
 }
 
 fn openai_reasoning_delta(delta: &Value) -> Option<&str> {
@@ -1168,36 +1227,31 @@ impl RepetitionGuard {
     }
 }
 
+/// The grammar the model must generate within, from the one place actions are
+/// declared. See [`crate::acp::action_schema`] for why it is per-action rather
+/// than one flat object accepting every property.
 fn action_schema() -> Value {
-    let mut action_types = crate::acp::action_type_names(true);
-    action_types.push("mcp_call");
-    json!({
-        "type": "object",
-        "required": ["type"],
-        "properties": {
-            "type": {
-                "enum": action_types
-            },
-            "path": { "type": "string" },
-            "query": { "type": "string" },
-            "command": { "type": "string" },
-            "content": { "type": "string" },
-            "url": { "type": "string" },
-            "old": { "type": "string" },
-            "new": { "type": "string" },
-            "replace_all": { "type": "boolean" },
-            "offset": { "type": "integer" },
-            "limit": { "type": "integer" },
-            "reason": { "type": "string" },
-            "summary": { "type": "string" },
-            "message": { "type": "string" },
-            "server": { "type": "string" },
-            "tool": { "type": "string" },
-            "arguments": { "type": "object" },
-            "verification": { "type": "array", "items": { "type": "string" } },
-            "next": { "type": ["string", "null"] }
-        }
-    })
+    crate::acp::action_schema()
+}
+
+/// Whether to constrain decoding to [`action_schema`] on OpenAI-compatible
+/// backends, rather than asking only for "some JSON object".
+///
+/// Off by default, and deliberately so. The constraint is unambiguously right
+/// about *shape*: it makes a truncated-mid-string action and a `read` carrying
+/// an invented file body impossible, both of which were observed. But measured
+/// against the 9B runner it also changed which action the model *chose* —
+/// toward whichever branch has no required parameters — and a harness that
+/// picks the wrong tool cheaply is not better than one that picks the right
+/// tool expensively. Turning it on is therefore a per-model decision backed by
+/// a measured run, not a default.
+///
+/// `HII_STRICT_ACTION_SCHEMA=1` enables it.
+fn strict_action_schema_enabled() -> bool {
+    matches!(
+        std::env::var("HII_STRICT_ACTION_SCHEMA").as_deref(),
+        Ok("1") | Ok("true") | Ok("on")
+    )
 }
 
 /// Append a compact record of a model call to `~/.hii/traces/llm_requests.jsonl`
@@ -1258,16 +1312,19 @@ fn format_ureq(error: ureq::Error) -> String {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::{
-        acquired_native_model, openai_messages, openai_reasoning_delta, openai_reported_durations,
-        ox_alpha_browser_prompt, provider_messages, ChatUsage, Message, Ollama, RepetitionGuard,
+        acquired_native_model, apply_thinking, openai_messages, openai_reasoning_delta,
+        openai_reported_durations, ox_alpha_browser_prompt, provider_messages, ChatUsage, Message,
+        Ollama, RepetitionGuard,
     };
     use crate::attachments::ImagePayload;
     use crate::config::ModelProvider;
 
     #[test]
     fn reported_durations_are_absent_for_backends_that_do_not_time_themselves() {
-        // HII Native and LM Studio return a usage block with tokens only, which
+        // HII and LM Studio return a usage block with tokens only, which
         // is why every session since the native default went to zero timings.
         let usage = serde_json::json!({ "prompt_tokens": 11070, "completion_tokens": 11 });
         assert_eq!(openai_reported_durations(&usage), None);
@@ -1336,17 +1393,35 @@ mod tests {
 
     use super::action_schema;
 
+    /// The old flat schema was capped at 1000 bytes because it was pasted into
+    /// the prompt, where size is a real cost. A `json_schema` response format
+    /// drives a logits processor instead of prompt text, so the budget that
+    /// matters is per-action precision, not total bytes.
     #[test]
-    fn action_schema_uses_local_model_friendly_flat_types() {
+    fn the_action_schema_offers_every_action_and_closes_each_one() {
         let schema = action_schema();
-        let types = schema["properties"]["type"]["enum"]
-            .as_array()
-            .expect("type enum");
-        assert!(types.iter().any(|value| value == "write"));
-        assert!(types.iter().any(|value| value == "verify"));
-        assert!(!types.iter().any(|value| value == "tool"));
-        let bytes = serde_json::to_vec(&schema).expect("serialize schema").len();
-        assert!(bytes <= 1_000, "action schema grew to {bytes} bytes");
+        let branches = schema["oneOf"].as_array().expect("oneOf branches");
+        let named = |name: &str| {
+            branches
+                .iter()
+                .find(|branch| branch["properties"]["type"]["const"] == name)
+        };
+        for name in ["write", "verify", "read", "final", "message", "mcp_call"] {
+            assert!(named(name).is_some(), "{name} is not offered to the model");
+        }
+        assert!(named("tool").is_none(), "the wrapper spelling is internal");
+
+        // Every branch is closed: this is what makes a hallucinated parameter
+        // ungeneratable rather than merely ignored.
+        for branch in branches {
+            assert_eq!(branch["additionalProperties"], json!(false));
+        }
+        let read = named("read").expect("read branch");
+        assert!(read["properties"].get("path").is_some());
+        assert!(
+            read["properties"].get("content").is_none(),
+            "a read must not be able to carry a file body"
+        );
     }
 
     #[test]
@@ -1384,6 +1459,35 @@ mod tests {
         );
         assert_eq!(messages[1]["role"], "user");
         assert_eq!(messages[1]["content"], "hello");
+    }
+
+    /// The reasoning setting must reach OpenAI-compatible backends on the
+    /// fields they actually read. `chat_template_kwargs` is not one of them:
+    /// against the live mlx-vlm runner it produced byte-identical output for
+    /// both settings, while `enable_thinking` yields a populated
+    /// `reasoning_content` for `true` and none for `false`.
+    #[test]
+    fn the_reasoning_setting_reaches_openai_compatible_backends() {
+        let mut on = json!({ "model": "m" });
+        apply_thinking(&mut on, true);
+        assert_eq!(on["enable_thinking"], json!(true));
+        assert_eq!(on["reasoning_effort"], json!("medium"));
+
+        let mut off = json!({ "model": "m" });
+        apply_thinking(&mut off, false);
+        assert_eq!(off["enable_thinking"], json!(false));
+        assert_eq!(off["reasoning_effort"], json!("none"));
+
+        // The two controls must never disagree: a backend honoring only one of
+        // them still has to land on the operator's setting.
+        for think in [true, false] {
+            let mut body = json!({});
+            apply_thinking(&mut body, think);
+            assert_eq!(
+                body["enable_thinking"].as_bool().expect("enable_thinking"),
+                body["reasoning_effort"] != json!("none")
+            );
+        }
     }
 
     #[test]

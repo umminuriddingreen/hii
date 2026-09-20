@@ -13,6 +13,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  (await import('../../lib/server/operational-object-store.ts')).resetOperationalObjectStoreForTests();
   delete process.env.HII_RUNTIME_DIR;
   await rm(runtimeDir, { recursive: true, force: true });
 });

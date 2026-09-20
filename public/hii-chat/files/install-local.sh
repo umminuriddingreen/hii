@@ -25,11 +25,14 @@ if [ -z "$token" ]; then
   echo "Create a token at https://humaninformationinterface.com/remote" >&2
   exit 2
 fi
-node_bin=$(command -v node)
-hii_bin=$(command -v hii || true)
+node_bin=$(command -v node || true)
+hii_bin=${HII_BIN:-$(command -v hii || true)}
+if [ -z "$hii_bin" ] && [ -x "$HOME/.local/bin/hii" ]; then
+  hii_bin="$HOME/.local/bin/hii"
+fi
 
-[ -n "$node_bin" ] || { echo "node is required" >&2; exit 3; }
-[ -n "$hii_bin" ] || { echo "hii is required" >&2; exit 3; }
+[ -n "$node_bin" ] || { echo "Node.js is required. Install it from https://nodejs.org, then retry." >&2; exit 3; }
+[ -n "$hii_bin" ] || { echo "HII is required. Install it with: curl -fsSL https://humaninformationinterface.com/install | sh" >&2; exit 3; }
 
 mkdir -p "$bin_dir" "$conf_dir" "$log_dir" "$(dirname "$plist")"
 chmod 700 "$conf_dir"
@@ -99,6 +102,7 @@ if [ -f "$update_script" ]; then
     <string>-i</string>
     <string>HOME=$HOME</string>
     <string>PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>HII_NODE_BIN=$node_bin</string>
     <string>/bin/sh</string>
     <string>$update_script</string>
   </array>

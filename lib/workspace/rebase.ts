@@ -39,7 +39,9 @@ export function rebaseWorkspaceDoc(
       taken.add(remoteNode.id);
       continue;
     }
-    merged.push(pickNewer(localNode, remoteNode));
+    const original = base.nodes.find(node => node.id === remoteNode.id);
+    const winner = pickNewer(localNode, remoteNode);
+    merged.push(original ? mergeFields(original, localNode, remoteNode, winner === localNode) as WorkspaceNode : winner);
     taken.add(remoteNode.id);
   }
 
@@ -117,4 +119,21 @@ function pickNewer(local: WorkspaceNode, remote: WorkspaceNode): WorkspaceNode {
   if (!Number.isFinite(localTime)) return remote;
   // Ties go to the local edit: this client is the one with a user in front of it.
   return remoteTime > localTime ? remote : local;
+}
+
+const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+/** Independent text, geometry and metadata edits must not overwrite one another.
+ * Same-field conflicts retain the existing timestamp rule; arrays are atomic. */
+function mergeFields(base: unknown, local: unknown, remote: unknown, preferLocal: boolean): unknown {
+  if (equal(local, base)) return remote;
+  if (equal(remote, base) || equal(local, remote)) return local;
+  if (!record(base) || !record(local) || !record(remote)) return preferLocal ? local : remote;
+  const result: Record<string, unknown> = {};
+  for (const key of new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(remote)])) {
+    const value = mergeFields(base[key], local[key], remote[key], preferLocal);
+    if (value !== undefined) result[key] = value;
+  }
+  return result;
 }

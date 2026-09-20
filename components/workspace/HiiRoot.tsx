@@ -25,7 +25,9 @@ import {
 import { APPLICATION_POLL_INTERVAL_MS, shouldSkipApplicationPoll } from '@/lib/workspace/application-poll';
 import {
   acknowledgeApplicationLaunch,
+  agentRequestFromContextPack,
   approveContextPack,
+  cancelAgent,
   captureInformation,
   compileContextPack,
   formatActiveState,
@@ -37,11 +39,18 @@ import {
   runtimeSpaceId,
   startAgent,
   stopTerminalSession,
+  writeTerminalSession,
   type AgentEventV1,
   type ContextPackV1,
   type HiiApplicationManifest,
+  type InformationSearchResult,
   type InformationCaptureResult
 } from '@/lib/client/hii-bridge';
+import { RunBody } from '@/components/workspace/RunBody';
+import { handleCompletions, resolveHandles } from '@/lib/workspace/handles';
+import { workspaceNodeTitle } from '@/lib/workspace/search';
+import { seedsFromRunOutput } from '@/lib/workspace/stdout-types';
+import { TypedOutput } from '@/components/workspace/TypedOutput';
 import { renderedBrowserSeed } from '@/lib/workspace/browser-seed';
 import { canvasTextSeed, canvasTextSize, clipboardFiles, directPasteSeeds, makeNode, nodeSeedFromResourceProjection, seedFor, seedFromFile, seedFromString, seedsFromDataTransfer, seedsFromFiles, type NodeSeed } from '@/lib/workspace/ingest';
 import { flowSeedPlacements } from '@/lib/workspace/placement';
@@ -76,13 +85,14 @@ import {
   objectConversationTurns,
   type ObjectConversationTurn
 } from '@/lib/workspace/object-conversation';
-import type { WorkspaceNode } from '@/lib/workspace/types';
+import { workspaceNodeTransform3D, type WorkspaceNode } from '@/lib/workspace/types';
 import { applicationSeed } from '@/lib/workspace/application-seed';
 import { UpdateBanner } from './UpdateBanner';
 import { NodeFrame } from './NodeFrame';
 import { ShellTerminal } from './ShellTerminal';
 import { packagePlacementSeed, WAYMARK_PACKAGE, type HiiMarketplacePackage } from '@/lib/marketplace/catalog';
 import { KEY_ZOOM_STEP, cameraKeyIntent, useCamera } from './useCamera';
+import dynamic from 'next/dynamic';
 import { useWorkspace, type WorkspacePersistence } from './useWorkspace';
 import { SpaceToolbar } from '@/components/spaces/SpaceToolbar';
 import { InkBody } from '@/components/spaces/InkBody';
@@ -92,6 +102,11 @@ import { trackPointerGesture } from '@/lib/workspace/gestures';
 import { fitWorkspaceViewport } from '@/lib/workspace/viewport';
 import { canvasManagerFocusNodes, type CanvasManagerBoard } from '@/lib/workspace/canvas-manager';
 import { CanvasManager } from './CanvasManager';
+import type { SearchableWorkspace } from '@/lib/workspace/cross-workspace-search';
+const WorkspaceScene3D = dynamic(() => import('./WorkspaceScene3D').then((m) => m.WorkspaceScene3D), {
+  ssr: false,
+  loading: () => <div className="hii-scene3d-loading">Opening 3D view…</div>
+});
 import { nodesInMarquee, type MarqueeRect } from '@/lib/workspace/selection';
 import { historyShortcut } from '@/lib/workspace/history-shortcut';
 import { mergeAgentResponse } from '@/lib/workspace/agent-stream';
@@ -214,7 +229,6 @@ type PromptState = {
   contextPack?: ContextPackV1;
   menu?: 'commands' | 'settings';
 };
-const RESPONSE_URL = /(https?:\/\/[^\s<>()]+)/g;
 
 const promptSlashCommands = [
   ['/codex <task>', 'Run with Codex'],
@@ -230,7 +244,8 @@ const promptSlashCommands = [
 ] as const;
 
 const promptKeyboardCommands = [
-  ['⌘ K', 'Quick terminal'],
+  ['⌘ K', 'Ask HII or enter a command'],
+  ['⌘ J', 'Open or hide the HII terminal'],
   ['⌘ T', 'Search Google on the canvas'],
   ['⌘ Space / ⌥ Space', 'Open or hide the HII terminal'],
   ['⌘ ⇧ T', 'Move the terminal between dock and canvas'],
@@ -285,57 +300,83 @@ function accountSeedsFromDataTransfer(transfer: DataTransfer): NodeSeed[] {
   return [canvasTextSeed(value.slice(0, 100_000))];
 }
 
-function PromptResponse({ value, running }: { value: string; running: boolean }) {
+function PromptResponse({
+  value,
+  running,
+  onPlaceArtifacts
+}: {
+  value: string;
+  running: boolean;
+  onPlaceArtifacts?: (output: string) => void;
+}) {
   const external = /external context|web_search|web_fetch|https?:\/\//i.test(value);
   return (
     <output className="hii-prompt-response" data-external={external || undefined} aria-live="polite">
       {external && <span className="hii-external-context-state"><i aria-hidden="true" />{running ? 'External context loading' : 'External context loaded'}</span>}
-      {value.split('\n').map((line, lineIndex) => (
-        <span className="hii-prompt-response-line" key={`${line}:${lineIndex}`}>
-          {line.split(RESPONSE_URL).map((part, partIndex) => /^https?:\/\//i.test(part)
-            ? <a href={part} target="_blank" rel="noreferrer" key={`${part}:${partIndex}`}>{part}</a>
-            : <span key={`${part}:${partIndex}`}>{part}</span>)}
-        </span>
-      ))}
+      {/* A run that saved three files says so in prose; typing the output is
+          what turns those three lines into three objects one click away. */}
+      <TypedOutput value={value} onPlace={running ? undefined : onPlaceArtifacts} />
     </output>
   );
 }
 
-function QuickWebSearch({
+export function QuickWebSearch({
   onDismiss,
-  onSearch
+  onSearch,
+  onOpen
 }: {
   onDismiss: () => void;
   onSearch: (query: string) => void;
+  onOpen: (url: string) => void;
 }) {
   const [query, setQuery] = useState('');
+  const [results, setResults] = useState<InformationSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  useEffect(() => {
+    const value = query.trim();
+    if (value.length < 2) { setResults([]); setSearching(false); return; }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setSearching(true);
+      void findInformation(value, { web: false, limit: 8 })
+        .then((matches) => { if (!cancelled) setResults(matches.filter((item) => /^https?:\/\//i.test(item.url))); })
+        .catch(() => { if (!cancelled) setResults([]); })
+        .finally(() => { if (!cancelled) setSearching(false); });
+    }, 180);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [query]);
   return (
-    <form
-      className="hii-canvas-search-text"
-      data-workspace-ui
-      onPointerDown={(event) => event.stopPropagation()}
-      onSubmit={(event) => {
-        event.preventDefault();
-        const value = query.trim();
-        if (value) onSearch(value);
-      }}
-    >
-      <input
-        autoFocus
-        aria-label="Write a web search on the canvas"
-        autoComplete="off"
-        spellCheck={false}
-        value={query}
-        placeholder="Search the web"
-        onChange={(event) => setQuery(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key !== 'Escape') return;
-          event.preventDefault();
-          event.stopPropagation();
-          onDismiss();
-        }}
-      />
-    </form>
+    <div className="hii-canvas-search-text" data-workspace-ui onPointerDown={(event) => event.stopPropagation()}>
+      <form onSubmit={(event) => { event.preventDefault(); if (query.trim()) onSearch(query.trim()); }}>
+        <input
+          autoFocus
+          aria-label="Write a web search on the canvas"
+          autoComplete="off"
+          spellCheck={false}
+          value={query}
+          placeholder="Search HII and the web"
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            event.stopPropagation();
+            onDismiss();
+          }}
+        />
+      </form>
+      {query.trim().length >= 2 && <section className="hii-canvas-search-results" aria-label="Saved pages and sources">
+        <header><strong>Saved pages and sources</strong><small>{searching ? 'Searching…' : `${results.length} found`}</small></header>
+        {results.map((result) => <article key={result.versionId || result.id || result.url}>
+          <button type="button" onClick={() => onOpen(result.url)}>
+            <strong>{result.title || result.url}</strong>
+            <small>{result.browserName || result.siteName || 'Saved source'}{result.capturedAt ? ` · ${new Date(result.capturedAt).toLocaleDateString()}` : ''}{result.versionId ? ` · ${result.versionId.slice(-8)}` : ''}</small>
+            {result.excerpt && <span>{result.excerpt}</span>}
+          </button>
+          {typeof window !== 'undefined' && !('__TAURI_INTERNALS__' in window) && <a href={`/remote/browser?url=${encodeURIComponent(result.url)}`}>Open live in HII ↗</a>}
+        </article>)}
+        {!searching && !results.length && <p>No saved page matches. Press Return to search the web.</p>}
+      </section>}
+    </div>
   );
 }
 
@@ -534,7 +575,13 @@ function TerminalBody({
             ? <details className="hii-terminal-activity"><summary>{activityLines.length} activity update{activityLines.length === 1 ? '' : 's'}</summary>{activityLines.map((line, index) => <span key={`${line}:${index}`}>{line}</span>)}</details>
             : <span className="hii-terminal-activity-live">{activityLines.at(-1)}</span>
         )}
-        {agentTerminal && resultLines.map((line, index) => <span className="hii-terminal-result" key={`${line}:${index}`}>{line}</span>)}
+        {/* The agent's result is the one part of a terminal that is a result
+            rather than a log, so it is the part worth typing. */}
+        {agentTerminal && resultLines.length > 0 && (
+          <span className="hii-terminal-result" data-typed>
+            <TypedOutput value={resultLines.join('\n')} />
+          </span>
+        )}
         {agentTerminal ? (
           <span className="hii-terminal-command-line">
             <b>›</b>
@@ -707,6 +754,17 @@ function AssetNodeBody({ node }: { node: WorkspaceNode }) {
   return <AssetFailure name={name} state="failed" onRetry={() => setAttempt((value) => value + 1)} />;
 }
 
+/**
+ * The sentence a run object was created to carry out.
+ *
+ * A run seeded by an agent puts it in `prompt`; one typed by a person lands in
+ * `text`; the title is the last resort so approval never fires on an empty
+ * intent (`startObjectiveAgent` refuses a blank one).
+ */
+function runIntent(node: WorkspaceNode) {
+  return text(node.payload.prompt) || text(node.payload.text) || text(node.payload.title);
+}
+
 function NodeBody({
   node,
   autoFocus,
@@ -718,7 +776,10 @@ function NodeBody({
   onCurationRequest,
   onBrowserAgent,
   onBrowserCapture,
-  onOpenBrowser
+  onOpenBrowser,
+  onApproveRun,
+  onStopRun,
+  onOpenProof
 }: {
   node: WorkspaceNode;
   autoFocus?: boolean;
@@ -731,6 +792,9 @@ function NodeBody({
   onBrowserAgent: (request: string) => void;
   onBrowserCapture: (result: InformationCaptureResult) => void;
   onOpenBrowser: (url: string) => void;
+  onApproveRun: () => void;
+  onStopRun: () => void;
+  onOpenProof: (receiptPath: string) => void;
 }) {
   const payload = node.payload;
   const content = text(payload.content) || text(payload.text) || text(payload.output) || text(payload.summary);
@@ -741,6 +805,7 @@ function NodeBody({
     return <DeferredSurface><NativeDevBrowser nodeId={node.id} initialUrl={url} onUrl={(nextUrl) => onPayload({ url: nextUrl, title: hostFor(nextUrl) })} onAgent={onBrowserAgent} onCapture={onBrowserCapture} onOpenObject={onOpenBrowser} /></DeferredSurface>;
   }
   if (node.type === 'browser' || node.type === 'link') return <SourceBody node={node} onOpen={onOpenBrowser} />;
+  if (node.type === 'run') return <RunBody node={node} onApprove={onApproveRun} onStop={onStopRun} onOpenProof={onOpenProof} />;
   if (node.type === 'terminal') return <TerminalBody node={node} onPayload={onPayload} onAgentSubmit={onAgentSubmit} />;
   if (node.type === 'intent') return <RequestBody node={node} onPayload={onPayload} onAgentSubmit={onAgentSubmit} />;
   if (node.type === 'surface' && payload.surface === 'profile-music') {
@@ -754,6 +819,12 @@ function NodeBody({
   if (node.type === 'ink') return <InkBody node={node} />;
   if (node.type === 'image' && payload.sticker === true) return <div className="hii-sticker" role="img" aria-label={name}>{text(payload.emoji) || '✦'}</div>;
   if (node.type === 'image' || node.type === 'document' || node.type === 'media') return <AssetNodeBody node={node} />;
+  if (node.type === 'file') return <article className="hii-file-reference" aria-label={`${name} file reference`}>
+    <strong>{name}</strong>
+    <small>{text(payload.label) || 'File'} · {typeof payload.size === 'number' ? `${Math.round(payload.size / 1024)} KB` : 'size unknown'}</small>
+    <p>{text(payload.description) || 'Select this file to include its reference when asking HII.'}</p>
+    {typeof payload.path === 'string' && payload.path ? <button type="button" onClick={() => void navigator.clipboard.writeText(payload.path as string)}>Copy file path</button> : null}
+  </article>;
   if (node.type === 'note' || node.type === 'canvas-text') {
     return (
       <CanvasEditor
@@ -767,7 +838,7 @@ function NodeBody({
       />
     );
   }
-  return <pre className="hii-node-copy" data-mono={node.type === 'run'}>{content || name}</pre>;
+  return <pre className="hii-node-copy">{content || name}</pre>;
 }
 
 function Prompt({
@@ -783,9 +854,13 @@ function Prompt({
   presentation = 'floating',
   workspaceLabel = 'HII workspace',
   selectedCount = 0,
+  nodes,
   onDismiss,
   onMode,
   onApproveContext,
+  onRejectContext,
+  onDropContextItem,
+  onPlaceArtifacts,
   onSubmit
 }: {
   anchor: Point;
@@ -800,18 +875,39 @@ function Prompt({
   onDismiss: () => void;
   onMode: (mode: CanvasModeId) => void;
   onApproveContext: () => void;
+  onRejectContext: () => void;
+  onDropContextItem: (objectId: string) => void;
+  onPlaceArtifacts: (output: string) => void;
   onSubmit: (value: string) => void;
   presentation?: 'floating' | 'terminal';
   workspaceLabel?: string;
   selectedCount?: number;
+  nodes: WorkspaceNode[];
 }) {
   const [value, setValue] = useState(initialValue);
   const [menu, setMenu] = useState<'root' | 'commands' | 'settings' | null>(initialMenu || null);
+  const [showAllContext, setShowAllContext] = useState(false);
+  const visibleContextItems = showAllContext
+    ? (contextPack?.items || [])
+    : (contextPack?.items || []).slice(0, 8);
   const input = useRef<HTMLInputElement | null>(null);
   const commands = value.startsWith('/')
     ? promptSlashCommands.filter(([command]) => command.startsWith(value.trim().toLowerCase()) || value.trim() === '/')
     : [];
+  // Typing `@name` is selecting without clicking: the sentence carries its own
+  // context. Resolution runs on every keystroke so the objects a run will see
+  // are visible while it is still being written, not after it starts.
+  const handles = useMemo(() => resolveHandles(value, nodes), [value, nodes]);
+  const handleDraft = /(?:^|\s)@([a-z0-9-]*)$/i.exec(value);
+  const handleMatches = handleDraft ? handleCompletions(handleDraft[1], nodes) : [];
+  const completeHandle = (handle: string) => {
+    setValue((current) => current.replace(/(?:^|\s)@[a-z0-9-]*$/i, (match) => `${match.startsWith('@') ? '' : ' '}@${handle} `));
+    input.current?.focus();
+  };
   const submit = () => {
+    // An unresolved handle is not a typo to route around. Running the rest of
+    // the sentence would silently operate on the wrong objects.
+    if (handles.unresolved.length) return;
     if (value.trim() && status !== 'running' && !contextPack) onSubmit(value.trim());
   };
   useEffect(() => { input.current?.focus(); }, []);
@@ -855,6 +951,11 @@ function Prompt({
             value={value}
             onChange={(event) => setValue(event.target.value)}
             onKeyDown={(event) => {
+              if (event.key === 'Tab' && !event.shiftKey && handleMatches.length) {
+                event.preventDefault();
+                completeHandle(handleMatches[0].handle);
+                return;
+              }
               if (event.key === 'Tab' && event.shiftKey) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -904,21 +1005,81 @@ function Prompt({
           ))}</div>
           <small>{canvasMode(mode).description} · ⇧ Tab cycles modes</small>
         </section>}
-        {(running || visibleResponse) && <PromptResponse value={visibleResponse} running={running} />}
+        {(running || visibleResponse) && <PromptResponse value={visibleResponse} running={running} onPlaceArtifacts={onPlaceArtifacts} />}
         {contextPack && (
           <section className="hii-context-preflight" aria-label="Context review">
             <header>
-              <strong>{contextPack.items.length} context items</strong>
+              <strong>{visibleContextItems.length} of {contextPack.items.length} context items</strong>
               <span>{contextPack.budget.usedTokens.toLocaleString()} / {contextPack.budget.maximumTokens.toLocaleString()} tokens</span>
             </header>
+            {/* Authority and transmission scope are the two facts that decide
+                what approving this actually permits, and the pack has carried
+                both all along without ever showing them. */}
+            <dl className="hii-context-authority">
+              <div><dt>Authority</dt><dd>{contextPack.authority}</dd></div>
+              <div><dt>Transmission</dt><dd>{contextPack.transmissionScope}</dd></div>
+            </dl>
             <p>{contextPack.risk.reasons.join(' · ')}</p>
-            <ul>{contextPack.items.slice(0, 8).map((item) => (
-              <li key={`${item.ref.kind}:${item.ref.id}`}><b>{item.title}</b><span>{item.itemType}{item.selected ? ' · selected' : ''}</span></li>
-            ))}</ul>
+            {contextPack.changedSincePrevious && (
+              <small data-tone="warn">This context differs from the last one you approved.</small>
+            )}
+            <ul>{visibleContextItems.map((item) => {
+              const key = `${item.ref.kind}:${item.ref.id}`;
+              return (
+                <li key={key}>
+                  <b>{item.title}</b>
+                  <span>{item.itemType}{item.selected ? ' · selected' : ''}</span>
+                  {/* Removing one item is the difference between reviewing a
+                      context and merely acknowledging it. */}
+                  {item.ref.kind === 'runtime-object' && <button
+                    type="button"
+                    className="hii-context-drop"
+                    aria-label={`Remove ${item.title} from this context`}
+                    onClick={() => onDropContextItem(item.ref.id)}
+                  >−</button>}
+                </li>
+              );
+            })}</ul>
+            {contextPack.items.length > visibleContextItems.length && (
+              <button type="button" className="hii-context-more" onClick={() => setShowAllContext(true)}>
+                Show all {contextPack.items.length} items
+              </button>
+            )}
             {contextPack.excluded.length > 0 && <small>{contextPack.excluded.length} item{contextPack.excluded.length === 1 ? '' : 's'} excluded by scope, safety, or budget.</small>}
-            <button type="button" onClick={onApproveContext}>Approve this exact context and continue</button>
+            {contextPack.sourceErrors.length > 0 && (
+              // A source HII could not read is not an empty context item; it is
+              // a hole in what the run will see, and it belongs in the review.
+              <ul className="hii-context-errors" aria-label="Sources HII could not read">
+                {contextPack.sourceErrors.map((error) => <li key={error}>{error}</li>)}
+              </ul>
+            )}
+            <div className="hii-context-decision">
+              <button type="button" onClick={onApproveContext}>Approve this exact context and continue</button>
+              <button type="button" className="hii-context-reject" onClick={onRejectContext}>Reject</button>
+            </div>
             <code>{contextPack.fingerprint.slice(0, 18)}…</code>
           </section>
+        )}
+        {handleMatches.length > 0 && (
+          <div className="hii-prompt-command-list" data-handles aria-label="Matching canvas objects">
+            {handleMatches.map((match) => (
+              <button key={match.handle} type="button" onClick={() => completeHandle(match.handle)}>
+                <kbd>@{match.handle}</kbd>
+                <b>{match.title}</b>
+                <small>{match.kind}</small>
+              </button>
+            ))}
+          </div>
+        )}
+        {(handles.nodes.length > 0 || handles.unresolved.length > 0) && (
+          <div className="hii-prompt-handles" aria-label="Objects named in this intent">
+            {handles.nodes.map((node) => <span key={node.id}>{workspaceNodeTitle(node)}</span>)}
+            {handles.unresolved.map((reference) => (
+              <span key={`${reference.raw}-${reference.start}`} data-unresolved>
+                {reference.raw}{reference.ambiguous ? ' · ambiguous' : ' · no such object'}
+              </span>
+            ))}
+          </div>
         )}
         {commands.length > 0 && <div className="hii-prompt-commands" aria-label="Matching HII commands">{commands.map(([command, description]) => <span key={command}><b>{command}</b>{description}</span>)}</div>}
       </form>
@@ -933,6 +1094,7 @@ export function HiiRoot({
   persistence,
   allowPhoto = true,
   persistentChrome = true,
+  allowLocalRuntime = false,
   openTerminalOnReady = false,
   onTerminalReady,
   onUnsavedChanges,
@@ -940,7 +1102,12 @@ export function HiiRoot({
   onRequestDevice,
   fileSeeder,
   canvasImportRequest = null,
-  projectionRequest = null
+  projectionRequest = null,
+  searchWorkspaces,
+  searchWorkspaceId,
+  onFocusExternalNode,
+  searchFocusNodeId = null,
+  canvasManagerRequest = 0
 }: {
   surface?: 'workspace' | 'space' | 'account';
   spaceId?: string;
@@ -948,6 +1115,7 @@ export function HiiRoot({
   persistence?: WorkspacePersistence;
   allowPhoto?: boolean;
   persistentChrome?: boolean;
+  allowLocalRuntime?: boolean;
   openTerminalOnReady?: boolean;
   onTerminalReady?: () => void;
   onUnsavedChanges?: (unsaved: boolean) => void;
@@ -956,11 +1124,16 @@ export function HiiRoot({
   fileSeeder?: (files: File[]) => Promise<NodeSeed[]>;
   canvasImportRequest?: CanvasImportRequest | null;
   projectionRequest?: WorkspaceProjectionRequest | null;
+  searchWorkspaces?: () => Promise<SearchableWorkspace[]>;
+  searchWorkspaceId?: string;
+  onFocusExternalNode?: (workspaceId: string, nodeId: string) => void;
+  searchFocusNodeId?: string | null;
+  canvasManagerRequest?: number;
 } = {}) {
   const isSpace = surface === 'space';
   const isAccount = surface === 'account';
   const isTouchCanvas = isSpace || isAccount;
-  const runtimeEnabled = !isTouchCanvas;
+  const runtimeEnabled = !isTouchCanvas || allowLocalRuntime;
   const startupTerminalHandled = useRef(false);
   const save = useRef<() => void>(() => {});
   const settleCamera = useCallback(() => save.current(), []);
@@ -984,6 +1157,31 @@ export function HiiRoot({
   const [drawing, setDrawing] = useState(false);
   const [canvasCommandsOpen, setCanvasCommandsOpen] = useState(false);
   const [canvasManagerOpen, setCanvasManagerOpen] = useState(false);
+  /**
+   * Which projection of the workspace is on screen.
+   *
+   * A projection, not a document: both views read `workspace.nodes` and write
+   * through the same patch path, so switching never migrates or copies state.
+   */
+  const [projection, setProjection] = useState<'2d' | '3d'>(() => {
+    if (typeof window === 'undefined') return '2d';
+    return new URLSearchParams(window.location.search).get('view') === '3d' ? '3d' : '2d';
+  });
+
+  /**
+   * Keep the projection in the URL.
+   *
+   * A view someone can link to is a view someone can send you, and it costs one
+   * `replaceState` — no history entry, because switching projection is not
+   * navigation and should not need two Backs to undo.
+   */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (projection === '3d') url.searchParams.set('view', '3d');
+    else url.searchParams.delete('view');
+    if (url.toString() !== window.location.href) window.history.replaceState(null, '', url);
+  }, [projection]);
   const [toolMessage, setToolMessage] = useState('');
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [dropActive, setDropActive] = useState(false);
@@ -993,6 +1191,8 @@ export function HiiRoot({
   const activeObjectives = useRef(new Map<string, string>());
   const pendingContextStart = useRef<null | {
     pack: ContextPackV1;
+    /** Kept so removing an item can recompile rather than edit the pack locally. */
+    request: { intent: string; mode: CanvasModeId; contextNodeIds: string[]; authority: string; excludedObjectIds?: string[] };
     start: (approved: ContextPackV1) => Promise<void>;
   }>(null);
   const activeConversation = useRef<{
@@ -1020,6 +1220,9 @@ export function HiiRoot({
     onStarted: (result: { runId: string }) => void | Promise<void>,
     reviewAnchor: Point = mouse.current
   ) => {
+    // Context is compiled from Runtime state, so first acknowledge every local
+    // edit (including a just-created object named by an @handle).
+    await workspace.flush();
     const authority = ['plan', 'browse', 'see'].includes(request.mode) ? 'read-only' : 'workspace';
     const pack = await compileContextPack({
       intent: request.intent,
@@ -1032,19 +1235,11 @@ export function HiiRoot({
       throw new Error(pack.risk.reasons.join(' ') || 'HII blocked unsafe or missing context.');
     }
     const start = async (approved: ContextPackV1) => {
-      const result = await startAgent({
-        version: 1,
-        intent: request.intent,
-        mode: request.mode,
-        spaceId: spaceId || runtimeSpaceId() || 'default',
-        contextNodeIds: request.contextNodeIds,
-        contextPackId: approved.id,
-        contextFingerprint: approved.fingerprint
-      });
+      const result = await startAgent(agentRequestFromContextPack(approved));
       await onStarted(result);
     };
     if (pack.risk.action === 'review') {
-      pendingContextStart.current = { pack, start };
+      pendingContextStart.current = { pack, request: { ...request, authority }, start };
       setPrompt((current) => ({
         anchor: current?.anchor || reviewAnchor,
         initialValue: current?.initialValue || request.intent,
@@ -1059,20 +1254,69 @@ export function HiiRoot({
     }
     await start(await approveContextPack(pack, true));
     return true;
-  }, [spaceId]);
+  }, [spaceId, workspace.flush]);
+
+  /**
+   * Remove one object from the context under review.
+   *
+   * The pack cannot be edited here: the Runtime approves the pack it stored, by
+   * id and fingerprint, and refuses one whose contents moved. So removal means
+   * compiling a fresh pack from a smaller selection, which the person then
+   * reviews - the approval always refers to something that actually exists.
+   */
+  const dropContextItem = useCallback(async (objectId: string) => {
+    const pending = pendingContextStart.current;
+    if (!pending) return;
+    const nodeId = objectId.split(':').at(-1) || objectId;
+    const contextNodeIds = pending.request.contextNodeIds.filter((id) => id !== objectId && id !== nodeId);
+    const excludedObjectIds = [...new Set([...(pending.request.excludedObjectIds ?? []), objectId])];
+    try {
+      await workspace.flush();
+      const pack = await compileContextPack({
+        intent: pending.request.intent,
+        mode: pending.request.mode,
+        authority: pending.request.authority,
+        selectedObjectIds: contextNodeIds,
+        excludedObjectIds,
+        spaceId: pending.pack.spaceId,
+        workspaceRoot: pending.pack.workspaceRoot
+      });
+      if (pendingContextStart.current !== pending) return;
+      pendingContextStart.current = { ...pending, pack, request: { ...pending.request, contextNodeIds, excludedObjectIds } };
+      setPrompt((current) => current ? { ...current, contextPack: pack } : current);
+    } catch (error) {
+      setPrompt((current) => current ? {
+        ...current,
+        response: error instanceof Error ? error.message : 'HII could not recompile this context.',
+        status: 'failed'
+      } : current);
+    }
+  }, [workspace.flush]);
+
+  const rejectPendingContext = useCallback(() => {
+    pendingContextStart.current = null;
+    setPrompt((current) => current ? {
+      ...current,
+      contextPack: undefined,
+      response: 'Context rejected. Nothing ran.',
+      status: 'idle'
+    } : current);
+  }, []);
 
   const approvePendingContext = useCallback(async () => {
     const pending = pendingContextStart.current;
     if (!pending) return;
     setPrompt((current) => current ? { ...current, contextPack: undefined, response: 'Starting with the approved context…', status: 'running' } : current);
     try {
+      await workspace.flush();
       const approved = await approveContextPack(pending.pack);
+      if (pendingContextStart.current !== pending) return;
       pendingContextStart.current = null;
       await pending.start(approved);
     } catch (error) {
       setPrompt((current) => current ? { ...current, response: error instanceof Error ? error.message : 'HII could not approve this context.', status: 'failed' } : current);
     }
-  }, []);
+  }, [workspace.flush]);
   const curationRun = useRef<{ runId: string; nodeId: string; request: string; text: string } | null>(null);
   const workspaceRef = useRef(workspace);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -1128,6 +1372,33 @@ export function HiiRoot({
     const center = camera.centerWorld();
     return spawnSeeds([seed], { x: center.x - seed.w / 2, y: center.y - seed.h / 2 });
   }, [camera, spawnSeeds]);
+
+  // The small native capture window sends its committed text here. Wait until
+  // the active Space has loaded so a capture cannot land in a transient board.
+  const pendingQuickCaptures = useRef<Array<{ text: string; captureId?: string }>>([]);
+  const quickCaptureSink = useRef<(capture: { text: string; captureId?: string }) => void>(() => {});
+  quickCaptureSink.current = (capture) => {
+    if (!workspace.ready) { pendingQuickCaptures.current.push(capture); return; }
+    const [nodeId] = spawnCenteredSeed(isSpace ? canvasTextSeed(capture.text) : seedFromString(capture.text));
+    if (!capture.captureId || !nodeId) return;
+    void workspace.flush().then(() => import('@tauri-apps/api/event').then(({ emit }) => emit('hii:quick-capture-saved', { captureId: capture.captureId, nodeId })))
+      .catch((error) => void import('@tauri-apps/api/event').then(({ emit }) => emit('hii:quick-capture-failed', { captureId: capture.captureId, error: error instanceof Error ? error.message : String(error) })));
+  };
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return;
+    let disposed = false;
+    let unlisten = () => {};
+    void import('@tauri-apps/api/event').then(({ listen }) => listen<{ text: string; captureId?: string }>('hii:quick-capture', (event) => {
+      const value = event.payload?.text;
+      if (typeof value !== 'string' || !value.trim()) return;
+      quickCaptureSink.current({ text: value.slice(0, 100_000), captureId: event.payload.captureId });
+    })).then((dispose) => { if (disposed) dispose(); else unlisten = dispose; });
+    return () => { disposed = true; unlisten(); };
+  }, []);
+  useEffect(() => {
+    if (!workspace.ready || !pendingQuickCaptures.current.length) return;
+    for (const capture of pendingQuickCaptures.current.splice(0)) quickCaptureSink.current(capture);
+  }, [workspace.ready]);
 
   const importFiles = useCallback(async (files: File[], at: Point, direct = false) => {
     try {
@@ -1264,6 +1535,9 @@ export function HiiRoot({
   }, []);
 
   const closeCanvasManager = useCallback(() => setCanvasManagerOpen(false), []);
+  useEffect(() => {
+    if (canvasManagerRequest > 0) openCanvasManager();
+  }, [canvasManagerRequest, openCanvasManager]);
 
   const focusCanvasBoard = useCallback((board: CanvasManagerBoard) => {
     setCanvasManagerOpen(false);
@@ -1282,6 +1556,13 @@ export function HiiRoot({
     setFocusNodeId(node.id);
     focusNodes([node], 'Jumped to the object.');
   }, [focusNodes]);
+
+  const handledSearchFocus = useRef<string | null>(null);
+  useEffect(() => {
+    if (!workspace.ready || !searchFocusNodeId || handledSearchFocus.current === searchFocusNodeId) return;
+    const node = workspace.nodes.find((entry) => entry.id === searchFocusNodeId);
+    if (node) { handledSearchFocus.current = searchFocusNodeId; focusCanvasNode(node); }
+  }, [workspace.ready, workspace.nodes, searchFocusNodeId, focusCanvasNode]);
 
   const toggleDrawing = useCallback(() => {
     setDrawing((current) => {
@@ -1426,7 +1707,10 @@ export function HiiRoot({
 
   const startObjectiveAgent = useCallback(async (nodeId: string, intent: string) => {
     const node = workspaceRef.current.nodes.find((entry) => entry.id === nodeId);
-    if (!node || node.payload.role !== 'agent-objective' || !intent.trim()) return;
+    // A `run` object is the same governed thing as an agent-objective note: an
+    // intent awaiting approval. It arrives here from the run pane's "Approve
+    // bounded run" button rather than from a textarea submit.
+    if (!node || (node.payload.role !== 'agent-objective' && node.type !== 'run') || !intent.trim()) return;
     const runMode = isCanvasMode(node.payload.mode) ? node.payload.mode : mode;
     const contextNodeIds = Array.isArray(node.payload.contextNodeIds)
       ? node.payload.contextNodeIds.filter((id): id is string => typeof id === 'string' && id !== nodeId).slice(0, 100)
@@ -1485,6 +1769,41 @@ export function HiiRoot({
       });
     }
   }, [mode, startWithContext]);
+
+  const stopWorkspaceRun = useCallback(async (node: WorkspaceNode) => {
+    const runId = text(node.payload.runId);
+    if (!runId) return;
+    try {
+      await cancelAgent(runId);
+    } catch (error) {
+      setToolMessage(error instanceof Error ? error.message : 'HII could not stop this run.');
+      return;
+    }
+    // The cancelled AgentEventV1 writes the terminal status; this only records
+    // that the stop was a human decision, so the receipt reads honestly.
+    workspaceRef.current.patchNode(node.id, {
+      object: {
+        ...(node.object || { kind: 'run' as const }),
+        audit: [
+          ...(node.object?.audit || []),
+          { ts: new Date().toISOString(), actor: 'human' as const, action: 'stopped bounded run' }
+        ].slice(-20)
+      }
+    });
+  }, []);
+
+  const placeRunArtifacts = useCallback((output: string) => {
+    const seeds = seedsFromRunOutput({ output, runId: activeRun.current || undefined });
+    if (!seeds.length) return;
+    const center = camera.toWorld(window.innerWidth / 2, window.innerHeight / 2);
+    spawnSeeds(seeds, { x: center.x - 220, y: center.y - 140 });
+    setToolMessage(`Placed ${seeds.length} run artifact${seeds.length === 1 ? '' : 's'} on the canvas.`);
+  }, [camera, spawnSeeds]);
+
+  const openProof = useCallback((receiptPath: string) => {
+    void navigator.clipboard?.writeText(receiptPath).catch(() => {});
+    setToolMessage(`Receipt path copied · ${receiptPath}`);
+  }, []);
 
   const openObjectConversation = useCallback((node: WorkspaceNode) => {
     const conversationId = text(node.payload.conversationId) || crypto.randomUUID();
@@ -1735,10 +2054,25 @@ export function HiiRoot({
         setPrompt((current) => current ? { ...current, response: `Placed ${count} source${count === 1 ? '' : 's'} on the canvas.`, status: 'completed' } : current);
         return;
       }
+      // Resolved here rather than at the top of `submit` so a URL capture or a
+      // web search carrying an `@` in its path is never read as a handle.
+      const handles = resolveHandles(requestIntent, workspaceRef.current.nodes);
+      if (handles.unresolved.length) {
+        const names = handles.unresolved.map((reference) => reference.raw).join(', ');
+        setPrompt((current) => current ? {
+          ...current,
+          response: `No canvas object answers to ${names}. Nothing ran.`,
+          status: 'failed'
+        } : current);
+        return;
+      }
+      // A named object is context the person chose as deliberately as a
+      // selection, so it enters the pack the same way and is reviewable there.
+      const contextNodeIds = [...new Set([...selected, ...handles.nodes.map((node) => node.id)])];
       await startWithContext({
-        intent: modeIntent(requestMode, requestIntent),
+        intent: modeIntent(requestMode, handles.text),
         mode: requestMode,
-        contextNodeIds: selected
+        contextNodeIds
       }, (result) => {
         activeRun.current = result.runId;
         if (objectId && conversationId) {
@@ -1932,12 +2266,21 @@ export function HiiRoot({
         setToolMessage('Opened HII Remote.');
         return;
       }
-      if (runtimeEnabled && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      if (runtimeEnabled && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        ensureWorkspaceTerminal('quick');
+        setPrompt({ anchor: { x: window.innerWidth / 2, y: window.innerHeight - 72 }, initialValue: '', response: '', status: 'idle' });
+        setPromptPresentation('terminal');
+        setPromptVisible(true);
         setWebSearchOpen(false);
-        setPromptVisible(false);
         setSelected([]);
+        return;
+      }
+      if (runtimeEnabled && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
+        event.preventDefault();
+        if (workspaceTerminal?.payload.terminalPresentation === 'docked') {
+          workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, terminalPresentation: 'hidden' } });
+        } else ensureWorkspaceTerminal('docked');
+        setPromptVisible(false);
         return;
       }
       if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 't') {
@@ -2196,6 +2539,44 @@ export function HiiRoot({
       } : current));
   }, []);
 
+  const projectionToggle = runtimeEnabled && persistentChrome ? (
+    <nav className="hii-projection-toggle" aria-label="Workspace projection" data-workspace-ui onPointerDown={(event) => event.stopPropagation()}>
+      <button
+        type="button"
+        aria-pressed={projection === '2d'}
+        onClick={() => setProjection('2d')}
+      >2D</button>
+      <button
+        type="button"
+        aria-pressed={projection === '3d'}
+        onClick={() => setProjection('3d')}
+      >3D</button>
+    </nav>
+  ) : null;
+
+  if (projection === '3d') {
+    return (
+      <main className="hii-canvas" data-surface={surface} data-projection="3d" aria-label="HII canvas, 3D view">
+        {projectionToggle}
+        <WorkspaceScene3D
+          nodes={workspace.nodes}
+          selectedIds={selected}
+          onSelect={setSelected}
+          onMove={(id, position) => {
+            const node = workspace.nodes.find((item) => item.id === id);
+            if (!node) return;
+            const transform = workspaceNodeTransform3D(node);
+            workspace.patchNode(id, {
+              x: position.x,
+              y: position.y,
+              transform: { ...transform, position }
+            });
+          }}
+        />
+      </main>
+    );
+  }
+
   return (
     <main
       ref={camera.viewportRef}
@@ -2350,10 +2731,14 @@ export function HiiRoot({
       />}
       {canvasManagerOpen && <CanvasManager
         nodes={workspace.nodes}
+        searchWorkspaces={searchWorkspaces}
+        currentWorkspaceId={searchWorkspaceId ?? spaceId ?? 'local'}
+        onFocusExternalNode={onFocusExternalNode ? (workspaceId, nodeId) => { setCanvasManagerOpen(false); onFocusExternalNode(workspaceId, nodeId); } : undefined}
         onFocusBoard={focusCanvasBoard}
         onFocusNode={focusCanvasNode}
         onClose={closeCanvasManager}
       />}
+      {projectionToggle}
       {isAccount && canvasFeedback && <div className="hii-canvas-feedback" role="status" aria-live="polite">{canvasFeedback}</div>}
       {runtimeEnabled && persistentChrome && workspace.nodes.some((node) => node.type === 'app') && <div className="hii-app-dock" onPointerDown={(event) => event.stopPropagation()}>
         <button onClick={tileApps}>Tile apps</button>
@@ -2409,6 +2794,9 @@ export function HiiRoot({
               onBrowserAgent={(request) => void requestBrowserAgent(node, request)}
               onBrowserCapture={(result) => spawnInformation(capturedInformationSeeds(result), { x: node.x + node.w + 40, y: node.y })}
               onOpenBrowser={(url) => openDevBrowser({ x: node.x + node.w + 40, y: node.y }, url)}
+              onApproveRun={() => void startObjectiveAgent(node.id, runIntent(node))}
+              onStopRun={() => void stopWorkspaceRun(node)}
+              onOpenProof={openProof}
             />
           </NodeFrame>
         ))}
@@ -2423,27 +2811,39 @@ export function HiiRoot({
           }}
         />}
       </div>
-      {runtimeEnabled && persistentChrome && (workspaceTerminal?.payload.terminalPresentation === 'docked' || workspaceTerminal?.payload.terminalPresentation === 'quick') && (
+      {runtimeEnabled && (workspaceTerminal?.payload.terminalPresentation === 'docked' || workspaceTerminal?.payload.terminalPresentation === 'quick') && (
         <aside
           className="hii-docked-terminal"
           data-compact={workspaceTerminal.payload.terminalPresentation === 'quick' || undefined}
           data-workspace-ui
           onPointerDown={(event) => event.stopPropagation()}
           onKeyDownCapture={(event) => {
-            if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return;
+            if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'j') return;
             event.preventDefault();
             event.stopPropagation();
             workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, terminalPresentation: 'hidden' } });
           }}
         >
+          <div className="hii-docked-terminal-context" aria-label="Terminal context">
+            <span>{spaceId || runtimeSpaceId() || 'default'}</span>
+            {selectedNodes.find((node) => typeof node.payload.path === 'string' && node.payload.path) && <button type="button" onClick={() => {
+              const source = selectedNodes.find((node) => typeof node.payload.path === 'string' && node.payload.path);
+              if (!source) return;
+              void writeTerminalSession(text(workspaceTerminal.payload.sessionId), ` ${text(source.payload.path)} `);
+            }}>Insert selected file path</button>}
+          </div>
           <div className="hii-docked-terminal-actions">
             <button type="button" data-tooltip="Move to canvas · ⌘⇧T" aria-label="Move terminal to canvas" onClick={() => ensureWorkspaceTerminal('canvas')}><CornersOut size={16} /></button>
-            <button type="button" data-tooltip="Hide · ⌘Space" aria-label="Hide terminal" onClick={() => workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, terminalPresentation: 'hidden' } })}>×</button>
+            <button type="button" data-tooltip="Hide · ⌘J" aria-label="Hide terminal" onClick={() => workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, terminalPresentation: 'hidden' } })}>×</button>
           </div>
           <TerminalBody node={workspaceTerminal} onPayload={(patch) => workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, ...patch } })} onAgentSubmit={(intent) => void startObjectiveAgent(workspaceTerminal.id, intent)} />
         </aside>
       )}
-      {webSearchOpen && <QuickWebSearch onDismiss={() => setWebSearchOpen(false)} onSearch={submitQuickWebSearch} />}
+      {webSearchOpen && <QuickWebSearch onDismiss={() => setWebSearchOpen(false)} onSearch={submitQuickWebSearch} onOpen={(url) => {
+        const center = camera.toWorld(window.innerWidth / 2, window.innerHeight / 2);
+        openDevBrowser({ x: center.x - 380, y: center.y - 270 }, url);
+        setWebSearchOpen(false);
+      }} />}
       {runtimeEnabled && promptVisible && prompt && (
         <Prompt
           key={`${prompt.anchor.x}:${prompt.anchor.y}:${prompt.initialValue}:${prompt.menu || 'closed'}`}
@@ -2464,6 +2864,10 @@ export function HiiRoot({
           onDismiss={() => setPromptVisible(false)}
           onMode={setMode}
           onApproveContext={() => void approvePendingContext()}
+          onRejectContext={rejectPendingContext}
+          onDropContextItem={(objectId) => void dropContextItem(objectId)}
+          nodes={workspace.nodes}
+          onPlaceArtifacts={placeRunArtifacts}
           onSubmit={(value) => void submit(value, prompt.anchor, prompt.objectId, prompt.conversationId)}
         />
       )}

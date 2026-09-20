@@ -68,8 +68,66 @@ pub struct CaptureResult {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WebCapturePayload {
+    pub schema_version: u8,
+    pub kind: String,
+    pub captured_at: String,
+    pub capture_id: String,
+    pub source: WebCaptureSource,
+    pub capture: WebCaptureDetails,
+    pub content: Option<WebCaptureContent>,
+    pub authority: WebCaptureAuthority,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebCaptureSource {
+    pub url: String,
+    pub canonical_url: Option<String>,
+    pub title: Option<String>,
+    pub site_name: Option<String>,
+    pub favicon_url: Option<String>,
+    pub media_type: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebCaptureDetails {
+    pub method: String,
+    #[serde(default)]
+    pub browser_name: Option<String>,
+    #[serde(default)]
+    pub browser_tab_id: Option<i64>,
+    pub selected_text: Option<String>,
+    pub note: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub project_id: Option<String>,
+    pub workspace_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebCaptureContent {
+    pub text: Option<String>,
+    pub html: Option<String>,
+    pub screenshot_asset_id: Option<String>,
+    pub content_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebCaptureAuthority {
+    pub client: String,
+    pub local_only: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SearchResult {
     pub id: Option<String>,
+    pub version_id: Option<String>,
+    pub browser_name: Option<String>,
     pub url: String,
     pub title: String,
     pub excerpt: String,
@@ -178,6 +236,18 @@ fn database(runtime: &Path) -> Result<Connection, String> {
               excerpt,
               content,
               tokenize = 'unicode61 remove_diacritics 2'
+            );
+
+            CREATE TABLE IF NOT EXISTS information_web_captures (
+              capture_id TEXT PRIMARY KEY,
+              source_id TEXT NOT NULL,
+              captured_at TEXT NOT NULL,
+              method TEXT NOT NULL,
+              client TEXT NOT NULL,
+              payload_hash TEXT NOT NULL,
+              payload_json TEXT NOT NULL,
+              receipt_id TEXT,
+              FOREIGN KEY (source_id) REFERENCES information_sources(id) ON DELETE CASCADE
             );
 
             INSERT OR IGNORE INTO schema_migrations(version)
@@ -384,6 +454,217 @@ pub fn capture(
     })
 }
 
+pub fn ingest_web_capture(
+    runtime: &Path,
+    workspace: &Path,
+    payload: WebCapturePayload,
+) -> Result<CaptureResult, String> {
+    validate_web_capture(&payload)?;
+    let requested_url = valid_http_url(&payload.source.url)?.to_string();
+    let canonical_url = valid_http_url(
+        payload
+            .source
+            .canonical_url
+            .as_deref()
+            .unwrap_or(&requested_url),
+    )?
+    .to_string();
+    let captured_at = chrono::DateTime::parse_from_rfc3339(&payload.captured_at)
+        .map_err(|_| "capturedAt must be an RFC 3339 timestamp".to_string())?
+        .to_rfc3339();
+    let content = bounded_text(
+        payload
+            .content
+            .as_ref()
+            .and_then(|value| value.text.as_deref())
+            .or(payload.capture.selected_text.as_deref())
+            .or(payload.capture.note.as_deref())
+            .unwrap_or(""),
+        MAX_EXTRACTED_CHARS,
+    );
+    let content_hash = sha256(content.as_bytes());
+    if payload
+        .content
+        .as_ref()
+        .and_then(|value| value.content_hash.as_deref())
+        .is_some_and(|declared| declared != content_hash)
+    {
+        return Err("content.contentHash does not match captured text".into());
+    }
+    let payload_json = serde_json::to_vec(&payload).map_err(|error| error.to_string())?;
+    let payload_text = String::from_utf8_lossy(&payload_json).to_string();
+    let payload_hash = sha256(&payload_json);
+    let raw_hash = payload_hash.clone();
+    let source_id = format!("source:{}", &sha256(canonical_url.as_bytes())[..32]);
+    let fallback_title = Url::parse(&canonical_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+        .unwrap_or_else(|| "web capture".into());
+    let title = bounded_text(
+        payload.source.title.as_deref().unwrap_or(&fallback_title),
+        500,
+    );
+    let site_name = bounded_text(payload.source.site_name.as_deref().unwrap_or(""), 300);
+    let content_type = payload
+        .source
+        .media_type
+        .clone()
+        .unwrap_or_else(|| "text/plain".into());
+    let blob = runtime.join("information/blobs").join(&raw_hash);
+    if !blob.is_file() {
+        atomic_write(&blob, &payload_json)?;
+    }
+
+    let mut connection = database(runtime)?;
+    if let Some((existing_hash, receipt_id)) = connection
+        .query_row(
+            "SELECT payload_hash,receipt_id FROM information_web_captures WHERE capture_id=?1",
+            [&payload.capture_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+    {
+        if existing_hash != payload_hash {
+            return Err("captureId already exists with different content".into());
+        }
+        let (source, images) = inspect(runtime, &source_id)?;
+        let receipt_id = receipt_id.unwrap_or_default();
+        return Ok(CaptureResult {
+            source,
+            images,
+            changed: false,
+            previous_content_hash: Some(content_hash),
+            receipt_path: runtime
+                .join("runs/cli")
+                .join(&receipt_id)
+                .join("receipt.json")
+                .display()
+                .to_string(),
+            receipt_id,
+        });
+    }
+
+    let previous_content_hash = connection
+        .query_row(
+            "SELECT content_hash FROM information_sources WHERE id=?1",
+            [&source_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let changed = previous_content_hash
+        .as_deref()
+        .is_some_and(|value| value != content_hash);
+    let excerpt = bounded_text(&content, 360);
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
+    transaction.execute(
+        r#"INSERT INTO information_sources(id,url,title,author,site_name,published_at,excerpt,content,content_hash,raw_hash,content_type,captured_at,updated_at)
+           VALUES (?1,?2,?3,'',?4,NULL,?5,?6,?7,?8,?9,?10,?10)
+           ON CONFLICT(id) DO UPDATE SET url=excluded.url,title=excluded.title,site_name=excluded.site_name,
+             excerpt=excluded.excerpt,content=excluded.content,content_hash=excluded.content_hash,
+             raw_hash=excluded.raw_hash,content_type=excluded.content_type,captured_at=excluded.captured_at,updated_at=excluded.updated_at"#,
+        params![source_id, canonical_url, title, site_name, excerpt, content, content_hash, raw_hash, content_type, captured_at],
+    ).map_err(|error| error.to_string())?;
+    let version_id = format!(
+        "version:{}",
+        &sha256(format!("{source_id}:{content_hash}").as_bytes())[..32]
+    );
+    transaction.execute(
+        "INSERT OR IGNORE INTO information_versions(id,source_id,content_hash,raw_hash,metadata_json,captured_at) VALUES (?1,?2,?3,?4,?5,?6)",
+        params![version_id, source_id, content_hash, raw_hash, payload_text, captured_at],
+    ).map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "DELETE FROM information_fts WHERE source_id=?1",
+            [&source_id],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "INSERT INTO information_fts(source_id,title,excerpt,content) VALUES (?1,?2,?3,?4)",
+            params![source_id, title, excerpt, content],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.execute(
+        "INSERT INTO information_web_captures(capture_id,source_id,captured_at,method,client,payload_hash,payload_json) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+        params![payload.capture_id, source_id, captured_at, payload.capture.method, payload.authority.client, payload_hash, payload_text],
+    ).map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+
+    let receipt = write_receipt(
+        runtime,
+        workspace,
+        &format!("Save {requested_url} to local HII"),
+        &format!("Saved explicit web capture {}", payload.capture_id),
+        vec![requested_url],
+        vec![blob.display().to_string()],
+        json!({
+            "intent": "save explicit web capture",
+            "captureId": payload.capture_id,
+            "sourceId": source_id,
+            "method": payload.capture.method,
+            "client": payload.authority.client,
+            "localOnly": true,
+            "contentHash": content_hash,
+            "verification": ["payload validated", "content hash computed", "source re-read from canonical store"]
+        }),
+    )?;
+    connection
+        .execute(
+            "UPDATE information_web_captures SET receipt_id=?1 WHERE capture_id=?2",
+            params![receipt.0, payload.capture_id],
+        )
+        .map_err(|error| error.to_string())?;
+    let source = inspect(runtime, &source_id)?.0;
+    Ok(CaptureResult {
+        source,
+        images: Vec::new(),
+        changed,
+        previous_content_hash,
+        receipt_id: receipt.0,
+        receipt_path: receipt.1.display().to_string(),
+    })
+}
+
+fn validate_web_capture(payload: &WebCapturePayload) -> Result<(), String> {
+    if payload.schema_version != 1 || payload.kind != "hii.web.capture" {
+        return Err("expected schemaVersion 1 and kind hii.web.capture".into());
+    }
+    if payload.capture_id.trim().is_empty() || payload.capture_id.len() > 200 {
+        return Err("captureId is required and must be at most 200 characters".into());
+    }
+    const METHODS: [&str; 6] = [
+        "extension-action",
+        "extension-page-index",
+        "context-selection",
+        "context-page",
+        "context-image",
+        "context-link",
+    ];
+    if !METHODS.contains(&payload.capture.method.as_str()) {
+        return Err("capture.method is not supported".into());
+    }
+    if payload
+        .capture
+        .browser_name
+        .as_ref()
+        .is_some_and(|name| name.len() > 64)
+        || payload.capture.browser_tab_id.is_some_and(|id| id < 0)
+    {
+        return Err("browser capture identity is invalid".into());
+    }
+    if !payload.authority.local_only {
+        return Err("Save to HII ingest requires authority.localOnly=true".into());
+    }
+    if payload.authority.client.trim().is_empty() {
+        return Err("authority.client is required".into());
+    }
+    Ok(())
+}
+
 pub fn inspect(
     runtime: &Path,
     id: &str,
@@ -431,7 +712,9 @@ pub fn search(runtime: &Path, query: &str, limit: usize) -> Result<Vec<SearchRes
     let connection = database(runtime)?;
     let mut statement = connection
         .prepare(
-            r#"SELECT s.id,s.url,s.title,s.excerpt,s.site_name,s.content_hash,s.captured_at
+            r#"SELECT s.id,s.url,s.title,s.excerpt,s.site_name,s.content_hash,s.captured_at,
+                      (SELECT v.id FROM information_versions v WHERE v.source_id=s.id AND v.content_hash=s.content_hash LIMIT 1),
+                      (SELECT json_extract(c.payload_json,'$.capture.browserName') FROM information_web_captures c WHERE c.source_id=s.id ORDER BY c.captured_at DESC LIMIT 1)
                FROM information_fts f JOIN information_sources s ON s.id=f.source_id
                WHERE information_fts MATCH ?1 ORDER BY bm25(information_fts) LIMIT ?2"#,
         )
@@ -440,6 +723,8 @@ pub fn search(runtime: &Path, query: &str, limit: usize) -> Result<Vec<SearchRes
         .query_map(params![terms.join(" AND "), limit.clamp(1, 100)], |row| {
             Ok(SearchResult {
                 id: Some(row.get(0)?),
+                version_id: row.get(7)?,
+                browser_name: row.get(8)?,
                 url: row.get(1)?,
                 title: row.get(2)?,
                 excerpt: row.get(3)?,
@@ -534,6 +819,8 @@ fn parse_search_html(raw: &str, limit: usize) -> Result<Vec<SearchResult>, Strin
             .unwrap_or_default();
         results.push(SearchResult {
             id: None,
+            version_id: None,
+            browser_name: None,
             url,
             title,
             excerpt,
@@ -802,6 +1089,15 @@ fn write_receipt(
     let now = chrono::Utc::now().timestamp_millis().max(0) as u128;
     let directory = runtime.join("runs/cli").join(&id);
     let receipt_path = directory.join("receipt.json");
+    let risk = if causal_chain
+        .get("localOnly")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        "local-write"
+    } else {
+        "network-read/local-write"
+    };
     let receipt = json!({
         "schema_version": 8,
         "id": id,
@@ -818,7 +1114,7 @@ fn write_receipt(
         "git_status": "not applicable",
         "next": null,
         "review": null,
-        "risk": "network-read/local-write",
+        "risk": risk,
         "authority": "workspace",
         "done_when": "durable source or artifact exists with provenance and content hash",
         "approvals": [],
@@ -862,6 +1158,38 @@ fn write_receipt(
 mod tests {
     use super::*;
 
+    fn web_payload() -> WebCapturePayload {
+        WebCapturePayload {
+            schema_version: 1,
+            kind: "hii.web.capture".into(),
+            captured_at: "2026-09-12T20:00:00Z".into(),
+            capture_id: "capture-test-1".into(),
+            source: WebCaptureSource {
+                url: "https://example.com/article".into(),
+                canonical_url: None,
+                title: Some("Useful article".into()),
+                site_name: Some("Example".into()),
+                favicon_url: None,
+                media_type: Some("text/plain".into()),
+            },
+            capture: WebCaptureDetails {
+                method: "context-selection".into(),
+                browser_name: None,
+                browser_tab_id: None,
+                selected_text: Some("A selected claim with provenance.".into()),
+                note: Some("Use in the brief".into()),
+                tags: vec!["research".into()],
+                project_id: Some("project-1".into()),
+                workspace_id: None,
+            },
+            content: None,
+            authority: WebCaptureAuthority {
+                client: "chrome-extension".into(),
+                local_only: true,
+            },
+        }
+    }
+
     #[test]
     fn html_becomes_typed_source_material() {
         let page = extract_html(
@@ -898,5 +1226,93 @@ mod tests {
         assert_eq!(results[0].url, "https://supplier.example/catalog");
         assert_eq!(results[0].title, "Supplier Catalog");
         assert!(results[0].excerpt.contains("lead times"));
+    }
+
+    #[test]
+    fn explicit_web_capture_writes_canonical_source_record_and_receipt() {
+        let runtime = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let result = ingest_web_capture(runtime.path(), workspace.path(), web_payload()).unwrap();
+
+        assert_eq!(result.source.title, "Useful article");
+        assert_eq!(result.source.content, "A selected claim with provenance.");
+        assert!(Path::new(&result.receipt_path).is_file());
+        let connection = database(runtime.path()).unwrap();
+        let stored: (String, String, String) = connection
+            .query_row(
+                "SELECT method,client,receipt_id FROM information_web_captures WHERE capture_id='capture-test-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(stored.0, "context-selection");
+        assert_eq!(stored.1, "chrome-extension");
+        assert_eq!(stored.2, result.receipt_id);
+        let receipt: Value =
+            serde_json::from_slice(&fs::read(&result.receipt_path).unwrap()).unwrap();
+        assert_eq!(receipt["risk"], "local-write");
+        assert_eq!(receipt["information"]["localOnly"], true);
+    }
+
+    #[test]
+    fn web_capture_is_idempotent_and_rejects_capture_id_reuse() {
+        let runtime = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let first = ingest_web_capture(runtime.path(), workspace.path(), web_payload()).unwrap();
+        let replay = ingest_web_capture(runtime.path(), workspace.path(), web_payload()).unwrap();
+        assert_eq!(replay.receipt_id, first.receipt_id);
+
+        let mut conflicting = web_payload();
+        conflicting.capture.note = Some("different payload".into());
+        assert!(
+            ingest_web_capture(runtime.path(), workspace.path(), conflicting)
+                .unwrap_err()
+                .contains("different content")
+        );
+    }
+
+    #[test]
+    fn indexed_browser_pages_keep_versions_and_search_latest_rendered_text() {
+        let runtime = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let mut first = web_payload();
+        first.capture.method = "extension-page-index".into();
+        first.capture.browser_name = Some("Helium".into());
+        first.capture.browser_tab_id = Some(42);
+        first.capture.selected_text = None;
+        first.content = Some(WebCaptureContent {
+            text: Some("Original rendered bridge specification".into()),
+            html: None,
+            screenshot_asset_id: None,
+            content_hash: None,
+        });
+        ingest_web_capture(runtime.path(), workspace.path(), first.clone()).unwrap();
+        let mut second = first;
+        second.capture_id = "capture-test-2".into();
+        second.content.as_mut().unwrap().text = Some("Revised rendered lidar specification".into());
+        let saved = ingest_web_capture(runtime.path(), workspace.path(), second).unwrap();
+        assert!(saved.changed);
+        assert_eq!(versions(runtime.path(), &saved.source.id).unwrap().len(), 2);
+        let found = search(runtime.path(), "lidar", 10).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].browser_name.as_deref(), Some("Helium"));
+        assert!(found[0]
+            .version_id
+            .as_ref()
+            .is_some_and(|id| id.starts_with("version:")));
+        assert!(search(runtime.path(), "bridge", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn web_capture_requires_explicit_local_authority_and_http_source() {
+        let runtime = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let mut payload = web_payload();
+        payload.authority.local_only = false;
+        assert!(ingest_web_capture(runtime.path(), workspace.path(), payload).is_err());
+
+        let mut payload = web_payload();
+        payload.source.url = "file:///etc/passwd".into();
+        assert!(ingest_web_capture(runtime.path(), workspace.path(), payload).is_err());
     }
 }

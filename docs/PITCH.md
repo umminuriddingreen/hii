@@ -3,7 +3,7 @@
 **Status:** pitch narrative, pre-external-traction
 **Founder:** Ummi Nuriddin Green
 **Date:** 2026-07-29
-**Companion docs:** `LAUNCH_AND_MONETIZATION.md` (offer, economics, gates) · `HII_AII_MASTER_CONTEXT.md` (architecture authority) · `hii-brand-dna-v0.1.md` (voice, UX laws) · `RELEASE_READINESS.md` (ship blockers)
+**Companion docs:** `business/structure.md` (business lanes and operating procedure) · `LAUNCH_AND_MONETIZATION.md` (offer, economics, gates) · `HII_AII_MASTER_CONTEXT.md` (architecture authority) · `hii-brand-dna-v0.1.md` (voice, UX laws) · `RELEASE_READINESS.md` (ship blockers)
 
 ---
 

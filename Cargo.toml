@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/hii-core", "crates/hii-chat", "cli", "native-runner", "fabric/protocol"]
+members = ["crates/hii-core", "crates/hii-chat", "crates/hii-drive", "cli", "native-runner", "fabric/protocol"]
 exclude = ["src-tauri"]
 resolver = "2"
 

@@ -7,8 +7,6 @@ import type { WorkspaceViewport } from '../../lib/workspace/types';
 export type Camera = { x: number; y: number; z: number };
 export type ScreenPoint = { x: number; y: number };
 
-const GRID = 32;
-
 /** Shared zoom limits. Every path that changes `z` clamps through `clampZoom`. */
 export const ZOOM_MIN = 0.05;
 export const ZOOM_MAX = 8;
@@ -116,10 +114,6 @@ export function useCamera(onSettle?: () => void) {
     const { x, y, z } = cam.current;
     if (worldRef.current) {
       worldRef.current.style.transform = `translate(${x}px, ${y}px) scale(${z})`;
-    }
-    if (viewportRef.current) {
-      viewportRef.current.style.backgroundPosition = `${x}px ${y}px`;
-      viewportRef.current.style.backgroundSize = `${GRID * z}px ${GRID * z}px`;
     }
   }, []);
 

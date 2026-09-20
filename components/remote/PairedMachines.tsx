@@ -159,15 +159,17 @@ export function PairedMachines({ embedded = false, authenticatedSession }: { emb
         </div>
         {setupCommand ? (
           <div className={styles.token}>
-            <p>Run this once on the Mac you want to reach, then paste the pairing token when asked. The token is shown only now and stays out of shell history.</p>
+            <p className={styles.step}><strong>1</strong> On the Mac you want to connect, open Terminal and run:</p>
             <code>{setupCommand}</code>
             <button type="button" onClick={() => navigator.clipboard?.writeText(setupCommand)}>
               Copy installer
             </button>
+            <p className={styles.step}><strong>2</strong> When Terminal asks for the pairing token, paste this one:</p>
             <code>{issuedToken?.token}</code>
             <button type="button" onClick={() => navigator.clipboard?.writeText(issuedToken?.token ?? '')}>
               Copy pairing token
             </button>
+            <p className={styles.note}>The token is shown once and is entered privately, so it does not remain in shell history. HII and Node.js must already be installed on that Mac.</p>
           </div>
         ) : null}
       </section>

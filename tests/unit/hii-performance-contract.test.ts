@@ -97,7 +97,7 @@ describe('HII performance contract', () => {
 
   it('keeps uncommon workspace applications out of the eager module graph', () => {
     const graph = eagerModuleGraph(desktopEntry);
-    const reachable = [...graph].map((file) => relative(root, file));
+    const reachable = [...graph].map((file) => relative(root, file).replaceAll('\\', '/'));
 
     // The desktop entry must pull in the canvas itself — otherwise this test
     // would pass trivially against a graph that resolved nothing.

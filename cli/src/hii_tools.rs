@@ -218,8 +218,9 @@ fn canvas_list(arguments: Option<&Value>) -> Result<String, String> {
 }
 
 fn canvas_read(arguments: Option<&Value>) -> Result<String, String> {
-    let id = required_argument(arguments, "objectId")?;
+    let reference = required_argument(arguments, "objectId")?;
     let snapshot = canvas_snapshot(arguments)?;
+    let id = hii_core::runtime::resolve_space_object_id(&snapshot, &reference)?;
     let object = snapshot
         .document
         .get("nodes")
@@ -243,7 +244,7 @@ fn canvas_add(arguments: Option<&Value>, actor_id: &str) -> Result<String, Strin
     let kind = required_argument(arguments, "type")?;
     if !matches!(
         kind.as_str(),
-        "note" | "canvas-text" | "image" | "link" | "document" | "frame"
+        "note" | "canvas-text" | "image" | "link" | "document" | "frame" | "run" | "intent"
     ) {
         return Err(format!("canvas_add type is not allowed: {kind}"));
     }
@@ -271,30 +272,56 @@ fn canvas_add(arguments: Option<&Value>, actor_id: &str) -> Result<String, Strin
         arguments,
         "content",
         &mut payload,
-        if kind == "canvas-text" {
-            "text"
-        } else {
-            "content"
+        match kind.as_str() {
+            "canvas-text" => "text",
+            // A run or intent object carries the sentence it exists to carry
+            // out; the run pane reads `prompt` first.
+            "run" | "intent" => "prompt",
+            _ => "content",
         },
     );
     copy_string_argument(arguments, "url", &mut payload, "url");
+    // An agent may propose a run; it may not start one. The object is written
+    // in exactly the state a person has to approve, and `autoStart` is set
+    // here rather than copied from arguments so it cannot be overridden.
+    let proposes_work = matches!(kind.as_str(), "run" | "intent");
+    if proposes_work {
+        payload.insert("status".into(), Value::from("waiting_approval"));
+        payload.insert("autoStart".into(), Value::from(false));
+    }
+    // Match `defaultSize` in lib/workspace/ingest.ts so an agent-placed run has
+    // room for its manifest without the person resizing it first.
+    let (default_width, default_height) = match kind.as_str() {
+        "run" => (620.0, 460.0),
+        "intent" => (520.0, 150.0),
+        _ => (360.0, 240.0),
+    };
     let node = serde_json::json!({
         "id": id,
         "type": kind,
         "x": bounded_number(arguments, "x", 80.0 + (count % 6.0) * 48.0, -100_000.0, 100_000.0),
         "y": bounded_number(arguments, "y", 80.0 + (count % 5.0) * 42.0, -100_000.0, 100_000.0),
-        "w": bounded_number(arguments, "width", 360.0, 80.0, 4096.0),
-        "h": bounded_number(arguments, "height", 240.0, 60.0, 4096.0),
+        "w": bounded_number(arguments, "width", default_width, 80.0, 4096.0),
+        "h": bounded_number(arguments, "height", default_height, 60.0, 4096.0),
         "z": next_z,
         "rotation": 0,
         "createdAt": now,
         "updatedAt": now,
         "object": {
-            "kind": if kind == "frame" { "scene" } else { "artifact" },
+            "kind": match kind.as_str() {
+                "frame" => "scene",
+                "run" => "run",
+                "intent" => "intent",
+                _ => "artifact",
+            },
             "owner": actor_id,
-            "status": "ready",
+            "status": if proposes_work { "waiting_approval" } else { "ready" },
             "source": "hii mcp",
-            "capabilityId": "hii.workspace.creative_canvas",
+            "capabilityId": if proposes_work {
+                "hii.agent.workspace_run"
+            } else {
+                "hii.workspace.creative_canvas"
+            },
             "audit": [{ "ts": now, "actor": "agent", "action": "added object through hii mcp" }]
         },
         "payload": payload
@@ -310,8 +337,9 @@ fn canvas_add(arguments: Option<&Value>, actor_id: &str) -> Result<String, Strin
 }
 
 fn canvas_update(arguments: Option<&Value>, actor_id: &str) -> Result<String, String> {
-    let id = required_argument(arguments, "objectId")?;
+    let reference = required_argument(arguments, "objectId")?;
     let mut snapshot = canvas_snapshot(arguments)?;
+    let id = hii_core::runtime::resolve_space_object_id(&snapshot, &reference)?;
     let now = chrono::Utc::now().to_rfc3339();
     let node = snapshot
         .document
@@ -368,21 +396,52 @@ fn apply_canvas(
     actor_id: &str,
     object: Value,
 ) -> Result<String, String> {
+    let idempotency_key = required_argument(arguments, "idempotencyKey")?;
+    let actor = IdentityRefV1 {
+        id: format!("mcp:{actor_id}"),
+        kind: "agent".into(),
+    };
+    let run_id = crate::run_context::run_id();
+    let grant_id = match argument_field(arguments, "authorityGrantId")
+        .filter(|value| !value.trim().is_empty())
+    {
+        Some(grant) => grant, // Caller-supplied grants must already exist.
+        None => {
+            // This adapter runs only after the run authority / MCP ACL gates.
+            // A stable identity makes revocation durable across later calls.
+            let scope = serde_json::to_vec(&(&actor.id, &snapshot.space_id, &run_id))
+                .map_err(|error| error.to_string())?;
+            let digest = ring::digest::digest(&ring::digest::SHA256, &scope);
+            let grant = format!(
+                "mcp-acl:{}",
+                digest
+                    .as_ref()
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            );
+            hii_core::runtime::grant_space_mutation(
+                &hii_core::runtime_root()?,
+                &snapshot.space_id,
+                &IdentityRefV1 {
+                    id: "human:local".into(),
+                    kind: "human".into(),
+                },
+                &actor,
+                &grant,
+                run_id.as_deref(),
+            )?;
+            grant
+        }
+    };
     let applied = runtime_space_apply(RuntimeSpaceApplyV1 {
         version: 1,
         space_id: Some(snapshot.space_id.clone()),
         expected_sequence: snapshot.sequence,
-        actor: IdentityRefV1 {
-            id: format!("mcp:{actor_id}"),
-            kind: "agent".into(),
-        },
-        authority_grant_id: Some(
-            argument_field(arguments, "authorityGrantId")
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| format!("mcp-acl:{actor_id}:canvas-operator")),
-        ),
-        run_id: None,
-        idempotency_key: required_argument(arguments, "idempotencyKey")?,
+        actor,
+        authority_grant_id: Some(grant_id),
+        run_id,
+        idempotency_key,
         document: snapshot.document,
     })?;
     serde_json::to_string(&serde_json::json!({
@@ -683,6 +742,12 @@ fn hii(repo: &Path, args: &[&str]) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn runtime_env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn classifies_hii_tools() {
@@ -739,5 +804,143 @@ mod tests {
         assert!(!compact.contains("large"));
         assert!(compact.contains("HII CURRENT CONTEXT"));
         assert!(compact.len() < 2_000);
+    }
+
+    #[test]
+    fn canvas_add_is_readable_from_canonical_runtime_space() {
+        let _guard = runtime_env_lock().lock().expect("runtime env lock");
+        let temp_dir = tempfile::tempdir().expect("temp runtime");
+        let previous_runtime = std::env::var_os("HII_RUNTIME_DIR");
+        std::env::set_var("HII_RUNTIME_DIR", temp_dir.path());
+
+        let added = canvas_add(
+            Some(&serde_json::json!({
+                "spaceId": "test-space",
+                "idempotencyKey": "test-canvas-add",
+                "type": "note",
+                "title": "MCP-visible note",
+                "content": "hello from mcp"
+            })),
+            "test-agent",
+        )
+        .expect("canvas add");
+        let added: serde_json::Value = serde_json::from_str(&added).expect("added json");
+        let object_id = added["object"]["id"].as_str().expect("object id");
+
+        let read = canvas_read(Some(&serde_json::json!({
+            "spaceId": "test-space",
+            "objectId": object_id
+        })))
+        .expect("canvas read");
+        let read: serde_json::Value = serde_json::from_str(&read).expect("read json");
+
+        assert_eq!(read["object"]["payload"]["title"], "MCP-visible note");
+        assert_eq!(read["object"]["payload"]["content"], "hello from mcp");
+
+        let mut snapshot = runtime_space_snapshot(Some("test-space".into())).unwrap();
+        let grant = snapshot
+            .recent_events
+            .iter()
+            .find_map(|event| event.authority_grant_id.clone())
+            .expect("persisted grant in event");
+        snapshot.document["nodes"][0]["handle"] = serde_json::json!("durable-note");
+        runtime_space_apply(RuntimeSpaceApplyV1 {
+            version: 1,
+            space_id: Some(snapshot.space_id.clone()),
+            expected_sequence: snapshot.sequence,
+            actor: IdentityRefV1 {
+                id: "human:local".into(),
+                kind: "human".into(),
+            },
+            authority_grant_id: None,
+            run_id: None,
+            idempotency_key: "assign-test-handle".into(),
+            document: snapshot.document,
+        })
+        .unwrap();
+        assert!(canvas_read(Some(
+            &serde_json::json!({"spaceId":"test-space", "objectId":"@durable-note"})
+        ))
+        .is_ok());
+        let update = serde_json::json!({
+            "spaceId":"test-space", "objectId":"@durable-note",
+            "idempotencyKey":"handle-update", "content":"updated through handle"
+        });
+        assert!(canvas_update(Some(&update), "test-agent").is_ok());
+        let mut forged = update.clone();
+        forged["authorityGrantId"] = serde_json::json!("invented-permission");
+        assert!(canvas_update(Some(&forged), "test-agent")
+            .unwrap_err()
+            .contains("does not authorize"));
+        hii_core::runtime::revoke_space_mutation_grant(
+            temp_dir.path(),
+            "test-space",
+            &IdentityRefV1 {
+                id: "human:local".into(),
+                kind: "human".into(),
+            },
+            &grant,
+        )
+        .unwrap();
+        assert!(canvas_update(Some(&update), "test-agent")
+            .unwrap_err()
+            .contains("does not authorize"));
+
+        if let Some(previous_runtime) = previous_runtime {
+            std::env::set_var("HII_RUNTIME_DIR", previous_runtime);
+        } else {
+            std::env::remove_var("HII_RUNTIME_DIR");
+        }
+    }
+
+    /// An agent can propose a run. It cannot approve one.
+    ///
+    /// The payload here asks for exactly that, and the arguments are copied
+    /// into the object, so this is the drift that would be silent: a run that
+    /// arrives already `running` skips the approval pane entirely.
+    #[test]
+    fn agent_placed_run_cannot_start_itself() {
+        let _guard = runtime_env_lock().lock().expect("runtime env lock");
+        let temp_dir = tempfile::tempdir().expect("temp runtime");
+        let previous_runtime = std::env::var_os("HII_RUNTIME_DIR");
+        std::env::set_var("HII_RUNTIME_DIR", temp_dir.path());
+
+        let added = canvas_add(
+            Some(&serde_json::json!({
+                "spaceId": "test-space",
+                "idempotencyKey": "test-canvas-run",
+                "type": "run",
+                "content": "tidy the receipts directory",
+                "payload": { "status": "running", "autoStart": true }
+            })),
+            "test-agent",
+        )
+        .expect("canvas add run");
+        let added: serde_json::Value = serde_json::from_str(&added).expect("added json");
+        let object = &added["object"];
+
+        assert_eq!(object["payload"]["status"], "waiting_approval");
+        assert_eq!(object["payload"]["autoStart"], false);
+        assert_eq!(object["object"]["status"], "waiting_approval");
+        assert_eq!(object["object"]["kind"], "run");
+        assert_eq!(object["object"]["capabilityId"], "hii.agent.workspace_run");
+        // The run pane reads `prompt` first; `content` would render as nothing.
+        assert_eq!(object["payload"]["prompt"], "tidy the receipts directory");
+
+        assert!(canvas_add(
+            Some(&serde_json::json!({
+                "spaceId": "test-space",
+                "idempotencyKey": "test-canvas-terminal",
+                "type": "terminal"
+            })),
+            "test-agent",
+        )
+        .is_err());
+
+        if let Some(previous_runtime) = previous_runtime {
+            std::env::set_var("HII_RUNTIME_DIR", previous_runtime);
+        } else {
+            std::env::remove_var("HII_RUNTIME_DIR");
+        }
     }
 }

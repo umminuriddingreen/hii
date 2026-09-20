@@ -12,8 +12,28 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 type McpTool = {
 	name: string;
 	description?: string;
-	inputSchema: Record<string, unknown>;
+	inputSchema?: unknown;
 };
+
+export function normalizeParametersSchema(inputSchema: unknown): Record<string, unknown> {
+	if (
+		inputSchema &&
+		typeof inputSchema === "object" &&
+		!Array.isArray(inputSchema) &&
+		(inputSchema as Record<string, unknown>).type === "object"
+	) {
+		return {
+			additionalProperties: true,
+			...(inputSchema as Record<string, unknown>),
+		};
+	}
+	return {
+		type: "object",
+		properties: {},
+		required: [],
+		additionalProperties: true,
+	};
+}
 
 async function request(method: string, params?: unknown, signal?: AbortSignal): Promise<any> {
 	return await new Promise((resolve, reject) => {
@@ -59,7 +79,7 @@ export default async function hiiMcpExtension(pi: ExtensionAPI) {
 				"Use hii_canvas_list and hii_canvas_read to inspect the HII canvas before changing it.",
 				"Use hii_canvas_add or hii_canvas_update only when the user asks to change the HII canvas.",
 			],
-			parameters: tool.inputSchema as any,
+			parameters: normalizeParametersSchema(tool.inputSchema) as any,
 			async execute(_toolCallId, params, signal) {
 				const result = await request(
 					"tools/call",

@@ -132,7 +132,7 @@ profile remains under `~/.hii/browser/ox-alpha` for continuity. If Ox Alpha
 requests its one-time human check, repeat one request with
 `HII_BROWSER_HEADLESS=0`, complete the visible verification, then return to
 headless use. HII does not automate that challenge. Use
-`hii model use <installed-local-model>` to return to HII Native.
+`hii model use <installed-local-model>` to return to HII.
 
 There is no tool-step ceiling by default. HII continues until the model
 finishes or the operator interrupts with Esc/Ctrl-C. `--max-steps N` remains
@@ -246,7 +246,7 @@ goal
 
 The default work and review model is resolved per provider, because model names
 are not portable between runtimes: compatibility providers retain their own
-names, while the 48 GB Apple-Silicon HII Native profile uses
+names, while the 48 GB Apple-Silicon HII profile uses
 `mlx-community/Qwen3.8-27B-4bit`. `--review` sends the
 final result and proof record to that provider's review model for a stricter
 second pass; `--review-model` overrides it. Compatibility providers remain
@@ -256,7 +256,7 @@ When the operator names no model, a default that is not installed is an error
 listing what is available — HII never silently substitutes a different model,
 because the receipt would then misreport what produced the run.
 
-HII Native binds to loopback port 11435. Its Rust supervisor owns lifecycle and
+HII binds to loopback port 11435. Its Rust supervisor owns lifecycle and
 proof; on Apple Silicon its optimized engine is MLX-VLM:
 
 ```sh

@@ -56,53 +56,61 @@ const MONO: Palette = Palette {
 static ACTIVE_THEME: AtomicU8 = AtomicU8::new(Theme::Heritage as u8);
 static ACTIVITY_ROWS: AtomicUsize = AtomicUsize::new(0);
 
+/// Grouped for better navigation and discoverability.
 const COMMANDS: &[(&str, &str)] = &[
+    // Navigation & Overview
     ("/help", "all controls"),
     ("/overview", "context state map"),
     ("/status", "session state"),
-    ("/attach", "add file or image"),
-    ("/attachments", "pending context"),
-    ("/detach", "remove pending context"),
+    // Work & Tasks
     ("/goal", "persistent objective"),
     ("/plan", "inspect before acting"),
     ("/side", "ask without derailing"),
-    ("/theme", "visual signature"),
-    ("/keymap", "keyboard profile"),
-    ("/usage", "tokens and speed"),
-    ("/reasoning", "model effort"),
-    ("/autonomy", "local action policy"),
-    ("/model", "choose local model"),
-    ("/files", "ranger-style explorer"),
-    ("/explore", "ranger-style explorer"),
-    ("/codex", "use Codex model for a task"),
-    ("/claude", "use Claude model for a task"),
-    ("/models", "list local models"),
-    ("/providers", "accounts and plans"),
-    ("/login", "connect an account"),
+    ("/attachments", "pending context"),
+    ("/attach", "add file or image"),
+    ("/detach", "remove pending context"),
     ("/proof", "latest receipt"),
     ("/diff", "workspace changes"),
     ("/review", "review current diff"),
-    ("/permissions", "authority boundary"),
-    ("/resume", "restore a session"),
-    ("/agents", "managed workers"),
-    ("/ps", "managed workers"),
-    ("/stop", "stop one worker"),
-    ("/skills", "learned workflows"),
-    ("/learn", "learning memory"),
-    ("/hooks", "lifecycle policy"),
-    ("/mcp", "governed tool servers"),
-    ("/background", "supervised local task"),
-    ("/jobs", "background work"),
-    ("/job", "inspect or cancel job"),
-    ("/compact", "shrink context"),
+    // Conversation Control
     ("/clear", "fresh conversation"),
     ("/new", "fresh conversation"),
     ("/rename", "name this session"),
     ("/copy", "copy response, code, or all"),
     ("/undo", "drop last exchange"),
     ("/fork", "snapshot session"),
-    ("/teach", "save as skill"),
+    ("/resume", "restore a session"),
+    // Models & AI
+    ("/reasoning", "model effort"),
+    ("/autonomy", "local action policy"),
+    ("/model", "choose local model"),
+    ("/models", "list local models"),
+    ("/codex", "use Codex model for a task"),
+    ("/claude", "use Claude model for a task"),
+    ("/providers", "accounts and plans"),
+    ("/login", "connect an account"),
+    // Tools & Files
+    ("/files", "ranger-style explorer"),
+    ("/explore", "ranger-style explorer"),
+    ("/mcp", "governed tool servers"),
+    ("/skills", "learned workflows"),
+    ("/learn", "learning memory"),
+    ("/hooks", "lifecycle policy"),
+    // Agents & Background Work
+    ("/agents", "managed workers"),
     ("/agent", "manage one worker"),
+    ("/ps", "managed workers"),
+    ("/stop", "stop one worker"),
+    ("/background", "supervised local task"),
+    ("/jobs", "background work"),
+    ("/job", "inspect or cancel job"),
+    // Permissions & Security
+    ("/permissions", "authority boundary"),
+    // System & Resources
+    ("/usage", "tokens and speed"),
+    ("/compact", "shrink context"),
+    ("/theme", "visual signature"),
+    ("/keymap", "keyboard profile"),
     #[cfg(feature = "preview")]
     ("/resources", "machine resources"),
     #[cfg(feature = "preview")]
@@ -115,6 +123,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/calendar", "calendar view"),
     #[cfg(feature = "preview")]
     ("/sync", "sync calendar"),
+    ("/teach", "save as skill"),
     ("/exit", "leave HII"),
 ];
 
@@ -429,7 +438,12 @@ pub(crate) fn welcome_frame(
         paint("HUMAN INFORMATION INTERFACE", &[DIM, palette().muted])
     );
     let location = paint(
-        &format!("{}  ·  {}  ·  {}", short_path(workspace), provider, model),
+        &format!(
+            "{}  ·  started with {}  ·  {}",
+            short_path(workspace),
+            provider,
+            model
+        ),
         &[DIM, palette().muted],
     );
     let greeting = paint(greeting, &[palette().secondary]);
@@ -505,34 +519,22 @@ fn model_query(input: &str) -> Option<&str> {
         .map(str::trim)
 }
 
-fn model_matches(query: &str, public_test: bool) -> Vec<(String, String)> {
+fn model_matches(query: &str, _public_test: bool) -> Vec<(String, String)> {
     let query = query.to_ascii_lowercase();
-    let mut rows = crate::ollama::Ollama::discover()
+    let provider = crate::ollama::Ollama::discover();
+    let provider_label = provider.provider_label().to_string();
+    let mut rows = provider
         .models()
         .unwrap_or_default()
         .into_iter()
         .filter(|model| query.is_empty() || model.to_ascii_lowercase().contains(&query))
-        .map(|model| (format!("/model {model}"), "Local".to_string()))
+        .map(|model| (format!("/model {model}"), provider_label.clone()))
         .collect::<Vec<_>>();
-    if !public_test {
-        rows.extend(
-            crate::agents::AgentManager::hosted_model_choices()
-                .into_iter()
-                .filter(|(provider, model)| {
-                    query.is_empty()
-                        || provider.to_ascii_lowercase().contains(&query)
-                        || model.to_ascii_lowercase().contains(&query)
-                })
-                .map(|(provider, model)| {
-                    let command = match provider.as_str() {
-                        "Claude" => "/claude ".to_string(),
-                        "Codex" => "/codex ".to_string(),
-                        _ => format!("/model {model}"),
-                    };
-                    (command, format!("{provider} · {model}"))
-                }),
-        );
-    }
+    // `/model` changes the model used by HII's local inference runtime. Hosted
+    // CLIs are explicit task routes (`/codex` and `/claude`), not selectable
+    // HII models. Listing their aliases here was especially misleading because
+    // selecting one inserted only the provider command and discarded the
+    // displayed model name.
     rows.sort_by(|left, right| {
         left.1
             .to_ascii_lowercase()
@@ -995,13 +997,14 @@ mod tests {
     fn welcome_is_compact_and_leaves_instruction_to_the_composer() {
         let rendered = welcome_frame(
             Path::new("/tmp/studio"),
-            "HII Native",
+            "HII",
             "local-model",
             "Welcome back — 2 context sources loaded.",
             false,
         );
         assert!(rendered.contains("HUMAN INFORMATION INTERFACE"));
-        assert!(rendered.contains("HII Native"));
+        assert!(rendered.contains("HII"));
+        assert!(rendered.contains("started with HII  ·  local-model"));
         assert!(rendered.contains("Welcome back"));
         assert!(!rendered.contains("What do you want"));
         assert!(!rendered.contains("Type naturally"));
@@ -1118,9 +1121,10 @@ mod tests {
         assert_eq!(matches.first().map(|item| item.0.as_str()), Some("/status"));
         assert!(command_matches("status", false).is_empty());
         let model_matches = command_matches("/model claude", false);
-        assert!(model_matches
+        assert!(model_matches.is_empty());
+        assert!(command_matches("/cla", false)
             .iter()
-            .any(|(command, description)| command == "/claude " && description.contains("Claude")));
+            .any(|(command, _)| command == "/claude"));
     }
 
     #[test]

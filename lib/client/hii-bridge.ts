@@ -129,6 +129,8 @@ export type InformationSearchResult = {
   siteName: string;
   contentHash?: string;
   capturedAt?: string;
+  browserName?: string;
+  versionId?: string;
 };
 
 export type HiiApplicationManifest = {
@@ -385,10 +387,13 @@ export async function readWorkspace(): Promise<WorkspaceDoc> {
 
 export async function writeWorkspace(document: WorkspaceDoc): Promise<WorkspaceDoc> {
   if (isTauri()) {
+    if (!authoritativeSpaceId) throw new Error('Load the workspace before saving changes.');
+    const spaceId = authoritativeSpaceId;
     const { invoke } = await import('@tauri-apps/api/core');
     const snapshot = await invoke<RuntimeSpaceSnapshotV1>('runtime_space_apply_v1', {
       request: {
         version: 1,
+        spaceId,
         expectedSequence: document.revision,
         actor: { id: 'human:local', kind: 'human' },
         idempotencyKey: `canvas:${document.revision}:${document.updatedAt}`,
@@ -450,6 +455,7 @@ export async function compileContextPack(request: {
   mode: CanvasModeId;
   authority: string;
   selectedObjectIds: string[];
+  excludedObjectIds?: string[];
   spaceId?: string;
   workspaceRoot?: string;
   budgetTokens?: number;
@@ -460,6 +466,7 @@ export async function compileContextPack(request: {
     workspaceRoot: request.workspaceRoot,
     intent: request.intent,
     selectedObjectIds: request.selectedObjectIds,
+    excludedObjectIds: request.excludedObjectIds ?? [],
     actor: { id: 'human:local', kind: 'human' },
     authority: request.authority,
     mode: request.mode,
@@ -498,6 +505,25 @@ export async function getContextPack(id: string): Promise<ContextPackV1> {
     return invoke<ContextPackV1>('runtime_context_get_v1', { id });
   }
   return developmentRequest<ContextPackV1>(`/context/${encodeURIComponent(id)}`);
+}
+
+/** The reviewed pack, including removals, is the complete execution request. */
+export function agentRequestFromContextPack(pack: ContextPackV1): AgentRequestV1 {
+  if (pack.status !== 'approved' || pack.risk.action === 'blocked') {
+    throw new Error('Review and approve this context before starting work.');
+  }
+  return {
+    version: 1,
+    intent: pack.intent,
+    mode: pack.mode,
+    workspaceRoot: pack.workspaceRoot,
+    spaceId: pack.spaceId,
+    contextNodeIds: [...new Set(pack.items.filter((item) => item.selected).map((item) =>
+      item.ref.id.split(':').at(-1) || item.ref.id
+    ))],
+    contextPackId: pack.id,
+    contextFingerprint: pack.fingerprint
+  };
 }
 
 export async function startAgent(request: AgentRequestV1): Promise<AgentStartResult> {
@@ -664,6 +690,10 @@ export async function findInformation(query: string, options: { web?: boolean; l
       web: Boolean(options.web),
       limit: options.limit || 10
     });
+  }
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    const { searchSyncedBrowserSnapshots } = await import('../web/browser-snapshot-search');
+    return searchSyncedBrowserSnapshots(query, options.limit || 10);
   }
   const value = await developmentRequest<{ results: InformationSearchResult[] }>('/information/find', {
     method: 'POST',

@@ -48,4 +48,7 @@ life/
 /macos/.build/
 /.next-desktop-perf/
 /.next-desktop-playwright/
+/.next-desktop-verify/
+/.venv-mlx/
+/.venv-mlx312/
 src-tauri/tauri.no-updater.json

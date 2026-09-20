@@ -8,6 +8,7 @@ import path from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import url from "node:url";
 import { runSkillCommand } from "../aii/skills/registry.mjs";
+import { observeInstances } from "./lib/instance-observation.mjs";
 
 // The repository this CLI belongs to. Derived from this file's own location so
 // a checkout anywhere works; HII_ROOT overrides it. Hardcoding ~/hii made every
@@ -201,7 +202,7 @@ function cmdApp(args) {
 
 function slashDefaults() {
   return [
-    { name: "backend", description: "manage HII Native models", argvPrefix: ["model"] },
+    { name: "backend", description: "manage HII models", argvPrefix: ["model"] },
     { name: "open", description: "launch HII app, web, or site", argvPrefix: ["open"] },
     { name: "ui", description: "control app and web surfaces", argvPrefix: ["ui"] }
   ];
@@ -643,16 +644,6 @@ function runtimePointers() {
   ];
 }
 
-function processIsLive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function countBy(items, key) {
   return items.reduce((counts, item) => {
     const value = String(item?.[key] || "unknown");
@@ -683,10 +674,9 @@ function activeStatePayload(context) {
   );
   const daemon = readJsonObject(DAEMON_STATUS);
   const instanceDocument = readJsonObject(DAEMON_INSTANCES);
-  const instances = Array.isArray(instanceDocument?.instances) ? instanceDocument.instances : [];
-  const activeInstances = instances
-    .filter((instance) => ["queued", "running", "working", "attention"].includes(String(instance?.status).toLowerCase()))
-    .map((instance) => ({ ...instance, live: instance.pid == null ? null : processIsLive(instance.pid) }));
+  const reportedInstances = observeInstances(instanceDocument, { now: Date.parse(observedAt) });
+  const observations = countBy(reportedInstances, "observation");
+  const activeInstances = reportedInstances.filter((instance) => instance.live === true);
   const ownedInstances = activeInstances.filter((instance) => instance.owned === true);
   const observedProcesses = activeInstances.filter((instance) => instance.type === "process" && instance.owned !== true);
   const partialCapabilities = context.capabilities.filter((capability) => capability.status === "partial");
@@ -708,16 +698,16 @@ function activeStatePayload(context) {
       basis: `${tasks.byLane.doing || 0} doing, ${tasks.byLane.blocked || 0} blocked, ${tasks.open} open.`, counts: tasks.byLane
     },
     {
-      id: "agents", state: activeJobs.length || ownedInstances.some((instance) => instance.type === "codex-run") ? "active" : "idle", visibility: "observed",
+      id: "agents", state: ownedInstances.some((instance) => instance.type === "codex-run") ? "active" : activeJobs.length ? "ready" : "idle", visibility: activeJobs.length ? "partial" : "observed",
       source: LOCAL_CAPABILITY_JOBS, updatedAt: context.localState.capabilityJobs.updatedAt || null,
-      basis: `${activeJobs.length} bounded job(s); ${ownedInstances.filter((instance) => instance.type === "codex-run").length} managed agent run(s).`,
+      basis: `${activeJobs.length} reported bounded job(s), not process-verified; ${ownedInstances.filter((instance) => instance.type === "codex-run").length} verified live managed agent run(s).`,
       counts: { boundedJobs: activeJobs.length, managedRuns: ownedInstances.filter((instance) => instance.type === "codex-run").length }
     },
     {
-      id: "systems", state: activeInstances.length ? "active" : daemon ? "idle" : "offline", visibility: daemon ? "observed" : "unavailable",
+      id: "systems", state: activeInstances.length ? "active" : reportedInstances.length ? "unknown" : daemon ? "idle" : "offline", visibility: observations.stale || observations.unknown ? "partial" : daemon ? "observed" : "unavailable",
       source: DAEMON_INSTANCES, updatedAt: instanceDocument?.updatedAt || daemon?.updatedAt || null,
-      basis: daemon ? `${activeInstances.length} live or reported instance(s), including ${observedProcesses.length} observed process(es).` : "The HII daemon has not published system state.",
-      counts: { active: activeInstances.length, owned: ownedInstances.length, observed: observedProcesses.length, byType: countBy(activeInstances, "type") }
+      basis: instanceDocument ? `${activeInstances.length} verified live instance(s); ${observations.dead || 0} dead, ${observations.stale || 0} stale, ${observations.unknown || 0} unverified report(s).` : "The HII daemon has not published system state.",
+      counts: { active: activeInstances.length, owned: ownedInstances.length, observed: observedProcesses.length, reported: reportedInstances.length, dead: observations.dead || 0, stale: observations.stale || 0, unknown: observations.unknown || 0, byType: countBy(activeInstances, "type") }
     },
     {
       id: "context", state: context.localState.personalContext.knowledge.exists ? "ready" : "unknown", visibility: "observed",
@@ -1373,9 +1363,9 @@ function agentCommandCatalog() {
     { command: "hii loop decide <yes|no>", purpose: "Approve or reject the latest proposed plan." },
     { command: "hii model recommend", purpose: "Compare HII-curated local models against this machine, installed state, and measured speed." },
     { command: "hii model search <query>", purpose: "Discover MLX-ready Hugging Face models; defaults to mlx-community." },
-    { command: "hii model install <org/model>", purpose: "Explicitly download and verify weights in HII Native's private cache." },
-    { command: "hii model installed", purpose: "List locally installed HII Native model weights and disk usage." },
-    { command: "hii model use <org/model>", purpose: "Switch the HII Native backend and project the active choice into Pi." },
+    { command: "hii model install <org/model>", purpose: "Explicitly download and verify weights in HII's private cache." },
+    { command: "hii model installed", purpose: "List locally installed HII model weights and disk usage." },
+    { command: "hii model use <org/model>", purpose: "Switch the HII backend and project the active choice into Pi." },
     { command: "hii model status", purpose: "Show backend, active model, endpoint, process, performance settings, and logs." },
     { command: "hii model bench", purpose: "Run HII's bounded end-to-end completion benchmark against the active model." },
     { command: "hii model remove <org/model>", purpose: "Preview removal; add --yes only when the displayed target is correct." },
@@ -1416,7 +1406,7 @@ function agentCommandCatalog() {
     { command: "hii runner init <name>", purpose: "Register an owned runner and print its local token once." },
     { command: "hii runner start --once", purpose: "Heartbeat, claim one whitelisted capability job, stream logs, and exit." },
     { command: "hii runner doctor", purpose: "Inspect the native model runtime, consumer hardware tier, and privacy route." },
-    { command: "hii runner model start", purpose: "Start HII Native with the hardware-optimized local engine and explicit model acquisition." },
+    { command: "hii runner model start", purpose: "Start HII with the hardware-optimized local engine and explicit model acquisition." },
     { command: "hii runner bench", purpose: "Measure an end-to-end native completion and print model usage." },
     { command: "hii jobs", purpose: "List recent local capability jobs." },
     { command: "hii jobs reconcile", purpose: "Append local reconciliation receipts for completed Claude-backed HII agent jobs." },
@@ -3345,9 +3335,9 @@ usage: hii <command>
   model [recommend]    compare curated choices for this machine
   model search <query> discover MLX models on Hugging Face
   model install <id>  download and verify a model in HII's private cache
-  model installed     list models installed for HII Native
+  model installed     list models installed for HII
   model use <id|alias> activate an installed model and update Pi
-  model status|models inspect the active HII Native backend
+  model status|models inspect the active HII backend
   model bench|logs    benchmark or inspect the active backend
   model start|stop    control the HII-owned model runtime
   model remove <id>   preview removal; add --yes to apply

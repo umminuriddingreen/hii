@@ -25,8 +25,8 @@ describe('canvas Runtime boundary', () => {
 
   it('refreshes external Runtime Space mutations without racing local saves', () => {
     expect(hook).toContain('window.setInterval(() => void refresh(), 750)');
-    expect(hook).toContain('source.revision <= current.current.revision');
-    expect(hook).toContain('saveTimer.current || saveInFlight.current');
+    expect(hook).toContain('source.revision <= authoritative.current.revision');
+    expect(hook).toContain('!loaded.current || saveInFlight.current');
   });
 
   it('publishes all foundational protocol definitions', () => {

@@ -41,6 +41,7 @@ pub enum Group {
     Infra,
     Tools,
     Build,
+    Admin,
     /// Machine-facing entrypoints; never advertised to a human.
     Internal,
 }
@@ -52,6 +53,7 @@ impl Group {
         Group::Infra,
         Group::Tools,
         Group::Build,
+        Group::Admin,
     ];
 
     pub fn title(self) -> &'static str {
@@ -61,6 +63,7 @@ impl Group {
             Group::Infra => "Infrastructure",
             Group::Tools => "Tools",
             Group::Build => "Build",
+            Group::Admin => "Admin",
             Group::Internal => "Internal",
         }
     }
@@ -133,7 +136,12 @@ pub const CHAT_NATIVE_VERBS: &[&str] = &["list", "show", "new", "settings", "sen
 
 /// Every command `hii` answers to, and who answers it.
 pub const ROUTES: &[Route] = &[
-    native("session-backup", Extended, Infra, "back up and restore provider session logs"),
+    native(
+        "session-backup",
+        Extended,
+        Infra,
+        "back up and restore provider session logs",
+    ),
     // ---- the bounded-work loop: what a new user should see first ----
     delegated("home", Core, Context, "show the compact current coordinate"),
     native(
@@ -174,6 +182,12 @@ pub const ROUTES: &[Route] = &[
     ),
     native("board", Core, Work, "local kanban/todo board"),
     native(
+        "state",
+        Extended,
+        Work,
+        "save, inspect, and restore named local canvas states",
+    ),
+    native(
         "status",
         Core,
         Infra,
@@ -197,12 +211,7 @@ pub const ROUTES: &[Route] = &[
         Infra,
         "compatibility listing for provider-advertised models",
     ),
-    delegated(
-        "model",
-        Core,
-        Infra,
-        "fully manage the HII Native model backend",
-    ),
+    delegated("model", Core, Infra, "fully manage the HII model backend"),
     delegated(
         "open",
         Core,

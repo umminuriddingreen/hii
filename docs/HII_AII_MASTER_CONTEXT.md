@@ -61,6 +61,13 @@ exposing the operational facts a person needs to understand, interrupt,
 correct, undo, or trust the system. The canonical state contract is documented
 in [`HII_WHITE_BOX.md`](HII_WHITE_BOX.md).
 
+**Business structure, 2026-09-08:** HII is organized operationally as Studio,
+Product, and Network. Studio sells concrete founder-led outcomes now; Product
+turns repeated verified outcomes into software; Network remains the later
+shared-object, service, and exchange layer. Use
+[`business/structure.md`](business/structure.md) before expanding business
+docs, launch promises, or service-led client work.
+
 ## Authority and use
 
 Agents must distinguish four levels of truth:

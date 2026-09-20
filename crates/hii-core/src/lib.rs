@@ -10,6 +10,7 @@ use std::{
 use uuid::Uuid;
 
 pub mod adaptive;
+pub mod checkpoints;
 pub mod context_pack;
 pub mod information;
 pub mod operational;
@@ -90,31 +91,22 @@ pub fn default_workspace_root() -> Result<PathBuf, String> {
         .ok_or_else(|| "HII could not determine its default workspace.".to_string())
 }
 
-fn workspace_directory() -> Result<PathBuf, String> {
-    Ok(runtime_root()?.join("workspace"))
-}
-
-fn selected_workspace_id() -> String {
-    let path = match workspace_directory() {
-        Ok(directory) => directory.join("selection.json"),
-        Err(_) => return "default".into(),
-    };
+fn selected_workspace_id(runtime: &Path) -> String {
+    let path = runtime.join("workspace/selection.json");
     fs::read_to_string(path)
         .ok()
         .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
         .and_then(|value| value.get("workspaceId")?.as_str().map(str::to_owned))
-        .filter(|value| {
-            value.chars().all(|character| {
-                character.is_ascii_alphanumeric() || character == '-' || character == '_'
-            })
-        })
+        .filter(|value| runtime::validate_space_id(value).is_ok())
         .unwrap_or_else(|| "default".into())
 }
 
-fn workspace_path() -> Result<PathBuf, String> {
-    Ok(workspace_directory()?
+fn workspace_path(runtime: &Path, space_id: &str) -> Result<PathBuf, String> {
+    runtime::validate_space_id(space_id)?;
+    Ok(runtime
+        .join("workspace")
         .join("workspaces")
-        .join(format!("{}.json", selected_workspace_id())))
+        .join(format!("{space_id}.json")))
 }
 
 fn empty_workspace() -> Value {
@@ -130,14 +122,32 @@ fn empty_workspace() -> Value {
 }
 
 pub fn read_workspace() -> Result<Value, String> {
-    let current = workspace_path()?;
-    let legacy = workspace_directory()?.join("workspace.json");
-    let source = if current.is_file() { current } else { legacy };
-    if !source.is_file() {
-        return Ok(empty_workspace());
-    }
-    let raw = fs::read_to_string(&source)
-        .map_err(|error| format!("Could not read {}: {error}", source.display()))?;
+    let runtime = runtime_root()?;
+    read_workspace_at(&runtime, &selected_workspace_id(&runtime))
+}
+
+fn read_workspace_at(runtime: &Path, space_id: &str) -> Result<Value, String> {
+    let source = workspace_path(runtime, space_id)?;
+    let raw = match fs::read_to_string(&source) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            // The old single canvas belongs only to the default workspace.
+            // Never seed a named Space with another Space's private objects.
+            if space_id != "default" {
+                return Ok(empty_workspace());
+            }
+            let legacy = runtime.join("workspace/workspace.json");
+            match fs::read_to_string(&legacy) {
+                Ok(raw) => {
+                    return serde_json::from_str(&raw)
+                        .map_err(|error| format!("Could not parse {}: {error}", legacy.display()))
+                }
+                Err(error) if error.kind() == ErrorKind::NotFound => return Ok(empty_workspace()),
+                Err(error) => return Err(format!("Could not read {}: {error}", legacy.display())),
+            }
+        }
+        Err(error) => return Err(format!("Could not read {}: {error}", source.display())),
+    };
     serde_json::from_str(&raw)
         .map_err(|error| format!("Could not parse {}: {error}", source.display()))
 }
@@ -153,13 +163,15 @@ pub fn write_workspace(mut document: Value) -> Result<Value, String> {
         .get("revision")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    let path = workspace_path()?;
+    let runtime = runtime_root()?;
+    let space_id = selected_workspace_id(&runtime);
+    let path = workspace_path(&runtime, &space_id)?;
     let parent = path
         .parent()
         .ok_or_else(|| "HII state path has no parent.".to_string())?;
     fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let _lock = WorkspaceFileLock::acquire(&path)?;
-    let actual_revision = read_workspace()?
+    let actual_revision = read_workspace_at(&runtime, &space_id)?
         .get("revision")
         .and_then(Value::as_u64)
         .unwrap_or(0);
@@ -178,28 +190,50 @@ pub fn write_workspace(mut document: Value) -> Result<Value, String> {
 pub fn runtime_space_snapshot(
     space_id: Option<String>,
 ) -> Result<runtime::RuntimeSpaceSnapshotV1, String> {
-    let space_id = space_id.unwrap_or_else(selected_workspace_id);
-    if let Some(snapshot) = runtime::read_space(&runtime_root()?, &space_id)? {
+    let runtime = runtime_root()?;
+    let space_id = space_id.unwrap_or_else(|| selected_workspace_id(&runtime));
+    runtime_space_snapshot_at(&runtime, &space_id)
+}
+
+fn runtime_space_snapshot_at(
+    runtime: &Path,
+    space_id: &str,
+) -> Result<runtime::RuntimeSpaceSnapshotV1, String> {
+    if let Some(snapshot) = runtime::read_space(runtime, space_id)? {
         return Ok(snapshot);
     }
-    let legacy = read_workspace()?;
-    runtime::initialize_space(&runtime_root()?, &space_id, &legacy)
+    let legacy = read_workspace_at(runtime, space_id)?;
+    runtime::initialize_space(runtime, space_id, &legacy)
 }
 
 /// Apply a bounded Space mutation through the Runtime and refresh the old JSON
 /// file as a compatibility/export snapshot. The JSON file is no longer read as
 /// authority after Runtime initialization.
 pub fn runtime_space_apply(
+    request: runtime::RuntimeSpaceApplyV1,
+) -> Result<runtime::RuntimeSpaceSnapshotV1, String> {
+    let runtime = runtime_root()?;
+    runtime_space_apply_at(&runtime, request)
+}
+
+pub(crate) fn runtime_space_apply_at(
+    runtime: &Path,
     mut request: runtime::RuntimeSpaceApplyV1,
 ) -> Result<runtime::RuntimeSpaceSnapshotV1, String> {
     let space_id = request
         .space_id
         .clone()
-        .unwrap_or_else(selected_workspace_id);
+        .unwrap_or_else(|| selected_workspace_id(runtime));
     request.space_id = Some(space_id.clone());
-    let _ = runtime_space_snapshot(Some(space_id.clone()))?;
-    let snapshot = runtime::apply_space(&runtime_root()?, &space_id, &request)?;
-    write_workspace_snapshot(&snapshot.document)?;
+    // Resolve selection once and hold the same compatibility lock through the
+    // mutation and export. A selection change cannot redirect either half.
+    let path = workspace_path(runtime, &space_id)?;
+    fs::create_dir_all(path.parent().ok_or("HII state path has no parent.")?)
+        .map_err(|error| error.to_string())?;
+    let _lock = WorkspaceFileLock::acquire(&path)?;
+    let _ = runtime_space_snapshot_at(runtime, &space_id)?;
+    let snapshot = runtime::apply_space(runtime, &space_id, &request)?;
+    atomic_json_write(&path, &snapshot.document)?;
     Ok(snapshot)
 }
 
@@ -207,44 +241,37 @@ pub fn runtime_space_history(
     space_id: Option<String>,
     limit: Option<usize>,
 ) -> Result<Vec<runtime::RuntimeEventV1>, String> {
-    let space_id = space_id.unwrap_or_else(selected_workspace_id);
-    let _ = runtime_space_snapshot(Some(space_id.clone()))?;
-    runtime::history(&runtime_root()?, &space_id, limit.unwrap_or(100))
+    let runtime = runtime_root()?;
+    let space_id = space_id.unwrap_or_else(|| selected_workspace_id(&runtime));
+    let _ = runtime_space_snapshot_at(&runtime, &space_id)?;
+    runtime::history(&runtime, &space_id, limit.unwrap_or(100))
 }
 
 pub fn runtime_share_create(
     mut request: runtime::RuntimeShareRequestV1,
 ) -> Result<runtime::RuntimeShareBundleV1, String> {
+    let runtime = runtime_root()?;
     let space_id = request
         .space_id
         .clone()
-        .unwrap_or_else(selected_workspace_id);
+        .unwrap_or_else(|| selected_workspace_id(&runtime));
     request.space_id = Some(space_id.clone());
-    let _ = runtime_space_snapshot(Some(space_id))?;
-    runtime::create_share_bundle(&runtime_root()?, &request)
+    let _ = runtime_space_snapshot_at(&runtime, &space_id)?;
+    runtime::create_share_bundle(&runtime, &request)
 }
 
 pub fn runtime_share_list(
     space_id: Option<String>,
 ) -> Result<Vec<runtime::RuntimeShareRecordV1>, String> {
-    let space_id = space_id.unwrap_or_else(selected_workspace_id);
-    runtime::list_shares(&runtime_root()?, &space_id)
+    let runtime = runtime_root()?;
+    let space_id = space_id.unwrap_or_else(|| selected_workspace_id(&runtime));
+    runtime::list_shares(&runtime, &space_id)
 }
 
 pub fn runtime_share_revoke(
     request: runtime::RuntimeShareRevokeRequestV1,
 ) -> Result<runtime::RuntimeShareRecordV1, String> {
     runtime::revoke_share(&runtime_root()?, &request)
-}
-
-fn write_workspace_snapshot(document: &Value) -> Result<(), String> {
-    let path = workspace_path()?;
-    let parent = path
-        .parent()
-        .ok_or_else(|| "HII state path has no parent.".to_string())?;
-    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    let _lock = WorkspaceFileLock::acquire(&path)?;
-    atomic_json_write(&path, document)
 }
 
 struct WorkspaceFileLock {
@@ -257,7 +284,9 @@ impl WorkspaceFileLock {
         let mut lock_name = workspace_path.as_os_str().to_os_string();
         lock_name.push(".lock");
         let lock_path = PathBuf::from(lock_name);
-        for _ in 0..40 {
+        // A writer can be pre-empted while another process holds this lock.
+        // Give it a bounded five seconds before reporting contention.
+        for _ in 0..200 {
             match fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -404,6 +433,14 @@ mod tests {
             "payload": { "text": "preserved" }
         }]);
         atomic_json_write(&workspace, &typescript_winner).unwrap();
+        // Selection can change while this writer waits. The revision must be
+        // checked against the file it locked, not the newly selected canvas.
+        atomic_json_write(&workspaces.join("other-space.json"), &empty_workspace()).unwrap();
+        atomic_json_write(
+            &workspace_dir.join("selection.json"),
+            &json!({"workspaceId": "other-space"}),
+        )
+        .unwrap();
         drop(lock_handle);
         fs::remove_file(&lock).unwrap();
 

@@ -53,46 +53,8 @@ impl AgentManager {
         let codex = provider_status("codex")?;
         let claude = provider_status("claude")?;
         Ok(format!(
-            "local   HII Native · hardware-optimized private runtime\ncodex   {codex}\nclaude  {claude}\n\n/login codex  ·  /login claude\nCompatibility providers remain opt-in through explicit configuration."
+            "local   HII · hardware-optimized private runtime\ncodex   {codex}\nclaude  {claude}\n\n/login codex  ·  /login claude\nCompatibility providers remain opt-in through explicit configuration."
         ))
-    }
-
-    /// Return the hosted model routes HII can invoke without claiming a full
-    /// vendor catalog that the installed CLIs do not expose.
-    pub fn model_routes(&self) -> Vec<(String, String, String)> {
-        let codex = provider_status("codex").unwrap_or_else(|_| "unavailable".into());
-        let claude = provider_status("claude").unwrap_or_else(|_| "unavailable".into());
-        Self::hosted_model_routes()
-            .into_iter()
-            .map(|(provider, model)| {
-                let status = if provider == "Codex" {
-                    codex.as_str()
-                } else {
-                    claude.as_str()
-                };
-                (provider.into(), model.into(), status.into())
-            })
-            .collect()
-    }
-
-    pub fn hosted_model_choices() -> Vec<(String, String)> {
-        Self::hosted_model_routes()
-            .into_iter()
-            .map(|(provider, model)| (provider.into(), model.into()))
-            .collect()
-    }
-
-    /// Fast, no-auth-probe route list for keystroke-driven picker rendering.
-    fn hosted_model_routes() -> Vec<(&'static str, &'static str)> {
-        [
-            ("Claude", "default"),
-            ("Claude", "fable"),
-            ("Claude", "opus"),
-            ("Claude", "sonnet"),
-            ("Codex", "default"),
-        ]
-        .into_iter()
-        .collect()
     }
 
     /// Hand the terminal directly to the provider's official login flow. HII

@@ -68,8 +68,8 @@ esac
 target="${arch_part}-${os_part}"
 archive="hii-${target}.tar.gz"
 
-# Assets default to GitHub releases but can be served from anywhere — HII's own
-# domain, or a mirror — by setting HII_INSTALL_BASE_URL. The layout it must
+# Latest assets come from HII; explicit tags come from GitHub releases. A mirror
+# can be selected with HII_INSTALL_BASE_URL. The layout it must
 # serve is flat: <base>/hii-<target>.tar.gz and <base>/SHA256SUMS.
 if [ -n "${HII_INSTALL_BASE_URL:-}" ]; then
     base="${HII_INSTALL_BASE_URL%/}"

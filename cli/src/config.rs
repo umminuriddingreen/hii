@@ -6,7 +6,7 @@ use std::{
 
 pub const DEFAULT_MODEL: &str = "qwen3.6:35b-mlx";
 pub const DEFAULT_REVIEW_MODEL: &str = "qwen3.6:35b-mlx";
-/// HII Native names models by HuggingFace repo id, so an Ollama tag can never
+/// HII names models by HuggingFace repo id, so an Ollama tag can never
 /// match there. Each provider therefore carries its own default rather than
 /// sharing one string that is only valid on one runtime.
 pub const DEFAULT_NATIVE_MODEL: &str = "mlx-community/Qwen3.8-27B-4bit";
@@ -19,7 +19,7 @@ pub const OX_ALPHA_WEB_URL: &str = "https://oxalpha.com";
 /// time; this bounds it in work.
 pub const DEFAULT_MAX_STEPS: usize = 60;
 
-/// Which local model runtime we are talking to. LM Studio and HII Native expose
+/// Which local model runtime we are talking to. LM Studio and HII expose
 /// OpenAI-compatible endpoints; Ollama uses its native API for richer local
 /// metadata and streaming controls.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,7 +68,7 @@ impl ModelProvider {
     fn from_env_value(value: &str) -> Option<Self> {
         match value.to_ascii_lowercase().as_str() {
             "lmstudio" | "lm-studio" | "lm_studio" => Some(ModelProvider::LmStudio),
-            "native" | "hii-native" | "hii_native" => Some(ModelProvider::Native),
+            "hii" | "native" | "hii-native" | "hii_native" => Some(ModelProvider::Native),
             "ollama" => Some(ModelProvider::Ollama),
             "rapid-mlx" | "rapidmlx" | "rapid_mlx" | "rapid" => Some(ModelProvider::RapidMlx),
             "ox-alpha-web" | "oxalpha-web" | "oxalpha" | "ox-alpha" => {
@@ -113,7 +113,7 @@ impl ModelProvider {
     /// Stable provider label used in status/logging.
     pub fn label(self) -> &'static str {
         match self {
-            ModelProvider::Native => "HII Native",
+            ModelProvider::Native => "HII",
             ModelProvider::LmStudio => "LM Studio",
             ModelProvider::Ollama => "Ollama",
             ModelProvider::RapidMlx => "Rapid-MLX",

@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod admin;
+mod browser_snapshot;
 mod chat;
 mod device;
 mod feed;
@@ -155,10 +156,18 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
             if !rate_limit(request, env, &db, "web-search", 100_000).await? {
                 return secure_no_store(api_error(429, "rate_limited")?);
             }
-            return secure_no_store(search::handle_search(request, env).await?);
+            return secure_no_store(search::handle_search(request).await?);
         }
         if remote::is_remote_host_socket(&path) {
             return remote::handle_host_socket(request, env).await;
+        }
+        if browser_snapshot::is_native_browser_snapshot_path(&path) {
+            if request.headers().get("origin")?.is_some() {
+                return secure_no_store(api_error(403, "native_device_required")?);
+            }
+            return secure_no_store(
+                browser_snapshot::handle_native_browser_snapshot_api(request, env, &db).await?,
+            );
         }
         if device::is_native_device_path(&path) {
             if request.headers().get("origin")?.is_some() {
@@ -172,6 +181,7 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
         if path.starts_with("/api/chat")
             || device::is_account_device_path(&path)
             || workspace::is_workspace_api_path(&path)
+            || browser_snapshot::is_browser_snapshot_path(&path)
             || feed::is_feed_api_path(&path)
             || remote::is_remote_api_path(&path)
         {
@@ -188,6 +198,8 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
                     "device-write"
                 } else if workspace::is_workspace_api_path(&path) {
                     "workspace-write"
+                } else if browser_snapshot::is_browser_snapshot_path(&path) {
+                    "browser-snapshot-write"
                 } else if remote::is_remote_api_path(&path) {
                     "remote-write"
                 } else {
@@ -234,6 +246,18 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
                     workspace::handle_workspace_api(request, &db, &session).await?,
                 );
             }
+            if browser_snapshot::is_browser_snapshot_path(&path) {
+                return secure_no_store(
+                    browser_snapshot::handle_browser_snapshot_api(
+                        request,
+                        env,
+                        &db,
+                        &session.account_id,
+                        &session.csrf_token,
+                    )
+                    .await?,
+                );
+            }
             let actor =
                 feed::FeedActor::new(&session.account_id, &session.handle, &session.csrf_token);
             return secure_no_store(feed::handle_feed_request(request, &db, &actor).await?);
@@ -278,12 +302,22 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
         return secure_no_store(api_error(405, "method_not_allowed")?);
     }
 
-    if let Some(target) = path.strip_prefix("/download/").filter(|target| {
-        matches!(
-            *target,
-            "windows" | "macos" | "windows.json" | "macos.json"
-        )
-    }) {
+    if path == "/install" {
+        let mut response = if method == Method::Head {
+            Response::empty()?
+        } else {
+            Response::ok(include_str!("../../../scripts/install.sh"))?
+        };
+        response
+            .headers_mut()
+            .set("Content-Type", "text/plain; charset=utf-8")?;
+        return secure_no_store(response);
+    }
+
+    if let Some(target) = path
+        .strip_prefix("/download/")
+        .filter(|target| matches!(*target, "windows" | "macos" | "windows.json" | "macos.json"))
+    {
         let Some(token) = cookie(request, SESSION_COOKIE)? else {
             return secure_no_store(api_error(401, "authentication_required")?);
         };
@@ -884,15 +918,7 @@ async fn download_desktop(request: &Request, env: &Env, platform: &str) -> Resul
 }
 
 async fn download_cli(request: &Request, env: &Env, asset: &str) -> Result<Response> {
-    const ASSETS: &[&str] = &[
-        "hii-macos-arm64.tar.gz",
-        "hii-macos-arm64.tar.gz.sha256",
-        "hii-linux-x64.tar.gz",
-        "hii-linux-x64.tar.gz.sha256",
-        "hii-windows-x64.zip",
-        "hii-windows-x64.zip.sha256",
-    ];
-    if !ASSETS.contains(&asset) {
+    if !valid_cli_asset(asset) {
         return api_error(404, "release_not_found");
     }
     let bucket = env.bucket("DOWNLOADS")?;
@@ -917,6 +943,28 @@ async fn download_cli(request: &Request, env: &Env, asset: &str) -> Result<Respo
         return api_error(404, "release_not_found");
     };
     downloadable(request, object, asset, None)
+}
+
+fn valid_cli_asset(asset: &str) -> bool {
+    const LEGACY_ASSETS: &[&str] = &[
+        "hii-macos-arm64.tar.gz",
+        "hii-macos-arm64.tar.gz.sha256",
+        "hii-linux-x64.tar.gz",
+        "hii-linux-x64.tar.gz.sha256",
+        "hii-windows-x64.zip",
+        "hii-windows-x64.zip.sha256",
+    ];
+    const TARGETS: &[&str] = &[
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-unknown-linux-gnu",
+    ];
+    asset == "SHA256SUMS"
+        || LEGACY_ASSETS.contains(&asset)
+        || TARGETS
+            .iter()
+            .any(|target| asset == format!("hii-{target}.tar.gz"))
 }
 
 async fn download_ui(request: &Request, env: &Env, asset: &str) -> Result<Response> {
@@ -1003,7 +1051,33 @@ fn valid_cli_tag(tag: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{SessionResponse, normalize_handle, valid_cli_tag, valid_ui_asset};
+    use super::{
+        SessionResponse, normalize_handle, valid_cli_asset, valid_cli_tag, valid_ui_asset,
+    };
+
+    #[test]
+    fn cli_distribution_accepts_installer_contract_and_legacy_assets_only() {
+        for asset in [
+            "SHA256SUMS",
+            "hii-aarch64-apple-darwin.tar.gz",
+            "hii-x86_64-apple-darwin.tar.gz",
+            "hii-aarch64-unknown-linux-gnu.tar.gz",
+            "hii-x86_64-unknown-linux-gnu.tar.gz",
+            "hii-macos-arm64.tar.gz",
+            "hii-macos-arm64.tar.gz.sha256",
+            "hii-windows-x64.zip",
+        ] {
+            assert!(valid_cli_asset(asset), "{asset}");
+        }
+        for asset in [
+            "../SHA256SUMS",
+            "latest.json",
+            "hii-unknown.tar.gz",
+            "hii-aarch64-apple-darwin.tar.gz/extra",
+        ] {
+            assert!(!valid_cli_asset(asset), "{asset}");
+        }
+    }
 
     #[test]
     fn authenticated_sessions_expose_an_opaque_canvas_scope() {

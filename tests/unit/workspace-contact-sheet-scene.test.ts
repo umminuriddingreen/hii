@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { organizeContactSheetReviewSet } from '../../lib/workspace/contact-sheet-scene';
-import { emptyWorkspaceHistory, recordWorkspaceChange, undoWorkspace } from '../../lib/workspace/history';
+import { reverseWorkspaceChange } from '../../lib/workspace/reverse-change';
 import { normalizeWorkspace, type WorkspaceDoc, type WorkspaceNode } from '../../lib/workspace/types';
 
 const hashes = ['1', '2', '3'].map((value) => value.padStart(64, '0'));
@@ -124,11 +124,10 @@ describe('contact-sheet review-set Scenes', () => {
       sceneId: 'scene-facades',
       now: '2026-07-30T12:00:00.000Z'
     });
-    const history = recordWorkspaceChange(emptyWorkspaceHistory(), before);
-    const undone = organized ? undoWorkspace(history, organized.doc) : null;
+    const undone = organized ? reverseWorkspaceChange(before, organized.doc, organized.doc) : null;
 
-    expect(undone?.doc.nodes).toEqual(before.nodes);
-    expect(undone?.doc.revision).toBe(before.revision);
+    expect(undone?.nodes.map(({ updatedAt, ...node }) => node)).toEqual(before.nodes.map(({ updatedAt, ...node }) => node));
+    expect(undone?.revision).toBe(before.revision);
   });
 
   it('requires at least two exact selected references', () => {

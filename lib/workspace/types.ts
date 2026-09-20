@@ -139,6 +139,58 @@ export type WorkspaceNodePermissions = {
   inheritance: 'space-policy';
 };
 
+/**
+ * A point in workspace space. The 2D canvas is the plane z = 0.
+ */
+export type Vec3 = { x: number; y: number; z: number };
+
+/** Orientation as a unit quaternion. Identity is `{ x: 0, y: 0, z: 0, w: 1 }`. */
+export type Quaternion = { x: number; y: number; z: number; w: number };
+
+/**
+ * The full spatial placement of an object.
+ *
+ * The 2D and 3D views are two projections of this one value, not two systems
+ * kept in sync by hand. `position`/`rotation`/`scale` are authoritative;
+ * `x`/`y`/`rotation` on the node are the 2D projection of the same placement
+ * and are reconciled on every normalize, so code written against either one
+ * reads the same truth.
+ *
+ * `size` carries the object's extent. Depth defaults to zero because a canvas
+ * card is a plane, and a plane given arbitrary thickness renders as a slab
+ * nobody asked for.
+ */
+export type WorkspaceTransform = {
+  position: Vec3;
+  rotation: Quaternion;
+  scale: Vec3;
+  size: Vec3;
+};
+
+export const IDENTITY_QUATERNION: Quaternion = { x: 0, y: 0, z: 0, w: 1 };
+
+/** Rotation about the view axis, which is the only rotation a 2D canvas can express. */
+export function quaternionFromZDegrees(degrees: number): Quaternion {
+  const half = ((Number.isFinite(degrees) ? degrees : 0) * Math.PI) / 360;
+  return { x: 0, y: 0, z: Math.sin(half), w: Math.cos(half) };
+}
+
+/**
+ * Recover the 2D rotation from a quaternion.
+ *
+ * Any out-of-plane component is dropped rather than approximated: the 2D view
+ * cannot draw it, and inventing an angle for it would make a card jump when a
+ * 3D rotation is projected back down.
+ */
+export function zDegreesFromQuaternion(rotation: Quaternion): number {
+  const angle = Math.atan2(
+    2 * (rotation.w * rotation.z + rotation.x * rotation.y),
+    1 - 2 * (rotation.y * rotation.y + rotation.z * rotation.z)
+  );
+  const degrees = (angle * 180) / Math.PI;
+  return Number.isFinite(degrees) ? degrees : 0;
+}
+
 export type WorkspaceNode = {
   id: string;
   type: WorkspaceNodeType;
@@ -146,6 +198,21 @@ export type WorkspaceNode = {
   spaceId?: string;
   /** Object attribution such as `user:<id>` or `guest:<id>`. */
   creatorId?: string;
+  /**
+   * The `@name` the user assigned to this object.
+   *
+   * Absent means the object is still addressable by a handle derived from its
+   * title; see `lib/workspace/handles.ts`. Only the authored name lives in the
+   * document, because only the authored name is meant to survive a retitle.
+   */
+  handle?: string;
+  /**
+   * Authoritative spatial placement, shared by the 2D and 3D projections.
+   *
+   * Always present after `normalizeNode`. It is optional on the type only so
+   * that documents written before the 3D migration still parse.
+   */
+  transform?: WorkspaceTransform;
   x: number;
   y: number;
   w: number;
@@ -172,6 +239,55 @@ export type WorkspaceNode = {
 export function workspaceNodeTransform(node: Pick<WorkspaceNode, 'x' | 'y' | 'rotation'>) {
   const rotation = typeof node.rotation === 'number' && Number.isFinite(node.rotation) ? node.rotation : 0;
   return `translate3d(${node.x}px, ${node.y}px, 0) rotate(${rotation}deg)`;
+}
+
+/**
+ * The node's placement in world space.
+ *
+ * Note what is *not* here: `node.z`. That field is paint order for the 2D
+ * canvas — the stacking index handed out by `nextZ` — and reading it as depth
+ * would scatter every card along the view axis by how recently it was touched.
+ * Depth is `transform.position.z`, and it is zero until something sets it.
+ */
+export function workspaceNodeTransform3D(node: WorkspaceNode): WorkspaceTransform {
+  if (node.transform) return node.transform;
+  return {
+    position: { x: node.x, y: node.y, z: 0 },
+    rotation: quaternionFromZDegrees(node.rotation ?? 0),
+    scale: { x: 1, y: 1, z: 1 },
+    size: { x: node.w, y: node.h, z: 0 }
+  };
+}
+
+/**
+ * Rebuild a node's 2D projection from its authoritative transform.
+ *
+ * Every write path should go through this rather than setting `x`/`y` beside
+ * `transform`, which is how the two representations drift apart.
+ */
+export function withWorkspaceTransform(node: WorkspaceNode, transform: WorkspaceTransform): WorkspaceNode {
+  return {
+    ...node,
+    transform,
+    x: transform.position.x,
+    y: transform.position.y,
+    w: Math.max(40, transform.size.x),
+    h: Math.max(28, transform.size.y),
+    rotation: zDegreesFromQuaternion(transform.rotation)
+  };
+}
+
+/** Move a node in world space, keeping both projections consistent. */
+export function moveWorkspaceNode(node: WorkspaceNode, position: Partial<Vec3>): WorkspaceNode {
+  const current = workspaceNodeTransform3D(node);
+  return withWorkspaceTransform(node, {
+    ...current,
+    position: {
+      x: isFiniteNumber(position.x) ? position.x : current.position.x,
+      y: isFiniteNumber(position.y) ? position.y : current.position.y,
+      z: isFiniteNumber(position.z) ? position.z : current.position.z
+    }
+  });
 }
 
 export type WorkspaceViewport = { x: number; y: number; zoom: number };
@@ -327,6 +443,85 @@ export function normalizeSpatialObject(raw: unknown): SpatialObjectMetadata | un
   };
 }
 
+function normalizeHandleField(raw: unknown): string | undefined {
+  const handle = String(raw ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+  return handle || undefined;
+}
+
+function vec3(raw: unknown, fallback: Vec3): Vec3 {
+  const value = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  return {
+    x: isFiniteNumber(value.x) ? value.x : fallback.x,
+    y: isFiniteNumber(value.y) ? value.y : fallback.y,
+    z: isFiniteNumber(value.z) ? value.z : fallback.z
+  };
+}
+
+/**
+ * Reconcile the stored transform against the 2D fields.
+ *
+ * A document written before the migration has no transform, so one is built
+ * from `x`/`y`/`w`/`h`/`rotation` at depth zero. A document that has both is
+ * trusted on the transform, because that is the authoritative half — but a
+ * non-unit quaternion is renormalized rather than accepted, since an
+ * unnormalized rotation silently scales everything it is applied to.
+ */
+function normalizeTransform(
+  raw: unknown,
+  plane: { x: number; y: number; w: number; h: number; rotation: number }
+): WorkspaceTransform {
+  const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
+
+  // The plane wins on everything the plane can express.
+  //
+  // `x/y/w/h/rotation` are what every existing writer patches - the canvas
+  // drag, the realtime move event, the replication merge - and none of them
+  // know `transform` exists. If a stored transform could override them, a
+  // plain 2D move would silently snap back to wherever the object last was in
+  // 3D, and the move would look like it never happened. So the transform
+  // carries only what the plane cannot say: depth, scale, and off-axis
+  // rotation. A 3D writer patches both together (see WorkspaceScene3D).
+  const storedPosition = vec3(source?.position, { x: plane.x, y: plane.y, z: 0 });
+  const storedSize = vec3(source?.size, { x: plane.w, y: plane.h, z: 0 });
+  const position = { x: plane.x, y: plane.y, z: storedPosition.z };
+  const size = { x: plane.w, y: plane.h, z: storedSize.z };
+  const scale = vec3(source?.scale, { x: 1, y: 1, z: 1 });
+
+  const rawRotation = source?.rotation && typeof source.rotation === 'object'
+    ? (source.rotation as Record<string, unknown>)
+    : null;
+  const stored = rawRotation
+    ? {
+        x: isFiniteNumber(rawRotation.x) ? rawRotation.x : 0,
+        y: isFiniteNumber(rawRotation.y) ? rawRotation.y : 0,
+        z: isFiniteNumber(rawRotation.z) ? rawRotation.z : 0,
+        w: isFiniteNumber(rawRotation.w) ? rawRotation.w : 1
+      }
+    : null;
+  // Off-axis tilt has no 2D equivalent, so a stored quaternion is kept as long
+  // as it still agrees with `node.rotation`. Once they disagree the plane has
+  // been rotated by a 2D writer, and it is the one telling the truth.
+  const storedDegrees = stored ? zDegreesFromQuaternion(stored) : null;
+  let rotation = stored && storedDegrees !== null && Math.abs(storedDegrees - plane.rotation) < 0.01
+    ? stored
+    : quaternionFromZDegrees(plane.rotation);
+  const length = Math.hypot(rotation.x, rotation.y, rotation.z, rotation.w);
+  rotation = length > 0
+    ? { x: rotation.x / length, y: rotation.y / length, z: rotation.z / length, w: rotation.w / length }
+    : IDENTITY_QUATERNION;
+
+  return {
+    position,
+    rotation,
+    scale: { x: scale.x || 1, y: scale.y || 1, z: scale.z || 1 },
+    size: { x: Math.max(40, size.x), y: Math.max(28, size.y), z: Math.max(0, size.z) }
+  };
+}
+
 export function normalizeNode(raw: unknown): WorkspaceNode | null {
   if (!raw || typeof raw !== 'object') return null;
   const node = raw as Record<string, unknown>;
@@ -347,17 +542,39 @@ export function normalizeNode(raw: unknown): WorkspaceNode | null {
     && (node.permissions as Record<string, unknown>).inheritance === 'space-policy'
     ? { inheritance: 'space-policy' as const }
     : undefined;
+  const plane = {
+    x: node.x as number,
+    y: node.y as number,
+    w: Math.max(40, node.w as number),
+    h: Math.max(28, node.h as number),
+    rotation: isFiniteNumber(node.rotation) ? node.rotation : 0
+  };
+  const transform = normalizeTransform(node.transform, plane);
+  // Stored only when it says something the plane cannot: depth, scale, or
+  // off-axis rotation. A transform that merely restates `x/y/w/h/rotation` is
+  // pure duplication - it doubles every document, and it gives a stale copy of
+  // the plane somewhere to hide. `workspaceNodeTransform3D` derives it on
+  // demand for the 3D view, so nothing needs the stored form to be present.
+  const flat = transform.position.z === 0
+    && transform.size.z === 0
+    && transform.scale.x === 1
+    && transform.scale.y === 1
+    && transform.scale.z === 1
+    && transform.rotation.x === 0
+    && transform.rotation.y === 0;
   return {
     id: node.id.slice(0, 64),
     type: node.type as WorkspaceNodeType,
     spaceId: sanitizeText(node.spaceId, 160),
     creatorId: sanitizeText(node.creatorId, 160),
-    x: node.x as number,
-    y: node.y as number,
-    w: Math.max(40, node.w as number),
-    h: Math.max(28, node.h as number),
+    handle: normalizeHandleField(node.handle),
+    ...(flat ? {} : { transform }),
+    x: plane.x,
+    y: plane.y,
+    w: plane.w,
+    h: plane.h,
     z: isFiniteNumber(node.z) ? node.z : 1,
-    rotation: isFiniteNumber(node.rotation) ? node.rotation : 0,
+    rotation: plane.rotation,
     createdAt: typeof node.createdAt === 'string' ? node.createdAt : now,
     updatedAt: typeof node.updatedAt === 'string' ? node.updatedAt : now,
     permissions,

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { readWorkspace, writeWorkspace } from '@/lib/client/hii-bridge';
 import { rebaseWorkspaceDoc, reconcileWorkspaceSave } from '@/lib/workspace/rebase';
+import { reverseWorkspaceChange } from '@/lib/workspace/reverse-change';
 import { emptyWorkspace, type WorkspaceDoc, type WorkspaceNode, type WorkspaceViewport } from '@/lib/workspace/types';
 
 export type WorkspaceApi = {
@@ -11,6 +12,7 @@ export type WorkspaceApi = {
   syncError: string | null;
   hasUnsavedChanges: boolean;
   retrySave: () => void;
+  flush: () => Promise<WorkspaceDoc>;
   nodes: WorkspaceNode[];
   addNode: (node: WorkspaceNode) => void;
   patchNode: (id: string, patch: Partial<WorkspaceNode>) => void;
@@ -53,8 +55,10 @@ export function useWorkspace(
   const epoch = useRef(0);
   const inFlight = useRef<Promise<void> | null>(null);
   const persistRef = useRef<() => Promise<void>>(async () => undefined);
-  const past = useRef<WorkspaceNode[][]>([]);
-  const future = useRef<WorkspaceNode[][]>([]);
+  const saveError = useRef<Error | null>(null);
+  type Change = { before: WorkspaceDoc; after: WorkspaceDoc };
+  const past = useRef<Change[]>([]);
+  const future = useRef<Change[]>([]);
 
   const receive = useCallback((source: WorkspaceDoc) => {
     if (source.revision <= authoritative.current.revision) return;
@@ -77,6 +81,7 @@ export function useWorkspace(
     const scope = epoch.current;
     const next = { ...current.current, viewport: getViewport(), updatedAt: new Date().toISOString() };
     saveInFlight.current = true;
+    saveError.current = null;
     setSaving(true);
     try {
       const saved = await (persistence?.write(next) ?? writeWorkspace(next));
@@ -93,6 +98,7 @@ export function useWorkspace(
       if (changedWhileSaving) saveQueued.current = true;
     } catch (error) {
       if (scope !== epoch.current) return;
+      saveError.current = error instanceof Error ? error : new Error(String(error));
       setSyncError(error instanceof Error ? error.message : String(error));
     } finally {
       if (scope !== epoch.current) return;
@@ -109,6 +115,23 @@ export function useWorkspace(
     }
   }, [getViewport, persistence]);
   persistRef.current = persist;
+
+  const flush = useCallback(async () => {
+    const scope = epoch.current;
+    if (!loaded.current) throw new Error('Workspace is not loaded.');
+    do {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      if (saveInFlight.current) await inFlight.current;
+      else if (dirty.current) {
+        inFlight.current = persistRef.current();
+        await inFlight.current;
+      }
+      if (scope !== epoch.current) throw new Error('Workspace changed while saving.');
+      if (saveError.current) throw saveError.current;
+    } while (dirty.current || saveInFlight.current);
+    return authoritative.current;
+  }, []);
 
   const scheduleSave = useCallback(() => {
     if (!loaded.current) return;
@@ -127,6 +150,7 @@ export function useWorkspace(
     dirty.current = false;
     saveInFlight.current = false;
     saveQueued.current = false;
+    saveError.current = null;
     inFlight.current = null;
     current.current = emptyWorkspace();
     authoritative.current = current.current;
@@ -212,12 +236,14 @@ export function useWorkspace(
     if (!loaded.current) return;
     const before = current.current;
     mutationVersion.current += 1;
-    past.current.push(before.nodes);
-    if (past.current.length > 80) past.current.shift();
-    future.current = [];
     // Revision is the authoritative Runtime sequence. Local optimistic edits
     // keep the last observed sequence; persistence advances it atomically.
-    const next = { ...before, nodes: change(before.nodes), updatedAt: new Date().toISOString() };
+    const nodes = change(before.nodes);
+    const ids = new Set(nodes.map(node => node.id));
+    const next = { ...before, nodes, links: before.links.filter(link => ids.has(link.fromId) && ids.has(link.toId)), updatedAt: new Date().toISOString() };
+    past.current.push({ before, after: next });
+    if (past.current.length > 80) past.current.shift();
+    future.current = [];
     current.current = next;
     setDocument(next);
     scheduleSave();
@@ -236,11 +262,12 @@ export function useWorkspace(
     if (node) patchNode(id, { z: takeZ() });
   }, [patchNode, takeZ]);
 
-  const restore = useCallback((source: React.MutableRefObject<WorkspaceNode[][]>, destination: React.MutableRefObject<WorkspaceNode[][]>) => {
-    const nodes = source.current.pop();
-    if (!nodes) return;
-    destination.current.push(current.current.nodes);
-    const next = { ...current.current, nodes, updatedAt: new Date().toISOString() };
+  const restore = useCallback((source: React.MutableRefObject<Change[]>, destination: React.MutableRefObject<Change[]>) => {
+    const change = source.current.pop();
+    if (!change) return;
+    const before = current.current;
+    const next = reverseWorkspaceChange(change.before, change.after, before);
+    destination.current.push({ before, after: next });
     mutationVersion.current += 1;
     current.current = next;
     setDocument(next);
@@ -252,6 +279,7 @@ export function useWorkspace(
     saving,
     syncError,
     hasUnsavedChanges,
+    flush,
     retrySave: () => {
       if (!loaded.current) setLoadAttempt((attempt) => attempt + 1);
       else if (dirty.current) inFlight.current = persistRef.current();

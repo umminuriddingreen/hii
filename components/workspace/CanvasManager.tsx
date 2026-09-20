@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
   canvasManagerBoards,
   canvasManagerHits,
@@ -8,6 +9,7 @@ import {
   type CanvasManagerHit
 } from '@/lib/workspace/canvas-manager';
 import type { WorkspaceNode } from '@/lib/workspace/types';
+import { searchCanvasWorkspaces, type SearchableWorkspace, type CrossWorkspaceHit } from '@/lib/workspace/cross-workspace-search';
 import styles from './CanvasManager.module.css';
 
 /**
@@ -24,9 +26,9 @@ export type CanvasManagerContext = {
   query: string;
   nodes: WorkspaceNode[];
   boards: CanvasManagerBoard[];
-  hits: CanvasManagerHit[];
+  hits: (CanvasManagerHit | CrossWorkspaceHit)[];
   focusBoard: (board: CanvasManagerBoard) => void;
-  focusNode: (node: WorkspaceNode) => void;
+  focusNode: (node: WorkspaceNode, workspaceId?: string) => void;
   close: () => void;
 };
 
@@ -59,10 +61,10 @@ const searchSection: CanvasManagerSection = {
       <ul className={styles.hits}>
         {hits.map((hit) => (
           <li key={hit.node.id}>
-            <button type="button" className={styles.hit} onClick={() => focusNode(hit.node)}>
+            <button type="button" className={styles.hit} onClick={() => focusNode(hit.node, 'workspaceId' in hit ? hit.workspaceId : undefined)}>
               <span className={styles.hitTitle}>{hit.title}</span>
               <span className={styles.hitMeta}>{hit.node.type.replaceAll('-', ' ')}</span>
-              <span className={styles.hitBoard}>{hit.boardTitle}</span>
+              <span className={styles.hitBoard}>{'workspaceTitle' in hit ? `${hit.workspaceTitle} · ` : ''}{'boardTitle' in hit ? hit.boardTitle : ''}</span>
             </button>
           </li>
         ))}
@@ -97,9 +99,14 @@ function BoardPreview({ board }: { board: CanvasManagerBoard }) {
 const feedSection: CanvasManagerSection = {
   id: 'feed',
   title: 'Your canvases',
-  render: ({ boards, query, focusBoard }) => {
+  render: ({ boards, query, focusBoard, close }) => {
     if (!boards.length) {
-      return <p className={styles.empty}>{query.trim() ? 'No board holds a match.' : 'No boards yet. Press F on the canvas to frame one.'}</p>;
+      return query.trim() ? <p className={styles.empty}>No board holds a match.</p> : (
+        <div className={styles.emptyState}>
+          <p className={styles.empty}>Nothing here yet. Return to the canvas and add text or a file to get started.</p>
+          <button type="button" className={styles.close} onClick={close}>Back to canvas</button>
+        </div>
+      );
     }
     return (
       <div className={styles.feed}>
@@ -109,7 +116,7 @@ const feedSection: CanvasManagerSection = {
             <span className={styles.cardText}>
               <span className={styles.cardTitle}>
                 {board.sequence ? <span className={styles.sequence}>{board.sequence}</span> : null}
-                {board.title}
+                <span className={styles.cardName}>{board.title}</span>
               </span>
               <span className={styles.cardMeta}>
                 {board.memberCount} object{board.memberCount === 1 ? '' : 's'} · {board.summary}
@@ -135,21 +142,68 @@ export function CanvasManager({
   onFocusBoard,
   onFocusNode,
   onClose,
+  searchWorkspaces,
+  currentWorkspaceId,
+  onFocusExternalNode,
   sections = CANVAS_MANAGER_SECTIONS
 }: {
   nodes: WorkspaceNode[];
   onFocusBoard: (board: CanvasManagerBoard) => void;
   onFocusNode: (node: WorkspaceNode) => void;
   onClose: () => void;
+  searchWorkspaces?: () => Promise<SearchableWorkspace[]>;
+  currentWorkspaceId?: string;
+  onFocusExternalNode?: (workspaceId: string, nodeId: string) => void;
   sections?: CanvasManagerSection[];
 }) {
   const [query, setQuery] = useState('');
+  const [external, setExternal] = useState<SearchableWorkspace[]>([]);
+  const [searchError, setSearchError] = useState('');
+  useEffect(() => {
+    if (!searchWorkspaces) return;
+    let cancelled = false;
+    void searchWorkspaces().then((documents) => { if (!cancelled) setExternal(documents); })
+      .catch(() => { if (!cancelled) setSearchError('Other workspaces could not be searched.'); });
+    return () => { cancelled = true; };
+  }, [searchWorkspaces]);
+  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const shellRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => { searchRef.current?.focus(); }, []);
+  useEffect(() => { setPortalRoot(document.body); }, []);
+
+  useEffect(() => {
+    if (!portalRoot) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    searchRef.current?.focus();
+    const containFocus = (event: FocusEvent) => {
+      if (event.target instanceof Node && !shellRef.current?.contains(event.target)) searchRef.current?.focus();
+    };
+    document.addEventListener('focusin', containFocus);
+    return () => {
+      document.removeEventListener('focusin', containFocus);
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+    };
+  }, [portalRoot]);
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
+      if (event.key === 'Tab') {
+        const controls = [...(shellRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button, input, select, textarea, [tabindex]'
+        ) ?? [])].filter((element) => element.tabIndex >= 0 && !element.matches(':disabled')
+          && !element.closest('[hidden], [inert]') && getComputedStyle(element).display !== 'none'
+          && getComputedStyle(element).visibility !== 'hidden');
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        const active = document.activeElement;
+        if (!first || !shellRef.current?.contains(active) || (event.shiftKey ? active === first : active === last)) {
+          event.preventDefault();
+          (event.shiftKey ? last : first)?.focus();
+        }
+        event.stopPropagation();
+        return;
+      }
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopPropagation();
@@ -161,7 +215,13 @@ export function CanvasManager({
   }, [onClose]);
 
   const boards = useMemo(() => canvasManagerBoards(nodes, query), [nodes, query]);
-  const hits = useMemo(() => canvasManagerHits(nodes, query), [nodes, query]);
+  const hits = useMemo(() => searchWorkspaces
+    ? searchCanvasWorkspaces(external.map((document) => document.id === currentWorkspaceId ? { ...document, nodes } : document), query)
+    : canvasManagerHits(nodes, query), [nodes, external, query, searchWorkspaces, currentWorkspaceId]);
+  const focusNode = (node: WorkspaceNode, workspaceId?: string) => {
+    if (workspaceId && onFocusExternalNode) onFocusExternalNode(workspaceId, node.id);
+    else onFocusNode(node);
+  };
 
   const context: CanvasManagerContext = {
     query,
@@ -169,7 +229,7 @@ export function CanvasManager({
     boards,
     hits,
     focusBoard: onFocusBoard,
-    focusNode: onFocusNode,
+    focusNode,
     close: onClose
   };
 
@@ -177,8 +237,12 @@ export function CanvasManager({
     .map((section) => ({ section, content: section.render(context) }))
     .filter((entry) => entry.content !== null && entry.content !== undefined);
 
-  return (
-    <div className={styles.shell} role="dialog" aria-modal="true" aria-label="Canvas manager">
+  if (!portalRoot) return null;
+
+  // Escape the canvas stacking context and its touch-action: none so this
+  // modal covers account controls and its feed can scroll on touch screens.
+  return createPortal(
+    <div ref={shellRef} className={styles.shell} role="dialog" aria-modal="true" aria-label="Canvas manager">
       <header className={styles.bar}>
         <span className={styles.title}>Canvases</span>
         <span className={styles.count}>{boards.length}</span>
@@ -194,7 +258,7 @@ export function CanvasManager({
             if (event.key !== 'Enter') return;
             event.preventDefault();
             const first = hits[0];
-            if (first) onFocusNode(first.node);
+            if (first) focusNode(first.node, 'workspaceId' in first ? first.workspaceId : undefined);
             else if (boards[0]) onFocusBoard(boards[0]);
           }}
         />
@@ -206,9 +270,11 @@ export function CanvasManager({
           <section key={section.id} className={styles.section}>
             <h2 className={styles.sectionTitle}>{section.title}</h2>
             {content}
+            {section.id === 'search' && searchError ? <p className={styles.empty} role="status">{searchError}</p> : null}
           </section>
         ))}
       </div>
-    </div>
+    </div>,
+    portalRoot
   );
 }

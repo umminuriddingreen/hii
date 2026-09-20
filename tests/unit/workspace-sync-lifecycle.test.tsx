@@ -50,6 +50,115 @@ afterEach(async () => {
 });
 
 describe('workspace synchronization lifecycle', () => {
+  it('undo and redo preserve independent agent objects and fields', async () => {
+    const { adapter, remote } = persistence();
+    await render(adapter);
+    act(() => api.patchNode('base', { x: 40 }));
+    await advance();
+    const external = doc(3, ['base', 'agent']);
+    external.nodes[0] = { ...external.nodes[0], x: 40, payload: { content: 'agent revision' } };
+    act(() => remote(external));
+    act(() => api.undo());
+    expect(api.nodes.map(n => n.id)).toEqual(['base', 'agent']);
+    expect(api.nodes[0]).toMatchObject({ x: 0, payload: { content: 'agent revision' } });
+    act(() => api.redo());
+    expect(api.nodes[0]).toMatchObject({ x: 40, payload: { content: 'agent revision' } });
+    expect(api.nodes.map(n => n.id)).toContain('agent');
+  });
+
+  it('undo does not overwrite a newer edit to the same field', async () => {
+    const { adapter, remote } = persistence();
+    await render(adapter);
+    act(() => api.patchNode('base', { x: 40 }));
+    await advance();
+    const external = doc(3, ['base']);
+    external.nodes[0].x = 90;
+    act(() => remote(external));
+    act(() => api.undo());
+    expect(api.nodes[0].x).toBe(90);
+  });
+
+  it('restores deleted node links without replacing independent remote links', async () => {
+    const initial = doc(1, ['base', 'other']);
+    initial.links = [{ id: 'original', fromId: 'base', toId: 'other' }];
+    const { adapter, remote } = persistence(initial);
+    await render(adapter);
+    act(() => api.removeNode('base'));
+    await act(async () => { await api.flush(); });
+    expect(vi.mocked(adapter.write).mock.calls[0][0].links).toEqual([]);
+    const external = doc(3, ['other', 'agent']);
+    external.links = [{ id: 'agent-link', fromId: 'other', toId: 'agent' }];
+    act(() => remote(external));
+    act(() => api.undo());
+    let restored!: WorkspaceDoc;
+    await act(async () => { restored = await api.flush(); });
+    expect(restored.links.map(link => link.id).sort()).toEqual(['agent-link', 'original']);
+    act(() => api.redo());
+    await act(async () => { restored = await api.flush(); });
+    expect(restored.links.map(link => link.id)).toEqual(['agent-link']);
+    expect(restored.nodes.map(n => n.id)).toEqual(['other', 'agent']);
+  });
+
+  it('flush commits debounced edits and returns the acknowledged revision', async () => {
+    const { adapter } = persistence();
+    await render(adapter);
+    act(() => api.addNode(node('selected')));
+    let committed!: WorkspaceDoc;
+    await act(async () => { committed = await api.flush(); });
+    expect(committed.revision).toBe(2);
+    expect(committed.nodes.map(n => n.id)).toContain('selected');
+    expect(api.hasUnsavedChanges).toBe(false);
+    await advance();
+    expect(adapter.write).toHaveBeenCalledTimes(1);
+  });
+
+  it('flush waits for edits made during an in-flight save', async () => {
+    const { adapter } = persistence();
+    const save = deferred<WorkspaceDoc>();
+    vi.mocked(adapter.write).mockImplementationOnce(() => save.promise);
+    await render(adapter);
+    act(() => api.addNode(node('first')));
+    await advance();
+    act(() => api.addNode(node('second')));
+    let committed!: WorkspaceDoc;
+    await act(async () => {
+      const flushing = api.flush();
+      save.resolve(doc(2, ['base', 'first']));
+      committed = await flushing;
+    });
+    expect(committed.revision).toBe(3);
+    expect(committed.nodes.map(n => n.id)).toContain('second');
+    expect(adapter.write).toHaveBeenCalledTimes(2);
+  });
+
+  it('flush rejects failed persistence instead of authorizing stale context', async () => {
+    const { adapter } = persistence();
+    await render(adapter);
+    act(() => api.addNode(node('selected')));
+    vi.mocked(adapter.write).mockRejectedValueOnce(new Error('disk unavailable'));
+    await act(async () => { await expect(api.flush()).rejects.toThrow('disk unavailable'); });
+    expect(api.hasUnsavedChanges).toBe(true);
+  });
+
+  it('flush rejects when its workspace changes while awaiting persistence', async () => {
+    const first = persistence();
+    const second = persistence(doc(1, ['other']));
+    const save = deferred<WorkspaceDoc>();
+    vi.mocked(first.adapter.write).mockImplementationOnce(() => save.promise);
+    await render(first.adapter);
+    act(() => api.addNode(node('selected')));
+    let flushing!: Promise<WorkspaceDoc>;
+    let rejected!: Promise<void>;
+    act(() => {
+      flushing = api.flush();
+      rejected = expect(flushing).rejects.toThrow('Workspace changed while saving.');
+    });
+    await render(second.adapter);
+    await act(async () => { save.resolve(doc(2, ['base', 'selected'])); await rejected; });
+    expect(api.nodes.map(n => n.id)).toEqual(['other']);
+    expect(second.adapter.write).not.toHaveBeenCalled();
+  });
+
   it('merges a remote poll during debounce without erasing the local addition', async () => {
     const { adapter, remote } = persistence();
     await render(adapter);

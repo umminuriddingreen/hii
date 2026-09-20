@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "kind": "hii.cli-stack-benchmark",
+  "generatedAt": "2026-09-08T16:00:34.537586+00:00",
+  "measurement": "end-to-end subprocess wall-clock time",
+  "prompt": "Reply with exactly these three words: local inference works",
+  "expectedOutput": "local inference works",
+  "note": "Models may differ. Compare stack latency only when model identity and runtime conditions are acceptable.",
+  "summary": [
+    {
+      "runner": "hii",
+      "model": "mlx-community/Qwen3.5-9B-MLX-4bit",
+      "successfulRuns": 3,
+      "totalRuns": 3,
+      "exactMatches": 3,
+      "medianMs": 359.3,
+      "minMs": 352.14,
+      "maxMs": 471.31,
+      "command": "hii ask --model mlx-community/Qwen3.5-9B-MLX-4bit --no-hooks '<prompt>'"
+    },
+    {
+      "runner": "ollama",
+      "model": "qwen3.8:27b-mlx",
+      "successfulRuns": 3,
+      "totalRuns": 3,
+      "exactMatches": 0,
+      "medianMs": 1361.69,
+      "minMs": 1317.97,
+      "maxMs": 1759.39,
+      "command": "ollama run qwen3.8:27b-mlx '<prompt>'"
+    },
+    {
+      "runner": "pi",
+      "model": "hii-native/mlx-community/Qwen3.5-9B-MLX-4bit",
+      "successfulRuns": 3,
+      "totalRuns": 3,
+      "exactMatches": 3,
+      "medianMs": 396.23,
+      "minMs": 395.09,
+      "maxMs": 417.95,
+      "command": "pi --print --no-session --no-tools --no-skills --no-extensions --no-context-files --provider hii-native --model mlx-community/Qwen3.5-9B-MLX-4bit --system-prompt 'Answer directly and concisely.' '<prompt>'"
+    }
+  ],
+  "runs": [
+    {
+      "runner": "hii",
+      "startedAt": "2026-09-08T16:00:27.705673+00:00",
+      "durationMs": 471.31,
+      "exitCode": 0,
+      "success": true,
+      "exactMatch": true,
+      "output": "local inference works",
+      "stderr": "",
+      "iteration": 1,
+      "model": "mlx-community/Qwen3.5-9B-MLX-4bit"
+    },
+    {
+      "runner": "ollama",
+      "startedAt": "2026-09-08T16:00:28.177173+00:00",
+      "durationMs": 1759.39,
+      "exitCode": 0,
+      "success": true,
+      "exactMatch": false,
+      "output": "Thinking...\nThe user wants me to reply with exactly three words: \"local inference works\u001b[5D\u001b[K\nworks\". Let me check - \"local\" (1), \"inference\" (2), \"works\" (3). Yes, that\u001b[4D\u001b[K\nthat's exactly three words. I should reply with nothing else, just those th\u001b[2D\u001b[K\nthree words.\n...done thinking.\n\nlocal inference works",
+      "stderr": "\u001b[?2026h\u001b[?25l\u001b[1G\u2819 \u001b[K\u001b[?25h\u001b[?2026l\u001b[?2026h\u001b[?25l\u001b[1G\u2839 \u001b[K\u001b[?25h\u001b[?2026l\u001b[?2026h\u001b[?25l\u001b[1G\u2838 \u001b[K\u001b[?25h\u001b[?2026l\u001b[?25l\u001b[?2026h\u001b[?25l\u001b[1G\u001b[K\u001b[?25h\u001b[?2026l\u001b[2K\u001b[1G\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h",
+      "iteration": 1,
+      "model": "qwen3.8:27b-mlx"
+    },
+    {
+      "runner": "pi",
+      "startedAt": "2026-09-08T16:00:29.936644+00:00",
+      "durationMs": 417.95,
+      "exitCode": 0,
+      "success": true,
+      "exactMatch": true,
+      "output": "local inference works",
+      "stderr": "",
+      "iteration": 1,
+      "model": "hii-native/mlx-community/Qwen3.5-9B-MLX-4bit"
+    },
+    {
+      "runner": "hii",
+      "startedAt": "2026-09-08T16:00:30.354670+00:00",
+      "durationMs": 359.3,
+      "exitCode": 0,
+      "success": true,
+      "exactMatch": true,
+      "output": "local inference works",
+      "stderr": "",
+      "iteration": 2,
+      "model": "mlx-community/Qwen3.5-9B-MLX-4bit"
+    },
+    {
+      "runner": "ollama",
+      "startedAt": "2026-09-08T16:00:30.714042+00:00",
+      "durationMs": 1317.97,
+      "exitCode": 0,
+      "success": true,
+      "exactMatch": false,
+      "output": "Thinking...\nThe user wants me to reply with exactly three words: \"local inference works\u001b[5D\u001b[K\nworks\". Let me check - \"local\", \"inference\", \"works\" - yes, that's exactly \u001b[K\nthree words. I should reply with nothing else, just those three words.\n...done thinking.\n\nlocal inference works",
+      "stderr": "\u001b[?25l\u001b[?2026h\u001b[?25l\u001b[1G\u001b[K\u001b[?25h\u001b[?2026l\u001b[2K\u001b[1G\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h",
+      "iteration": 2,
+      "model": "qwen3.8:27b-mlx"
+    },
+    {
+      "runner": "pi",
+      "startedAt": "2026-09-08T16:00:32.032075+00:00",
+      "durationMs": 395.09,
+      "exitCode": 0,
+      "success": true,
+      "exactMatch": true,
+      "output": "local inference works",
+      "stderr": "",
+      "iteration": 2,
+      "model": "hii-native/mlx-community/Qwen3.5-9B-MLX-4bit"
+    },
+    {
+      "runner": "hii",
+      "startedAt": "2026-09-08T16:00:32.427234+00:00",
+      "durationMs": 352.14,
+      "exitCode": 0,
+      "success": true,
+      "exactMatch": true,
+      "output": "local inference works",
+      "stderr": "",
+      "iteration": 3,
+      "model": "mlx-community/Qwen3.5-9B-MLX-4bit"
+    },
+    {
+      "runner": "ollama",
+      "startedAt": "2026-09-08T16:00:32.779445+00:00",
+      "durationMs": 1361.69,
+      "exitCode": 0,
+      "success": true,
+      "exactMatch": false,
+      "output": "Thinking...\nThe user wants me to reply with exactly three words: \"local inference works\u001b[5D\u001b[K\nworks\". Let me check - \"local\" (1), \"inference\" (2), \"works\" (3). Yes, that\u001b[4D\u001b[K\nthat's exactly three words. I should reply with just those three words and \u001b[K\nnothing else.\n...done thinking.\n\nlocal inference works",
+      "stderr": "\u001b[?2026h\u001b[?25l\u001b[1G\u2819 \u001b[K\u001b[?25h\u001b[?2026l\u001b[?25l\u001b[?2026h\u001b[?25l\u001b[1G\u001b[K\u001b[?25h\u001b[?2026l\u001b[2K\u001b[1G\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h\u001b[?25l\u001b[?25h",
+      "iteration": 3,
+      "model": "qwen3.8:27b-mlx"
+    },
+    {
+      "runner": "pi",
+      "startedAt": "2026-09-08T16:00:34.141199+00:00",
+      "durationMs": 396.23,
+      "exitCode": 0,
+      "success": true,
+      "exactMatch": true,
+      "output": "local inference works",
+      "stderr": "",
+      "iteration": 3,
+      "model": "hii-native/mlx-community/Qwen3.5-9B-MLX-4bit"
+    }
+  ]
+}

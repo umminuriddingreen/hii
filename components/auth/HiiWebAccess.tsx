@@ -3,10 +3,11 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AsciiWave } from '@/components/marketing/AsciiWave';
-import { HiiFirstRunTerminal } from '@/components/auth/HiiFirstRunTerminal';
 import { HiiRoot } from '@/components/workspace/HiiRoot';
+import { NativeDevBrowser } from '@/components/workspace/NativeDevBrowser';
 import { browserSpacePersistence } from '@/components/spaces/SpaceCanvas';
 import type { WorkspaceNode } from '@/lib/workspace/types';
+import type { SearchableWorkspace } from '@/lib/workspace/cross-workspace-search';
 import { browserCanvasSeedsFromFiles, hydrateBrowserCanvasAssets } from '@/lib/web/canvas-assets';
 import {
   AccountWorkspacePersistence,
@@ -28,6 +29,36 @@ import { HiiWebPanel, type WebPanel } from './HiiWebPanels';
 import styles from './HiiWebAccess.module.css';
 
 type AccessMode = 'login' | 'signup' | null;
+
+function HiiCanvasFrame({ accountName, workspaces, activeWorkspaceId, onWorkspaceSelect, onAccount, onFindObjects }: {
+  accountName: string;
+  workspaces: AccountWorkspaceSummary[];
+  activeWorkspaceId: string;
+  onWorkspaceSelect?: (id: string) => void;
+  onAccount: () => void;
+  onFindObjects: () => void;
+}) {
+  const [railOpen, setRailOpen] = useState(false);
+  const [browserOpen, setBrowserOpen] = useState(false);
+  const [browserUrl, setBrowserUrl] = useState('');
+  return <>
+    <button type="button" className={styles.railToggle} data-open={railOpen} data-workspace-ui aria-label={railOpen ? 'Hide navigation' : 'Show navigation'} onClick={() => setRailOpen((value) => !value)}>{railOpen ? '‹' : '☰'}</button>
+    {railOpen && <aside className={styles.workspaceRail} data-workspace-ui aria-label="Workspace navigation">
+      <div className={styles.railBrand}><strong>hii</strong><span>your workspace</span></div>
+      <nav aria-label="Workspace views">
+        <span aria-current="page">Canvas</span>
+        <button type="button" onClick={onFindObjects}>Find objects <small>all workspaces</small></button>
+        <button type="button" aria-pressed={browserOpen} onClick={() => setBrowserOpen((value) => !value)}>Browser <small>{browserOpen ? 'open' : 'closed'}</small></button>
+      </nav>
+      <section aria-label="Workspaces"><small>Workspaces</small>
+        {workspaces.length ? workspaces.map((workspace) => <button key={workspace.id} type="button" aria-current={workspace.id === activeWorkspaceId ? 'page' : undefined} onClick={() => onWorkspaceSelect?.(workspace.id)}>{workspace.name}<small>{workspace.role}</small></button>) : <p>Browser-only canvas</p>}
+      </section>
+      <footer><button type="button" onClick={onAccount}>{accountName}</button><small>⌘K for canvas commands</small></footer>
+    </aside>}
+    <button type="button" className={styles.browserToggle} data-workspace-ui aria-label={browserOpen ? 'Hide browser pane' : 'Show browser pane'} onClick={() => setBrowserOpen((value) => !value)}>{browserOpen ? '×' : '◎'}</button>
+    {browserOpen && <aside className={styles.browserDock} data-workspace-ui aria-label="Browser pane"><header><span>Browser</span><small>local-first</small></header><NativeDevBrowser nodeId="workspace-browser-dock" initialUrl={browserUrl} startEmpty={!browserUrl} docked onUrl={setBrowserUrl} /></aside>}
+  </>;
+}
 
 type Session = {
   authenticated: boolean;
@@ -152,8 +183,9 @@ function ProsumerLanding({ onLogin, onCreateAccount }: { onLogin: () => void; on
           <p className={styles.heroBody}>HII gives your files, notes, links, media, projects, and tools one working surface—then lets your own agent create with them.</p>
           <div className={styles.heroActions}>
             <button type="button" onClick={onCreateAccount}>create your HII</button>
-            <button type="button" onClick={onLogin}>open your workspace</button>
+            <a href="/">try the canvas</a>
           </div>
+          <p className={styles.heroNote}>Start in your browser. No account needed.</p>
         </div>
         <div className={styles.asciiStage} aria-label="Your information becoming usable">
           <AsciiWave className={styles.asciiWave} />
@@ -198,12 +230,13 @@ function ProsumerLanding({ onLogin, onCreateAccount }: { onLogin: () => void; on
 
 export function HiiWebAccess() {
   const [mode, setMode] = useState<AccessMode>(null);
+  const authRef = useRef<HTMLElement | null>(null);
   const [session, setSession] = useState<Session>({ authenticated: false });
+  const [browserOnly, setBrowserOnly] = useState(false);
   const [handle, setHandle] = useState('');
   const [message, setMessage] = useState('');
   const [accountOpen, setAccountOpen] = useState(false);
   const [cliLinkRequested, setCliLinkRequested] = useState(false);
-  const [firstRunDismissed, setFirstRunDismissed] = useState(false);
   const [productSite, setProductSite] = useState(false);
   const [deviceMessage, setDeviceMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -213,6 +246,8 @@ export function HiiWebAccess() {
   const [canvasImport, setCanvasImport] = useState<{ id: string; seed: ReturnType<typeof nodeSeedFromFeedSnapshot> } | null>(null);
   const [workspaces, setWorkspaces] = useState<AccountWorkspaceSummary[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
+  const [searchFocusNodeId, setSearchFocusNodeId] = useState<string | null>(null);
+  const [canvasManagerRequest, setCanvasManagerRequest] = useState(0);
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [workspaceName, setWorkspaceName] = useState('');
   const [workspaceMessage, setWorkspaceMessage] = useState('');
@@ -243,24 +278,58 @@ export function HiiWebAccess() {
           ),
     [accountSync, activeWorkspace?.id, canvasAccountId, canvasAccountReady, session.csrfToken],
   );
+  const searchWorkspaces = useCallback(async (): Promise<SearchableWorkspace[]> => {
+    if (!accountSync) return [];
+    return Promise.all(workspaces.map(async (entry) => {
+      const document = await new AccountWorkspacePersistence(entry.id, session.csrfToken ?? '').read();
+      return { id: entry.id, title: entry.name, nodes: document.nodes };
+    }));
+  }, [accountSync, session.csrfToken, workspaces]);
+  const focusSearchResult = useCallback((workspaceId: string, nodeId: string) => {
+    if (canvasUnsaved.current) { setWorkspaceMessage('Save or retry the current canvas before changing workspaces.'); return; }
+    setSearchFocusNodeId(nodeId);
+    setActiveWorkspaceId(workspaceId);
+  }, []);
   // The signed-out canvas is the same surface, kept in this browser only.
   const guestPersistence = useMemo(() => browserSpacePersistence('guest'), []);
-  const completeFirstRun = useCallback(() => {
-    window.localStorage.setItem('hii.onboarding.completed.v1', 'true');
-    setFirstRunDismissed(true);
-  }, []);
   const canvasFileSeeder = useCallback(
     (files: File[]) => browserCanvasSeedsFromFiles(canvasAccountId, files),
     [canvasAccountId],
   );
 
   useEffect(() => {
+    if (!mode) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = authRef.current;
+    const controls = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href]') ?? []);
+    (dialog?.querySelector<HTMLElement>('input') ?? controls()[0])?.focus();
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setMode(null);
+      } else if (event.key === 'Tab') {
+        const items = controls();
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (!dialog?.contains(document.activeElement) || (event.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+          event.preventDefault();
+          (event.shiftKey ? last : first)?.focus();
+        }
+      }
+    };
+    window.addEventListener('keydown', keydown, true);
+    return () => {
+      window.removeEventListener('keydown', keydown, true);
+      if (previous?.isConnected) previous.focus();
+    };
+  }, [mode]);
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const requestedLink = params.get('link') === 'cli';
     const requestedFirstRun = params.get('first-run') === '1';
     if (params.get('site') === '1') setProductSite(true);
-    // Same onboarding key the installed app uses, so the terminal opens once.
-    if (window.localStorage.getItem('hii.onboarding.completed.v1') === 'true') setFirstRunDismissed(true);
     setCliLinkRequested(requestedLink);
     if (requestedLink) setMode('login');
     if (requestedFirstRun) {
@@ -533,6 +602,11 @@ export function HiiWebAccess() {
         });
         setSession({ ...next, source: 'account' });
       }
+      // Authentication changes identity, never the canvas the person is editing.
+      setBrowserOnly(true);
+      setMode(null);
+      setProductSite(false);
+      setAccountOpen(true);
     } catch {
       setMessage(
         mode === 'signup'
@@ -563,7 +637,17 @@ export function HiiWebAccess() {
     }
   };
 
-  if (ready && session.authenticated) {
+  const switchCanvas = (local: boolean) => {
+    if (canvasUnsaved.current) {
+      setWorkspaceMessage('Save or retry the current canvas before changing workspaces.');
+      return;
+    }
+    setBrowserOnly(local);
+    setWorkspaceMessage('');
+    setPanel(null);
+  };
+
+  if (ready && session.authenticated && !browserOnly && !productSite) {
     const accountName = session.handle ?? 'account';
     if (!canvasAccountReady || !canvasPersistence || (accountSync && (!activeWorkspace || workspaceBusy && !workspaces.length))) {
       return (
@@ -576,6 +660,7 @@ export function HiiWebAccess() {
                 : 'could not open this account.'}
             </p>
             <button type="button" onClick={() => window.location.reload()}>retry</button>
+            <button type="button" onClick={() => switchCanvas(true)}>open browser-only canvas</button>
           </section>
         </main>
       );
@@ -595,7 +680,16 @@ export function HiiWebAccess() {
           onRequestDevice={() => setPanel('models')}
           onShareNode={(node) => { setShareNode(node); setPanel('feed'); }}
           canvasImportRequest={canvasImport}
+          searchWorkspaces={searchWorkspaces}
+          searchWorkspaceId={activeWorkspaceId}
+          onFocusExternalNode={focusSearchResult}
+          searchFocusNodeId={searchFocusNodeId}
+          canvasManagerRequest={canvasManagerRequest}
         />
+        <HiiCanvasFrame accountName={accountName} workspaces={workspaces} activeWorkspaceId={activeWorkspaceId} onWorkspaceSelect={(id) => {
+          if (canvasUnsaved.current) { setWorkspaceMessage('Save or retry the current canvas before changing workspaces.'); return; }
+          setActiveWorkspaceId(id);
+        }} onAccount={() => setAccountOpen((value) => !value)} onFindObjects={() => setCanvasManagerRequest((value) => value + 1)} />
         <header className={styles.canvasHeader} data-workspace-ui aria-label="HII account access">
           <nav aria-label="HII account actions">
             <button
@@ -629,6 +723,7 @@ export function HiiWebAccess() {
               <div><dt>workspace</dt><dd>{accountSync ? 'synchronized to your account' : 'stored on this device'}</dd></div>
               <div><dt>computer</dt><dd>connected only when you allow it</dd></div>
             </dl>
+            <button type="button" onClick={() => switchCanvas(true)}>open browser-only canvas</button>
             {accountSync ? <section className={styles.workspaceControls} aria-label="Your workspaces">
               <label>
                 your workspaces
@@ -706,7 +801,7 @@ export function HiiWebAccess() {
 
   const authDialog = <>
         {mode ? <div className={styles.authBackdrop} onPointerDown={(event) => { if (event.target === event.currentTarget) setMode(null); }}>
-          <section className={styles.formPanel} role="dialog" aria-modal="true" aria-label={mode === 'login' ? 'Log in' : 'Create your HII'}>
+          <section ref={authRef} className={styles.formPanel} role="dialog" aria-modal="true" aria-label={mode === 'login' ? 'Log in' : 'Create your HII'}>
             <header><span>hii / {mode === 'login' ? 'log in' : 'create your HII'}</span><button type="button" onClick={() => setMode(null)}>close</button></header>
             {cliLinkRequested ? <p className={styles.cliLinkNotice}>The HII CLI is waiting. Log in, then create a one-time computer code.</p> : null}
             <form onSubmit={submit}>
@@ -744,44 +839,17 @@ export function HiiWebAccess() {
   if (productSite) {
     return (
       <main className={styles.access} id="hii-main">
-        <ProsumerLanding onLogin={() => chooseMode('login')} onCreateAccount={() => chooseMode('signup')} />
-        {ready && !session.authenticated && !mode && !firstRunDismissed ? <HiiFirstRunTerminal
-          options={[
-            {
-              id: 'chatgpt',
-              label: 'Sign in with ChatGPT',
-              detail: 'complete this provider sign-in in the HII desktop app',
-              action: () => undefined,
-              disabled: true
-            },
-            {
-              id: 'hii-account',
-              label: 'Log in to HII',
-              detail: 'continue with your passkey',
-              action: () => chooseMode('login')
-            },
-            {
-              id: 'create',
-              label: 'Create your HII',
-              detail: 'make a passkey-protected account',
-              action: () => chooseMode('signup')
-            },
-            {
-              id: 'site',
-              label: 'Explore HII first',
-              detail: 'view the public product site',
-              action: () => setFirstRunDismissed(true)
-            }
-          ]}
-        /> : null}
+        <ProsumerLanding
+          onLogin={() => session.authenticated ? setProductSite(false) : chooseMode('login')}
+          onCreateAccount={() => session.authenticated ? setProductSite(false) : chooseMode('signup')}
+        />
         {authDialog}
       </main>
     );
   }
 
-  // The browser opens on the same canvas the installed app opens on. Signing in
-  // is chrome over that canvas, not a page in front of it; the marketing site
-  // stays reachable at /?site=1 and from the panel below.
+  // Signing in keeps this browser-only document mounted. Account workspaces
+  // are separate documents, opened explicitly; login never uploads this one.
   return (
     <div className={styles.canvasShell}>
       <HiiRoot
@@ -793,9 +861,9 @@ export function HiiWebAccess() {
         onUnsavedChanges={setCanvasUnsaved}
         allowPhoto
         persistentChrome={false}
-        openTerminalOnReady={ready && !firstRunDismissed}
-        onTerminalReady={completeFirstRun}
+        canvasManagerRequest={canvasManagerRequest}
       />
+      <HiiCanvasFrame accountName={session.authenticated ? session.handle ?? 'account' : 'hii'} workspaces={[]} activeWorkspaceId="" onAccount={() => setAccountOpen((value) => !value)} onFindObjects={() => setCanvasManagerRequest((value) => value + 1)} />
       <header className={styles.canvasHeader} data-workspace-ui aria-label="HII account access">
         <nav aria-label="HII account actions">
           <button
@@ -804,21 +872,27 @@ export function HiiWebAccess() {
             aria-controls="hii-web-account"
             onClick={() => setAccountOpen((value) => !value)}
           >
-            hii
+            {session.authenticated ? session.handle ?? 'account' : 'hii'}
           </button>
         </nav>
       </header>
       {accountOpen ? (
         <aside id="hii-web-account" className={styles.accountPanel} data-workspace-ui aria-label="HII account">
           <dl>
-            <div><dt>profile</dt><dd>not signed in</dd></div>
+            <div><dt>profile</dt><dd>{session.authenticated ? session.handle ?? 'account' : 'not signed in'}</dd></div>
             <div><dt>sign-in</dt><dd>passkey</dd></div>
             <div><dt>workspace</dt><dd>stored on this browser</dd></div>
             <div><dt>computer</dt><dd>connected only when you allow it</dd></div>
           </dl>
-          <button type="button" onClick={() => { chooseMode('login'); setAccountOpen(false); }}>log in</button>
-          <button type="button" onClick={() => { chooseMode('signup'); setAccountOpen(false); }}>create your HII</button>
-          <small>Sign in to synchronize this canvas to your account. Until then it stays in this browser.</small>
+          {session.authenticated ? <>
+            <button type="button" onClick={() => switchCanvas(false)}>open account workspace</button>
+            <button type="button" onClick={signOut} disabled={busy}>log out</button>
+          </> : <>
+            <button type="button" onClick={() => { chooseMode('login'); setAccountOpen(false); }}>log in</button>
+            <button type="button" onClick={() => { chooseMode('signup'); setAccountOpen(false); }}>create your HII</button>
+          </>}
+          <small>This canvas stays in this browser. Account workspaces are separate; signing in does not upload or synchronize this canvas.</small>
+          <p role="status" aria-live="polite">{workspaceMessage || deviceMessage}</p>
           <nav className={styles.platformLinks} aria-label="Open HII on a computer">
             <a href="/?site=1">what HII is</a>
             <a href="/download#mac">HII for Mac</a>

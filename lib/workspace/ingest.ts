@@ -26,6 +26,7 @@ const VIEWABLE_MODEL = /\.(glb|gltf|obj|stl|ply)$/i;
 const CAD = /\.(3dm|dwg|dxf|step|stp|iges|igs|ifc|sat|skp|rvt|3mf)$/i;
 const CONTACT_SHEET_THRESHOLD = 4;
 const CONTACT_SHEET_LIMIT = 80;
+const MAX_WORKSPACE_ASSET_BYTES = 250 * 1024 * 1024;
 
 export const defaultSize: Record<WorkspaceNodeType, { w: number; h: number }> = {
   chat: { w: 420, h: 560 },
@@ -263,7 +264,7 @@ export type StoredWorkspaceAsset = {
 export type WorkspaceAssetStoreOptions = { spaceId?: string; store?: boolean };
 
 export async function storeWorkspaceAsset(file: File, options: WorkspaceAssetStoreOptions = {}): Promise<StoredWorkspaceAsset | null> {
-  if (options.store === false) return null;
+  if (options.store === false || file.size < 1 || file.size > MAX_WORKSPACE_ASSET_BYTES) return null;
   try {
     if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
       const { convertFileSrc, invoke } = await import('@tauri-apps/api/core');
@@ -473,7 +474,25 @@ export async function seedFromFile(file: File, options: WorkspaceAssetStoreOptio
     const content = await file.slice(0, 100_000).text();
     return seedFor('text', { content, name, mime: t, size: file.size, extension, truncated: file.size > 100_000 });
   }
-  return seedFor('file', { name, size: file.size, mime: t, extension, metadataOnly: true, ...fileSummary(name, t) });
+  const stored = await storeWorkspaceAsset(file, options);
+  return {
+    type: 'file',
+    ...defaultSize.file,
+    object: governedAsset(file, stored, 'asset', 'added file reference to workspace'),
+    payload: {
+      ...persistedAssetPayload(file, stored, extension),
+      ...fileSummary(name, t),
+      title: name,
+      // A failed or deliberately disabled store may still be shown in this
+      // session, but it must never masquerade as a durable file reference.
+      metadataOnly: !stored,
+      description: stored
+        ? 'Saved file reference. Select it when asking HII to work with this file.'
+        : file.size > MAX_WORKSPACE_ASSET_BYTES
+          ? 'File exceeds the 250 MB workspace asset limit; only its details are saved.'
+          : 'File storage was unavailable; only its details are saved.'
+    }
+  };
 }
 
 function isImageFile(file: File) {
