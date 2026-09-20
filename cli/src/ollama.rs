@@ -186,11 +186,28 @@ struct OpenAiModel {
     id: String,
 }
 
+fn model_authorization(provider: ModelProvider) -> Option<String> {
+    let key_file = std::env::var_os("HII_MODEL_API_KEY_FILE")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            if provider != ModelProvider::LlamaCpp {
+                return None;
+            }
+            crate::config::AppPaths::discover()
+                .ok()
+                .map(|paths| paths.runtime.join("network/model-rail/api-key"))
+        })?;
+    let key = std::fs::read_to_string(key_file).ok()?;
+    let key = key.trim();
+    (!key.is_empty()).then(|| format!("Bearer {key}"))
+}
+
 #[derive(Clone)]
 pub struct Ollama {
     base_url: String,
     provider: ModelProvider,
     agent: ureq::Agent,
+    authorization: Option<String>,
 }
 
 impl Ollama {
@@ -201,10 +218,26 @@ impl Ollama {
             .timeout_read(Duration::from_secs(600))
             .timeout_write(Duration::from_secs(30))
             .build();
+        let authorization = model_authorization(provider);
         Self {
             base_url,
             provider,
             agent,
+            authorization,
+        }
+    }
+
+    fn get(&self, url: &str) -> ureq::Request {
+        match self.authorization.as_deref() {
+            Some(value) => self.agent.get(url).set("Authorization", value),
+            None => self.agent.get(url),
+        }
+    }
+
+    fn post(&self, url: &str) -> ureq::Request {
+        match self.authorization.as_deref() {
+            Some(value) => self.agent.post(url).set("Authorization", value),
+            None => self.agent.post(url),
         }
     }
 
@@ -289,7 +322,6 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         match self.provider {
             ModelProvider::Ollama => {
                 let response: TagsResponse = self
-                    .agent
                     .get(&format!("{}/api/tags", self.base_url))
                     .call()
                     .map_err(format_ureq)?
@@ -306,7 +338,6 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             | ModelProvider::Native
             | ModelProvider::RapidMlx => {
                 let response: OpenAiModels = self
-                    .agent
                     .get(&format!("{}/v1/models", self.base_url))
                     .call()
                     .map_err(format_ureq)?
@@ -363,7 +394,6 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             return Ok(None);
         }
         let value: Value = self
-            .agent
             .post(&format!("{}/api/show", self.base_url))
             .send_json(json!({ "model": model }))
             .map_err(format_ureq)?
@@ -430,7 +460,6 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             body["format"] = format;
         }
         let response: ChatResponse = self
-            .agent
             .post(&format!("{}/api/chat", self.base_url))
             .send_json(body)
             .map_err(format_ureq)?
@@ -472,7 +501,6 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         }
         let started = Instant::now();
         let value: Value = self
-            .agent
             .post(&format!("{}/v1/chat/completions", self.base_url))
             .send_json(body)
             .map_err(format_ureq)?
@@ -607,7 +635,6 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
             };
         }
         let response = match self
-            .agent
             .post(&format!("{}/api/chat", self.base_url))
             .send_json(body)
             .map_err(format_ureq)
@@ -724,8 +751,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
                     json!({ "type": "json_object" })
                 };
             }
-            self.agent
-                .post(&format!("{}/v1/chat/completions", self.base_url))
+            self.post(&format!("{}/v1/chat/completions", self.base_url))
                 .send_json(body)
                 .map_err(format_ureq)
         };
