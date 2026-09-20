@@ -2,7 +2,7 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AsciiWave } from '@/components/marketing/AsciiWave';
+import Image from 'next/image';
 import { HiiRoot } from '@/components/workspace/HiiRoot';
 import { browserSpacePersistence } from '@/components/spaces/SpaceCanvas';
 import type { WorkspaceNode } from '@/lib/workspace/types';
@@ -62,8 +62,9 @@ function ComfyCreatePanel({ nodes, onClose, onOutput }: { nodes: WorkspaceNode[]
         payload: { title: 'HII Create output', name: output.filename, url, prompt: fullPrompt, promptId }
       });
       setStatus('Complete · output placed back on the canvas.');
-    } catch (error) { setStatus(error instanceof Error ? error.message : 'Local generation failed.'); }
-    finally { setBusy(false); }
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Local generation failed.');
+    } finally { setBusy(false); }
   }
   return <aside className={styles.comfyPanel} data-workspace-ui aria-label="Create with local ComfyUI">
     <header><strong>HII Create</strong><button type="button" onClick={onClose}>close</button></header>
@@ -174,7 +175,10 @@ function ProsumerLanding({ onLogin, onCreateAccount }: { onLogin: () => void; on
   return (
     <div className={styles.landing}>
       <header className={styles.landingHeader}>
-        <a href="#top" aria-label="HII home">hii</a>
+        <a className={styles.landingBrand} href="#top" aria-label="HII home">
+          <strong>HII</strong>
+          <span>human information interface</span>
+        </a>
         <nav aria-label="HII account access">
           <button type="button" onClick={onLogin}>log in</button>
           <button type="button" onClick={onCreateAccount}>create your HII</button>
@@ -183,23 +187,28 @@ function ProsumerLanding({ onLogin, onCreateAccount }: { onLogin: () => void; on
 
       <section className={styles.hero} id="top" aria-labelledby="hii-hero-title">
         <div className={styles.heroCopy}>
-          <p className={styles.eyebrow}>Human Information Interface</p>
+          <p className={styles.eyebrow}>Human Information Interface / local-first</p>
           <h1 id="hii-hero-title">Everything you&apos;ve made.<br />Ready to make what&apos;s next.</h1>
           <p className={styles.heroBody}>HII gives your files, notes, links, media, projects, and tools one working surface—then lets your own agent create with them.</p>
           <div className={styles.heroActions}>
-            <button type="button" onClick={onCreateAccount}>create your HII</button>
             <a href="/">try the canvas</a>
             <a href="/site-analysis">site analysis for students</a>
+            <button type="button" onClick={onCreateAccount}>create your HII</button>
           </div>
-          <p className={styles.heroNote}>Start in your browser. No account needed.</p>
+          <p className={styles.heroNote}>Start in your browser. No account needed. Your first canvas stays on this device.</p>
         </div>
-        <div className={styles.asciiStage} aria-label="Your information becoming usable">
-          <AsciiWave className={styles.asciiWave} />
-          <div className={styles.asciiLegend} aria-hidden="true">
-            <span>files</span><span>images</span><span>notes</span><span>links</span>
-          </div>
-          <p><span aria-hidden="true">›</span> use what I&apos;ve made to create what&apos;s next<span className={styles.cursor} aria-hidden="true">_</span></p>
-        </div>
+        <figure className={styles.heroVisual}>
+          <div className={styles.visualHeader}><span>workspace</span><span>live HII surface</span></div>
+          <Image
+            src="/marketing/hii-workspace-live.png"
+            alt="A live HII canvas with a launch brief, approved context, agent conversation, and verified receipt arranged as connected objects."
+            width={1280}
+            height={720}
+            priority
+            sizes="(max-width: 900px) 100vw, 58vw"
+          />
+          <figcaption><span>local-first workspace</span><span>context → work → proof</span></figcaption>
+        </figure>
       </section>
 
       <section className={styles.workingLoop} aria-labelledby="working-loop-title">
@@ -207,23 +216,75 @@ function ProsumerLanding({ onLogin, onCreateAccount }: { onLogin: () => void; on
           <p className={styles.eyebrow}>One creative loop</p>
           <h2 id="working-loop-title">Your material becomes a workspace, not a pile of uploads.</h2>
         </header>
-        <div className={styles.loopRail}>
-          <article><small>Bring it in</small><h3>Collect your world.</h3><p>Drop in files and media. Paste links. Write notes. Capture useful pages in the browser.</p><span>files · images · video · PDF · notes · links</span></article>
-          <article><small>Work with it</small><h3>Ask HII directly.</h3><p>Select what matters and describe the outcome. HII keeps the relevant context attached to the work.</p><span>selection · text intent · local intelligence</span></article>
-          <article><small>Carry it forward</small><h3>Keep the result connected.</h3><p>Return finished work to the canvas, synchronize the workspace, and invite trusted collaborators with explicit access.</p><span>artifacts · workspaces · collaborators · proof</span></article>
-        </div>
+        <ol className={styles.loopRail}>
+          <li><article><small>01 / Bring it in</small><h3>Collect your world.</h3><p>Drop in files and media. Paste links. Write notes. Capture useful pages in the browser.</p><span>files · images · video · PDF · notes · links</span></article></li>
+          <li><article><small>02 / Work with it</small><h3>Ask HII directly.</h3><p>Select what matters and describe the outcome. HII keeps the relevant context attached to the work.</p><span>selection · text intent · local intelligence</span></article></li>
+          <li><article><small>03 / Carry it forward</small><h3>Keep the result connected.</h3><p>Return finished work to the canvas, synchronize the workspace, and invite trusted collaborators with explicit access.</p><span>artifacts · workspaces · collaborators · proof</span></article></li>
+        </ol>
       </section>
 
-      <section className={styles.campaignVisual} aria-label="HII information field">
-        <div><p className={styles.eyebrow}>Your information. Your tools. Your agent.</p><h2>The technical layer stays underneath. You stay in the creative loop.</h2></div>
+      <section className={styles.productProof} aria-labelledby="product-proof-title">
+        <header>
+          <p className={styles.eyebrow}>Your information. Your tools. Your agent.</p>
+          <h2 id="product-proof-title">The technical layer stays underneath. You stay in the creative loop.</h2>
+        </header>
+        <article className={styles.proofFeature}>
+          <figure className={styles.productFrame}>
+            <div className={styles.visualHeader}><span>command palette</span><span>choose the capability</span></div>
+            <Image
+              src="/marketing/hii-command-palette-live.png"
+              alt="The HII command palette offering real workspace capabilities such as a terminal, browser, chat, note, and live system context."
+              width={1280}
+              height={720}
+              loading="lazy"
+              sizes="(max-width: 900px) 100vw, 58vw"
+            />
+          </figure>
+          <div className={styles.proofCopy}>
+            <p className={styles.eyebrow}>Direct manipulation</p>
+            <h3>Point at the context. Choose the move.</h3>
+            <p>Files, pages, notes, terminals, and agent runs stay visible as objects. Select what matters, then ask for one bounded outcome.</p>
+            <span>selection · intent · approved context</span>
+          </div>
+        </article>
+        <article className={`${styles.proofFeature} ${styles.proofFeatureReverse}`}>
+          <figure className={styles.productFrame}>
+            <div className={styles.visualHeader}><span>run receipt</span><span>proof returned to the canvas</span></div>
+            <Image
+              src="/marketing/hii-run-receipt-live.png"
+              alt="A completed HII run showing approved intent, bounded work, collected proof, a saved artifact, and the final receipt on the canvas."
+              width={1920}
+              height={1080}
+              loading="lazy"
+              sizes="(max-width: 900px) 100vw, 58vw"
+            />
+          </figure>
+          <div className={styles.proofCopy}>
+            <p className={styles.eyebrow}>Visible result</p>
+            <h3>Keep the artifact and the evidence together.</h3>
+            <p>HII returns the finished work, its source context, and a receipt you can inspect before trusting or repeating it.</p>
+            <span>artifact · verification · receipt</span>
+          </div>
+        </article>
       </section>
 
       <section className={styles.controlSection} aria-labelledby="control-title">
-        <p className={styles.eyebrow}>Private by design</p>
-        <h2 id="control-title">Power without giving up control.</h2>
-        <p>HII can use connected computers, local models, browser research, and bounded tools. Consequential work stays visible, permissioned, and revocable.</p>
-        <div><span>local-first</span><span>source-linked</span><span>revocable access</span><span>receipts after action</span></div>
-        <button type="button" onClick={onCreateAccount}>start with your own workspace</button>
+        <div className={styles.controlCopy}>
+          <p className={styles.eyebrow}>Private by design</p>
+          <h2 id="control-title">Power without giving up control.</h2>
+          <p>HII can use connected computers, local models, browser research, and bounded tools. Consequential work stays visible, permissioned, and revocable.</p>
+          <button type="button" onClick={onCreateAccount}>start with your own workspace</button>
+        </div>
+        <aside className={styles.controlCard} aria-label="HII authority boundary">
+          <header><strong>Authority boundary</strong><span>owner controlled</span></header>
+          <dl>
+            <div><dt>context</dt><dd>source-linked</dd></div>
+            <div><dt>execution</dt><dd>bounded</dd></div>
+            <div><dt>access</dt><dd>revocable</dd></div>
+            <div><dt>result</dt><dd>receipt attached</dd></div>
+          </dl>
+          <p>Local-first by default. Nothing is connected, transmitted, or published silently.</p>
+        </aside>
       </section>
 
       <footer className={styles.landingFooter}>

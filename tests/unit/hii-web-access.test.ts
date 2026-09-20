@@ -185,22 +185,28 @@ describe('HII web access gate', () => {
     expect(worker).toContain('account_id: Some(&session.account_id)');
   });
 
-  it('presents HII as a restrained prosumer surface with original campaign art', () => {
+  it('presents HII as the same light, spatial surface users enter', () => {
     const source = readFileSync('components/auth/HiiWebAccess.tsx', 'utf8');
     const css = readFileSync('components/auth/HiiWebAccess.module.css', 'utf8');
 
     expect(source).toContain("Everything you&apos;ve made.");
     expect(source).toContain("Ready to make what&apos;s next.");
-    expect(source).toContain('<AsciiWave');
+    expect(source).toContain('src="/marketing/hii-workspace-live.png"');
+    expect(source).toContain('src="/marketing/hii-command-palette-live.png"');
+    expect(source).toContain('src="/marketing/hii-run-receipt-live.png"');
+    expect(source).toContain('alt="A live HII canvas');
+    expect(source).not.toContain('<AsciiWave');
     expect(source).toContain("const params = new URLSearchParams(window.location.search)");
     expect(source).toContain("params.get('link') === 'cli'");
     expect(source).toContain("if (requestedLink) setMode('login')");
     expect(source).toContain('create a computer code');
-    expect(css).toContain('--black: #050505');
-    expect(css).toContain('--signal: #72f18b');
-    expect(css).toContain("url('/marketing/hii-prosumer-field-wide.png')");
-    expect(css).toContain("url('/marketing/hii-prosumer-field-portrait.png')");
-    expect(css).not.toContain('#0066ff');
+    expect(css).toContain('--field: #f6f7f4');
+    expect(css).toContain('--blue: #1759ff');
+    expect(css).toContain('--signal: #008c69');
+    expect(css).toContain('background: rgba(249, 250, 248, .88)');
+    expect(css).not.toContain("url('/marketing/hii-prosumer-field-wide.png')");
+    expect(css).not.toContain("url('/marketing/hii-prosumer-field-portrait.png')");
+    expect(css).not.toContain('.asciiWave');
     expect(css).toContain('overflow-y: auto');
     expect(css).toContain('place-items: center');
   });
