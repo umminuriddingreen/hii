@@ -507,7 +507,7 @@ impl Toolbelt {
                 Err(error) => return tool_result(Err(error), false),
             }
         };
-        if let Err(error) = validate_shell(command, &self.workspace, deletion_approved) {
+        if let Err(error) = validate_shell(command, &self.workspace, deletion_approved, family) {
             return tool_result(Err(error), verification);
         }
         let process = if verification {
@@ -535,7 +535,9 @@ impl Toolbelt {
             Ok(lock) => lock,
             Err(error) => return tool_result(Err(error), false),
         };
-        if let Err(error) = validate_shell(command, &self.workspace, deletion_approved) {
+        if let Err(error) =
+            validate_shell(command, &self.workspace, deletion_approved, shell_family())
+        {
             return tool_result(Err(error), false);
         }
         let result = platform_shell(command)
@@ -1615,7 +1617,12 @@ fn workspace_redirect_target(command: &str) -> Option<String> {
     None
 }
 
-fn validate_shell(command: &str, workspace: &Path, deletion_approved: bool) -> Result<(), String> {
+fn validate_shell(
+    command: &str,
+    workspace: &Path,
+    deletion_approved: bool,
+    family: ShellFamily,
+) -> Result<(), String> {
     let normalized = command.to_ascii_lowercase();
     if crate::contract::deletion_shell(command) && !deletion_approved {
         return Err("file deletion requires explicit operator approval".into());
@@ -1657,7 +1664,14 @@ fn validate_shell(command: &str, workspace: &Path, deletion_approved: bool) -> R
     for token in command.split_whitespace() {
         let clean =
             token.trim_matches(|character| matches!(character, '\'' | '"' | '(' | ')' | ';' | ','));
+        let windows_switch = family != ShellFamily::Posix
+            && clean.starts_with('/')
+            && clean.len() > 1
+            && clean[1..].chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '?' | ':')
+            });
         if clean.starts_with('/')
+            && !windows_switch
             && clean != "/dev/null"
             && !Path::new(clean).starts_with(workspace)
         {
@@ -1838,9 +1852,11 @@ mod tests {
     #[test]
     fn shell_rejects_writing_a_workspace_file_through_a_redirect() {
         let path = workspace();
-        assert!(validate_shell("echo 'x' > calc.py", &path, false)
-            .expect_err("redirect into the workspace should be refused")
-            .contains("SHELL_REDIRECT_BLOCKED"));
+        assert!(
+            validate_shell("echo 'x' > calc.py", &path, false, ShellFamily::Posix)
+                .expect_err("redirect into the workspace should be refused")
+                .contains("SHELL_REDIRECT_BLOCKED")
+        );
         let _ = fs::remove_dir_all(path);
     }
 
@@ -1858,6 +1874,21 @@ mod tests {
             workspace_redirect_target("cat a >> log.txt").as_deref(),
             Some("log.txt")
         );
+    }
+
+    #[test]
+    fn shell_distinguishes_windows_slash_switches_from_posix_absolute_paths() {
+        let path = workspace();
+        assert!(validate_shell("dir /s /b *.gh", &path, false, ShellFamily::PowerShell,).is_ok());
+        assert!(validate_shell("ls /s", &path, false, ShellFamily::Posix).is_err());
+        assert!(validate_shell(
+            "type /outside/file.txt",
+            &path,
+            false,
+            ShellFamily::PowerShell,
+        )
+        .is_err());
+        let _ = fs::remove_dir_all(path);
     }
 
     #[test]
@@ -1939,9 +1970,9 @@ mod tests {
     #[test]
     fn destructive_shell_is_blocked() {
         let path = workspace();
-        assert!(validate_shell("rm -rf build", &path, false).is_err());
-        assert!(validate_shell("rm -rf build", &path, true).is_ok());
-        assert!(validate_shell("git status --short", &path, false).is_ok());
+        assert!(validate_shell("rm -rf build", &path, false, ShellFamily::Posix).is_err());
+        assert!(validate_shell("rm -rf build", &path, true, ShellFamily::Posix).is_ok());
+        assert!(validate_shell("git status --short", &path, false, ShellFamily::Posix).is_ok());
         let _ = fs::remove_dir_all(path);
     }
 
@@ -2276,9 +2307,11 @@ mod tests {
     #[test]
     fn windows_destructive_patterns_are_blocked() {
         let path = workspace();
-        assert!(validate_shell("del important.txt", &path, false).is_err());
-        assert!(validate_shell("Remove-Item x", &path, false).is_err());
-        assert!(validate_shell("cargo test", &path, false).is_ok());
+        assert!(
+            validate_shell("del important.txt", &path, false, ShellFamily::PowerShell).is_err()
+        );
+        assert!(validate_shell("Remove-Item x", &path, false, ShellFamily::PowerShell).is_err());
+        assert!(validate_shell("cargo test", &path, false, ShellFamily::PowerShell).is_ok());
         let _ = fs::remove_dir_all(path);
     }
 
