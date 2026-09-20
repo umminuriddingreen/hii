@@ -1869,6 +1869,7 @@ async function discoverModels() {
     endpoints.push(await probeModelEndpoint(url, url === MODEL_RUNTIME_URL));
   }
   const presets = HOST_PLATFORM.nodePlatform === "win32" ? windowsModelPresets() : [];
+  const catalog = HOST_PLATFORM.nodePlatform === "win32" ? [] : modelSelectionCatalog();
   const runtimes = HOST_PLATFORM.nodePlatform === "win32"
     ? [
         { id: "llama.cpp", available: Boolean(windowsLlamaBin()), binary: windowsLlamaBin(), ownedStartSupported: true },
@@ -1886,15 +1887,25 @@ async function discoverModels() {
     sources: HOST_PLATFORM.nodePlatform === "win32"
       ? [{ kind: "llama.cpp-presets", path: WINDOWS_MODEL_PRESETS, exists: fs.existsSync(WINDOWS_MODEL_PRESETS) }]
       : [{ kind: "huggingface-cache", path: HF_CACHE, exists: fs.existsSync(HF_CACHE) }],
-    models: presets.map((preset) => ({
-      id: preset.id,
-      backend: "llama.cpp",
-      format: "gguf",
-      installed: preset.installed,
-      modelPath: preset.modelPath || null,
-      mmprojPath: preset.mmprojPath || null,
-      visionProjectorInstalled: preset.visionProjectorInstalled
-    })),
+    models: HOST_PLATFORM.nodePlatform === "win32"
+      ? presets.map((preset) => ({
+          id: preset.id,
+          backend: "llama.cpp",
+          format: "gguf",
+          installed: preset.installed,
+          modelPath: preset.modelPath || null,
+          mmprojPath: preset.mmprojPath || null,
+          visionProjectorInstalled: preset.visionProjectorInstalled
+        }))
+      : catalog.map((entry) => ({
+          id: entry.model,
+          aliases: entry.aliases || [],
+          backend: entry.backend || HOST_PLATFORM.runtimeFamily,
+          format: HOST_PLATFORM.modelFormat,
+          installed: modelIsInstalled(entry.model, entry.source),
+          modelPath: modelIsInstalled(entry.model, entry.source) ? cachedModelPath(entry.model) : null,
+          capabilities: entry.capabilities || []
+        })),
     endpoints
   };
   console.log(JSON.stringify(report, null, 2));
