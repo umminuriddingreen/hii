@@ -4,8 +4,10 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { HiiRoot } from '@/components/workspace/HiiRoot';
+import { NativeDevBrowser } from '@/components/workspace/NativeDevBrowser';
 import { browserSpacePersistence } from '@/components/spaces/SpaceCanvas';
 import type { WorkspaceNode } from '@/lib/workspace/types';
+import type { SearchableWorkspace } from '@/lib/workspace/cross-workspace-search';
 import { browserCanvasSeedsFromFiles, hydrateBrowserCanvasAssets } from '@/lib/web/canvas-assets';
 import {
   AccountWorkspacePersistence,
@@ -29,6 +31,36 @@ import { HiiWebPanel, type WebPanel } from './HiiWebPanels';
 import styles from './HiiWebAccess.module.css';
 
 type AccessMode = 'login' | 'signup' | null;
+
+function HiiCanvasFrame({ accountName, workspaces, activeWorkspaceId, onWorkspaceSelect, onAccount, onFindObjects }: {
+  accountName: string;
+  workspaces: AccountWorkspaceSummary[];
+  activeWorkspaceId: string;
+  onWorkspaceSelect?: (id: string) => void;
+  onAccount: () => void;
+  onFindObjects: () => void;
+}) {
+  const [railOpen, setRailOpen] = useState(false);
+  const [browserOpen, setBrowserOpen] = useState(false);
+  const [browserUrl, setBrowserUrl] = useState('');
+  return <>
+    <button type="button" className={styles.railToggle} data-open={railOpen} data-workspace-ui aria-label={railOpen ? 'Hide navigation' : 'Show navigation'} onClick={() => setRailOpen((value) => !value)}>{railOpen ? '‹' : '☰'}</button>
+    {railOpen && <aside className={styles.workspaceRail} data-workspace-ui aria-label="Workspace navigation">
+      <div className={styles.railBrand}><strong>hii</strong><span>your workspace</span></div>
+      <nav aria-label="Workspace views">
+        <span aria-current="page">Canvas</span>
+        <button type="button" onClick={onFindObjects}>Find objects <small>all workspaces</small></button>
+        <button type="button" aria-pressed={browserOpen} onClick={() => setBrowserOpen((value) => !value)}>Browser <small>{browserOpen ? 'open' : 'closed'}</small></button>
+      </nav>
+      <section aria-label="Workspaces"><small>Workspaces</small>
+        {workspaces.length ? workspaces.map((workspace) => <button key={workspace.id} type="button" aria-current={workspace.id === activeWorkspaceId ? 'page' : undefined} onClick={() => onWorkspaceSelect?.(workspace.id)}>{workspace.name}<small>{workspace.role}</small></button>) : <p>Browser-only canvas</p>}
+      </section>
+      <footer><button type="button" onClick={onAccount}>{accountName}</button><small>⌘K for canvas commands</small></footer>
+    </aside>}
+    <button type="button" className={styles.browserToggle} data-workspace-ui aria-label={browserOpen ? 'Hide browser pane' : 'Show browser pane'} onClick={() => setBrowserOpen((value) => !value)}>{browserOpen ? '×' : '◎'}</button>
+    {browserOpen && <aside className={styles.browserDock} data-workspace-ui aria-label="Browser pane"><header><span>Browser</span><small>local-first</small></header><NativeDevBrowser nodeId="workspace-browser-dock" initialUrl={browserUrl} startEmpty={!browserUrl} docked onUrl={setBrowserUrl} /></aside>}
+  </>;
+}
 
 type Session = {
   authenticated: boolean;
@@ -303,7 +335,6 @@ export function HiiWebAccess() {
   const [message, setMessage] = useState('');
   const [accountOpen, setAccountOpen] = useState(false);
   const [cliLinkRequested, setCliLinkRequested] = useState(false);
-  const [firstRunDismissed, setFirstRunDismissed] = useState(false);
   const [productSite, setProductSite] = useState(false);
   const [deviceMessage, setDeviceMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -316,6 +347,8 @@ export function HiiWebAccess() {
   const [selectedCanvasNodes, setSelectedCanvasNodes] = useState<WorkspaceNode[]>([]);
   const [workspaces, setWorkspaces] = useState<AccountWorkspaceSummary[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
+  const [searchFocusNodeId, setSearchFocusNodeId] = useState<string | null>(null);
+  const [canvasManagerRequest, setCanvasManagerRequest] = useState(0);
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [workspaceName, setWorkspaceName] = useState('');
   const [workspaceMessage, setWorkspaceMessage] = useState('');
@@ -346,12 +379,20 @@ export function HiiWebAccess() {
           ),
     [accountSync, activeWorkspace?.id, canvasAccountId, canvasAccountReady, session.csrfToken],
   );
+  const searchWorkspaces = useCallback(async (): Promise<SearchableWorkspace[]> => {
+    if (!accountSync) return [];
+    return Promise.all(workspaces.map(async (entry) => {
+      const document = await new AccountWorkspacePersistence(entry.id, session.csrfToken ?? '').read();
+      return { id: entry.id, title: entry.name, nodes: document.nodes };
+    }));
+  }, [accountSync, session.csrfToken, workspaces]);
+  const focusSearchResult = useCallback((workspaceId: string, nodeId: string) => {
+    if (canvasUnsaved.current) { setWorkspaceMessage('Save or retry the current canvas before changing workspaces.'); return; }
+    setSearchFocusNodeId(nodeId);
+    setActiveWorkspaceId(workspaceId);
+  }, []);
   // The signed-out canvas is the same surface, kept in this browser only.
   const guestPersistence = useMemo(() => browserSpacePersistence('guest'), []);
-  const completeFirstRun = useCallback(() => {
-    window.localStorage.setItem('hii.onboarding.completed.v1', 'true');
-    setFirstRunDismissed(true);
-  }, []);
   const canvasFileSeeder = useCallback(
     (files: File[]) => browserCanvasSeedsFromFiles(canvasAccountId, files),
     [canvasAccountId],
@@ -390,8 +431,6 @@ export function HiiWebAccess() {
     const requestedLink = params.get('link') === 'cli';
     const requestedFirstRun = params.get('first-run') === '1';
     if (params.get('site') === '1') setProductSite(true);
-    // Same onboarding key the installed app uses, so the terminal opens once.
-    if (window.localStorage.getItem('hii.onboarding.completed.v1') === 'true') setFirstRunDismissed(true);
     setCliLinkRequested(requestedLink);
     if (requestedLink) setMode('login');
     if (requestedFirstRun) {
@@ -744,7 +783,16 @@ export function HiiWebAccess() {
           onRequestDevice={(selection) => { setAgentContextNodes(selection); setPanel('models'); }}
           onShareNode={(node) => { setAgentContextNodes([]); setShareNode(node); setPanel('feed'); }}
           canvasImportRequest={canvasImport}
+          searchWorkspaces={searchWorkspaces}
+          searchWorkspaceId={activeWorkspaceId}
+          onFocusExternalNode={focusSearchResult}
+          searchFocusNodeId={searchFocusNodeId}
+          canvasManagerRequest={canvasManagerRequest}
         />
+        <HiiCanvasFrame accountName={accountName} workspaces={workspaces} activeWorkspaceId={activeWorkspaceId} onWorkspaceSelect={(id) => {
+          if (canvasUnsaved.current) { setWorkspaceMessage('Save or retry the current canvas before changing workspaces.'); return; }
+          setActiveWorkspaceId(id);
+        }} onAccount={() => setAccountOpen((value) => !value)} onFindObjects={() => setCanvasManagerRequest((value) => value + 1)} />
         <header className={styles.canvasHeader} data-workspace-ui aria-label="HII account access">
           <nav aria-label="HII account actions">
             <button type="button" disabled={!selectedCanvasNodes.length} onClick={() => setComfyOpen(true)}>Create{selectedCanvasNodes.length ? ` · ${selectedCanvasNodes.length}` : ''}</button>
@@ -921,9 +969,9 @@ export function HiiWebAccess() {
         onUnsavedChanges={setCanvasUnsaved}
         allowPhoto
         persistentChrome={false}
-        openTerminalOnReady={ready && !firstRunDismissed}
-        onTerminalReady={completeFirstRun}
+        canvasManagerRequest={canvasManagerRequest}
       />
+      <HiiCanvasFrame accountName={session.authenticated ? session.handle ?? 'account' : 'hii'} workspaces={[]} activeWorkspaceId="" onAccount={() => setAccountOpen((value) => !value)} onFindObjects={() => setCanvasManagerRequest((value) => value + 1)} />
       <header className={styles.canvasHeader} data-workspace-ui aria-label="HII account access">
         <nav aria-label="HII account actions">
           <button

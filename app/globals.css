@@ -22,6 +22,11 @@ button, input, textarea { font: inherit; }
 .hii-upload-chooser { position: fixed; z-index: 2147483500; left: 50%; bottom: max(20px, env(safe-area-inset-bottom)); display: flex; width: min(360px, calc(100vw - 24px)); padding: 6px; gap: 4px; border: 1px solid #d8d8d8; border-radius: 14px; background: #fff; box-shadow: 0 12px 36px rgba(0, 0, 0, .13); transform: translateX(-50%); }
 .hii-upload-chooser button { flex: 1; min-width: 0; min-height: 48px; padding: 4px; border: 0; border-radius: 9px; background: transparent; color: #111; font: 12px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
 .hii-upload-chooser button:hover, .hii-upload-chooser button:focus-visible { background: #f1f1ef; outline: none; }
+.hii-file-reference { display: grid; align-content: center; gap: 5px; width: 100%; height: 100%; padding: 13px 16px; overflow: hidden; }
+.hii-file-reference strong, .hii-file-reference small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hii-file-reference small { color: var(--muted); font: 10px/1.3 "SF Mono", ui-monospace, monospace; }
+.hii-file-reference p { margin: 4px 0; color: var(--muted); font-size: 11px; line-height: 1.35; }
+.hii-file-reference button { justify-self: start; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 11px; text-decoration: underline; }
 .hii-html { width: 100%; height: 100%; border: 0; background: white; }
 .hii-intent-object { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; width: 100%; height: 100%; padding: 16px 18px 13px; }
 .hii-intent-object header, .hii-intent-object footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; color: var(--muted); font: 9px/1.35 "SF Mono", ui-monospace, monospace; }
@@ -307,7 +312,7 @@ button, input, textarea { font: inherit; }
 .hii-entry-loading { position: fixed; inset: 0; background: var(--field); }
 .hii-canvas[data-surface="space"] { background: #fff; }
 .hii-canvas[data-surface="account"] { background: #f8f7f3; }
-.hii-space-toolbar { position: fixed; z-index: 2147482000; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); display: flex; align-items: stretch; max-width: calc(100vw - 24px); border: 1px solid #d8d8d8; background: rgba(255, 255, 255, .98); color: #111; transform: translateX(-50%); }
+.hii-space-toolbar { position: fixed; z-index: 2147482000; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); display: flex; align-items: stretch; max-width: calc(100vw - 24px); border: 1px solid rgba(255,255,255,.8); border-radius: 14px; background: rgba(248,249,249,.76); color: #111; box-shadow: 0 18px 48px rgba(20,29,35,.13), inset 0 1px rgba(255,255,255,.85); -webkit-backdrop-filter: blur(30px) saturate(1.45); backdrop-filter: blur(30px) saturate(1.45); transform: translateX(-50%); }
 .hii-space-toolbar strong { display: flex; align-items: center; padding: 0 14px; border-right: 1px solid #d8d8d8; font: 10px/1 "SF Mono", ui-monospace, monospace; font-weight: 400; white-space: nowrap; }
 .hii-space-toolbar button { display: inline-flex; min-width: 72px; min-height: 44px; align-items: center; justify-content: center; gap: 8px; padding: 0 12px; border: 0; border-right: 1px solid #d8d8d8; border-radius: 0; background: transparent; color: inherit; font: 10px/1 "SF Mono", ui-monospace, monospace; font-weight: 400; }
 .hii-space-toolbar button:last-child { border-right: 0; }
@@ -320,7 +325,7 @@ button, input, textarea { font: inherit; }
 .hii-canvas-command-trigger[aria-expanded="true"] { background: #111; color: #fff; }
 .hii-canvas-touch-tools { display: contents; }
 .hii-space-toolbar[data-account-tools="true"] .hii-canvas-touch-tools { display: none; }
-.hii-account-tools { position: absolute; right: 0; bottom: calc(100% + 8px); display: grid; width: min(320px, calc(100vw - 20px)); border: 1px solid #d8d8d8; background: rgba(255, 255, 255, .99); color: #111; }
+.hii-account-tools { position: absolute; right: 0; bottom: calc(100% + 8px); display: grid; width: min(320px, calc(100vw - 20px)); border: 1px solid rgba(255,255,255,.8); border-radius: 14px; background: rgba(248,249,249,.78); color: #111; box-shadow: 0 18px 48px rgba(20,29,35,.13), inset 0 1px rgba(255,255,255,.85); -webkit-backdrop-filter: blur(30px) saturate(1.45); backdrop-filter: blur(30px) saturate(1.45); overflow: hidden; }
 .hii-canvas-command-search { display: block; border-bottom: 1px solid #d8d8d8; }
 .hii-canvas-command-search input { width: 100%; min-height: 44px; padding: 0 12px; border: 0; outline: 0; background: transparent; color: inherit; font: 10px/1 "SF Mono", ui-monospace, monospace; }
 .hii-canvas-command-search input:focus-visible { outline: 1px solid #111; outline-offset: -3px; }
@@ -333,7 +338,7 @@ button, input, textarea { font: inherit; }
 .hii-canvas-command-list button kbd { opacity: .55; }
 .hii-canvas-command-list small { display: block; padding: 14px 12px; }
 .hii-canvas-touch-secondary { display: none; }
-.hii-canvas-touch-secondary button { min-height: 44px; border-radius: 0; background: #fff; font-size: 10px; font-weight: 400; }
+.hii-canvas-touch-secondary button { min-height: 44px; border-radius: 0; background: transparent; font-size: 10px; font-weight: 400; }
 .hii-canvas-touch-link { display: none; grid-template-columns: minmax(0, 1fr) auto; border-top: 1px solid #d8d8d8; }
 .hii-canvas-touch-link input { min-width: 0; min-height: 44px; padding: 0 12px; border: 0; outline: 0; background: transparent; color: inherit; font: 10px/1 "SF Mono", ui-monospace, monospace; }
 .hii-canvas-touch-link button { min-width: 76px; padding: 0; background: transparent; font-size: 10px; font-weight: 400; }
@@ -402,6 +407,7 @@ button, input, textarea { font: inherit; }
 .hii-browser-nav-main > button:hover, .hii-browser-nav-main > button[aria-expanded="true"] { background: #e9e9e6; }
 .hii-browser-nav-main > button:disabled { cursor: default; opacity: .28; }
 .hii-browser-nav-main .hii-browser-capture { color: #454545; }
+.hii-dev-browser[data-docked="true"] { overflow: hidden; border-radius: 0; }
 .hii-browser-address { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; height: 30px; margin: 0 3px; padding: 0 10px; border: 1px solid #e3e3e0; border-radius: 5px; background: #fff; color: #777; }
 .hii-browser-address:focus-within { border-color: #a2a7a8; }
 .hii-browser-address input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: transparent; color: var(--browser-ink); font: 12px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
@@ -418,20 +424,37 @@ button, input, textarea { font: inherit; }
 .hii-browser-more label { display: flex; align-items: center; gap: 7px; margin-left: auto; }
 .hii-browser-more select { padding: 4px; border: 1px solid var(--browser-line); border-radius: 4px; background: #fff; color: #333; font: inherit; }
 .hii-browser-workarea { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; overflow: hidden; }
+.hii-dev-browser[data-agent="true"] .hii-browser-workarea { grid-template-columns: minmax(0, 1fr) 260px; }
 .hii-dev-browser[data-device="desktop"] .hii-browser-viewport { width: min(1280px, 100%); justify-self: center; border-inline: 1px solid var(--browser-line); }
 .hii-dev-browser[data-device="mobile"] .hii-browser-viewport { width: min(390px, 100%); justify-self: center; border-inline: 1px solid var(--browser-line); }
 .hii-browser-viewport { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #fff; }
 .hii-browser-viewport iframe { width: 100%; height: 100%; border: 0; background: #fff; }
+.hii-browser-empty { display: grid; align-content: center; justify-items: center; gap: 8px; height: 100%; padding: 24px; text-align: center; }
+.hii-browser-empty span { color: #69747a; font-size: 28px; }
+.hii-browser-empty strong { font-size: 17px; font-weight: 550; }
+.hii-browser-empty p { margin: 0; color: #737b80; font-size: 11px; }
 .hii-browser-loading { position: absolute; left: 50%; top: 50%; z-index: 1; transform: translate(-50%, -50%); color: #5d6572; font: 10px/1.4 "SF Mono", ui-monospace, monospace; pointer-events: none; }
-.hii-browser-results { height: 100%; overflow: auto; padding: 38px clamp(28px, 6vw, 76px) 56px; background: #fff; }
+.hii-browser-results { height: 100%; overflow: auto; padding: 38px clamp(28px, 6vw, 76px) 56px; background: rgba(255,255,255,.58); }
 .hii-browser-results header { display: grid; gap: 7px; margin-bottom: 30px; }
 .hii-browser-results header span { color: #818181; font: 10px/1 "SF Mono", ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
 .hii-browser-results header strong { color: #181818; font: 500 clamp(24px, 3vw, 38px)/1.08 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; letter-spacing: -.03em; }
 .hii-browser-results a { display: block; max-width: 760px; padding: 17px 0 19px; border-top: 1px solid #e8e8e5; color: inherit; text-decoration: none; }
+.hii-browser-results .hii-browser-search-external { display: inline-flex; align-items: center; min-height: 38px; margin-top: 18px; padding: 0 14px; border: 1px solid rgba(25,35,42,.18); border-radius: 9px; background: rgba(255,255,255,.72); color: #111; font: 11px/1.2 "SF Mono", ui-monospace, monospace; }
 .hii-browser-results a:hover h3 { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .hii-browser-results small { color: #737373; font: 10px/1.2 "SF Mono", ui-monospace, monospace; }
 .hii-browser-results h3 { margin: 5px 0 6px; color: #171717; font: 500 18px/1.25 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; letter-spacing: -.015em; }
 .hii-browser-results p { max-width: 680px; margin: 0; color: #5d5d5d; font-size: 13px; line-height: 1.5; }
+.hii-browser-agent { display: grid; grid-template-rows: auto auto minmax(120px, 1fr); gap: 13px; min-height: 0; padding: 16px; border-left: 1px solid var(--browser-line); background: #15181d; }
+.hii-browser-agent > header { display: flex; align-items: center; justify-content: space-between; }
+.hii-browser-agent > header span { font-size: 11px; font-weight: 620; }
+.hii-browser-agent > header small { color: #65d0a0; font: 8px/1 "SF Mono", ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.hii-browser-agent > p { margin: 0; color: var(--browser-muted); font-size: 10px; line-height: 1.5; }
+.hii-browser-agent form { display: grid; grid-template-rows: minmax(90px, 1fr) auto; gap: 8px; min-height: 0; }
+.hii-browser-agent textarea { width: 100%; resize: none; border: 1px solid var(--browser-line); border-radius: 6px; outline: 0; background: #0d0f12; color: var(--browser-ink); padding: 10px; font-size: 11px; line-height: 1.45; }
+.hii-browser-agent textarea:focus { border-color: #657089; }
+.hii-browser-agent form button { display: flex; align-items: center; justify-content: space-between; min-height: 32px; padding: 0 10px; border-radius: 5px; background: #e8edf5; color: #111419; font-size: 10px; font-weight: 600; }
+.hii-browser-agent form button:disabled { cursor: default; opacity: .28; }
+.hii-browser-agent form button span { color: #626a77; font: 8px/1 "SF Mono", ui-monospace, monospace; }
 .hii-browser-results .hii-browser-results-empty { color: #777; }
 
 .hii-prompt-shell {
@@ -715,11 +738,14 @@ button, input, textarea { font: inherit; }
 .hii-terminal-find input { width: 180px; border: 0; outline: 0; background: transparent; color: #eee; padding: 0 7px; font: 11px/1 "SF Mono", ui-monospace, monospace; }
 .hii-terminal-find button { width: 26px; height: 26px; padding: 0; border: 0; background: transparent; color: #999; cursor: pointer; }
 .hii-terminal-find button:hover { color: #fff; }
-.hii-docked-terminal { position: fixed; z-index: 2147482400; right: 12px; bottom: 12px; left: 12px; height: min(42vh, 480px); overflow: hidden; border: 1px solid #26282d; border-radius: 13px; background: #050505; box-shadow: 0 20px 70px rgba(0,0,0,.28); }
+.hii-docked-terminal { position: fixed; z-index: 2147482400; right: 12px; bottom: 12px; left: 12px; height: min(42vh, 300px); overflow: hidden; border: 1px solid rgba(255,255,255,.28); border-radius: 13px; background: rgba(5,8,12,.84); -webkit-backdrop-filter: blur(30px) saturate(1.4); backdrop-filter: blur(30px) saturate(1.4); box-shadow: 0 20px 70px rgba(0,0,0,.28); }
 .hii-docked-terminal .hii-job-terminal { height: 100%; }
 .hii-docked-terminal .hii-job-terminal[data-kind="shell"] header { padding-left: 14px; }
 .hii-docked-terminal .hii-job-terminal header small { margin-right: 64px; }
 .hii-docked-terminal-actions { position: absolute; z-index: 14; top: 5px; right: 8px; display: flex; gap: 2px; }
+.hii-docked-terminal-context { position: absolute; z-index: 14; top: 8px; left: 44px; display: flex; align-items: center; gap: 8px; max-width: calc(100% - 160px); color: #aeb8c3; font: 10px/1 "SF Mono", ui-monospace, monospace; }
+.hii-docked-terminal-context span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hii-docked-terminal-context button { padding: 2px 5px; border: 1px solid rgba(255,255,255,.2); border-radius: 5px; background: rgba(255,255,255,.08); color: #e8edf2; cursor: pointer; white-space: nowrap; }
 .hii-docked-terminal-actions button { position: relative; display: grid; width: 30px; height: 30px; padding: 0; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #777b84; cursor: pointer; }
 .hii-docked-terminal-actions button:hover { background: #1b1d21; color: #fff; }
 .hii-docked-terminal[data-compact="true"] { right: auto; bottom: 18px; left: 50%; width: min(760px, calc(100vw - 32px)); height: min(28vh, 260px); transform: translateX(-50%); border-radius: 10px; }
@@ -733,6 +759,18 @@ button, input, textarea { font: inherit; }
 .hii-canvas-search-text { position: fixed; z-index: 2147482450; top: 50%; left: 50%; width: min(720px, calc(100vw - 48px)); transform: translate(-50%, -50%); }
 .hii-canvas-search-text input { width: 100%; padding: 0; border: 0; outline: 0; background: transparent; color: #151515; caret-color: #151515; font: 500 clamp(28px, 4vw, 54px)/1.08 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; letter-spacing: -.035em; text-align: center; }
 .hii-canvas-search-text input::placeholder { color: rgba(21, 21, 21, .24); }
+.hii-canvas-search-results { max-height: min(50vh, 430px); margin-top: 20px; overflow-y: auto; border: 1px solid rgba(255,255,255,.78); border-radius: 16px; background: rgba(248,249,249,.82); -webkit-backdrop-filter: blur(30px) saturate(1.45); backdrop-filter: blur(30px) saturate(1.45); box-shadow: 0 18px 48px rgba(20,29,35,.13); }
+.hii-canvas-search-results > header { display: flex; justify-content: space-between; gap: 12px; padding: 12px 16px; color: #555; font: 10px/1.3 "SF Mono", ui-monospace, monospace; }
+.hii-canvas-search-results > header strong { color: #222; font-weight: 600; }
+.hii-canvas-search-results > header small { white-space: nowrap; }
+.hii-canvas-search-results > article { border-top: 1px solid rgba(0,0,0,.07); }
+.hii-canvas-search-results > article > button { display: grid; width: 100%; gap: 4px; padding: 11px 16px; border: 0; background: transparent; color: #111; text-align: left; cursor: pointer; }
+.hii-canvas-search-results > article > button:hover, .hii-canvas-search-results > article > button:focus-visible { background: rgba(255,255,255,.8); outline: none; }
+.hii-canvas-search-results > article > button strong, .hii-canvas-search-results > article > button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hii-canvas-search-results > article > button strong { font-size: 13px; font-weight: 550; }
+.hii-canvas-search-results > article > button small, .hii-canvas-search-results > article > button span { color: #666; font: 10px/1.4 "SF Mono", ui-monospace, monospace; }
+.hii-canvas-search-results > article > a { display: inline-block; margin: 0 16px 10px; color: #444; font: 10px/1.3 "SF Mono", ui-monospace, monospace; text-underline-offset: 2px; }
+.hii-canvas-search-results > p { margin: 0; padding: 12px 16px; color: #666; font-size: 11px; }
 .hii-terminal-window-controls {
   position: absolute;
   z-index: 12;

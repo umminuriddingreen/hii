@@ -76,6 +76,7 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, 
     });
     onTransformStart?.(detail(event));
     const move = (current: PointerEvent) => {
+      if (current.pointerId !== event.pointerId) return;
       const zoom = getZoom();
       const deltaX = (current.clientX - startX) / zoom;
       const deltaY = (current.clientY - startY) / zoom;

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Save to HII Options</title>
+    <style>
+      body {
+        max-width: 560px;
+        margin: 32px auto;
+        padding: 0 16px;
+        font: 14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #111;
+      }
+      code {
+        background: #f2f2f2;
+        padding: 2px 5px;
+      }
+      button {
+        margin-top: 12px;
+        border: 1px solid #111;
+        background: #111;
+        color: #fff;
+        padding: 9px 12px;
+        font-weight: 700;
+      }
+      #status {
+        margin-top: 12px;
+        color: #555;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Save to HII</h1>
+    <p>
+      Captures are saved locally through the native host
+      <code>com.ummi.hii.safari-capture</code>, which calls
+      <code>hii info ingest-web</code>.
+    </p>
+    <p>
+      Enable the signed HII Safari Capture extension in Safari Extensions settings.
+    </p>
+    <button id="check">Check native host</button>
+    <div id="status"></div>
+    <h2>Page indexing</h2>
+    <label for="browser-name">Browser</label>
+    <select id="browser-name"><option>Chrome</option><option>Helium</option><option>Chromium</option></select>
+    <p>When enabled, HII saves the visible text of ordinary pages as local, searchable versions. Private windows, sign-in and payment pages, form values, and browser-internal pages are excluded. Only new browsing after enabling is captured.</p>
+    <button id="enable-index">Enable and grant website access</button>
+    <button id="disable-index">Pause indexing</button>
+    <div id="index-status" role="status"></div>
+    <script src="options.js"></script>
+  </body>
+</html>

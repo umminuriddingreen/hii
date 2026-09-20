@@ -1,4 +1,35 @@
-const DEFAULT_ENDPOINT = "http://localhost:3000/api/links";
+import { buildWebCapture } from "./capture-payload.js";
+
+const NATIVE_HOST = "com.hii.save_to_hii";
+const PAGE_SCRIPT = "hii-page-index";
+const PAGE_ORIGINS = ["http://*/*", "https://*/*"];
+
+async function indexEnabled() {
+  const state = await chrome.storage.local.get({ pageIndexEnabled: false });
+  return state.pageIndexEnabled === true;
+}
+
+async function registerPageIndex() {
+  if (!await chrome.permissions.contains({ origins: PAGE_ORIGINS })) {
+    await chrome.storage.local.set({ pageIndexEnabled: false });
+    throw new Error("Website access is required for page indexing");
+  }
+  const registered = await chrome.scripting.getRegisteredContentScripts({ ids: [PAGE_SCRIPT] });
+  if (registered.length) return;
+  await chrome.scripting.registerContentScripts([{
+    id: PAGE_SCRIPT,
+    matches: ["http://*/*", "https://*/*"],
+    js: ["page-index.js"],
+    runAt: "document_idle",
+    persistAcrossSessions: true
+  }]);
+}
+
+async function disablePageIndex() {
+  const registered = await chrome.scripting.getRegisteredContentScripts({ ids: [PAGE_SCRIPT] });
+  if (registered.length) await chrome.scripting.unregisterContentScripts({ ids: [PAGE_SCRIPT] });
+  await chrome.storage.local.set({ pageIndexEnabled: false });
+}
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
@@ -13,43 +44,99 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
-async function settings() {
-  const values = await chrome.storage.sync.get({ endpoint: DEFAULT_ENDPOINT, token: "" });
-  return { endpoint: values.endpoint || DEFAULT_ENDPOINT, token: values.token || "" };
+chrome.runtime.onStartup.addListener(async () => {
+  if (await indexEnabled()) await registerPageIndex();
+});
+
+chrome.permissions.onRemoved.addListener((permissions) => {
+  if (permissions.origins?.some((origin) => PAGE_ORIGINS.includes(origin))) {
+    disablePageIndex().catch(console.warn);
+  }
+});
+
+function sendNative(message) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendNativeMessage(NATIVE_HOST, message, (response) => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        reject(new Error(error.message));
+        return;
+      }
+      if (!response?.ok) {
+        reject(new Error(response?.error || "HII native host did not accept the capture."));
+        return;
+      }
+      resolve(response.data);
+    });
+  });
 }
 
-async function saveLink(payload) {
-  const { endpoint, token } = await settings();
-  const headers = { "content-type": "application/json" };
-  if (token) headers.authorization = `Bearer ${token}`;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload)
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `HII returned ${response.status}`);
-  return data;
+async function saveCapture(payload) {
+  return sendNative({ type: "save-capture", payload });
 }
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   const url = info.pageUrl || tab?.url || "";
   const title = tab?.title || url;
-  const note = info.selectionText ? `Selection: ${info.selectionText.slice(0, 500)}` : "";
-  saveLink({
+  const method = info.menuItemId === "save-selection-to-hii"
+    ? "context-selection"
+    : "context-page";
+  const payload = buildWebCapture({
     url,
     title,
-    note,
-    source: "chrome-context",
+    method,
+    selectedText: method === "context-selection" ? info.selectionText : undefined,
     tags: ["browser"]
-  }).catch((error) => {
+  });
+  saveCapture(payload).catch((error) => {
     console.warn("HII capture failed", error);
   });
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== "save-link") return false;
-  saveLink(message.payload)
+  if (message?.type === "enable-page-index") {
+    chrome.storage.local.set({ pageIndexEnabled: true })
+      .then(registerPageIndex)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message?.type === "disable-page-index") {
+    disablePageIndex()
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message?.type === "index-page") {
+    const page = message.page;
+    if (!_sender.tab || _sender.tab.incognito || !/^https?:\/\//.test(page?.url || "") ||
+        page.url !== _sender.tab.url || typeof page.text !== "string" || page.text.length > 500_000 ||
+        page.text.length < 40) return false;
+    Promise.all([indexEnabled(), chrome.permissions.contains({ origins: PAGE_ORIGINS }), chrome.storage.local.get({ browserName: "Chrome" })])
+      .then(([enabled, allowed, settings]) => {
+        if (!enabled) throw new Error("Page indexing is off");
+        if (!allowed) throw new Error("Website access is not granted");
+        const sourceUrl = new URL(page.url);
+        sourceUrl.username = "";
+        sourceUrl.password = "";
+        sourceUrl.search = "";
+        sourceUrl.hash = "";
+        return saveCapture(buildWebCapture({
+          url: sourceUrl.toString(),
+          title: page.title || _sender.tab.title || page.url,
+          method: "extension-page-index",
+          contentText: page.text,
+          browserName: settings.browserName,
+          browserTabId: _sender.tab.id,
+          tags: ["browser", "page-index"]
+        }));
+      })
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message?.type !== "save-capture") return false;
+  saveCapture(message.payload)
     .then((data) => sendResponse({ ok: true, data }))
     .catch((error) => sendResponse({ ok: false, error: error.message }));
   return true;

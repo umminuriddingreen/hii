@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod admin;
+mod browser_snapshot;
 mod chat;
 mod device;
 mod feed;
@@ -176,6 +177,14 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
         if remote::is_remote_host_socket(&path) {
             return remote::handle_host_socket(request, env).await;
         }
+        if browser_snapshot::is_native_browser_snapshot_path(&path) {
+            if request.headers().get("origin")?.is_some() {
+                return secure_no_store(api_error(403, "native_device_required")?);
+            }
+            return secure_no_store(
+                browser_snapshot::handle_native_browser_snapshot_api(request, env, &db).await?,
+            );
+        }
         if device::is_native_device_path(&path) {
             if request.headers().get("origin")?.is_some() {
                 return secure_no_store(api_error(403, "native_device_required")?);
@@ -188,6 +197,7 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
         if path.starts_with("/api/chat")
             || device::is_account_device_path(&path)
             || workspace::is_workspace_api_path(&path)
+            || browser_snapshot::is_browser_snapshot_path(&path)
             || feed::is_feed_api_path(&path)
             || remote::is_remote_api_path(&path)
             || site_records::is_path(&path)
@@ -205,6 +215,8 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
                     "device-write"
                 } else if workspace::is_workspace_api_path(&path) {
                     "workspace-write"
+                } else if browser_snapshot::is_browser_snapshot_path(&path) {
+                    "browser-snapshot-write"
                 } else if remote::is_remote_api_path(&path) {
                     "remote-write"
                 } else if site_records::is_path(&path) {
@@ -254,6 +266,18 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
             if workspace::is_workspace_api_path(&path) {
                 return secure_no_store(
                     workspace::handle_workspace_api(request, &db, &session).await?,
+                );
+            }
+            if browser_snapshot::is_browser_snapshot_path(&path) {
+                return secure_no_store(
+                    browser_snapshot::handle_browser_snapshot_api(
+                        request,
+                        env,
+                        &db,
+                        &session.account_id,
+                        &session.csrf_token,
+                    )
+                    .await?,
                 );
             }
             let actor =

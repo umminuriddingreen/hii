@@ -143,7 +143,7 @@ describe('HII web access gate', () => {
     expect(css).not.toContain('.canvasHeader { display: none; }');
     expect(css).toContain('backdrop-filter: blur(24px) saturate(1.4);');
     expect(globalCss).toContain('.hii-node[data-node-type="note"]');
-    expect(globalCss).toContain('background: rgba(255, 255, 255, .99)');
+    expect(globalCss).toContain('background: rgba(248,249,249,.76)');
     expect(css).toContain('@media (max-width: 560px)');
   });
 

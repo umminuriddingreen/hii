@@ -2,13 +2,13 @@
 //!
 //! A host agent running on a paired machine opens an outbound WebSocket to
 //! `/api/remote/host` with a bearer token; a signed-in browser opens
-//! `/api/remote/chat` or `/api/remote/terminal`. Both land in the same
+//! `/api/remote/chat`, `/api/remote/terminal`, or `/api/remote/browser`. All land in the same
 //! Durable Object, which relays typed control messages between them. No
 //! inbound port is opened on the host machine and nothing relayed is
 //! persisted.
 //!
-//! There is no screen channel: the relay carries text, and the remote surface
-//! it exists to carry is live canvas synchronisation, not a remote desktop.
+//! Browser frames belong only to a separately granted browser channel. There
+//! is no machine screen or general remote input channel.
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -22,6 +22,7 @@ use crate::{SessionRow, api_error, hash_token, json_response, now_ms, random_tok
 
 /// Control messages are small JSON objects; anything larger is a protocol error.
 const MAX_CONTROL_BYTES: usize = 16 * 1024;
+const MAX_BROWSER_FRAME_BYTES: usize = 512 * 1024;
 const MAX_HOSTS_PER_ACCOUNT: i64 = 16;
 const MAX_TERMINAL_GRANT_TTL_MS: i64 = 10 * 60 * 1000;
 
@@ -30,6 +31,7 @@ pub fn is_remote_api_path(path: &str) -> bool {
         || path.starts_with("/api/remote/hosts/")
         || path == "/api/remote/chat"
         || path == "/api/remote/terminal"
+        || path == "/api/remote/browser"
 }
 
 /// True for the host socket, which authenticates with a bearer token rather
@@ -73,6 +75,55 @@ struct CreateTerminalGrant {
 #[derive(Deserialize)]
 struct TerminalGrantRow {
     host_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateBrowserGrant {
+    ttl_seconds: Option<i64>,
+}
+
+fn browser_grant_host(path: &str) -> Option<&str> {
+    path.strip_prefix("/api/remote/hosts/")?
+        .strip_suffix("/browser-grants")
+        .filter(|id| !id.is_empty() && !id.contains('/'))
+}
+
+fn browser_viewer_message_allowed(tag: &str, text: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+        return false;
+    };
+    let grant = tag.trim_start_matches("browser:");
+    let kind = value.get("t").and_then(|v| v.as_str()).unwrap_or_default();
+    let claimed = value
+        .get("grantId")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    if claimed != grant {
+        return false;
+    }
+    match kind {
+        "browser.open" | "browser.navigate" => value
+            .get("url")
+            .and_then(|v| v.as_str())
+            .is_some_and(|url| {
+                url.len() <= 4096 && (url.starts_with("https://") || url.starts_with("http://"))
+            }),
+        "browser.close" | "browser.ack" => true,
+        "browser.input" => matches!(
+            value.get("event").and_then(|v| v.as_str()),
+            Some(
+                "mousePressed"
+                    | "mouseReleased"
+                    | "mouseMoved"
+                    | "mouseWheel"
+                    | "keyDown"
+                    | "keyUp"
+                    | "char"
+            )
+        ),
+        _ => false,
+    }
 }
 
 fn terminal_grant_host(path: &str) -> Option<&str> {
@@ -168,7 +219,7 @@ pub async fn handle_remote_api(
         return stub.fetch_with_request(request.clone()?).await;
     }
 
-    if path == "/api/remote/terminal" {
+    if path == "/api/remote/terminal" || path == "/api/remote/browser" {
         let Some(grant_id) = url
             .query_pairs()
             .find(|(key, _)| key == "grant")
@@ -178,8 +229,11 @@ pub async fn handle_remote_api(
         };
         let grant = db
             .prepare(
-                "SELECT host_id FROM terminal_grants
-                 WHERE id = ?1 AND account_id = ?2 AND revoked_at IS NULL AND expires_at > ?3",
+                if path == "/api/remote/browser" {
+                    "SELECT host_id FROM browser_grants WHERE id = ?1 AND account_id = ?2 AND revoked_at IS NULL AND expires_at > ?3"
+                } else { "SELECT host_id FROM terminal_grants
+                 WHERE id = ?1 AND account_id = ?2 AND revoked_at IS NULL AND expires_at > ?3"
+                }
             )
             .bind(&[
                 grant_id.as_str().into(),
@@ -189,7 +243,7 @@ pub async fn handle_remote_api(
             .first::<TerminalGrantRow>(None)
             .await?;
         let Some(grant) = grant else {
-            return api_error(404, "terminal_grant_unavailable");
+            return api_error(404, "grant_unavailable");
         };
         if request.headers().get("Upgrade")?.as_deref() != Some("websocket") {
             return api_error(426, "upgrade_required");
@@ -310,6 +364,51 @@ pub async fn handle_remote_api(
                 }),
             )
         }
+        (Method::Post, path) if browser_grant_host(path).is_some() => {
+            let host_id = browser_grant_host(path).unwrap_or_default();
+            let input: CreateBrowserGrant = crate::read_json(request).await?;
+            let owned = db
+                .prepare("SELECT id FROM remote_hosts WHERE id = ?1 AND account_id = ?2")
+                .bind(&[host_id.into(), session.account_id.as_str().into()])?
+                .first::<serde_json::Value>(None)
+                .await?;
+            if owned.is_none() {
+                return api_error(404, "not_found");
+            }
+            let ttl_ms = input.ttl_seconds.unwrap_or(300).clamp(30, 600) * 1000;
+            let id = random_token()?;
+            let created_at = now_ms();
+            let expires_at = created_at + ttl_ms;
+            db.prepare("INSERT INTO browser_grants (id, account_id, host_id, created_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)")
+                .bind(&[id.as_str().into(), session.account_id.as_str().into(), host_id.into(),
+                    JsValue::from_f64(created_at as f64), JsValue::from_f64(expires_at as f64)])?
+                .run().await?;
+            json_response(
+                201,
+                json!({ "grantId": id, "hostId": host_id, "expiresAt": expires_at, "authority": "browse_isolated_profile" }),
+            )
+        }
+        (Method::Delete, path) if path.starts_with("/api/remote/browser-grants/") => {
+            let grant_id = path.trim_start_matches("/api/remote/browser-grants/");
+            let grant = db
+                .prepare("SELECT host_id FROM browser_grants WHERE id = ?1 AND account_id = ?2")
+                .bind(&[grant_id.into(), session.account_id.as_str().into()])?
+                .first::<TerminalGrantRow>(None)
+                .await?;
+            db.prepare("UPDATE browser_grants SET revoked_at = ?1 WHERE id = ?2 AND account_id = ?3 AND revoked_at IS NULL")
+                .bind(&[JsValue::from_f64(now_ms() as f64), grant_id.into(), session.account_id.as_str().into()])?
+                .run().await?;
+            if let Some(grant) = grant
+                && let Ok(stub) = room(env, &session.account_id, &grant.host_id).await
+            {
+                let _ = stub
+                    .fetch_with_str(&format!(
+                        "https://remote.invalid/revoke-browser?grant={grant_id}"
+                    ))
+                    .await;
+            }
+            json_response(200, json!({ "revoked": true }))
+        }
         (Method::Delete, path) if path.starts_with("/api/remote/terminal-grants/") => {
             let grant_id = path.trim_start_matches("/api/remote/terminal-grants/");
             let grant = db
@@ -394,11 +493,12 @@ pub async fn handle_host_socket(request: &Request, env: &Env) -> Result<Response
 #[durable_object]
 pub struct RemoteRoom {
     state: State,
+    env: Env,
 }
 
 impl worker::DurableObject for RemoteRoom {
-    fn new(state: State, _env: Env) -> Self {
-        Self { state }
+    fn new(state: State, env: Env) -> Self {
+        Self { state, env }
     }
 
     async fn fetch(&self, request: Request) -> Result<Response> {
@@ -436,17 +536,64 @@ impl worker::DurableObject for RemoteRoom {
                 }
                 Response::from_json(&json!({ "revoked": true }))
             }
-            "/api/remote/host" | "/api/remote/chat" | "/api/remote/terminal" => {
-                let terminal_tag = url
+            "/revoke-browser" => {
+                if let Some(grant) = url
                     .query_pairs()
                     .find(|(key, _)| key == "grant")
-                    .map(|(_, value)| format!("terminal:{value}"));
+                    .map(|(_, value)| value.into_owned())
+                {
+                    for socket in self
+                        .state
+                        .get_websockets_with_tag(&format!("browser:{grant}"))
+                    {
+                        let _ = socket.close(Some(4003), Some("browser grant revoked"));
+                    }
+                    for host in self.state.get_websockets_with_tag("host") {
+                        let _ = host.send_with_str(
+                            json!({ "t": "browser.revoked", "grantId": grant }).to_string(),
+                        );
+                    }
+                }
+                Response::from_json(&json!({ "revoked": true }))
+            }
+            "/api/remote/host"
+            | "/api/remote/chat"
+            | "/api/remote/terminal"
+            | "/api/remote/browser" => {
+                let grant = url
+                    .query_pairs()
+                    .find(|(key, _)| key == "grant")
+                    .map(|(_, value)| value.into_owned());
                 let role = if path == "/api/remote/host" {
                     "host"
                 } else if path == "/api/remote/terminal" {
-                    terminal_tag.as_deref().unwrap_or("terminal:invalid")
+                    // The API already checked account ownership and grant lifetime.
+                    "terminal"
+                } else if path == "/api/remote/browser" {
+                    "browser"
                 } else {
                     "chat"
+                };
+                let tag = match role {
+                    "terminal" | "browser" => {
+                        format!("{role}:{}", grant.as_deref().unwrap_or("invalid"))
+                    }
+                    _ => role.to_owned(),
+                };
+                let browser_expires = if role == "browser" {
+                    let grant_id = grant.as_deref().unwrap_or_default();
+                    let row = self.env.d1("IDENTITY")?
+                        .prepare("SELECT expires_at FROM browser_grants WHERE id = ?1 AND revoked_at IS NULL AND expires_at > ?2")
+                        .bind(&[grant_id.into(), JsValue::from_f64(now_ms() as f64)])?
+                        .first::<serde_json::Value>(None).await?;
+                    let Some(expires_at) =
+                        row.and_then(|value| value.get("expires_at").and_then(|v| v.as_i64()))
+                    else {
+                        return Response::error("browser_grant_unavailable", 404);
+                    };
+                    Some(format!("expires:{expires_at}"))
+                } else {
+                    None
                 };
                 if role == "host" {
                     // One host per room: a reconnecting agent replaces the stale socket.
@@ -455,7 +602,12 @@ impl worker::DurableObject for RemoteRoom {
                     }
                 }
                 let pair = WebSocketPair::new()?;
-                self.state.accept_websocket_with_tags(&pair.server, &[role]);
+                if let Some(expires) = browser_expires.as_deref() {
+                    self.state
+                        .accept_websocket_with_tags(&pair.server, &[&tag, expires]);
+                } else {
+                    self.state.accept_websocket_with_tags(&pair.server, &[&tag]);
+                }
                 if role == "chat" {
                     // Nudge the host to re-announce itself to a joining viewer.
                     for host in self.state.get_websockets_with_tag("host") {
@@ -469,10 +621,20 @@ impl worker::DurableObject for RemoteRoom {
                     for chat in self.state.get_websockets_with_tag("chat") {
                         let _ = chat.send_with_str(r#"{"t":"chat.host-online"}"#);
                     }
+                } else if role == "browser" {
+                    let online = !self.state.get_websockets_with_tag("host").is_empty();
+                    let _ = pair.server.send_with_str(
+                        json!({ "t": "browser.room", "hostOnline": online }).to_string(),
+                    );
+                    for host in self.state.get_websockets_with_tag("host") {
+                        let _ = host.send_with_str(
+                            json!({ "t": "browser.viewer_joined", "grantId": grant }).to_string(),
+                        );
+                    }
                 } else {
                     for host in self.state.get_websockets_with_tag("host") {
                         let _ = host.send_with_str(
-                            json!({ "t": "terminal.viewer_joined", "grantId": role.trim_start_matches("terminal:") }).to_string(),
+                            json!({ "t": "terminal.viewer_joined", "grantId": grant }).to_string(),
                         );
                     }
                 }
@@ -493,15 +655,40 @@ impl worker::DurableObject for RemoteRoom {
             .get_tags(&ws)
             .into_iter()
             .find(|tag| tag.starts_with("terminal:"));
+        let browser_tag = self
+            .state
+            .get_tags(&ws)
+            .into_iter()
+            .find(|tag| tag.starts_with("browser:"));
         let from_chat = self.state.get_tags(&ws).iter().any(|tag| tag == "chat");
         match message {
             // The relay is text-only; binary frames belong to no channel.
             WebSocketIncomingMessage::Binary(_) => {}
             WebSocketIncomingMessage::String(text) => {
-                if text.len() > MAX_CONTROL_BYTES {
+                if text.len() > MAX_BROWSER_FRAME_BYTES {
                     return Ok(());
                 }
-                if let Some(tag) = terminal_tag {
+                if let Some(tag) = browser_tag {
+                    let active = self.state.get_tags(&ws).iter().any(|tag| {
+                        tag.strip_prefix("expires:")
+                            .and_then(|value| value.parse::<i64>().ok())
+                            .is_some_and(|expiry| expiry > now_ms())
+                    });
+                    if !active {
+                        let _ = ws.close(Some(4003), Some("browser grant expired"));
+                        return Ok(());
+                    }
+                    if text.len() > MAX_CONTROL_BYTES
+                        || !browser_viewer_message_allowed(&tag, &text)
+                    {
+                        return Ok(());
+                    }
+                    for host in self.state.get_websockets_with_tag("host") {
+                        let _ = host.send_with_str(&text);
+                    }
+                } else if text.len() > MAX_CONTROL_BYTES && !from_host {
+                    return Ok(());
+                } else if let Some(tag) = terminal_tag {
                     if !terminal_viewer_message_allowed(&tag, &text) {
                         return Ok(());
                     }
@@ -526,9 +713,30 @@ impl worker::DurableObject for RemoteRoom {
                         .as_ref()
                         .and_then(|item| item.get("grantId"))
                         .and_then(|item| item.as_str());
-                    if kind.starts_with("chat.") {
+                    if kind.starts_with("chat.") && text.len() <= MAX_CONTROL_BYTES {
                         for viewer in self.state.get_websockets_with_tag("chat") {
                             let _ = viewer.send_with_str(&text);
+                        }
+                    } else if kind.starts_with("browser.")
+                        && kind != "browser.input"
+                        && kind != "browser.navigate"
+                    {
+                        if let Some(grant) = grant {
+                            for viewer in self
+                                .state
+                                .get_websockets_with_tag(&format!("browser:{grant}"))
+                            {
+                                let active = self.state.get_tags(&viewer).iter().any(|tag| {
+                                    tag.strip_prefix("expires:")
+                                        .and_then(|value| value.parse::<i64>().ok())
+                                        .is_some_and(|expiry| expiry > now_ms())
+                                });
+                                if active {
+                                    let _ = viewer.send_with_str(&text);
+                                } else {
+                                    let _ = viewer.close(Some(4003), Some("browser grant expired"));
+                                }
+                            }
                         }
                     } else if let Some(grant) = grant {
                         for viewer in self
@@ -561,6 +769,25 @@ impl worker::DurableObject for RemoteRoom {
             for chat in self.state.get_websockets_with_tag("chat") {
                 let _ = chat.send_with_str(r#"{"t":"chat.host-offline"}"#);
             }
+            for browser in self.state.get_websockets() {
+                if self
+                    .state
+                    .get_tags(&browser)
+                    .iter()
+                    .any(|tag| tag.starts_with("browser:"))
+                {
+                    let _ = browser.send_with_str(r#"{"t":"browser.host-offline"}"#);
+                }
+            }
+        } else if let Some(grant) = self
+            .state
+            .get_tags(&ws)
+            .into_iter()
+            .find(|tag| tag.starts_with("browser:"))
+        {
+            for host in self.state.get_websockets_with_tag("host") {
+                let _ = host.send_with_str(json!({ "t": "browser.close", "grantId": grant.trim_start_matches("browser:") }).to_string());
+            }
         }
         Ok(())
     }
@@ -573,7 +800,8 @@ impl worker::DurableObject for RemoteRoom {
 #[cfg(test)]
 mod tests {
     use super::{
-        chat_viewer_message_allowed, terminal_grant_host, terminal_viewer_message_allowed,
+        browser_grant_host, browser_viewer_message_allowed, chat_viewer_message_allowed,
+        terminal_grant_host, terminal_viewer_message_allowed,
     };
 
     #[test]
@@ -625,6 +853,38 @@ mod tests {
         ));
         assert!(!chat_viewer_message_allowed(
             r#"{"t":"chat.run","requestId":""}"#
+        ));
+    }
+
+    #[test]
+    fn browser_grant_and_inputs_are_browser_only() {
+        assert_eq!(
+            browser_grant_host("/api/remote/hosts/host-1/browser-grants"),
+            Some("host-1")
+        );
+        assert_eq!(
+            browser_grant_host("/api/remote/hosts/host-1/other/browser-grants"),
+            None
+        );
+        assert!(browser_viewer_message_allowed(
+            "browser:grant-1",
+            r#"{"t":"browser.navigate","grantId":"grant-1","url":"https://example.com"}"#
+        ));
+        assert!(browser_viewer_message_allowed(
+            "browser:grant-1",
+            r#"{"t":"browser.input","grantId":"grant-1","event":"mousePressed","x":1,"y":2}"#
+        ));
+        assert!(!browser_viewer_message_allowed(
+            "browser:grant-1",
+            r#"{"t":"browser.navigate","grantId":"grant-2","url":"https://example.com"}"#
+        ));
+        assert!(!browser_viewer_message_allowed(
+            "browser:grant-1",
+            r#"{"t":"browser.open","grantId":"grant-1","url":"file:///etc/passwd"}"#
+        ));
+        assert!(!browser_viewer_message_allowed(
+            "browser:grant-1",
+            r#"{"t":"terminal.open","grantId":"grant-1"}"#
         ));
     }
 }

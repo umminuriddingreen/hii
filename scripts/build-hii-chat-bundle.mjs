@@ -10,6 +10,7 @@ mkdirSync(output, { recursive: true });
 
 const sources = {
   'hii-remote-host.mjs': 'remote/host/hii-remote-host.mjs',
+  'hii-remote-browser.mjs': 'remote/host/hii-remote-browser.mjs',
   'install-local.sh': 'remote/host/install.sh',
   'update.sh': 'remote/host/update.sh',
 };

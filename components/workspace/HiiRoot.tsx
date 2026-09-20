@@ -41,9 +41,11 @@ import {
   runtimeSpaceId,
   startAgent,
   stopTerminalSession,
+  writeTerminalSession,
   type AgentEventV1,
   type ContextPackV1,
   type HiiApplicationManifest,
+  type InformationSearchResult,
   type InformationCaptureResult
 } from '@/lib/client/hii-bridge';
 import { RunBody } from '@/components/workspace/RunBody';
@@ -101,6 +103,7 @@ import { trackPointerGesture } from '@/lib/workspace/gestures';
 import { fitWorkspaceViewport } from '@/lib/workspace/viewport';
 import { canvasManagerFocusNodes, type CanvasManagerBoard } from '@/lib/workspace/canvas-manager';
 import { CanvasManager } from './CanvasManager';
+import type { SearchableWorkspace } from '@/lib/workspace/cross-workspace-search';
 const WorkspaceScene3D = dynamic(() => import('./WorkspaceScene3D').then((m) => m.WorkspaceScene3D), {
   ssr: false,
   loading: () => <div className="hii-scene3d-loading">Opening 3D view…</div>
@@ -336,41 +339,63 @@ function PromptResponse({
   );
 }
 
-function QuickWebSearch({
+export function QuickWebSearch({
   onDismiss,
-  onSearch
+  onSearch,
+  onOpen
 }: {
   onDismiss: () => void;
   onSearch: (query: string) => void;
+  onOpen: (url: string) => void;
 }) {
   const [query, setQuery] = useState('');
+  const [results, setResults] = useState<InformationSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  useEffect(() => {
+    const value = query.trim();
+    if (value.length < 2) { setResults([]); setSearching(false); return; }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setSearching(true);
+      void findInformation(value, { web: false, limit: 8 })
+        .then((matches) => { if (!cancelled) setResults(matches.filter((item) => /^https?:\/\//i.test(item.url))); })
+        .catch(() => { if (!cancelled) setResults([]); })
+        .finally(() => { if (!cancelled) setSearching(false); });
+    }, 180);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [query]);
   return (
-    <form
-      className="hii-canvas-search-text"
-      data-workspace-ui
-      onPointerDown={(event) => event.stopPropagation()}
-      onSubmit={(event) => {
-        event.preventDefault();
-        const value = query.trim();
-        if (value) onSearch(value);
-      }}
-    >
-      <input
-        autoFocus
-        aria-label="Write a web search on the canvas"
-        autoComplete="off"
-        spellCheck={false}
-        value={query}
-        placeholder="Search the web"
-        onChange={(event) => setQuery(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key !== 'Escape') return;
-          event.preventDefault();
-          event.stopPropagation();
-          onDismiss();
-        }}
-      />
-    </form>
+    <div className="hii-canvas-search-text" data-workspace-ui onPointerDown={(event) => event.stopPropagation()}>
+      <form onSubmit={(event) => { event.preventDefault(); if (query.trim()) onSearch(query.trim()); }}>
+        <input
+          autoFocus
+          aria-label="Write a web search on the canvas"
+          autoComplete="off"
+          spellCheck={false}
+          value={query}
+          placeholder="Search HII and the web"
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            event.stopPropagation();
+            onDismiss();
+          }}
+        />
+      </form>
+      {query.trim().length >= 2 && <section className="hii-canvas-search-results" aria-label="Saved pages and sources">
+        <header><strong>Saved pages and sources</strong><small>{searching ? 'Searching…' : `${results.length} found`}</small></header>
+        {results.map((result) => <article key={result.versionId || result.id || result.url}>
+          <button type="button" onClick={() => onOpen(result.url)}>
+            <strong>{result.title || result.url}</strong>
+            <small>{result.browserName || result.siteName || 'Saved source'}{result.capturedAt ? ` · ${new Date(result.capturedAt).toLocaleDateString()}` : ''}{result.versionId ? ` · ${result.versionId.slice(-8)}` : ''}</small>
+            {result.excerpt && <span>{result.excerpt}</span>}
+          </button>
+          {typeof window !== 'undefined' && !('__TAURI_INTERNALS__' in window) && <a href={`/remote/browser?url=${encodeURIComponent(result.url)}`}>Open live in HII ↗</a>}
+        </article>)}
+        {!searching && !results.length && <p>No saved page matches. Press Return to search the web.</p>}
+      </section>}
+    </div>
   );
 }
 
@@ -842,6 +867,12 @@ function NodeBody({
   if (node.type === 'ink') return <InkBody node={node} />;
   if (node.type === 'image' && payload.sticker === true) return <div className="hii-sticker" role="img" aria-label={name}>{text(payload.emoji) || '✦'}</div>;
   if (node.type === 'image' || node.type === 'document' || node.type === 'media') return <AssetNodeBody node={node} />;
+  if (node.type === 'file') return <article className="hii-file-reference" aria-label={`${name} file reference`}>
+    <strong>{name}</strong>
+    <small>{text(payload.label) || 'File'} · {typeof payload.size === 'number' ? `${Math.round(payload.size / 1024)} KB` : 'size unknown'}</small>
+    <p>{text(payload.description) || 'Select this file to include its reference when asking HII.'}</p>
+    {typeof payload.path === 'string' && payload.path ? <button type="button" onClick={() => void navigator.clipboard.writeText(payload.path as string)}>Copy file path</button> : null}
+  </article>;
   if (node.type === 'note' || node.type === 'canvas-text') {
     return (
       <CanvasEditor
@@ -1111,6 +1142,7 @@ export function HiiRoot({
   persistence,
   allowPhoto = true,
   persistentChrome = true,
+  allowLocalRuntime = false,
   openTerminalOnReady = false,
   onTerminalReady,
   onUnsavedChanges,
@@ -1119,7 +1151,12 @@ export function HiiRoot({
   onSelectionChange,
   fileSeeder,
   canvasImportRequest = null,
-  projectionRequest = null
+  projectionRequest = null,
+  searchWorkspaces,
+  searchWorkspaceId,
+  onFocusExternalNode,
+  searchFocusNodeId = null,
+  canvasManagerRequest = 0
 }: {
   surface?: 'workspace' | 'space' | 'account';
   spaceId?: string;
@@ -1127,6 +1164,7 @@ export function HiiRoot({
   persistence?: WorkspacePersistence;
   allowPhoto?: boolean;
   persistentChrome?: boolean;
+  allowLocalRuntime?: boolean;
   openTerminalOnReady?: boolean;
   onTerminalReady?: () => void;
   onUnsavedChanges?: (unsaved: boolean) => void;
@@ -1136,11 +1174,16 @@ export function HiiRoot({
   fileSeeder?: (files: File[]) => Promise<NodeSeed[]>;
   canvasImportRequest?: CanvasImportRequest | null;
   projectionRequest?: WorkspaceProjectionRequest | null;
+  searchWorkspaces?: () => Promise<SearchableWorkspace[]>;
+  searchWorkspaceId?: string;
+  onFocusExternalNode?: (workspaceId: string, nodeId: string) => void;
+  searchFocusNodeId?: string | null;
+  canvasManagerRequest?: number;
 } = {}) {
   const isSpace = surface === 'space';
   const isAccount = surface === 'account';
   const isTouchCanvas = isSpace || isAccount;
-  const runtimeEnabled = !isTouchCanvas;
+  const runtimeEnabled = !isTouchCanvas || allowLocalRuntime;
   const startupTerminalHandled = useRef(false);
   const save = useRef<() => void>(() => {});
   const settleCamera = useCallback(() => save.current(), []);
@@ -1399,6 +1442,33 @@ export function HiiRoot({
     return spawnSeeds([seed], { x: center.x - seed.w / 2, y: center.y - seed.h / 2 });
   }, [camera, spawnSeeds]);
 
+  // The small native capture window sends its committed text here. Wait until
+  // the active Space has loaded so a capture cannot land in a transient board.
+  const pendingQuickCaptures = useRef<Array<{ text: string; captureId?: string }>>([]);
+  const quickCaptureSink = useRef<(capture: { text: string; captureId?: string }) => void>(() => {});
+  quickCaptureSink.current = (capture) => {
+    if (!workspace.ready) { pendingQuickCaptures.current.push(capture); return; }
+    const [nodeId] = spawnCenteredSeed(isSpace ? canvasTextSeed(capture.text) : seedFromString(capture.text));
+    if (!capture.captureId || !nodeId) return;
+    void workspace.flush().then(() => import('@tauri-apps/api/event').then(({ emit }) => emit('hii:quick-capture-saved', { captureId: capture.captureId, nodeId })))
+      .catch((error) => void import('@tauri-apps/api/event').then(({ emit }) => emit('hii:quick-capture-failed', { captureId: capture.captureId, error: error instanceof Error ? error.message : String(error) })));
+  };
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return;
+    let disposed = false;
+    let unlisten = () => {};
+    void import('@tauri-apps/api/event').then(({ listen }) => listen<{ text: string; captureId?: string }>('hii:quick-capture', (event) => {
+      const value = event.payload?.text;
+      if (typeof value !== 'string' || !value.trim()) return;
+      quickCaptureSink.current({ text: value.slice(0, 100_000), captureId: event.payload.captureId });
+    })).then((dispose) => { if (disposed) dispose(); else unlisten = dispose; });
+    return () => { disposed = true; unlisten(); };
+  }, []);
+  useEffect(() => {
+    if (!workspace.ready || !pendingQuickCaptures.current.length) return;
+    for (const capture of pendingQuickCaptures.current.splice(0)) quickCaptureSink.current(capture);
+  }, [workspace.ready]);
+
   const importFiles = useCallback(async (files: File[], at: Point, direct = false) => {
     try {
       const seeds = await (fileSeeder ? fileSeeder(files) : seedsFromFiles(files));
@@ -1590,6 +1660,9 @@ export function HiiRoot({
   }, []);
 
   const closeCanvasManager = useCallback(() => setCanvasManagerOpen(false), []);
+  useEffect(() => {
+    if (canvasManagerRequest > 0) openCanvasManager();
+  }, [canvasManagerRequest, openCanvasManager]);
 
   const focusCanvasBoard = useCallback((board: CanvasManagerBoard) => {
     setCanvasManagerOpen(false);
@@ -1608,6 +1681,13 @@ export function HiiRoot({
     setFocusNodeId(node.id);
     focusNodes([node], 'Jumped to the object.');
   }, [focusNodes]);
+
+  const handledSearchFocus = useRef<string | null>(null);
+  useEffect(() => {
+    if (!workspace.ready || !searchFocusNodeId || handledSearchFocus.current === searchFocusNodeId) return;
+    const node = workspace.nodes.find((entry) => entry.id === searchFocusNodeId);
+    if (node) { handledSearchFocus.current = searchFocusNodeId; focusCanvasNode(node); }
+  }, [workspace.ready, workspace.nodes, searchFocusNodeId, focusCanvasNode]);
 
   const toggleDrawing = useCallback(() => {
     setDrawing((current) => {
@@ -2340,6 +2420,14 @@ export function HiiRoot({
         setPromptVisible(false);
         return;
       }
+      if (runtimeEnabled && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
+        event.preventDefault();
+        if (workspaceTerminal?.payload.terminalPresentation === 'docked') {
+          workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, terminalPresentation: 'hidden' } });
+        } else ensureWorkspaceTerminal('docked');
+        setPromptVisible(false);
+        return;
+      }
       if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 't') {
         event.preventDefault();
         setWebSearchOpen(true);
@@ -2848,6 +2936,9 @@ export function HiiRoot({
       />}
       {canvasManagerOpen && <CanvasManager
         nodes={workspace.nodes}
+        searchWorkspaces={searchWorkspaces}
+        currentWorkspaceId={searchWorkspaceId ?? spaceId ?? 'local'}
+        onFocusExternalNode={onFocusExternalNode ? (workspaceId, nodeId) => { setCanvasManagerOpen(false); onFocusExternalNode(workspaceId, nodeId); } : undefined}
         onFocusBoard={focusCanvasBoard}
         onFocusNode={focusCanvasNode}
         onClose={closeCanvasManager}
@@ -2981,27 +3072,39 @@ export function HiiRoot({
           }}
         />}
       </div>
-      {runtimeEnabled && persistentChrome && (workspaceTerminal?.payload.terminalPresentation === 'docked' || workspaceTerminal?.payload.terminalPresentation === 'quick') && (
+      {runtimeEnabled && (workspaceTerminal?.payload.terminalPresentation === 'docked' || workspaceTerminal?.payload.terminalPresentation === 'quick') && (
         <aside
           className="hii-docked-terminal"
           data-compact={workspaceTerminal.payload.terminalPresentation === 'quick' || undefined}
           data-workspace-ui
           onPointerDown={(event) => event.stopPropagation()}
           onKeyDownCapture={(event) => {
-            if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return;
+            if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'j') return;
             event.preventDefault();
             event.stopPropagation();
             workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, terminalPresentation: 'hidden' } });
           }}
         >
+          <div className="hii-docked-terminal-context" aria-label="Terminal context">
+            <span>{spaceId || runtimeSpaceId() || 'default'}</span>
+            {selectedNodes.find((node) => typeof node.payload.path === 'string' && node.payload.path) && <button type="button" onClick={() => {
+              const source = selectedNodes.find((node) => typeof node.payload.path === 'string' && node.payload.path);
+              if (!source) return;
+              void writeTerminalSession(text(workspaceTerminal.payload.sessionId), ` ${text(source.payload.path)} `);
+            }}>Insert selected file path</button>}
+          </div>
           <div className="hii-docked-terminal-actions">
             <button type="button" data-tooltip="Move to canvas · ⌘⇧T" aria-label="Move terminal to canvas" onClick={() => ensureWorkspaceTerminal('canvas')}><CornersOut size={16} /></button>
-            <button type="button" data-tooltip="Hide · ⌘Space" aria-label="Hide terminal" onClick={() => workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, terminalPresentation: 'hidden' } })}>×</button>
+            <button type="button" data-tooltip="Hide · ⌘J" aria-label="Hide terminal" onClick={() => workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, terminalPresentation: 'hidden' } })}>×</button>
           </div>
           <TerminalBody node={workspaceTerminal} onPayload={(patch) => workspace.patchNode(workspaceTerminal.id, { payload: { ...workspaceTerminal.payload, ...patch } })} onAgentSubmit={(intent) => void startObjectiveAgent(workspaceTerminal.id, intent)} />
         </aside>
       )}
-      {webSearchOpen && <QuickWebSearch onDismiss={() => setWebSearchOpen(false)} onSearch={submitQuickWebSearch} />}
+      {webSearchOpen && <QuickWebSearch onDismiss={() => setWebSearchOpen(false)} onSearch={submitQuickWebSearch} onOpen={(url) => {
+        const center = camera.toWorld(window.innerWidth / 2, window.innerHeight / 2);
+        openDevBrowser({ x: center.x - 380, y: center.y - 270 }, url);
+        setWebSearchOpen(false);
+      }} />}
       {runtimeEnabled && promptVisible && prompt && (
         <Prompt
           key={`${prompt.anchor.x}:${prompt.anchor.y}:${prompt.initialValue}:${prompt.menu || 'closed'}`}

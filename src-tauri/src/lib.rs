@@ -27,6 +27,7 @@ mod browser;
 mod chat;
 mod local_workspaces;
 mod natirar;
+mod quick_capture;
 mod terminal;
 mod ui_channel;
 
@@ -833,6 +834,34 @@ fn link_open_handoff(kind: String, recipient: String, body: String) -> Result<()
 
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if args.iter().any(|arg| arg == "--background") {
+                return;
+            }
+            if let Some(main) = app.get_webview_window("main") {
+                let _ = main.show();
+                let _ = main.set_focus();
+            }
+        }))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
+                    let capture =
+                        Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyH);
+                    if shortcut == &capture && event.state() == ShortcutState::Pressed {
+                        if let Err(error) = quick_capture::open(app) {
+                            eprintln!("HII quick capture: {error}");
+                        }
+                    }
+                })
+                .build(),
+        )
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--background"]),
+        ))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(AgentProcesses::default())
@@ -863,6 +892,23 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
+            let capture = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyH);
+            if let Err(error) = app.global_shortcut().register(capture) {
+                eprintln!("HII quick capture shortcut unavailable: {error}");
+            }
+            #[cfg(target_os = "macos")]
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                if !cfg!(debug_assertions) {
+                    let _ = app.autolaunch().enable();
+                }
+            }
+            if env::args().any(|arg| arg == "--background") {
+                if let Some(main) = app.get_webview_window("main") {
+                    let _ = main.hide();
+                }
+            }
             app.manage(chat::ChatState::open(app.handle().clone()).map_err(std::io::Error::other)?);
             ui_channel::apply_startup(&app.handle().clone());
             ui_channel::spawn_poller(app.handle().clone());
@@ -895,6 +941,7 @@ pub fn run() {
             account_sync::account_sync_link,
             account_sync::account_workspace_list,
             local_workspaces::local_workspace_list,
+            local_workspaces::local_workspace_read,
             local_workspaces::local_workspace_select,
             natirar::natirar_project_read,
             natirar::natirar_project_select,
@@ -908,6 +955,10 @@ pub fn run() {
             information_capture,
             information_find,
             information_inspect,
+            quick_capture::quick_capture_clipboard,
+            quick_capture::quick_capture_save,
+            quick_capture::quick_capture_hide,
+            quick_capture::quick_capture_open_main,
             agent_start,
             agent_cancel,
             terminal::terminal_start,

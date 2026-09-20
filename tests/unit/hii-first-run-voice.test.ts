@@ -14,8 +14,8 @@ describe('HII first-run and voice input', () => {
     expect(firstRun).toContain("event.key === 'ArrowDown'");
     expect(firstRun).toContain("event.key === 'Enter'");
     expect(web).not.toContain('<HiiFirstRunTerminal');
-    expect(web).toContain('openTerminalOnReady={ready && !firstRunDismissed}');
-    expect(web).toContain('onTerminalReady={completeFirstRun}');
+    expect(web).not.toContain('openTerminalOnReady={ready && !firstRunDismissed}');
+    expect(web).toContain('<HiiCanvasFrame');
     expect(web).toContain("params.get('first-run') === '1'");
     expect(desktop).not.toContain('<HiiFirstRunTerminal');
     expect(desktop).not.toContain('openTerminalOnReady={ready && !onboardingComplete}');

@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { HiiRoot } from '@/components/workspace/HiiRoot';
+import type { SearchableWorkspace } from '@/lib/workspace/cross-workspace-search';
 import { UserCircle, SidebarSimple, X } from '@phosphor-icons/react';
 import { readAccountWorkspaceSelection, resolveAccountWorkspaceSelection, saveAccountWorkspaceSelection } from '@/lib/desktop/account-selection';
 import {
@@ -12,7 +13,7 @@ import {
   type NativeAccountWorkspace
 } from '@/lib/desktop/account-sync';
 import styles from './DesktopHiiAccess.module.css';
-import { listLocalWorkspaces, selectLocalWorkspace, type LocalWorkspaceInventory } from '@/lib/desktop/local-workspaces';
+import { listLocalWorkspaces, readLocalWorkspace, selectLocalWorkspace, type LocalWorkspaceInventory } from '@/lib/desktop/local-workspaces';
 
 type LinkedIdentity = { handle: string; deviceName: string };
 
@@ -52,6 +53,30 @@ export function DesktopHiiAccess() {
   const [unsaved, setUnsaved] = useState(false);
   const [localBoards, setLocalBoards] = useState<LocalWorkspaceInventory | null>(null);
   const [localEpoch, setLocalEpoch] = useState(0);
+  const [searchFocusNodeId, setSearchFocusNodeId] = useState<string | null>(null);
+  const searchWorkspaces = useCallback(async (): Promise<SearchableWorkspace[]> => {
+    const documents: SearchableWorkspace[] = [];
+    const local = await listLocalWorkspaces();
+    const localDocuments = await Promise.all(local.workspaces.filter((board) => !board.unreadable).map(async (board) => {
+      const document = await readLocalWorkspace(board.id);
+      return { id: `local:${board.id}`, title: `On this device · ${board.id}`, nodes: document.nodes };
+    }));
+    documents.push(...localDocuments);
+    const accountDocuments = await Promise.all(workspaces.map(async (entry) => {
+      const source = new NativeAccountWorkspacePersistence(entry.id);
+      const document = await source.read();
+      return { id: entry.id, title: entry.name, nodes: document.nodes };
+    }));
+    return [...documents, ...accountDocuments];
+  }, [workspaces]);
+  const focusSearchResult = useCallback(async (workspaceId: string, nodeId: string) => {
+    if (unsaved) { setMessage('Save or retry the current canvas before changing workspaces.'); return; }
+    setSearchFocusNodeId(nodeId);
+    if (workspaceId.startsWith('local:')) {
+      const localId = workspaceId.slice('local:'.length);
+      if (active !== 'local' || localBoards?.selectedWorkspaceId !== localId) await openLocalBoard(localId);
+    } else if (workspaceId !== active) await selectWorkspace(workspaceId);
+  }, [active, localBoards?.selectedWorkspaceId, unsaved]);
 
   useEffect(() => {
     void listLocalWorkspaces().then(setLocalBoards).catch((error) => setMessage(String(error)));
@@ -167,6 +192,10 @@ export function DesktopHiiAccess() {
       spaceId={active === 'local' ? '' : active}
       creatorId={identity ? `account:${identity.handle}` : 'human:local'}
       persistence={persistence}
+      searchWorkspaces={searchWorkspaces}
+      searchWorkspaceId={active === 'local' ? `local:${localBoards?.selectedWorkspaceId ?? 'default'}` : active}
+      onFocusExternalNode={(workspaceId, nodeId) => { void focusSearchResult(workspaceId, nodeId); }}
+      searchFocusNodeId={searchFocusNodeId}
       persistentChrome={false}
       onUnsavedChanges={setUnsaved}
     /> : <div className={styles.loading} role="status">{ready ? 'Your account canvas could not be opened.' : 'Opening HII...'}</div>}

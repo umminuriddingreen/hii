@@ -46,6 +46,18 @@ pub fn local_workspace_list() -> Result<Value, String> {
 }
 
 #[tauri::command]
+pub fn local_workspace_read(workspace_id: String) -> Result<Value, String> {
+    let root = hii_core::runtime_root()?;
+    let listing = inventory(&root)?;
+    if !listing["workspaces"].as_array().is_some_and(|boards| {
+        boards.iter().any(|board| board["id"] == workspace_id && board["unreadable"] == false)
+    }) {
+        return Err("Choose an existing readable local board.".into());
+    }
+    Ok(hii_core::runtime_space_snapshot(Some(workspace_id))?.document)
+}
+
+#[tauri::command]
 pub fn local_workspace_select(workspace_id: String) -> Result<(), String> {
     let root = hii_core::runtime_root()?;
     let listing = inventory(&root)?;

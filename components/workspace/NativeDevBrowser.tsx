@@ -3,13 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowClockwise, ArrowLeft, ArrowRight, Check, DownloadSimple, DotsThree, MagnifyingGlass } from '@phosphor-icons/react';
 import { captureInformation, type InformationCaptureResult } from '@/lib/client/hii-bridge';
-import { browserNavigationTarget, browserTargetKind, normalizedBrowserUrl } from '@/lib/workspace/browser-target';
+import { browserNavigationTarget, browserTargetKind, localBrowserSearchTarget, normalizedBrowserUrl } from '@/lib/workspace/browser-target';
 
 type Props = {
   nodeId: string;
   initialUrl?: string;
+  startEmpty?: boolean;
+  docked?: boolean;
   onUrl: (url: string) => void;
-  onCapture: (result: InformationCaptureResult) => void;
+  onAgent?: (request: string) => void;
+  onCapture?: (result: InformationCaptureResult) => void;
   onOpenObject?: (url: string) => void;
 };
 
@@ -17,6 +20,7 @@ function searchQuery(value: string) {
   try {
     const parsed = new URL(value);
     if (parsed.hostname === 'google.com' || parsed.hostname === 'www.google.com') return parsed.searchParams.get('q')?.trim() || '';
+    if (parsed.hostname === '127.0.0.1' && parsed.port === '8888' && parsed.pathname === '/search') return parsed.searchParams.get('q')?.trim() || '';
   } catch { /* Invalid values are handled by browserNavigationTarget. */ }
   return '';
 }
@@ -25,32 +29,46 @@ function isTauri() {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onCapture, onOpenObject }: Props) {
-  const initial = browserNavigationTarget(initialUrl || '') || 'https://developer.mozilla.org/';
+export function NativeDevBrowser({ nodeId, initialUrl, startEmpty = false, docked = false, onUrl, onAgent, onCapture, onOpenObject }: Props) {
+  const initial = startEmpty ? '' : browserNavigationTarget(initialUrl || '') || 'https://developer.mozilla.org/';
   const [url, setUrl] = useState(initial);
   const [draftUrl, setDraftUrl] = useState(searchQuery(initial) || initial);
   const [history, setHistory] = useState([initial]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
-  const [status, setStatus] = useState<'loading' | 'ready' | 'captured' | 'error'>('loading');
+  const [status, setStatus] = useState<'loading' | 'ready' | 'captured' | 'error'>(startEmpty ? 'ready' : 'loading');
   const [device, setDevice] = useState<'responsive' | 'desktop' | 'mobile'>('responsive');
+  const [request, setRequest] = useState('');
+  const [showAgent, setShowAgent] = useState(false);
   const [showMore, setShowMore] = useState(false);
   const [omniboxOpen, setOmniboxOpen] = useState(false);
   const [omniboxIndex, setOmniboxIndex] = useState(0);
   const viewport = useRef<HTMLDivElement | null>(null);
   const webview = useRef<import('@tauri-apps/api/webview').Webview | null>(null);
+  const lastBounds = useRef('');
+  const boundsInFlight = useRef(false);
   const label = `hii-browser-${nodeId.replace(/[^a-zA-Z0-9-]/g, '-')}`;
   const omniboxId = `${label}-options`;
 
   const syncBounds = useCallback(async () => {
-    if (!webview.current || !viewport.current) return;
+    if (!webview.current || !viewport.current || boundsInFlight.current) return;
     const rect = viewport.current.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2) return;
-    const { LogicalPosition, LogicalSize } = await import('@tauri-apps/api/dpi');
-    await Promise.all([
-      webview.current.setPosition(new LogicalPosition(rect.left, rect.top)),
-      webview.current.setSize(new LogicalSize(rect.width, rect.height))
-    ]);
+    const bounds = [rect.left, rect.top, rect.width, rect.height].map((value) => Math.round(value)).join(':');
+    if (bounds === lastBounds.current) return;
+    boundsInFlight.current = true;
+    try {
+      const { LogicalPosition, LogicalSize } = await import('@tauri-apps/api/dpi');
+      const current = webview.current;
+      if (!current) return;
+      await Promise.all([
+        current.setPosition(new LogicalPosition(rect.left, rect.top)),
+        current.setSize(new LogicalSize(rect.width, rect.height))
+      ]);
+      lastBounds.current = bounds;
+    } finally {
+      boundsInFlight.current = false;
+    }
   }, []);
 
   useEffect(() => {
@@ -66,13 +84,14 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onCapture, onOpenO
       if (disposed) return;
       const rect = viewport.current!.getBoundingClientRect();
       const next = existing || new Webview(getCurrentWindow(), label, {
-        url: normalizedBrowserUrl(url) || 'https://developer.mozilla.org',
+        url: normalizedBrowserUrl(url) || 'about:blank',
         x: rect.left,
         y: rect.top,
         width: rect.width,
         height: rect.height
       });
       webview.current = next;
+      lastBounds.current = existing ? '' : [rect.left, rect.top, rect.width, rect.height].map((value) => Math.round(value)).join(':');
       if (existing) await existing.show();
       else {
         await next.once('tauri://created', () => setStatus('ready'));
@@ -85,6 +104,7 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onCapture, onOpenO
       window.clearInterval(timer);
       const current = webview.current;
       webview.current = null;
+      lastBounds.current = '';
       if (current) void current.close();
     };
   // The webview belongs to this durable node for its full mounted lifetime.
@@ -121,7 +141,7 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onCapture, onOpenO
   }, [historyIndex, onUrl]);
 
   const navigate = async (nextValue = draftUrl) => {
-    const next = browserNavigationTarget(nextValue);
+    const next = isTauri() ? localBrowserSearchTarget(nextValue) : browserNavigationTarget(nextValue);
     if (!next) { setStatus('error'); return; }
     setOmniboxOpen(false);
     setShowMore(false);
@@ -156,6 +176,7 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onCapture, onOpenO
   };
 
   const capture = async () => {
+    if (!onCapture || !url) return;
     setStatus('loading');
     try {
       const result = await captureInformation(url);
@@ -165,7 +186,7 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onCapture, onOpenO
   };
 
   return (
-    <article className="hii-dev-browser" data-device={device} data-target={targetKind}>
+    <article className="hii-dev-browser" data-device={device} data-agent={showAgent || undefined} data-target={targetKind} data-docked={docked || undefined}>
       <nav className="hii-browser-nav" aria-label="Browser controls">
         <div className="hii-browser-nav-main">
           <button type="button" title="Back" aria-label="Back" disabled={!isTauri() && historyIndex === 0} onClick={() => void action('back')}><ArrowLeft size={16} /></button>
@@ -180,6 +201,7 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onCapture, onOpenO
             }} role="combobox" aria-autocomplete="list" aria-controls={omniboxId} aria-expanded={omniboxOpen && omniboxOptions.length > 0} aria-activedescendant={omniboxOpen && omniboxOptions.length ? `${omniboxId}-${omniboxIndex}` : undefined} aria-label="Search or open another page" placeholder="Search or enter a URL" spellCheck={false} />
           </form>
           <button type="button" className="hii-browser-capture" title="Capture source" aria-label="Capture source" onClick={() => void capture()}>{status === 'captured' ? <Check size={17} /> : <DownloadSimple size={17} />}</button>
+          {onAgent && <button type="button" title="Ask HII about this page" aria-label="Ask HII about this page" onClick={() => setShowAgent((current) => !current)}>✦</button>}
           <button type="button" title="More browser actions" aria-label="More browser actions" aria-expanded={showMore} onClick={() => { setShowMore((current) => !current); setOmniboxOpen(false); }}><DotsThree size={19} /></button>
         </div>
         {omniboxOpen && omniboxOptions.length > 0 && <div className="hii-browser-omnibox-options" id={omniboxId} role="listbox" aria-label="Browser suggestions">
@@ -196,10 +218,19 @@ export function NativeDevBrowser({ nodeId, initialUrl, onUrl, onCapture, onOpenO
             <header><span>Local search</span><strong>{activeSearchQuery}</strong></header>
             <p className="hii-browser-results-empty">Web search runs through your local HII runtime in the desktop app or CLI.</p>
           </div>}
-          {!isTauri() && !activeSearchQuery && <iframe key={`${url}:${reloadKey}`} src={normalizedBrowserUrl(url) || undefined} title="HII interactive browser" sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-scripts" allow="clipboard-read; clipboard-write; fullscreen" onLoad={() => setStatus('ready')} onError={() => setStatus('error')} />}
-          {status === 'loading' && !activeSearchQuery && <span className="hii-browser-loading">{`Opening ${targetKind === 'local-service' ? 'local service' : 'website'}…`}</span>}
+          {!url && <div className="hii-browser-empty"><span aria-hidden="true">◎</span><strong>Start browsing</strong><p>Enter a URL or search above.</p></div>}
+          {!isTauri() && url && !activeSearchQuery && <iframe key={`${url}:${reloadKey}`} src={normalizedBrowserUrl(url) || undefined} title="HII interactive browser" sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-scripts" allow="clipboard-read; clipboard-write; fullscreen" onLoad={() => setStatus('ready')} onError={() => setStatus('error')} />}
+          {status === 'loading' && url && !activeSearchQuery && <span className="hii-browser-loading">{`Opening ${targetKind === 'local-service' ? 'local service' : 'website'}…`}</span>}
           {status === 'error' && <span className="hii-browser-loading">This page refused the embedded view. Open it in its own window or check the local service.</span>}
         </div>
+        {showAgent && <aside className="hii-browser-agent">
+          <header><span>Agent lens</span><small>page context</small></header>
+          <p>Give HII the current URL and a bounded instruction. Reading is allowed; changes still follow the active mode and approval boundary.</p>
+          <form onSubmit={(event) => { event.preventDefault(); if (request.trim()) { onAgent?.(request.trim()); setRequest(''); } }}>
+            <textarea value={request} onChange={(event) => setRequest(event.target.value)} placeholder="Explain this page, compare sources, or turn findings into an artifact…" />
+            <button type="submit" disabled={!request.trim()}>Ask HII <span>⌘ ↵</span></button>
+          </form>
+        </aside>}
       </section>
     </article>
   );

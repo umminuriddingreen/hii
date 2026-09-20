@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { browserNavigationTarget, browserTargetKind, normalizedBrowserUrl } from '@/lib/workspace/browser-target';
+import { browserNavigationTarget, browserTargetKind, localBrowserSearchTarget, normalizedBrowserUrl } from '@/lib/workspace/browser-target';
 
 describe('HII interactive browser targets', () => {
   it('defaults bare localhost services to http', () => {
@@ -11,6 +11,7 @@ describe('HII interactive browser targets', () => {
 
   it('defaults public hosts to https and rejects non-web protocols', () => {
     expect(normalizedBrowserUrl('example.com/docs')).toBe('https://example.com/docs');
+    expect(normalizedBrowserUrl('youtube')).toBeNull();
     expect(normalizedBrowserUrl('file:///tmp/private')).toBeNull();
   });
 
@@ -32,6 +33,9 @@ describe('HII interactive browser targets', () => {
     expect(browserNavigationTarget('site:archdaily.com museum')).toBe('https://www.google.com/search?q=site%3Aarchdaily.com%20museum');
     expect(browserNavigationTarget('archdaily.com')).toBe('https://archdaily.com/');
     expect(browserNavigationTarget('file:///tmp/private')).toBeNull();
+    expect(localBrowserSearchTarget('youtube')).toBe('http://127.0.0.1:8888/search?q=youtube');
+    expect(localBrowserSearchTarget('example.com')).toBe('https://example.com/');
+    expect(localBrowserSearchTarget('file:///tmp/private')).toBeNull();
   });
 
   it('projects search sources and live pages as independent canvas objects', () => {

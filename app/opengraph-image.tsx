@@ -16,7 +16,7 @@ export const contentType = 'image/png';
  * where its Windows path handling cannot prerender.
  */
 export default async function OpengraphImage() {
-  if (process.env.NEXT_PUBLIC_HII_TARGET === 'desktop') {
+  if (process.env.NEXT_PUBLIC_HII_TARGET === 'desktop' || process.platform === 'win32') {
     return new Response(null, { status: 404 });
   }
   const { ImageResponse } = await import('next/og');

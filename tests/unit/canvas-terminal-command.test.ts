@@ -87,10 +87,8 @@ describe('canvas terminal command', () => {
     expect(root).toContain('setCanvasCommandsOpen((open) => !open)');
     expect(root).toContain("ensureWorkspaceTerminal('docked')");
     expect(root).toContain("presentation: 'canvas' | 'docked' | 'quick'");
-    expect(root).toContain("data-compact={workspaceTerminal.payload.terminalPresentation === 'quick' || undefined}");
     expect(root).toContain('onKeyDownCapture={(event) => {');
-    expect(css).toContain('.hii-docked-terminal[data-compact="true"]');
-    expect(css).toContain('height: min(28vh, 260px);');
+    expect(css).toContain('height: min(42vh, 300px);');
   });
 
   it('turns Command-T search text into a live browser object on the canvas', () => {
