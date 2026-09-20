@@ -48,3 +48,47 @@ browser object on the canvas.
 3. Search a phrase and confirm the field is replaced by a live Google-results browser object.
 
 final result: blocked
+
+---
+
+# Design QA — Canvas-native HII landing page
+
+## Evidence
+
+- Target visual system: `public/marketing/hii-workspace-live.png` — 1280 × 720, intrinsic 1×. Supporting product references: `public/marketing/hii-command-palette-live.png` and `public/marketing/hii-run-receipt-live.png`.
+- Desktop implementation: `/mnt/c/Users/ummin/.codex/visualizations/2026/09/18/01a0b47f-e2ab-77c3-b92e-557842776861/hii-landing/desktop-final.png` — 1762 × 948 CSS pixels, device scale 1.
+- Tablet implementation: `/mnt/c/Users/ummin/.codex/visualizations/2026/09/18/01a0b47f-e2ab-77c3-b92e-557842776861/hii-landing/tablet-hero.png` — 768 × 1024 CSS pixels, device scale 1.
+- Mobile implementation: `/mnt/c/Users/ummin/.codex/visualizations/2026/09/18/01a0b47f-e2ab-77c3-b92e-557842776861/hii-landing/mobile-final.png` — 390 × 844 CSS pixels, device scale 1.
+- Mobile account overlay: `/mnt/c/Users/ummin/.codex/visualizations/2026/09/18/01a0b47f-e2ab-77c3-b92e-557842776861/hii-landing/mobile-auth.png` — 390 × 844 CSS pixels, device scale 1.
+- State: unauthenticated `/?site=1`, light color scheme, reduced motion enabled for mobile; local-owner behavior also checked separately on loopback.
+
+The target and desktop implementation were inspected together at original detail. This is a visual-system translation, not a pixel-identical clone: the workspace reference supplies the palette, field grid, translucent object windows, monospace metadata, compact status accents, and spatial proportions used by the marketing surface.
+
+## Interaction and runtime checks
+
+- Primary `try the canvas` action remains a direct link to `/`.
+- Existing local-owner session correctly enters the canvas from account CTAs.
+- Fresh unauthenticated `create your HII` opens the signup dialog; focus lands on the name field, Tab remains in the dialog, and Escape closes it.
+- Desktop, tablet, and mobile implementation widths equal their scroll widths; no horizontal overflow was found.
+- Product images loaded at all checked widths.
+- Browser console contained development/HMR information only; page errors were empty on the intended origin.
+- Axe 4.12.1: 39 passes, 0 incomplete, 0 violations after the final contrast adjustment.
+
+## Fidelity surfaces
+
+1. Layout and geometry: passed. The desktop hero uses the reference workspace as the dominant spatial object; tablet and mobile collapse to a safe single-column reading order.
+2. Typography and hierarchy: passed. Display copy remains primary while monospace labels, status text, and captions match the workspace shell.
+3. Color and surfaces: passed. Off-white canvas, translucent panels, restrained blue/green status accents, and light authority surfaces replace the dark campaign treatment.
+4. Product truth and media: passed. Live workspace, command palette, and run receipt imagery render in context with descriptive alt text; ASCII and dark campaign art are absent from this page.
+5. Interaction and accessibility: passed. Interactive targets are at least 44px, keyboard focus is visible, modal focus handling remains intact, reduced motion is supported, and automated contrast checks pass.
+
+## Comparison history
+
+- Pass 1: layout, media, responsive stacking, modal behavior, and overflow passed. Automated accessibility found three muted-text instances at 4.48:1 against the 4.5:1 threshold.
+- Pass 2: increased the shared muted-text token from 58% to 62% opacity. Re-ran the audit with 0 violations and recaptured final desktop/mobile states.
+
+## Release note
+
+The production application build passes. `npm run deploy` did not upload because the already-modified public worker fails in its existing Wasm build step: `failed to generate catch wrappers` / `externref table required for catch wrappers`. No worker files were changed as part of this design work. The live URL still returns HTTP 200 but remains on the previous dark build; that state is captured at `/mnt/c/Users/ummin/.codex/visualizations/2026/09/18/01a0b47f-e2ab-77c3-b92e-557842776861/hii-landing/live-before-release.png`.
+
+Final result: passed

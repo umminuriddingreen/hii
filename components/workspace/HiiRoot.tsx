@@ -1098,6 +1098,7 @@ export function HiiRoot({
   openTerminalOnReady = false,
   onTerminalReady,
   onUnsavedChanges,
+  onSelectionChange,
   onShareNode,
   onRequestDevice,
   fileSeeder,
@@ -1119,6 +1120,7 @@ export function HiiRoot({
   openTerminalOnReady?: boolean;
   onTerminalReady?: () => void;
   onUnsavedChanges?: (unsaved: boolean) => void;
+  onSelectionChange?: (nodes: WorkspaceNode[]) => void;
   onShareNode?: (node: WorkspaceNode) => void;
   onRequestDevice?: () => void;
   fileSeeder?: (files: File[]) => Promise<NodeSeed[]>;
@@ -1704,6 +1706,9 @@ export function HiiRoot({
   }, [spawnInformation]);
 
   const selectedNodes = useMemo(() => workspace.nodes.filter((node) => selected.includes(node.id)), [selected, workspace.nodes]);
+  useEffect(() => {
+    onSelectionChange?.(selectedNodes);
+  }, [onSelectionChange, selectedNodes]);
 
   const startObjectiveAgent = useCallback(async (nodeId: string, intent: string) => {
     const node = workspaceRef.current.nodes.find((entry) => entry.id === nodeId);
