@@ -62,9 +62,8 @@ function ComfyCreatePanel({ nodes, onClose, onOutput }: { nodes: WorkspaceNode[]
         payload: { title: 'HII Create output', name: output.filename, url, prompt: fullPrompt, promptId }
       });
       setStatus('Complete · output placed back on the canvas.');
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Local generation failed.');
-    } finally { setBusy(false); }
+    } catch (error) { setStatus(error instanceof Error ? error.message : 'Local generation failed.'); }
+    finally { setBusy(false); }
   }
   return <aside className={styles.comfyPanel} data-workspace-ui aria-label="Create with local ComfyUI">
     <header><strong>HII Create</strong><button type="button" onClick={onClose}>close</button></header>
