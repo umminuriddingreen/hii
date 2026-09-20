@@ -25,6 +25,10 @@ const LAUNCHER_TEMPLATE_SHELL = [
   'set -euo pipefail',
   '',
   'marker_file="${HII_CLI_RELEASE_MARKER:-{{MARKER_FILE}}}"',
+  'source_root={{SOURCE_ROOT}}',
+  'if [ -d "${source_root}" ]; then',
+  '  export HII_ROOT="${source_root}"',
+  'fi',
   '',
   'if [ ! -f "${marker_file}" ]; then',
   '  echo "hii: no HII release marker found at ${marker_file}." >&2',
@@ -54,6 +58,10 @@ const LAUNCHER_TEMPLATE_POWERSHELL = [
   '$ErrorActionPreference = \'Stop\'',
   '',
   '$markerFile = if ($env:HII_CLI_RELEASE_MARKER) { $env:HII_CLI_RELEASE_MARKER } else { "{{MARKER_FILE}}" }',
+  '$sourceRoot = {{SOURCE_ROOT}}',
+  'if (Test-Path -LiteralPath $sourceRoot -PathType Container) {',
+  '  $env:HII_ROOT = $sourceRoot',
+  '}',
   '',
   'if (-not (Test-Path -LiteralPath $markerFile)) {',
   '  throw "hii: no HII release marker found at $markerFile. Install with the release installer first."',
@@ -420,10 +428,22 @@ function appendLine(filePath, payload) {
   writeFileSync(filePath, `${JSON.stringify(payload)}\n`, { encoding: 'utf8', flag: 'a' });
 }
 
-function makeLauncher(platform, markerFile) {
+function shellLiteral(value) {
+  return `'${String(value).replaceAll("'", `'"'"'`)}'`;
+}
+
+function powerShellLiteral(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+function makeLauncher(platform, markerFile, sourceRoot) {
   return platform === 'win32'
-    ? LAUNCHER_TEMPLATE_POWERSHELL.replace('{{MARKER_FILE}}', markerFile)
-    : LAUNCHER_TEMPLATE_SHELL.replace('{{MARKER_FILE}}', markerFile);
+    ? LAUNCHER_TEMPLATE_POWERSHELL
+        .replace('{{MARKER_FILE}}', markerFile)
+        .replace('{{SOURCE_ROOT}}', powerShellLiteral(sourceRoot))
+    : LAUNCHER_TEMPLATE_SHELL
+        .replace('{{MARKER_FILE}}', markerFile)
+        .replace('{{SOURCE_ROOT}}', shellLiteral(sourceRoot));
 }
 
 function buildBinary(sourceRoot, sourceCargo) {
@@ -539,7 +559,7 @@ function main() {
     previousCurrent: previousMarker
   };
 
-  const launcherBody = makeLauncher(platform, defaults.markerFile);
+  const launcherBody = makeLauncher(platform, defaults.markerFile, sourceRoot);
   const launcherMode = platform === 'win32' ? undefined : 0o755;
   const previousLauncherPath = existsSync(defaults.launcherPath) ? path.resolve(defaults.launcherPath) : null;
   const launcherNeedsUpdate = previousLauncher !== launcherBody;

@@ -225,6 +225,12 @@ pub const ROUTES: &[Route] = &[
         Infra,
         "compatibility listing for provider-advertised models",
     ),
+    delegated(
+        "platform",
+        Extended,
+        Infra,
+        "detect OS, architecture, model format, and runtime",
+    ),
     delegated("model", Core, Infra, "fully manage the HII model backend"),
     delegated(
         "open",

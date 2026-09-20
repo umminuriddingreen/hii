@@ -237,17 +237,20 @@ impl Ollama {
         {
             return Self::new(crate::config::AppPaths::model_url());
         }
-        if let Some(config) = crate::config::inference_config() {
-            return Self::new(config.endpoint);
-        }
-        if crate::config::AppPaths::discover()
+        if let Some(provider) = crate::config::AppPaths::discover()
             .ok()
             .and_then(|paths| paths.user_model_preference().ok().flatten())
             .and_then(|preference| preference.provider)
-            .as_deref()
-            == Some(ModelProvider::OxAlphaWeb.id())
         {
-            return Self::new(OX_ALPHA_WEB_URL.to_string());
+            if provider == ModelProvider::OxAlphaWeb.id() {
+                return Self::new(OX_ALPHA_WEB_URL.to_string());
+            }
+            if provider == ModelProvider::LlamaCpp.id() {
+                return Self::new("http://127.0.0.1:6127".to_string());
+            }
+        }
+        if let Some(config) = crate::config::inference_config() {
+            return Self::new(config.endpoint);
         }
         Self::for_mode("auto")
     }
@@ -356,6 +359,9 @@ impl Ollama {
         if pinned_model_url() {
             return Err(self.unreachable_error());
         }
+        if self.provider == ModelProvider::LlamaCpp && start_windows_llama_runtime() {
+            return Ok(self);
+        }
         if let Some(native) = start_native_runner() {
             return Ok(native);
         }
@@ -387,7 +393,10 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
                     .map(|model| model.name)
                     .collect())
             }
-            ModelProvider::LmStudio | ModelProvider::Native | ModelProvider::RapidMlx => {
+            ModelProvider::LmStudio
+            | ModelProvider::LlamaCpp
+            | ModelProvider::Native
+            | ModelProvider::RapidMlx => {
                 let response: OpenAiModels = self
                     .authorize(self.agent.get(&format!("{}/v1/models", self.base_url)))?
                     .call()
@@ -498,9 +507,10 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
         let messages = provider_messages(messages);
         let result = match self.provider {
             ModelProvider::Ollama => self.chat_ollama(model, &messages, format),
-            ModelProvider::LmStudio | ModelProvider::Native | ModelProvider::RapidMlx => {
-                self.chat_openai(model, &messages, format)
-            }
+            ModelProvider::LmStudio
+            | ModelProvider::LlamaCpp
+            | ModelProvider::Native
+            | ModelProvider::RapidMlx => self.chat_openai(model, &messages, format),
             ModelProvider::OxAlphaWeb => self.chat_website(model, &messages),
         };
         match &result {
@@ -1242,6 +1252,39 @@ fn start_native_runner() -> Option<Ollama> {
     )?;
     wait_ready_verbose(native_url, Duration::from_secs(60), &log, &mut child)
         .then(|| Ollama::new(native_url.to_string()))
+}
+
+/// Start the HII-owned Windows llama.cpp service from the same platform-aware
+/// runtime manager used by `hii model start`. The manager only uses existing
+/// preset-backed GGUF files and binds its owned service to loopback.
+fn start_windows_llama_runtime() -> bool {
+    if !cfg!(target_os = "windows") {
+        return false;
+    }
+    let Ok(paths) = crate::config::AppPaths::discover() else {
+        return false;
+    };
+    let script = paths.repo.join("aii/daemon/hiid.mjs");
+    if !script.is_file() {
+        return false;
+    }
+    let status = std::process::Command::new("node")
+        .arg(script)
+        .args(["model-runtime", "start"])
+        .current_dir(&paths.repo)
+        .env("HII_ROOT", &paths.repo)
+        .status();
+    if !status.is_ok_and(|status| status.success()) {
+        return false;
+    }
+    let started = std::time::Instant::now();
+    while started.elapsed() < Duration::from_secs(30) {
+        if endpoint_ready("http://127.0.0.1:6127") {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    false
 }
 
 /// Spawn the runner detached from this terminal but with its output kept, so

@@ -1367,8 +1367,10 @@ function agentCommandCatalog() {
     { command: "hii loop once", purpose: "Propose the next user-proxy plan locally; do not act until y/n approval." },
     { command: "hii loop note <note>", purpose: "Add user notes to steer the persistent loop." },
     { command: "hii loop decide <yes|no>", purpose: "Approve or reject the latest proposed plan." },
+    { command: "hii platform --json", purpose: "Report the detected OS, architecture, compatible model format, and default runtime." },
     { command: "hii model recommend", purpose: "Compare HII-curated local models against this machine, installed state, and measured speed." },
-    { command: "hii model search <query>", purpose: "Discover MLX-ready Hugging Face models; defaults to mlx-community." },
+    { command: "hii model discover", purpose: "Find compatible local runtimes, preset-backed weights, and reachable model endpoints." },
+    { command: "hii model search <query>", purpose: "Search Hugging Face for OS-compatible MLX or GGUF model repositories." },
     { command: "hii model install <org/model>", purpose: "Explicitly download and verify weights in HII's private cache." },
     { command: "hii model installed", purpose: "List locally installed HII model weights and disk usage." },
     { command: "hii model use <org/model>", purpose: "Switch the HII backend and project the active choice into Pi." },
@@ -2968,7 +2970,7 @@ function refreshReadmeState() {
 }
 
 function runnerUsage() {
-  console.error("usage: hii model <search|install|installed|use|status|start|stop|models|bench|logs|remove>");
+  console.error("usage: hii model <recommend|discover|search|install|installed|use|status|start|stop|models|bench|logs|remove>");
 }
 
 async function cmdRunner(args) {
@@ -3190,6 +3192,9 @@ switch (cmd) {
   case "daemon": cmdDaemon(rest); break;
   case "instances": cmdInstances(rest); break;
   case "feed": cmdFeed(rest); break;
+  case "platform":
+    nodeScript(HIID, ["model-runtime", "platform", ...rest]);
+    break;
   case "model":
     if (rest.includes("--help") || rest.includes("-h")) cmdHelp("model");
     else nodeScript(HIID, ["model-runtime", ...(rest.length ? rest : ["recommend"])]);
@@ -3352,8 +3357,10 @@ usage: hii <command>
   skill doctor        validate registry, bundles, receipts, and legacy count
   runner init <name>  register an owned runner and print its token once
   runner start --once claim one whitelisted runner job and exit
-  model [recommend]    compare curated choices for this machine
-  model search <query> discover MLX models on Hugging Face
+  platform [--json]    detect OS, architecture, model format, and runtime
+  model [recommend]    compare platform-compatible choices for this machine
+  model discover       find local runtimes, weights, presets, and endpoints
+  model search <query> discover compatible MLX or GGUF models
   model install <id>  download and verify a model in HII's private cache
   model installed     list models installed for HII
   model use <id|alias> activate an installed model and update Pi
