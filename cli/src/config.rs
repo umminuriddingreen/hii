@@ -11,6 +11,7 @@ pub const DEFAULT_REVIEW_MODEL: &str = "qwen3.6:35b-mlx";
 /// sharing one string that is only valid on one runtime.
 pub const DEFAULT_NATIVE_MODEL: &str = "mlx-community/Qwen3.8-27B-4bit";
 pub const DEFAULT_NATIVE_REVIEW_MODEL: &str = "mlx-community/Qwen3.8-27B-4bit";
+pub const DEFAULT_LLAMA_CPP_MODEL: &str = "qwen3.6-35b-a3b-agent";
 pub const OX_ALPHA_WEB_MODEL: &str = "z-ai/glm-5.3-flash";
 pub const OX_ALPHA_WEB_URL: &str = "https://oxalpha.com";
 /// Default tool-step ceiling. `--max-steps 0` still means unlimited, but leaving
@@ -26,6 +27,7 @@ pub const DEFAULT_MAX_STEPS: usize = 60;
 pub enum ModelProvider {
     Ollama,
     LmStudio,
+    LlamaCpp,
     Native,
     RapidMlx,
     OxAlphaWeb,
@@ -60,6 +62,7 @@ impl ModelProvider {
             None if env::var("HII_RAPID_MLX_URL").is_ok() => ModelProvider::RapidMlx,
             _ if url.contains("oxalpha.com") => ModelProvider::OxAlphaWeb,
             _ if url.contains(":11435") => ModelProvider::Native,
+            _ if url.contains(":6127") => ModelProvider::LlamaCpp,
             _ if url.contains(":1234") => ModelProvider::LmStudio,
             _ => ModelProvider::Ollama,
         }
@@ -68,6 +71,7 @@ impl ModelProvider {
     fn from_env_value(value: &str) -> Option<Self> {
         match value.to_ascii_lowercase().as_str() {
             "lmstudio" | "lm-studio" | "lm_studio" => Some(ModelProvider::LmStudio),
+            "llama.cpp" | "llamacpp" | "llama-cpp" | "llama_cpp" => Some(ModelProvider::LlamaCpp),
             "hii" | "native" | "hii-native" | "hii_native" => Some(ModelProvider::Native),
             "ollama" => Some(ModelProvider::Ollama),
             "rapid-mlx" | "rapidmlx" | "rapid_mlx" | "rapid" => Some(ModelProvider::RapidMlx),
@@ -82,6 +86,7 @@ impl ModelProvider {
     pub fn default_model(self) -> &'static str {
         match self {
             ModelProvider::Native => DEFAULT_NATIVE_MODEL,
+            ModelProvider::LlamaCpp => DEFAULT_LLAMA_CPP_MODEL,
             ModelProvider::OxAlphaWeb => OX_ALPHA_WEB_MODEL,
             ModelProvider::RapidMlx | ModelProvider::Ollama | ModelProvider::LmStudio => {
                 DEFAULT_MODEL
@@ -93,6 +98,7 @@ impl ModelProvider {
     pub fn default_review_model(self) -> &'static str {
         match self {
             ModelProvider::Native => DEFAULT_NATIVE_REVIEW_MODEL,
+            ModelProvider::LlamaCpp => DEFAULT_LLAMA_CPP_MODEL,
             ModelProvider::OxAlphaWeb => OX_ALPHA_WEB_MODEL,
             ModelProvider::RapidMlx | ModelProvider::Ollama | ModelProvider::LmStudio => {
                 DEFAULT_REVIEW_MODEL
@@ -104,6 +110,7 @@ impl ModelProvider {
         match self {
             ModelProvider::Ollama => "ollama",
             ModelProvider::LmStudio => "lmstudio",
+            ModelProvider::LlamaCpp => "llama.cpp",
             ModelProvider::Native => "native",
             ModelProvider::RapidMlx => "rapid-mlx",
             ModelProvider::OxAlphaWeb => "ox-alpha-web",
@@ -115,6 +122,7 @@ impl ModelProvider {
         match self {
             ModelProvider::Native => "HII",
             ModelProvider::LmStudio => "LM Studio",
+            ModelProvider::LlamaCpp => "llama.cpp",
             ModelProvider::Ollama => "Ollama",
             ModelProvider::RapidMlx => "Rapid-MLX",
             ModelProvider::OxAlphaWeb => "Ox Alpha Website (external)",
@@ -157,6 +165,12 @@ impl AppPaths {
                     == Some(ModelProvider::OxAlphaWeb)
                 {
                     OX_ALPHA_WEB_URL.to_string()
+                } else if env::var("HII_MODEL_PROVIDER")
+                    .ok()
+                    .and_then(|value| ModelProvider::from_env_value(value.trim()))
+                    == Some(ModelProvider::LlamaCpp)
+                {
+                    "http://127.0.0.1:6127".to_string()
                 } else {
                     "http://127.0.0.1:11435".to_string()
                 }
@@ -261,6 +275,22 @@ mod tests {
         assert_eq!(provider.id(), "ox-alpha-web");
         assert_eq!(provider.label(), "Ox Alpha Website (external)");
         assert_eq!(provider.default_model(), super::OX_ALPHA_WEB_MODEL);
+    }
+
+    #[test]
+    fn windows_llama_cpp_provider_has_its_own_identity_and_model() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous_provider = env::var_os("HII_MODEL_PROVIDER");
+        env::remove_var("HII_MODEL_PROVIDER");
+        let provider = ModelProvider::discover("http://127.0.0.1:6127");
+        assert_eq!(provider, ModelProvider::LlamaCpp);
+        assert_eq!(provider.id(), "llama.cpp");
+        assert_eq!(provider.label(), "llama.cpp");
+        assert_eq!(provider.default_model(), super::DEFAULT_LLAMA_CPP_MODEL);
+        match previous_provider {
+            Some(value) => env::set_var("HII_MODEL_PROVIDER", value),
+            None => env::remove_var("HII_MODEL_PROVIDER"),
+        };
     }
 
     #[test]

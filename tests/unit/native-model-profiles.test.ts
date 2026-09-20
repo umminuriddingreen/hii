@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
 
 import { selectConsumerModelProfile } from "../../aii/model-runtime/profiles.mjs";
+import { detectModelPlatform, supportsPlatform } from "../../aii/model-runtime/platform.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const profiles = path.join(root, "config", "native-model-profiles.json");
@@ -15,12 +16,23 @@ describe("native consumer model profiles", () => {
     [24, "24-32gb", "Qwen/Qwen3-14B"],
     [48, "48gb+", "mlx-community/Qwen3.5-35B-A3B-4bit"]
   ])("maps %i GiB to %s", (memoryGiB, tier, model) => {
-    expect(selectConsumerModelProfile(profiles, memoryGiB)).toMatchObject({ tier, model });
+    expect(selectConsumerModelProfile(profiles, memoryGiB, "darwin", "arm64")).toMatchObject({ tier, model });
+  });
+
+  it.each([
+    [16, "windows-16-24gb", "qwen3.5-9b-balanced"],
+    [64, "windows-32gb+", "qwen3.6-35b-a3b-agent"]
+  ])("maps %i GiB Windows hosts to %s", (memoryGiB, tier, model) => {
+    expect(selectConsumerModelProfile(profiles, memoryGiB, "win32", "x64")).toMatchObject({
+      tier,
+      model,
+      backend: "llama.cpp"
+    });
   });
 
   it("keeps every automatic tier quantized for consumer memory", () => {
     for (const memoryGiB of [8, 16, 24, 48, 128]) {
-      expect(selectConsumerModelProfile(profiles, memoryGiB).quant).toBe("4");
+      expect(selectConsumerModelProfile(profiles, memoryGiB, "darwin", "arm64").quant).toBe("4");
     }
   });
 
@@ -38,10 +50,27 @@ describe("native consumer model profiles", () => {
     expect(manifest.selectionCatalog).toEqual(expect.arrayContaining([
       expect.objectContaining({ aliases: expect.arrayContaining(["fast"]), speed: "fastest" }),
       expect.objectContaining({ aliases: expect.arrayContaining(["balanced"]), model: "mlx-community/Qwen3.5-9B-MLX-4bit" }),
-      expect.objectContaining({ aliases: expect.arrayContaining(["quality"]), quality: "highest local" })
+      expect.objectContaining({ aliases: expect.arrayContaining(["quality"]), quality: "highest local" }),
+      expect.objectContaining({ model: "qwen3.6-35b-a3b-agent", backend: "llama.cpp", source: "preset" })
     ]));
     expect(manifest.selectionCatalogDoc).toContain("never downloads");
     expect(JSON.stringify(manifest)).not.toContain("llmfit");
+  });
+
+  it("detects Windows and Apple Silicon model compatibility explicitly", () => {
+    expect(detectModelPlatform({ platform: "win32", arch: "x64", release: "Windows", env: {} })).toMatchObject({
+      id: "windows",
+      runtimeFamily: "llama.cpp",
+      modelFormat: "gguf",
+      supported: true
+    });
+    expect(detectModelPlatform({ platform: "darwin", arch: "arm64", release: "Darwin", env: {} })).toMatchObject({
+      id: "macos",
+      runtimeFamily: "mlx",
+      modelFormat: "mlx-safetensors",
+      supported: true
+    });
+    expect(supportsPlatform({ platforms: ["darwin"], architectures: ["arm64"] }, "win32", "x64")).toBe(false);
   });
 
   it("offers Ox Alpha only as an explicit external HII-tool model", () => {
@@ -69,6 +98,8 @@ describe("HII model management CLI", () => {
     expect(source).toContain("benchmarkStore.results[status.model] = report");
     expect(source).toContain('routing: ["hii-native", "approved-hosted"]');
     expect(source).toContain('status.loadedModel = health.loaded_model || health.model');
+    expect(source).toContain('HOST_PLATFORM.nodePlatform === "win32"');
+    expect(source).toContain('sub === "discover" || sub === "find"');
   });
 
   it("defaults conversation UX to the direct model and tool stream", () => {

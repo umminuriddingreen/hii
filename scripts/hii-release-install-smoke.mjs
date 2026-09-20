@@ -152,6 +152,7 @@ try {
   assert.equal(existsSync(first.launcherBackup), true, 'launcher backup should be created');
   assert.equal(readFileSync(first.launcherBackup, 'utf8'), 'legacy-shim', 'launcher backup should preserve previous shim');
   assert.equal(existsSync(first.releaseBinary), true);
+  assert.equal(readFileSync(launcher, 'utf8').includes(source), true, 'launcher should retain the verified compatibility source root');
   const firstManifest = releaseManifest(path.join(first.releaseDir, 'release.json'));
   const firstManifestChecksum = fileSha256(first.releaseBinary);
   assert.equal(firstManifest.binarySha256, firstManifestChecksum, 'release manifest checksum must match built binary');

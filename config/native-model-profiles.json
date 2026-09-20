@@ -8,21 +8,30 @@
       "name": "8gb",
       "localClass": "3-4B",
       "model": "Qwen/Qwen3-4B",
-      "quantization": "4"
+      "quantization": "4",
+      "platforms": ["darwin"],
+      "architectures": ["arm64"],
+      "backend": "mlx"
     },
     {
       "memoryGiBMax": 18,
       "name": "16gb",
       "localClass": "8B",
       "model": "Qwen/Qwen3-8B",
-      "quantization": "4"
+      "quantization": "4",
+      "platforms": ["darwin"],
+      "architectures": ["arm64"],
+      "backend": "mlx"
     },
     {
       "memoryGiBMax": 36,
       "name": "24-32gb",
       "localClass": "14B",
       "model": "Qwen/Qwen3-14B",
-      "quantization": "4"
+      "quantization": "4",
+      "platforms": ["darwin"],
+      "architectures": ["arm64"],
+      "backend": "mlx"
     },
     {
       "memoryGiBMax": null,
@@ -31,7 +40,29 @@
       "model": "mlx-community/Qwen3.5-35B-A3B-4bit",
       "quantization": "4",
       "native_model": "mlx-community/Qwen3.5-35B-A3B-4bit",
-      "backend": "mlx"
+      "backend": "mlx",
+      "platforms": ["darwin"],
+      "architectures": ["arm64"]
+    },
+    {
+      "memoryGiBMax": 24,
+      "name": "windows-16-24gb",
+      "localClass": "9B dense GGUF",
+      "model": "qwen3.5-9b-balanced",
+      "quantization": "Q4_K_M",
+      "backend": "llama.cpp",
+      "platforms": ["win32"],
+      "architectures": ["x64"]
+    },
+    {
+      "memoryGiBMax": null,
+      "name": "windows-32gb+",
+      "localClass": "35B MoE / 3B active GGUF",
+      "model": "qwen3.6-35b-a3b-agent",
+      "quantization": "IQ3_S",
+      "backend": "llama.cpp",
+      "platforms": ["win32"],
+      "architectures": ["x64"]
     }
   ],
   "taskTiersDoc": "Task difficulty only: how much brain a request deserves. Never keyed by memory. Declarative today — no automatic router consumes this yet, and reaching tier 3 stays an explicit operator act per hostedTransmission.",
@@ -80,7 +111,11 @@
       "quality": "everyday",
       "minimumMemoryGiB": 8,
       "estimatedDiskGiB": 2.3,
-      "capabilities": ["chat", "tools"]
+      "capabilities": ["chat", "tools"],
+      "backend": "mlx",
+      "source": "huggingface",
+      "platforms": ["darwin"],
+      "architectures": ["arm64"]
     },
     {
       "model": "mlx-community/Qwen3.5-9B-MLX-4bit",
@@ -91,7 +126,11 @@
       "quality": "strong",
       "minimumMemoryGiB": 16,
       "estimatedDiskGiB": 6,
-      "capabilities": ["chat", "tools", "vision"]
+      "capabilities": ["chat", "tools", "vision"],
+      "backend": "mlx",
+      "source": "huggingface",
+      "platforms": ["darwin"],
+      "architectures": ["arm64"]
     },
     {
       "model": "mlx-community/Qwen3.5-35B-A3B-4bit",
@@ -102,7 +141,56 @@
       "quality": "highest local",
       "minimumMemoryGiB": 48,
       "estimatedDiskGiB": 20.4,
-      "capabilities": ["chat", "tools", "vision"]
+      "capabilities": ["chat", "tools", "vision"],
+      "backend": "mlx",
+      "source": "huggingface",
+      "platforms": ["darwin"],
+      "architectures": ["arm64"]
+    },
+    {
+      "model": "qwen3.5-9b-balanced",
+      "aliases": ["fast", "balanced", "9b"],
+      "role": "Fast Windows local",
+      "bestFor": "Everyday requests, vision, and low-latency tool use",
+      "speed": "fastest",
+      "quality": "strong",
+      "minimumMemoryGiB": 16,
+      "estimatedDiskGiB": 5.2,
+      "capabilities": ["chat", "tools", "vision"],
+      "backend": "llama.cpp",
+      "source": "preset",
+      "platforms": ["win32"],
+      "architectures": ["x64"]
+    },
+    {
+      "model": "qwen3.6-35b-a3b-agent",
+      "aliases": ["recommended", "default", "35b", "a3b"],
+      "role": "Measured Windows default",
+      "bestFor": "Everyday assistance, tool use, and high-throughput local reasoning",
+      "speed": "fast",
+      "quality": "highest utility",
+      "minimumMemoryGiB": 32,
+      "estimatedDiskGiB": 12.7,
+      "capabilities": ["chat", "tools"],
+      "backend": "llama.cpp",
+      "source": "preset",
+      "platforms": ["win32"],
+      "architectures": ["x64"]
+    },
+    {
+      "model": "qwen3.8-27b-agent",
+      "aliases": ["deliberate", "quality", "27b"],
+      "role": "Deliberate Windows local",
+      "bestFor": "Dense reasoning when answer quality matters more than latency",
+      "speed": "moderate",
+      "quality": "deliberate",
+      "minimumMemoryGiB": 32,
+      "estimatedDiskGiB": 11.2,
+      "capabilities": ["chat", "tools"],
+      "backend": "llama.cpp",
+      "source": "preset",
+      "platforms": ["win32"],
+      "architectures": ["x64"]
     }
   ],
   "hostedCatalogDoc": "Explicit hosted/browser-backed models. Selecting one records an external-transmission provider preference; HII never routes here automatically.",

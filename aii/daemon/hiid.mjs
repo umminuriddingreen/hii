@@ -17,6 +17,11 @@ import {
   totalMemoryGiB
 } from "../model-runtime/profiles.mjs";
 import {
+  detectModelPlatform,
+  normalizePlatform,
+  supportsPlatform
+} from "../model-runtime/platform.mjs";
+import {
   buildCodexMemoryPack,
   codexExecInvocation
 } from "./codex-memory.mjs";
@@ -42,11 +47,16 @@ const MODEL_RUNTIME_PID = path.join(MODEL_RUNTIME_DIR, "runner.pid");
 const MODEL_RUNTIME_STATUS = path.join(MODEL_RUNTIME_DIR, "status.json");
 const MODEL_RUNTIME_LOG = path.join(MODEL_RUNTIME_DIR, "runner.log");
 const MODEL_BENCHMARKS = path.join(MODEL_RUNTIME_DIR, "benchmarks.json");
-const MODEL_RUNTIME_URL = "http://127.0.0.1:11435";
+const HOST_PLATFORM = detectModelPlatform();
+const MODEL_RUNTIME_URL = (process.env.HII_MODEL_URL
+  || (HOST_PLATFORM.nodePlatform === "win32" ? "http://127.0.0.1:6127" : "http://127.0.0.1:11435"))
+  .replace(/\/$/, "");
 const MODEL_HOME = path.join(RUNTIME, "models");
 const HF_CACHE = path.join(MODEL_HOME, "huggingface", "hub");
 const MODEL_PROFILES = path.join(ROOT, "config", "native-model-profiles.json");
 const MODEL_PREFERENCE = path.join(RUNTIME, "config", "model.json");
+const WINDOWS_MODEL_PRESETS = process.env.HII_WINDOWS_MODEL_PRESETS
+  || path.win32.join(process.env.SystemDrive || "C:", "models", "models.ini");
 const CONTEXT_DB = path.join(RUNTIME, "hii.db");
 const OWNED_PATTERNS = [
   `${ROOT}/aii/daemon/hiid.mjs`,
@@ -1002,6 +1012,77 @@ function nativeRunnerBin() {
   return path.join(ROOT, "target", "debug", "hii-native-runner");
 }
 
+function executableFromPath(command) {
+  const finder = process.platform === "win32" ? "where.exe" : "which";
+  const result = spawnSync(finder, [command], { encoding: "utf8", windowsHide: true });
+  return result.status === 0
+    ? result.stdout.split(/\r?\n/).map((value) => value.trim()).find(Boolean) || null
+    : null;
+}
+
+function windowsLlamaBin() {
+  if (process.env.HII_LLAMA_BIN && fs.existsSync(process.env.HII_LLAMA_BIN)) {
+    return process.env.HII_LLAMA_BIN;
+  }
+  const discovered = executableFromPath("llama.exe");
+  if (discovered && fs.existsSync(discovered)) return discovered;
+  const localAppData = process.env.LOCALAPPDATA;
+  const windowsApps = localAppData
+    ? path.win32.join(localAppData, "Microsoft", "WindowsApps", "llama.exe")
+    : null;
+  return windowsApps && fs.existsSync(windowsApps) ? windowsApps : null;
+}
+
+function stripIniValue(value) {
+  return String(value || "").trim().replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, "$1$2");
+}
+
+function windowsModelPresets(file = WINDOWS_MODEL_PRESETS) {
+  if (!fs.existsSync(file)) return [];
+  const presets = [];
+  let current = null;
+  for (const rawLine of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#") || line.startsWith(";")) continue;
+    const section = line.match(/^\[([^\]]+)\]$/);
+    if (section) {
+      current = { id: section[1].trim(), presetFile: file };
+      presets.push(current);
+      continue;
+    }
+    const assignment = line.match(/^([^=]+?)\s*=\s*(.*)$/);
+    if (!current || !assignment) continue;
+    const key = assignment[1].trim().toLowerCase();
+    const value = stripIniValue(assignment[2]);
+    if (key === "model") current.modelPath = value;
+    if (key === "mmproj") current.mmprojPath = value;
+  }
+  return presets.map((preset) => ({
+    ...preset,
+    installed: Boolean(preset.modelPath && fs.existsSync(preset.modelPath)),
+    visionProjectorInstalled: preset.mmprojPath ? fs.existsSync(preset.mmprojPath) : null
+  }));
+}
+
+function modelRuntimeBin() {
+  return HOST_PLATFORM.nodePlatform === "win32" ? windowsLlamaBin() : nativeRunnerBin();
+}
+
+function modelRuntimeBackend() {
+  return HOST_PLATFORM.nodePlatform === "win32"
+    ? "llama.cpp"
+    : HOST_PLATFORM.nodePlatform === "darwin" && HOST_PLATFORM.arch === "arm64"
+      ? "hii/mlx-vlm"
+      : "hii/mistral.rs";
+}
+
+function modelRequestHeaders() {
+  const keyFile = process.env.HII_MODEL_API_KEY_FILE;
+  if (!keyFile || !fs.existsSync(keyFile)) return {};
+  const key = fs.readFileSync(keyFile, "utf8").trim();
+  return key ? { authorization: `Bearer ${key}` } : {};
+}
+
 function ensureHiiNativeEngine() {
   if (process.platform !== "darwin" || process.arch !== "arm64") return null;
   const runtimeRoot = path.join(RUNTIME, "runtimes", "mlx");
@@ -1031,6 +1112,17 @@ function ensureHiiNativeEngine() {
 
 function modelRuntimeProcess() {
   const recorded = Number(fs.existsSync(MODEL_RUNTIME_PID) ? fs.readFileSync(MODEL_RUNTIME_PID, "utf8").trim() : "");
+  if (process.platform === "win32") {
+    if (!Number.isInteger(recorded) || recorded <= 0) return null;
+    const query = spawnSync("powershell.exe", [
+      "-NoProfile", "-NonInteractive", "-Command",
+      `(Get-CimInstance Win32_Process -Filter \"ProcessId = ${recorded}\").CommandLine`
+    ], { encoding: "utf8", windowsHide: true });
+    const command = query.status === 0 ? query.stdout.trim() : "";
+    const expected = path.basename(modelRuntimeBin() || "llama.exe").toLowerCase();
+    if (!command || !command.toLowerCase().includes(expected)) return null;
+    return { pid: recorded, pgid: null, command };
+  }
   const observed = spawnSync("ps", ["-axo", "pid=,pgid=,command="], { encoding: "utf8" });
   if (observed.status !== 0) return null;
   const mlxServer = path.join(RUNTIME, "runtimes", "mlx", "bin", "mlx_vlm.server");
@@ -1052,7 +1144,12 @@ function modelRuntimePid() {
 }
 
 function consumerModelProfile(memoryGiB = totalMemoryGiB()) {
-  return selectConsumerModelProfile(MODEL_PROFILES, memoryGiB);
+  return selectConsumerModelProfile(
+    MODEL_PROFILES,
+    memoryGiB,
+    HOST_PLATFORM.nodePlatform,
+    HOST_PLATFORM.arch
+  );
 }
 
 function modelRuntimeStatus() {
@@ -1063,10 +1160,12 @@ function modelRuntimeStatus() {
     ...previous,
     pid,
     endpoint: MODEL_RUNTIME_URL,
-    backend: previous.backend || "hii-native",
+    backend: modelRuntimeBackend(),
+    platform: HOST_PLATFORM,
+    ownership: pid ? "owned" : "none",
     modelHome: path.join(RUNTIME, "models"),
     log: MODEL_RUNTIME_LOG,
-    binary: nativeRunnerBin(),
+    binary: modelRuntimeBin(),
     profile: consumerModelProfile(),
     state: pid ? (previous.state === "starting" ? "starting" : "running") : "stopped",
     updatedAt: now()
@@ -1085,24 +1184,26 @@ async function printModelRuntimeStatus() {
     endpoint: hosted?.endpoint || MODEL_RUNTIME_URL,
     externalTransmission: Boolean(hosted?.externalTransmission)
   } : {
-    provider: "native",
+    provider: HOST_PLATFORM.runtimeFamily,
     model: status.model || null,
     endpoint: MODEL_RUNTIME_URL,
     externalTransmission: false
   };
-  if (status.pid) {
-    try {
-      const response = await fetch(`${MODEL_RUNTIME_URL}/health`, { signal: AbortSignal.timeout(500) });
-      status.state = response.ok ? "ready" : "starting";
-      if (response.ok) {
-        const health = await response.json().catch(() => ({}));
-        status.loadedModel = health.loaded_model || health.model || status.loadedModel || null;
-      }
-    } catch {
-      status.state = "starting";
+  try {
+    const response = await fetch(`${MODEL_RUNTIME_URL}/health`, {
+      headers: modelRequestHeaders(),
+      signal: AbortSignal.timeout(1000)
+    });
+    status.state = response.ok ? "ready" : status.pid ? "starting" : "unreachable";
+    if (response.ok) {
+      const health = await response.json().catch(() => ({}));
+      status.loadedModel = health.loaded_model || health.model || status.loadedModel || null;
+      if (!status.pid) status.ownership = "observed";
     }
-    writeJson(MODEL_RUNTIME_STATUS, status);
+  } catch {
+    status.state = status.pid ? "starting" : "stopped";
   }
+  writeJson(MODEL_RUNTIME_STATUS, status);
   console.log(JSON.stringify(status, null, 2));
 }
 
@@ -1135,14 +1236,19 @@ function cachedModelPath(model) {
   return path.join(HF_CACHE, `models--${model.replaceAll("/", "--")}`);
 }
 
-function modelIsInstalled(model) {
+function modelIsInstalled(model, source = "huggingface") {
+  if (source === "preset") {
+    return Boolean(windowsModelPresets().find((preset) => preset.id === model)?.installed);
+  }
   const root = cachedModelPath(model);
   return fs.existsSync(path.join(root, "refs")) || fs.existsSync(path.join(root, "snapshots"));
 }
 
-function modelSelectionCatalog() {
+function modelSelectionCatalog(platform = HOST_PLATFORM.nodePlatform, arch = HOST_PLATFORM.arch) {
   const manifest = safeReadJson(MODEL_PROFILES, {});
-  return Array.isArray(manifest.selectionCatalog) ? manifest.selectionCatalog : [];
+  return Array.isArray(manifest.selectionCatalog)
+    ? manifest.selectionCatalog.filter((entry) => supportsPlatform(entry, platform, arch))
+    : [];
 }
 
 function hostedModelCatalog() {
@@ -1169,6 +1275,19 @@ function resolveModelSelection(value, command) {
   const selected = modelSelectionCatalog().find((entry) =>
     entry.model === requested || (entry.aliases || []).includes(requested.toLowerCase())
   );
+  if (!selected) {
+    const manifest = safeReadJson(MODEL_PROFILES, {});
+    const incompatible = (manifest.selectionCatalog || []).find((entry) =>
+      entry.model === requested || (entry.aliases || []).includes(requested.toLowerCase())
+    );
+    if (incompatible) {
+      throw new Error(`[ERR_PLATFORM_MODEL_INCOMPATIBLE] ${requested} supports ${(incompatible.platforms || []).join(", ")}, not ${HOST_PLATFORM.id}`);
+    }
+  }
+  if (HOST_PLATFORM.nodePlatform === "win32") {
+    if (!selected) throw new Error(`usage: hii model ${command} <Windows preset or alias>; run: hii model discover`);
+    return selected.model;
+  }
   return requireHuggingFaceModel(selected?.model || requested, command);
 }
 
@@ -1176,7 +1295,18 @@ function modelBenchmarkResults() {
   return safeReadJson(MODEL_BENCHMARKS, { schemaVersion: 1, results: {} });
 }
 
-function modelRecommendations() {
+function requestedPlatform(args = []) {
+  const inline = args.find((arg) => arg.startsWith("--platform="))?.split("=")[1];
+  const index = args.indexOf("--platform");
+  const requested = inline || (index >= 0 ? args[index + 1] : null);
+  if (!requested) return HOST_PLATFORM;
+  const nodePlatform = normalizePlatform(requested);
+  const arch = nodePlatform === "darwin" ? "arm64" : nodePlatform === "win32" ? "x64" : HOST_PLATFORM.arch;
+  return detectModelPlatform({ platform: nodePlatform, arch });
+}
+
+function modelRecommendations(args = []) {
+  const target = requestedPlatform(args);
   const memoryGiB = totalMemoryGiB();
   const status = modelRuntimeStatus();
   const benchmarks = modelBenchmarkResults().results || {};
@@ -1185,19 +1315,25 @@ function modelRecommendations() {
     objective: "utility-per-wait",
     advisoryOnly: true,
     hardware: {
-      platform: process.platform,
-      arch: process.arch,
+      ...target,
       chip: os.cpus()[0]?.model || "unknown",
       memoryGiB
     },
+    compatibility: {
+      runtimeFamily: target.runtimeFamily,
+      modelFormat: target.modelFormat,
+      currentHost: target.nodePlatform === HOST_PLATFORM.nodePlatform && target.arch === HOST_PLATFORM.arch
+    },
     activeModel: status.pid ? status.model || null : null,
-    choices: modelSelectionCatalog().map((entry, index) => {
+    choices: modelSelectionCatalog(target.nodePlatform, target.arch).map((entry, index) => {
       const benchmark = benchmarks[entry.model] || null;
       return {
         rank: index + 1,
         ...entry,
         fits: memoryGiB >= Number(entry.minimumMemoryGiB || 0),
-        installed: modelIsInstalled(entry.model),
+        installed: target.nodePlatform === HOST_PLATFORM.nodePlatform
+          ? modelIsInstalled(entry.model, entry.source)
+          : false,
         active: Boolean(status.pid && status.model === entry.model),
         benchmark: benchmark ? {
           completionTokensPerSecond: benchmark.completionTokensPerSecond,
@@ -1207,6 +1343,7 @@ function modelRecommendations() {
         } : null,
         commands: {
           install: `hii model install ${entry.aliases?.[0] || entry.model}`,
+          discover: "hii model discover",
           use: `hii model use ${entry.aliases?.[0] || entry.model}`,
           benchmark: "hii model bench"
         }
@@ -1221,12 +1358,13 @@ function modelRecommendations() {
 }
 
 function printModelRecommendations(args = []) {
-  const report = modelRecommendations();
+  const report = modelRecommendations(args);
   if (args.includes("--json")) {
     console.log(JSON.stringify(report, null, 2));
     return;
   }
-  console.log(`HII model guide — ${report.hardware.chip} · ${report.hardware.memoryGiB} GiB`);
+  console.log(`HII model guide — ${report.hardware.id} ${report.hardware.arch} · ${report.hardware.chip} · ${report.hardware.memoryGiB} GiB`);
+  console.log(`Runtime: ${report.compatibility.runtimeFamily} · format: ${report.compatibility.modelFormat || "unavailable"}`);
   console.log("Optimized for utility per wait. Advisory only: nothing is downloaded or switched here.\n");
   for (const choice of report.choices) {
     const state = [
@@ -1242,7 +1380,12 @@ function printModelRecommendations(args = []) {
     console.log(`   ${choice.bestFor}`);
     console.log(`   ${choice.speed} · ${choice.quality} · ~${choice.estimatedDiskGiB} GiB disk · ${(choice.capabilities || []).join(", ")}`);
     console.log(`   ${state}${measured}`);
-    console.log(`   ${choice.installed ? "Use" : "Install"}: ${choice.installed ? choice.commands.use : choice.commands.install}\n`);
+    const next = choice.installed
+      ? `Use: ${choice.commands.use}`
+      : choice.source === "preset"
+        ? `Find: ${choice.commands.discover}`
+        : `Install: ${choice.commands.install}`;
+    console.log(`   ${next}\n`);
   }
   if (report.hostedChoices.length) {
     console.log("Explicit external models\n");
@@ -1254,7 +1397,7 @@ function printModelRecommendations(args = []) {
       console.log(`  Use: ${choice.commands.use}\n`);
     }
   }
-  console.log("Explore more MLX models: hii model search <query>");
+  console.log(`Explore more ${report.compatibility.modelFormat || "compatible"} models: hii model search <query>`);
   console.log("Machine-readable view: hii model recommend --json");
 }
 
@@ -1277,7 +1420,7 @@ function syncPiModel(model, makeDefault) {
   if (!provider.models.some((entry) => entry.id === model)) {
     provider.models.push({
       id: model,
-      name: `${model} (HII MLX)`,
+      name: `${model} (HII ${HOST_PLATFORM.runtimeFamily})`,
       input: ["text"],
       reasoning: false,
       contextWindow: 262144,
@@ -1299,14 +1442,35 @@ function searchModels(args) {
   if (!query) throw new Error("usage: hii model search <query> [--all-authors]");
   // hf 1.0+ rejects --human-readable when listing model repositories. The
   // default table remains readable and compatible with the current Hub CLI.
-  const command = ["models", "list", "--search", query, "--limit", "20"];
-  if (!args.includes("--all-authors")) command.push("--author", "mlx-community");
+  const compatibleQuery = HOST_PLATFORM.nodePlatform === "win32" && !/gguf/i.test(query)
+    ? `${query} GGUF`
+    : query;
+  const command = ["models", "list", "--search", compatibleQuery, "--limit", "20"];
+  if (HOST_PLATFORM.nodePlatform === "darwin" && !args.includes("--all-authors")) {
+    command.push("--author", "mlx-community");
+  }
   const result = hf(command);
   process.stdout.write(result.stdout);
 }
 
 function installModel(args) {
   const model = resolveModelSelection(args[0], "install");
+  const entry = modelSelectionCatalog().find((candidate) => candidate.model === model);
+  if (HOST_PLATFORM.nodePlatform === "win32") {
+    const preset = windowsModelPresets().find((candidate) => candidate.id === model);
+    if (preset?.installed) {
+      console.log(JSON.stringify({
+        ok: true,
+        alreadyInstalled: true,
+        model,
+        backend: "llama.cpp",
+        modelPath: preset.modelPath,
+        presetFile: preset.presetFile
+      }, null, 2));
+      return;
+    }
+    throw new Error(`[ERR_MODEL_WEIGHTS_MISSING] ${model} is a Windows llama.cpp preset, but its GGUF file is missing. Run \`hii model discover\` to inspect the preset and model path.`);
+  }
   fs.mkdirSync(HF_CACHE, { recursive: true });
   hf(["download", model, "--cache-dir", HF_CACHE], { stdio: "inherit" });
   hf(["cache", "verify", model, "--cache-dir", HF_CACHE], { stdio: "inherit" });
@@ -1314,10 +1478,19 @@ function installModel(args) {
   event("model_runtime.model_installed", {
     actor: "hii.cli", target: model, status: "verified", text: `Installed ${model} in HII's model cache`
   });
-  console.log(JSON.stringify({ ok: true, model, cache: HF_CACHE, verified: true, pi }, null, 2));
+  console.log(JSON.stringify({ ok: true, model, cache: HF_CACHE, verified: true, backend: entry?.backend || "mlx", pi }, null, 2));
 }
 
 function listInstalledModels() {
+  if (HOST_PLATFORM.nodePlatform === "win32") {
+    console.log(JSON.stringify({
+      object: "list",
+      platform: HOST_PLATFORM,
+      source: WINDOWS_MODEL_PRESETS,
+      data: windowsModelPresets().filter((preset) => preset.installed)
+    }, null, 2));
+    return;
+  }
   fs.mkdirSync(HF_CACHE, { recursive: true });
   const result = hf(["cache", "list", "--cache-dir", HF_CACHE]);
   process.stdout.write(result.stdout);
@@ -1327,12 +1500,27 @@ async function waitForModelRuntime(timeoutMs = 30 * 60 * 1000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`${MODEL_RUNTIME_URL}/health`, { signal: AbortSignal.timeout(1000) });
+      const response = await fetch(`${MODEL_RUNTIME_URL}/health`, {
+        headers: modelRequestHeaders(),
+        signal: AbortSignal.timeout(1000)
+      });
       if (response.ok) return;
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
   throw new Error("HII did not become ready within 30 minutes; run `hii model logs`");
+}
+
+async function modelEndpointReady(timeoutMs = 1000) {
+  try {
+    const response = await fetch(`${MODEL_RUNTIME_URL}/v1/models`, {
+      headers: modelRequestHeaders(),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 async function waitForModelRuntimeStopped(timeoutMs = 30000) {
@@ -1373,8 +1561,23 @@ async function useModel(args) {
     return;
   }
   const model = resolveModelSelection(args[0], "use");
-  if (!modelIsInstalled(model)) {
+  const entry = modelSelectionCatalog().find((candidate) => candidate.model === model);
+  if (!modelIsInstalled(model, entry?.source)) {
     throw new Error(`${model} is not installed; run: hii model install ${model}`);
+  }
+  if (HOST_PLATFORM.nodePlatform === "win32" && await modelEndpointReady()) {
+    const preference = saveModelPreference("llama.cpp", model);
+    const pi = syncPiModel(model, true);
+    console.log(JSON.stringify({
+      ok: true,
+      active: model,
+      provider: "llama.cpp",
+      endpoint: MODEL_RUNTIME_URL,
+      runtime: modelRuntimePid() ? "owned" : "observed",
+      preference,
+      pi
+    }, null, 2));
+    return;
   }
   if (modelRuntimePid()) {
     stopModelRuntime();
@@ -1382,7 +1585,7 @@ async function useModel(args) {
   }
   await startModelRuntime(["--model", model]);
   await waitForModelRuntime();
-  const preference = saveModelPreference("native", model);
+  const preference = saveModelPreference(HOST_PLATFORM.runtimeFamily, model);
   const pi = syncPiModel(model, true);
   console.log(JSON.stringify({ ok: true, active: model, endpoint: MODEL_RUNTIME_URL, preference, pi }, null, 2));
 }
@@ -1391,6 +1594,9 @@ function removeModel(args) {
   const model = resolveModelSelection(args[0], "remove");
   const active = modelRuntimeStatus().model === model && Boolean(modelRuntimePid());
   if (active) throw new Error(`${model} is active; choose another model or run \`hii model stop\` first`);
+  if (HOST_PLATFORM.nodePlatform === "win32") {
+    throw new Error("[ERR_EXTERNAL_MODEL_OWNERSHIP] Windows GGUF files are referenced by models.ini and are not deleted by HII. Remove or update the preset explicitly.");
+  }
   if (!modelIsInstalled(model)) throw new Error(`${model} is not installed in HII`);
   if (!args.includes("--yes")) {
     console.log(JSON.stringify({ ok: true, dryRun: true, model, path: cachedModelPath(model), apply: `hii model remove ${model} --yes` }, null, 2));
@@ -1402,7 +1608,80 @@ function removeModel(args) {
   });
 }
 
+async function startWindowsModelRuntime(args) {
+  ensureDirs();
+  if (await modelEndpointReady()) {
+    console.log(`HII can already reach a Windows model runtime at ${MODEL_RUNTIME_URL}`);
+    return;
+  }
+  const endpoint = new URL(MODEL_RUNTIME_URL);
+  if (!['127.0.0.1', 'localhost', '::1'].includes(endpoint.hostname)) {
+    throw new Error(`[ERR_RUNTIME_OWNERSHIP] HII will only start its owned Windows runtime on loopback, not ${endpoint.hostname}`);
+  }
+  const binary = windowsLlamaBin();
+  if (!binary) {
+    throw new Error("[ERR_RUNTIME_MISSING] llama.cpp is not installed or discoverable. Run `hii model discover`.");
+  }
+  if (!fs.existsSync(WINDOWS_MODEL_PRESETS)) {
+    throw new Error(`[ERR_PRESETS_MISSING] Windows model presets are missing at ${WINDOWS_MODEL_PRESETS}`);
+  }
+  const modelIndex = args.indexOf("--model");
+  const profile = consumerModelProfile();
+  const model = modelIndex >= 0 ? args[modelIndex + 1] : profile.model;
+  if (!model) throw new Error("--model requires a Windows preset ID or alias");
+  const resolvedModel = resolveModelSelection(model, "start");
+  const preset = windowsModelPresets().find((candidate) => candidate.id === resolvedModel);
+  if (!preset?.installed) {
+    throw new Error(`[ERR_MODEL_WEIGHTS_MISSING] ${resolvedModel} does not resolve to an installed GGUF in ${WINDOWS_MODEL_PRESETS}`);
+  }
+  const out = fs.openSync(MODEL_RUNTIME_LOG, "a");
+  const port = endpoint.port || "80";
+  const child = spawn(binary, [
+    "serve",
+    "--models-preset", WINDOWS_MODEL_PRESETS,
+    "--models-max", "1",
+    "--host", endpoint.hostname,
+    "--port", port,
+    "--no-webui"
+  ], {
+    cwd: ROOT,
+    detached: true,
+    windowsHide: true,
+    stdio: ["ignore", out, out],
+    env: process.env
+  });
+  child.unref();
+  fs.closeSync(out);
+  fs.writeFileSync(MODEL_RUNTIME_PID, String(child.pid));
+  writeJson(MODEL_RUNTIME_STATUS, {
+    schemaVersion: 2,
+    state: "starting",
+    pid: child.pid,
+    ownership: "owned",
+    endpoint: MODEL_RUNTIME_URL,
+    backend: "llama.cpp",
+    platform: HOST_PLATFORM,
+    model: resolvedModel,
+    profile,
+    presets: WINDOWS_MODEL_PRESETS,
+    log: MODEL_RUNTIME_LOG,
+    binary,
+    startedAt: now(),
+    updatedAt: now()
+  });
+  event("model_runtime.started", {
+    actor: "hii.cli", target: MODEL_RUNTIME_URL, status: "starting", pid: child.pid,
+    text: `Started HII Windows llama.cpp runtime with ${resolvedModel}`
+  });
+  console.log(`started HII Windows llama.cpp runtime pid=${child.pid}`);
+  console.log(`model ${resolvedModel}`);
+  console.log(`endpoint ${MODEL_RUNTIME_URL}`);
+}
+
 async function startModelRuntime(args) {
+  if (HOST_PLATFORM.nodePlatform === "win32") {
+    return startWindowsModelRuntime(args);
+  }
   ensureDirs();
   const existing = modelRuntimePid();
   if (existing) {
@@ -1452,9 +1731,9 @@ async function startModelRuntime(args) {
     state: "starting",
     pid: child.pid,
     endpoint: MODEL_RUNTIME_URL,
-    backend: process.platform === "darwin" && process.arch === "arm64"
-      ? "hii/mlx-vlm"
-      : "hii/mistral.rs",
+    backend: modelRuntimeBackend(),
+    platform: HOST_PLATFORM,
+    ownership: "owned",
     model,
     quantization: quant,
     performance: {
@@ -1509,13 +1788,36 @@ function stopModelRuntime() {
 function doctorModelRuntime() {
   ensureDirs();
   const profile = consumerModelProfile();
+  if (HOST_PLATFORM.nodePlatform === "win32") {
+    const binary = windowsLlamaBin();
+    const presets = windowsModelPresets();
+    const report = {
+      ok: Boolean(binary && fs.existsSync(WINDOWS_MODEL_PRESETS) && presets.some((preset) => preset.installed)),
+      hardware: { ...HOST_PLATFORM, memoryGiB: totalMemoryGiB() },
+      profile,
+      runner: {
+        state: binary ? "installed" : "missing",
+        backend: "llama.cpp",
+        binary,
+        endpoint: MODEL_RUNTIME_URL,
+        presets: WINDOWS_MODEL_PRESETS,
+        installedPresetCount: presets.filter((preset) => preset.installed).length,
+        fix: binary ? null : "Install llama.cpp or set HII_LLAMA_BIN"
+      },
+      routing: ["llama.cpp", "approved-hosted"],
+      privacy: "The HII-owned Windows runtime binds to loopback. Hosted transmission remains explicit."
+    };
+    console.log(JSON.stringify(report, null, 2));
+    if (!report.ok) process.exitCode = 1;
+    return;
+  }
   const binary = nativeRunnerBin();
   const build = fs.existsSync(binary)
     ? spawnSync(binary, ["doctor", "--json", "--model-home", path.join(RUNTIME, "models")], { encoding: "utf8" })
     : null;
   const report = {
     ok: Boolean(build?.status === 0),
-    hardware: { platform: process.platform, arch: process.arch, memoryGiB: totalMemoryGiB() },
+    hardware: { ...HOST_PLATFORM, memoryGiB: totalMemoryGiB() },
     profile,
     runner: build?.status === 0 ? JSON.parse(build.stdout) : {
       state: "not-built",
@@ -1529,14 +1831,101 @@ function doctorModelRuntime() {
   if (!report.ok) process.exitCode = 1;
 }
 
+async function probeModelEndpoint(url, useConfiguredKey = false) {
+  try {
+    const response = await fetch(`${url.replace(/\/$/, "")}/v1/models`, {
+      headers: useConfiguredKey ? modelRequestHeaders() : {},
+      signal: AbortSignal.timeout(750)
+    });
+    const body = response.ok ? await response.json().catch(() => ({})) : {};
+    return {
+      url,
+      ready: response.ok,
+      status: response.status,
+      models: Array.isArray(body.data) ? body.data.map((entry) => entry.id).filter(Boolean) : []
+    };
+  } catch (error) {
+    return { url, ready: false, status: null, models: [], error: error.cause?.code || error.name || "unreachable" };
+  }
+}
+
+async function discoverModels() {
+  const endpointCandidates = HOST_PLATFORM.nodePlatform === "win32"
+    ? [MODEL_RUNTIME_URL, "http://127.0.0.1:6127", "http://127.0.0.1:1234", "http://127.0.0.1:8080"]
+    : [MODEL_RUNTIME_URL, "http://127.0.0.1:11435", "http://127.0.0.1:11434", "http://127.0.0.1:1234"];
+  const endpoints = [];
+  for (const url of [...new Set(endpointCandidates)]) {
+    endpoints.push(await probeModelEndpoint(url, url === MODEL_RUNTIME_URL));
+  }
+  const presets = HOST_PLATFORM.nodePlatform === "win32" ? windowsModelPresets() : [];
+  const runtimes = HOST_PLATFORM.nodePlatform === "win32"
+    ? [
+        { id: "llama.cpp", available: Boolean(windowsLlamaBin()), binary: windowsLlamaBin(), ownedStartSupported: true },
+        { id: "lmstudio", available: Boolean(executableFromPath("lms.exe")), binary: executableFromPath("lms.exe"), ownedStartSupported: false }
+      ]
+    : [
+        { id: "hii-native", available: fs.existsSync(nativeRunnerBin()), binary: nativeRunnerBin(), ownedStartSupported: true },
+        { id: "lmstudio", available: Boolean(executableFromPath("lms")), binary: executableFromPath("lms"), ownedStartSupported: false }
+      ];
+  const report = {
+    schemaVersion: 1,
+    platform: HOST_PLATFORM,
+    compatibility: { runtimeFamily: HOST_PLATFORM.runtimeFamily, modelFormat: HOST_PLATFORM.modelFormat },
+    runtimes,
+    sources: HOST_PLATFORM.nodePlatform === "win32"
+      ? [{ kind: "llama.cpp-presets", path: WINDOWS_MODEL_PRESETS, exists: fs.existsSync(WINDOWS_MODEL_PRESETS) }]
+      : [{ kind: "huggingface-cache", path: HF_CACHE, exists: fs.existsSync(HF_CACHE) }],
+    models: presets.map((preset) => ({
+      id: preset.id,
+      backend: "llama.cpp",
+      format: "gguf",
+      installed: preset.installed,
+      modelPath: preset.modelPath || null,
+      mmprojPath: preset.mmprojPath || null,
+      visionProjectorInstalled: preset.visionProjectorInstalled
+    })),
+    endpoints
+  };
+  console.log(JSON.stringify(report, null, 2));
+}
+
+function printPlatform(args = []) {
+  const report = {
+    schemaVersion: 1,
+    platform: HOST_PLATFORM,
+    modelRuntime: {
+      backend: modelRuntimeBackend(),
+      endpoint: MODEL_RUNTIME_URL,
+      modelFormat: HOST_PLATFORM.modelFormat
+    }
+  };
+  if (args.includes("--json")) {
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+  console.log(`${HOST_PLATFORM.id} ${HOST_PLATFORM.arch}${HOST_PLATFORM.isWsl ? " (WSL)" : ""}`);
+  console.log(`runtime ${report.modelRuntime.backend}`);
+  console.log(`model format ${report.modelRuntime.modelFormat || "unsupported"}`);
+  console.log(`endpoint ${report.modelRuntime.endpoint}`);
+}
+
 async function listModelRuntimeModels() {
   let nativeModels = [];
   let nativeError = null;
   try {
-    const response = await fetch(`${MODEL_RUNTIME_URL}/v1/models`, { signal: AbortSignal.timeout(1500) });
+    const response = await fetch(`${MODEL_RUNTIME_URL}/v1/models`, {
+      headers: modelRequestHeaders(),
+      signal: AbortSignal.timeout(1500)
+    });
     if (!response.ok) throw new Error(`native model listing failed with ${response.status}`);
     const body = await response.json();
-    nativeModels = (body.data || []).map((model) => ({ ...model, provider: "native", externalTransmission: false }));
+    nativeModels = (body.data || []).map((model) => ({
+      ...model,
+      provider: HOST_PLATFORM.runtimeFamily,
+      platform: HOST_PLATFORM.id,
+      modelFormat: HOST_PLATFORM.modelFormat,
+      externalTransmission: false
+    }));
   } catch (error) {
     nativeError = error.message;
   }
@@ -1561,11 +1950,10 @@ async function listModelRuntimeModels() {
 async function benchModelRuntime(args) {
   const prompt = args.join(" ").trim() || "Reply with exactly: HII_NATIVE_OK";
   const status = modelRuntimeStatus();
-  if (!status.pid) throw new Error("HII native runner is not running");
   const started = performance.now();
   const response = await fetch(`${MODEL_RUNTIME_URL}/v1/chat/completions`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...modelRequestHeaders() },
     body: JSON.stringify({
       model: status.model,
       stream: false,
@@ -1606,7 +1994,7 @@ async function benchModelRuntime(args) {
     usage: body.usage || null,
     output: body.choices?.[0]?.message?.content || "",
     measuredAt: now(),
-    hardware: { platform: process.platform, arch: process.arch, memoryGiB: totalMemoryGiB() }
+    hardware: { ...HOST_PLATFORM, memoryGiB: totalMemoryGiB() }
   };
   const benchmarkStore = modelBenchmarkResults();
   benchmarkStore.schemaVersion = 1;
@@ -1620,13 +2008,15 @@ async function benchModelRuntime(args) {
 async function cmdModelRuntime(args) {
   const sub = args[0] || "recommend";
   if (sub === "start") {
-    if (!currentDaemonPid()) startDaemon();
+    if (process.platform !== "win32" && !currentDaemonPid()) startDaemon();
     await startModelRuntime(args.slice(1));
   }
   else if (sub === "stop") stopModelRuntime();
   else if (sub === "status") await printModelRuntimeStatus();
   else if (sub === "doctor") doctorModelRuntime();
   else if (sub === "models") await listModelRuntimeModels();
+  else if (sub === "discover" || sub === "find") await discoverModels();
+  else if (sub === "platform") printPlatform(args.slice(1));
   else if (sub === "bench") await benchModelRuntime(args.slice(1));
   else if (sub === "logs") tailFile(MODEL_RUNTIME_LOG, Number(args[1] || 80));
   else if (sub === "search") searchModels(args.slice(1));
@@ -1635,7 +2025,7 @@ async function cmdModelRuntime(args) {
   else if (sub === "use") await useModel(args.slice(1));
   else if (sub === "recommend" || sub === "choose") printModelRecommendations(args.slice(1));
   else if (sub === "remove") removeModel(args.slice(1));
-  else throw new Error("usage: hii model <recommend|search|install|installed|use|status|start|stop|models|bench|logs|remove>");
+  else throw new Error("usage: hii model <recommend|discover|search|install|installed|use|status|start|stop|models|bench|logs|remove>");
 }
 
 function runningDaemonPids() {
