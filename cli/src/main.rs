@@ -4417,9 +4417,21 @@ fn doctor(paths: &AppPaths, cwd: Option<PathBuf>) -> Result<bool, String> {
         Ok(models) => {
             let default_model = ollama.provider().default_model();
             let review_model = ollama.provider().default_review_model();
+            let configured_model = crate::config::inference_config()
+                .filter(|config| {
+                    config.endpoint.trim_end_matches('/')
+                        == ollama.base_url().trim_end_matches('/')
+                })
+                .map(|config| config.model);
             let selected_model = native_status
                 .as_ref()
                 .and_then(|status| status["selection"]["model"].as_str())
+                .or_else(|| {
+                    native_status
+                        .as_ref()
+                        .and_then(|status| status["selection"]["model"]["id"].as_str())
+                })
+                .or(configured_model.as_deref())
                 .unwrap_or(default_model);
             let loaded_model = native_status
                 .as_ref()

@@ -2074,6 +2074,13 @@ pub(crate) fn saved_model_for_provider(
     paths: &AppPaths,
     provider: ModelProvider,
 ) -> Result<Option<String>, String> {
+    if provider == ModelProvider::Native {
+        let config: Option<crate::config::InferenceConfig> =
+            crate::store::read_json(&paths.runtime.join("config/inference.json"));
+        if let Some(config) = config {
+            return Ok(Some(config.model));
+        }
+    }
     Ok(paths
         .user_model_preference()?
         .filter(|preference| {
@@ -2091,6 +2098,8 @@ fn choose_model_with_env(
     provider: ModelProvider,
     installed: &[String],
 ) -> Result<String, String> {
+    let may_recover_stale_environment =
+        requested.is_none() && env_model.is_some() && provider == ModelProvider::Native;
     let explicit = requested
         .map(str::to_string)
         .or_else(|| env_model.map(str::to_string));
@@ -2099,6 +2108,13 @@ fn choose_model_with_env(
         .unwrap_or_else(|| provider.default_model().to_string());
     if installed.iter().any(|model| model == &requested) {
         return Ok(requested);
+    }
+    if may_recover_stale_environment {
+        if let Some(config) = crate::config::inference_config() {
+            if installed.iter().any(|model| model == &config.model) {
+                return Ok(config.model);
+            }
+        }
     }
     if installed.is_empty() {
         return Err("no local models are available; run `hii runner doctor`".into());
