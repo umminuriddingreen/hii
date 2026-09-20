@@ -1200,6 +1200,7 @@ fn authority_cli_label(authority: Authority) -> &'static str {
     match authority {
         Authority::ReadOnly => "read-only",
         Authority::Workspace => "workspace",
+        Authority::PersonalLocal => "personal-local",
         Authority::ExternalPreview => "external-preview",
         Authority::ExternalCommit => "external-commit",
         Authority::Yolo => "yolo",

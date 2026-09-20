@@ -289,6 +289,7 @@ fn ask_receipt(
         failure_patterns: Vec::new(),
         skill_draft_ref: None,
         token_usage,
+        engine: None,
     }
 }
 

@@ -485,6 +485,7 @@ fn quarantine(
                 failure_patterns: Vec::new(),
                 skill_draft_ref: None,
                 token_usage: None,
+                engine: None,
             };
             let mut value = serde_json::to_value(receipt).map_err(|error| error.to_string())?;
             value["archivedBlob"] =
