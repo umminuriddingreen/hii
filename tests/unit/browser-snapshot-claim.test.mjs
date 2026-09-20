@@ -1,6 +1,8 @@
 import { readFile, readdir } from 'node:fs/promises';
-import { DatabaseSync } from 'node:sqlite';
+import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
+
+const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
 
 describe('browser snapshot ID reservation', () => {
   it('claims a unique account snapshot before any blob write', async () => {
