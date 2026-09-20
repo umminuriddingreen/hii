@@ -206,6 +206,13 @@ enum Commands {
         #[arg(required = true, num_args = 1..)]
         prompt: Vec<String>,
         #[arg(
+            long = "source",
+            value_name = "PATH",
+            action = clap::ArgAction::Append,
+            help = "Attach a UTF-8 text source to the local-model prompt (repeatable)"
+        )]
+        sources: Vec<PathBuf>,
+        #[arg(
             long,
             help = "Stream machine-readable answer events, one JSON object per line"
         )]
@@ -2013,8 +2020,19 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             local_chat::execute(action)?;
             Ok(ExitCode::SUCCESS)
         }
-        Some(Commands::Ask { prompt, jsonl }) => {
-            ask::run(&paths, cli.model.as_deref(), prompt.join(" "), jsonl)?;
+        Some(Commands::Ask {
+            prompt,
+            sources,
+            jsonl,
+        }) => {
+            ask::run(
+                &paths,
+                cli.model.as_deref(),
+                prompt.join(" "),
+                sources,
+                cli.cwd.as_deref(),
+                jsonl,
+            )?;
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Terminal {

@@ -11,18 +11,30 @@ use crate::{
 };
 use serde_json::json;
 use std::{
+    fs,
     io::{self, Write},
+    path::{Path, PathBuf},
     sync::mpsc,
     thread,
 };
 
 const SYSTEM_PROMPT: &str =
     "Answer the user directly and concisely. Return only the answer, with no tool protocol.";
+const MAX_SOURCE_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_TOTAL_SOURCE_BYTES: u64 = 8 * 1024 * 1024;
+
+#[derive(Debug)]
+struct SourceBundle {
+    prompt: String,
+    provenance: Vec<String>,
+}
 
 pub fn run(
     paths: &AppPaths,
     requested_model: Option<&str>,
     prompt: String,
+    sources: Vec<PathBuf>,
+    requested_workspace: Option<&Path>,
     jsonl: bool,
 ) -> Result<(), String> {
     let prompt = prompt.trim();
@@ -30,7 +42,14 @@ pub fn run(
         return Err("ask needs a prompt".into());
     }
 
-    let workspace = std::env::current_dir().map_err(|error| error.to_string())?;
+    let workspace = match requested_workspace {
+        Some(path) => path
+            .canonicalize()
+            .map_err(|error| format!("cannot resolve --cwd {}: {error}", path.display()))?,
+        None => std::env::current_dir().map_err(|error| error.to_string())?,
+    };
+    let source_bundle = load_sources(&workspace, prompt, &sources)?;
+    let model_prompt = source_bundle.prompt.as_str();
     if crate::run_context::conversation_id().is_none() {
         crate::run_context::set_conversation_id(&hii_core::run_ledger::new_run_id());
     }
@@ -50,6 +69,7 @@ pub fn run(
             Outcome::Running,
             "Ask run in progress.",
             None,
+            &source_bundle.provenance,
         ),
     )?);
     store.event(
@@ -83,7 +103,7 @@ pub fn run(
             "{SYSTEM_PROMPT}\n\n{}",
             crate::config::runtime_identity_context(ollama.provider(), &model, ollama.base_url(),)
         );
-        let messages = vec![Message::system(system), Message::user(prompt)];
+        let messages = vec![Message::system(system), Message::user(model_prompt)];
         let transcript = messages
             .iter()
             .map(|message| {
@@ -166,6 +186,7 @@ pub fn run(
                             completion_tokens: result.usage.completion_tokens,
                             budget: 0,
                         }),
+                        &source_bundle.provenance,
                     );
                     store.event(
                         "run.finished",
@@ -231,6 +252,7 @@ fn ask_receipt(
     outcome: Outcome,
     summary: &str,
     token_usage: Option<TokenUsageRecord>,
+    context_sources: &[String],
 ) -> Receipt {
     Receipt {
         schema_version: 9,
@@ -254,7 +276,7 @@ fn ask_receipt(
         approvals: Vec::new(),
         artifacts: Vec::new(),
         reversible: Some(true),
-        context_sources: Vec::new(),
+        context_sources: context_sources.to_vec(),
         preexisting_changes: Vec::new(),
         hooks: Vec::new(),
         outcome: outcome.label().into(),
@@ -270,14 +292,118 @@ fn ask_receipt(
     }
 }
 
+fn load_sources(
+    workspace: &Path,
+    prompt: &str,
+    sources: &[PathBuf],
+) -> Result<SourceBundle, String> {
+    if sources.is_empty() {
+        return Ok(SourceBundle {
+            prompt: prompt.to_string(),
+            provenance: Vec::new(),
+        });
+    }
+
+    let mut total_bytes = 0_u64;
+    let mut combined = String::with_capacity(prompt.len() + 1024);
+    combined.push_str(prompt);
+    combined.push_str("\n\nUse the following user-approved sources. Cite them by the displayed path and do not invent missing content.\n");
+    let mut provenance = Vec::with_capacity(sources.len());
+
+    for source in sources {
+        let resolved = if source.is_absolute() {
+            source.clone()
+        } else {
+            workspace.join(source)
+        };
+        let canonical = resolved
+            .canonicalize()
+            .map_err(|error| format!("cannot resolve source {}: {error}", source.display()))?;
+        let metadata = fs::metadata(&canonical)
+            .map_err(|error| format!("cannot inspect source {}: {error}", canonical.display()))?;
+        if !metadata.is_file() {
+            return Err(format!("source is not a file: {}", canonical.display()));
+        }
+        if metadata.len() > MAX_SOURCE_BYTES {
+            return Err(format!(
+                "source exceeds the 2 MiB limit: {} ({} bytes)",
+                canonical.display(),
+                metadata.len()
+            ));
+        }
+        total_bytes = total_bytes.saturating_add(metadata.len());
+        if total_bytes > MAX_TOTAL_SOURCE_BYTES {
+            return Err(format!(
+                "attached sources exceed the 8 MiB total limit ({} bytes)",
+                total_bytes
+            ));
+        }
+        let content = fs::read_to_string(&canonical).map_err(|error| {
+            format!(
+                "source must be valid UTF-8 text (extract PDFs first): {}: {error}",
+                canonical.display()
+            )
+        })?;
+        let label = canonical.display().to_string();
+        provenance.push(label.clone());
+        combined.push_str("\n\n--- SOURCE: ");
+        combined.push_str(&label);
+        combined.push_str(" ---\n");
+        combined.push_str(&content);
+    }
+
+    Ok(SourceBundle {
+        prompt: combined,
+        provenance,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn chat_system_prompt_does_not_request_agent_actions() {
         assert!(SYSTEM_PROMPT.contains("directly"));
         assert!(!SYSTEM_PROMPT.contains("JSON action"));
         assert!(!SYSTEM_PROMPT.contains("tool call"));
+    }
+
+    #[test]
+    fn attached_sources_are_grounded_and_provenanced() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("hii-ask-source-{nonce}"));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("brief.txt"), "authoritative requirement").unwrap();
+
+        let bundle = load_sources(&root, "Summarize", &[PathBuf::from("brief.txt")]).unwrap();
+
+        assert!(bundle.prompt.contains("Summarize"));
+        assert!(bundle.prompt.contains("authoritative requirement"));
+        assert_eq!(
+            bundle.provenance,
+            vec![root
+                .join("brief.txt")
+                .canonicalize()
+                .unwrap()
+                .display()
+                .to_string()]
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn attached_sources_reject_missing_files() {
+        let error = load_sources(
+            Path::new("/tmp"),
+            "Summarize",
+            &[PathBuf::from("hii-source-that-does-not-exist.txt")],
+        )
+        .unwrap_err();
+        assert!(error.contains("cannot resolve source"));
     }
 }
