@@ -77,6 +77,13 @@ impl AclConfig {
             "canvas-operator" => {
                 is_reader_tool(tool_name) || matches!(tool_name, "canvas_add" | "canvas_update")
             }
+            "workflow-operator" => {
+                is_reader_tool(tool_name)
+                    || matches!(
+                        tool_name,
+                        "workflow_source_connect" | "workflow_sync" | "workflow_chat_link"
+                    )
+            }
             "operator" | "service" => true,
             _ => false,
         };
@@ -219,6 +226,25 @@ mod tests {
         assert!(cfg.check_acl("codex", "write").is_err());
         assert!(cfg.check_acl("codex", "shell").is_err());
         assert!(cfg.check_acl("codex", "board_write").is_err());
+    }
+
+    #[test]
+    fn workflow_operator_can_sync_and_link_but_cannot_write_files() {
+        let mut cfg = AclConfig::load_default();
+        cfg.clients.insert(
+            "codex".into(),
+            ClientRole {
+                role: "workflow-operator".into(),
+                restricted_tools: vec![],
+                max_params_per_call: 64,
+            },
+        );
+        assert!(cfg.check_acl("codex", "workflow_status").is_ok());
+        assert!(cfg.check_acl("codex", "workflow_sync").is_ok());
+        assert!(cfg.check_acl("codex", "workflow_chat_link").is_ok());
+        assert!(cfg.check_acl("codex", "write").is_err());
+        assert!(cfg.check_acl("codex", "shell").is_err());
+        assert!(cfg.check_acl("codex", "canvas_add").is_err());
     }
 
     /// Regression: `web_fetch`/`web_search` were denied to read-only roles even

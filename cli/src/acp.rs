@@ -321,6 +321,55 @@ const TOOLS: &[ToolSpec] = &[
         "read one object through an approved HII grant",
     ),
     tool(
+        "workflow_status",
+        "hii",
+        Reach::Hii,
+        false,
+        "inspect the central HII project and complete-conversation workflow",
+    ),
+    tool(
+        "workflow_source_connect",
+        "hii",
+        Reach::Hii,
+        true,
+        "connect an explicit official ChatGPT export or local Codex sessions directory",
+    ),
+    tool(
+        "workflow_sync",
+        "hii",
+        Reach::Hii,
+        true,
+        "sync all configured complete conversation sources into the canonical HII database",
+    ),
+    tool(
+        "workflow_search",
+        "hii",
+        Reach::Hii,
+        false,
+        "search complete archived conversations, bound projects, and project sources together",
+    ),
+    tool(
+        "workflow_chat_read",
+        "hii",
+        Reach::Hii,
+        false,
+        "read one complete archived conversation with every imported user and assistant message",
+    ),
+    tool(
+        "workflow_chat_link",
+        "hii",
+        Reach::Hii,
+        true,
+        "link one archived conversation into a bound project's central workflow",
+    ),
+    tool(
+        "workflow_project_read",
+        "hii",
+        Reach::Hii,
+        false,
+        "read one consolidated project with its sources and linked complete conversations",
+    ),
+    tool(
         "agent_send",
         "hii",
         Reach::Hii,
@@ -506,6 +555,42 @@ pub fn input_schema(name: &str) -> Value {
             json!(["grant", "object"]),
         ),
         "object_list" => object(json!({ "grant": string }), json!(["grant"])),
+        "workflow_status" | "workflow_sync" => object(json!({}), json!([])),
+        "workflow_source_connect" => object(
+            json!({
+                "provider": { "type": "string", "enum": ["chatgpt", "codex"] },
+                "path": string,
+            }),
+            json!(["provider", "path"]),
+        ),
+        "workflow_search" => object(
+            json!({
+                "query": string,
+                "projectId": string,
+                "limit": { "type": "integer", "minimum": 1, "maximum": 100 },
+            }),
+            json!(["query"]),
+        ),
+        "workflow_chat_read" => object(
+            json!({ "conversationId": string }),
+            json!(["conversationId"]),
+        ),
+        "workflow_chat_link" => object(
+            json!({
+                "projectId": string,
+                "conversationId": string,
+                "note": string,
+                "tags": { "type": "array", "items": string, "maxItems": 32 },
+            }),
+            json!(["projectId", "conversationId"]),
+        ),
+        "workflow_project_read" => object(
+            json!({
+                "projectId": string,
+                "includeMessages": { "type": "boolean" },
+            }),
+            json!(["projectId"]),
+        ),
         "schedule_write" => object(
             json!({ "cron": string, "task": string, "query": string }),
             json!([]),
@@ -713,6 +798,19 @@ pub fn output_schema(name: &str) -> Option<Value> {
                 "sequence": { "type": "integer" },
                 "object": { "type": "object" },
                 "objects": { "type": "array" }
+            }
+        })),
+        "workflow_status"
+        | "workflow_source_connect"
+        | "workflow_sync"
+        | "workflow_search"
+        | "workflow_chat_read"
+        | "workflow_chat_link"
+        | "workflow_project_read" => Some(json!({
+            "type": "object",
+            "properties": {
+                "schemaVersion": { "type": "integer" },
+                "kind": { "type": "string" }
             }
         })),
         _ => None,
@@ -942,6 +1040,7 @@ mod tests {
     fn recognizes_known_tools() {
         assert!(is_known_tool("read"));
         assert!(is_known_tool("bridge_send"));
+        assert!(is_known_tool("workflow_project_read"));
         assert!(!is_known_tool("nope"));
     }
 
@@ -1003,6 +1102,7 @@ mod tests {
         assert!(has_declared_input_schema("read"));
         assert!(has_declared_input_schema("web_search"));
         assert!(has_declared_input_schema("image_search"));
+        assert!(has_declared_input_schema("workflow_chat_link"));
     }
 
     /// Every tool the agent can execute must be reachable as a flat action.

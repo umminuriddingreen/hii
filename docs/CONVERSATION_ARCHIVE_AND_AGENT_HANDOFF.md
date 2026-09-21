@@ -14,6 +14,59 @@ hii archive install-sync
 
 `install-sync` registers a user-level macOS LaunchAgent that repeats `archive sync` every five minutes. The source configuration is `~/.hii/imports/conversation-sources.json`, and the last result is `~/.hii/imports/last-sync.json`. Codex sessions change locally and can sync automatically. ChatGPT export data is a snapshot: to bring in later ChatGPT conversations, obtain a newer `conversations.json` export and connect it; HII does not claim access to an unexposed live ChatGPT history API. The archive stays on this machine unless the user separately exports or shares it.
 
+## Central project workflow over MCP
+
+The canonical `hii mcp` stdio server exposes the archive and bound projects as
+one governed workflow. It uses the existing archive tables and operational
+graph; it does not create another database or copy large project files.
+
+| MCP tool | Purpose |
+| --- | --- |
+| `workflow_status` | List configured conversation sources, archive counts, sync state, and projects. |
+| `workflow_source_connect` | Connect an explicit ChatGPT `conversations.json` or Codex sessions directory. |
+| `workflow_sync` | Import or refresh every configured complete visible conversation. |
+| `workflow_search` | Search archived chat text, project bindings, and project sources together. |
+| `workflow_chat_read` | Return every imported user/assistant message for one archived chat. |
+| `workflow_chat_link` | Link an archived chat into a project through the operational graph. |
+| `workflow_project_read` | Return a project, all registered sources, and linked chats; `includeMessages` returns their complete imported messages. |
+
+Read tools work under the default read-only MCP authority. Connecting,
+syncing, and linking are mutations and require an operator/service ACL plus a
+non-read-only authority envelope. Credentials, browser Cookies, model
+reasoning, tool-call payloads, and hidden/system messages never enter the
+central workflow.
+
+```sh
+hii mcp --authority personal-local --client-identity codex
+```
+
+The matching `~/.hii/mcp_acl.json` client should use the bounded
+`workflow-operator` role. That role can call the three workflow mutations but
+cannot write arbitrary files, run shell commands, or mutate the canvas. A
+Codex installation can register the stdio server with:
+
+```powershell
+codex mcp add hii-workflow `
+  --env HII_ROOT=C:\path\to\hii `
+  -- C:\path\to\hii.exe mcp --authority personal-local --client-identity codex
+```
+
+The client discovers the tools through `tools/list`. For example, a
+`workflow_chat_link` call uses:
+
+```json
+{
+  "projectId": "<bound-project-id>",
+  "conversationId": "codex:<archive-id>",
+  "note": "Design-development record",
+  "tags": ["architecture", "rhino"]
+}
+```
+
+"Central" currently means one canonical local HII database and operational
+graph. This MCP surface does not claim encrypted cross-device transcript sync;
+that remains a separate HII device-trust and transport capability.
+
 Agents coordinate through the local HII mailbox. A handoff records sender, recipient, task/thread, workspace, context references, an optional proof receipt, and a short message. Messages are immutable files in `~/.hii/agents/mailbox/messages`; acknowledgements are separate files, so no agent rewrites another agent's handoff.
 
 ```sh

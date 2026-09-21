@@ -438,7 +438,18 @@ mod tests {
             .all(|spec| spec["name"].is_string() && spec["inputSchema"]["type"] == "object"));
         // mcp_call is an agent action, not something this server can proxy.
         assert!(!specs.iter().any(|spec| spec["name"] == "mcp_call"));
-        for name in ["canvas_list", "canvas_read", "canvas_add", "canvas_update"] {
+        for name in [
+            "canvas_list",
+            "canvas_read",
+            "canvas_add",
+            "canvas_update",
+            "workflow_status",
+            "workflow_sync",
+            "workflow_search",
+            "workflow_chat_read",
+            "workflow_chat_link",
+            "workflow_project_read",
+        ] {
             assert!(
                 specs.iter().any(|spec| spec["name"] == name),
                 "missing {name}"
@@ -463,6 +474,24 @@ mod tests {
         assert_eq!(error.0, AUTHORITY_DENIED);
         // The refused write must not have touched the workspace.
         assert!(!path.join("x.txt").exists());
+        let _ = std::fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn read_only_rejects_central_workflow_sync_before_execution() {
+        let (tools, path) = tempbelt("reject-workflow-sync");
+        let params = json!({ "name": "workflow_sync", "arguments": {} });
+        let error = tools_call(
+            &params,
+            &tools,
+            &path.join(".hii"),
+            &path,
+            Authority::ReadOnly,
+            "anonymous",
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(error.0, AUTHORITY_DENIED);
         let _ = std::fs::remove_dir_all(path);
     }
 

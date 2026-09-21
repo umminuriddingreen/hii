@@ -43,6 +43,13 @@ pub const HII_TOOLS: &[&str] = &[
     "bridge_read",
     "object_list",
     "object_read",
+    "workflow_status",
+    "workflow_source_connect",
+    "workflow_sync",
+    "workflow_search",
+    "workflow_chat_read",
+    "workflow_chat_link",
+    "workflow_project_read",
 ];
 
 pub fn is_hii_tool(tool: &str) -> bool {
@@ -61,6 +68,9 @@ pub fn is_mutating(tool: &str) -> bool {
             | "bridge_send"
             | "canvas_add"
             | "canvas_update"
+            | "workflow_source_connect"
+            | "workflow_sync"
+            | "workflow_chat_link"
     )
 }
 
@@ -213,6 +223,80 @@ pub fn execute_as(
                 )
             }
         }
+        "workflow_status" => workflow_runtime().and_then(|runtime| {
+            hii_core::conversation_workflow::archive_status(&runtime)
+                .and_then(|value| serde_json::to_string(&value).map_err(|error| error.to_string()))
+        }),
+        "workflow_source_connect" => {
+            let provider = required_argument(arguments, "provider");
+            let path = required_argument(arguments, "path");
+            match (provider, path) {
+                (Ok(provider), Ok(path)) if matches!(provider.as_str(), "chatgpt" | "codex") => {
+                    archive_cli(repo, &["connect", &provider, &path])
+                }
+                (Ok(provider), Ok(_)) => Err(format!(
+                    "workflow_source_connect provider must be chatgpt or codex; got {provider}"
+                )),
+                (Err(error), _) | (_, Err(error)) => Err(error),
+            }
+        }
+        "workflow_sync" => archive_cli(repo, &["sync"]),
+        "workflow_search" => workflow_runtime().and_then(|runtime| {
+            let query = required_argument(arguments, "query")?;
+            let project_id = argument_field(arguments, "projectId");
+            let limit = arguments
+                .and_then(|value| value.get("limit"))
+                .and_then(Value::as_u64)
+                .unwrap_or(20)
+                .clamp(1, 100) as usize;
+            let result = hii_core::conversation_workflow::search_workflow(
+                &runtime,
+                &query,
+                project_id.as_deref(),
+                limit,
+            )?;
+            serde_json::to_string(&result).map_err(|error| error.to_string())
+        }),
+        "workflow_chat_read" => workflow_runtime().and_then(|runtime| {
+            let id = required_argument(arguments, "conversationId")?;
+            let conversation = hii_core::conversation_workflow::conversation(&runtime, &id)?;
+            serde_json::to_string(&conversation).map_err(|error| error.to_string())
+        }),
+        "workflow_chat_link" => workflow_runtime().and_then(|runtime| {
+            let project_id = required_argument(arguments, "projectId")?;
+            let conversation_id = required_argument(arguments, "conversationId")?;
+            let note = argument_field(arguments, "note");
+            let tags = arguments
+                .and_then(|value| value.get("tags"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .take(32)
+                .collect::<Vec<_>>();
+            let source = hii_core::conversation_workflow::link_conversation(
+                &runtime,
+                &project_id,
+                &conversation_id,
+                note.as_deref(),
+                &tags,
+            )?;
+            serde_json::to_string(&source).map_err(|error| error.to_string())
+        }),
+        "workflow_project_read" => workflow_runtime().and_then(|runtime| {
+            let project_id = required_argument(arguments, "projectId")?;
+            let include_messages = arguments
+                .and_then(|value| value.get("includeMessages"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let workflow = hii_core::conversation_workflow::project_workflow(
+                &runtime,
+                &project_id,
+                include_messages,
+            )?;
+            serde_json::to_string(&workflow).map_err(|error| error.to_string())
+        }),
         other => Err(format!("unknown HII tool: {other}")),
     };
     match result {
@@ -549,6 +633,38 @@ fn argument_field(arguments: Option<&Value>, field: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+fn workflow_runtime() -> Result<std::path::PathBuf, String> {
+    crate::config::AppPaths::discover().map(|paths| paths.runtime)
+}
+
+fn archive_cli(repo: &Path, args: &[&str]) -> Result<String, String> {
+    let script = repo.join("scripts/hii-cli.mjs");
+    if !script.is_file() {
+        return Err(format!(
+            "HII archive command is unavailable: {}",
+            script.display()
+        ));
+    }
+    let output = Command::new("node")
+        .arg(&script)
+        .arg("archive")
+        .args(args)
+        .current_dir(repo)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| format!("cannot run HII archive workflow: {error}"))?;
+    let mut combined = String::from_utf8_lossy(&output.stdout).to_string();
+    if !output.status.success() {
+        combined.push_str(&String::from_utf8_lossy(&output.stderr));
+        return Err(if combined.trim().is_empty() {
+            "HII archive workflow failed".into()
+        } else {
+            combined.trim().to_string()
+        });
+    }
+    Ok(combined.trim().to_string())
+}
+
 fn system_status(repo: &Path, arguments: Option<&Value>) -> Result<String, String> {
     let system = argument_field(arguments, "system");
     let mut args = vec!["systems", "status"];
@@ -799,6 +915,8 @@ mod tests {
         assert!(is_hii_tool("info_find"));
         assert!(is_hii_tool("info_capture"));
         assert!(is_hii_tool("board_write"));
+        assert!(is_hii_tool("workflow_chat_read"));
+        assert!(is_hii_tool("workflow_chat_link"));
         assert!(!is_hii_tool("write"));
     }
 
@@ -808,6 +926,10 @@ mod tests {
         assert!(!is_mutating("info_find"));
         assert!(is_mutating("board_write"));
         assert!(is_mutating("bridge_send"));
+        assert!(is_mutating("workflow_sync"));
+        assert!(is_mutating("workflow_chat_link"));
+        assert!(!is_mutating("workflow_chat_read"));
+        assert!(!is_mutating("workflow_project_read"));
         assert!(!is_mutating("board_read"));
         assert!(!is_mutating("og_next"));
     }

@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     fs,
+    io::BufReader,
     path::{Path, PathBuf},
     process::Command,
+    time::UNIX_EPOCH,
 };
 use uuid::Uuid;
 
@@ -28,6 +30,34 @@ pub struct ProjectBindingV1 {
     pub validation_status: String,
     pub created_at: String,
     pub updated_at: String,
+    pub provenance: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSourceV1 {
+    pub schema_version: u8,
+    pub kind: String,
+    pub id: String,
+    pub project_id: String,
+    pub source_kind: String,
+    pub locator: String,
+    pub title: String,
+    pub summary: String,
+    pub fingerprint: String,
+    pub metadata: Value,
+    pub created_at: String,
+    pub updated_at: String,
+    pub provenance: Value,
+}
+
+#[derive(Debug, Clone)]
+pub struct AddProjectSourceInput {
+    pub source_kind: String,
+    pub locator: String,
+    pub title: String,
+    pub summary: String,
+    pub metadata: Value,
     pub provenance: Value,
 }
 
@@ -159,10 +189,10 @@ fn object_id(kind: &str, id: &str) -> String {
 }
 
 fn identity(path: &Path) -> Result<String, String> {
-    let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
+        let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
         Ok(format!("unix:{}:{}", metadata.dev(), metadata.ino()))
     }
     #[cfg(not(unix))]
@@ -315,6 +345,348 @@ pub fn validate(runtime: &Path, id: &str) -> Result<ProjectBindingV1, String> {
         &p.updated_at,
     )?;
     Ok(p)
+}
+
+fn stable_id(parts: &[&str]) -> String {
+    let mut hasher = blake3::Hasher::new();
+    for part in parts {
+        hasher.update(part.as_bytes());
+        hasher.update(&[0]);
+    }
+    hasher.finalize().to_hex()[..32].to_string()
+}
+
+fn bounded(value: &str, max_chars: usize) -> String {
+    let value = value.trim();
+    if value.chars().count() <= max_chars {
+        return value.to_owned();
+    }
+    let mut result = value
+        .chars()
+        .take(max_chars.saturating_sub(1))
+        .collect::<String>();
+    result.push('…');
+    result
+}
+
+fn file_source(
+    project: &ProjectBindingV1,
+    locator: &str,
+    metadata: &mut Value,
+) -> Result<(String, String), String> {
+    let canonical = assert_target(project, Path::new(locator))?;
+    if !canonical.is_file() {
+        return Err("project source must resolve to a file".into());
+    }
+    let file_metadata = fs::metadata(&canonical).map_err(|e| e.to_string())?;
+    let modified = file_metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+        .map(|value| value.as_secs());
+    let details = json!({
+        "sizeBytes": file_metadata.len(),
+        "modifiedUnixSeconds": modified,
+    });
+    match metadata {
+        Value::Object(values) => {
+            values.insert("file".into(), details);
+        }
+        _ => *metadata = json!({"file": details}),
+    }
+    let canonical = canonical.display().to_string();
+    let fingerprint = stable_id(&[
+        &canonical,
+        &file_metadata.len().to_string(),
+        &modified.unwrap_or_default().to_string(),
+    ]);
+    Ok((canonical, fingerprint))
+}
+
+pub fn add_project_source(
+    runtime: &Path,
+    project_id: &str,
+    mut input: AddProjectSourceInput,
+) -> Result<ProjectSourceV1, String> {
+    let project = project(runtime, project_id)?;
+    let source_kind = input.source_kind.trim();
+    if !matches!(
+        source_kind,
+        "local-file" | "rhino" | "notion" | "chatgpt-conversation" | "conversation"
+    ) {
+        return Err(
+            "source kind must be local-file, rhino, notion, chatgpt-conversation, or conversation"
+                .into(),
+        );
+    }
+    if input.locator.trim().is_empty() || input.title.trim().is_empty() {
+        return Err("source locator and title cannot be empty".into());
+    }
+
+    let (locator, fingerprint) = match source_kind {
+        "local-file" | "rhino" => file_source(&project, input.locator.trim(), &mut input.metadata)?,
+        "notion" => {
+            let locator = input.locator.trim();
+            let parsed =
+                url::Url::parse(locator).map_err(|_| "Notion locator must be a valid URL")?;
+            let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+            if parsed.scheme() != "https"
+                || !(host == "notion.so"
+                    || host.ends_with(".notion.so")
+                    || host == "notion.site"
+                    || host.ends_with(".notion.site")
+                    || host == "app.notion.com")
+            {
+                return Err("Notion locator must use an official HTTPS Notion host".into());
+            }
+            (locator.to_owned(), stable_id(&[source_kind, locator]))
+        }
+        "chatgpt-conversation" => {
+            let locator = input.locator.trim();
+            if !locator.starts_with("chatgpt://conversation/") {
+                return Err(
+                    "ChatGPT conversation locator must start with chatgpt://conversation/".into(),
+                );
+            }
+            (locator.to_owned(), stable_id(&[source_kind, locator]))
+        }
+        "conversation" => {
+            let locator = input.locator.trim();
+            if locator
+                .strip_prefix("hii://conversation/")
+                .is_none_or(str::is_empty)
+            {
+                return Err(
+                    "conversation locator must start with hii://conversation/ and include an archive id"
+                        .into(),
+                );
+            }
+            (locator.to_owned(), stable_id(&[source_kind, locator]))
+        }
+        _ => unreachable!(),
+    };
+    let id = stable_id(&[&project.id, source_kind, &locator]);
+    let timestamp = now();
+    let c = connection(runtime)?;
+    let existing: Option<String> = c
+        .query_row(
+            "SELECT properties_json FROM operational_objects WHERE id=?1 AND deleted_at IS NULL",
+            params![object_id("source", &id)],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let created_at = existing
+        .and_then(|raw| serde_json::from_str::<ProjectSourceV1>(&raw).ok())
+        .map(|source| source.created_at)
+        .unwrap_or_else(|| timestamp.clone());
+    let source = ProjectSourceV1 {
+        schema_version: 1,
+        kind: "projectSource".into(),
+        id,
+        project_id: project.id.clone(),
+        source_kind: source_kind.into(),
+        locator,
+        title: bounded(&input.title, 300),
+        summary: bounded(&input.summary, 1_200),
+        fingerprint,
+        metadata: input.metadata,
+        created_at,
+        updated_at: timestamp.clone(),
+        provenance: input.provenance,
+    };
+    let source_object_id = object_id("source", &source.id);
+    upsert(
+        &c,
+        &source_object_id,
+        "adaptive-project-source",
+        &source,
+        &timestamp,
+    )?;
+    let relation_id = object_id("project-source-relation", &source.id);
+    c.execute(
+        "INSERT INTO operational_relations (id,space_id,type,from_object_id,to_object_id,properties_json,provenance_json,created_at,updated_at,deleted_at,relation_version,canonical_source,provenance_class)
+         VALUES (?1,?2,'has-source',?3,?4,'{}','{\"source\":\"hii project source\"}',?5,?5,NULL,1,'graph','human_authored')
+         ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at,deleted_at=NULL,relation_version=operational_relations.relation_version+1",
+        params![relation_id, SPACE, object_id("project", &project.id), source_object_id, timestamp],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(source)
+}
+
+pub fn project_sources(runtime: &Path, project_id: &str) -> Result<Vec<ProjectSourceV1>, String> {
+    let project = project(runtime, project_id)?;
+    let mut sources = values(&connection(runtime)?, "adaptive-project-source")?
+        .into_iter()
+        .filter_map(|value| serde_json::from_value::<ProjectSourceV1>(value).ok())
+        .filter(|source| source.project_id == project.id)
+        .collect::<Vec<_>>();
+    sources.sort_by(|a, b| {
+        a.source_kind
+            .cmp(&b.source_kind)
+            .then(a.title.cmp(&b.title))
+    });
+    Ok(sources)
+}
+
+pub fn search_project_sources(
+    runtime: &Path,
+    project_id: &str,
+    query: &str,
+) -> Result<Vec<ProjectSourceV1>, String> {
+    let terms = query
+        .split_whitespace()
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>();
+    Ok(project_sources(runtime, project_id)?
+        .into_iter()
+        .filter(|source| {
+            let haystack = format!(
+                "{} {} {} {}",
+                source.source_kind, source.title, source.summary, source.locator
+            )
+            .to_ascii_lowercase();
+            terms.iter().all(|term| haystack.contains(term))
+        })
+        .collect())
+}
+
+fn chatgpt_message_text(conversation: &Value) -> String {
+    let mut messages = conversation
+        .get("mapping")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|mapping| mapping.values())
+        .filter_map(|node| node.get("message"))
+        .filter_map(|message| {
+            let parts = message
+                .pointer("/content/parts")?
+                .as_array()?
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(" ");
+            if parts.trim().is_empty() {
+                return None;
+            }
+            let time = message
+                .get("create_time")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            let role = message
+                .pointer("/author/role")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            Some((time, format!("[{role}] {}", parts.trim())))
+        })
+        .collect::<Vec<_>>();
+    messages.sort_by(|a, b| a.0.total_cmp(&b.0));
+    messages
+        .into_iter()
+        .map(|(_, text)| text)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn relevant_excerpt(text: &str, query: &str) -> String {
+    let lower = text.to_ascii_lowercase();
+    let first_term = query
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let byte_start = lower.find(&first_term).unwrap_or(0).saturating_sub(200);
+    let start = text
+        .char_indices()
+        .map(|(index, _)| index)
+        .take_while(|index| *index <= byte_start)
+        .last()
+        .unwrap_or(0);
+    bounded(&text[start..], 1_000)
+}
+
+pub fn import_chatgpt_export(
+    runtime: &Path,
+    project_id: &str,
+    export: &Path,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<ProjectSourceV1>, String> {
+    project(runtime, project_id)?;
+    if query.trim().is_empty() {
+        return Err("ChatGPT import requires a non-empty relevance query".into());
+    }
+    if limit == 0 || limit > 500 {
+        return Err("ChatGPT import limit must be between 1 and 500".into());
+    }
+    let export = if export.is_dir() {
+        export.join("conversations.json")
+    } else {
+        export.to_path_buf()
+    };
+    if export.extension().and_then(|value| value.to_str()) == Some("zip") {
+        return Err("extract the official ChatGPT export ZIP, then pass its directory or conversations.json".into());
+    }
+    let metadata =
+        fs::metadata(&export).map_err(|e| format!("cannot read {}: {e}", export.display()))?;
+    if metadata.len() > 512 * 1024 * 1024 {
+        return Err("ChatGPT conversations.json exceeds the 512 MiB import limit".into());
+    }
+    let file = fs::File::open(&export).map_err(|e| e.to_string())?;
+    let conversations: Value =
+        serde_json::from_reader(BufReader::new(file)).map_err(|e| e.to_string())?;
+    let conversations = conversations
+        .as_array()
+        .ok_or("ChatGPT conversations.json must contain a JSON array")?;
+    let terms = query
+        .split_whitespace()
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>();
+    let canonical_export = fs::canonicalize(&export).map_err(|e| e.to_string())?;
+    let mut imported = Vec::new();
+    for conversation in conversations {
+        let title = conversation
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("Untitled ChatGPT conversation");
+        let text = chatgpt_message_text(conversation);
+        let haystack = format!("{title}\n{text}").to_ascii_lowercase();
+        if !terms.iter().all(|term| haystack.contains(term)) {
+            continue;
+        }
+        let id = conversation
+            .get("id")
+            .or_else(|| conversation.get("conversation_id"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| stable_id(&[title, &text]));
+        let source = add_project_source(
+            runtime,
+            project_id,
+            AddProjectSourceInput {
+                source_kind: "chatgpt-conversation".into(),
+                locator: format!("chatgpt://conversation/{id}"),
+                title: title.into(),
+                summary: relevant_excerpt(&text, query),
+                metadata: json!({
+                    "createTime": conversation.get("create_time"),
+                    "updateTime": conversation.get("update_time"),
+                    "matchedQuery": query,
+                    "exportFile": canonical_export.display().to_string(),
+                    "fullTranscriptStored": false,
+                }),
+                provenance: json!({
+                    "actor": "local operator",
+                    "source": "official ChatGPT data export",
+                }),
+            },
+        )?;
+        imported.push(source);
+        if imported.len() >= limit {
+            break;
+        }
+    }
+    Ok(imported)
 }
 
 pub fn create_thread(
@@ -787,6 +1159,100 @@ mod tests {
                 .unwrap()
                 .foreground
         );
+    }
+
+    #[test]
+    fn project_sources_are_scoped_searchable_and_idempotent() {
+        let runtime = Temp::new();
+        let root = Temp::new();
+        let model = root.0.join("site.3dm");
+        fs::write(&model, "rhino fixture").unwrap();
+        let project = bind(&runtime.0, &root.0, Some("Museum")).unwrap();
+        let input = || AddProjectSourceInput {
+            source_kind: "rhino".into(),
+            locator: model.display().to_string(),
+            title: "Natirar contour model".into(),
+            summary: "Live terrain and program massing source".into(),
+            metadata: json!({"documentRole":"working-model"}),
+            provenance: json!({"source":"test"}),
+        };
+        let first = add_project_source(&runtime.0, &project.id, input()).unwrap();
+        let replay = add_project_source(&runtime.0, &project.id, input()).unwrap();
+        assert_eq!(first.id, replay.id);
+        assert_eq!(first.created_at, replay.created_at);
+        assert_eq!(project_sources(&runtime.0, &project.id).unwrap().len(), 1);
+        assert_eq!(
+            search_project_sources(&runtime.0, &project.id, "terrain Natirar")
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(search_project_sources(&runtime.0, &project.id, "unrelated")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn local_project_sources_cannot_escape_the_bound_root() {
+        let runtime = Temp::new();
+        let root = Temp::new();
+        let outside = Temp::new();
+        let file = outside.0.join("outside.3dm");
+        fs::write(&file, "outside").unwrap();
+        let project = bind(&runtime.0, &root.0, None).unwrap();
+        let result = add_project_source(
+            &runtime.0,
+            &project.id,
+            AddProjectSourceInput {
+                source_kind: "rhino".into(),
+                locator: file.display().to_string(),
+                title: "Outside model".into(),
+                summary: String::new(),
+                metadata: json!({}),
+                provenance: json!({"source":"test"}),
+            },
+        );
+        assert!(result
+            .unwrap_err()
+            .contains("outside the canonical project root"));
+    }
+
+    #[test]
+    fn chatgpt_export_import_keeps_only_relevant_bounded_references() {
+        let runtime = Temp::new();
+        let root = Temp::new();
+        let export_dir = Temp::new();
+        let project = bind(&runtime.0, &root.0, Some("ARCH495")).unwrap();
+        let export = export_dir.0.join("conversations.json");
+        fs::write(
+            &export,
+            serde_json::to_vec(&json!([
+                {
+                    "id":"relevant-1",
+                    "title":"Natirar museum concept",
+                    "create_time":1.0,
+                    "update_time":2.0,
+                    "mapping":{
+                        "a":{"message":{"create_time":1.0,"author":{"role":"user"},"content":{"parts":["Develop the ARCH495 landscape museum at Natirar"]}}}
+                    }
+                },
+                {
+                    "id":"other-1",
+                    "title":"Dinner",
+                    "mapping":{
+                        "a":{"message":{"create_time":1.0,"author":{"role":"user"},"content":{"parts":["Pasta recipe"]}}}
+                    }
+                }
+            ]))
+            .unwrap(),
+        )
+        .unwrap();
+        let imported =
+            import_chatgpt_export(&runtime.0, &project.id, &export, "ARCH495 Natirar", 10).unwrap();
+        assert_eq!(imported.len(), 1);
+        assert_eq!(imported[0].locator, "chatgpt://conversation/relevant-1");
+        assert_eq!(imported[0].metadata["fullTranscriptStored"], false);
+        assert!(imported[0].summary.contains("ARCH495"));
     }
 
     #[cfg(unix)]

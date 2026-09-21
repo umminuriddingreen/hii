@@ -1303,6 +1303,50 @@ enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
+    #[command(
+        name = "source-add",
+        about = "Register a project-scoped local file, Rhino model, Notion page, or ChatGPT conversation"
+    )]
+    SourceAdd {
+        id: String,
+        #[arg(long, value_name = "KIND")]
+        source_kind: String,
+        #[arg(long)]
+        locator: String,
+        #[arg(long)]
+        title: String,
+        #[arg(long, default_value = "")]
+        summary: String,
+        #[arg(long, value_name = "JSON")]
+        metadata: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
+        name = "sources",
+        about = "List or search a project's consolidated sources"
+    )]
+    Sources {
+        id: String,
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
+        name = "import-chatgpt",
+        about = "Import relevant references from an extracted official ChatGPT data export"
+    )]
+    ImportChatgpt {
+        id: String,
+        export: PathBuf,
+        #[arg(long, required = true)]
+        query: String,
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
     #[command(about = "Show a project, delivery prices, KPIs, and next actions")]
     Show {
         id: String,
@@ -3160,6 +3204,94 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                         );
                     } else {
                         println!("{}  {}", binding.id, binding.validation_status);
+                    }
+                }
+                ProjectCommand::SourceAdd {
+                    id,
+                    source_kind,
+                    locator,
+                    title,
+                    summary,
+                    metadata,
+                    json,
+                } => {
+                    let metadata = metadata
+                        .as_deref()
+                        .map(serde_json::from_str)
+                        .transpose()
+                        .map_err(|error| format!("invalid --metadata JSON: {error}"))?
+                        .unwrap_or_else(|| serde_json::json!({}));
+                    let source = hii_core::adaptive::add_project_source(
+                        &paths.runtime,
+                        &id,
+                        hii_core::adaptive::AddProjectSourceInput {
+                            source_kind,
+                            locator,
+                            title,
+                            summary,
+                            metadata,
+                            provenance: serde_json::json!({
+                                "actor": "local operator",
+                                "source": "hii project source-add",
+                            }),
+                        },
+                    )?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&source).map_err(|e| e.to_string())?
+                        );
+                    } else {
+                        println!("{}  {:<22} {}", source.id, source.source_kind, source.title);
+                    }
+                }
+                ProjectCommand::Sources { id, query, json } => {
+                    let sources = match query.as_deref() {
+                        Some(query) => {
+                            hii_core::adaptive::search_project_sources(&paths.runtime, &id, query)?
+                        }
+                        None => hii_core::adaptive::project_sources(&paths.runtime, &id)?,
+                    };
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&sources).map_err(|e| e.to_string())?
+                        );
+                    } else if sources.is_empty() {
+                        println!("No matching project sources.");
+                    } else {
+                        for source in sources {
+                            println!(
+                                "{:<32} {:<22} {}",
+                                source.id, source.source_kind, source.title
+                            );
+                        }
+                    }
+                }
+                ProjectCommand::ImportChatgpt {
+                    id,
+                    export,
+                    query,
+                    limit,
+                    json,
+                } => {
+                    let sources = hii_core::adaptive::import_chatgpt_export(
+                        &paths.runtime,
+                        &id,
+                        &export,
+                        &query,
+                        limit,
+                    )?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&sources).map_err(|e| e.to_string())?
+                        );
+                    } else {
+                        println!("Imported {} relevant ChatGPT references.", sources.len());
+                        for source in sources {
+                            println!("  {}  {}", source.id, source.title);
+                        }
                     }
                 }
                 ProjectCommand::Show { id, json } => {

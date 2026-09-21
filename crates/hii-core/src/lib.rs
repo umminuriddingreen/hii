@@ -12,6 +12,7 @@ use uuid::Uuid;
 pub mod adaptive;
 pub mod checkpoints;
 pub mod context_pack;
+pub mod conversation_workflow;
 pub mod information;
 pub mod memory;
 pub mod operational;
