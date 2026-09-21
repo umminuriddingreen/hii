@@ -768,6 +768,25 @@ impl Toolbelt {
         if raw.is_empty() {
             return Err("path cannot be empty".into());
         }
+        // Models sometimes echo Rust's Windows verbatim display form with one
+        // leading slash lost ("\?\C:\..." instead of "\\?\C:\...").
+        // Repair only that exact drive-qualified form; never reinterpret a
+        // general rooted or relative path.
+        #[cfg(target_os = "windows")]
+        let repaired;
+        #[cfg(target_os = "windows")]
+        let raw = if raw.starts_with("\\?\\")
+            && raw
+                .as_bytes()
+                .get(3)
+                .is_some_and(|byte| byte.is_ascii_alphabetic())
+            && raw.as_bytes().get(4) == Some(&b':')
+        {
+            repaired = format!(r"\{raw}");
+            repaired.as_str()
+        } else {
+            raw
+        };
         let path = Path::new(raw);
         if path
             .components()
@@ -2302,6 +2321,21 @@ mod tests {
         let listed = tools.list(Some("."));
         assert!(listed.ok);
         assert!(listed.output.is_empty());
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn repairs_single_slash_windows_verbatim_paths_from_model_output() {
+        let path = workspace();
+        fs::write(path.join("proof.txt"), "ok").unwrap();
+        let tools = Toolbelt::new(path.clone()).unwrap();
+        let displayed = tools.workspace().display().to_string();
+        assert!(displayed.starts_with(r"\\?\"), "{displayed}");
+        let malformed = displayed.replacen(r"\\?\", r"\?\", 1);
+        let listed = tools.list(Some(&malformed));
+        assert!(listed.ok, "{}", listed.output);
+        assert!(listed.output.contains("proof.txt"));
         let _ = fs::remove_dir_all(path);
     }
 
