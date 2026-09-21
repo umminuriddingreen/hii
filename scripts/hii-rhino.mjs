@@ -38,8 +38,36 @@ function targetArgs() {
   return target ? ['--rhino', target] : [];
 }
 
+function printWindowState() {
+  process.stdout.write('HII RHINO WINDOWS\n');
+  if (process.platform === 'win32') {
+    const script = [
+      "Get-Process Rhino -ErrorAction SilentlyContinue",
+      "Select-Object Id,MainWindowTitle,Responding,StartTime,@{n='WorkingSetMB';e={[math]::Round($_.WorkingSet64/1MB)}}",
+      'ConvertTo-Json -Compress'
+    ].join(' | ');
+    const state = spawnSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8', windowsHide: true });
+    const text = state.stdout?.trim();
+    if (!text) process.stdout.write('none\n');
+    else {
+      const rows = JSON.parse(text);
+      for (const row of Array.isArray(rows) ? rows : [rows]) {
+        process.stdout.write(`${row.Id}\t${row.Responding ? 'responsive' : 'not-responding'}\t${row.WorkingSetMB} MB\t${row.MainWindowTitle || '(no window title)'}\n`);
+      }
+    }
+  } else if (process.platform === 'darwin') {
+    const state = spawnSync('ps', ['-axo', 'pid=,stat=,comm='], { encoding: 'utf8' });
+    const rows = (state.stdout || '').split(/\r?\n/).filter((line) => /Rhino/i.test(line));
+    process.stdout.write(rows.length ? `${rows.join('\n')}\n` : 'none\n');
+  } else {
+    process.stdout.write(`unsupported on ${process.platform}\n`);
+  }
+  process.stdout.write('\nRHINOCODE DOCUMENTS\n');
+}
+
 const [verb = 'status', ...words] = process.argv.slice(2);
 if (verb === 'status') {
+  printWindowState();
   run(['list']);
 } else if (verb === 'command') {
   if (!words.length) fail('command text is required');
