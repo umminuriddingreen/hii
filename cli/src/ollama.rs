@@ -1289,7 +1289,13 @@ fn start_windows_llama_runtime(endpoint: &str) -> bool {
     }
     let status = std::process::Command::new("node")
         .arg(script)
-        .args(["model-runtime", "start", "--endpoint", endpoint])
+        .args([
+            "model-runtime",
+            "start",
+            "--idle-router",
+            "--endpoint",
+            endpoint,
+        ])
         .current_dir(&paths.repo)
         .env("HII_ROOT", &paths.repo)
         .status();

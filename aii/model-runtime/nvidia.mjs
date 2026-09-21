@@ -19,6 +19,7 @@ export function nvidiaOptions(args = []) {
     if (index >= 0) { if (!args[index + 1] || args[index + 1].startsWith("--")) throw new Error(`${flag} requires a value`); result[key] = args[index + 1]; }
   }
   result.dryRun = args.includes("--dry-run");
+  result.idleRouter = args.includes("--idle-router");
   return result;
 }
 
@@ -137,6 +138,14 @@ export function buildNvidiaLaunchPlan(options = {}) {
   if (!Number.isInteger(context) || context < 512 || context > 262144) throw new Error("Context must be between 512 and 262144 tokens");
   let command = s.binary || s.env.HII_LLAMA_SERVER_BIN || "llama-server";
   const isWsl = s.backend.startsWith("wsl-");
+  if (s.idleRouter) {
+    if (isWsl) throw new Error("The idle preset router currently requires native Windows llama.cpp");
+    if (!fs.existsSync(s.modelsConfig)) throw new Error(`Model preset registry is missing: ${s.modelsConfig}`);
+    if (!/^llama(?:\.exe)?$/i.test(path.basename(command))) throw new Error("The idle preset router requires the unified llama executable");
+    const args = ["serve", "--models-preset", s.modelsConfig, "--models-max", "1", "--host", "127.0.0.1", "--port", port, "--no-webui"];
+    if (s.apiKeyFile) args.push("--api-key-file", s.apiKeyFile);
+    return { command, args, env: {}, backend: s.backend, endpoint: s.endpoint, contextTokens: null, selection, idleRouter: true, secretValuesIncluded: false };
+  }
   const modelPath = isWsl ? wslPath(selection.model.path) : selection.model.path;
   let args = ["--model", modelPath, "--alias", selection.model.id, "--host", "127.0.0.1", "--port", port, "--ctx-size", String(context), "--n-gpu-layers", "999", "--flash-attn", "on", "--cache-type-k", profile.kvCacheType, "--cache-type-v", profile.kvCacheType, "--batch-size", String(profile.batchSize), "--ubatch-size", String(profile.microBatchSize), "--parallel", "1", "--no-webui", "--jinja", "--reasoning", "off"];
   if (selection.model.mmproj) args.push("--mmproj", isWsl ? wslPath(selection.model.mmproj) : selection.model.mmproj);
@@ -263,7 +272,7 @@ export async function nvidiaStart(options = {}) {
   const plan = buildNvidiaLaunchPlan({ ...s, selection });
   if (s.dryRun) return { ...plan, dryRun: true, backendAvailable: inventory.backends[s.backend]?.available === true };
   if (!inventory.backends[s.backend]?.available) throw new Error(`${s.backend} is not installed or GPU-ready; run model doctor. No installation was attempted.`);
-  if (selection.state === "waiting-for-memory") return { state: "waiting-for-memory", queued: false, retryable: true, selection, reason: "Insufficient estimated GPU headroom; finish GPU-heavy work and retry. No process was started." };
+  if (!s.idleRouter && selection.state === "waiting-for-memory") return { state: "waiting-for-memory", queued: false, retryable: true, selection, reason: "Insufficient estimated GPU headroom; finish GPU-heavy work and retry. No process was started." };
   fs.mkdirSync(path.dirname(s.stateFile), { recursive: true });
   const lockFile = `${s.stateFile}.lock`;
   let lock;
@@ -301,7 +310,7 @@ export async function nvidiaStart(options = {}) {
     }
     saveState(s, record);
     savePreference(s, { model: selection.model.id, contextTokens: plan.contextTokens, backend: s.backend, profile: selection.profile });
-    return { ...record, ownership: "hii", reason: "Engine starting; model status reports readiness" };
+    return { ...record, ownership: "hii", idleRouter: Boolean(s.idleRouter), reason: s.idleRouter ? "Idle router starting; weights load only when a model request arrives" : "Engine starting; model status reports readiness" };
   } finally { fs.closeSync(lock); fs.unlinkSync(lockFile); }
 }
 
