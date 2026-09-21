@@ -63,13 +63,15 @@ describe("native consumer model profiles", () => {
     expect(resolveModelSelectionEntry(manifest, "qwen3.8-27b-agent", "darwin", "arm64")).toMatchObject({
       model: "mlx-community/Qwen3.8-27B-4bit",
       logicalModel: "qwen3.8-27b-agent",
-      backend: "mlx"
+      backend: "mlx",
+      capabilities: ["chat", "tools", "vision"]
     });
     expect(resolveModelSelectionEntry(manifest, "qwen3.8-27b-agent", "win32", "x64")).toMatchObject({
       model: "qwen3.8-27b-agent",
       logicalModel: "qwen3.8-27b-agent",
       backend: "llama.cpp",
-      source: "preset"
+      source: "preset",
+      capabilities: ["chat", "tools", "vision"]
     });
     expect(resolveModelSelectionEntry(manifest, "mlx-community/Qwen3.8-27B-4bit", "win32", "x64")).toBeNull();
   });
