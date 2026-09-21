@@ -9,7 +9,7 @@
   border-radius: 16px;
   background: var(--panel);
   color: var(--ink);
-  box-shadow: 0 10px 32px var(--shadow);
+  box-shadow: 0 4px 18px var(--shadow);
   -webkit-backdrop-filter: blur(22px) saturate(1.2);
   backdrop-filter: blur(22px) saturate(1.2);
 }

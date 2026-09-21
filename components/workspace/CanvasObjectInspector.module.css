@@ -17,4 +17,4 @@
 .actions button { min-height: 34px; border: 1px solid #d3d3d3; border-radius: 7px; background: #fff; color: #111; font: inherit; font-size: 11px; cursor: pointer; }
 .actions button:hover { background: #f3f3f3; }
 .actions button:disabled { opacity: .35; cursor: default; }
-.inspector button:focus-visible { outline: 2px solid #1677ff; outline-offset: 2px; }
+.inspector button:focus-visible { outline: 2px solid var(--selection); outline-offset: 2px; }

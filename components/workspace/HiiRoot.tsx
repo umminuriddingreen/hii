@@ -2761,6 +2761,11 @@ export function HiiRoot({
         onOpenTerminal={() => ensureWorkspaceTerminal('docked')} onSearch={openSearchPanel} onOpenActivity={openActivityPanel}
         onOpenRemote={() => { onRequestDevice?.(selectedNodes); setToolMessage('Opened HII Remote.'); }}
         onRequestFeature={runtimeEnabled ? requestFeature : undefined}
+        onCaptureText={(value) => {
+          const [id] = spawnCenteredSeed(canvasTextSeed(value.slice(0, 100_000)));
+          if (id) { setSelected([id]); setFocusNodeId(null); }
+          setToolMessage('Saved locally to this canvas.');
+        }}
         onStartWork={runtimeEnabled ? startFromCommand : isAccount && spaceId ? queueAccountObjective : undefined}
         selectionLabels={selectedNodes.map(titleFor)}
         workUnavailableReason={!runtimeEnabled && (!isAccount || !spaceId) ? 'Agent work needs a connected HII executor. Canvas commands remain available here.' : undefined}

@@ -42,7 +42,7 @@ describe('desktop account access', () => {
   it('restores the account canvas and exposes account controls', async () => {
     await render();
     expect(container.querySelector('[data-testid="canvas"]')?.textContent).toBe('canvas-a');
-    const account = container.querySelector<HTMLButtonElement>('button[title="HII account"]')!;
+    const account = container.querySelector<HTMLButtonElement>('button[aria-label^="HII account"]')!;
     await act(async () => account.click());
     expect(container.querySelector('[aria-label="HII account synchronization"]')?.textContent).toContain('Ummi');
     expect(api.save).not.toHaveBeenCalled();
@@ -51,7 +51,7 @@ describe('desktop account access', () => {
     await render();
     await act(async () => container.querySelector<HTMLButtonElement>('button[title="Workspaces"]')!.click());
     expect(container.textContent).toContain('181 objects');
-    const board = [...container.querySelectorAll('button')].find(button => button.textContent?.startsWith('default'))!;
+    const board = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('default'))!;
     await act(async () => board.click());
     expect(local.select).toHaveBeenCalledWith('default');
     expect(api.save).toHaveBeenCalledWith(null);

@@ -19,7 +19,7 @@
 }
 
 .title { font-weight: 600; letter-spacing: -0.01em; }
-.title { color: #42c8ff; font-size: 22px; }
+.title { color: var(--ink); font-size: 22px; }
 .count { color: var(--muted); font-variant-numeric: tabular-nums; }
 .spacer { flex: 1; }
 
@@ -102,7 +102,7 @@
   text-align: left;
   cursor: pointer;
 }
-.card:hover, .card:focus-visible { border-color: #42c8ff; transform: translateY(-2px); }
+.card:hover, .card:focus-visible { border-color: var(--ink); transform: translateY(-2px); }
 
 .preview {
   position: relative;
@@ -133,7 +133,7 @@
 .cardName { min-width: 0; overflow-wrap: anywhere; }
 .sequence { flex-shrink: 0; color: #999; font-variant-numeric: tabular-nums; }
 .cardMeta { color: var(--muted); font-size: 0.85em; overflow-wrap: anywhere; }
-.cardMatches { color: #42c8ff; font-size: 0.85em; font-weight: 500; }
+.cardMatches { color: var(--ink); font-size: 0.85em; font-weight: 500; }
 
 @media (max-width: 640px) {
   .bar { flex-wrap: wrap; }

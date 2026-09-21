@@ -2,8 +2,8 @@
 .surface { position: absolute; inset: 0; }
 .accountControls { position: absolute; z-index: 2147483601; inset: 14px 16px auto 16px; display: flex; align-items: center; gap: 8px; pointer-events: none; }
 .accountControls button { display: grid; width: 36px; height: 36px; place-items: center; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; }
-.accountControls button:first-child { background: var(--surface); box-shadow: 0 7px 24px var(--shadow); backdrop-filter: blur(16px); }
-.accountControls button:last-child { margin-left: auto; background: var(--surface); box-shadow: 0 7px 24px var(--shadow); backdrop-filter: blur(16px); }
+.accountControls button:first-child { background: var(--surface); box-shadow: 0 3px 14px var(--shadow); backdrop-filter: blur(16px); }
+.accountControls button:last-child { margin-left: auto; background: var(--surface); box-shadow: 0 3px 14px var(--shadow); backdrop-filter: blur(16px); }
 .accountControls button, .boardTitle { pointer-events: auto; }
 .boardTitle { max-width: min(240px, 28vw); overflow: hidden; color: var(--ink); font: 600 14px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; text-overflow: ellipsis; white-space: nowrap; }
 .accountControls button:hover,
@@ -26,19 +26,22 @@
 .panel { position: fixed; z-index: 2147483500; top: 62px; right: 16px; width: min(300px, calc(100vw - 32px)); max-height: calc(100dvh - 78px); overflow-y: auto; padding: 10px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--ink); box-shadow: 0 18px 48px var(--shadow); -webkit-backdrop-filter: blur(30px) saturate(1.45); backdrop-filter: blur(30px) saturate(1.45); font: 12px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
 .panel > header { display: flex; min-height: 34px; align-items: center; justify-content: space-between; padding: 0 4px 8px; }
 .panel > header strong { font-size: 14px; letter-spacing: -.01em; }
+.brand { display: grid; gap: 1px; }
+.brand small { margin: 0; color: var(--muted); font-size: 10px; font-weight: 450; }
+.companionNote { margin: 0 4px 12px; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .panel > header button { display: grid; width: 30px; min-height: 30px; place-items: center; border-radius: 9px; }
 .workspacePanel { position: fixed; z-index: 2147483400; inset: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: 76px 32px 24px; background: var(--gallery); color: var(--ink); font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; overflow: hidden; }
 .workspacePanel > header,
 .workspacePanel > footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 48px; padding: 0; border: 0; }
-.workspacePanel > header strong { color: #42c8ff; font-size: clamp(28px, 4vw, 44px); font-weight: 700; letter-spacing: -.035em; }
+.workspacePanel > header strong { color: var(--ink); font-size: clamp(28px, 4vw, 44px); font-weight: 650; letter-spacing: -.035em; }
 .workspacePanel kbd,
 .workspacePanel small { color: var(--muted); font: inherit; }
 .workspacePanel nav { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); align-content: start; gap: 22px; padding: 28px 0; overflow: auto; }
 .workspacePanel nav button { position: relative; display: grid; grid-template-rows: minmax(120px, 1fr) auto; align-items: end; gap: 4px; min-height: 210px; padding: 148px 16px 16px; overflow: hidden; border: 0; border-radius: 16px; background: linear-gradient(to bottom, var(--gallery-card) 0 66%, var(--gallery-footer) 66% 100%); color: var(--ink); cursor: pointer; text-align: left; }
 .workspacePanel nav button::before { content: ''; position: absolute; inset: 0 0 34% 0; background: radial-gradient(circle at 36% 42%, rgba(0,0,0,.06) 0 2px, transparent 3px); }
 .workspacePanel nav button:hover,
-.workspacePanel nav button:focus-visible { outline: 3px solid #42c8ff; outline-offset: 3px; transform: translateY(-2px); }
-.workspacePanel nav button[data-active] { box-shadow: inset 0 0 0 3px #42c8ff; }
+.workspacePanel nav button:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; transform: translateY(-2px); }
+.workspacePanel nav button[data-active] { box-shadow: inset 0 0 0 2px var(--ink); }
 .workspacePanel nav button > span:not(.preview):not(.previewEmpty),
 .workspacePanel nav button > small { position: absolute; z-index: 1; right: 16px; left: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspacePanel nav button > span:not(.preview):not(.previewEmpty) { bottom: 42px; font-size: 15px; font-weight: 650; }

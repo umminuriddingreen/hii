@@ -20,7 +20,7 @@ type ThemeMode = 'system' | 'light' | 'dark';
 
 function applyTheme(mode: ThemeMode) {
   const resolved = mode === 'system'
-    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    ? (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
     : mode;
   window.localStorage.setItem('hii.theme.v1', mode);
   document.documentElement.dataset.theme = resolved;
@@ -89,10 +89,10 @@ export function DesktopHiiAccess() {
     const initial: ThemeMode = stored === 'light' || stored === 'dark' ? stored : 'system';
     setTheme(initial);
     applyTheme(initial);
-    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const media = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
     const syncSystem = () => { if ((window.localStorage.getItem('hii.theme.v1') ?? 'system') === 'system') applyTheme('system'); };
-    media.addEventListener('change', syncSystem);
-    return () => media.removeEventListener('change', syncSystem);
+    media?.addEventListener('change', syncSystem);
+    return () => media?.removeEventListener('change', syncSystem);
   }, []);
   const chooseTheme = (next: ThemeMode) => { setTheme(next); applyTheme(next); };
   const searchWorkspaces = useCallback(async (): Promise<SearchableWorkspace[]> => {
@@ -271,11 +271,12 @@ export function DesktopHiiAccess() {
           <span>{workspace.name}</span><small>{workspace.role} · mirrored with web</small>
         </button>)}
       </nav>
-      <footer><span>Same account board in web and app</span><small>Device-only boards are preserved separately until you choose to connect them.</small></footer>
+      <footer><span>Your local context library</span><small>Notes, images, and project context stay separate until you choose to connect them.</small></footer>
       <p role="status">{message}</p>
     </aside> : null}
     {accountOpen ? <aside className={styles.panel} data-workspace-ui aria-label="HII account synchronization">
-      <header><strong>HII</strong><button type="button" title="Close account" aria-label="Close account" onClick={() => setAccountOpen(false)}><X size={17} /></button></header>
+      <header><div className={styles.brand}><strong>HII</strong><small>Local companion</small></div><button type="button" title="Close account" aria-label="Close account" onClick={() => setAccountOpen(false)}><X size={17} /></button></header>
+      <p className={styles.companionNote}>Save chat excerpts, notes, images, and project files here. Connected agents can request approved context through HII.</p>
       {linked ? <>
         <dl>
           <div><dt>account</dt><dd>{identity?.handle}</dd></div>
