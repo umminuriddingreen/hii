@@ -105,7 +105,9 @@ use std::{
 )]
 struct Cli {
     #[arg(
+        short = 'C',
         long,
+        alias = "cd",
         global = true,
         value_name = "PATH",
         help = "Bound the agent to this workspace"
@@ -113,6 +115,7 @@ struct Cli {
     cwd: Option<PathBuf>,
 
     #[arg(
+        short = 'm',
         long,
         global = true,
         value_name = "MODEL",
@@ -282,7 +285,10 @@ enum Commands {
         #[arg(long, help = "Emit one machine-readable result")]
         json: bool,
     },
-    #[command(alias = "agent", about = "Complete a goal inside a bounded workspace")]
+    #[command(
+        aliases = ["agent", "exec", "e"],
+        about = "Complete a goal inside a bounded workspace"
+    )]
     Run {
         #[arg(required = true, num_args = 1..)]
         goal: Vec<String>,
@@ -397,7 +403,7 @@ enum Commands {
         // does — how often the model pauses to ask — and says so.
         #[arg(
             long = "asks",
-            alias = "autonomy",
+            aliases = ["autonomy", "ask-for-approval"],
             value_enum,
             default_value_t = AutonomyArg::LocalFull,
             value_name = "WHEN",
@@ -406,7 +412,9 @@ enum Commands {
         )]
         autonomy: AutonomyArg,
         #[arg(
+            short = 'o',
             long,
+            alias = "output-last-message",
             value_name = "PATH",
             help = "Write the final model message to a file inside the workspace"
         )]
@@ -1980,7 +1988,7 @@ enum DiscoverCommand {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 enum AutonomyArg {
     /// Pause before sensitive, destructive, or external actions.
-    #[value(name = "sensitive", alias = "approval")]
+    #[value(name = "sensitive", aliases = ["approval", "on-request"])]
     Approval,
     /// Act without pausing; `--authority` remains the boundary that is enforced.
     #[default]
@@ -2279,6 +2287,19 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             last_message,
         }) => {
             let workspace = workspace(cli.cwd.clone())?;
+            let goal = if goal.len() == 1 && goal[0] == "-" {
+                let mut prompt = String::new();
+                io::stdin()
+                    .read_to_string(&mut prompt)
+                    .map_err(|error| format!("could not read run goal from stdin: {error}"))?;
+                let prompt = prompt.trim().to_string();
+                if prompt.is_empty() {
+                    return Err("stdin did not contain a run goal".into());
+                }
+                prompt
+            } else {
+                goal.join(" ")
+            };
             let authority =
                 resolve_authority(yolo, authority.as_deref(), AuthorityContext::Operator)?;
             let output = if jsonl {
@@ -2301,7 +2322,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 engine.into(),
                 &paths,
                 RunOptions {
-                    goal: goal.join(" "),
+                    goal,
                     workspace,
                     model: cli.model,
                     review,
