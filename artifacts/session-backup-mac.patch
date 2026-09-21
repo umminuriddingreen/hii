@@ -1,0 +1,24 @@
+--- a/cli/src/main.rs
++++ b/cli/src/main.rs
+@@ -1,2 +1,3 @@
+ // SPDX-License-Identifier: LicenseRef-BSL-1.1
+ mod account;
++mod session_backup;
+@@ -163,1 +164,6 @@
+ enum Commands {
++    #[command(about = "Back up and restore local Codex, Claude and Pi session logs")]
++    SessionBackup {
++        #[command(subcommand)]
++        action: session_backup::SessionBackupCommand,
++    },
+@@ -1823,1 +1829,5 @@
+     match cli.command {
++        Some(Commands::SessionBackup { action }) => {
++            session_backup::execute(action)?;
++            Ok(ExitCode::SUCCESS)
++        }
+--- a/cli/src/route.rs
++++ b/cli/src/route.rs
+@@ -141,1 +141,2 @@
+ pub const ROUTES: &[Route] = &[
++    native("session-backup", Extended, Infra, "back up and restore provider session logs"),

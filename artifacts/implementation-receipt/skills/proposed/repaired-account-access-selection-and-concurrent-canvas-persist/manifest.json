@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "kind": "hii.skill-manifest",
+  "id": "repaired-account-access-selection-and-concurrent-canvas-persist",
+  "name": "Repaired Account Access Selection And Concurrent Canvas Persist",
+  "description": "Repaired account access selection and concurrent canvas persistence; live Mac has local Ummi identity but no registered account device link",
+  "status": "draft",
+  "sourceReceiptIds": [
+    "f8f1b91e-13b4-4821-b75d-0170ccf0e2d3"
+  ],
+  "observations": 1,
+  "permissions": [],
+  "sideEffects": [
+    "Local source and build artifacts only; no account credential copied; no canvas uploaded; no web deployment or Mac source replacement; diagnostic wrong account-status command briefly started a Mac runner then both owned processes were stopped"
+  ],
+  "verification": [
+    "34 focused frontend tests passed; CLI account 3 passed; desktop account 4 passed; typecheck passed; desktop export and Windows build passed; web export blocked by next/og Invalid URL"
+  ],
+  "commands": [],
+  "capabilities": [],
+  "createdAt": "2026-09-05T18:57:48.051Z",
+  "updatedAt": "2026-09-05T18:57:48.051Z"
+}
