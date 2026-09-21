@@ -24,6 +24,7 @@ use crossterm::event::{
 };
 use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+use unicode_width::UnicodeWidthChar;
 
 /// Local result alias: keyboard I/O surfaces plain string errors, matching the
 /// rest of the crate.
@@ -153,25 +154,16 @@ impl LiveInput {
     }
 
     pub fn write_stream(&mut self, delta: &str) -> Result<()> {
-        if !delta.is_empty() {
-            self.has_committed_output = true;
-        }
         let mut out = io::stdout();
-        for ch in delta.chars() {
-            if ch == '\n' {
-                write!(out, "\r\n\x1b[L")
-                    .map_err(|e| format!("failed to advance model stream: {e}"))?;
-                self.stream_column = 0;
-                continue;
-            }
-            if self.stream_column >= self.terminal_width {
-                write!(out, "\r\n\x1b[L")
-                    .map_err(|e| format!("failed to wrap model stream: {e}"))?;
-                self.stream_column = 0;
-            }
-            write!(out, "{ch}").map_err(|e| format!("failed to write model stream: {e}"))?;
-            self.stream_column += 1;
-        }
+        write_stream_delta(
+            &mut out,
+            delta,
+            &mut self.stream_column,
+            self.terminal_width,
+            !self.has_committed_output,
+        )
+        .map_err(|e| format!("failed to write model stream: {e}"))?;
+        self.has_committed_output |= !delta.is_empty();
         out.flush()
             .map_err(|e| format!("failed to flush model stream: {e}"))
     }
@@ -179,6 +171,12 @@ impl LiveInput {
     /// Replace the single transient activity row above the live composer.
     /// Keeping this to one row lets the final response erase it cleanly.
     pub fn replace_stream_line(&mut self, line: &str) -> Result<()> {
+        // Once reply bytes are durable, this row is no longer transient.
+        // Repainting activity here would erase the last response line when a
+        // JSON final action continues after its `summary` field.
+        if self.has_committed_output {
+            return Ok(());
+        }
         let mut out = io::stdout();
         write!(out, "\r\x1b[2K{line}")
             .map_err(|e| format!("failed to update model activity: {e}"))?;
@@ -232,6 +230,67 @@ impl LiveInput {
         let _ = out.flush();
         self.stream_active = false;
     }
+}
+
+/// Write model text without ever touching the terminal's final column.
+///
+/// The final physical column is reserved because printing into it triggers an
+/// implicit terminal wrap. The live composer uses relative cursor movement;
+/// one implicit wrap is enough to make later status updates overwrite reply
+/// text. Model-provided control bytes are rendered harmlessly, and display
+/// width (rather than UTF-8 bytes or scalar count) keeps wide characters from
+/// producing the same desynchronization.
+fn write_stream_delta(
+    out: &mut impl Write,
+    delta: &str,
+    stream_column: &mut usize,
+    terminal_width: usize,
+    clear_transient: bool,
+) -> io::Result<()> {
+    if delta.is_empty() {
+        return Ok(());
+    }
+    if clear_transient {
+        write!(out, "\r\x1b[2K")?;
+        *stream_column = 0;
+    }
+    let usable_width = terminal_width.saturating_sub(1).max(1);
+    let advance = |out: &mut dyn Write, column: &mut usize| -> io::Result<()> {
+        write!(out, "\r\n\x1b[L")?;
+        *column = 0;
+        Ok(())
+    };
+    for character in delta.chars() {
+        if character == '\n' {
+            advance(out, stream_column)?;
+            continue;
+        }
+        if character == '\r' {
+            continue;
+        }
+        if character == '\t' {
+            let spaces = 4 - (*stream_column % 4);
+            for _ in 0..spaces {
+                if *stream_column + 1 > usable_width {
+                    advance(out, stream_column)?;
+                }
+                write!(out, " ")?;
+                *stream_column += 1;
+            }
+            continue;
+        }
+        let (safe, width) = if character.is_control() {
+            ('�', 1)
+        } else {
+            (character, UnicodeWidthChar::width(character).unwrap_or(0))
+        };
+        if width > 0 && *stream_column > 0 && *stream_column + width > usable_width {
+            advance(out, stream_column)?;
+        }
+        write!(out, "{safe}")?;
+        *stream_column += width;
+    }
+    Ok(())
 }
 
 fn finish_stream_sequence(has_committed_output: bool) -> &'static str {
@@ -825,6 +884,27 @@ mod tests {
         );
         assert!(!finish_stream_sequence(true).contains("\x1b[2A"));
         assert_ne!(finish_stream_sequence(true), finish_stream_sequence(false));
+    }
+
+    #[test]
+    fn first_stream_delta_clears_activity_and_reserves_the_last_column() {
+        let mut out = Vec::new();
+        let mut column = 0;
+        write_stream_delta(&mut out, "abcde", &mut column, 5, true).unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), "\r\x1b[2Kabcd\r\n\x1b[Le");
+        assert_eq!(column, 1);
+    }
+
+    #[test]
+    fn streamed_output_counts_wide_text_and_never_executes_control_bytes() {
+        let mut out = Vec::new();
+        let mut column = 0;
+        write_stream_delta(&mut out, "ab界c\x1b[2J", &mut column, 5, false).unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "ab界\r\n\x1b[Lc�[2\r\n\x1b[LJ"
+        );
+        assert_eq!(column, 1);
     }
 
     fn key(code: KeyCode) -> KeyEvent {

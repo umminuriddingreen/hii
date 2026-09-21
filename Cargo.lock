@@ -2419,6 +2419,7 @@ dependencies = [
  "time",
  "tokio",
  "tower",
+ "unicode-width",
  "ureq",
  "url",
  "uuid 1.24.0",
