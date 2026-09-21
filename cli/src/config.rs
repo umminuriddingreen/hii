@@ -11,7 +11,7 @@ pub const DEFAULT_REVIEW_MODEL: &str = "qwen3.6:35b-mlx";
 /// sharing one string that is only valid on one runtime.
 pub const DEFAULT_NATIVE_MODEL: &str = "mlx-community/Qwen3.8-27B-4bit";
 pub const DEFAULT_NATIVE_REVIEW_MODEL: &str = "mlx-community/Qwen3.8-27B-4bit";
-pub const DEFAULT_LLAMA_CPP_MODEL: &str = "qwen3.6-35b-a3b-agent";
+pub const DEFAULT_LLAMA_CPP_MODEL: &str = "qwen3.8-27b-agent";
 pub const OX_ALPHA_WEB_MODEL: &str = "z-ai/glm-5.3-flash";
 pub const OX_ALPHA_WEB_URL: &str = "https://oxalpha.com";
 /// Default tool-step ceiling. `--max-steps 0` still means unlimited, but leaving
@@ -54,23 +54,31 @@ impl ModelProvider {
     /// `rapid-mlx`, etc.); otherwise infer from standard ports and fall back to
     /// Ollama compatibility.
     pub fn discover(url: &str) -> Self {
-        match env::var("HII_MODEL_PROVIDER")
+        if let Some(provider) = env::var("HII_MODEL_PROVIDER")
             .ok()
             .and_then(|value| Self::from_env_value(value.trim()))
         {
-            Some(provider) => provider,
-            None if inference_config().is_some_and(|config| {
-                config.endpoint.trim_end_matches('/') == url.trim_end_matches('/')
-            }) =>
-            {
-                ModelProvider::Native
+            return provider;
+        }
+        if let Some(config) = inference_config()
+            .filter(|config| config.endpoint.trim_end_matches('/') == url.trim_end_matches('/'))
+        {
+            if let Some(provider) = config.provider.as_deref().and_then(Self::from_env_value) {
+                return provider;
             }
-            None if env::var("HII_RAPID_MLX_URL").is_ok() => ModelProvider::RapidMlx,
-            _ if url.contains("oxalpha.com") => ModelProvider::OxAlphaWeb,
-            _ if url.contains(":11435") => ModelProvider::Native,
-            _ if url.contains(":6127") => ModelProvider::LlamaCpp,
-            _ if url.contains(":1234") => ModelProvider::LmStudio,
-            _ => ModelProvider::Ollama,
+        }
+        if env::var("HII_RAPID_MLX_URL").is_ok() {
+            ModelProvider::RapidMlx
+        } else if url.contains("oxalpha.com") {
+            ModelProvider::OxAlphaWeb
+        } else if url.contains(":11435") {
+            ModelProvider::Native
+        } else if url.contains(":6127") {
+            ModelProvider::LlamaCpp
+        } else if url.contains(":1234") {
+            ModelProvider::LmStudio
+        } else {
+            ModelProvider::Ollama
         }
     }
 
@@ -181,7 +189,13 @@ impl AppPaths {
                 } else {
                     inference_config()
                         .map(|config| config.endpoint)
-                        .unwrap_or_else(|| "http://127.0.0.1:11435".to_string())
+                        .unwrap_or_else(|| {
+                            if cfg!(target_os = "windows") {
+                                "http://127.0.0.1:6127".to_string()
+                            } else {
+                                "http://127.0.0.1:11435".to_string()
+                            }
+                        })
                 }
             })
             .trim_end_matches('/')
@@ -192,7 +206,13 @@ impl AppPaths {
         let path = self.runtime.join("config/model.json");
         if !path.exists() {
             return Ok(inference_config().map(|config| UserModelPreference {
-                provider: Some("native".into()),
+                provider: config.provider.or_else(|| {
+                    Some(if cfg!(target_os = "windows") {
+                        "llama.cpp".into()
+                    } else {
+                        "native".into()
+                    })
+                }),
                 model: config.model,
             }));
         }
@@ -228,6 +248,7 @@ impl AppPaths {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InferenceConfig {
+    pub provider: Option<String>,
     pub endpoint: String,
     pub model: String,
     pub api_key_file: Option<PathBuf>,

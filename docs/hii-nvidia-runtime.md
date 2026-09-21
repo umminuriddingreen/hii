@@ -17,8 +17,11 @@ hii runner model bench --suite quick --baseline /path/to/previous-suite.json
 ```
 
 Native discovery supports `llama-server` and `llama serve`. Existing GGUF files
-are referenced in place through `HII_MODEL_CONFIG` (Windows default:
-`C:\models\models.ini`). WSL uses the default installed distribution, overridable
+are referenced in place through `HII_MODEL_CONFIG`. HII's canonical Windows
+registry is `~/.hii/models/windows/models.ini`; an existing legacy
+`C:\models\models.ini` remains a read-compatible fallback. The registry is
+metadata, not a second copy of the weights, so LM Studio or another approved
+model store can remain the physical owner. WSL uses the default installed distribution, overridable
 with `HII_WSL_DISTRO`; `HII_WSL_LLAMA_SERVER_BIN` selects a prepared Linux binary.
 vLLM requires an already installed private environment and compatible Linux model
 directory via `HII_WSL_VLLM_BIN` and `HII_VLLM_MODEL_PATH`. No command silently
@@ -33,6 +36,15 @@ including Linux boot ID and start ticks for WSL. No distro-wide shutdown is used
 Explicit environment settings take precedence. Credentials remain in their
 existing file and are sent only to the selected endpoint. Saved connection
 credentials are never reused for a different endpoint override.
+
+Windows HII-owned inference uses `http://127.0.0.1:6127`; Mac MLX uses
+`http://127.0.0.1:11435`. A stale managed Windows NVIDIA preference on `11435`
+is migrated to `6127` when the runtime is next inspected or started. HII starts
+the selected Windows backend lazily on the first model request, adopts a healthy
+existing endpoint without restarting it, and records the effective endpoint,
+backend, model, profile, and registry path in `~/.hii/config/inference.json`.
+This request-time recovery is the normal lifecycle; a separate always-on model
+scheduled task is not required.
 
 ## Adaptation and evidence
 

@@ -57,9 +57,9 @@
     {
       "memoryGiBMax": null,
       "name": "windows-32gb+",
-      "localClass": "35B MoE / 3B active GGUF",
-      "model": "qwen3.6-35b-a3b-agent",
-      "quantization": "IQ3_S",
+      "localClass": "27B dense GGUF",
+      "model": "qwen3.8-27b-agent",
+      "quantization": "Q3_K_XL",
       "backend": "llama.cpp",
       "platforms": ["win32"],
       "architectures": ["x64"]
@@ -133,6 +133,21 @@
       "architectures": ["arm64"]
     },
     {
+      "model": "mlx-community/Qwen3.8-27B-4bit",
+      "aliases": ["dense", "27b", "qwen3.8"],
+      "role": "Dense Mac local",
+      "bestFor": "Deliberate reasoning and vision when dense-model quality matters more than latency",
+      "speed": "moderate",
+      "quality": "deliberate",
+      "minimumMemoryGiB": 32,
+      "estimatedDiskGiB": 16.1,
+      "capabilities": ["chat", "tools", "vision"],
+      "backend": "mlx",
+      "source": "huggingface",
+      "platforms": ["darwin"],
+      "architectures": ["arm64"]
+    },
+    {
       "model": "mlx-community/Qwen3.5-35B-A3B-4bit",
       "aliases": ["recommended", "default", "quality", "deliberate", "strongest", "35b", "a3b"],
       "role": "Measured local default",
@@ -164,9 +179,9 @@
     },
     {
       "model": "qwen3.6-35b-a3b-agent",
-      "aliases": ["recommended", "default", "35b", "a3b"],
-      "role": "Measured Windows default",
-      "bestFor": "Everyday assistance, tool use, and high-throughput local reasoning",
+      "aliases": ["35b", "a3b"],
+      "role": "Optional Windows candidate",
+      "bestFor": "Explicit benchmark comparisons when this model is installed",
       "speed": "fast",
       "quality": "highest utility",
       "minimumMemoryGiB": 32,
@@ -179,9 +194,9 @@
     },
     {
       "model": "qwen3.8-27b-agent",
-      "aliases": ["deliberate", "quality", "27b"],
-      "role": "Deliberate Windows local",
-      "bestFor": "Dense reasoning when answer quality matters more than latency",
+      "aliases": ["recommended", "default", "deliberate", "quality", "27b"],
+      "role": "Current Windows default",
+      "bestFor": "Everyday assistance, tool use, and dense local reasoning",
       "speed": "moderate",
       "quality": "deliberate",
       "minimumMemoryGiB": 32,
@@ -245,7 +260,7 @@
     "backends": ["native-cuda", "wsl-cuda", "wsl-vllm"],
     "profiles": {
       "fast": { "modelAliases": ["qwen3.5-9b-balanced"], "contextTokens": 16384, "batchSize": 1024, "microBatchSize": 256, "kvCacheType": "q8_0" },
-      "deep": { "modelAliases": ["qwen3.6-35b-a3b-agent"], "contextTokens": 32768, "batchSize": 1024, "microBatchSize": 256, "kvCacheType": "q4_0" },
+      "deep": { "modelAliases": ["qwen3.8-27b-agent"], "contextTokens": 16384, "batchSize": 1024, "microBatchSize": 256, "kvCacheType": "q4_0" },
       "shared-gpu": { "modelAliases": ["qwen3.5-9b-balanced"], "contextTokens": 8192, "batchSize": 512, "microBatchSize": 128, "kvCacheType": "q4_0" }
     },
     "notes": "Candidate profiles, not measured performance claims. GPU capacity is separate from taskTiers. Adaptive selection happens only at explicit start boundaries; active tasks never switch models. Existing external rails are observation-only."
@@ -257,7 +272,7 @@
   },
   "hostedTransmission": "explicit-only",
   "metadata": {
-    "updated": "2026-09-02T04:28:00Z",
-    "reason": "Keep HII as the automatic local default and add Ox Alpha website access as an explicit external model choice that uses HII's bounded tool protocol."
+    "updated": "2026-09-21T05:55:00Z",
+    "reason": "Align Windows defaults and adaptive deep routing with the installed HII-owned Qwen3.8 27B model while retaining uninstalled candidates as explicit catalog choices."
   }
 }

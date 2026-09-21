@@ -57,8 +57,13 @@ const MODEL_HOME = path.join(RUNTIME, "models");
 const HF_CACHE = path.join(MODEL_HOME, "huggingface", "hub");
 const MODEL_PROFILES = path.join(ROOT, "config", "native-model-profiles.json");
 const MODEL_PREFERENCE = path.join(RUNTIME, "config", "model.json");
+const WINDOWS_MANAGED_MODEL_PRESETS = path.join(RUNTIME, "models", "windows", "models.ini");
+const WINDOWS_LEGACY_MODEL_PRESETS = path.win32.join(process.env.SystemDrive || "C:", "models", "models.ini");
 const WINDOWS_MODEL_PRESETS = process.env.HII_WINDOWS_MODEL_PRESETS
-  || path.win32.join(process.env.SystemDrive || "C:", "models", "models.ini");
+  || process.env.HII_MODEL_CONFIG
+  || (fs.existsSync(WINDOWS_MANAGED_MODEL_PRESETS) ? WINDOWS_MANAGED_MODEL_PRESETS
+    : fs.existsSync(WINDOWS_LEGACY_MODEL_PRESETS) ? WINDOWS_LEGACY_MODEL_PRESETS
+      : WINDOWS_MANAGED_MODEL_PRESETS);
 const CONTEXT_DB = path.join(RUNTIME, "hii.db");
 const OWNED_PATTERNS = [
   `${ROOT}/aii/daemon/hiid.mjs`,

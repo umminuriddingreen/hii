@@ -26,17 +26,31 @@ function settings(options = {}) {
   const env = options.env || process.env;
   const runtimeRoot = options.runtimeRoot || env.HII_RUNTIME_HOME || path.join(os.homedir(), ".hii");
   const root = options.root || ROOT;
+  const platform = options.platform || process.platform;
   const preference = readJson(path.join(runtimeRoot, "config", "inference.json"), {});
   const manifest = options.manifest || readJson(path.join(root, "config/native-model-profiles.json"), {});
-  const endpoint = String(options.endpoint || env.HII_MODEL_URL || preference.endpoint || "http://127.0.0.1:11435").replace(/\/$/, "").replace(/\/v1$/, "");
+  const defaultEndpoint = platform === "win32" ? "http://127.0.0.1:6127" : "http://127.0.0.1:11435";
+  // Early NVIDIA builds persisted the Mac MLX port on Windows. Treat that
+  // exact managed combination as migration debt; explicit CLI/env endpoints
+  // still win and can intentionally select any loopback port.
+  const savedEndpoint = platform === "win32"
+    && preference.endpoint === "http://127.0.0.1:11435"
+    && ["native-cuda", "wsl-cuda", "wsl-vllm"].includes(preference.backend)
+    ? defaultEndpoint
+    : preference.endpoint;
+  const endpoint = String(options.endpoint || env.HII_MODEL_URL || savedEndpoint || defaultEndpoint).replace(/\/$/, "").replace(/\/v1$/, "");
   const url = new URL(endpoint);
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== "/") throw new Error("Model endpoint must be an HTTP(S) origin without credentials, query, or path");
-  return { ...options, root, env, runtimeRoot, manifest, endpoint,
-    platform: options.platform || process.platform,
+  const managedModelsConfig = path.join(runtimeRoot, "models", platform === "win32" ? "windows" : platform, "models.ini");
+  const legacyModelsConfig = platform === "win32" ? "C:\\models\\models.ini" : path.join(runtimeRoot, "models", "models.ini");
+  const modelsConfig = options.modelsConfig || env.HII_MODEL_CONFIG || preference.modelsConfig
+    || (fs.existsSync(managedModelsConfig) ? managedModelsConfig : fs.existsSync(legacyModelsConfig) ? legacyModelsConfig : managedModelsConfig);
+  return { ...options, root, env, runtimeRoot, manifest, endpoint, platform,
     backend: options.backend || env.HII_NVIDIA_BACKEND || (manifest.nvidia?.backends.includes(preference.backend) ? preference.backend : null) || manifest.nvidia?.defaultBackend || "native-cuda",
     profile: options.profile || env.HII_NVIDIA_PROFILE || preference.profile || "adaptive",
+    model: options.model || env.HII_MODEL || preference.model || null,
     apiKeyFile: options.apiKeyFile || env.HII_MODEL_API_KEY_FILE || preference.apiKeyFile || null,
-    modelsConfig: options.modelsConfig || env.HII_MODEL_CONFIG || (process.platform === "win32" ? "C:\\models\\models.ini" : path.join(runtimeRoot, "models", "models.ini")),
+    modelsConfig,
     run: options.run || runDefault, fetch: options.fetch || globalThis.fetch,
     stateFile: path.join(runtimeRoot, "daemon", "nvidia-runtime.json") };
 }
@@ -187,7 +201,8 @@ function savePreference(s, value) {
   const previous = readJson(file, {});
   const contextTokens = value.contextTokens || (previous.endpoint === s.endpoint && previous.model === value.model ? previous.contextTokens : null) || null;
   if (contextTokens !== null && (!Number.isInteger(contextTokens) || contextTokens < 512 || contextTokens > 262144)) throw new Error("Context must be between 512 and 262144 tokens");
-  const next = JSON.stringify({ ...previous, schemaVersion: 1, provider: "native", endpoint: s.endpoint, model: value.model, apiKeyFile: s.apiKeyFile, contextTokens, backend: value.backend, profile: s.profile, effectiveProfile: value.profile || null }, null, 2);
+  const provider = s.platform === "win32" ? "llama.cpp" : "native";
+  const next = JSON.stringify({ ...previous, schemaVersion: 1, provider, endpoint: s.endpoint, model: value.model, apiKeyFile: s.apiKeyFile, modelsConfig: s.modelsConfig, contextTokens, backend: value.backend, profile: s.profile, effectiveProfile: value.profile || null }, null, 2);
   if (fs.existsSync(file) && fs.readFileSync(file, "utf8") === next) return;
   const stamp = `${Date.now()}.${process.pid}`;
   const temporary = `${file}.${stamp}.tmp`;

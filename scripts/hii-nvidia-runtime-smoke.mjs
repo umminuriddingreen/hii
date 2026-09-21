@@ -9,11 +9,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "config/native-model-profiles.json"), "utf8"));
 const config = manifest.nvidia;
 const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "hii-nvidia-test-"));
+const managedModelsConfig = path.join(runtimeRoot, "models", "windows", "models.ini");
+fs.mkdirSync(path.dirname(managedModelsConfig), { recursive: true });
+fs.writeFileSync(managedModelsConfig, "version = 1\n");
 const gpus = parseGpuCsv("0, GPU-test, RTX test, 591.01, 16384, 14000, 2384, 0\n1, GPU-second, RTX second, 591.01, 24576, 24000, 576, N/A");
-const models = [ { id: "qwen3.5-9b-balanced", path: "C:\\Models with spaces\\9b.gguf", installed: true, sizeBytes: 6 * 1024 ** 3, mmproj: "C:\\Models with spaces\\vision.gguf" }, { id: "qwen3.6-35b-a3b-agent", path: "C:\\models\\35b.gguf", installed: true, sizeBytes: 11 * 1024 ** 3 } ];
+const models = [ { id: "qwen3.5-9b-balanced", path: "C:\\Models with spaces\\9b.gguf", installed: true, sizeBytes: 6 * 1024 ** 3, mmproj: "C:\\Models with spaces\\vision.gguf" }, { id: "qwen3.8-27b-agent", path: "C:\\models\\27b.gguf", installed: true, sizeBytes: 13 * 1024 ** 3 } ];
 let passed = 0;
 async function test(name, fn) { await fn(); passed++; console.log(`ok ${passed} - ${name}`); }
-const base = { root, runtimeRoot, manifest, env: {}, platform: "win32", endpoint: "http://127.0.0.1:11435" };
+const base = { root, runtimeRoot, manifest, env: {}, platform: "win32", endpoint: "http://127.0.0.1:6127" };
 const unavailable = async () => { throw new Error("offline"); };
 const selection = selectNvidiaProfile({ config, gpus, models });
 try {
@@ -44,7 +47,8 @@ try {
   await test("preference updates atomically preserve a rollback snapshot", async () => {
     await nvidiaStart({ ...base, contextTokens: 16384, fetch: async () => new Response(JSON.stringify({ data: [{ id: "existing-model" }] })), run: () => ({ status: 1 }) });
     const snapshots = fs.readdirSync(path.join(runtimeRoot, "config")).filter((name) => name.endsWith(".previous"));
-    assert.equal(snapshots.length, 1); assert.equal(JSON.parse(fs.readFileSync(path.join(runtimeRoot, "config", snapshots[0]))).contextTokens, null); assert.equal(JSON.parse(fs.readFileSync(path.join(runtimeRoot, "config/inference.json"))).contextTokens, 16384);
+    const preference = JSON.parse(fs.readFileSync(path.join(runtimeRoot, "config/inference.json")));
+    assert.equal(snapshots.length, 1); assert.equal(JSON.parse(fs.readFileSync(path.join(runtimeRoot, "config", snapshots[0]))).contextTokens, null); assert.equal(preference.contextTokens, 16384); assert.equal(preference.endpoint, "http://127.0.0.1:6127"); assert.equal(preference.provider, "llama.cpp"); assert.equal(preference.modelsConfig, managedModelsConfig);
   });
   await test("stop does not signal external runtime", async () => assert.equal((await nvidiaStop(base)).stopped, false));
   await test("PID reuse cannot terminate a different Windows process", async () => {
@@ -86,7 +90,7 @@ try {
   });
   await test("pressure advice uses observed memory without changing route", () => { const advice = nvidiaResourceAdvice([{ ...gpus[0], freeMiB: 500 }]); assert.equal(advice.state, "memory-pressure"); assert.equal(advice.automaticAction, false); assert.equal(nvidiaResourceAdvice([]).state, "unknown"); });
   const taskBase = { ...base, backend: "native-cuda", profile: "adaptive", ownerPid: 4242, run: () => ({ status: 0, stdout: JSON.stringify({ id: 4242, started: "process-generation-one", executable: "hii.exe" }) }), inventory: { gpus, models, backends: { "native-cuda": { available: true } } } };
-  const active = { state: "ready", ownership: "hii", pid: 1111, contextTokens: 32768, selection: { profile: "deep", model: { id: models[1].id }, gpu: 0 } };
+  const active = { state: "ready", ownership: "hii", pid: 1111, contextTokens: 16384, selection: { profile: "deep", model: { id: models[1].id }, gpu: 0 } };
   await test("task lease serializes owned work and requires matching release", async () => {
     const options = { ...taskBase, taskId: "task-one", getStatus: async () => active };
     const first = await nvidiaPrepareTask(options); assert.equal(first.ok, true); assert.equal(first.changed, false); assert.match(first.reason, /evidence/);

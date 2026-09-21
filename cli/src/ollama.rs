@@ -363,7 +363,7 @@ impl Ollama {
         if pinned_model_url() {
             return Err(self.unreachable_error());
         }
-        if self.provider == ModelProvider::LlamaCpp && start_windows_llama_runtime() {
+        if windows_managed_provider(self.provider) && start_windows_llama_runtime(&self.base_url) {
             return Ok(self);
         }
         if let Some(native) = start_native_runner() {
@@ -1271,7 +1271,12 @@ fn start_native_runner() -> Option<Ollama> {
 /// Start the HII-owned Windows llama.cpp service from the same platform-aware
 /// runtime manager used by `hii model start`. The manager only uses existing
 /// preset-backed GGUF files and binds its owned service to loopback.
-fn start_windows_llama_runtime() -> bool {
+fn windows_managed_provider(provider: ModelProvider) -> bool {
+    cfg!(target_os = "windows")
+        && matches!(provider, ModelProvider::LlamaCpp | ModelProvider::Native)
+}
+
+fn start_windows_llama_runtime(endpoint: &str) -> bool {
     if !cfg!(target_os = "windows") {
         return false;
     }
@@ -1284,7 +1289,7 @@ fn start_windows_llama_runtime() -> bool {
     }
     let status = std::process::Command::new("node")
         .arg(script)
-        .args(["model-runtime", "start"])
+        .args(["model-runtime", "start", "--endpoint", endpoint])
         .current_dir(&paths.repo)
         .env("HII_ROOT", &paths.repo)
         .status();
@@ -1293,7 +1298,7 @@ fn start_windows_llama_runtime() -> bool {
     }
     let started = std::time::Instant::now();
     while started.elapsed() < Duration::from_secs(30) {
-        if endpoint_ready("http://127.0.0.1:6127") {
+        if endpoint_ready(endpoint) {
             return true;
         }
         std::thread::sleep(Duration::from_millis(250));
@@ -1591,7 +1596,7 @@ mod tests {
     use super::{
         acquired_native_model, apply_thinking, load_model_api_key, openai_messages,
         openai_reasoning_delta, openai_reported_durations, ox_alpha_browser_prompt,
-        provider_messages, ChatUsage, Message, Ollama, RepetitionGuard,
+        provider_messages, windows_managed_provider, ChatUsage, Message, Ollama, RepetitionGuard,
     };
     use crate::attachments::ImagePayload;
     use crate::config::ModelProvider;
@@ -1908,8 +1913,26 @@ mod tests {
     #[test]
     fn automatic_runtime_is_hii_native() {
         let client = Ollama::for_mode("auto");
-        assert_eq!(client.base_url(), "http://127.0.0.1:11435");
-        assert_eq!(client.provider(), ModelProvider::Native);
+        if cfg!(target_os = "windows") {
+            assert_eq!(client.base_url(), "http://127.0.0.1:6127");
+            assert_eq!(client.provider(), ModelProvider::LlamaCpp);
+        } else {
+            assert_eq!(client.base_url(), "http://127.0.0.1:11435");
+            assert_eq!(client.provider(), ModelProvider::Native);
+        }
+    }
+
+    #[test]
+    fn windows_runtime_recovery_accepts_native_and_llamacpp_labels() {
+        assert_eq!(
+            windows_managed_provider(ModelProvider::Native),
+            cfg!(target_os = "windows")
+        );
+        assert_eq!(
+            windows_managed_provider(ModelProvider::LlamaCpp),
+            cfg!(target_os = "windows")
+        );
+        assert!(!windows_managed_provider(ModelProvider::Ollama));
     }
 
     #[test]
