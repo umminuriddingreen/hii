@@ -914,7 +914,22 @@ pub fn recovery(message: &str) {
 
 pub fn reply(message: &str, activity: Option<&str>) {
     let _ = activity;
-    println!("{message}");
+    println!("{}", terminal_safe_text(message));
+}
+
+/// Keep model text literal: ANSI/OSC and other control bytes must never become
+/// terminal commands. Newlines and tabs remain available for readable prose,
+/// tables, and code blocks.
+fn terminal_safe_text(message: &str) -> String {
+    message
+        .chars()
+        .filter_map(|character| match character {
+            '\n' | '\t' => Some(character),
+            '\r' => None,
+            character if character.is_control() => Some('�'),
+            character => Some(character),
+        })
+        .collect()
 }
 
 pub fn system(message: &str) {
@@ -942,10 +957,18 @@ mod tests {
     use super::{
         active_run_frame, active_run_progress_frame, clear_activity_sequence, command_matches,
         command_menu, composer_window, model_activity, overview, prompt_frame, short_path,
-        terminal_width, theme_choices, tool_result_frame, tool_start_frame, user_turn_frame,
-        welcome_frame, workspace_state, ActiveRunView, Theme,
+        terminal_safe_text, terminal_width, theme_choices, tool_result_frame, tool_start_frame,
+        user_turn_frame, welcome_frame, workspace_state, ActiveRunView, Theme,
     };
     use std::path::Path;
+
+    #[test]
+    fn final_replies_preserve_layout_without_executing_terminal_controls() {
+        assert_eq!(
+            terminal_safe_text("Title\n\n- item\n\tcode\x1b[2J"),
+            "Title\n\n- item\n\tcode�[2J"
+        );
+    }
 
     #[test]
     fn theme_choices_offer_every_theme_and_mark_the_active_one() {

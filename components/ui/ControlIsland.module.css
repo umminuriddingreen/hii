@@ -1,0 +1,47 @@
+.island {
+  display: flex;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 4px 18px var(--shadow);
+  -webkit-backdrop-filter: blur(22px) saturate(1.2);
+  backdrop-filter: blur(22px) saturate(1.2);
+}
+
+.compact { padding: 4px; border-radius: 14px; }
+
+.button {
+  position: relative;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.buttonCompact { width: 34px; height: 34px; border-radius: 9px; }
+.button:hover { background: var(--hover); color: var(--ink); }
+.button:focus-visible { outline: 2px solid var(--selection); outline-offset: 1px; }
+.button[aria-pressed='true'],
+.button[aria-expanded='true'],
+.button[data-emphasis] { background: var(--ink); color: var(--field); }
+.button:disabled { cursor: default; opacity: .38; }
+
+.divider { width: 1px; height: 24px; margin: 0 3px; background: var(--line); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .button { transition: background-color 120ms ease, color 120ms ease, transform 120ms ease; }
+  .button:active { transform: scale(.94); }
+}

@@ -2743,6 +2743,8 @@ pub(crate) enum ActionRepair {
     Unwrapped,
     /// Contained literal control characters inside JSON strings.
     EscapedControlChars,
+    /// Used an OpenAI-style nested `arguments` object for a flat HII action.
+    FlattenedArguments,
 }
 
 impl ActionRepair {
@@ -2750,6 +2752,7 @@ impl ActionRepair {
         match self {
             Self::Unwrapped => "unwrapped",
             Self::EscapedControlChars => "escaped-control-chars",
+            Self::FlattenedArguments => "flattened-arguments",
         }
     }
 }
@@ -2829,6 +2832,9 @@ pub(crate) fn parse_action_with_repair(
     // lost canvas_*, info_find, info_capture, object_*, and system_* — ten
     // tools the agent advertises, executes, and could not parse a call to.
     if crate::acp::action_tool_names(true).contains(&action_type.as_str()) {
+        if flatten_action_arguments(&mut value, &action_type)? {
+            repair = Some(ActionRepair::FlattenedArguments);
+        }
         crate::acp::validate_action_params(&action_type, &value)?;
         value["type"] = serde_json::Value::String("tool".into());
         value["tool"] = serde_json::Value::String(action_type);
@@ -2840,6 +2846,55 @@ pub(crate) fn parse_action_with_repair(
     }
     let action = serde_json::from_value(value).map_err(|error| error.to_string())?;
     Ok((action, repair))
+}
+
+/// Accept the common OpenAI tool-call spelling
+/// `{"type":"web_fetch","arguments":{"url":"..."}}` at HII's flat action
+/// boundary. This is only a shape repair: keys still have to be declared by
+/// the tool schema, and conflicting flat/nested values are rejected.
+fn flatten_action_arguments(value: &mut Value, tool: &str) -> Result<bool, String> {
+    if !crate::acp::has_declared_input_schema(tool) {
+        return Ok(false);
+    }
+    let schema = crate::acp::input_schema(tool);
+    let declared = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .ok_or_else(|| format!("{tool} has no object input schema"))?;
+    if declared.contains_key("arguments") {
+        return Ok(false);
+    }
+    let Some(arguments) = value.get("arguments") else {
+        return Ok(false);
+    };
+    let arguments = arguments
+        .as_object()
+        .ok_or_else(|| format!("{tool} arguments must be an object"))?
+        .clone();
+    for (key, nested) in &arguments {
+        if !declared.contains_key(key) {
+            return Err(format!("{tool} does not take {key}"));
+        }
+        if let Some(flat) = value.get(key) {
+            if flat != nested {
+                return Err(format!(
+                    "{tool} received conflicting flat and nested values for {key}"
+                ));
+            }
+        }
+    }
+    value
+        .as_object_mut()
+        .expect("action was checked as an object")
+        .remove("arguments");
+    for (key, nested) in arguments {
+        value
+            .as_object_mut()
+            .expect("action was checked as an object")
+            .entry(key)
+            .or_insert(nested);
+    }
+    Ok(true)
 }
 
 pub(crate) fn execute_read_batch(
@@ -3275,6 +3330,24 @@ mod tests {
         )
         .unwrap();
         assert_eq!(escaped, Some(ActionRepair::EscapedControlChars));
+
+        let (action, flattened) = parse_action_with_repair(
+            r#"{"type":"web_fetch","arguments":{"url":"https://example.com"}}"#,
+        )
+        .unwrap();
+        assert_eq!(flattened, Some(ActionRepair::FlattenedArguments));
+        assert!(
+            matches!(action, Action::Tool { tool, url: Some(url), .. } if tool == "web_fetch" && url == "https://example.com")
+        );
+    }
+
+    #[test]
+    fn nested_flat_action_arguments_still_enforce_the_tool_schema() {
+        let error = parse_action(
+            r#"{"type":"web_search","arguments":{"query":"HII","url":"https://example.com"}}"#,
+        )
+        .unwrap_err();
+        assert!(error.contains("web_search does not take url"), "{error}");
     }
 
     #[test]

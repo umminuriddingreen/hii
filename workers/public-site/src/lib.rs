@@ -5,6 +5,8 @@ mod browser_snapshot;
 mod chat;
 mod device;
 mod feed;
+mod mcp;
+mod oauth;
 mod remote;
 mod search;
 mod site_records;
@@ -151,6 +153,21 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
     let path = url.path().to_owned();
     let method = request.method();
     let db = env.d1("IDENTITY")?;
+
+    if oauth::is_oauth_path(&path) {
+        let (action, daily_limit) = if path == "/oauth/register" {
+            ("oauth-register", 1_000)
+        } else {
+            ("oauth", 2_000_000)
+        };
+        if !rate_limit(request, env, &db, action, daily_limit).await? {
+            return secure_no_store(api_error(429, "rate_limited")?);
+        }
+        return secure_no_store(oauth::handle(request, &db).await?);
+    }
+    if path == "/mcp" {
+        return secure_no_store(mcp::handle(request, &db).await?);
+    }
 
     if path.starts_with("/api/") {
         if method == Method::Get && path == "/api/site-osm" {
@@ -363,7 +380,10 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
         return secure(download_ui(request, env, asset).await?);
     }
 
-    let response = env.assets("ASSETS")?.fetch_request(request.clone()?).await?;
+    let response = env
+        .assets("ASSETS")?
+        .fetch_request(request.clone()?)
+        .await?;
     if path == "/site-analysis" || path == "/site-analysis.html" {
         // Asset responses have immutable fetch headers. Copy them before adding
         // route-specific map permissions, preserving status and streaming body.
@@ -687,6 +707,7 @@ pub async fn scheduled(
                 _ => break,
             }
         }
+        let _ = oauth::purge_expired(&db, now).await;
     }
 }
 

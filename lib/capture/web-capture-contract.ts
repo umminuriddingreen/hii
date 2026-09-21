@@ -3,6 +3,7 @@ export const HII_WEB_CAPTURE_KIND = 'hii.web.capture' as const;
 
 export const HII_WEB_CAPTURE_METHODS = [
   'extension-action',
+  'extension-page-index',
   'context-selection',
   'context-page',
   'context-image',
@@ -26,6 +27,8 @@ export interface HiiWebReferenceCapture {
   };
   capture: {
     method: HiiWebCaptureMethod;
+    browserName?: string;
+    browserTabId?: number;
     selectedText?: string;
     note?: string;
     tags: string[];
@@ -140,6 +143,11 @@ export function normalizeWebCapture(
 
   const selectedText = optionalString(capture.selectedText, 'capture.selectedText');
   const note = optionalString(capture.note, 'capture.note');
+  const browserName = optionalString(capture.browserName, 'capture.browserName');
+  const browserTabId = capture.browserTabId;
+  if (browserTabId !== undefined && (typeof browserTabId !== 'number' || !Number.isSafeInteger(browserTabId) || browserTabId < 0)) {
+    invalid('capture.browserTabId must be a non-negative integer.');
+  }
   const content = raw.content === undefined ? undefined : record(raw.content, 'content');
 
   return {
@@ -154,6 +162,8 @@ export function normalizeWebCapture(
     },
     capture: {
       method: capture.method as HiiWebCaptureMethod,
+      ...(browserName === undefined ? {} : { browserName }),
+      ...(browserTabId === undefined ? {} : { browserTabId }),
       ...(selectedText === undefined ? {} : { selectedText }),
       ...(note === undefined ? {} : { note }),
       tags: normalizeTags(capture.tags),

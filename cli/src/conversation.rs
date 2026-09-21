@@ -69,6 +69,10 @@ enum ThinkingMode {
     Raw,
 }
 
+fn streams_readable_reply(mode: ThinkingMode) -> bool {
+    matches!(mode, ThinkingMode::Stream)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ReasoningMode {
     Auto,
@@ -3553,10 +3557,10 @@ impl Conversation {
         let mut live_input = crate::keyboard::LiveInput::enter(self.keymap.clone())?;
         let interactive = io::stdout().is_terminal();
         let raw_activity = matches!(self.thinking_mode, ThinkingMode::Raw);
-        let stream_activity = matches!(
-            self.thinking_mode,
-            ThinkingMode::Conversation | ThinkingMode::Stream
-        );
+        // Conversation is the clean human view: retain the live composer and
+        // transient status, then render the complete reply once. Progressive
+        // bytes remain available explicitly in Stream view.
+        let stream_activity = streams_readable_reply(self.thinking_mode);
         let compact_activity = false;
         let mut content_started = false;
         let mut reasoning_chars = 0usize;
@@ -5126,8 +5130,9 @@ mod tests {
         public_test_sensitive_shell, render_permissions, resumable_messages, session_authority,
         session_flow, session_goal, session_plan_mode, session_title,
         shell_command_is_observation_only, shell_command_is_preview, shell_command_is_read_only,
-        side_context, tool_is_observation, verification_required_message, Conversation,
-        ReasoningMode, REASONING_MODES, THINKING_MODES,
+        side_context, streams_readable_reply, tool_is_observation,
+        verification_required_message, Conversation, ReasoningMode, ThinkingMode, REASONING_MODES,
+        THINKING_MODES,
     };
     use crate::agent::parse_action;
     use crate::contract::{Authority, Decision};
@@ -5148,6 +5153,13 @@ mod tests {
             clean_final_output("Hello, Ummi.\n", false, ""),
             "Hello, Ummi."
         );
+    }
+
+    #[test]
+    fn conversation_view_waits_for_one_clean_final_reply() {
+        assert!(!streams_readable_reply(ThinkingMode::Conversation));
+        assert!(streams_readable_reply(ThinkingMode::Stream));
+        assert!(!streams_readable_reply(ThinkingMode::Raw));
     }
 
     #[test]

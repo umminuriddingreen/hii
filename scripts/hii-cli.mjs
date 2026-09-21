@@ -1385,6 +1385,8 @@ function agentCommandCatalog() {
     { command: "hii loop decide <yes|no>", purpose: "Approve or reject the latest proposed plan." },
     { command: "hii platform --json", purpose: "Report the detected OS, architecture, compatible model format, and default runtime." },
     { command: "hii model recommend", purpose: "Compare HII-curated local models against this machine, installed state, and measured speed." },
+    { command: "hii model field", purpose: "Inventory configured, installed, ready, hosted, and remote model rails without changing them." },
+    { command: "hii model plan", purpose: "Produce a deterministic bounded spin-up plan without starting or stopping a model." },
     { command: "hii model discover", purpose: "Find compatible local runtimes, preset-backed weights, and reachable model endpoints." },
     { command: "hii model search <query>", purpose: "Search Hugging Face for OS-compatible MLX or GGUF model repositories." },
     { command: "hii model install <org/model>", purpose: "Explicitly download and verify weights in HII's private cache." },
@@ -2986,7 +2988,7 @@ function refreshReadmeState() {
 }
 
 function runnerUsage() {
-  console.error("usage: hii model <recommend|discover|search|install|installed|use|status|start|stop|models|bench|logs|remove>");
+  console.error("usage: hii model <field|plan|recommend|discover|search|install|installed|use|status|start|stop|models|bench|logs|remove>");
 }
 
 async function cmdRunner(args) {
@@ -3411,6 +3413,8 @@ usage: hii <command>
   runner start --once claim one whitelisted runner job and exit
   platform [--json]    detect OS, architecture, model format, and runtime
   model [recommend]    compare platform-compatible choices for this machine
+  model field          inventory configured, installed, ready, hosted, and remote model rails
+  model plan           produce a bounded read-only spin-up plan; never changes runtime state
   model discover       find local runtimes, weights, presets, and endpoints
   model search <query> discover compatible MLX or GGUF models
   model install <id>  download and verify a model in HII's private cache

@@ -28,16 +28,17 @@ describe('shared canvas controls', () => {
     return props;
   };
 
-  const openCommands = () => act(() => (container.querySelector('[aria-label="Open information terminal"]') as HTMLButtonElement).click());
+  const openCommands = () => act(() => (container.querySelector('[aria-label="Open HII companion"]') as HTMLButtonElement).click());
 
-  it('starts with one compact control and runs a canvas command', () => {
+  it('starts with compact canvas tools and runs a canvas command', () => {
     const props = renderToolbar();
-    expect(container.querySelectorAll('button')).toHaveLength(1);
+    expect(container.querySelectorAll('[aria-label="Open HII companion"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[aria-label="Note"]')).toHaveLength(1);
     openCommands();
-    expect(container.querySelector('[aria-label="Search HII commands"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Save to HII or search commands"]')).not.toBeNull();
     act(() => [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((button) => button.textContent?.includes('Shape'))!.click());
     expect(props.onToolChange).toHaveBeenCalledWith('shape');
-    expect(container.querySelector('[aria-label="Search HII commands"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Save to HII or search commands"]')).toBeNull();
   });
 
   it('routes desktop capabilities without suggesting unavailable remote control', () => {
@@ -54,16 +55,34 @@ describe('shared canvas controls', () => {
     const startWork = vi.fn();
     renderToolbar({ onStartWork: startWork });
     openCommands();
-    const input = container.querySelector('[aria-label="Search HII commands"]') as HTMLInputElement;
+    const input = container.querySelector('[aria-label="Save to HII or search commands"]') as HTMLInputElement;
     act(() => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
       setter.call(input, 'organize my project research');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    expect(container.textContent).toContain('Start work: organize my project research');
+    expect(container.textContent).toContain('Use as a task');
     act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
     expect(startWork).toHaveBeenCalledWith('organize my project research');
-    expect(container.querySelector('[aria-label="Search HII commands"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Save to HII or search commands"]')).toBeNull();
+  });
+
+  it('saves pasted context locally before offering agent work', () => {
+    const capture = vi.fn();
+    const startWork = vi.fn();
+    renderToolbar({ onCaptureText: capture, onStartWork: startWork });
+    openCommands();
+    const input = container.querySelector('[aria-label="Save to HII or search commands"]') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, 'A useful excerpt from my conversation');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.querySelectorAll<HTMLButtonElement>('[role="option"]')[0]?.textContent).toContain('Save to HII');
+    expect(container.textContent).toContain('Use as a task');
+    act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    expect(capture).toHaveBeenCalledWith('A useful excerpt from my conversation');
+    expect(startWork).not.toHaveBeenCalled();
   });
 
   it('shows selected context and submits free-form work from the same field', () => {
@@ -71,7 +90,7 @@ describe('shared canvas controls', () => {
     renderToolbar({ selectionLabels: ['Facade PDF', 'Section drawing'], onStartWork: startWork });
     openCommands();
     expect(container.querySelector('[aria-label="2 selected canvas objects"]')?.textContent).toContain('Facade PDF');
-    const input = container.querySelector('[aria-label="Search HII commands"]') as HTMLInputElement;
+    const input = container.querySelector('[aria-label="Save to HII or search commands"]') as HTMLInputElement;
     act(() => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
       setter.call(input, 'compare these references');

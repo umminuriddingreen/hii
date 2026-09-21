@@ -1,9 +1,14 @@
-.shell { position: fixed; inset: 0; background: #fff; color: #111; }
+.shell { position: fixed; inset: 0; background: var(--field); color: var(--ink); }
 .surface { position: absolute; inset: 0; }
-.accountControls { position: absolute; top: 14px; left: 16px; z-index: 2147483601; display: flex; gap: 4px; max-width: calc(100vw - 235px); padding: 3px; border: 1px solid #dedede; border-radius: 6px; background: #f6f6f6; }
-.accountControls button { display: flex; align-items: center; gap: 6px; min-width: 32px; min-height: 30px; padding: 4px 8px; border: 0; background: transparent; color: #333; font: 12px/1.3 'Segoe UI', sans-serif; cursor: pointer; }
-.accountControls span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.accountControls button:focus-visible { outline: 2px solid #187c69; }
+.accountControls { position: absolute; z-index: 2147483601; inset: 14px 16px auto 16px; display: flex; align-items: center; gap: 8px; pointer-events: none; }
+.accountControls button { display: grid; width: 36px; height: 36px; place-items: center; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; }
+.accountControls button:first-child { background: var(--surface); box-shadow: 0 3px 14px var(--shadow); backdrop-filter: blur(16px); }
+.accountControls button:last-child { margin-left: auto; background: var(--surface); box-shadow: 0 3px 14px var(--shadow); backdrop-filter: blur(16px); }
+.accountControls button, .boardTitle { pointer-events: auto; }
+.boardTitle { max-width: min(240px, 28vw); overflow: hidden; color: var(--ink); font: 600 14px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; text-overflow: ellipsis; white-space: nowrap; }
+.accountControls button:hover,
+.accountControls button:focus-visible,
+.accountControls button[aria-expanded='true'] { background: var(--ink); color: var(--field); outline: 0; }
 .workspacePanel button:disabled { opacity: .5; cursor: wait; }
 .loading { display: grid; min-height: 100vh; place-items: center; font: 12px/1.4 ui-monospace, Menlo, monospace; }
 .header { position: fixed; z-index: 2147483600; top: 14px; right: 16px; left: 16px; display: flex; align-items: center; justify-content: space-between; pointer-events: none; font: 11px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
@@ -18,31 +23,60 @@
 .panel button:hover,
 .panel button:focus-visible { text-decoration: underline; }
 .header button:hover, .header button:focus-visible { text-decoration: none; opacity: .62; outline: 0; }
-.panel { position: fixed; z-index: 2147483500; top: 64px; right: 18px; width: min(320px, calc(100vw - 36px)); max-height: calc(100dvh - 82px); overflow-y: auto; padding: 16px; border: 1px solid rgba(255,255,255,.78); border-radius: 16px; background: rgba(248,249,249,.74); box-shadow: 0 18px 48px rgba(20,29,35,.13), inset 0 1px rgba(255,255,255,.85); -webkit-backdrop-filter: blur(30px) saturate(1.45); backdrop-filter: blur(30px) saturate(1.45); font: 10px/1.5 ui-monospace, Menlo, monospace; }
-.workspacePanel { position: fixed; z-index: 2147483400; top: 58px; bottom: 12px; left: 12px; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: min(260px, calc(100vw - 24px)); border: 1px solid rgba(255,255,255,.8); border-radius: 16px; background: rgba(246, 246, 246, .78); box-shadow: 0 18px 48px rgba(20,29,35,.13); font: 11px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; backdrop-filter: blur(30px) saturate(1.45); overflow: hidden; }
+.panel { position: fixed; z-index: 2147483500; top: 62px; right: 16px; width: min(300px, calc(100vw - 32px)); max-height: calc(100dvh - 78px); overflow-y: auto; padding: 10px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--ink); box-shadow: 0 18px 48px var(--shadow); -webkit-backdrop-filter: blur(30px) saturate(1.45); backdrop-filter: blur(30px) saturate(1.45); font: 12px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
+.panel > header { display: flex; min-height: 34px; align-items: center; justify-content: space-between; padding: 0 4px 8px; }
+.panel > header strong { font-size: 14px; letter-spacing: -.01em; }
+.brand { display: grid; gap: 1px; }
+.brand small { margin: 0; color: var(--muted); font-size: 10px; font-weight: 450; }
+.companionNote { margin: 0 4px 12px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.panel > header button { display: grid; width: 30px; min-height: 30px; place-items: center; border-radius: 9px; }
+.workspacePanel { position: fixed; z-index: 2147483400; inset: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: 76px 32px 24px; background: var(--gallery); color: var(--ink); font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; overflow: hidden; }
 .workspacePanel > header,
-.workspacePanel > footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 42px; padding: 0 14px; border-bottom: 1px solid #dededb; }
-.workspacePanel > header strong { font-weight: 600; }
+.workspacePanel > footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 48px; padding: 0; border: 0; }
+.workspacePanel > header strong { color: var(--ink); font-size: clamp(28px, 4vw, 44px); font-weight: 650; letter-spacing: -.035em; }
 .workspacePanel kbd,
-.workspacePanel small { color: rgba(17,17,17,.48); font: inherit; }
-.workspacePanel nav { display: grid; align-content: start; overflow: auto; }
-.workspacePanel nav button { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; min-height: 42px; padding: 0 14px; border: 0; border-bottom: 1px solid rgba(17,17,17,.06); background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.workspacePanel small { color: var(--muted); font: inherit; }
+.workspacePanel nav { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); align-content: start; gap: 22px; padding: 28px 0; overflow: auto; }
+.workspacePanel nav button { position: relative; display: grid; grid-template-rows: minmax(120px, 1fr) auto; align-items: end; gap: 4px; min-height: 210px; padding: 148px 16px 16px; overflow: hidden; border: 0; border-radius: 16px; background: linear-gradient(to bottom, var(--gallery-card) 0 66%, var(--gallery-footer) 66% 100%); color: var(--ink); cursor: pointer; text-align: left; }
+.workspacePanel nav button::before { content: ''; position: absolute; inset: 0 0 34% 0; background: radial-gradient(circle at 36% 42%, rgba(0,0,0,.06) 0 2px, transparent 3px); }
 .workspacePanel nav button:hover,
-.workspacePanel nav button:focus-visible,
-.workspacePanel nav button[data-active] { background: #fff; outline: 0; }
-.workspacePanel nav button[data-active] { box-shadow: inset 2px 0 #111; }
-.workspacePanel nav button span,
-.workspacePanel nav button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.workspacePanel > footer { border-top: 1px solid #dededb; border-bottom: 0; }
-.panel dl { display: grid; gap: 7px; margin: 0 0 14px; }
-.panel dl div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; }
+.workspacePanel nav button:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; transform: translateY(-2px); }
+.workspacePanel nav button[data-active] { box-shadow: inset 0 0 0 2px var(--ink); }
+.workspacePanel nav button > span:not(.preview):not(.previewEmpty),
+.workspacePanel nav button > small { position: absolute; z-index: 1; right: 16px; left: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspacePanel nav button > span:not(.preview):not(.previewEmpty) { bottom: 42px; font-size: 15px; font-weight: 650; }
+.workspacePanel nav button > small { bottom: 18px; }
+.preview, .previewEmpty { position: absolute; z-index: 1; inset: 10px 10px 35%; overflow: hidden; border-radius: 9px; }
+.preview { background: #fff; }
+.previewEmpty { display: grid; place-items: center; color: #aaa; font-size: 12px; font-weight: 500; }
+.previewTile { position: absolute; min-width: 3px; min-height: 3px; overflow: hidden; border: 1px solid rgba(0,0,0,.14); border-radius: 2px; background: #ededeb; }
+.previewTile[data-kind='canvas-text'] { border: 0; background: #222; opacity: .65; }
+.previewTile[data-kind='note'] { background: #fff2a8; }
+.previewTile[data-kind='ink'] { border: 0; background: #555; opacity: .5; }
+.previewTile img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.workspacePanel > footer { color: var(--muted); }
+.workspacePanel > p { position: absolute; right: 32px; bottom: 18px; }
+.panel dl { display: grid; gap: 1px; margin: 0 0 8px; overflow: hidden; border-radius: 11px; background: var(--line); }
+.panel dl div { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 10px; padding: 9px 10px; background: var(--surface); }
 .panel dt { opacity: .5; }
 .panel dd { margin: 0; overflow-wrap: anywhere; }
 .panel form,
 .panel label { display: grid; gap: 6px; }
 .panel form { gap: 10px; }
-.panel input { min-height: 36px; padding: 6px 8px; border: 1px solid rgba(25,35,42,.16); border-radius: 8px; background: rgba(255,255,255,.8); font: inherit; }
+.panel input { min-height: 36px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; }
 .panel small { display: block; margin-top: 8px; opacity: .55; }
 .panel ol { padding-left: 18px; }
 .panel p { min-height: 1.5em; }
+.appearance { display: grid; gap: 7px; margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--line); }
+.appearance > span { color: var(--muted); font-size: 11px; }
+.appearance > div { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 2px; border-radius: 10px; background: var(--soft); }
+.appearance button { min-height: 30px; border-radius: 8px; font-size: 11px; text-transform: capitalize; }
+.appearance button[aria-checked='true'] { background: var(--surface); box-shadow: 0 1px 4px var(--shadow); text-decoration: none; }
 .srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+@media (max-width: 700px) {
+  .workspacePanel { padding: 68px 16px 16px; }
+  .workspacePanel nav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .workspacePanel nav button { min-height: 160px; padding: 110px 12px 12px; }
+  .workspacePanel > footer { display: none; }
+  .boardTitle { display: none; }
+}

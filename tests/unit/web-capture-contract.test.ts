@@ -50,6 +50,23 @@ describe('web capture contract', () => {
     expect(capture.capture.note).toBe('Compare this with the brief.');
   });
 
+  it('accepts explicit local browser-library imports with browser provenance', () => {
+    const capture = normalizeWebCapture({
+      ...baseCapture(),
+      capture: {
+        method: 'extension-page-index',
+        browserName: 'Chrome',
+        browserTabId: 42,
+        tags: ['browser-library', 'open-tab']
+      }
+    });
+    expect(capture.capture).toMatchObject({
+      method: 'extension-page-index',
+      browserName: 'Chrome',
+      browserTabId: 42
+    });
+  });
+
   it.each(['chrome://extensions', 'file:///tmp/private.html', 'javascript:alert(1)', 'not a url'])(
     'rejects unsupported source URL %s',
     (url) => {

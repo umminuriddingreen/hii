@@ -163,6 +163,22 @@
       "architectures": ["arm64"]
     },
     {
+      "model": "mlx-community/Qwen3.8-27B-4bit",
+      "logicalModel": "qwen3.8-27b-agent",
+      "aliases": ["qwen3.8-27b-agent", "27b-agent", "qwen3.8-27b", "27b"],
+      "role": "Dense agent model",
+      "bestFor": "Complex tool use, application control, and dense multi-step reasoning",
+      "speed": "moderate",
+      "quality": "deliberate",
+      "minimumMemoryGiB": 32,
+      "estimatedDiskGiB": 16,
+      "capabilities": ["chat", "tools", "vision"],
+      "backend": "mlx",
+      "source": "huggingface",
+      "platforms": ["darwin"],
+      "architectures": ["arm64"]
+    },
+    {
       "model": "qwen3.5-9b-balanced",
       "aliases": ["fast", "balanced", "9b"],
       "role": "Fast Windows local",
@@ -194,14 +210,15 @@
     },
     {
       "model": "qwen3.8-27b-agent",
-      "aliases": ["recommended", "default", "deliberate", "quality", "27b"],
+      "logicalModel": "qwen3.8-27b-agent",
+      "aliases": ["recommended", "default", "deliberate", "quality", "27b-agent", "qwen3.8-27b", "27b"],
       "role": "Current Windows default",
       "bestFor": "Everyday assistance, tool use, and dense local reasoning",
       "speed": "moderate",
       "quality": "deliberate",
       "minimumMemoryGiB": 32,
       "estimatedDiskGiB": 11.2,
-      "capabilities": ["chat", "tools"],
+      "capabilities": ["chat", "tools", "vision"],
       "backend": "llama.cpp",
       "source": "preset",
       "platforms": ["win32"],
@@ -261,6 +278,7 @@
     "profiles": {
       "fast": { "modelAliases": ["qwen3.5-9b-balanced"], "contextTokens": 16384, "batchSize": 1024, "microBatchSize": 256, "kvCacheType": "q8_0" },
       "deep": { "modelAliases": ["qwen3.8-27b-agent"], "contextTokens": 16384, "batchSize": 1024, "microBatchSize": 256, "kvCacheType": "q4_0" },
+      "agent": { "modelAliases": ["qwen3.8-27b-agent"], "contextTokens": 16384, "batchSize": 1024, "microBatchSize": 256, "kvCacheType": "q4_0", "cpuOffload": false },
       "shared-gpu": { "modelAliases": ["qwen3.5-9b-balanced"], "contextTokens": 8192, "batchSize": 512, "microBatchSize": 128, "kvCacheType": "q4_0" }
     },
     "notes": "Candidate profiles, not measured performance claims. GPU capacity is separate from taskTiers. Adaptive selection happens only at explicit start boundaries; active tasks never switch models. Existing external rails are observation-only."

@@ -11,9 +11,9 @@
   width: 12px;
   height: 12px;
   padding: 0;
-  border: 1px solid #1677ff;
+  border: 1px solid var(--selection);
   border-radius: 2px;
-  background: #fff;
+  background: var(--field);
   box-shadow: 0 1px 3px rgb(0 0 0 / 16%);
   pointer-events: auto;
   touch-action: none;
@@ -44,7 +44,7 @@
   bottom: 100%;
   width: 1px;
   height: 14px;
-  background: #1677ff;
+  background: var(--selection);
 }
 
 .lockIndicator {

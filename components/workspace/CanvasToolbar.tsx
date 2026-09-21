@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { Cursor, NoteBlank, Paperclip, PencilSimple, Shapes, Table, TextT } from '@phosphor-icons/react';
+import { ControlButton, ControlDivider, ControlIsland } from '@/components/ui/ControlIsland';
 import { commandShortcutFromEvent, type CommandShortcut } from '@/lib/workspace/command-shortcut';
 import styles from './CanvasToolbar.module.css';
 
@@ -34,6 +36,7 @@ export type CanvasToolbarProps = {
   onOpenSiteViews?: () => void;
   onOpenParameters?: () => void;
   onRequestFeature?: (title: string) => Promise<string>;
+  onCaptureText?: (text: string) => void;
   onStartWork?: (intent: string) => void;
   selectionLabels?: string[];
   workUnavailableReason?: string;
@@ -56,7 +59,7 @@ export function CanvasToolbar({
   activeTool, capabilities = {}, open, disabled = false, onOpenChange, onToolChange,
   onZoomIn, onZoomOut, onFitView, onOpenScenes, onExport, onOpenTerminal,
   onSearch, onOpenActivity, onOpenRemote, onOpenSiteViews, onOpenParameters,
-  onRequestFeature, onStartWork, selectionLabels = [], workUnavailableReason, shortcutLabel = '⌘K', onShortcutChange
+  onRequestFeature, onCaptureText, onStartWork, selectionLabels = [], workUnavailableReason, shortcutLabel = '⌘K', onShortcutChange
 }: CanvasToolbarProps) {
   const [localOpen, setLocalOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -97,8 +100,11 @@ export function CanvasToolbar({
   }, [capabilities.activity, capabilities.export, capabilities.nativeTerminal, capabilities.remote, capabilities.scenes, capabilities.search, onExport, onFitView, onOpenActivity, onOpenParameters, onOpenRemote, onOpenScenes, onOpenSiteViews, onOpenTerminal, onRequestFeature, onSearch, onShortcutChange, onToolChange, onZoomIn, onZoomOut]);
   const visible = commands.filter((command) => `${command.label} ${command.keywords} ${command.shortcut}`.toLowerCase().includes(query.trim().toLowerCase()));
   const workIntent = query.trim();
+  const exactCommand = visible.some((command) => command.label.toLowerCase() === workIntent.toLowerCase());
+  const showCapture = Boolean(onCaptureText && workIntent && !exactCommand);
   const showStartWork = Boolean(onStartWork && workIntent);
-  const resultCount = visible.length + Number(showStartWork);
+  const commandOffset = Number(showCapture);
+  const resultCount = visible.length + commandOffset + Number(showStartWork);
   const run = (action: () => void, label: string) => {
     if (label === 'Request a feature' || label === 'Set command shortcut') { action(); setQuery(''); return; }
     action();
@@ -109,11 +115,11 @@ export function CanvasToolbar({
     if (event.key === 'Escape') { event.preventDefault(); setExpanded(false); }
     else if (event.key === 'ArrowDown') { event.preventDefault(); setIndex((value) => Math.min(value + 1, Math.max(0, resultCount - 1))); }
     else if (event.key === 'ArrowUp') { event.preventDefault(); setIndex((value) => Math.max(value - 1, 0)); }
-    else if (event.key === 'Enter' && showStartWork && workIntent && index === 0 && !visible.some((command) => command.label.toLowerCase() === workIntent.toLowerCase())) {
-      event.preventDefault(); onStartWork?.(workIntent); setExpanded(false);
+    else if (event.key === 'Enter' && showCapture && index === 0) {
+      event.preventDefault(); onCaptureText?.(workIntent); setExpanded(false);
     }
-    else if (event.key === 'Enter' && visible[index]) { event.preventDefault(); run(visible[index].run, visible[index].label); }
-    else if (event.key === 'Enter' && showStartWork && index === visible.length) { event.preventDefault(); onStartWork?.(workIntent); setExpanded(false); }
+    else if (event.key === 'Enter' && visible[index - commandOffset]) { event.preventDefault(); run(visible[index - commandOffset].run, visible[index - commandOffset].label); }
+    else if (event.key === 'Enter' && showStartWork && index === commandOffset + visible.length) { event.preventDefault(); onStartWork?.(workIntent); setExpanded(false); }
   };
   const saveFeature = async () => {
     const title = featureDraft?.trim() || '';
@@ -129,11 +135,31 @@ export function CanvasToolbar({
     } finally { setFeatureBusy(false); }
   };
 
-  return <nav className={styles.shell} data-workspace-ui aria-label="Information terminal" onPointerDown={(event) => event.stopPropagation()}>
-    <button className={styles.trigger} type="button" aria-label="Open information terminal" aria-expanded={expanded} aria-controls="hii-information-terminal" onClick={() => setExpanded(!expanded)}>
-      <span>hii</span><kbd>{shortcutLabel}</kbd>
-    </button>
-    {expanded && <section id="hii-information-terminal" className={styles.palette} aria-label="Information terminal">
+  const quickTools: Array<{ id: CanvasTool; label: string; icon: React.ReactNode }> = [
+    { id: 'select', label: 'Select', icon: <Cursor size={19} /> },
+    { id: 'sticky', label: 'Note', icon: <NoteBlank size={19} /> },
+    { id: 'text', label: 'Text', icon: <TextT size={19} /> },
+    { id: 'shape', label: 'Shape', icon: <Shapes size={19} /> },
+    { id: 'table', label: 'Table', icon: <Table size={19} /> },
+    { id: 'draw', label: 'Draw', icon: <PencilSimple size={19} /> },
+    { id: 'media', label: 'Import', icon: <Paperclip size={19} /> }
+  ];
+
+  return <nav className={styles.shell} data-workspace-ui aria-label="Canvas tools" onPointerDown={(event) => event.stopPropagation()}>
+    <ControlIsland className={styles.toolbar}>
+      <ControlButton className={styles.trigger} label="Open HII companion" aria-expanded={expanded} aria-controls="hii-information-terminal" onClick={() => setExpanded(!expanded)}>
+        <span>hii</span><kbd aria-hidden="true">{shortcutLabel}</kbd>
+      </ControlButton>
+      <ControlDivider />
+      {quickTools.map((tool) => <ControlButton
+        key={tool.id}
+        className={styles.tool}
+        label={tool.label}
+        aria-pressed={activeTool === tool.id}
+        onClick={() => onToolChange(tool.id)}
+      >{tool.icon}</ControlButton>)}
+    </ControlIsland>
+    {expanded && <section id="hii-information-terminal" className={styles.palette} aria-label="HII local companion">
       {shortcutCapture ? <div className={styles.shortcutCapture}>
         <label htmlFor="hii-command-shortcut">Press a shortcut</label>
         <input id="hii-command-shortcut" autoFocus readOnly value="" placeholder="Hold ⌘, ⌥, or ⌃ and press a key" onKeyDown={(event) => {
@@ -152,13 +178,16 @@ export function CanvasToolbar({
           {selectionLabels.slice(0, 3).map((label, position) => <span className={styles.selectionItem} key={`${label}:${position}`}>{label}</span>)}
           {selectionLabels.length > 3 && <span className={styles.selectionItem}>+{selectionLabels.length - 3}</span>}
         </div>}
-        <input ref={input} aria-label="Search HII commands" placeholder="Ask, find, create, or do something…" value={query} onChange={(event) => { setQuery(event.target.value); setIndex(0); }} onKeyDown={onKeys} disabled={disabled} />
+        <input ref={input} aria-label="Save to HII or search commands" placeholder="Paste a chat, save a note, or find a command…" value={query} onChange={(event) => { setQuery(event.target.value); setIndex(0); }} onKeyDown={onKeys} disabled={disabled} />
         <div className={styles.results} role="listbox" aria-label="Commands">
-          {visible.map((command, position) => <button key={command.label} type="button" role="option" aria-selected={position === index} onMouseEnter={() => setIndex(position)} onClick={() => run(command.run, command.label)}>
+          {showCapture && <button type="button" role="option" aria-selected={index === 0} onMouseEnter={() => setIndex(0)} onClick={() => { onCaptureText?.(workIntent); setExpanded(false); }}>
+            <span>Save to HII</span><kbd>local</kbd>
+          </button>}
+          {visible.map((command, position) => <button key={command.label} type="button" role="option" aria-selected={position + commandOffset === index} onMouseEnter={() => setIndex(position + commandOffset)} onClick={() => run(command.run, command.label)}>
             <span>{command.label}{command.id === activeTool && toolCommands.some((tool) => tool.label === command.label) ? ' ✓' : ''}</span><kbd>{command.shortcut}</kbd>
           </button>)}
-          {showStartWork && <button type="button" role="option" aria-selected={index === visible.length} onMouseEnter={() => setIndex(visible.length)} onClick={() => { onStartWork?.(workIntent); setExpanded(false); }}>
-            <span>Start work: {workIntent}</span><kbd>review first</kbd>
+          {showStartWork && <button type="button" role="option" aria-selected={index === commandOffset + visible.length} onMouseEnter={() => setIndex(commandOffset + visible.length)} onClick={() => { onStartWork?.(workIntent); setExpanded(false); }}>
+            <span>Use as a task</span><kbd>review first</kbd>
           </button>}
           {!resultCount && <p>No matching command.</p>}
         </div>
@@ -169,7 +198,12 @@ export function CanvasToolbar({
         <div className={styles.formActions}><button type="button" onClick={() => setFeatureDraft(null)}>Back</button><button type="submit" disabled={featureBusy || featureDraft.trim().length < 2}>{featureBusy ? 'Saving…' : 'Save to board'}</button></div>
       </form>}
       {message && <p role="status" className={styles.message}>{message}</p>}
-      <small>↑↓ choose · Enter run · Esc close</small>
+      <small>Local companion · context is shared only through HII access</small>
     </section>}
+    <ControlIsland compact className={styles.zoom} aria-label="Canvas zoom">
+      <ControlButton compact label="Zoom out" onClick={onZoomOut}>−</ControlButton>
+      <ControlButton compact label="Fit canvas" className={styles.fitButton} onClick={onFitView}>Fit</ControlButton>
+      <ControlButton compact label="Zoom in" onClick={onZoomIn}>+</ControlButton>
+    </ControlIsland>
   </nav>;
 }

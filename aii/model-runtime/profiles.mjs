@@ -29,3 +29,19 @@ export function selectConsumerModelProfile(
     platforms: selected.platforms
   };
 }
+
+export function resolveModelSelectionEntry(
+  manifest,
+  value,
+  platform = process.platform,
+  arch = process.arch
+) {
+  const requested = String(value || "").trim().toLowerCase();
+  if (!requested) return null;
+  return (manifest.selectionCatalog || []).find((entry) => {
+    if (!supportsPlatform(entry, platform, arch)) return false;
+    return [entry.model, entry.logicalModel, ...(entry.aliases || [])]
+      .filter(Boolean)
+      .some((candidate) => String(candidate).toLowerCase() === requested);
+  }) || null;
+}

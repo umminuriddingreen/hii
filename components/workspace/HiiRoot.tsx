@@ -72,6 +72,7 @@ import {
   isAssistantShortcut,
   isDirectCanvasTyping,
   isTerminalShortcut,
+  objectiveSeedFromText,
   terminalSeedFromCommand
 } from '@/lib/workspace/terminal-command';
 import {
@@ -1203,10 +1204,14 @@ export function HiiRoot({
   const uploadAt = useRef<Point | null>(null);
   const cameraInput = useRef<HTMLInputElement | null>(null);
   const photosInput = useRef<HTMLInputElement | null>(null);
+  const notionInput = useRef<HTMLInputElement | null>(null);
+  const miroInput = useRef<HTMLInputElement | null>(null);
+  const freeformInput = useRef<HTMLInputElement | null>(null);
   useEffect(() => () => { if (textTapTimer.current) clearTimeout(textTapTimer.current); }, []);
   const mouse = useRef<Point>({ x: 400, y: 280 });
   const activeRun = useRef<string | null>(null);
   const activeObjectives = useRef(new Map<string, string>());
+  const bufferedAgentEvents = useRef(new Map<string, AgentEventV1[]>());
   const pendingContextStart = useRef<null | {
     pack: ContextPackV1;
     /** Kept so removing an item can recompile rather than edit the pack locally. */
@@ -1406,11 +1411,20 @@ export function HiiRoot({
     for (const capture of pendingQuickCaptures.current.splice(0)) quickCaptureSink.current(capture);
   }, [workspace.ready]);
 
-  const importFiles = useCallback(async (files: File[], at: Point, direct = false) => {
+  const importFiles = useCallback(async (files: File[], at: Point, direct = false, source?: 'Notion' | 'Miro' | 'Freeform') => {
     try {
-      const seeds = await (fileSeeder ? fileSeeder(files) : seedsFromFiles(files));
+      const imported = await (fileSeeder ? fileSeeder(files) : seedsFromFiles(files));
+      const seeds = source ? imported.map((seed) => ({
+        ...seed,
+        object: seed.object ? {
+          ...seed.object,
+          source: `${source} export · imported locally`,
+          audit: [...(seed.object.audit ?? []), { ts: new Date().toISOString(), actor: 'human' as const, action: `imported from ${source}` }]
+        } : seed.object,
+        payload: { ...seed.payload, importedFrom: source.toLowerCase() }
+      })) : imported;
       spawnSeeds(direct ? directPasteSeeds(seeds) : seeds, at, 'flow');
-      setToolMessage(`Added ${seeds.length} file${seeds.length === 1 ? '' : 's'}.`);
+      setToolMessage(`${source ? `Imported from ${source}: ` : 'Added '}${seeds.length} file${seeds.length === 1 ? '' : 's'}.`);
     } catch (error) {
       const code = error instanceof Error ? error.message : '';
       setToolMessage(code === 'canvas_asset_batch_too_many'
@@ -1422,6 +1436,13 @@ export function HiiRoot({
             : 'could not store that file on this device.');
     }
   }, [fileSeeder, spawnSeeds]);
+
+  const acceptSourceFiles = useCallback((source: 'Notion' | 'Miro' | 'Freeform', files: File[]) => {
+    if (!files.length) { uploadAt.current = null; return; }
+    const at = uploadAt.current ?? camera.centerWorld();
+    uploadAt.current = null;
+    void importFiles(files, at, false, source);
+  }, [camera, importFiles]);
 
   const addTextAt = useCallback((at: Point) => {
     const [id] = spawnSeeds([canvasTextSeed()], camera.toWorld(at.x, at.y));
@@ -1636,11 +1657,12 @@ export function HiiRoot({
     setDrawing(tool === 'draw');
     setConnectorStartId(null);
     if (tool === 'media') {
-      fileInput.current?.click();
+      uploadAt.current = camera.centerWorld();
+      setUploadChooser(true);
       setActiveTool('select');
     }
     setToolMessage(tool === 'connector' ? 'Choose two objects to connect.' : '');
-  }, []);
+  }, [camera]);
 
   const createCanvasObject = useCallback((tool: CanvasTool, at: Point) => {
     let seed: NodeSeed | null = null;
@@ -1811,6 +1833,46 @@ export function HiiRoot({
   const selectedNodes = useMemo(() => workspace.nodes.filter((node) => selected.includes(node.id)), [selected, workspace.nodes]);
   useEffect(() => { onSelectionChange?.(selectedNodes); }, [onSelectionChange, selectedNodes]);
 
+  const applyObjectiveAgentEvent = useCallback((nodeId: string, event: AgentEventV1) => {
+    const node = workspaceRef.current.nodes.find((entry) => entry.id === nodeId);
+    if (!node) return;
+    const objectiveStatus = event.status === 'completed'
+      ? 'completed'
+      : event.status === 'failed'
+        ? 'failed'
+        : event.status === 'cancelled'
+          ? 'cancelled'
+          : 'running';
+    const proofRefs = event.receiptPath
+      ? [...new Set([...(node.object?.proofRefs || []), event.receiptPath])]
+      : node.object?.proofRefs;
+    const finished = ['completed', 'failed', 'cancelled'].includes(event.status);
+    const priorOutput = text(node.payload.output);
+    const nextOutput = event.text ? `${priorOutput}\n${event.text}`.trim() : priorOutput;
+    workspaceRef.current.patchNode(nodeId, {
+      payload: {
+        ...node.payload,
+        runId: event.runId,
+        status: objectiveStatus,
+        output: nextOutput,
+        receiptPath: event.receiptPath || node.payload.receiptPath
+      },
+      object: {
+        ...(node.object || { kind: 'intent' as const }),
+        status: objectiveStatus,
+        runId: event.runId,
+        proofRefs,
+        audit: finished
+          ? [
+              ...(node.object?.audit || []),
+              { ts: new Date().toISOString(), actor: 'agent' as const, action: `objective run ${objectiveStatus}` }
+            ].slice(-20)
+          : node.object?.audit
+      }
+    });
+    if (finished) activeObjectives.current.delete(event.runId);
+  }, []);
+
   const startObjectiveAgent = useCallback(async (nodeId: string, intent: string) => {
     const node = workspaceRef.current.nodes.find((entry) => entry.id === nodeId);
     // A `run` object is the same governed thing as an agent-objective note: an
@@ -1855,6 +1917,9 @@ export function HiiRoot({
             object: { ...(current.object || { kind: 'intent' as const }), runId: result.runId }
           });
         }
+        const buffered = bufferedAgentEvents.current.get(result.runId) || [];
+        bufferedAgentEvents.current.delete(result.runId);
+        for (const event of buffered) applyObjectiveAgentEvent(nodeId, event);
       });
       if (!started) {
         const current = workspaceRef.current.nodes.find((entry) => entry.id === nodeId);
@@ -1874,7 +1939,72 @@ export function HiiRoot({
         object: { ...(current.object || { kind: 'intent' as const }), status: 'failed' }
       });
     }
-  }, [mode, startWithContext]);
+  }, [applyObjectiveAgentEvent, mode, startWithContext]);
+
+  const queueAccountObjective = useCallback((intent: string) => {
+    const value = intent.trim();
+    if (!value || runtimeEnabled || !isAccount || !spaceId) return;
+    const seed = objectiveSeedFromText(value, { mode, contextNodeIds: selected });
+    const requestedAt = new Date().toISOString();
+    seed.payload = {
+      ...seed.payload,
+      draft: '',
+      text: value,
+      status: 'queued',
+      requestedAt,
+      requestedBy: creatorId,
+      output: 'Queued for your linked HII computer.'
+    };
+    seed.object = {
+      ...(seed.object || { kind: 'intent' as const }),
+      status: 'queued',
+      audit: [
+        ...(seed.object?.audit || []),
+        { ts: requestedAt, actor: 'human', action: 'queued bounded work for a linked HII executor' }
+      ]
+    };
+    spawnCenteredSeed(seed);
+    setToolMessage('Queued for your linked HII computer. No browser shell access was granted.');
+  }, [creatorId, isAccount, mode, runtimeEnabled, selected, spaceId, spawnCenteredSeed]);
+
+  const queueExistingAccountObjective = useCallback((nodeId: string, intent: string) => {
+    const value = intent.trim();
+    const node = workspaceRef.current.nodes.find((entry) => entry.id === nodeId);
+    if (!value || !node || runtimeEnabled || !isAccount || !spaceId) return;
+    const requestedAt = new Date().toISOString();
+    workspaceRef.current.patchNode(nodeId, {
+      payload: {
+        ...node.payload,
+        draft: '',
+        text: value,
+        status: 'queued',
+        requestedAt,
+        requestedBy: creatorId,
+        output: 'Queued for your linked HII computer.'
+      },
+      object: {
+        ...(node.object || { kind: 'intent' as const }),
+        status: 'queued',
+        capabilityId: 'hii.agent.workspace_run',
+        audit: [
+          ...(node.object?.audit || []),
+          { ts: requestedAt, actor: 'human' as const, action: 'queued bounded work for a linked HII executor' }
+        ].slice(-20)
+      }
+    });
+    setToolMessage('Queued for your linked HII computer. No browser shell access was granted.');
+  }, [creatorId, isAccount, runtimeEnabled, spaceId]);
+
+  const claimedAccountObjectives = useRef(new Set<string>());
+  useEffect(() => {
+    if (!runtimeEnabled || !workspace.ready) return;
+    for (const node of workspace.nodes) {
+      if (node.payload.role !== 'agent-objective' || node.payload.status !== 'queued') continue;
+      if (!text(node.payload.requestedAt) || claimedAccountObjectives.current.has(node.id)) continue;
+      claimedAccountObjectives.current.add(node.id);
+      void startObjectiveAgent(node.id, text(node.payload.text) || text(node.payload.draft));
+    }
+  }, [runtimeEnabled, startObjectiveAgent, workspace.nodes, workspace.ready]);
 
   const stopWorkspaceRun = useCallback(async (node: WorkspaceNode) => {
     const runId = text(node.payload.runId);
@@ -2081,45 +2211,13 @@ export function HiiRoot({
     let disposed = false;
     listenAgentEvents((event: AgentEventV1) => {
       const objectiveNodeId = activeObjectives.current.get(event.runId);
-      if (activeRun.current !== event.runId && !objectiveNodeId) return;
+      if (activeRun.current !== event.runId && !objectiveNodeId) {
+        const buffered = bufferedAgentEvents.current.get(event.runId) || [];
+        bufferedAgentEvents.current.set(event.runId, [...buffered, event].slice(-20));
+        return;
+      }
       if (objectiveNodeId) {
-        const node = workspaceRef.current.nodes.find((entry) => entry.id === objectiveNodeId);
-        if (node) {
-          const objectiveStatus = event.status === 'completed'
-            ? 'completed'
-            : event.status === 'failed'
-              ? 'failed'
-              : event.status === 'cancelled'
-                ? 'cancelled'
-                : 'running';
-          const proofRefs = event.receiptPath
-            ? [...new Set([...(node.object?.proofRefs || []), event.receiptPath])]
-            : node.object?.proofRefs;
-          const finished = ['completed', 'failed', 'cancelled'].includes(event.status);
-          const priorOutput = text(node.payload.output);
-          const nextOutput = event.text ? `${priorOutput}\n${event.text}`.trim() : priorOutput;
-          workspaceRef.current.patchNode(objectiveNodeId, {
-            payload: {
-              ...node.payload,
-              status: objectiveStatus,
-              output: nextOutput,
-              receiptPath: event.receiptPath || node.payload.receiptPath
-            },
-            object: {
-              ...(node.object || { kind: 'intent' as const }),
-              status: objectiveStatus,
-              runId: event.runId,
-              proofRefs,
-              audit: finished
-                ? [
-                    ...(node.object?.audit || []),
-                    { ts: new Date().toISOString(), actor: 'agent' as const, action: `objective run ${objectiveStatus}` }
-                  ].slice(-20)
-                : node.object?.audit
-            }
-          });
-        }
-        if (['completed', 'failed', 'cancelled'].includes(event.status)) activeObjectives.current.delete(event.runId);
+        applyObjectiveAgentEvent(objectiveNodeId, event);
         return;
       }
       const conversation = activeConversation.current?.runId === event.runId ? activeConversation.current : null;
@@ -2171,7 +2269,7 @@ export function HiiRoot({
       disposed = true;
       unlisten();
     };
-  }, [runtimeEnabled]);
+  }, [applyObjectiveAgentEvent, runtimeEnabled]);
 
   useEffect(() => {
     const inField = (target: EventTarget | null) => (target as Element | null)?.closest?.('input,textarea,[contenteditable]');
@@ -2476,8 +2574,22 @@ export function HiiRoot({
 
   const selectionAction = useCallback((action: CanvasSelectionAction) => {
     if (action === 'format' || action === 'inspect') { setInspectorOpen(true); return; }
+    if (action === 'export') { setExportOpen(true); return; }
     if (action === 'connect') { setActiveTool('connector'); setConnectorStartId(selected.length === 1 ? selected[0] : null); setToolMessage('Choose the next object to connect.'); return; }
   }, [selected]);
+
+  const selectionBarAnchor = useMemo(() => {
+    if (!selectedNodes.length || typeof window === 'undefined') return undefined;
+    const left = Math.min(...selectedNodes.map((node) => node.x));
+    const top = Math.min(...selectedNodes.map((node) => node.y));
+    const right = Math.max(...selectedNodes.map((node) => node.x + node.w));
+    const bottom = Math.max(...selectedNodes.map((node) => node.y + node.h));
+    const view = camera.cam.current;
+    const x = Math.min(window.innerWidth - 170, Math.max(170, view.x + ((left + right) / 2) * view.z));
+    const above = view.y + top * view.z;
+    const y = above > 82 ? above : Math.min(window.innerHeight - 90, view.y + bottom * view.z + 64);
+    return { x, y };
+  }, [camera.cam, cameraRevision, selectedNodes]);
 
   return (
     <main
@@ -2649,9 +2761,14 @@ export function HiiRoot({
         onOpenTerminal={() => ensureWorkspaceTerminal('docked')} onSearch={openSearchPanel} onOpenActivity={openActivityPanel}
         onOpenRemote={() => { onRequestDevice?.(selectedNodes); setToolMessage('Opened HII Remote.'); }}
         onRequestFeature={runtimeEnabled ? requestFeature : undefined}
-        onStartWork={runtimeEnabled ? startFromCommand : undefined}
+        onCaptureText={(value) => {
+          const [id] = spawnCenteredSeed(canvasTextSeed(value.slice(0, 100_000)));
+          if (id) { setSelected([id]); setFocusNodeId(null); }
+          setToolMessage('Saved locally to this canvas.');
+        }}
+        onStartWork={runtimeEnabled ? startFromCommand : isAccount && spaceId ? queueAccountObjective : undefined}
         selectionLabels={selectedNodes.map(titleFor)}
-        workUnavailableReason={!runtimeEnabled ? 'Agent work needs a connected HII executor. Canvas commands remain available here.' : undefined}
+        workUnavailableReason={!runtimeEnabled && (!isAccount || !spaceId) ? 'Agent work needs a connected HII executor. Canvas commands remain available here.' : undefined}
         shortcutLabel={isAccount ? commandShortcutLabel(commandShortcut) : '⌘K'}
         onShortcutChange={isAccount ? (shortcut) => { saveCommandShortcut(shortcut); setCommandShortcut(shortcut); } : undefined}
       />
@@ -2666,7 +2783,15 @@ export function HiiRoot({
         onFocus={focusOasisTarget}
         onFit={fitCanvas}
       />}
-      <CanvasSelectionBar selectionCount={selected.length} canConnect={selected.length <= 2} onAction={selectionAction} />
+      <CanvasSelectionBar
+        selectionCount={selected.length}
+        selectionType={selectedNodes[0]?.type}
+        foreground={canvasObjectState(selectedNodes[0] || ({ payload: {} } as WorkspaceNode)).appearance?.foreground}
+        fontSize={canvasObjectState(selectedNodes[0] || ({ payload: {} } as WorkspaceNode)).appearance?.fontSize}
+        canConnect={selected.length <= 2}
+        anchor={selectionBarAnchor}
+        onAction={selectionAction}
+      />
       {inspectorOpen && selectedNodes.length > 0 && <CanvasObjectInspector
         title={selectedNodes.length === 1 ? titleFor(selectedNodes[0]) : 'Multiple selection'} typeLabel={selectedNodes[0]?.type || 'objects'} selectionCount={selectedNodes.length}
         locked={selectedNodes.every((node) => canvasObjectState(node).locked)}
@@ -2692,13 +2817,6 @@ export function HiiRoot({
         onFocusNode={focusCanvasNode}
         onClose={closeCanvasManager}
       />}
-      {selected.length === 1 && !exportOpen && <button
-        type="button"
-        className="hii-export-trigger"
-        data-workspace-ui
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={() => setExportOpen(true)}
-      >export</button>}
       {exportOpen && selected.length === 1 && (() => {
         const node = workspace.nodes.find((entry) => entry.id === selected[0]);
         if (!node) return null;
@@ -2766,10 +2884,14 @@ export function HiiRoot({
               onAutoFocused={() => setFocusNodeId(null)}
               onPayload={(patch) => workspace.patchNode(node.id, { payload: { ...node.payload, ...patch } })}
               onResize={(size) => workspace.patchNode(node.id, size)}
-              onAgentSubmit={(intent) => void startObjectiveAgent(node.id, intent)}
+              onAgentSubmit={(intent) => void (runtimeEnabled
+                ? startObjectiveAgent(node.id, intent)
+                : queueExistingAccountObjective(node.id, intent))}
               onBrowserCapture={(result) => spawnInformation(capturedInformationSeeds(result), { x: node.x + node.w + 40, y: node.y })}
               onOpenBrowser={(url) => openDevBrowser({ x: node.x + node.w + 40, y: node.y }, url)}
-              onApproveRun={() => void startObjectiveAgent(node.id, runIntent(node))}
+              onApproveRun={() => void (runtimeEnabled
+                ? startObjectiveAgent(node.id, runIntent(node))
+                : queueExistingAccountObjective(node.id, runIntent(node)))}
               onStopRun={() => void stopWorkspaceRun(node)}
               onOpenProof={openProof}
             />
@@ -2846,15 +2968,27 @@ export function HiiRoot({
           onSubmit={(value) => void submit(value, prompt.anchor, prompt.objectId, prompt.conversationId)}
         />
       )}
-      {uploadChooser && <div className="hii-upload-chooser" data-workspace-ui role="dialog" aria-label="Add to canvas" onPointerDown={(event) => event.stopPropagation()}>
-        <button type="button" onClick={() => { setUploadChooser(false); cameraInput.current?.click(); }}>Camera</button>
-        <button type="button" onClick={() => { setUploadChooser(false); photosInput.current?.click(); }}>Photos</button>
-        <button type="button" onClick={() => { setUploadChooser(false); fileInput.current?.click(); }}>Files</button>
-        <button type="button" onClick={() => { setUploadChooser(false); uploadAt.current = null; }}>Cancel</button>
+      {uploadChooser && <div className="hii-upload-chooser" data-workspace-ui role="dialog" aria-label="Import to canvas" onPointerDown={(event) => event.stopPropagation()}>
+        <header><strong>Import</strong><small>Exports stay on this device</small></header>
+        {!isSpace ? <div className="hii-import-sources">
+          <button type="button" onClick={() => { setUploadChooser(false); notionInput.current?.click(); }}><b>N</b><span>Notion<small>Markdown, CSV, HTML, PDF</small></span></button>
+          <button type="button" onClick={() => { setUploadChooser(false); miroInput.current?.click(); }}><b>M</b><span>Miro<small>PDF, CSV, images</small></span></button>
+          <button type="button" onClick={() => { setUploadChooser(false); freeformInput.current?.click(); }}><b>F</b><span>Freeform<small>PDF or images</small></span></button>
+        </div> : <div className="hii-import-sources"><button type="button" onClick={() => { setUploadChooser(false); cameraInput.current?.click(); }}><b>+</b><span>Camera<small>Take a Space photo</small></span></button></div>}
+        <footer>
+          <button type="button" onClick={() => { setUploadChooser(false); photosInput.current?.click(); }}>Photos</button>
+          <button type="button" onClick={() => { setUploadChooser(false); fileInput.current?.click(); }}>Any file</button>
+          <button type="button" onClick={() => { setUploadChooser(false); uploadAt.current = null; }}>Cancel</button>
+        </footer>
       </div>}
       {(!isSpace || allowPhoto) && <>
       <input ref={cameraInput} className="hii-file-input" type="file" accept="image/*" capture="environment" aria-label="Take a photo for HII" onChange={(event) => { const files = [...(event.currentTarget.files || [])]; event.currentTarget.value = ''; acceptChosenFiles(files); }} />
       <input ref={photosInput} className="hii-file-input" type="file" accept="image/*" multiple={!isSpace} aria-label="Choose photos for HII" onChange={(event) => { const files = [...(event.currentTarget.files || [])]; event.currentTarget.value = ''; acceptChosenFiles(files); }} />
+      {!isSpace && <>
+      <input ref={notionInput} className="hii-file-input" type="file" multiple accept=".md,.markdown,.csv,.html,.htm,.txt,.json,.pdf,image/*" aria-label="Import a Notion export" onChange={(event) => { const files = [...(event.currentTarget.files || [])]; event.currentTarget.value = ''; acceptSourceFiles('Notion', files); }} />
+      <input ref={miroInput} className="hii-file-input" type="file" multiple accept=".pdf,.csv,image/*" aria-label="Import a Miro export" onChange={(event) => { const files = [...(event.currentTarget.files || [])]; event.currentTarget.value = ''; acceptSourceFiles('Miro', files); }} />
+      <input ref={freeformInput} className="hii-file-input" type="file" multiple accept=".pdf,image/*" aria-label="Import a Freeform export" onChange={(event) => { const files = [...(event.currentTarget.files || [])]; event.currentTarget.value = ''; acceptSourceFiles('Freeform', files); }} />
+      </>}
       <input
         ref={fileInput}
         className="hii-file-input"
