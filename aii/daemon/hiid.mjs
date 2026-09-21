@@ -14,6 +14,7 @@ import {
   stageWorkspaceRunContext
 } from "./workspace-run-staging.mjs";
 import {
+  resolveModelSelectionEntry,
   selectConsumerModelProfile,
   totalMemoryGiB
 } from "../model-runtime/profiles.mjs";
@@ -1295,13 +1296,18 @@ function saveModelPreference(provider, model) {
 
 function resolveModelSelection(value, command) {
   const requested = String(value || "").trim();
-  const selected = modelSelectionCatalog().find((entry) =>
-    entry.model === requested || (entry.aliases || []).includes(requested.toLowerCase())
+  const manifest = safeReadJson(MODEL_PROFILES, {});
+  const selected = resolveModelSelectionEntry(
+    manifest,
+    requested,
+    HOST_PLATFORM.nodePlatform,
+    HOST_PLATFORM.arch
   );
   if (!selected) {
-    const manifest = safeReadJson(MODEL_PROFILES, {});
     const incompatible = (manifest.selectionCatalog || []).find((entry) =>
-      entry.model === requested || (entry.aliases || []).includes(requested.toLowerCase())
+      [entry.model, entry.logicalModel, ...(entry.aliases || [])]
+        .filter(Boolean)
+        .some((candidate) => String(candidate).toLowerCase() === requested.toLowerCase())
     );
     if (incompatible) {
       throw new Error(`[ERR_PLATFORM_MODEL_INCOMPATIBLE] ${requested} supports ${(incompatible.platforms || []).join(", ")}, not ${HOST_PLATFORM.id}`);

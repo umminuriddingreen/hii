@@ -3,7 +3,8 @@ import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
 
-import { selectConsumerModelProfile } from "../../aii/model-runtime/profiles.mjs";
+import { resolveModelSelectionEntry, selectConsumerModelProfile } from "../../aii/model-runtime/profiles.mjs";
+import { buildNvidiaLaunchPlan } from "../../aii/model-runtime/nvidia.mjs";
 import { detectModelPlatform, supportsPlatform } from "../../aii/model-runtime/platform.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -55,6 +56,55 @@ describe("native consumer model profiles", () => {
     ]));
     expect(manifest.selectionCatalogDoc).toContain("never downloads");
     expect(JSON.stringify(manifest)).not.toContain("llmfit");
+  });
+
+  it("resolves the logical Qwen3.8 27B agent model to the native platform format", () => {
+    const manifest = JSON.parse(fs.readFileSync(profiles, "utf8"));
+    expect(resolveModelSelectionEntry(manifest, "qwen3.8-27b-agent", "darwin", "arm64")).toMatchObject({
+      model: "mlx-community/Qwen3.8-27B-4bit",
+      logicalModel: "qwen3.8-27b-agent",
+      backend: "mlx"
+    });
+    expect(resolveModelSelectionEntry(manifest, "qwen3.8-27b-agent", "win32", "x64")).toMatchObject({
+      model: "qwen3.8-27b-agent",
+      logicalModel: "qwen3.8-27b-agent",
+      backend: "llama.cpp",
+      source: "preset"
+    });
+    expect(resolveModelSelectionEntry(manifest, "mlx-community/Qwen3.8-27B-4bit", "win32", "x64")).toBeNull();
+  });
+
+  it("defines an RTX 5080-sized agent profile with full GPU residency", () => {
+    const manifest = JSON.parse(fs.readFileSync(profiles, "utf8"));
+    expect(manifest.nvidia.profiles.agent).toEqual({
+      modelAliases: ["qwen3.8-27b-agent"],
+      contextTokens: 16384,
+      batchSize: 1024,
+      microBatchSize: 256,
+      kvCacheType: "q4_0",
+      cpuOffload: false
+    });
+
+    const selection = {
+      settings: manifest.nvidia.profiles.agent,
+      model: { id: "qwen3.8-27b-agent", path: "C:\\models\\qwen3.8-27b-agent.gguf" },
+      gpu: 0,
+      gpuUuid: "GPU-5080"
+    };
+    const plan = buildNvidiaLaunchPlan({
+      manifest,
+      selection,
+      platform: "win32",
+      backend: "native-cuda",
+      endpoint: "http://127.0.0.1:6127",
+      binary: "llama-server.exe"
+    });
+    expect(plan.contextTokens).toBe(16384);
+    expect(plan.args).toEqual(expect.arrayContaining([
+      "--n-gpu-layers", "999",
+      "--cache-type-k", "q4_0",
+      "--cache-type-v", "q4_0"
+    ]));
   });
 
   it("detects Windows and Apple Silicon model compatibility explicitly", () => {
