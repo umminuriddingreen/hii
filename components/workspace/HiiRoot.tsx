@@ -72,6 +72,7 @@ import {
   isAssistantShortcut,
   isDirectCanvasTyping,
   isTerminalShortcut,
+  objectiveSeedFromText,
   terminalSeedFromCommand
 } from '@/lib/workspace/terminal-command';
 import {
@@ -1876,6 +1877,71 @@ export function HiiRoot({
     }
   }, [mode, startWithContext]);
 
+  const queueAccountObjective = useCallback((intent: string) => {
+    const value = intent.trim();
+    if (!value || runtimeEnabled || !isAccount || !spaceId) return;
+    const seed = objectiveSeedFromText(value, { mode, contextNodeIds: selected });
+    const requestedAt = new Date().toISOString();
+    seed.payload = {
+      ...seed.payload,
+      draft: '',
+      text: value,
+      status: 'queued',
+      requestedAt,
+      requestedBy: creatorId,
+      output: 'Queued for your linked HII computer.'
+    };
+    seed.object = {
+      ...(seed.object || { kind: 'intent' as const }),
+      status: 'queued',
+      audit: [
+        ...(seed.object?.audit || []),
+        { ts: requestedAt, actor: 'human', action: 'queued bounded work for a linked HII executor' }
+      ]
+    };
+    spawnCenteredSeed(seed);
+    setToolMessage('Queued for your linked HII computer. No browser shell access was granted.');
+  }, [creatorId, isAccount, mode, runtimeEnabled, selected, spaceId, spawnCenteredSeed]);
+
+  const queueExistingAccountObjective = useCallback((nodeId: string, intent: string) => {
+    const value = intent.trim();
+    const node = workspaceRef.current.nodes.find((entry) => entry.id === nodeId);
+    if (!value || !node || runtimeEnabled || !isAccount || !spaceId) return;
+    const requestedAt = new Date().toISOString();
+    workspaceRef.current.patchNode(nodeId, {
+      payload: {
+        ...node.payload,
+        draft: '',
+        text: value,
+        status: 'queued',
+        requestedAt,
+        requestedBy: creatorId,
+        output: 'Queued for your linked HII computer.'
+      },
+      object: {
+        ...(node.object || { kind: 'intent' as const }),
+        status: 'queued',
+        capabilityId: 'hii.agent.workspace_run',
+        audit: [
+          ...(node.object?.audit || []),
+          { ts: requestedAt, actor: 'human' as const, action: 'queued bounded work for a linked HII executor' }
+        ].slice(-20)
+      }
+    });
+    setToolMessage('Queued for your linked HII computer. No browser shell access was granted.');
+  }, [creatorId, isAccount, runtimeEnabled, spaceId]);
+
+  const claimedAccountObjectives = useRef(new Set<string>());
+  useEffect(() => {
+    if (!runtimeEnabled || !workspace.ready) return;
+    for (const node of workspace.nodes) {
+      if (node.payload.role !== 'agent-objective' || node.payload.status !== 'queued') continue;
+      if (!text(node.payload.requestedAt) || claimedAccountObjectives.current.has(node.id)) continue;
+      claimedAccountObjectives.current.add(node.id);
+      void startObjectiveAgent(node.id, text(node.payload.text) || text(node.payload.draft));
+    }
+  }, [runtimeEnabled, startObjectiveAgent, workspace.nodes, workspace.ready]);
+
   const stopWorkspaceRun = useCallback(async (node: WorkspaceNode) => {
     const runId = text(node.payload.runId);
     if (!runId) return;
@@ -2649,9 +2715,9 @@ export function HiiRoot({
         onOpenTerminal={() => ensureWorkspaceTerminal('docked')} onSearch={openSearchPanel} onOpenActivity={openActivityPanel}
         onOpenRemote={() => { onRequestDevice?.(selectedNodes); setToolMessage('Opened HII Remote.'); }}
         onRequestFeature={runtimeEnabled ? requestFeature : undefined}
-        onStartWork={runtimeEnabled ? startFromCommand : undefined}
+        onStartWork={runtimeEnabled ? startFromCommand : isAccount && spaceId ? queueAccountObjective : undefined}
         selectionLabels={selectedNodes.map(titleFor)}
-        workUnavailableReason={!runtimeEnabled ? 'Agent work needs a connected HII executor. Canvas commands remain available here.' : undefined}
+        workUnavailableReason={!runtimeEnabled && (!isAccount || !spaceId) ? 'Agent work needs a connected HII executor. Canvas commands remain available here.' : undefined}
         shortcutLabel={isAccount ? commandShortcutLabel(commandShortcut) : '⌘K'}
         onShortcutChange={isAccount ? (shortcut) => { saveCommandShortcut(shortcut); setCommandShortcut(shortcut); } : undefined}
       />
@@ -2766,10 +2832,14 @@ export function HiiRoot({
               onAutoFocused={() => setFocusNodeId(null)}
               onPayload={(patch) => workspace.patchNode(node.id, { payload: { ...node.payload, ...patch } })}
               onResize={(size) => workspace.patchNode(node.id, size)}
-              onAgentSubmit={(intent) => void startObjectiveAgent(node.id, intent)}
+              onAgentSubmit={(intent) => void (runtimeEnabled
+                ? startObjectiveAgent(node.id, intent)
+                : queueExistingAccountObjective(node.id, intent))}
               onBrowserCapture={(result) => spawnInformation(capturedInformationSeeds(result), { x: node.x + node.w + 40, y: node.y })}
               onOpenBrowser={(url) => openDevBrowser({ x: node.x + node.w + 40, y: node.y }, url)}
-              onApproveRun={() => void startObjectiveAgent(node.id, runIntent(node))}
+              onApproveRun={() => void (runtimeEnabled
+                ? startObjectiveAgent(node.id, runIntent(node))
+                : queueExistingAccountObjective(node.id, runIntent(node)))}
               onStopRun={() => void stopWorkspaceRun(node)}
               onOpenProof={openProof}
             />

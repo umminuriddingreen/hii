@@ -121,6 +121,17 @@ describe('canvas terminal command', () => {
     });
   });
 
+  it('queues account work for the linked native executor without browser shell authority', () => {
+    const root = readFileSync(resolve(process.cwd(), 'components/workspace/HiiRoot.tsx'), 'utf8');
+    expect(root).toContain("status: 'queued'");
+    expect(root).toContain("requestedBy: creatorId");
+    expect(root).toContain("queued bounded work for a linked HII executor");
+    expect(root).toContain("node.payload.status !== 'queued'");
+    expect(root).toContain("startObjectiveAgent(node.id, text(node.payload.text) || text(node.payload.draft))");
+    expect(root).toContain("No browser shell access was granted.");
+    expect(root).toContain("onStartWork={runtimeEnabled ? startFromCommand : isAccount && spaceId ? queueAccountObjective : undefined}");
+  });
+
   it('routes direct workspace typing into editable canvas text', () => {
     const root = readFileSync(resolve(process.cwd(), 'components/workspace/HiiRoot.tsx'), 'utf8');
     expect(root).toContain('spawnSeeds([canvasTextSeed(event.key)], at)');
