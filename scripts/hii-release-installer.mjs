@@ -50,6 +50,7 @@ const LAUNCHER_TEMPLATE_SHELL = [
 ].join('\n');
 
 const LAUNCHER_TEMPLATE_POWERSHELL = [
+  '[CmdletBinding(PositionalBinding = $false)]',
   'param(',
   '  [Parameter(ValueFromRemainingArguments = $true)]',
   '  [string[]] $Args,',
