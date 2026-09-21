@@ -6841,10 +6841,10 @@ mod tests {
 
         let clap_names: Vec<&str> = from_clap.iter().map(|(name, _)| name.as_str()).collect();
         for entry in route::ROUTES {
-            // `agent`/`receipt` are clap aliases, and `help` is clap's own
+            // `agent`/`exec`/`e`/`receipt` are clap aliases, and `help` is clap's own
             // builtin; none of them appear as subcommands in their own right.
             if !route::has_native_surface(entry.name)
-                || matches!(entry.name, "agent" | "receipt" | "help")
+                || matches!(entry.name, "agent" | "exec" | "e" | "receipt" | "help")
             {
                 continue;
             }

@@ -283,6 +283,8 @@ pub const ROUTES: &[Route] = &[
     ),
     // ---- native, but infrastructure ----
     native("agent", Extended, Work, "alias for `run`"),
+    native("exec", Extended, Work, "non-interactive alias for `run`"),
+    native("e", Extended, Work, "short alias for `run`"),
     native("receipt", Extended, Work, "alias for `proof`"),
     native(
         "terminal",
