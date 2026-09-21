@@ -152,7 +152,8 @@ async function waitForWeb(timeoutMs = 120000) {
 }
 
 function openUrl(target) {
-  const result = spawnSync("open", [target], { stdio: "inherit" });
+  const program = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer.exe" : "xdg-open";
+  const result = spawnSync(program, [target], { stdio: "inherit" });
   if (result.status !== 0) throw new Error(`could not open ${target}`);
 }
 
@@ -189,15 +190,30 @@ async function cmdWeb(args) {
 
 function cmdApp(args) {
   const sub = args[0] || "open";
-  const app = "/Applications/HII.app";
+  const app = process.platform === "darwin"
+    ? "/Applications/HII.app"
+    : process.platform === "win32"
+      ? [
+          path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "HII", "hii.exe"),
+          path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "Programs", "HII", "hii.exe")
+        ].find((candidate) => fs.existsSync(candidate))
+      : "/usr/bin/hii";
   if (sub === "open") {
-    if (!fs.existsSync(app)) throw new Error(`HII app is not installed at ${app}`);
-    const result = spawnSync("open", ["-a", app], { stdio: "inherit" });
-    if (result.status !== 0) throw new Error("could not open the HII app");
+    if (!app || !fs.existsSync(app)) throw new Error(`HII app is not installed${app ? ` at ${app}` : ""}`);
+    if (process.platform === "darwin") {
+      const result = spawnSync("open", ["-a", app], { stdio: "inherit" });
+      if (result.status !== 0) throw new Error("could not open the HII app");
+    } else {
+      const child = spawn(app, [], { detached: true, stdio: "ignore" });
+      child.unref();
+    }
     console.log(`opened ${app}`);
   } else if (sub === "status") {
-    const result = spawnSync("pgrep", ["-x", "HII"], { encoding: "utf8" });
-    console.log(JSON.stringify({ installed: fs.existsSync(app), running: result.status === 0, pid: result.stdout.trim() || null, app }, null, 2));
+    const result = process.platform === "win32"
+      ? spawnSync("tasklist.exe", ["/FI", "IMAGENAME eq hii.exe", "/FO", "CSV", "/NH"], { encoding: "utf8" })
+      : spawnSync("pgrep", ["-x", "HII"], { encoding: "utf8" });
+    const running = result.status === 0 && (process.platform !== "win32" || result.stdout.toLowerCase().includes('"hii.exe"'));
+    console.log(JSON.stringify({ installed: Boolean(app && fs.existsSync(app)), running, pid: process.platform === "win32" ? null : result.stdout.trim() || null, app: app || null }, null, 2));
   } else {
     throw new Error("usage: hii app <open|status>");
   }

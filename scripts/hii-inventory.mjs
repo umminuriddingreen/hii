@@ -23,6 +23,19 @@ function json(program, args, timeout) {
 
 function exists(file) { try { return fs.existsSync(file); } catch { return false; } }
 
+function installedAppPath() {
+  if (process.platform === 'darwin') return '/Applications/HII.app';
+  if (process.platform === 'win32') {
+    const localAppData = process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
+    const candidates = [
+      path.join(localAppData, 'HII', 'hii.exe'),
+      path.join(localAppData, 'Programs', 'HII', 'hii.exe')
+    ];
+    return candidates.find(exists) || candidates[0];
+  }
+  return '/usr/bin/hii';
+}
+
 function featureRegistry() {
   const source = path.join(root, 'docs', 'HII_FEATURE_REGISTRY.yaml');
   const raw = fs.readFileSync(source, 'utf8');
@@ -50,7 +63,7 @@ export function buildInventory({ live = true } = {}) {
   const network = live ? json(binary, ['network', 'status', '--json'], 3000) : null;
   const archive = live ? json(binary, ['archive', 'status'], 3000) : null;
   const inbox = live ? json(binary, ['agents', 'inbox', '--for', 'hii'], 3000) : null;
-  const app = process.platform === 'darwin' ? '/Applications/HII.app' : path.join(process.env.LOCALAPPDATA || '', 'Programs', 'HII');
+  const app = installedAppPath();
   const sourceCommit = run('git', ['rev-parse', '--short', 'HEAD']);
   const commands = (manifest?.commands || []).map(command => ({ ...command,
     state: 'in-progress',
