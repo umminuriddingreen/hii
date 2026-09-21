@@ -32,8 +32,7 @@ export function stageCli({ rebuild = true } = {}) {
   if (rebuild || !existsSync(built)) {
     const build = spawnSync('cargo', ['build', '--release', '-p', 'hii-cli'], {
       cwd: root,
-      stdio: 'inherit',
-      shell: process.platform === 'win32'
+      stdio: 'inherit'
     });
     if (build.error) throw new Error(`Unable to start the HII CLI build: ${build.error.message}`);
     if (build.status !== 0) process.exit(build.status ?? 1);

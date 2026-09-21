@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { stageCli } from './hii-stage-cli.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const tauri = path.join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'tauri.cmd' : 'tauri');
+const tauri = path.join(root, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
 
 // A release bundle always carries a freshly built CLI; see hii-stage-cli.mjs.
 console.log(`hii staged CLI for bundling: ${path.relative(root, stageCli({ rebuild: true }))}`);
@@ -46,10 +46,9 @@ if (withoutUpdater) {
   args.push('--config', overridePath);
 }
 
-const build = spawnSync(tauri, args, {
+const build = spawnSync(process.execPath, [tauri, ...args], {
   cwd: root,
   stdio: 'inherit',
-  shell: process.platform === 'win32',
   env: {
     ...process.env,
     ...(signingKey
