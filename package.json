@@ -140,5 +140,8 @@
   },
   "overrides": {
     "postcss": "$postcss"
+  },
+  "allowScripts": {
+    "workerd@1.20260828.1": true
   }
 }
