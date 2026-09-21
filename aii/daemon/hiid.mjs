@@ -23,6 +23,7 @@ import {
   normalizePlatform,
   supportsPlatform
 } from "../model-runtime/platform.mjs";
+import { inspectIntelligenceField, planIntelligenceField } from "../model-runtime/intelligence-field.mjs";
 import {
   buildCodexMemoryPack,
   codexExecInvocation
@@ -2047,6 +2048,22 @@ async function benchModelRuntime(args) {
 
 async function cmdModelRuntime(args) {
   const sub = args[0] || "recommend";
+  if (sub === "field" || sub === "plan") {
+    const field = await inspectIntelligenceField({
+      root: ROOT,
+      runtimeRoot: RUNTIME,
+      platform: HOST_PLATFORM.nodePlatform,
+      arch: HOST_PLATFORM.arch
+    });
+    if (sub === "field") console.log(JSON.stringify(field, null, 2));
+    else console.log(JSON.stringify(planIntelligenceField(field, {
+      taskClass: cliOption(args, "--task-class", "interactive"),
+      privacy: cliOption(args, "--privacy", "local"),
+      capabilities: args.flatMap((value, index) => args[index - 1] === "--capability" ? [value] : []),
+      maxModels: cliOption(args, "--max-models", "1")
+    }), null, 2));
+    return;
+  }
   const backend = cliOption(args, "--backend", process.env.HII_NVIDIA_BACKEND);
   const nvidia = backend ? ["native-cuda", "wsl-cuda", "wsl-vllm"].includes(backend) : process.platform === "win32";
   if (nvidia && ["start", "stop", "status", "doctor", "bench", "recommend", "choose", "models", "installed", "prepare-task", "finish-task"].includes(sub)) {
@@ -2075,7 +2092,7 @@ async function cmdModelRuntime(args) {
   else if (sub === "use") await useModel(args.slice(1));
   else if (sub === "recommend" || sub === "choose") printModelRecommendations(args.slice(1));
   else if (sub === "remove") removeModel(args.slice(1));
-  else throw new Error("usage: hii model <recommend|discover|search|install|installed|use|status|start|stop|models|bench|logs|remove>");
+  else throw new Error("usage: hii model <field|plan|recommend|discover|search|install|installed|use|status|start|stop|models|bench|logs|remove>");
 }
 
 function runningDaemonPids() {

@@ -2986,7 +2986,7 @@ function refreshReadmeState() {
 }
 
 function runnerUsage() {
-  console.error("usage: hii model <recommend|discover|search|install|installed|use|status|start|stop|models|bench|logs|remove>");
+  console.error("usage: hii model <field|plan|recommend|discover|search|install|installed|use|status|start|stop|models|bench|logs|remove>");
 }
 
 async function cmdRunner(args) {
