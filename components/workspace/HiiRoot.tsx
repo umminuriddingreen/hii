@@ -1204,6 +1204,9 @@ export function HiiRoot({
   const uploadAt = useRef<Point | null>(null);
   const cameraInput = useRef<HTMLInputElement | null>(null);
   const photosInput = useRef<HTMLInputElement | null>(null);
+  const notionInput = useRef<HTMLInputElement | null>(null);
+  const miroInput = useRef<HTMLInputElement | null>(null);
+  const freeformInput = useRef<HTMLInputElement | null>(null);
   useEffect(() => () => { if (textTapTimer.current) clearTimeout(textTapTimer.current); }, []);
   const mouse = useRef<Point>({ x: 400, y: 280 });
   const activeRun = useRef<string | null>(null);
@@ -1408,11 +1411,20 @@ export function HiiRoot({
     for (const capture of pendingQuickCaptures.current.splice(0)) quickCaptureSink.current(capture);
   }, [workspace.ready]);
 
-  const importFiles = useCallback(async (files: File[], at: Point, direct = false) => {
+  const importFiles = useCallback(async (files: File[], at: Point, direct = false, source?: 'Notion' | 'Miro' | 'Freeform') => {
     try {
-      const seeds = await (fileSeeder ? fileSeeder(files) : seedsFromFiles(files));
+      const imported = await (fileSeeder ? fileSeeder(files) : seedsFromFiles(files));
+      const seeds = source ? imported.map((seed) => ({
+        ...seed,
+        object: seed.object ? {
+          ...seed.object,
+          source: `${source} export · imported locally`,
+          audit: [...(seed.object.audit ?? []), { ts: new Date().toISOString(), actor: 'human' as const, action: `imported from ${source}` }]
+        } : seed.object,
+        payload: { ...seed.payload, importedFrom: source.toLowerCase() }
+      })) : imported;
       spawnSeeds(direct ? directPasteSeeds(seeds) : seeds, at, 'flow');
-      setToolMessage(`Added ${seeds.length} file${seeds.length === 1 ? '' : 's'}.`);
+      setToolMessage(`${source ? `Imported from ${source}: ` : 'Added '}${seeds.length} file${seeds.length === 1 ? '' : 's'}.`);
     } catch (error) {
       const code = error instanceof Error ? error.message : '';
       setToolMessage(code === 'canvas_asset_batch_too_many'
@@ -1424,6 +1436,13 @@ export function HiiRoot({
             : 'could not store that file on this device.');
     }
   }, [fileSeeder, spawnSeeds]);
+
+  const acceptSourceFiles = useCallback((source: 'Notion' | 'Miro' | 'Freeform', files: File[]) => {
+    if (!files.length) { uploadAt.current = null; return; }
+    const at = uploadAt.current ?? camera.centerWorld();
+    uploadAt.current = null;
+    void importFiles(files, at, false, source);
+  }, [camera, importFiles]);
 
   const addTextAt = useCallback((at: Point) => {
     const [id] = spawnSeeds([canvasTextSeed()], camera.toWorld(at.x, at.y));
@@ -1638,11 +1657,12 @@ export function HiiRoot({
     setDrawing(tool === 'draw');
     setConnectorStartId(null);
     if (tool === 'media') {
-      fileInput.current?.click();
+      uploadAt.current = camera.centerWorld();
+      setUploadChooser(true);
       setActiveTool('select');
     }
     setToolMessage(tool === 'connector' ? 'Choose two objects to connect.' : '');
-  }, []);
+  }, [camera]);
 
   const createCanvasObject = useCallback((tool: CanvasTool, at: Point) => {
     let seed: NodeSeed | null = null;
@@ -2943,15 +2963,27 @@ export function HiiRoot({
           onSubmit={(value) => void submit(value, prompt.anchor, prompt.objectId, prompt.conversationId)}
         />
       )}
-      {uploadChooser && <div className="hii-upload-chooser" data-workspace-ui role="dialog" aria-label="Add to canvas" onPointerDown={(event) => event.stopPropagation()}>
-        <button type="button" onClick={() => { setUploadChooser(false); cameraInput.current?.click(); }}>Camera</button>
-        <button type="button" onClick={() => { setUploadChooser(false); photosInput.current?.click(); }}>Photos</button>
-        <button type="button" onClick={() => { setUploadChooser(false); fileInput.current?.click(); }}>Files</button>
-        <button type="button" onClick={() => { setUploadChooser(false); uploadAt.current = null; }}>Cancel</button>
+      {uploadChooser && <div className="hii-upload-chooser" data-workspace-ui role="dialog" aria-label="Import to canvas" onPointerDown={(event) => event.stopPropagation()}>
+        <header><strong>Import</strong><small>Exports stay on this device</small></header>
+        {!isSpace ? <div className="hii-import-sources">
+          <button type="button" onClick={() => { setUploadChooser(false); notionInput.current?.click(); }}><b>N</b><span>Notion<small>Markdown, CSV, HTML, PDF</small></span></button>
+          <button type="button" onClick={() => { setUploadChooser(false); miroInput.current?.click(); }}><b>M</b><span>Miro<small>PDF, CSV, images</small></span></button>
+          <button type="button" onClick={() => { setUploadChooser(false); freeformInput.current?.click(); }}><b>F</b><span>Freeform<small>PDF or images</small></span></button>
+        </div> : <div className="hii-import-sources"><button type="button" onClick={() => { setUploadChooser(false); cameraInput.current?.click(); }}><b>+</b><span>Camera<small>Take a Space photo</small></span></button></div>}
+        <footer>
+          <button type="button" onClick={() => { setUploadChooser(false); photosInput.current?.click(); }}>Photos</button>
+          <button type="button" onClick={() => { setUploadChooser(false); fileInput.current?.click(); }}>Any file</button>
+          <button type="button" onClick={() => { setUploadChooser(false); uploadAt.current = null; }}>Cancel</button>
+        </footer>
       </div>}
       {(!isSpace || allowPhoto) && <>
       <input ref={cameraInput} className="hii-file-input" type="file" accept="image/*" capture="environment" aria-label="Take a photo for HII" onChange={(event) => { const files = [...(event.currentTarget.files || [])]; event.currentTarget.value = ''; acceptChosenFiles(files); }} />
       <input ref={photosInput} className="hii-file-input" type="file" accept="image/*" multiple={!isSpace} aria-label="Choose photos for HII" onChange={(event) => { const files = [...(event.currentTarget.files || [])]; event.currentTarget.value = ''; acceptChosenFiles(files); }} />
+      {!isSpace && <>
+      <input ref={notionInput} className="hii-file-input" type="file" multiple accept=".md,.markdown,.csv,.html,.htm,.txt,.json,.pdf,image/*" aria-label="Import a Notion export" onChange={(event) => { const files = [...(event.currentTarget.files || [])]; event.currentTarget.value = ''; acceptSourceFiles('Notion', files); }} />
+      <input ref={miroInput} className="hii-file-input" type="file" multiple accept=".pdf,.csv,image/*" aria-label="Import a Miro export" onChange={(event) => { const files = [...(event.currentTarget.files || [])]; event.currentTarget.value = ''; acceptSourceFiles('Miro', files); }} />
+      <input ref={freeformInput} className="hii-file-input" type="file" multiple accept=".pdf,image/*" aria-label="Import a Freeform export" onChange={(event) => { const files = [...(event.currentTarget.files || [])]; event.currentTarget.value = ''; acceptSourceFiles('Freeform', files); }} />
+      </>}
       <input
         ref={fileInput}
         className="hii-file-input"

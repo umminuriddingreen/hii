@@ -46,9 +46,17 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 body { background: var(--field); color: var(--ink); }
 button, input, textarea { font: inherit; }
 .hii-file-input { display: none; }
-.hii-upload-chooser { position: fixed; z-index: 2147483500; left: 50%; bottom: max(20px, env(safe-area-inset-bottom)); display: flex; width: min(360px, calc(100vw - 24px)); padding: 6px; gap: 4px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: 0 12px 36px var(--shadow); transform: translateX(-50%); }
-.hii-upload-chooser button { flex: 1; min-width: 0; min-height: 48px; padding: 4px; border: 0; border-radius: 9px; background: transparent; color: var(--ink); font: 12px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
+.hii-upload-chooser { position: fixed; z-index: 2147483500; left: 50%; bottom: max(20px, env(safe-area-inset-bottom)); display: grid; width: min(440px, calc(100vw - 24px)); padding: 9px; gap: 7px; border: 1px solid var(--line); border-radius: 17px; background: var(--surface); box-shadow: 0 16px 48px var(--shadow); backdrop-filter: blur(24px) saturate(1.3); transform: translateX(-50%); }
+.hii-upload-chooser > header { display: flex; align-items: baseline; justify-content: space-between; padding: 4px 5px 6px; }
+.hii-upload-chooser > header strong { font-size: 14px; }
+.hii-upload-chooser small { color: var(--muted); font-size: 10px; font-weight: 400; }
+.hii-upload-chooser button { flex: 1; min-width: 0; min-height: 42px; padding: 4px 8px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); font: 12px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
 .hii-upload-chooser button:hover, .hii-upload-chooser button:focus-visible { background: var(--hover); outline: none; }
+.hii-import-sources { display: grid; gap: 3px; }
+.hii-import-sources button { display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: center; min-height: 54px; text-align: left; }
+.hii-import-sources button > b { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 9px; background: var(--soft); font-size: 13px; }
+.hii-import-sources button > span { display: grid; gap: 3px; }
+.hii-upload-chooser > footer { display: flex; gap: 3px; padding-top: 4px; border-top: 1px solid var(--line); }
 .hii-file-reference { display: grid; align-content: center; gap: 5px; width: 100%; height: 100%; padding: 13px 16px; overflow: hidden; }
 .hii-file-reference strong, .hii-file-reference small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hii-file-reference small { color: var(--muted); font: 10px/1.3 "SF Mono", ui-monospace, monospace; }
