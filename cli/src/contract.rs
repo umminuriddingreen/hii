@@ -92,6 +92,10 @@ pub fn sensitive_shell(command: &str) -> bool {
         "ssh ",
         "scp ",
         "rsync ",
+        "hii satellite",
+        "hii.exe satellite",
+        " satellite send",
+        " satellite call",
         "stripe ",
         "aws ",
         "gcloud ",
@@ -428,6 +432,10 @@ mod tests {
     fn detects_sensitive_shell() {
         assert!(sensitive_shell("git push origin main"));
         assert!(sensitive_shell("curl https://example.com"));
+        assert!(sensitive_shell(
+            "hii satellite send --authority external-commit"
+        ));
+        assert!(sensitive_shell("target/debug/hii satellite call"));
         assert!(!sensitive_shell("cargo test"));
     }
 

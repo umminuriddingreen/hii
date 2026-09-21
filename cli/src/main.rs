@@ -35,6 +35,7 @@ mod keymap;
 mod learning;
 mod legacy;
 mod local_chat;
+mod mail;
 mod mcp;
 mod mcp_client;
 mod network;
@@ -49,6 +50,7 @@ mod receipt;
 mod route;
 mod run_context;
 mod runlog;
+mod satellite;
 mod schedule;
 mod service;
 mod session_backup;
@@ -85,6 +87,7 @@ use std::{
     process::{Command, ExitCode},
     time::{Duration, Instant},
 };
+use zeroize::Zeroize;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -600,6 +603,33 @@ enum Commands {
     Schedule {
         #[command(subcommand)]
         action: ScheduleCommand,
+    },
+    #[command(about = "Configure and read explicitly scoped email through HII")]
+    #[command(hide = true)]
+    Mail {
+        #[command(subcommand)]
+        action: MailCommand,
+    },
+    #[command(about = "Communicate through the owner's replaceable Satellite transport")]
+    Satellite {
+        #[arg(
+            long,
+            global = true,
+            default_value = "mac",
+            help = "Authenticated SSH host for the active Satellite executor"
+        )]
+        host: String,
+        #[arg(
+            long,
+            global = true,
+            value_name = "PATH",
+            help = "SSH config containing the authenticated Satellite host"
+        )]
+        ssh_config: Option<PathBuf>,
+        #[arg(long, global = true, default_value_t = 120, value_parser = clap::value_parser!(u64).range(5..=600))]
+        timeout_seconds: u64,
+        #[command(subcommand)]
+        action: SatelliteCommand,
     },
     #[command(
         name = "tools-manifest",
@@ -1753,6 +1783,146 @@ enum ScheduleCommand {
     Remove { id: String },
     #[command(hide = true)]
     Tick,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum MailProviderArg {
+    Gmail,
+    Icloud,
+    Outlook,
+    Custom,
+}
+
+impl MailProviderArg {
+    fn default_host(self) -> Option<&'static str> {
+        match self {
+            Self::Gmail => Some("imap.gmail.com"),
+            Self::Icloud => Some("imap.mail.me.com"),
+            Self::Outlook => Some("outlook.office365.com"),
+            Self::Custom => None,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Gmail => "gmail",
+            Self::Icloud => "icloud",
+            Self::Outlook => "outlook",
+            Self::Custom => "custom",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum MailSetupProviderArg {
+    Gmail,
+    Icloud,
+}
+
+impl MailSetupProviderArg {
+    fn provider(self) -> MailProviderArg {
+        match self {
+            Self::Gmail => MailProviderArg::Gmail,
+            Self::Icloud => MailProviderArg::Icloud,
+        }
+    }
+}
+
+#[derive(Subcommand, Debug)]
+enum MailCommand {
+    #[command(
+        about = "Interactively link a Gmail or iCloud account without exposing its app password"
+    )]
+    Setup {
+        #[arg(value_enum, help = "Provider to link; omit for an interactive picker")]
+        provider: Option<MailSetupProviderArg>,
+        #[arg(long, help = "Email address; omit to enter it interactively")]
+        email: Option<String>,
+        #[arg(
+            long,
+            help = "Stable local account id; defaults from the email and provider"
+        )]
+        id: Option<String>,
+    },
+    #[command(
+        about = "Add one read-only IMAP account; the secret goes to the OS credential vault"
+    )]
+    Add {
+        #[arg(long, help = "Stable local account id, such as personal or school")]
+        id: String,
+        #[arg(long)]
+        email: String,
+        #[arg(long, value_enum, default_value_t = MailProviderArg::Gmail)]
+        provider: MailProviderArg,
+        #[arg(long, help = "IMAP TLS host; required for --provider custom")]
+        host: Option<String>,
+        #[arg(long, default_value_t = 993)]
+        port: u16,
+        #[arg(long, default_value = "INBOX")]
+        mailbox: String,
+        #[arg(
+            long,
+            help = "Read the provider app-password from stdin instead of prompting"
+        )]
+        password_stdin: bool,
+    },
+    #[command(about = "List configured account metadata (never secrets)")]
+    List,
+    #[command(about = "Search one or every configured account without marking messages read")]
+    Check {
+        #[arg(long, help = "Account id; omit to check every configured account")]
+        account: Option<String>,
+        #[arg(long)]
+        mailbox: Option<String>,
+        #[arg(
+            long,
+            default_value = "UNSEEN",
+            help = "Bounded IMAP search expression"
+        )]
+        query: String,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+    #[command(about = "Read one exact message UID without marking it read")]
+    Read {
+        #[arg(long)]
+        account: String,
+        #[arg(long)]
+        uid: u32,
+        #[arg(long)]
+        mailbox: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum SatelliteCommand {
+    #[command(about = "Show HII authority, owner scope, bridge health, and OS permission state")]
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Send one stdin/private-prompt message to the sealed owner identity")]
+    Send {
+        #[arg(
+            long,
+            value_name = "LEVEL",
+            help = "Authority envelope: external-preview prompts; external-commit executes"
+        )]
+        authority: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Request an owner call; the Mac requires a second local confirmation")]
+    Call {
+        #[arg(
+            long,
+            value_name = "LEVEL",
+            help = "Authority envelope: external-preview prompts; external-commit executes"
+        )]
+        authority: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -3326,6 +3496,161 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             let authority =
                 resolve_authority(false, authority.as_deref(), AuthorityContext::Server)?;
             acp::serve(&paths, authority)
+        }
+        Some(Commands::Mail { action }) => {
+            let value = match action {
+                MailCommand::Setup {
+                    provider,
+                    email,
+                    id,
+                } => {
+                    let provider = provider
+                        .map(MailSetupProviderArg::provider)
+                        .map(Ok)
+                        .unwrap_or_else(prompt_mail_provider)?;
+                    let email = match email {
+                        Some(value) if !value.trim().is_empty() => value.trim().to_string(),
+                        Some(_) => return Err("email cannot be empty".into()),
+                        None => prompt_mail_line("Email address: ")?,
+                    };
+                    let id = id.unwrap_or_else(|| default_mail_account_id(&email, provider));
+                    eprintln!(
+                        "Linking {} as '{id}'. Use an app-specific password; your normal account password may be rejected.",
+                        provider.label()
+                    );
+                    let mut password = rpassword::prompt_password("Provider app password: ")
+                        .map_err(|error| format!("could not read password: {error}"))?;
+                    let result = mail::setup_account(
+                        &paths,
+                        mail::MailAccount {
+                            id,
+                            email,
+                            host: provider.default_host().unwrap().to_string(),
+                            port: 993,
+                            mailbox: "INBOX".into(),
+                        },
+                        &password,
+                    );
+                    password.zeroize();
+                    result?
+                }
+                MailCommand::Add {
+                    id,
+                    email,
+                    provider,
+                    host,
+                    port,
+                    mailbox,
+                    password_stdin,
+                } => {
+                    let host = host
+                        .or_else(|| provider.default_host().map(str::to_string))
+                        .ok_or("--host is required with --provider custom")?;
+                    let mut password = if password_stdin {
+                        let mut value = String::new();
+                        io::stdin().read_to_string(&mut value).map_err(|error| {
+                            format!("could not read password from stdin: {error}")
+                        })?;
+                        value.trim_end_matches(['\r', '\n']).to_string()
+                    } else {
+                        rpassword::prompt_password("Provider app password: ")
+                            .map_err(|error| format!("could not read password: {error}"))?
+                    };
+                    let result = mail::add_account(
+                        &paths,
+                        mail::MailAccount {
+                            id,
+                            email,
+                            host,
+                            port,
+                            mailbox,
+                        },
+                        &password,
+                    );
+                    password.zeroize();
+                    result?
+                }
+                MailCommand::List => mail::list_accounts(&paths)?,
+                MailCommand::Check {
+                    account,
+                    mailbox,
+                    query,
+                    limit,
+                } => mail::search_many(
+                    &paths,
+                    account.as_deref(),
+                    mailbox.as_deref(),
+                    &query,
+                    limit,
+                    "human:local",
+                )?,
+                MailCommand::Read {
+                    account,
+                    uid,
+                    mailbox,
+                } => mail::read(&paths, &account, mailbox.as_deref(), uid, "human:local")?,
+            };
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?
+            );
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Satellite {
+            host,
+            ssh_config,
+            timeout_seconds,
+            action,
+        }) => {
+            let ssh_config = ssh_config
+                .map(Ok)
+                .unwrap_or_else(satellite::default_ssh_config)?;
+            match action {
+                SatelliteCommand::Status { json } => {
+                    let status = satellite::status(&host, &ssh_config, timeout_seconds)?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&status)
+                                .map_err(|error| error.to_string())?
+                        );
+                    } else {
+                        print_satellite_status(&status);
+                    }
+                }
+                SatelliteCommand::Send { authority, json } => {
+                    let authority =
+                        resolve_authority(false, authority.as_deref(), AuthorityContext::Operator)?;
+                    authorize_satellite(authority, "send one message to the sealed owner")?;
+                    let body = read_satellite_message()?;
+                    let receipt = satellite::dispatch(
+                        &paths,
+                        satellite::SatelliteAction::SendMessage,
+                        Some(&body),
+                        authority,
+                        &host,
+                        &ssh_config,
+                        timeout_seconds,
+                    )?;
+                    print_satellite_receipt(&receipt, json)?;
+                }
+                SatelliteCommand::Call { authority, json } => {
+                    let authority =
+                        resolve_authority(false, authority.as_deref(), AuthorityContext::Operator)?;
+                    authorize_satellite(authority, "request one owner call handoff")?;
+                    let receipt = satellite::dispatch(
+                        &paths,
+                        satellite::SatelliteAction::StartCall,
+                        None,
+                        authority,
+                        &host,
+                        &ssh_config,
+                        timeout_seconds,
+                    )?;
+                    print_satellite_receipt(&receipt, json)?;
+                }
+            }
+            Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Schedule { action }) => {
             let service = schedule::ScheduleService::new(&paths)?;
@@ -6222,6 +6547,164 @@ fn resolve_authority(
     }
 }
 
+fn authorize_satellite(authority: contract::Authority, action: &str) -> Result<(), String> {
+    use contract::Decision;
+    match satellite::authority_decision(authority) {
+        Decision::Allow => Ok(()),
+        Decision::Deny => Err(format!(
+            "Satellite {action} requires HII external authority. Re-run with --authority external-preview for a live prompt or --authority external-commit after explicit operator authorization."
+        )),
+        Decision::Prompt => {
+            if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
+                return Err(format!(
+                    "Satellite {action} needs a live operator prompt at this authority; non-interactive callers cannot approve it."
+                ));
+            }
+            eprint!(
+                "Approve Satellite to {action}? This is an external communication [y/N]: "
+            );
+            io::stderr().flush().map_err(|error| error.to_string())?;
+            let mut answer = String::new();
+            io::stdin()
+                .read_line(&mut answer)
+                .map_err(|error| error.to_string())?;
+            if matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+                Ok(())
+            } else {
+                Err("Satellite communication was not approved by the operator.".into())
+            }
+        }
+    }
+}
+
+fn read_satellite_message() -> Result<String, String> {
+    let mut body = String::new();
+    if io::stdin().is_terminal() {
+        eprint!("Message to sealed owner: ");
+        io::stderr().flush().map_err(|error| error.to_string())?;
+        io::stdin()
+            .read_line(&mut body)
+            .map_err(|error| format!("could not read the message: {error}"))?;
+    } else {
+        io::stdin()
+            .read_to_string(&mut body)
+            .map_err(|error| format!("could not read the message from stdin: {error}"))?;
+    }
+    while matches!(body.chars().last(), Some('\r' | '\n')) {
+        body.pop();
+    }
+    if body.is_empty() {
+        return Err("Satellite message body cannot be empty.".into());
+    }
+    Ok(body)
+}
+
+fn print_satellite_status(status: &serde_json::Value) {
+    let executor = &status["executor"];
+    println!("SATELLITE PERMISSIONS");
+    println!("  identity      sealed owner only");
+    println!("  message       external-commit");
+    println!("  call          external-commit + local Mac confirmation");
+    println!("  yolo          cannot bypass communication approval");
+    println!(
+        "  bridge        running={} socket={} owner-only={}",
+        executor["bridge_running"].as_bool().unwrap_or(false),
+        executor["socket_ready"].as_bool().unwrap_or(false),
+        executor["socket_owner_only"].as_bool().unwrap_or(false)
+    );
+    println!(
+        "  macOS         Messages automation {}",
+        executor["macos_messages_permission"]
+            .as_str()
+            .unwrap_or("unknown")
+    );
+    println!("  call audio    unavailable");
+}
+
+fn print_satellite_receipt(
+    receipt: &satellite::SatelliteReceipt,
+    json: bool,
+) -> Result<(), String> {
+    let value = serde_json::to_value(receipt).map_err(|error| error.to_string())?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?
+        );
+    } else {
+        println!(
+            "satellite  {}\naction     {}\nauthority  {}\ndelivery   {}\nproof      {}",
+            value["status"].as_str().unwrap_or("unknown"),
+            value["action"].as_str().unwrap_or("unknown"),
+            value["authority"].as_str().unwrap_or("unknown"),
+            value["carrier_delivery"].as_str().unwrap_or("unverified"),
+            value["id"].as_str().unwrap_or("unavailable")
+        );
+    }
+    Ok(())
+}
+
+fn prompt_mail_provider() -> Result<MailProviderArg, String> {
+    if !io::stdin().is_terminal() {
+        return Err(
+            "choose a provider explicitly: `hii mail setup gmail` or `hii mail setup icloud`"
+                .into(),
+        );
+    }
+    eprintln!("Choose the email provider to link:");
+    eprintln!("  1. Gmail");
+    eprintln!("  2. iCloud");
+    loop {
+        let choice = prompt_mail_line("Provider [1/2]: ")?;
+        match choice.trim().to_ascii_lowercase().as_str() {
+            "1" | "gmail" => return Ok(MailProviderArg::Gmail),
+            "2" | "icloud" | "i-cloud" => return Ok(MailProviderArg::Icloud),
+            _ => eprintln!("Enter 1 for Gmail or 2 for iCloud."),
+        }
+    }
+}
+
+fn prompt_mail_line(prompt: &str) -> Result<String, String> {
+    if !io::stdin().is_terminal() {
+        return Err("interactive mail setup needs a terminal".into());
+    }
+    eprint!("{prompt}");
+    io::stderr().flush().map_err(|error| error.to_string())?;
+    let mut value = String::new();
+    io::stdin()
+        .read_line(&mut value)
+        .map_err(|error| format!("could not read setup input: {error}"))?;
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        Err("setup input cannot be empty".into())
+    } else {
+        Ok(value)
+    }
+}
+
+fn default_mail_account_id(email: &str, provider: MailProviderArg) -> String {
+    let local = email.split('@').next().unwrap_or(email);
+    let mut id = local
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    while id.contains("--") {
+        id = id.replace("--", "-");
+    }
+    let id = id.trim_matches('-');
+    let local = if id.is_empty() { "mail" } else { id };
+    format!("{local}-{}", provider.label())
+        .chars()
+        .take(64)
+        .collect()
+}
+
 fn fail(error: impl std::fmt::Display) -> ExitCode {
     eprintln!("hii: {error}");
     ExitCode::from(1)
@@ -6747,6 +7230,42 @@ mod tests {
     }
 
     #[test]
+    fn parses_satellite_send_without_message_text_in_arguments() {
+        let cli = Cli::try_parse_from([
+            "hii",
+            "satellite",
+            "send",
+            "--authority",
+            "external-commit",
+            "--json",
+        ])
+        .expect("parse Satellite send");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Satellite {
+                action: SatelliteCommand::Send {
+                    authority: Some(authority),
+                    json: true,
+                },
+                ..
+            }) if authority == "external-commit"
+        ));
+    }
+
+    #[test]
+    fn satellite_send_rejects_positional_message_text() {
+        assert!(Cli::try_parse_from([
+            "hii",
+            "satellite",
+            "send",
+            "private body",
+            "--authority",
+            "external-commit",
+        ])
+        .is_err());
+    }
+
+    #[test]
     fn parses_service_request_as_a_bounded_fulfillment_contract() {
         let cli = Cli::try_parse_from([
             "hii",
@@ -7067,6 +7586,47 @@ mod tests {
                 time: Some("14:30".into()),
                 title: "Review".into()
             })
+        );
+    }
+
+    #[test]
+    fn parses_explicit_gmail_and_icloud_setup() {
+        for provider in ["gmail", "icloud"] {
+            let cli = Cli::try_parse_from([
+                "hii",
+                "mail",
+                "setup",
+                provider,
+                "--email",
+                "person@example.com",
+            ])
+            .unwrap();
+            match cli.command {
+                Some(Commands::Mail {
+                    action:
+                        MailCommand::Setup {
+                            provider: Some(parsed),
+                            email: Some(email),
+                            id: None,
+                        },
+                }) => {
+                    assert_eq!(parsed.provider().label(), provider);
+                    assert_eq!(email, "person@example.com");
+                }
+                other => panic!("unexpected command: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn mail_setup_derives_a_safe_provider_scoped_id() {
+        assert_eq!(
+            default_mail_account_id("First.Last+home@gmail.com", MailProviderArg::Gmail),
+            "first-last-home-gmail"
+        );
+        assert_eq!(
+            default_mail_account_id("@icloud.com", MailProviderArg::Icloud),
+            "mail-icloud"
         );
     }
 }

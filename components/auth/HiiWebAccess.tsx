@@ -213,23 +213,23 @@ function ProsumerLanding({ onLogin, onCreateAccount }: { onLogin: () => void; on
         </a>
         <nav aria-label="HII account access">
           <button type="button" onClick={onLogin}>log in</button>
-          <button type="button" onClick={onCreateAccount}>create your HII</button>
+          <button type="button" onClick={onCreateAccount}>open your HII</button>
         </nav>
       </header>
 
       <section className={styles.hero} id="top" aria-labelledby="hii-hero-title">
         <div className={styles.heroCopy}>
-          <p className={styles.eyebrow}>Human Information Interface / local-first</p>
-          <h1 id="hii-hero-title">Everything you&apos;ve made.<br />Ready to make what&apos;s next.</h1>
-          <p className={styles.heroBody}>HII gives your files, notes, links, media, projects, and tools one working surface—then lets your own agent create with them.</p>
+          <p className={styles.eyebrow}>Human Information Interface / local-first / owner-controlled</p>
+          <h1 id="hii-hero-title">Your digital world.<br /><em>In your hands.</em></h1>
+          <p className={styles.heroBody}>One spatial surface for your files, notes, links, media, projects, tools, and agents—without surrendering the context that makes them yours.</p>
           <div className={styles.heroActions}>
-            <a href="/">try the canvas</a>
+            <a href="/">enter the canvas <span aria-hidden="true">↗</span></a>
             <button type="button" onClick={onCreateAccount}>create your HII</button>
           </div>
-          <p className={styles.heroNote}>Start in your browser. No account needed. Your first canvas stays on this device.</p>
+          <p className={styles.heroNote}>Browser first. No account required. Local by default. Proof attached.</p>
         </div>
         <figure className={styles.heroVisual}>
-          <div className={styles.visualHeader}><span>workspace</span><span>live HII surface</span></div>
+          <div className={styles.visualHeader}><span>HII / workspace 001</span><span>live owner surface</span></div>
           <Image
             src="/marketing/hii-workspace-live.png"
             alt="A live HII canvas with a launch brief, approved context, agent conversation, and verified receipt arranged as connected objects."
@@ -238,9 +238,13 @@ function ProsumerLanding({ onLogin, onCreateAccount }: { onLogin: () => void; on
             priority
             sizes="(max-width: 900px) 100vw, 58vw"
           />
-          <figcaption><span>local-first workspace</span><span>context → work → proof</span></figcaption>
+          <figcaption><span>selected context becomes authority</span><span>context → work → proof</span></figcaption>
         </figure>
       </section>
+
+      <div className={styles.signalStrip} aria-label="HII principles">
+        <span>USER OWNED</span><span>LOCAL FIRST</span><span>SOURCE LINKED</span><span>BOUNDED ACTION</span><span>VERIFIED WORK</span><span>DURABLE RECEIPTS</span>
+      </div>
 
       <section className={styles.workingLoop} aria-labelledby="working-loop-title">
         <header>

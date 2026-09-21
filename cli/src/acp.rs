@@ -194,6 +194,34 @@ const TOOLS: &[ToolSpec] = &[
         "capture a web source as durable content, image, lineage, and proof objects",
     ),
     tool(
+        "mail_accounts",
+        "hii",
+        Reach::Hii,
+        false,
+        "list linked email account metadata without exposing credentials",
+    ),
+    tool(
+        "mail_setup_guide",
+        "hii",
+        Reach::Hii,
+        false,
+        "prepare an explicit Gmail or iCloud link command while keeping secret entry human-only",
+    ),
+    tool(
+        "mail_search",
+        "hii",
+        Reach::Hii,
+        false,
+        "search one or every explicitly configured email account without marking messages read",
+    ),
+    tool(
+        "mail_read",
+        "hii",
+        Reach::Hii,
+        false,
+        "read one exact email message UID within an explicitly named account and mailbox",
+    ),
+    tool(
         "og_next",
         "hii",
         Reach::Hii,
@@ -359,6 +387,23 @@ pub fn input_schema(name: &str) -> Value {
             json!(["query"]),
         ),
         "info_capture" => object(json!({ "url": string }), json!(["url"])),
+        "mail_accounts" => object(json!({}), json!([])),
+        "mail_setup_guide" => object(
+            json!({
+                "provider": { "type": "string", "enum": ["gmail", "icloud"] },
+                "email": string,
+                "id": string,
+            }),
+            json!(["provider"]),
+        ),
+        "mail_search" => object(
+            json!({ "account": string, "mailbox": string, "query": string, "limit": integer }),
+            json!([]),
+        ),
+        "mail_read" => object(
+            json!({ "account": string, "mailbox": string, "uid": integer }),
+            json!(["account", "uid"]),
+        ),
         "system_status" => object(json!({ "system": string }), json!([])),
         "system_observe" => object(
             json!({

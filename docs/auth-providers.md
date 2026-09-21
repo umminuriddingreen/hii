@@ -73,9 +73,49 @@ users continue through the HII passkey account flow. ChatGPT provider sign-in
 is completed in the installed HII app until HII has a separately approved
 hosted ChatGPT authentication boundary.
 
-Future browser, email, and calendar connectors should follow the same local
-contract: authenticate only when needed, store the minimum local grant state,
-and require a separate source selection before model use.
+Future browser and calendar connectors should follow the same local contract:
+authenticate only when needed, store the minimum local grant state, and require
+a separate source selection before model use. Email now has a narrow read-only
+IMAP slice described below; it does not grant background or write access.
+
+## Email (read-only)
+
+HII can check multiple explicitly configured IMAP accounts without importing a
+mailbox or changing provider state. Account metadata lives under
+`~/.hii/mail/`; the provider password or app-password lives in the operating
+system credential vault and never enters HII config, receipts, or command-line
+arguments.
+
+```sh
+hii mail setup                         # interactive Gmail/iCloud picker
+hii mail setup gmail                  # prompts for email + app password
+hii mail setup icloud --email you@icloud.com
+hii mail add --id personal --email you@example.com --provider gmail
+hii mail add --id school --email you@example.edu --provider custom --host imap.example.edu
+hii mail list
+hii mail check                         # UNSEEN across every configured account
+hii mail check --account school --query 'SINCE 1-Sep-2026 FROM professor@example.edu'
+hii mail read --account school --uid 12345
+```
+
+`setup` is the preferred human path. It derives a stable local account id,
+prompts for the email when omitted, and accepts the app password only through a
+hidden terminal prompt. Agents can call `mail_accounts` and
+`mail_setup_guide` to inspect linked account metadata or prepare the exact
+setup command, but the user must enter the secret in a local terminal.
+
+`gmail`, `icloud`, and `outlook` are host presets, not OAuth grants. They work
+only when that provider/account permits an IMAP password or app-password.
+Provider policies that require OAuth remain unsupported by this first slice and
+must fail honestly rather than reuse a browser or Outlook session.
+
+The agent-facing `mail_search` and `mail_read` tools use the same CLI-owned
+implementation through `hii mcp`. A search call grants only its named account
+(or the configured-account set), mailbox, query, and per-account limit. A read
+call grants one exact account, mailbox, and UID. Both use IMAP `BODY.PEEK`, so
+they do not mark a message read. HII records only the scope, query hash, UIDs,
+actor, timestamp, and side-effect claim in `~/.hii/mail/receipts.jsonl`; message
+subjects and bodies are not copied into the receipt ledger.
 
 ## Google
 

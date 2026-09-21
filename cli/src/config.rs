@@ -158,7 +158,9 @@ impl AppPaths {
                 {
                     OX_ALPHA_WEB_URL.to_string()
                 } else {
-                    "http://127.0.0.1:11435".to_string()
+                    inference_config()
+                        .map(|config| config.endpoint)
+                        .unwrap_or_else(|| "http://127.0.0.1:11435".to_string())
                 }
             })
             .trim_end_matches('/')
@@ -197,6 +199,23 @@ impl AppPaths {
     }
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InferenceConfig {
+    endpoint: String,
+}
+
+fn inference_config() -> Option<InferenceConfig> {
+    let root = hii_core::runtime_root().ok()?;
+    let raw = fs::read_to_string(root.join("config/inference.json")).ok()?;
+    let config: InferenceConfig = serde_json::from_str(&raw).ok()?;
+    if config.endpoint.trim().is_empty() {
+        None
+    } else {
+        Some(config)
+    }
+}
+
 /// Cross-platform home directory. Uses `dirs::home_dir()` so it resolves
 /// `USERPROFILE` on Windows and `HOME` on Unix.
 pub fn home_dir() -> Result<PathBuf, String> {
@@ -220,6 +239,45 @@ mod tests {
     use std::sync::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn model_url_uses_persisted_inference_route_without_environment_override() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let root = std::env::temp_dir().join(format!("hii-inference-route-{}", std::process::id()));
+        let config_dir = root.join("config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("inference.json"),
+            r#"{"endpoint":"http://100.125.216.124:11435","model":"mlx-community/Qwen3.5-35B-A3B-4bit","apiKeyFile":null,"contextTokens":262144,"backend":"hii-account-remote","profile":"mac"}"#,
+        )
+        .unwrap();
+        let previous_runtime = env::var_os("HII_RUNTIME_DIR");
+        let previous_url = env::var_os("HII_MODEL_URL");
+        let previous_rapid = env::var_os("HII_RAPID_MLX_URL");
+        let previous_ollama = env::var_os("HII_OLLAMA_URL");
+        let previous_provider = env::var_os("HII_MODEL_PROVIDER");
+        env::set_var("HII_RUNTIME_DIR", &root);
+        env::remove_var("HII_MODEL_URL");
+        env::remove_var("HII_RAPID_MLX_URL");
+        env::remove_var("HII_OLLAMA_URL");
+        env::remove_var("HII_MODEL_PROVIDER");
+
+        assert_eq!(AppPaths::model_url(), "http://100.125.216.124:11435");
+
+        for (name, value) in [
+            ("HII_RUNTIME_DIR", previous_runtime),
+            ("HII_MODEL_URL", previous_url),
+            ("HII_RAPID_MLX_URL", previous_rapid),
+            ("HII_OLLAMA_URL", previous_ollama),
+            ("HII_MODEL_PROVIDER", previous_provider),
+        ] {
+            match value {
+                Some(value) => env::set_var(name, value),
+                None => env::remove_var(name),
+            }
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn rapid_mlx_env_alias_is_recognized() {

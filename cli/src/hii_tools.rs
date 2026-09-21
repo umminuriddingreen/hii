@@ -6,7 +6,7 @@
 //! out to the `hii` front controller (which routes context/og/caps/bridge to
 //! the compatibility layer); they are local-first and carry no network effect.
 
-use crate::tools::ToolResult;
+use crate::{config::AppPaths, mail, tools::ToolResult};
 use hii_core::{
     runtime::{IdentityRefV1, RuntimeSpaceApplyV1},
     runtime_space_apply, runtime_space_snapshot,
@@ -27,6 +27,10 @@ pub const HII_TOOLS: &[&str] = &[
     "canvas_update",
     "info_find",
     "info_capture",
+    "mail_accounts",
+    "mail_setup_guide",
+    "mail_search",
+    "mail_read",
     "og_next",
     "caps_check",
     "board_read",
@@ -100,6 +104,81 @@ pub fn execute_as(
                 Err("info_capture needs a http or https URL".to_string())
             } else {
                 hii(repo, &["info", "capture", url.trim(), "--json"])
+            }
+        }
+        "mail_accounts" => AppPaths::discover().and_then(|paths| {
+            mail::list_accounts(&paths)
+                .and_then(|value| serde_json::to_string(&value).map_err(|error| error.to_string()))
+        }),
+        "mail_setup_guide" => {
+            let provider = argument_field(arguments, "provider").unwrap_or_default();
+            let provider = provider.trim().to_ascii_lowercase();
+            if !matches!(provider.as_str(), "gmail" | "icloud") {
+                Err("mail_setup_guide provider must be gmail or icloud".into())
+            } else {
+                let email =
+                    argument_field(arguments, "email").filter(|value| !value.trim().is_empty());
+                let id = argument_field(arguments, "id").filter(|value| !value.trim().is_empty());
+                let mut command = vec![
+                    "hii".to_string(),
+                    "mail".to_string(),
+                    "setup".to_string(),
+                    provider.clone(),
+                ];
+                if let Some(email) = email.as_deref() {
+                    command.extend(["--email".into(), email.trim().into()]);
+                }
+                if let Some(id) = id.as_deref() {
+                    command.extend(["--id".into(), id.trim().into()]);
+                }
+                serde_json::to_string(&serde_json::json!({
+                    "schemaVersion": 1,
+                    "kind": "hii.mail.setup-guide",
+                    "provider": provider,
+                    "command": command,
+                    "userActionRequired": true,
+                    "secretBoundary": "Run this command in a local interactive terminal. The agent must never request or receive the app password.",
+                }))
+                .map_err(|error| error.to_string())
+            }
+        }
+        "mail_search" => {
+            let paths = AppPaths::discover();
+            let account = argument_field(arguments, "account");
+            let mailbox = argument_field(arguments, "mailbox");
+            let query = argument_field(arguments, "query").unwrap_or_else(|| "UNSEEN".into());
+            let limit = arguments
+                .and_then(|value| value.get("limit"))
+                .and_then(Value::as_u64)
+                .unwrap_or(20) as usize;
+            paths.and_then(|paths| {
+                mail::search_many(
+                    &paths,
+                    account.as_deref(),
+                    mailbox.as_deref(),
+                    &query,
+                    limit,
+                    actor_id,
+                )
+                .and_then(|value| serde_json::to_string(&value).map_err(|error| error.to_string()))
+            })
+        }
+        "mail_read" => {
+            let account = argument_field(arguments, "account").unwrap_or_default();
+            let mailbox = argument_field(arguments, "mailbox");
+            let uid = arguments
+                .and_then(|value| value.get("uid"))
+                .and_then(Value::as_u64)
+                .and_then(|value| u32::try_from(value).ok())
+                .unwrap_or(0);
+            if account.trim().is_empty() || uid == 0 {
+                Err("mail_read needs an account and positive uid".into())
+            } else {
+                AppPaths::discover().and_then(|paths| {
+                    mail::read(&paths, &account, mailbox.as_deref(), uid, actor_id).and_then(
+                        |value| serde_json::to_string(&value).map_err(|error| error.to_string()),
+                    )
+                })
             }
         }
         "og_next" => hii(repo, &["og", "status"]),
@@ -754,6 +833,10 @@ mod tests {
         assert!(is_hii_tool("og_next"));
         assert!(is_hii_tool("info_find"));
         assert!(is_hii_tool("info_capture"));
+        assert!(is_hii_tool("mail_search"));
+        assert!(is_hii_tool("mail_read"));
+        assert!(is_hii_tool("mail_accounts"));
+        assert!(is_hii_tool("mail_setup_guide"));
         assert!(is_hii_tool("board_write"));
         assert!(!is_hii_tool("write"));
     }

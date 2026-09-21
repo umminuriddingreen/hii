@@ -228,7 +228,7 @@ impl Ollama {
         {
             return Self::new(OX_ALPHA_WEB_URL.to_string());
         }
-        Self::for_mode("auto")
+        Self::new(crate::config::AppPaths::model_url())
     }
 
     pub fn for_mode(_mode: &str) -> Self {
@@ -721,9 +721,7 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
                 self.agent
                     .post(&format!("{}/v1/chat/completions", self.base_url)),
             );
-            request
-                .send_json(body)
-                .map_err(format_ureq)
+            request.send_json(body).map_err(format_ureq)
         };
         let response = match request {
             Ok(response) => response,

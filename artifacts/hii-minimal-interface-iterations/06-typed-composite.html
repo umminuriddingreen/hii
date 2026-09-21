@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1344, initial-scale=1">
+  <title>HII — information and space</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 1344px; height: 768px; margin: 0; overflow: hidden; }
+    body {
+      background: #f7f5ee;
+      color: #171714;
+      font-family: Inter, "Segoe UI", Arial, sans-serif;
+      text-rendering: geometricPrecision;
+      -webkit-font-smoothing: antialiased;
+    }
+    main {
+      position: relative;
+      width: 1344px;
+      height: 768px;
+      background: url("06-typed-composite-base.png") center / 1344px 768px no-repeat;
+    }
+    .brand {
+      position: absolute;
+      top: 38px;
+      left: 69px;
+      font-size: 24px;
+      font-weight: 600;
+      letter-spacing: -0.06em;
+    }
+    .coordinate {
+      position: absolute;
+      top: 45px;
+      right: 68px;
+      color: rgba(23, 23, 20, 0.48);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+    .source {
+      position: absolute;
+      top: 301px;
+      left: 69px;
+      width: 250px;
+    }
+    .eyebrow {
+      display: block;
+      margin-bottom: 8px;
+      color: rgba(23, 23, 20, 0.48);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .source strong {
+      display: block;
+      font-size: 16px;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+    }
+    .source p {
+      margin: 5px 0 0;
+      color: rgba(23, 23, 20, 0.58);
+      font-size: 11px;
+      line-height: 1.4;
+    }
+    .human {
+      position: absolute;
+      top: 390px;
+      left: 84px;
+      width: 360px;
+    }
+    .human p,
+    .relation p,
+    .model p {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 450;
+      letter-spacing: -0.015em;
+    }
+    .relation {
+      position: absolute;
+      top: 346px;
+      left: 462px;
+      width: 330px;
+    }
+    .model {
+      position: absolute;
+      top: 326px;
+      left: 900px;
+      width: 286px;
+      color: rgba(23, 23, 20, 0.68);
+    }
+    .model p + p { margin-top: 9px; }
+    .proof {
+      position: absolute;
+      top: 284px;
+      left: 1227px;
+      color: #1747e8;
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .rule {
+      position: absolute;
+      right: 68px;
+      bottom: 44px;
+      color: rgba(23, 23, 20, 0.42);
+      font-size: 10px;
+      letter-spacing: 0.02em;
+    }
+  </style>
+</head>
+<body>
+  <main aria-label="A minimal HII workspace showing source information, a human spatial gesture, a local model trace, and a verified result.">
+    <div class="brand">hii</div>
+    <div class="coordinate">information / space</div>
+
+    <section class="source">
+      <span class="eyebrow">source / 01</span>
+      <strong>Courtyard study</strong>
+      <p>material · light · enclosure</p>
+    </section>
+
+    <section class="human">
+      <span class="eyebrow">you</span>
+      <p>connect this to the launch brief</p>
+    </section>
+
+    <section class="relation">
+      <span class="eyebrow">selection</span>
+      <p>this relation is the prompt</p>
+    </section>
+
+    <section class="model">
+      <span class="eyebrow">local model trace</span>
+      <p>I found the brief.</p>
+      <p>Make a three-step plan →</p>
+    </section>
+
+    <div class="proof">ready</div>
+    <div class="rule">model work appears beside information, then becomes information</div>
+  </main>
+</body>
+</html>

@@ -1423,5 +1423,114 @@
     "evidence": ["src/routes/(app)/create/+page.svelte", "lib/server/hii-comfy.ts", "app/api/ecosystem/route.ts"],
     "status": "ready",
     "trustLevel": "operator-reviewed"
+  },
+  {
+    "id": "hii.mail.read",
+    "name": "Check Explicitly Scoped Email",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Search one or every operator-configured IMAP account and read an exact message UID without changing mailbox state.",
+    "inputs": [
+      "configured account id or all configured accounts",
+      "mailbox",
+      "bounded IMAP search expression or exact message UID"
+    ],
+    "outputs": [
+      "source-scoped message metadata",
+      "bounded message content when an exact UID is requested",
+      "metadata-only local receipt"
+    ],
+    "permissions": [
+      "provider app-password stored in the operating-system credential vault",
+      "TLS IMAP connection to the configured provider host",
+      "BODY.PEEK reads only",
+      "no send, delete, move, flag, mark-read, attachment persistence, or background ingestion"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "cli/src/mail.rs",
+      "cli/src/hii_tools.rs",
+      "cli/src/acp.rs",
+      "~/.hii/mail/receipts.jsonl"
+    ],
+    "status": "partial",
+    "statusNotes": "The CLI, OS-vault credential boundary, read-only IMAP implementation, MCP tools, and offline tests are present. A real provider login and mailbox read remain unverified until the operator configures an account.",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.satellite.message_send",
+    "name": "Message the Sealed Owner Identity",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Send one owner-authorized message through a replaceable Satellite executor and the phone identity the owner already controls.",
+    "inputs": [
+      "message body from private prompt or stdin",
+      "authenticated Satellite executor",
+      "HII external authority"
+    ],
+    "outputs": [
+      "owner-only transport dispatch",
+      "metadata-only HII receipt",
+      "explicitly unverified carrier-delivery state"
+    ],
+    "permissions": [
+      "message sealed owner identity only",
+      "external-commit authority or live external-preview approval",
+      "macOS Messages Automation permission",
+      "no caller-selected recipient, attachment, group, or background ingestion",
+      "message body and phone identity excluded from HII receipts"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "cli/src/satellite.rs",
+      "integrations/satellite/macos/Sources/SatelliteBridge/main.swift",
+      "integrations/satellite/macos/Sources/SatelliteCore/Policy.swift",
+      "~/.hii/satellite/hii-receipts.jsonl"
+    ],
+    "status": "partial",
+    "statusNotes": "The owner-only bridge, HII authority gate, and metadata-only receipt path are implemented. End-to-end sending remains blocked until the owner enables Satellite Bridge to control Messages in macOS Automation settings.",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.satellite.call_start",
+    "name": "Request an Owner Call Handoff",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Request one owner-only carrier call handoff while requiring both HII external authority and a fresh local confirmation on the Mac.",
+    "inputs": [
+      "authenticated Satellite executor",
+      "HII external authority",
+      "fresh local Mac confirmation"
+    ],
+    "outputs": [
+      "system calling UI handoff",
+      "metadata-only HII receipt",
+      "explicitly unverified connection and audio state"
+    ],
+    "permissions": [
+      "call sealed owner identity only",
+      "external-commit authority or live external-preview approval",
+      "fresh local confirmation required for every handoff",
+      "YOLO cannot bypass the communication approval floor",
+      "no claim of connected call or live agent audio"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "cli/src/satellite.rs",
+      "integrations/satellite/macos/Sources/SatelliteBridge/main.swift",
+      "~/.hii/satellite/hii-receipts.jsonl"
+    ],
+    "status": "partial",
+    "statusNotes": "The HII authority gate and the Mac-local confirmation are implemented. The handoff does not prove call connection and live autonomous call audio is unavailable.",
+    "trustLevel": "first-party"
   }
 ]

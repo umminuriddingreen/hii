@@ -377,6 +377,18 @@ pub const ROUTES: &[Route] = &[
         "manage local recurring work through cron",
     ),
     native(
+        "mail",
+        Extended,
+        Context,
+        "check explicitly scoped email without changing mailbox state",
+    ),
+    native(
+        "satellite",
+        Extended,
+        Infra,
+        "govern owner-only messaging and call handoff",
+    ),
+    native(
         "tools",
         Extended,
         Tools,
