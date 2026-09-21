@@ -136,8 +136,18 @@ pub const CHAT_NATIVE_VERBS: &[&str] = &["list", "show", "new", "settings", "sen
 
 /// Every command `hii` answers to, and who answers it.
 pub const ROUTES: &[Route] = &[
-    delegated("inventory", Extended, Context, "inspect source, installed, device, and live evidence"),
-    delegated("archive", Extended, Context, "sync ChatGPT exports and local Codex conversations"),
+    delegated(
+        "inventory",
+        Extended,
+        Context,
+        "inspect source, installed, device, and live evidence",
+    ),
+    delegated(
+        "archive",
+        Extended,
+        Context,
+        "sync ChatGPT exports and local Codex conversations",
+    ),
     native(
         "memory",
         Extended,
@@ -196,6 +206,12 @@ pub const ROUTES: &[Route] = &[
     ),
     native("board", Core, Work, "local kanban/todo board"),
     native(
+        "time",
+        Core,
+        Work,
+        "plan time blocks and synchronize them across enrolled devices",
+    ),
+    native(
         "state",
         Extended,
         Work,
@@ -232,8 +248,18 @@ pub const ROUTES: &[Route] = &[
         "detect OS, architecture, model format, and runtime",
     ),
     delegated("model", Core, Infra, "fully manage the HII model backend"),
-    delegated("rhino", Core, Tools, "control Rhino and Grasshopper through HII"),
-    delegated("git-map", Core, Context, "explore commit topology, time, and diffs in the terminal"),
+    delegated(
+        "rhino",
+        Core,
+        Tools,
+        "control Rhino and Grasshopper through HII",
+    ),
+    delegated(
+        "git-map",
+        Core,
+        Context,
+        "explore commit topology, time, and diffs in the terminal",
+    ),
     delegated(
         "open",
         Core,

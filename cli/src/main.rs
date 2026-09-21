@@ -70,6 +70,7 @@ mod stream;
 mod system_monitor;
 mod terminal_image;
 mod text;
+mod time_management;
 mod timeline;
 mod tool_artifacts;
 mod tools;
@@ -653,6 +654,11 @@ enum Commands {
     Schedule {
         #[command(subcommand)]
         action: ScheduleCommand,
+    },
+    #[command(about = "Plan time blocks and synchronize them across enrolled HII devices")]
+    Time {
+        #[command(subcommand)]
+        action: TimeCommand,
     },
     #[command(
         name = "tools-manifest",
@@ -1897,6 +1903,83 @@ enum ScheduleCommand {
     Remove { id: String },
     #[command(hide = true)]
     Tick,
+}
+
+#[derive(Subcommand, Debug)]
+enum TimeCommand {
+    #[command(about = "Create a local time block")]
+    Add {
+        #[arg(help = "RFC3339 or local YYYY-MM-DDTHH:MM")]
+        start: String,
+        #[arg(help = "RFC3339 or local YYYY-MM-DDTHH:MM")]
+        end: String,
+        #[arg(required = true, num_args = 1..)]
+        title: Vec<String>,
+        #[arg(long, value_name = "TASK_ID")]
+        task: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Show today's time blocks")]
+    Today {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Show the current Monday-through-Sunday week")]
+    Week {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(alias = "ls", about = "List time blocks from a local date/time")]
+    List {
+        #[arg(long, help = "RFC3339 or local YYYY-MM-DDTHH:MM; defaults to now")]
+        from: Option<String>,
+        #[arg(long, default_value_t = 7)]
+        days: i64,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Mark one time block complete")]
+    Done {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Cancel one time block without erasing its history")]
+    Cancel {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Append a tombstone for one time block")]
+    Remove {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Find overlapping planned time blocks")]
+    Conflicts {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Export the append-only time journal for an HII peer")]
+    Export {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(hide = true, about = "Merge one bounded base64-encoded peer record")]
+    Merge {
+        #[arg(long, value_name = "BASE64_JSON")]
+        record: String,
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Two-way merge with an enrolled HII device and save remote receipts")]
+    Sync {
+        system: String,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -3660,6 +3743,130 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                 ScheduleCommand::Resume { id } => println!("{}", service.set_enabled(&id, true)?),
                 ScheduleCommand::Remove { id } => println!("{}", service.remove(&id)?),
                 ScheduleCommand::Tick => println!("{}", service.tick()?),
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Time { action }) => {
+            let service = time_management::TimeService::new(&paths);
+            match action {
+                TimeCommand::Add {
+                    start,
+                    end,
+                    title,
+                    task,
+                    json,
+                } => {
+                    let block = service.add(&start, &end, &title.join(" "), task)?;
+                    println!("{}", time_management::render_blocks(&[block], json)?);
+                }
+                TimeCommand::Today { json } => {
+                    println!(
+                        "{}",
+                        time_management::render_blocks(&service.today()?, json)?
+                    );
+                }
+                TimeCommand::Week { json } => {
+                    println!(
+                        "{}",
+                        time_management::render_blocks(&service.week()?, json)?
+                    );
+                }
+                TimeCommand::List { from, days, json } => {
+                    println!(
+                        "{}",
+                        time_management::render_blocks(
+                            &service.range_from(from.as_deref(), days)?,
+                            json,
+                        )?
+                    );
+                }
+                TimeCommand::Done { id, json } => {
+                    let block = service.set_status(&id, "completed")?;
+                    println!("{}", time_management::render_blocks(&[block], json)?);
+                }
+                TimeCommand::Cancel { id, json } => {
+                    let block = service.set_status(&id, "cancelled")?;
+                    println!("{}", time_management::render_blocks(&[block], json)?);
+                }
+                TimeCommand::Remove { id, json } => {
+                    let record = service.remove(&id)?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&record).map_err(|e| e.to_string())?
+                        );
+                    } else {
+                        println!("Removed {} (history retained)", record.block_id);
+                    }
+                }
+                TimeCommand::Conflicts { json } => {
+                    let conflicts = service.conflicts()?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::json!({
+                                "schemaVersion": 1,
+                                "kind": "hii.time.conflicts",
+                                "count": conflicts.len(),
+                                "conflicts": conflicts
+                            }))
+                            .map_err(|e| e.to_string())?
+                        );
+                    } else if conflicts.is_empty() {
+                        println!("No time conflicts.");
+                    } else {
+                        for (left, right) in conflicts {
+                            println!("{} overlaps {}", left.id, right.id);
+                        }
+                    }
+                }
+                TimeCommand::Export { json: _ } => println!(
+                    "{}",
+                    serde_json::to_string_pretty(&service.export()?).map_err(|e| e.to_string())?
+                ),
+                TimeCommand::Merge { record, json } => {
+                    let merged = service.merge_record_base64(&record)?;
+                    if json {
+                        println!("{}", serde_json::json!({"ok": true, "merged": merged}));
+                    } else {
+                        println!(
+                            "{}",
+                            if merged {
+                                "Merged 1 time record"
+                            } else {
+                                "Time record already present"
+                            }
+                        );
+                    }
+                }
+                TimeCommand::Sync { system, json } => {
+                    let registry = load_systems(&paths)?;
+                    let peer = find_system(&registry, &system)?;
+                    if peer.local || !matches!(peer.transport.as_str(), "ssh" | "tailscale-ssh") {
+                        return Err("time sync requires an enrolled SSH peer".into());
+                    }
+                    if peer.status != "ready" {
+                        return Err(format!(
+                            "time sync requires a ready peer; {} reports {}",
+                            peer.id, peer.status
+                        ));
+                    }
+                    let report = service.sync(&peer.id, &peer.host, &peer.os)?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+                        );
+                    } else {
+                        println!(
+                            "Synced {}: pulled {}, pushed {} ({} receipt(s))",
+                            report.peer,
+                            report.pulled,
+                            report.pushed,
+                            report.remote_receipts.len()
+                        );
+                    }
+                }
             }
             Ok(ExitCode::SUCCESS)
         }

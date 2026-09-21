@@ -23,6 +23,9 @@ pub fn read_only(args: &[String]) -> bool {
     if matches!(words.as_slice(), ["--version"] | ["--help"] | ["models"]) {
         return true;
     }
+    if words.as_slice() == ["time", "export", "--json"] {
+        return true;
+    }
     let (prefix, tail) = if words.starts_with(&["runner", "model", "doctor"])
         || words.starts_with(&["runner", "model", "status"])
     {

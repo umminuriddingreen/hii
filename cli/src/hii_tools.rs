@@ -157,21 +157,42 @@ pub fn execute_as(
             let task = argument_field(handoff, "task").unwrap_or_default();
             let message = argument_field(handoff, "message").unwrap_or_default();
             if to.trim().is_empty() || task.trim().is_empty() || message.trim().is_empty() {
-                Err("agent_send needs arguments.to, arguments.task, and arguments.message".to_string())
+                Err(
+                    "agent_send needs arguments.to, arguments.task, and arguments.message"
+                        .to_string(),
+                )
             } else {
-                let mut command = vec!["agents".to_string(), "send".into(), "--from".into(), "hii-agent".into(),
-                    "--to".into(), to, "--task".into(), task, "--message".into(), message];
+                let mut command = vec![
+                    "agents".to_string(),
+                    "send".into(),
+                    "--from".into(),
+                    "hii-agent".into(),
+                    "--to".into(),
+                    to,
+                    "--task".into(),
+                    task,
+                    "--message".into(),
+                    message,
+                ];
                 for field in ["workspace", "receipt"] {
                     if let Some(value) = argument_field(handoff, field) {
-                        command.push(format!("--{field}")); command.push(value);
+                        command.push(format!("--{field}"));
+                        command.push(value);
                     }
                 }
-                if let Some(contexts) = handoff.and_then(|value| value.get("contextRefs")).and_then(Value::as_array) {
+                if let Some(contexts) = handoff
+                    .and_then(|value| value.get("contextRefs"))
+                    .and_then(Value::as_array)
+                {
                     for context in contexts.iter().filter_map(Value::as_str) {
-                        command.push("--context".into()); command.push(context.into());
+                        command.push("--context".into());
+                        command.push(context.into());
                     }
                 }
-                hii(repo, &command.iter().map(String::as_str).collect::<Vec<_>>())
+                hii(
+                    repo,
+                    &command.iter().map(String::as_str).collect::<Vec<_>>(),
+                )
             }
         }
         "bridge_send" => {

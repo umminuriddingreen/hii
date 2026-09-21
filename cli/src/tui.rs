@@ -8,7 +8,10 @@ use std::{
     env, fs,
     io::{self, IsTerminal, Write},
     path::{Path, PathBuf},
-    sync::{atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering}, Arc},
+    sync::{
+        atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
+        Arc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -21,7 +24,9 @@ pub struct TransientStatus {
 
 impl TransientStatus {
     pub fn start(label: &str) -> Option<Self> {
-        if !io::stdout().is_terminal() { return None; }
+        if !io::stdout().is_terminal() {
+            return None;
+        }
         let label = label.to_string();
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = stop.clone();
@@ -29,8 +34,11 @@ impl TransientStatus {
             let started = Instant::now();
             let mut frame = 0usize;
             while !worker_stop.load(Ordering::Relaxed) {
-                let glyph = if env::var("HII_MOTION").as_deref() == Ok("off") { "*" }
-                    else { ["|", "/", "-", "\\"][frame % 4] };
+                let glyph = if env::var("HII_MOTION").as_deref() == Ok("off") {
+                    "*"
+                } else {
+                    ["|", "/", "-", "\\"][frame % 4]
+                };
                 let line = format!("  {glyph} HII  {label}  {}s", started.elapsed().as_secs());
                 let clipped = crate::text::clip(&line, terminal_width());
                 print!("\r\x1b[2K{}", paint(&clipped, &[palette().primary]));
@@ -39,14 +47,19 @@ impl TransientStatus {
                 thread::sleep(Duration::from_millis(180));
             }
         });
-        Some(Self { stop, worker: Some(worker) })
+        Some(Self {
+            stop,
+            worker: Some(worker),
+        })
     }
 }
 
 impl Drop for TransientStatus {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        if let Some(worker) = self.worker.take() { let _ = worker.join(); }
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
         print!("\r\x1b[2K");
         let _ = io::stdout().flush();
     }
@@ -209,7 +222,12 @@ impl Theme {
     }
 }
 
-const THEMES: [Theme; 4] = [Theme::Heritage, Theme::Midnight, Theme::Mono, Theme::Cyberpunk];
+const THEMES: [Theme; 4] = [
+    Theme::Heritage,
+    Theme::Midnight,
+    Theme::Mono,
+    Theme::Cyberpunk,
+];
 
 fn active_theme() -> Theme {
     match ACTIVE_THEME.load(Ordering::Relaxed) {
@@ -741,7 +759,14 @@ pub fn model_activity(frame: usize, phase: &str, detail: Option<&str>) -> String
         .unwrap_or_default();
     format!(
         "  {}  {}{}",
-        paint(if std::env::var("HII_MOTION").as_deref() == Ok("off") { "*" } else { FRAMES[frame % FRAMES.len()] }, &[BOLD, palette().primary]),
+        paint(
+            if std::env::var("HII_MOTION").as_deref() == Ok("off") {
+                "*"
+            } else {
+                FRAMES[frame % FRAMES.len()]
+            },
+            &[BOLD, palette().primary]
+        ),
         paint(phase, &[BOLD]),
         paint(&detail, &[DIM, palette().muted])
     )

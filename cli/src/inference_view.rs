@@ -9,7 +9,10 @@ pub struct MiniInference {
 
 impl MiniInference {
     pub fn new(_prompt: &str) -> Self {
-        Self { frame: 0, output_started: false }
+        Self {
+            frame: 0,
+            output_started: false,
+        }
     }
 
     pub fn observe_delta(&mut self, delta: &str) {
@@ -17,10 +20,18 @@ impl MiniInference {
     }
 
     pub fn next_frame(&mut self, phase: &str, elapsed: Duration, width: usize) -> String {
-        let motion = std::env::var("HII_MOTION").map(|value| value != "off").unwrap_or(true);
-        let glyph = if motion { ["|", "/", "-", "\\"][self.frame % 4] } else { "*" };
+        let motion = std::env::var("HII_MOTION")
+            .map(|value| value != "off")
+            .unwrap_or(true);
+        let glyph = if motion {
+            ["|", "/", "-", "\\"][self.frame % 4]
+        } else {
+            "*"
+        };
         self.frame = self.frame.wrapping_add(1);
-        let phase = if self.output_started { "Generating" } else {
+        let phase = if self.output_started {
+            "Generating"
+        } else {
             match phase {
                 "thinking" => "Thinking",
                 "reviewing" => "Reviewing",
@@ -28,7 +39,10 @@ impl MiniInference {
                 other => other,
             }
         };
-        crate::text::clip(&format!("  {glyph} HII  {phase}  {}s", elapsed.as_secs()), width)
+        crate::text::clip(
+            &format!("  {glyph} HII  {phase}  {}s", elapsed.as_secs()),
+            width,
+        )
     }
 }
 
