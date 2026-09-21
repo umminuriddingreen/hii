@@ -130,6 +130,8 @@ describe('canvas terminal command', () => {
     expect(root).toContain("startObjectiveAgent(node.id, text(node.payload.text) || text(node.payload.draft))");
     expect(root).toContain("No browser shell access was granted.");
     expect(root).toContain("onStartWork={runtimeEnabled ? startFromCommand : isAccount && spaceId ? queueAccountObjective : undefined}");
+    expect(root).toContain('bufferedAgentEvents.current.set(event.runId');
+    expect(root).toContain('for (const event of buffered) applyObjectiveAgentEvent(nodeId, event)');
   });
 
   it('routes direct workspace typing into editable canvas text', () => {

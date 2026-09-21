@@ -1208,6 +1208,7 @@ export function HiiRoot({
   const mouse = useRef<Point>({ x: 400, y: 280 });
   const activeRun = useRef<string | null>(null);
   const activeObjectives = useRef(new Map<string, string>());
+  const bufferedAgentEvents = useRef(new Map<string, AgentEventV1[]>());
   const pendingContextStart = useRef<null | {
     pack: ContextPackV1;
     /** Kept so removing an item can recompile rather than edit the pack locally. */
@@ -1812,6 +1813,46 @@ export function HiiRoot({
   const selectedNodes = useMemo(() => workspace.nodes.filter((node) => selected.includes(node.id)), [selected, workspace.nodes]);
   useEffect(() => { onSelectionChange?.(selectedNodes); }, [onSelectionChange, selectedNodes]);
 
+  const applyObjectiveAgentEvent = useCallback((nodeId: string, event: AgentEventV1) => {
+    const node = workspaceRef.current.nodes.find((entry) => entry.id === nodeId);
+    if (!node) return;
+    const objectiveStatus = event.status === 'completed'
+      ? 'completed'
+      : event.status === 'failed'
+        ? 'failed'
+        : event.status === 'cancelled'
+          ? 'cancelled'
+          : 'running';
+    const proofRefs = event.receiptPath
+      ? [...new Set([...(node.object?.proofRefs || []), event.receiptPath])]
+      : node.object?.proofRefs;
+    const finished = ['completed', 'failed', 'cancelled'].includes(event.status);
+    const priorOutput = text(node.payload.output);
+    const nextOutput = event.text ? `${priorOutput}\n${event.text}`.trim() : priorOutput;
+    workspaceRef.current.patchNode(nodeId, {
+      payload: {
+        ...node.payload,
+        runId: event.runId,
+        status: objectiveStatus,
+        output: nextOutput,
+        receiptPath: event.receiptPath || node.payload.receiptPath
+      },
+      object: {
+        ...(node.object || { kind: 'intent' as const }),
+        status: objectiveStatus,
+        runId: event.runId,
+        proofRefs,
+        audit: finished
+          ? [
+              ...(node.object?.audit || []),
+              { ts: new Date().toISOString(), actor: 'agent' as const, action: `objective run ${objectiveStatus}` }
+            ].slice(-20)
+          : node.object?.audit
+      }
+    });
+    if (finished) activeObjectives.current.delete(event.runId);
+  }, []);
+
   const startObjectiveAgent = useCallback(async (nodeId: string, intent: string) => {
     const node = workspaceRef.current.nodes.find((entry) => entry.id === nodeId);
     // A `run` object is the same governed thing as an agent-objective note: an
@@ -1856,6 +1897,9 @@ export function HiiRoot({
             object: { ...(current.object || { kind: 'intent' as const }), runId: result.runId }
           });
         }
+        const buffered = bufferedAgentEvents.current.get(result.runId) || [];
+        bufferedAgentEvents.current.delete(result.runId);
+        for (const event of buffered) applyObjectiveAgentEvent(nodeId, event);
       });
       if (!started) {
         const current = workspaceRef.current.nodes.find((entry) => entry.id === nodeId);
@@ -1875,7 +1919,7 @@ export function HiiRoot({
         object: { ...(current.object || { kind: 'intent' as const }), status: 'failed' }
       });
     }
-  }, [mode, startWithContext]);
+  }, [applyObjectiveAgentEvent, mode, startWithContext]);
 
   const queueAccountObjective = useCallback((intent: string) => {
     const value = intent.trim();
@@ -2147,45 +2191,13 @@ export function HiiRoot({
     let disposed = false;
     listenAgentEvents((event: AgentEventV1) => {
       const objectiveNodeId = activeObjectives.current.get(event.runId);
-      if (activeRun.current !== event.runId && !objectiveNodeId) return;
+      if (activeRun.current !== event.runId && !objectiveNodeId) {
+        const buffered = bufferedAgentEvents.current.get(event.runId) || [];
+        bufferedAgentEvents.current.set(event.runId, [...buffered, event].slice(-20));
+        return;
+      }
       if (objectiveNodeId) {
-        const node = workspaceRef.current.nodes.find((entry) => entry.id === objectiveNodeId);
-        if (node) {
-          const objectiveStatus = event.status === 'completed'
-            ? 'completed'
-            : event.status === 'failed'
-              ? 'failed'
-              : event.status === 'cancelled'
-                ? 'cancelled'
-                : 'running';
-          const proofRefs = event.receiptPath
-            ? [...new Set([...(node.object?.proofRefs || []), event.receiptPath])]
-            : node.object?.proofRefs;
-          const finished = ['completed', 'failed', 'cancelled'].includes(event.status);
-          const priorOutput = text(node.payload.output);
-          const nextOutput = event.text ? `${priorOutput}\n${event.text}`.trim() : priorOutput;
-          workspaceRef.current.patchNode(objectiveNodeId, {
-            payload: {
-              ...node.payload,
-              status: objectiveStatus,
-              output: nextOutput,
-              receiptPath: event.receiptPath || node.payload.receiptPath
-            },
-            object: {
-              ...(node.object || { kind: 'intent' as const }),
-              status: objectiveStatus,
-              runId: event.runId,
-              proofRefs,
-              audit: finished
-                ? [
-                    ...(node.object?.audit || []),
-                    { ts: new Date().toISOString(), actor: 'agent' as const, action: `objective run ${objectiveStatus}` }
-                  ].slice(-20)
-                : node.object?.audit
-            }
-          });
-        }
-        if (['completed', 'failed', 'cancelled'].includes(event.status)) activeObjectives.current.delete(event.runId);
+        applyObjectiveAgentEvent(objectiveNodeId, event);
         return;
       }
       const conversation = activeConversation.current?.runId === event.runId ? activeConversation.current : null;
@@ -2237,7 +2249,7 @@ export function HiiRoot({
       disposed = true;
       unlisten();
     };
-  }, [runtimeEnabled]);
+  }, [applyObjectiveAgentEvent, runtimeEnabled]);
 
   useEffect(() => {
     const inField = (target: EventTarget | null) => (target as Element | null)?.closest?.('input,textarea,[contenteditable]');

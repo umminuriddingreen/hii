@@ -12,6 +12,9 @@ account workspace persistence adapter. It claims the request on the Mac and
 starts it through the existing approved-context `agent_start` path. Progress,
 completion state, and the receipt path are written back to the same object and
 therefore become visible in the authenticated web workspace on its next sync.
+Native run events that arrive before the new run id is attached to its canvas
+objective are buffered and replayed, so an immediate failure cannot leave the
+account object falsely stuck in `running`.
 
 Security boundary:
 
