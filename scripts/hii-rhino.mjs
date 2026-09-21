@@ -65,6 +65,27 @@ function printWindowState() {
   process.stdout.write('\nRHINOCODE DOCUMENTS\n');
 }
 
+function runAgent(words) {
+  const toolIndex = words.indexOf('--tool');
+  const tool = toolIndex >= 0 ? words[toolIndex + 1]?.toLowerCase() : 'codex';
+  if (!['codex', 'inspect', 'grasshopper'].includes(tool)) fail('agent tool must be codex, inspect, or grasshopper');
+  const promptWords = words.filter((_, index) => index !== toolIndex && index !== toolIndex + 1);
+  if (!promptWords.length) fail('agent request is required');
+  const workspace = process.cwd();
+  const prompt = [
+    `Selected Rhino tool: ${tool}`,
+    `Bounded workspace: ${workspace}`,
+    'Use HII Rhino/RhinoCode for live document interaction. You may create or edit .gh and .py files inside the bounded workspace. Do not use Termite. Verify mutations and write a receipt.',
+    `User request: ${promptWords.join(' ')}`
+  ].join('\n');
+  const args = ['run', '--cwd', workspace, '--authority', tool === 'inspect' ? 'read-only' : 'workspace', '--stream', '--context-source', `rhino-cli:${tool}`, prompt];
+  const result = process.platform === 'win32'
+    ? spawnSync('powershell.exe', ['-NoProfile', '-File', path.join(process.env.APPDATA || '', 'npm', 'hii.ps1'), ...args], { cwd: workspace, stdio: 'inherit', windowsHide: false })
+    : spawnSync(path.join(process.env.HOME || '', 'bin', 'hii'), args, { cwd: workspace, stdio: 'inherit' });
+  if (result.error) fail(result.error.message);
+  process.exit(result.status ?? 1);
+}
+
 const [verb = 'status', ...words] = process.argv.slice(2);
 if (verb === 'status') {
   printWindowState();
@@ -83,6 +104,8 @@ if (verb === 'status') {
   if (!existsSync(definition)) fail(`definition not found: ${definition}`);
   const escaped = definition.replaceAll('"', '""');
   run([...targetArgs(), 'command', `_-Grasshopper _Document _Open "${escaped}" _Enter`], { inherit: true });
+} else if (verb === 'agent') {
+  runAgent(words);
 } else {
-  fail('usage: hii-rhino status | command <command> | script <path.py> | grasshopper <path.gh>');
+  fail('usage: hii-rhino status | command <command> | script <path.py> | grasshopper <path.gh> | agent [--tool codex|inspect|grasshopper] <request>');
 }
