@@ -84,6 +84,49 @@ records for actual verification and remaining platform/authentication gaps.
   commands. Existing auto-apply reloads without a dirty-draft handshake or
   application-health rollback, so do not enable it for active unsaved sessions.
 
+## Forks and Editable Agent Setups
+
+The installed CLI does not have to come from upstream `main`. A clean branch or
+user fork can be built, smoke-checked, and activated directly:
+
+```sh
+npm run hii:cli:activate
+```
+
+For an agent or user actively editing HII, activation of uncommitted changes is
+explicit rather than automatic:
+
+```sh
+npm run hii:cli:activate-local
+```
+
+The local command records the exact checkout path and base commit, marks the
+release as a dirty `working-tree` build, and assigns a unique local release ID.
+It never claims that the resulting binary is represented by the base commit.
+Ignored files and credentials are not copied into the release.
+
+Both commands build in the installer-owned release area rather than the source
+checkout's `target` directory. The candidate binary is smoke-tested before the
+`current.bin` marker changes, so a running Windows HII executable is not
+overwritten. The stable launcher reads that marker on each new invocation;
+already-running sessions continue on their current binary until they exit.
+The prior launcher is backed up before the first marker-launcher installation,
+and every activation is appended to `install-history.jsonl`.
+Windows release builds use one Cargo job by default to avoid observed MSVC
+compiler access violations; set `HII_CARGO_JOBS` to an explicit safe value to
+override it.
+
+If a user-owned launcher sets model routing or other private environment values,
+make it read `current.bin` and pass `--keep-launcher` to the installer. That mode
+switches only the release marker and leaves the custom launcher byte-for-byte
+unchanged; it refuses to proceed when the launcher does not already exist.
+
+Use `node scripts/hii-release-installer.mjs --source-root . --dry-run` to inspect
+paths and build intent. The clean-source command still refuses a dirty checkout;
+`--from-working-tree` is the deliberate boundary for running local edits. Source
+updates remain limited to designated clean `main` checkouts and never rewrite a
+fork or active worktree.
+
 ## Validation
 
 ```sh

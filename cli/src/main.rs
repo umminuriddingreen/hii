@@ -3707,13 +3707,13 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             tui::system("Running queued follow-up.");
             pending
         } else if interactive {
-            // Raw-mode keyboard model: Enter=submit, Shift+Tab=queue, Esc/Ctrl+B/Ctrl+T
-            // are surfaced as events (interrupt/background/task-view meaning applies
-            // during a run; at the idle prompt they are informational).
+            // Raw-mode keyboard model: Enter=submit, Shift+Tab=queue, and
+            // Esc/Ctrl+B/Ctrl+T surface HII work and run-control events.
             match keyboard::read_event(
                 conversation.is_public_test(),
                 &input_history,
                 conversation.keymap(),
+                &conversation.composer_footer(),
             )
             .map_err(|error| error.to_string())?
             {
@@ -3739,7 +3739,11 @@ fn repl(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     continue;
                 }
                 keyboard::InputEvent::TaskView => {
-                    tui::system(&conversation.task_view());
+                    match conversation.open_work_view() {
+                        Ok(message) if !message.trim().is_empty() => tui::system(&message),
+                        Ok(_) => {}
+                        Err(error) => tui::error(&error),
+                    }
                     continue;
                 }
                 keyboard::InputEvent::AutoAdvisor => match conversation.auto_advisor_suggestion() {
@@ -4172,7 +4176,7 @@ fn slash_help() -> String {
 }
 
 fn slash_help_compact() -> String {
-    "CREATE + ACT\n  Describe the outcome you want. HII can inspect, make, and verify.\n  !<command>             run a shell command directly\n  /attach <path>         add a file or image\n  /plan [prompt|off]     explore without changing anything\n\nYOUR WORK\n  /status                session, workspace, model, and usage\n  /overview              projects, context, and latest proof\n  /proof [run-id]        inspect what completed\n  /diff                   see workspace changes\n  /files                  browse and attach local files\n\nSHAPE THE SESSION\n  /model                  choose a model\n  /theme                  choose the visual signature\n  /permissions            inspect or change authority\n  /undo                   remove the last exchange\n  /new                    begin with fresh context\n  /exit                   leave HII\n\nType / to browse controls  ·  /help all for the complete reference\nWhile HII works: Enter steers  ·  Tab queues  ·  Esc stops"
+    "CREATE + ACT\n  Describe the outcome you want. HII can inspect, make, and verify.\n  !<command>             run a shell command directly\n  /attach <path>         add a file or image\n  /plan [prompt|off]     explore without changing anything\n\nYOUR WORK\n  Esc                     open durable HII work\n  /status                session, workspace, model, and usage\n  /overview              projects, context, and latest proof\n  /proof [run-id]        inspect what completed\n  /diff                   see workspace changes\n  /files                  browse and attach local files\n\nSHAPE THE SESSION\n  /model                  choose a model\n  /theme                  choose the visual signature\n  /permissions            inspect or change authority\n  /undo                   remove the last exchange\n  /new                    begin with fresh context\n  /exit                   leave HII\n\nType / to browse controls  ·  /help all for the complete reference\nIdle: Esc opens work · Ctrl+J adds a line · Ctrl+C exits\nWhile HII works: Enter steers  ·  Tab queues  ·  Esc stops"
         .replace("Tab queues", "Shift+Tab queues")
 }
 

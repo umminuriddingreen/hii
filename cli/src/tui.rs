@@ -390,7 +390,7 @@ pub(crate) fn composer_window(buf: &str, cursor: usize, width: usize) -> (String
     (visible.into_iter().collect(), cursor_column - start)
 }
 
-fn short_path(path: &Path) -> String {
+pub(crate) fn short_path(path: &Path) -> String {
     let displayed = path.display().to_string();
     let Some(home) = dirs::home_dir() else {
         return displayed;
@@ -509,8 +509,16 @@ pub fn prompt_frame(_frame: usize) -> String {
     format!("\r\n  {} ", paint("›", &[BOLD, palette().primary]))
 }
 
-pub fn prompt_footer() -> String {
-    String::new()
+pub fn composer_placeholder() -> String {
+    paint(
+        "Describe what should exist next",
+        &[DIM, palette().muted],
+    )
+}
+
+pub fn prompt_footer(context: &str) -> String {
+    let context = crate::text::clip_line(context, terminal_width().saturating_sub(4));
+    format!("  {}", paint(&context, &[DIM, palette().muted]))
 }
 
 fn public_command(command: &str) -> bool {
@@ -1039,13 +1047,18 @@ mod tests {
     }
 
     #[test]
-    fn prompt_is_a_minimal_codex_style_input_line() {
+    fn prompt_is_a_minimal_hii_input_line() {
         assert!(!prompt_frame(0).trim().is_empty());
         assert_eq!(prompt_frame(0), prompt_frame(99));
         assert!(prompt_frame(0).contains('›'));
         assert!(!prompt_frame(0).contains("INTENT"));
         assert!(!prompt_frame(0).contains('╭'));
-        assert!(super::prompt_footer().is_empty());
+        assert!(super::composer_placeholder().contains("Describe what should exist next"));
+        let footer = super::prompt_footer(
+            "LOOK  Esc work · DO  Enter act · DELEGATE  Ctrl+B · local · workspace",
+        );
+        assert!(footer.contains("LOOK"));
+        assert!(footer.contains("DELEGATE"));
     }
 
     #[test]

@@ -179,6 +179,46 @@ try {
   assert.equal(dirty.ok, false);
   assert.equal(readHistoryLines(historyPath).length, 2, 'failed run should not append history');
 
+  const local = parseResult(
+    runInstaller(env, [
+      '--source-root', source,
+      '--release-root', releaseRoot,
+      '--launcher-path', launcher,
+      '--from-working-tree'
+    ]).output
+  );
+  assert.equal(local.ok, true);
+  assert.equal(local.sourceKind, 'working-tree');
+  assert.equal(local.sourceTreeClean, false);
+  assert.match(local.releaseId, new RegExp(`^${sourceCommit.slice(0, 12)}-local-`));
+  assert.notEqual(local.releaseDir, first.releaseDir);
+  assert.equal(existsSync(local.releaseBinary), true);
+  assert.equal(
+    existsSync(path.join(source, 'target', 'release', isWin ? 'hii.exe' : 'hii')),
+    false,
+    'installer build should not write the checkout target directory'
+  );
+  const localManifest = releaseManifest(path.join(local.releaseDir, 'release.json'));
+  assert.equal(localManifest.schema, 'hii-release-v2');
+  assert.equal(localManifest.sourceKind, 'working-tree');
+  assert.equal(localManifest.sourceTreeClean, false);
+
+  const customLauncher = '# custom marker-aware launcher\n';
+  writeFileSync(launcher, customLauncher);
+  const customLocal = parseResult(
+    runInstaller(env, [
+      '--source-root', source,
+      '--release-root', releaseRoot,
+      '--launcher-path', launcher,
+      '--from-working-tree',
+      '--keep-launcher'
+    ]).output
+  );
+  assert.equal(customLocal.ok, true);
+  assert.equal(customLocal.launcherManaged, false);
+  assert.equal(readFileSync(launcher, 'utf8'), customLauncher, '--keep-launcher must preserve custom setup');
+  assert.equal(readFileSync(path.join(releaseRoot, 'current.bin'), 'utf8').trim(), customLocal.releaseBinary);
+
   execFileSync('git', ['-C', source, 'checkout', '--', 'cli/src/main.rs']);
   const snapshotSource = path.join(scratch, 'snapshot');
   cpSync(source, snapshotSource, {

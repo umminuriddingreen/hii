@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 
 const BINARY_NAME = process.platform === 'win32' ? 'hii.exe' : 'hii';
@@ -80,10 +80,16 @@ function printUsage() {
 Usage:
   hii-release-installer [--source-root <path> | --source-snapshot <path>]
                         [--source-commit <git-commit>]
+                        [--from-working-tree]
                         [--release-root <path>] [--launcher-path <path>]
+                        [--keep-launcher]
                         [--dry-run]
 
 Install a host-built hii CLI release into a per-user release root.
+
+Clean branches and forks are accepted. Use --from-working-tree to explicitly
+build uncommitted local edits; they receive a unique local release id and are
+never represented as a commit-signed release.
 `;
   console.log(usage.trim());
 }
@@ -100,10 +106,14 @@ function parseArgs(argv) {
       options.sourceSnapshot = argv[++i];
     } else if (arg === '--source-commit') {
       options.sourceCommit = argv[++i];
+    } else if (arg === '--from-working-tree') {
+      options.fromWorkingTree = true;
     } else if (arg === '--release-root') {
       options.releaseRoot = argv[++i];
     } else if (arg === '--launcher-path') {
       options.launcherPath = argv[++i];
+    } else if (arg === '--keep-launcher') {
+      options.keepLauncher = true;
     } else if (arg === '--dry-run') {
       options.dryRun = true;
     } else {
@@ -342,8 +352,13 @@ function sha256(filePath) {
   return digest.digest('hex');
 }
 
-function sourceBinaryPath(sourceRoot) {
-  return path.join(sourceRoot, 'target', 'release', BINARY_NAME);
+function buildBinaryPath(buildTargetRoot) {
+  return path.join(buildTargetRoot, 'release', BINARY_NAME);
+}
+
+function makeLocalReleaseId(commit) {
+  const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, '');
+  return `${commit.slice(0, 12)}-local-${timestamp}-${randomBytes(3).toString('hex')}`;
 }
 
 function launcherBackupDir(launcherPath) {
@@ -426,17 +441,25 @@ function makeLauncher(platform, markerFile) {
     : LAUNCHER_TEMPLATE_SHELL.replace('{{MARKER_FILE}}', markerFile);
 }
 
-function buildBinary(sourceRoot, sourceCargo) {
+function buildBinary(sourceRoot, sourceCargo, buildTargetRoot) {
   const cargo = process.env.HII_CARGO_BIN || 'cargo';
-  runCommand(cargo, ['build', '--manifest-path', sourceCargo, '--package', 'hii-cli', '--release'], {
-    cwd: sourceRoot,
-    env: process.env
-  });
-  const sourceBinary = sourceBinaryPath(sourceRoot);
-  if (!existsSync(sourceBinary)) {
-    throw new Error(`CLI binary missing after build: ${sourceBinary}`);
+  const cargoArgs = ['build', '--manifest-path', sourceCargo, '--package', 'hii-cli', '--release'];
+  const jobs = process.env.HII_CARGO_JOBS || (process.platform === 'win32' ? '1' : null);
+  if (jobs) {
+    cargoArgs.push('--jobs', jobs);
   }
-  return sourceBinary;
+  runCommand(cargo, cargoArgs, {
+    cwd: sourceRoot,
+    env: {
+      ...process.env,
+      CARGO_TARGET_DIR: buildTargetRoot
+    }
+  });
+  const builtBinary = buildBinaryPath(buildTargetRoot);
+  if (!existsSync(builtBinary)) {
+    throw new Error(`CLI binary missing after build: ${builtBinary}`);
+  }
+  return builtBinary;
 }
 
 function main() {
@@ -448,6 +471,9 @@ function main() {
 
   if (options.sourceRoot && options.sourceSnapshot) {
     throw new Error('use only one of --source-root or --source-snapshot');
+  }
+  if (options.sourceSnapshot && options.fromWorkingTree) {
+    throw new Error('--from-working-tree requires --source-root, not --source-snapshot');
   }
 
   const platform = process.platform;
@@ -462,8 +488,11 @@ function main() {
   }
 
   const sourceMarker = resolveSourceState(sourceRoot, options.sourceCommit, Boolean(options.sourceSnapshot));
-  if (sourceMarker.dirty && sourceMarker.verified) {
-    throw new Error(`source root is dirty: ${sourceRoot}. commit-signed release installs require a clean checkout.`);
+  if (sourceMarker.dirty && sourceMarker.verified && !options.fromWorkingTree) {
+    throw new Error(
+      `source root is dirty: ${sourceRoot}. commit-signed installs require a clean checkout; `
+      + 'use --from-working-tree to explicitly activate local edits.'
+    );
   }
 
   const sourceCargo = path.join(sourceRoot, 'Cargo.toml');
@@ -473,9 +502,16 @@ function main() {
   }
 
   const commit = sourceMarker.commit;
-  const releaseDir = path.join(defaults.releaseRoot, commit);
+  const sourceKind = options.sourceSnapshot
+    ? 'snapshot'
+    : sourceMarker.dirty
+      ? 'working-tree'
+      : 'clean-git';
+  const releaseId = sourceKind === 'working-tree' ? makeLocalReleaseId(commit) : commit;
+  const releaseDir = path.join(defaults.releaseRoot, releaseId);
   const releaseBinary = path.join(releaseDir, BINARY_NAME);
   const releaseManifestPath = path.join(releaseDir, RELEASE_MANIFEST_FILE);
+  const buildTargetRoot = path.join(defaults.releaseRoot, '.build');
   const currentMarker = readMarker(defaults.markerFile);
   const alreadyCurrent = currentMarker === releaseBinary;
   const shouldBuild = !existsSync(releaseBinary) || !existsSync(releaseManifestPath);
@@ -490,9 +526,13 @@ function main() {
       sourceRoot,
       sourceCommit: commit,
       sourceCommitVerified: sourceMarker.verified,
+      sourceTreeClean: !sourceMarker.dirty,
+      sourceKind,
+      releaseId,
       releaseRoot: defaults.releaseRoot,
       releaseDir,
       launcherPath: defaults.launcherPath,
+      launcherManaged: !options.keepLauncher,
       markerPath: defaults.markerFile,
       wouldRunBuild: shouldBuild,
       launcherBackup: null
@@ -502,15 +542,18 @@ function main() {
   }
 
   const previousLauncher = existsSync(defaults.launcherPath) ? readFileSync(defaults.launcherPath, 'utf8') : null;
+  if (options.keepLauncher && previousLauncher === null) {
+    throw new Error(`--keep-launcher requires an existing marker-aware launcher: ${defaults.launcherPath}`);
+  }
   const previousMarker = currentMarker;
   const previousManifest = existsSync(releaseManifestPath) ? readFileSync(releaseManifestPath, 'utf8') : null;
   const previousHistory = existsSync(defaults.historyFile) ? readFileSync(defaults.historyFile, 'utf8') : null;
 
   if (shouldBuild) {
-    buildBinary(sourceRoot, sourceCargo);
+    const builtBinary = buildBinary(sourceRoot, sourceCargo, buildTargetRoot);
     buildPerformed = true;
     mkdirSync(releaseDir, { recursive: true });
-    cpSync(sourceBinaryPath(sourceRoot), releaseBinary);
+    cpSync(builtBinary, releaseBinary);
     if (platform !== 'win32') {
       chmodSync(releaseBinary, 0o755);
     }
@@ -526,10 +569,13 @@ function main() {
     : null;
 
   const releaseManifest = {
-    schema: 'hii-release-v1',
+    schema: 'hii-release-v2',
+    releaseId,
     commit,
     sourceRoot,
     sourceCommitVerified: sourceMarker.verified,
+    sourceTreeClean: !sourceMarker.dirty,
+    sourceKind,
     createdAt: new Date().toISOString(),
     releaseBinary,
     releaseRoot: defaults.releaseRoot,
@@ -542,7 +588,7 @@ function main() {
   const launcherBody = makeLauncher(platform, defaults.markerFile);
   const launcherMode = platform === 'win32' ? undefined : 0o755;
   const previousLauncherPath = existsSync(defaults.launcherPath) ? path.resolve(defaults.launcherPath) : null;
-  const launcherNeedsUpdate = previousLauncher !== launcherBody;
+  const launcherNeedsUpdate = !options.keepLauncher && previousLauncher !== launcherBody;
 
   let launcherWrite = { backupPath: null, wroteBackup: false };
   let action = alreadyCurrent ? 'already-current' : 'installed';
@@ -551,11 +597,15 @@ function main() {
     at: new Date().toISOString(),
     platform,
     commit,
+    releaseId,
     releaseBinary,
     sourceRoot,
     sourceCommitVerified: sourceMarker.verified,
+    sourceTreeClean: !sourceMarker.dirty,
+    sourceKind,
     sourceSnapshot: Boolean(options.sourceSnapshot),
     launcherPath: defaults.launcherPath,
+    launcherManaged: !options.keepLauncher,
     previousCurrent: previousMarker,
     buildPerformed,
     launcherBackup: null
@@ -588,10 +638,14 @@ function main() {
       sourceRoot,
       sourceCommit: commit,
       sourceCommitVerified: sourceMarker.verified,
+      sourceTreeClean: !sourceMarker.dirty,
+      sourceKind,
+      releaseId,
       releaseRoot: defaults.releaseRoot,
       releaseDir,
       releaseBinary,
       launcherPath: defaults.launcherPath,
+      launcherManaged: !options.keepLauncher,
       markerPath: defaults.markerFile,
       historyPath: defaults.historyFile,
       buildPerformed,

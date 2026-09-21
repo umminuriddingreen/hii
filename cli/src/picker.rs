@@ -87,7 +87,7 @@ pub fn select(title: &str, choices: &[Choice]) -> Result<Option<String>> {
         match key.code {
             KeyCode::Esc => break None,
             KeyCode::Char('c' | 'd') if control => break None,
-            KeyCode::Enter => {
+            KeyCode::Enter | KeyCode::Right => {
                 break visible
                     .get(selected)
                     .map(|index| choices[*index].value.clone())
@@ -179,7 +179,7 @@ fn frame(
         lines.push(format!("    {}", tui::style_dim("no match")));
         lines.push(format!(
             "    {}",
-            tui::style_dim("↑↓ navigate  Enter select  Esc cancel")
+            tui::style_dim("↑↓ navigate  Enter/→ open  Esc back")
         ));
         return lines;
     }
@@ -217,7 +217,7 @@ fn frame(
     lines.push(format!(
         "    {}",
         tui::style_dim(&format!(
-            "↑↓ navigate  Enter select  Esc cancel  ·  {}/{}",
+            "↑↓ navigate  Enter/→ open  Esc back  ·  {}/{}",
             selected + 1,
             visible.len()
         ))
@@ -346,6 +346,7 @@ mod tests {
         assert!(lines[2].contains("▸"));
         assert!(lines[1].contains("qwen3.6:35b-mlx"));
         assert!(lines.last().unwrap().contains("2/3"));
+        assert!(lines.last().unwrap().contains("Enter/→ open"));
     }
 
     #[test]

@@ -2029,6 +2029,147 @@ impl Conversation {
         format!("{}\n\nBACKGROUND JOBS\n{jobs}", self.status())
     }
 
+    pub fn composer_footer(&self) -> String {
+        let mode = if self.plan_mode {
+            "plan"
+        } else {
+            self.authority.label()
+        };
+        let workspace = crate::text::clip_line(
+            &crate::tui::short_path(self.tools.workspace()),
+            22,
+        );
+        format!(
+            "LOOK Esc · DO Enter/^J · DELEGATE ^B · {} · {} · {}",
+            crate::text::clip_line(&self.model, 20),
+            mode,
+            workspace
+        )
+    }
+
+    /// Open HII's durable work surface. Objective threads are the HII-native
+    /// equivalent of transient provider tasks: they retain project identity,
+    /// standing meaning, and proof references instead of becoming another
+    /// provider-specific session list.
+    pub fn open_work_view(&mut self) -> Result<String, String> {
+        if !crate::picker::is_available() {
+            return Ok(self.task_view());
+        }
+        let mut items = Vec::new();
+        for project in hii_core::adaptive::projects(&self.paths.runtime)? {
+            for thread in hii_core::adaptive::threads(&self.paths.runtime, &project.id)? {
+                if thread.status == "closed" {
+                    continue;
+                }
+                items.push((project.clone(), thread));
+            }
+        }
+        items.sort_by(|left, right| right.1.updated_at.cmp(&left.1.updated_at));
+        if items.is_empty() {
+            return Ok("HII WORK\nNo durable intentions yet. Describe what should exist next; HII will bind it to this project and keep its meaning.".into());
+        }
+        let current_thread = self.thread.as_ref().map(|(_, thread)| thread.as_str());
+        let choices = items
+            .iter()
+            .map(|(project, thread)| {
+                let label = format!(
+                    "{}  ›  {}",
+                    project.name,
+                    crate::text::clip_line(&thread.objective, 64)
+                );
+                let current = current_thread == Some(thread.id.as_str());
+                let detail = format!(
+                    "{}{} · {}",
+                    if current { "in focus · " } else { "" },
+                    thread.status,
+                    crate::tui::short_path(std::path::Path::new(&project.canonical_root))
+                );
+                crate::picker::Choice::new(label, detail).current(current)
+            })
+            .collect::<Vec<_>>();
+        let title = format!(
+            "HII WORK  {} open{}",
+            choices.len(),
+            if current_thread.is_some() {
+                " · 1 in focus"
+            } else {
+                ""
+            }
+        );
+        let Some(selected) = crate::picker::select(&title, &choices)? else {
+            return Ok(String::new());
+        };
+        let Some(index) = choices.iter().position(|choice| choice.value == selected) else {
+            return Err("selected HII work item is no longer available".into());
+        };
+        let (project, thread) = &items[index];
+        let project_root = std::fs::canonicalize(&project.canonical_root)
+            .unwrap_or_else(|_| std::path::PathBuf::from(&project.canonical_root));
+        let live_root = std::fs::canonicalize(self.tools.workspace())
+            .unwrap_or_else(|_| self.tools.workspace().to_path_buf());
+        if project_root != live_root {
+            return Ok(format!(
+                "OPEN IN PROJECT\n{}\n{}\n\nThis session remains bounded to {}. Open the selected intention with:\nhii --cwd \"{}\"",
+                project.name,
+                thread.objective,
+                crate::tui::short_path(self.tools.workspace()),
+                project.canonical_root
+            ));
+        }
+        hii_core::adaptive::activate_thread(&self.paths.runtime, &project.id, &thread.id)?;
+        let snapshot =
+            hii_core::adaptive::snapshot(&self.paths.runtime, &project.id, &thread.id)?;
+        let standing = snapshot
+            .semantic_items
+            .iter()
+            .take(20)
+            .map(|item| {
+                format!(
+                    "- {}: {}",
+                    item.item_kind,
+                    crate::text::clip_line(&item.text, 500)
+                )
+            })
+            .collect::<Vec<_>>();
+        self.messages.push(Message::system(format!(
+            "HII WORK IN FOCUS\nProject: {}\nRoot: {}\nObjective: {}\nStanding meaning:\n{}\nContinue from this durable objective unless the operator clearly starts another one.",
+            project.name,
+            project.canonical_root,
+            thread.objective,
+            if standing.is_empty() {
+                "- none recorded yet".into()
+            } else {
+                standing.join("\n")
+            }
+        )));
+        self.thread = Some((project.id.clone(), thread.id.clone()));
+        self.last_projection_item = snapshot
+            .semantic_items
+            .iter()
+            .rev()
+            .find(|item| item.item_kind == "objectiveProjection")
+            .map(|item| item.id.clone());
+        self.store.event(
+            "conversation.work_focused",
+            json!({
+                "project": project.id,
+                "thread": thread.id,
+                "objective": redact_text(&thread.objective)
+            }),
+        )?;
+        Ok(format!(
+            "IN FOCUS\n{}\n{}\n{} standing context item{} restored. Continue in the composer.",
+            project.name,
+            thread.objective,
+            snapshot.semantic_items.len(),
+            if snapshot.semantic_items.len() == 1 {
+                ""
+            } else {
+                "s"
+            }
+        ))
+    }
+
     pub fn keymap(&self) -> &Keymap {
         &self.keymap
     }
@@ -3549,7 +3690,8 @@ impl Conversation {
     ) -> Result<ChatResult, String> {
         let started = Instant::now();
         let mut reasoning_started = false;
-        let mut live_input = crate::keyboard::LiveInput::enter(self.keymap.clone())?;
+        let footer = self.composer_footer();
+        let mut live_input = crate::keyboard::LiveInput::enter(self.keymap.clone(), footer)?;
         let interactive = io::stdout().is_terminal();
         let raw_activity = matches!(self.thinking_mode, ThinkingMode::Raw);
         let stream_activity = matches!(

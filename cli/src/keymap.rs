@@ -136,7 +136,7 @@ impl Keymap {
             .collect::<Vec<_>>()
             .join("\n");
         format!(
-            "KEYMAP  {}\n{}\n\nProfiles: default | vim\nCustomize: /keymap bind <action> <chord>\nRecovery controls always remain: Enter · arrows · Esc · Ctrl+C",
+            "KEYMAP  {}\n{}\n\nProfiles: default | vim\nCustomize: /keymap bind <action> <chord>\nIdle: Esc opens HII work · Ctrl+C exits\nRunning: Esc stops · Enter steers",
             self.file.profile, rows
         )
     }

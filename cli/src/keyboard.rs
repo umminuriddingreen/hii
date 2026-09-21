@@ -2,7 +2,8 @@
 //!
 //! The REPL wants richer control keys than a line-based `read_line` can offer:
 //! Enter submits steering for the current run, Shift+Tab queues a line for the next
-//! checkpoint, Esc interrupts, and Ctrl+B / Ctrl+T reach into run control. This
+//! checkpoint, Esc interrupts active work or opens durable work while idle,
+//! and Ctrl+B / Ctrl+T reach into run control. This
 //! module owns that translation and nothing else — it turns raw key presses
 //! into a high-level [`InputEvent`] the REPL can act on.
 //!
@@ -36,7 +37,7 @@ pub enum InputEvent {
     Submit(String),
     /// Shift+Tab — queue the current line for the next checkpoint (not submitted now).
     Queue(String),
-    /// Esc — interrupt the current run.
+    /// Esc — interrupt the current run; the idle reader maps it to HII work.
     Interrupt,
     /// Ctrl+B — start the current composer text as a supervised background task.
     Background(String),
@@ -86,10 +87,11 @@ pub struct LiveInput {
     terminal_width: usize,
     stream_active: bool,
     has_committed_output: bool,
+    footer: String,
 }
 
 impl LiveInput {
-    pub fn enter(keymap: Keymap) -> Result<Option<Self>> {
+    pub fn enter(keymap: Keymap, footer: String) -> Result<Option<Self>> {
         if !is_interactive() {
             return Ok(None);
         }
@@ -106,6 +108,7 @@ impl LiveInput {
                 .max(1),
             stream_active: true,
             has_committed_output: false,
+            footer,
         };
         input.begin_stream()?;
         Ok(Some(input))
@@ -145,7 +148,7 @@ impl LiveInput {
             out,
             "{}\r\n{}\x1b[1A\r\x1b[L",
             crate::tui::prompt_frame(0),
-            crate::tui::prompt_footer()
+            crate::tui::prompt_footer(&self.footer)
         )
         .map_err(|e| format!("failed to draw active composer: {e}"))?;
         out.flush()
@@ -205,9 +208,14 @@ impl LiveInput {
         let mut out = io::stdout();
         let (visible, column) =
             crate::tui::composer_window(&self.buf, self.cursor, crate::tui::composer_width());
+        let painted = if self.buf.is_empty() {
+            crate::tui::composer_placeholder()
+        } else {
+            visible.clone()
+        };
         write!(
             out,
-            "\x1b[s\x1b[2B\r\x1b[2K{}{visible}",
+            "\x1b[s\x1b[2B\r\x1b[2K{}{painted}",
             crate::tui::prompt_frame(0)
                 .rsplit_once("\r\n")
                 .map_or(crate::tui::prompt_frame(0), |(_, row)| row.to_string()),
@@ -343,6 +351,11 @@ fn apply_key(key: KeyEvent, buf: &mut String, cursor: &mut usize, keymap: &Keyma
     }
     if key.code == KeyCode::Tab {
         return KeyOutcome::Emit(InputEvent::AutoAdvisor);
+    }
+    if matches!(key.code, KeyCode::Char('j')) && ctrl {
+        buf.insert(*cursor, '\n');
+        *cursor += 1;
+        return KeyOutcome::Continue;
     }
     match key.code {
         KeyCode::Enter => {
@@ -520,6 +533,7 @@ fn clear_menu(out: &mut impl Write, rows: usize) {
 
 fn redraw(
     prompt: &str,
+    footer: &str,
     buf: &str,
     cursor: usize,
     selected: usize,
@@ -531,10 +545,15 @@ fn redraw(
     // The buffer is windowed to one row: a wrapped line would desynchronise
     // every relative cursor move below and tear the frame apart.
     let (visible, column) = crate::tui::composer_window(buf, cursor, crate::tui::composer_width());
+    let painted = if buf.is_empty() {
+        crate::tui::composer_placeholder()
+    } else {
+        visible
+    };
     write!(
         out,
-        "\r\x1b[2K{prompt}{visible}\r\n\x1b[2K{}",
-        crate::tui::prompt_footer()
+        "\r\x1b[2K{prompt}{painted}\r\n\x1b[2K{}",
+        crate::tui::prompt_footer(footer)
     )
     .map_err(|e| format!("failed to write prompt: {e}"))?;
     let menu = crate::tui::command_menu(buf, selected, public_test);
@@ -601,7 +620,12 @@ fn complete_selected_command(
     *cursor = buf.len();
 }
 
-pub fn read_event(public_test: bool, history: &[String], keymap: &Keymap) -> Result<InputEvent> {
+pub fn read_event(
+    public_test: bool,
+    history: &[String],
+    keymap: &Keymap,
+    footer: &str,
+) -> Result<InputEvent> {
     let _guard = RawModeGuard::enter()?;
     let mut buf = String::new();
     let mut cursor = 0usize;
@@ -613,6 +637,7 @@ pub fn read_event(public_test: bool, history: &[String], keymap: &Keymap) -> Res
     let mut draft = String::new();
     redraw(
         &crate::tui::prompt_frame(frame),
+        footer,
         &buf,
         cursor,
         selected,
@@ -631,6 +656,7 @@ pub fn read_event(public_test: bool, history: &[String], keymap: &Keymap) -> Res
             selected = 0;
             redraw(
                 &crate::tui::prompt_frame(frame),
+                footer,
                 &buf,
                 cursor,
                 selected,
@@ -658,6 +684,7 @@ pub fn read_event(public_test: bool, history: &[String], keymap: &Keymap) -> Res
                 selected = move_selection(selected, matches.len(), -1);
                 redraw(
                     &crate::tui::prompt_frame(frame),
+                    footer,
                     &buf,
                     cursor,
                     selected,
@@ -672,6 +699,7 @@ pub fn read_event(public_test: bool, history: &[String], keymap: &Keymap) -> Res
                 selected = move_selection(selected, matches.len(), 1);
                 redraw(
                     &crate::tui::prompt_frame(frame),
+                    footer,
                     &buf,
                     cursor,
                     selected,
@@ -693,6 +721,7 @@ pub fn read_event(public_test: bool, history: &[String], keymap: &Keymap) -> Res
                 selected = 0;
                 redraw(
                     &crate::tui::prompt_frame(frame),
+                    footer,
                     &buf,
                     cursor,
                     selected,
@@ -715,6 +744,7 @@ pub fn read_event(public_test: bool, history: &[String], keymap: &Keymap) -> Res
                 selected = 0;
                 redraw(
                     &crate::tui::prompt_frame(frame),
+                    footer,
                     &buf,
                     cursor,
                     selected,
@@ -729,6 +759,7 @@ pub fn read_event(public_test: bool, history: &[String], keymap: &Keymap) -> Res
                     selected = 0;
                     redraw(
                         &crate::tui::prompt_frame(frame),
+                        footer,
                         &buf,
                         cursor,
                         selected,
@@ -751,6 +782,7 @@ pub fn read_event(public_test: bool, history: &[String], keymap: &Keymap) -> Res
                     selected = 0;
                     redraw(
                         &crate::tui::prompt_frame(frame),
+                        footer,
                         &buf,
                         cursor,
                         selected,
@@ -758,6 +790,13 @@ pub fn read_event(public_test: bool, history: &[String], keymap: &Keymap) -> Res
                         public_test,
                     )?;
                     continue;
+                }
+                KeyCode::Esc => {
+                    let mut out = io::stdout();
+                    clear_menu(&mut out, menu_rows);
+                    let _ = write!(out, "\r\n");
+                    let _ = out.flush();
+                    return Ok(InputEvent::TaskView);
                 }
                 _ => {}
             }
@@ -774,6 +813,7 @@ pub fn read_event(public_test: bool, history: &[String], keymap: &Keymap) -> Res
                     selected = 0;
                     redraw(
                         &crate::tui::prompt_frame(frame),
+                        footer,
                         &buf,
                         cursor,
                         selected,
@@ -881,6 +921,19 @@ mod tests {
         );
         // Buffer is drained on submit.
         assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn ctrl_j_adds_a_line_without_submitting() {
+        let mut buf = String::from("first");
+        let mut cursor = buf.len();
+        assert!(emit(ctrl(KeyCode::Char('j')), &mut buf, &mut cursor).is_none());
+        assert!(emit(key(KeyCode::Char('s')), &mut buf, &mut cursor).is_none());
+        assert_eq!(buf, "first\ns");
+        assert_eq!(
+            emit(key(KeyCode::Enter), &mut buf, &mut cursor),
+            Some(InputEvent::Submit("first\ns".into()))
+        );
     }
 
     #[test]
