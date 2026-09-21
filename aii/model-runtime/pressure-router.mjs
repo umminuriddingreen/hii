@@ -33,11 +33,13 @@ export function scoreModelNode(rawNode, request = {}, state = {}, options = {}) 
   const node = normalizeNode(rawNode);
   const required = list(request.capabilities);
   const missing = required.filter((capability) => !node.capabilities.includes(capability));
+  const matchedCapabilities = required.filter((capability) => node.capabilities.includes(capability));
   const capabilityFit = missing.length === 0 || (request.allowComposition && required.some((capability) => node.capabilities.includes(capability)));
   const healthScore = { ready: 40, available: 25, degraded: 8, stopped: node.launchable ? 15 : -100 }[node.health] ?? -100;
   const resident = node.resources.resident ?? ["ready", "degraded"].includes(node.health);
   const availableMiB = node.resources.freeMiB - (resident ? 0 : node.resources.requiredMiB);
-  const requiredHeadroom = number(request.minimumHeadroomMiB, policy.minimumHeadroomMiB);
+  const requiredHeadroom = number(node.resources.minimumHeadroomMiB, number(request.minimumHeadroomMiB, policy.minimumHeadroomMiB));
+  const observedMemoryPressure = availableMiB < number(policy.minimumHeadroomMiB, DEFAULT_POLICY.minimumHeadroomMiB);
   const capacityAvailable = node.activeLeases < node.maxConcurrency;
   const modelFit = !request.model || node.models.includes(String(request.model));
   const eligible = Boolean(node.id) && capabilityFit && modelFit && healthScore > 0
@@ -47,7 +49,7 @@ export function scoreModelNode(rawNode, request = {}, state = {}, options = {}) 
   const headroomScore = Math.min(30, Math.max(-30, availableMiB / 512));
   const performanceScore = Math.min(25, Math.max(0, number(node.tokensPerSecond) / 2));
   const localityScore = node.locality === "local" ? 8 : node.locality === "peer" ? 4 : 0;
-  const capabilityScore = required.length * 10;
+  const capabilityScore = matchedCapabilities.length * 10;
   const modelScore = request.model ? (modelMatch ? 25 : -35) : 0;
   const pressurePenalty = node.activeLeases * 12;
   const hysteresisScore = current ? number(policy.hysteresis) : 0;
@@ -63,10 +65,11 @@ export function scoreModelNode(rawNode, request = {}, state = {}, options = {}) 
       ...(!capacityAvailable ? ["concurrency-exhausted"] : []),
       ...(node.activeGenerations > 0 ? ["generation-in-flight"] : []),
       ...(availableMiB < requiredHeadroom ? ["insufficient-headroom"] : []),
+      ...(observedMemoryPressure ? ["memory-pressure-observed"] : []),
       ...(missing.length ? [`missing:${missing.join(",")}`] : []),
       ...(!modelFit ? ["model-unavailable"] : []),
     ],
-    breakdown: { health: healthScore, headroom: headroomScore, performance: performanceScore, locality: localityScore, capabilities: capabilityScore, model: modelScore, hysteresis: hysteresisScore, pressure: -pressurePenalty },
+    breakdown: { health: healthScore, headroom: headroomScore, projectedHeadroomMiB: availableMiB, headroomThresholdMiB: requiredHeadroom, memoryPressure: observedMemoryPressure, performance: performanceScore, locality: localityScore, capabilities: capabilityScore, model: modelScore, hysteresis: hysteresisScore, pressure: -pressurePenalty },
     provenance: { nodeId: node.id, runtime: node.runtime || null, endpoint: node.endpoint || null, modelMatch, observedAt: node.observedAt || null },
   };
 }
@@ -82,7 +85,7 @@ function coveringRoute(eligible, byId, capabilities, limit) {
     if (picked.length && covers(picked.map((id) => byId.get(id)), capabilities)) {
       const score = picked.reduce((sum, id) => sum + eligible.find((candidate) => candidate.id === id).score, 0);
       const key = [...picked].sort().join("\0");
-      if (!best || score > best.score || (score === best.score && (picked.length < best.ids.length || (picked.length === best.ids.length && key < best.key)))) best = { ids: [...picked], score, key };
+      if (!best || picked.length < best.ids.length || (picked.length === best.ids.length && (score > best.score || (score === best.score && key < best.key)))) best = { ids: [...picked], score, key };
       return;
     }
     if (picked.length >= limit) return;

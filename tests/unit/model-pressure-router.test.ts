@@ -13,6 +13,15 @@ describe("model pressure router", () => {
     expect(first.score).toBeGreaterThan(pressured.score);
   });
 
+  it("honors a proven resident safe floor while reporting observed memory pressure", () => {
+    const resident = { ...pc, resources: { ...pc.resources, freeMiB: 200, minimumHeadroomMiB: 128 } };
+    expect(scoreModelNode(resident, { capabilities: ["tools"] })).toMatchObject({
+      eligible: true,
+      reasons: ["memory-pressure-observed"],
+      breakdown: { projectedHeadroomMiB: 200, headroomThresholdMiB: 128, memoryPressure: true },
+    });
+  });
+
   it("routes to the best arbitrary registered node and returns provenance", () => {
     const result = routeModelTask({ nodes: [mac, pc], request: { taskId: "t1", model: "qwen", capabilities: ["tools"] }, now: 100_000 });
     expect(result).toMatchObject({ action: "route", nodeIds: ["pc-llama"], reason: "highest-pressure-adjusted-score" });
@@ -49,6 +58,15 @@ describe("model pressure router", () => {
     const visionNode = { ...pc, capabilities: ["vision"] };
     const result = routeModelTask({ nodes: [toolNode, visionNode], request: { taskId: "t4", capabilities: ["tools", "vision"], allowComposition: true }, policy: { maxConcurrentNodes: 2 } });
     expect(result).toMatchObject({ action: "route", nodeIds: ["pc-llama", "mac-mlx"] });
+  });
+
+  it("prefers the smallest covering field and scores only matched capabilities", () => {
+    const all = { ...pc, id: "all", tokensPerSecond: 1 };
+    const vision = { ...pc, capabilities: ["vision"] };
+    const result = routeModelTask({ nodes: [mac, vision, all], request: { taskId: "minimal", capabilities: ["tools", "vision"], allowComposition: true }, policy: { maxConcurrentNodes: 2 } });
+    expect(result.nodeIds).toEqual(["all"]);
+    const partial = scoreModelNode({ ...mac, capabilities: ["tools"] }, { capabilities: ["tools", "vision"], allowComposition: true });
+    expect(partial.breakdown.capabilities).toBe(10);
   });
 
   it("does not switch unrelated routes while any generation is in flight", () => {
