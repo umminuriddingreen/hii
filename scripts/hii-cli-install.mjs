@@ -91,10 +91,21 @@ export function setInstallRoot(repo, options = {}) {
 
 function buildBrowserAdapter() {
   const browser = path.join(root, 'browser');
-  const build = spawnSync('npm', ['run', 'build'], {
+  const npmCli = process.env.npm_execpath
+    || path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  if (!existsSync(npmCli)) throw new Error(`Unable to locate npm CLI at ${npmCli}`);
+  const playwrightPackage = path.join(browser, 'node_modules', 'playwright', 'package.json');
+  if (!existsSync(playwrightPackage)) {
+    const install = spawnSync(process.execPath, [npmCli, 'ci', '--ignore-scripts'], {
+      cwd: browser,
+      stdio: 'inherit'
+    });
+    if (install.error) throw new Error(`Unable to install the HII browser build dependencies: ${install.error.message}`);
+    if (install.status !== 0) throw new Error(`HII browser dependency install exited with ${install.status}`);
+  }
+  const build = spawnSync(process.execPath, [npmCli, 'run', 'build'], {
     cwd: browser,
-    stdio: 'inherit',
-    shell: process.platform === 'win32'
+    stdio: 'inherit'
   });
   if (build.error) throw new Error(`Unable to start the HII browser build: ${build.error.message}`);
   if (build.status !== 0) throw new Error(`HII browser build exited with ${build.status}`);
