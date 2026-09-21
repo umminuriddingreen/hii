@@ -55,19 +55,19 @@ describe("Save to HII capture payload", () => {
     });
   });
 
-  it("carries rendered page text through the existing local ingest contract", () => {
+  it("carries explicitly saved page text through the existing local ingest contract", () => {
     const payload = buildWebCapture({
       ...fixed,
       url: "https://example.com/page",
       title: "Page",
-      method: "extension-page-index",
+      method: "extension-action",
       contentText: "Visible page text",
       browserName: "Helium",
       browserTabId: 42,
-      tags: ["browser", "page-index"]
+      tags: ["browser"]
     });
     expect(payload.content).toEqual({ text: "Visible page text" });
-    expect(payload.capture.method).toBe("extension-page-index");
+    expect(payload.capture.method).toBe("extension-action");
     expect(payload.capture.browserName).toBe("Helium");
     expect(payload.capture.browserTabId).toBe(42);
     expect(payload.authority.localOnly).toBe(true);

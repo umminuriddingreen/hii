@@ -1,4 +1,54 @@
 const NATIVE_HOST = "com.hii.save_to_hii";
+const PAGE_ORIGINS = ["http://*/*", "https://*/*"];
+const permissionSpecs = {
+  bookmarks: { request: { permissions: ["bookmarks"] }, remove: { permissions: ["bookmarks"] } },
+  history: { request: { permissions: ["history"] }, remove: { permissions: ["history"] } },
+  tabs: { request: { permissions: ["tabs"] }, remove: { permissions: ["tabs"] } },
+  pageText: {
+    request: { permissions: ["tabs", "scripting"], origins: PAGE_ORIGINS },
+    remove: { permissions: ["scripting"], origins: PAGE_ORIGINS }
+  }
+};
+
+function permissionCall(method, query) {
+  return new Promise((resolve, reject) => {
+    chrome.permissions[method](query, (result) => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve(result);
+    });
+  });
+}
+
+async function refreshPermissions() {
+  for (const input of document.querySelectorAll("[data-permission]")) {
+    const spec = permissionSpecs[input.dataset.permission];
+    input.checked = await permissionCall("contains", spec.remove);
+  }
+}
+
+for (const input of document.querySelectorAll("[data-permission]")) {
+  input.addEventListener("change", async () => {
+    const status = document.getElementById("import-status");
+    const spec = permissionSpecs[input.dataset.permission];
+    input.disabled = true;
+    try {
+      const changed = await permissionCall(input.checked ? "request" : "remove", input.checked ? spec.request : spec.remove);
+      status.dataset.tone = changed || !input.checked ? "success" : "quiet";
+      status.textContent = input.checked && !changed
+        ? "Chrome did not grant that source. Nothing was read."
+        : input.checked
+          ? "Permission enabled. Press Import when you want HII to read it."
+          : "Permission removed. Future imports will skip that source.";
+    } catch (error) {
+      status.dataset.tone = "error";
+      status.textContent = error.message;
+    } finally {
+      input.disabled = false;
+      await refreshPermissions();
+    }
+  });
+}
 
 document.getElementById("check").addEventListener("click", () => {
   const status = document.getElementById("status");
@@ -6,62 +56,58 @@ document.getElementById("check").addEventListener("click", () => {
   chrome.runtime.sendNativeMessage(NATIVE_HOST, { type: "ping" }, (response) => {
     const error = chrome.runtime.lastError;
     if (error) {
+      status.dataset.tone = "error";
       status.textContent = `Native host is not registered: ${error.message}`;
       return;
     }
+    status.dataset.tone = response?.ok ? "success" : "error";
     status.textContent = response?.ok
-      ? "Native host responded."
+      ? "HII Companion is connected to the local HII runtime."
       : `Native host responded with: ${response?.error || "unknown error"}`;
   });
 });
 
-const ORIGINS = ["http://*/*", "https://*/*"];
-const indexStatus = document.getElementById("index-status");
-const browserName = document.getElementById("browser-name");
-
-chrome.storage.local.get({ browserName: "Chrome" }).then((settings) => {
-  browserName.value = settings.browserName;
-});
-browserName.addEventListener("change", () => {
-  chrome.storage.local.set({ browserName: browserName.value });
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type !== "browser-import-progress") return;
+  const status = document.getElementById("import-status");
+  status.dataset.tone = message.progress?.phase === "complete" ? "success" : "quiet";
+  status.textContent = message.progress?.message || "Importing…";
 });
 
-async function refresh() {
-  const { pageIndexEnabled = false } = await chrome.storage.local.get({ pageIndexEnabled: false });
-  indexStatus.textContent = pageIndexEnabled ? "Page indexing is on." : "Page indexing is paused.";
-}
-
-function command(type) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({ type }, (response) => {
-      if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
-      if (!response?.ok) return reject(new Error(response?.error || "HII did not accept the change"));
-      resolve();
-    });
-  });
-}
-
-document.getElementById("enable-index").addEventListener("click", async () => {
-  try {
-    if (!await chrome.permissions.request({ origins: ORIGINS })) {
-      indexStatus.textContent = "Website access was not granted.";
+document.getElementById("import").addEventListener("click", () => {
+  const button = document.getElementById("import");
+  const status = document.getElementById("import-status");
+  const report = document.getElementById("import-report");
+  button.disabled = true;
+  report.hidden = true;
+  status.dataset.tone = "quiet";
+  status.textContent = "Starting local import…";
+  chrome.runtime.sendMessage({ type: "import-browser-library" }, (response) => {
+    button.disabled = false;
+    const error = chrome.runtime.lastError;
+    if (error || !response?.ok) {
+      status.dataset.tone = "error";
+      status.textContent = error?.message || response?.error || "Browser import failed.";
       return;
     }
-    await command("enable-page-index");
-    await refresh();
-  } catch (error) {
-    indexStatus.textContent = error.message;
-  }
+    const value = response.report;
+    status.dataset.tone = "success";
+    status.textContent = `Saved ${value.imported} local records; ${value.unchanged} already existed; ${value.failed} failed.`;
+    report.hidden = false;
+    report.textContent = JSON.stringify({
+      available: value.available,
+      prepared: value.prepared,
+      imported: value.imported,
+      unchanged: value.unchanged,
+      failed: value.failed,
+      excluded: value.excluded,
+      localOnly: value.localOnly
+    }, null, 2);
+  });
 });
 
-document.getElementById("disable-index").addEventListener("click", async () => {
-  try {
-    await command("disable-page-index");
-    await chrome.permissions.remove({ origins: ORIGINS });
-    await refresh();
-  } catch (error) {
-    indexStatus.textContent = error.message;
-  }
+refreshPermissions().catch((error) => {
+  const status = document.getElementById("import-status");
+  status.dataset.tone = "error";
+  status.textContent = error.message;
 });
-
-refresh();

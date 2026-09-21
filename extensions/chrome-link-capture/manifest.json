@@ -1,17 +1,31 @@
 {
   "manifest_version": 3,
   "name": "Save to HII",
-  "version": "0.1.0",
-  "description": "Save web pages, selections, and references into your local HII workspace.",
-  "permissions": ["activeTab", "contextMenus", "nativeMessaging", "tabs", "storage", "scripting"],
+  "version": "0.3.0",
+  "description": "Save explicit captures and optionally import approved browser context into your private local HII workspace.",
+  "permissions": ["activeTab", "contextMenus", "nativeMessaging"],
+  "optional_permissions": ["bookmarks", "history", "tabs", "scripting"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "action": {
     "default_title": "Save to HII",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
   },
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
-  "options_page": "options.html"
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  }
 }

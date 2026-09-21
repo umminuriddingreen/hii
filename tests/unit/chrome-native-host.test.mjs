@@ -106,4 +106,59 @@ describe("Save to HII native messaging host", () => {
     expect(response.ok).toBe(false);
     expect(response.error).toContain("localOnly");
   });
+
+  it("requires account handoff to be a separate explicit boolean", async () => {
+    const { code, response } = await runHost({
+      type: "save-capture",
+      payload,
+      shareToAccount: "yes"
+    }, { HII_CHROME_NATIVE_HII: "missing-hii-command" });
+
+    expect(code).toBe(1);
+    expect(response.ok).toBe(false);
+    expect(response.error).toContain("shareToAccount");
+  });
+
+  it("ingests bounded browser-library batches locally without account sharing", async () => {
+    const command = await fakeHiiCommand();
+    const browserPayload = {
+      ...payload,
+      captureId: "browser-library-history-test",
+      capture: { method: "extension-page-index", tags: ["browser", "browser-library", "history"] }
+    };
+    const { code, response } = await runHost({
+      type: "import-browser-library",
+      payloads: [browserPayload]
+    }, {
+      HII_CHROME_NATIVE_HII: process.execPath,
+      HII_CHROME_NATIVE_HII_ARGS: JSON.stringify([command])
+    });
+
+    expect(code).toBe(0);
+    expect(response).toEqual({
+      ok: true,
+      data: { imported: 1, unchanged: 0, failed: 0, errors: [] }
+    });
+  });
+
+  it("rejects browser-library cloud handoff and oversized batches", async () => {
+    const browserPayload = {
+      ...payload,
+      capture: { method: "extension-page-index", tags: ["browser-library"] }
+    };
+    const shared = await runHost({
+      type: "import-browser-library",
+      payloads: [browserPayload],
+      shareToAccount: true
+    }, { HII_CHROME_NATIVE_HII: "missing-hii-command" });
+    expect(shared.code).toBe(1);
+    expect(shared.response.error).toContain("cannot be shared");
+
+    const oversized = await runHost({
+      type: "import-browser-library",
+      payloads: Array.from({ length: 26 }, (_, index) => ({ ...browserPayload, captureId: `batch-${index}` }))
+    }, { HII_CHROME_NATIVE_HII: "missing-hii-command" });
+    expect(oversized.code).toBe(1);
+    expect(oversized.response.error).toContain("1 to 25");
+  });
 });

@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: LicenseRef-BSL-1.1
 
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { syncIndexedCapture } from "./hii-browser-snapshot-sync.mjs";
+import { shareCaptureToAccountWorkspace, syncBrowserCapture } from "./hii-browser-snapshot-sync.mjs";
 
 const MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
 
@@ -55,11 +54,7 @@ function hiiCommand() {
   return { command, args };
 }
 
-function validateMessage(message) {
-  if (message?.type !== "save-capture") {
-    throw new Error("expected save-capture native message");
-  }
-  const payload = message.payload;
+function validatePayload(payload) {
   if (payload?.kind !== "hii.web.capture" || payload?.schemaVersion !== 1) {
     throw new Error("expected hii.web.capture schemaVersion 1 payload");
   }
@@ -67,6 +62,32 @@ function validateMessage(message) {
     throw new Error("Save to HII native host only accepts localOnly captures");
   }
   return payload;
+}
+
+function validateMessage(message) {
+  if (message?.type !== "save-capture") {
+    throw new Error("expected save-capture native message");
+  }
+  if (message.shareToAccount !== undefined && typeof message.shareToAccount !== "boolean") {
+    throw new Error("shareToAccount must be a boolean");
+  }
+  return validatePayload(message.payload);
+}
+
+function validateBrowserLibraryBatch(message) {
+  if (!Array.isArray(message?.payloads) || message.payloads.length < 1 || message.payloads.length > 25) {
+    throw new Error("browser library import requires 1 to 25 captures");
+  }
+  if (message.shareToAccount !== undefined) {
+    throw new Error("browser library imports cannot be shared to an account");
+  }
+  return message.payloads.map((payload) => {
+    validatePayload(payload);
+    if (payload.capture?.method !== "extension-page-index") {
+      throw new Error("browser library imports require extension-page-index provenance");
+    }
+    return payload;
+  });
 }
 
 export function ingestCapture(payload) {
@@ -100,11 +121,41 @@ export function ingestCapture(payload) {
 
 export async function handleNativeMessage(message) {
   if (message?.type === "ping") return { ok: true, data: { host: "com.hii.save_to_hii" } };
+  if (message?.type === "import-browser-library") {
+    const payloads = validateBrowserLibraryBatch(message);
+    const report = { imported: 0, unchanged: 0, failed: 0, errors: [] };
+    for (const payload of payloads) {
+      try {
+        const data = await ingestCapture(payload);
+        if (data?.changed === false && data?.previousContentHash) report.unchanged += 1;
+        else report.imported += 1;
+      } catch (error) {
+        report.failed += 1;
+        if (report.errors.length < 10) {
+          report.errors.push({ captureId: payload.captureId, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+    }
+    return { ok: true, data: report };
+  }
   const payload = validateMessage(message);
   const data = await ingestCapture(payload);
-  if (payload.capture?.method !== "extension-page-index") return { ok: true, data };
-  const sync = await syncIndexedCapture(payload);
-  return { ok: true, data: { ...data, browserSync: sync } };
+  if (message.shareToAccount !== true) return { ok: true, data };
+  let browserSync;
+  try {
+    browserSync = await syncBrowserCapture(payload);
+  } catch {
+    // Local ingest is canonical. Optional account sync cannot turn a completed
+    // local capture into a failed Save to HII action.
+    browserSync = { uploaded: false, reason: "account_sync_failed" };
+  }
+  let accountShare;
+  try {
+    accountShare = await shareCaptureToAccountWorkspace(payload, data);
+  } catch {
+    accountShare = { shared: false, reason: "account_workspace_share_failed" };
+  }
+  return { ok: true, data: { ...data, browserSync, accountShare } };
 }
 
 async function main() {

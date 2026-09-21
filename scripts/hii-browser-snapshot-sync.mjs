@@ -47,6 +47,37 @@ async function request(api, token, path, body) {
   return value;
 }
 
+async function deviceRequest(api, token, path, options = {}) {
+  const response = await fetch(`${api}${path}`, {
+    method: options.method || "GET",
+    headers: {
+      authorization: `Bearer ${token}`,
+      ...(options.body === undefined ? {} : { "content-type": "application/json" }),
+    },
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+  });
+  const value = await response.json().catch(() => ({}));
+  if (!response.ok && response.status !== 409) {
+    throw new Error(value.error || `account_workspace_http_${response.status}`);
+  }
+  return { status: response.status, value };
+}
+
+async function accountConfig() {
+  const configPath = join(process.env.HII_ACCOUNT_DIR || join(runtime(), "account"), "device.json");
+  let config;
+  try { config = JSON.parse(await readFile(configPath, "utf8")); }
+  catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+  const api = new URL(config.api);
+  if (!((api.protocol === "https:" && api.hostname === "humaninformationinterface.com") ||
+        (api.protocol === "http:" && ["127.0.0.1", "localhost"].includes(api.hostname))) ||
+      api.pathname !== "/api/device") throw new Error("browser_sync_api_not_trusted");
+  return { ...config, api: api.href.replace(/\/$/, "") };
+}
+
 async function wrappingKey(privateKey, publicJwk, nonce, snapshotId, deviceId) {
   const publicKey = await crypto.subtle.importKey("jwk", publicJwk, { name: "ECDH", namedCurve: "P-256" }, false, []);
   const shared = await crypto.subtle.deriveBits({ name: "ECDH", public: publicKey }, privateKey, 256);
@@ -57,30 +88,31 @@ async function wrappingKey(privateKey, publicJwk, nonce, snapshotId, deviceId) {
   }, material, { name: "AES-GCM", length: 256 }, false, ["encrypt"]);
 }
 
-export async function syncIndexedCapture(payload) {
-  if (payload.capture?.method !== "extension-page-index") return { skipped: true };
-  const configPath = join(process.env.HII_ACCOUNT_DIR || join(runtime(), "account"), "device.json");
-  let config;
-  try { config = JSON.parse(await readFile(configPath, "utf8")); }
-  catch (error) {
-    if (error.code === "ENOENT") return { skipped: true, reason: "account_not_linked" };
-    throw error;
+const EXPLICIT_CAPTURE_METHODS = new Set([
+  "extension-action",
+  "context-selection",
+  "context-page",
+  "context-image",
+  "context-link",
+]);
+
+export async function syncBrowserCapture(payload) {
+  if (!EXPLICIT_CAPTURE_METHODS.has(payload.capture?.method)) {
+    return { skipped: true, reason: "capture_not_explicit" };
   }
-  const api = new URL(config.api);
-  if (!((api.protocol === "https:" && api.hostname === "humaninformationinterface.com") ||
-        (api.protocol === "http:" && ["127.0.0.1", "localhost"].includes(api.hostname))) ||
-      api.pathname !== "/api/device") throw new Error("browser_sync_api_not_trusted");
+  const config = await accountConfig();
+  if (!config) return { skipped: true, reason: "account_not_linked" };
   const local = await keys();
-  await request(api.href.replace(/\/$/, ""), config.token, "/keys", {
+  await request(config.api, config.token, "/keys", {
     ecdhPublicJwk: local.ecdhPublicJwk,
     signingPublicJwk: local.signingPublicJwk,
   });
-  const { devices } = await request(api.href.replace(/\/$/, ""), config.token, "/devices");
+  const { devices } = await request(config.api, config.token, "/devices");
   if (!devices.some((device) => device.id === config.deviceId)) throw new Error("browser_sync_device_missing");
   const snapshot = {
     url: payload.source.url,
     title: payload.source.title || payload.source.url,
-    content: payload.content?.text || "",
+    content: payload.content?.text || payload.capture?.selectedText || payload.capture?.note || "",
     capturedAt: payload.capturedAt,
     browser: payload.capture.browserName || "Chromium",
   };
@@ -100,8 +132,85 @@ export async function syncIndexedCapture(payload) {
     const wrapped = await crypto.subtle.encrypt({ name: "AES-GCM", iv: wrapNonce }, key, rawKey);
     recipientWraps.push({ deviceId: device.id, ephemeralPublicJwk: await crypto.subtle.exportKey("jwk", ephemeral.publicKey), nonce: b64(wrapNonce), ciphertext: b64(wrapped) });
   }
-  await request(api.href.replace(/\/$/, ""), config.token, "", {
+  await request(config.api, config.token, "", {
     ...base, algorithm: "P256-HKDF-SHA256-A256GCM", nonce: b64(nonce), ciphertext: b64(ciphertext), recipientWraps,
   });
   return { uploaded: true, id };
+}
+
+// Compatibility for older callers while the manual companion replaces
+// background page indexing.
+export const syncIndexedCapture = syncBrowserCapture;
+
+function accountNode(payload, result, document) {
+  const createdAt = payload.capturedAt || new Date().toISOString();
+  const digest = createHash("sha256").update(payload.captureId).digest("base64url").slice(0, 24);
+  const excerpt = (payload.capture?.selectedText || payload.capture?.note || payload.content?.text || "").slice(0, 2_000);
+  const sourceUrl = result?.source?.url || payload.source.url;
+  const title = String(result?.source?.title || payload.source.title || sourceUrl).slice(0, 500);
+  const z = Number.isSafeInteger(document.nextZ) ? document.nextZ : document.nodes.length + 1;
+  return {
+    id: `browser-capture-${digest}`,
+    type: "link",
+    x: 48 + (document.nodes.length % 8) * 28,
+    y: 48 + (document.nodes.length % 8) * 28,
+    w: 420,
+    h: 240,
+    z,
+    createdAt,
+    updatedAt: createdAt,
+    permissions: { inheritance: "space-policy" },
+    object: {
+      kind: "source",
+      owner: "hii",
+      status: "ready",
+      source: sourceUrl,
+      capabilityId: "hii.browser.link_capture",
+      proofRefs: result?.receiptId ? [result.receiptId] : [],
+      audit: [{ ts: createdAt, actor: "hii", action: "shared explicit browser capture to account workspace" }],
+    },
+    payload: {
+      title,
+      url: sourceUrl,
+      excerpt,
+      note: payload.capture?.note || "",
+      selectedText: payload.capture?.selectedText || "",
+      tags: Array.isArray(payload.capture?.tags) ? payload.capture.tags.slice(0, 20) : [],
+      captureId: payload.captureId,
+      capturedAt: createdAt,
+      receiptId: result?.receiptId || "",
+    },
+  };
+}
+
+export async function shareCaptureToAccountWorkspace(payload, result = {}) {
+  const config = await accountConfig();
+  if (!config) return { shared: false, reason: "account_not_linked" };
+  const listed = await deviceRequest(config.api, config.token, "/workspaces");
+  const writable = (listed.value.workspaces || []).filter((workspace) => ["owner", "admin", "editor"].includes(workspace.role));
+  for (const summary of writable) {
+    let current = await deviceRequest(config.api, config.token, `/workspaces/${encodeURIComponent(summary.id)}`);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const workspace = current.value.workspace;
+      const document = workspace?.document;
+      if (!document || !Array.isArray(document.nodes) || document.nodes.length >= 500 || !Array.isArray(document.links)) break;
+      const node = accountNode(payload, result, document);
+      if (document.nodes.some((entry) => entry.id === node.id)) {
+        return { shared: true, workspaceId: workspace.id, nodeId: node.id, duplicate: true };
+      }
+      const next = {
+        ...document,
+        updatedAt: new Date().toISOString(),
+        nextZ: Math.max(Number(document.nextZ) || 1, node.z + 1),
+        nodes: [...document.nodes, node],
+      };
+      const written = await deviceRequest(config.api, config.token, `/workspaces/${encodeURIComponent(workspace.id)}/document`, {
+        method: "POST",
+        body: { expectedRevision: workspace.revision, document: next },
+      });
+      if (written.status === 200) return { shared: true, workspaceId: workspace.id, nodeId: node.id };
+      current = written;
+    }
+  }
+  return { shared: false, reason: writable.length ? "account_workspaces_full_or_conflicted" : "no_writable_account_workspace" };
 }

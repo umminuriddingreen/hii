@@ -32,6 +32,27 @@ import styles from './HiiWebAccess.module.css';
 
 type AccessMode = 'login' | 'signup' | null;
 
+function safeOAuthReturn(value: string | null, origin: string) {
+  if (!value) return '';
+  try {
+    const target = new URL(value, origin);
+    if (target.origin !== origin || target.pathname !== '/oauth/authorize') return '';
+    return `${target.pathname}${target.search}`;
+  } catch {
+    return '';
+  }
+}
+
+function workspaceDeepLink(search: string) {
+  const params = new URLSearchParams(search);
+  const workspaceId = params.get('workspace') ?? '';
+  const nodeId = params.get('node') ?? '';
+  return {
+    workspaceId: /^[A-Za-z0-9_-]{43}$/.test(workspaceId) ? workspaceId : '',
+    nodeId: nodeId && nodeId.length <= 128 ? nodeId : '',
+  };
+}
+
 function HiiCanvasFrame({ accountName, workspaces, activeWorkspaceId, onWorkspaceSelect, onAccount, onFindObjects }: {
   accountName: string;
   workspaces: AccountWorkspaceSummary[];
@@ -328,6 +349,7 @@ function ProsumerLanding({ onLogin, onCreateAccount }: { onLogin: () => void; on
 
 export function HiiWebAccess() {
   const [mode, setMode] = useState<AccessMode>(null);
+  const [oauthReturn, setOAuthReturn] = useState('');
   const authRef = useRef<HTMLElement | null>(null);
   const [session, setSession] = useState<Session>({ authenticated: false });
   const [browserOnly, setBrowserOnly] = useState(false);
@@ -430,9 +452,16 @@ export function HiiWebAccess() {
     const params = new URLSearchParams(window.location.search);
     const requestedLink = params.get('link') === 'cli';
     const requestedFirstRun = params.get('first-run') === '1';
+    const requestedOAuthReturn = safeOAuthReturn(params.get('oauth_return'), window.location.origin);
+    const deepLink = workspaceDeepLink(window.location.search);
     if (params.get('site') === '1') setProductSite(true);
     setCliLinkRequested(requestedLink);
     if (requestedLink) setMode('login');
+    if (requestedOAuthReturn) {
+      setOAuthReturn(requestedOAuthReturn);
+      setMode('login');
+    }
+    if (deepLink.nodeId) setSearchFocusNodeId(deepLink.nodeId);
     if (requestedFirstRun) {
       setReady(true);
       return;
@@ -453,6 +482,11 @@ export function HiiWebAccess() {
       .finally(() => { if (active) setReady(true); });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (!ready || !session.authenticated || !oauthReturn) return;
+    window.location.assign(oauthReturn);
+  }, [oauthReturn, ready, session.authenticated]);
 
   useEffect(() => {
     if (cliLinkRequested && session.authenticated) setAccountOpen(true);
@@ -486,7 +520,8 @@ export function HiiWebAccess() {
       setWorkspaces(next);
       setActiveWorkspaceId((current) => {
         if (canvasUnsaved.current) return current;
-        const requested = preferredId || current;
+        const linkedWorkspace = typeof window === 'undefined' ? '' : workspaceDeepLink(window.location.search).workspaceId;
+        const requested = preferredId || current || linkedWorkspace;
         return next.some((workspace) => workspace.id === requested) ? requested : next[0]?.id ?? '';
       });
     } catch {
@@ -912,7 +947,8 @@ export function HiiWebAccess() {
         {mode ? <div className={styles.authBackdrop} onPointerDown={(event) => { if (event.target === event.currentTarget) setMode(null); }}>
           <section ref={authRef} className={styles.formPanel} role="dialog" aria-modal="true" aria-label={mode === 'login' ? 'Log in' : 'Create your HII'}>
             <header><span>hii / {mode === 'login' ? 'log in' : 'create your HII'}</span><button type="button" onClick={() => setMode(null)}>close</button></header>
-            {cliLinkRequested ? <p className={styles.cliLinkNotice}>The HII CLI is waiting. Log in, then create a one-time computer code.</p> : null}
+            {oauthReturn ? <p className={styles.cliLinkNotice}>ChatGPT is waiting. Log in to review the exact HII access it requested.</p> : null}
+            {!oauthReturn && cliLinkRequested ? <p className={styles.cliLinkNotice}>The HII CLI is waiting. Log in, then create a one-time computer code.</p> : null}
             <form onSubmit={submit}>
               {mode === 'signup' ? (
                 <label>
