@@ -616,25 +616,38 @@ export async function startTerminalSession(request: {
   rows: number;
   entry?: 'hii' | 'shell';
 }): Promise<TerminalStartResultV1> {
-  if (!isTauri()) throw new Error('Native shell terminals are available in the HII desktop app.');
+  if (!isTauri()) return startWebTerminalSession(request);
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<TerminalStartResultV1>('terminal_start', request);
 }
 
 export async function writeTerminalSession(sessionId: string, data: string): Promise<void> {
-  if (!isTauri()) return;
+  if (!isTauri()) {
+    sendWebTerminal(sessionId, { t: 'input', sessionId, data });
+    return;
+  }
   const { invoke } = await import('@tauri-apps/api/core');
   await invoke('terminal_write', { sessionId, data });
 }
 
 export async function resizeTerminalSession(sessionId: string, cols: number, rows: number): Promise<void> {
-  if (!isTauri()) return;
+  if (!isTauri()) {
+    sendWebTerminal(sessionId, { t: 'resize', sessionId, cols, rows });
+    return;
+  }
   const { invoke } = await import('@tauri-apps/api/core');
   await invoke('terminal_resize', { sessionId, cols, rows });
 }
 
 export async function stopTerminalSession(sessionId: string): Promise<boolean> {
-  if (!isTauri()) return false;
+  if (!isTauri()) {
+    const socket = webTerminalSockets.get(sessionId);
+    if (!socket) return false;
+    sendWebTerminal(sessionId, { t: 'kill', sessionId });
+    socket.close();
+    webTerminalSockets.delete(sessionId);
+    return true;
+  }
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<boolean>('terminal_stop', { sessionId });
 }
@@ -643,7 +656,10 @@ export async function listenTerminalEvents(handlers: {
   output: (event: TerminalOutputV1) => void;
   exit: (event: TerminalExitV1) => void;
 }) {
-  if (!isTauri()) return () => {};
+  if (!isTauri()) {
+    webTerminalListeners.add(handlers);
+    return () => { webTerminalListeners.delete(handlers); };
+  }
   const { listen } = await import('@tauri-apps/api/event');
   const [unlistenOutput, unlistenExit] = await Promise.all([
     listen<TerminalOutputV1>('hii://terminal-output', (event) => handlers.output(event.payload)),
@@ -653,6 +669,76 @@ export async function listenTerminalEvents(handlers: {
     unlistenOutput();
     unlistenExit();
   };
+}
+
+const webTerminalSockets = new Map<string, WebSocket>();
+const webTerminalListeners = new Set<{
+  output: (event: TerminalOutputV1) => void;
+  exit: (event: TerminalExitV1) => void;
+}>();
+
+function webTerminalUrl() {
+  const configured = process.env.NEXT_PUBLIC_HII_TERMINAL_WS;
+  if (configured) return configured;
+  return 'ws://127.0.0.1:3043/terminal';
+}
+
+function sendWebTerminal(sessionId: string, message: Record<string, unknown>) {
+  const socket = webTerminalSockets.get(sessionId);
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    throw new Error('The connected HII terminal is not ready.');
+  }
+  socket.send(JSON.stringify(message));
+}
+
+function startWebTerminalSession(request: {
+  sessionId: string;
+  cwd: string;
+  cols: number;
+  rows: number;
+  entry?: 'hii' | 'shell';
+}): Promise<TerminalStartResultV1> {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(webTerminalUrl());
+    webTerminalSockets.set(request.sessionId, socket);
+    const timeout = window.setTimeout(() => {
+      socket.close();
+      webTerminalSockets.delete(request.sessionId);
+      reject(new Error('No local HII executor answered the web terminal. Open the HII app or run npm run dev locally.'));
+    }, 5000);
+    socket.addEventListener('open', () => {
+      socket.send(JSON.stringify({
+        t: 'create',
+        sessionId: request.sessionId,
+        cwd: request.cwd,
+        cols: request.cols,
+        rows: request.rows,
+        program: request.entry === 'shell' ? undefined : 'hii'
+      }));
+    });
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(String(event.data)) as { t: string; sessionId?: string; data?: string; message?: string };
+      if (message.sessionId && message.sessionId !== request.sessionId) return;
+      if (message.t === 'created') {
+        window.clearTimeout(timeout);
+        resolve({ version: 1, sessionId: request.sessionId, cwd: request.cwd, replay: '', created: true });
+      } else if ((message.t === 'data' || message.t === 'scrollback') && message.data) {
+        const output = { version: 1, sessionId: request.sessionId, data: message.data } satisfies TerminalOutputV1;
+        for (const listener of webTerminalListeners) listener.output(output);
+      } else if (message.t === 'exit' || message.t === 'killed') {
+        const exit = { version: 1, sessionId: request.sessionId } satisfies TerminalExitV1;
+        for (const listener of webTerminalListeners) listener.exit(exit);
+      } else if (message.t === 'error') {
+        window.clearTimeout(timeout);
+        reject(new Error(message.message || 'The HII terminal gateway rejected the session.'));
+      }
+    });
+    socket.addEventListener('error', () => {
+      window.clearTimeout(timeout);
+      webTerminalSockets.delete(request.sessionId);
+      reject(new Error('The local HII terminal gateway is unavailable.'));
+    });
+  });
 }
 
 export async function listNotifications(): Promise<HiiNotification[]> {

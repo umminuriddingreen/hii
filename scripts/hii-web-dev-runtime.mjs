@@ -5,6 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { WebSocketServer } from 'ws';
+import { attachPtyGateway, isLocalRequest } from '../server/pty-gateway.mjs';
 
 const repo = path.resolve(process.cwd());
 const port = Number(process.env.HII_WEB_DEV_RUNTIME_PORT || 3043);
@@ -230,6 +232,20 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
+const terminalSockets = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
+attachPtyGateway(terminalSockets);
+server.on('upgrade', (request, socket, head) => {
+  const url = new URL(request.url || '/', `http://127.0.0.1:${port}`);
+  if (url.pathname !== '/terminal' || !isLocalRequest(request)) {
+    socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  terminalSockets.handleUpgrade(request, socket, head, (webSocket) => {
+    terminalSockets.emit('connection', webSocket, request);
+  });
+});
+
 server.listen(port, '127.0.0.1', () => {
-  process.stdout.write(`HII browser-dev transport ready at http://127.0.0.1:${port} using ${hiiBinary()}\n`);
+  process.stdout.write(`HII browser-dev transport and PTY ready at http://127.0.0.1:${port} using ${hiiBinary()}\n`);
 });

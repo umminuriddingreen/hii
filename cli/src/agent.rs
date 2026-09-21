@@ -2109,6 +2109,9 @@ fn choose_model_with_env(
     if installed.iter().any(|model| model == &requested) {
         return Ok(requested);
     }
+    if let Some(model) = resolve_model_role(&requested, installed) {
+        return Ok(model);
+    }
     if may_recover_stale_environment {
         if let Some(config) = crate::config::inference_config() {
             if installed.iter().any(|model| model == &config.model) {
@@ -2124,15 +2127,29 @@ fn choose_model_with_env(
             "model '{requested}' is not installed; run `hii models`"
         ));
     }
-    // A missing default is never silently swapped for whatever the provider
-    // happens to list first: the substitute model has different capabilities,
-    // and a run that quietly changed models is a run whose proof record lies
-    // about what produced it. Say what is missing and let the operator choose.
+    // A missing provider default is never swapped for an arbitrary first
+    // catalog entry: the substitute model has different capabilities, and a
+    // run that quietly changed models would lie about what produced it.
     Err(format!(
         "default model '{requested}' is not installed on this provider (available: {}). \
 Install it, or choose one explicitly with `--model <name>` or HII_MODEL=<name>.",
         installed.join(", ")
     ))
+}
+
+fn resolve_model_role(requested: &str, installed: &[String]) -> Option<String> {
+    let priorities: &[&str] = match requested.to_ascii_lowercase().as_str() {
+        "fast" => &["qwen3.5-9b", "qwen3-4b", "qwen3-0.6b"],
+        "agent" => &["qwen3.6-35b-a3b", "qwen3.5-35b-a3b", "qwen3.8-27b"],
+        "review" => &["qwen3.8-27b", "qwen3.5-35b-a3b", "qwen3.6-35b-a3b"],
+        _ => return None,
+    };
+    priorities.iter().find_map(|needle| {
+        installed
+            .iter()
+            .find(|model| model.to_ascii_lowercase().contains(needle))
+            .cloned()
+    })
 }
 
 fn choose_review_model(
@@ -3839,6 +3856,33 @@ fn model_selection_is_strict_and_defaults_per_provider() {
         choose_model_with_env(None, Some("Qwen/Qwen3-4B"), ModelProvider::Native, &partial)
             .unwrap(),
         "Qwen/Qwen3-4B"
+    );
+}
+
+#[test]
+fn model_roles_resolve_across_windows_and_mac_catalogs() {
+    let windows = vec![
+        "qwen3.5-9b-balanced".to_string(),
+        "qwen3.6-35b-a3b-agent".to_string(),
+        "qwen3.8-27b-agent".to_string(),
+    ];
+    let mac = vec![
+        "mlx-community/Qwen3.5-9B-MLX-4bit".to_string(),
+        "mlx-community/Qwen3.5-35B-A3B-4bit".to_string(),
+        "mlx-community/Qwen3.8-27B-4bit".to_string(),
+    ];
+
+    assert_eq!(
+        choose_model_with_env(Some("fast"), None, ModelProvider::Native, &windows).unwrap(),
+        "qwen3.5-9b-balanced"
+    );
+    assert_eq!(
+        choose_model_with_env(Some("agent"), None, ModelProvider::Native, &mac).unwrap(),
+        "mlx-community/Qwen3.5-35B-A3B-4bit"
+    );
+    assert_eq!(
+        choose_model_with_env(Some("review"), None, ModelProvider::Native, &mac).unwrap(),
+        "mlx-community/Qwen3.8-27B-4bit"
     );
 }
 

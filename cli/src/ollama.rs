@@ -237,6 +237,13 @@ impl Ollama {
         {
             return Self::new(crate::config::AppPaths::model_url());
         }
+        // The managed inference manifest describes the runtime HII actually
+        // owns now. Prefer it over an older compatibility-provider preference
+        // so a stale saved llama.cpp port cannot add a failed probe before
+        // every call or hide an adaptive task-boundary selection.
+        if let Some(config) = crate::config::inference_config() {
+            return Self::new(config.endpoint);
+        }
         if let Some(provider) = crate::config::AppPaths::discover()
             .ok()
             .and_then(|paths| paths.user_model_preference().ok().flatten())
@@ -248,9 +255,6 @@ impl Ollama {
             if provider == ModelProvider::LlamaCpp.id() {
                 return Self::new("http://127.0.0.1:6127".to_string());
             }
-        }
-        if let Some(config) = crate::config::inference_config() {
-            return Self::new(config.endpoint);
         }
         Self::for_mode("auto")
     }

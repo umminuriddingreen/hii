@@ -778,6 +778,7 @@ export function HiiWebAccess() {
           onUnsavedChanges={setCanvasUnsaved}
           onSelectionChange={setSelectedCanvasNodes}
           allowPhoto
+          allowLocalRuntime={session.source === 'local'}
           persistentChrome={false}
           fileSeeder={canvasFileSeeder}
           onRequestDevice={(selection) => { setAgentContextNodes(selection); setPanel('models'); }}
@@ -968,6 +969,7 @@ export function HiiWebAccess() {
         persistence={guestPersistence}
         onUnsavedChanges={setCanvasUnsaved}
         allowPhoto
+        allowLocalRuntime={session.source === 'local'}
         persistentChrome={false}
         canvasManagerRequest={canvasManagerRequest}
       />

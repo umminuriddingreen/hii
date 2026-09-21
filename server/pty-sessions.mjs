@@ -40,6 +40,15 @@ function isInside(target) {
   return resolved === ALLOWED_ROOT || resolved.startsWith(`${ALLOWED_ROOT}${path.sep}`);
 }
 
+function safeWorkingDirectory(requested) {
+  const expanded = typeof requested === 'string' && requested.startsWith('~')
+    ? path.join(ALLOWED_ROOT, requested.slice(1).replace(/^[/\\]+/, ''))
+    : requested;
+  if (!expanded || !isInside(expanded)) return ALLOWED_ROOT;
+  const resolved = path.resolve(expanded);
+  return existsSync(resolved) ? resolved : ALLOWED_ROOT;
+}
+
 function pushScrollback(session, data) {
   const chunk = Buffer.from(data, 'utf8');
   session.scrollback.push(chunk);
@@ -58,7 +67,7 @@ function broadcast(session, message) {
 
 export function createSession(sessionId, { cwd, cols, rows, program }) {
   if (sessions.has(sessionId)) return sessions.get(sessionId);
-  const safeCwd = cwd && isInside(cwd) ? path.resolve(cwd) : ALLOWED_ROOT;
+  const safeCwd = safeWorkingDirectory(cwd);
   const windows = process.platform === 'win32';
   const shell = windows ? (process.env.ComSpec || 'powershell.exe') : (process.env.SHELL || '/bin/zsh');
   const shellArgs = windows && /powershell/i.test(shell) ? ['-NoLogo'] : windows ? [] : ['-l'];

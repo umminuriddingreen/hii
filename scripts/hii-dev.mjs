@@ -3,11 +3,11 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const nextBin = fileURLToPath(new URL('../node_modules/.bin/next', import.meta.url));
+const nextBin = fileURLToPath(new URL('../node_modules/next/dist/bin/next', import.meta.url));
 
 const children = [
   spawn(process.execPath, ['scripts/hii-web-dev-runtime.mjs'], { stdio: 'inherit', env: process.env }),
-  spawn(nextBin, ['dev', '--hostname', '127.0.0.1', ...process.argv.slice(2)], {
+  spawn(process.execPath, [nextBin, 'dev', '--hostname', '127.0.0.1', ...process.argv.slice(2)], {
     stdio: 'inherit',
     env: {
       ...process.env,

@@ -1417,7 +1417,7 @@ export function HiiRoot({
     const acceptedSeeds = isSpace
       ? seeds.filter((seed) => isSpaceCanvasNodeType(seed.type))
       : isAccount
-        ? seeds.filter((seed) => isAccountCanvasNodeType(seed.type))
+        ? seeds.filter((seed) => isAccountCanvasNodeType(seed.type) || (allowLocalRuntime && seed.type === 'terminal'))
         : seeds;
     const flowWidth = Math.max(960, (camera.viewportRef.current?.clientWidth || window.innerWidth) / camera.cam.current.z - 120);
     const placements = layout === 'flow'
@@ -1435,7 +1435,7 @@ export function HiiRoot({
     });
     setSelected(ids);
     return ids;
-  }, [camera, creatorId, isAccount, isSpace, isTouchCanvas, spaceId, workspace]);
+  }, [allowLocalRuntime, camera, creatorId, isAccount, isSpace, isTouchCanvas, spaceId, workspace]);
 
   const spawnCenteredSeed = useCallback((seed: NodeSeed) => {
     const center = camera.centerWorld();
