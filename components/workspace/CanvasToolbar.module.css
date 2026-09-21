@@ -2,41 +2,61 @@
   position: absolute;
   z-index: 120;
   top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(520px, calc(100vw - 24px));
+  left: 0;
+  width: 100%;
   color: #111;
   font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
 }
+.toolbar {
+  display: flex;
+  width: max-content;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 5px;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid rgba(0, 0, 0, .07);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, .9);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, .09);
+  backdrop-filter: blur(22px) saturate(1.2);
+}
+.toolbar > i { width: 1px; height: 24px; margin: 0 3px; background: rgba(0, 0, 0, .1); }
 .trigger {
   display: grid;
   align-items: center;
   justify-content: center;
   min-width: 40px;
   min-height: 40px;
-  margin: 0 auto;
+  margin: 0;
   padding: 0 12px;
   border: 0;
   border-radius: 999px;
-  background: rgba(255, 255, 255, .72);
+  background: transparent;
   color: inherit;
   font: inherit;
   font-weight: 600;
   cursor: pointer;
-  backdrop-filter: blur(16px);
 }
 .trigger:hover, .trigger:focus-visible, .trigger[aria-expanded='true'] { background: #111; color: #fff; }
 .trigger kbd { display: none; }
+.tool { display: grid; width: 38px; height: 38px; padding: 0; place-items: center; border: 0; border-radius: 11px; background: transparent; color: #555; cursor: pointer; }
+.tool:hover, .tool:focus-visible { background: #f0f0ee; color: #111; outline: 0; }
+.tool[aria-pressed='true'] { background: #111; color: #fff; }
 .results kbd { color: #777; font: 10px/1 var(--font-mono, ui-monospace, monospace); }
 .palette {
   display: grid;
-  margin-top: 10px;
+  width: min(520px, calc(100vw - 24px));
+  margin: 10px auto 0;
   border: 1px solid rgba(0, 0, 0, .1);
   border-radius: 14px;
   background: #fff;
   box-shadow: 0 20px 60px rgba(0, 0, 0, .12);
   overflow: hidden;
 }
+.zoom { position: fixed; left: 16px; bottom: 16px; display: flex; align-items: center; padding: 4px; border: 1px solid rgba(0,0,0,.07); border-radius: 14px; background: rgba(255,255,255,.92); box-shadow: 0 8px 28px rgba(0,0,0,.08); backdrop-filter: blur(18px); }
+.zoom button { min-width: 38px; height: 34px; padding: 0 8px; border: 0; border-radius: 9px; background: transparent; color: #444; cursor: pointer; font: 500 12px/1 -apple-system, BlinkMacSystemFont, sans-serif; }
+.zoom button:hover, .zoom button:focus-visible { background: #eee; color: #111; outline: 0; }
 .selection { display: flex; align-items: center; gap: 6px; min-height: 38px; padding: 7px 12px; overflow: hidden; border-bottom: 1px solid #e8e8e5; color: #777; font: 10px/1.2 var(--font-mono, ui-monospace, monospace); }
 .selectionItem { max-width: 125px; overflow: hidden; padding: 5px 7px; border-radius: 5px; background: #f2f2ef; color: #272727; text-overflow: ellipsis; white-space: nowrap; }
 .unavailable { margin: 0; padding: 9px 14px; border-top: 1px solid #eee; color: #666; line-height: 1.45; }
@@ -85,6 +105,8 @@
 .trigger:focus-visible, .palette button:focus-visible, .palette input:focus-visible { outline: 2px solid #111; outline-offset: 2px; }
 @media (max-width: 760px), (pointer: coarse) {
   .shell { top: auto; bottom: max(12px, env(safe-area-inset-bottom)); }
-  .trigger { min-width: 44px; min-height: 44px; }
-  .palette { margin-top: 0; margin-bottom: 8px; }
+  .toolbar { max-width: calc(100vw - 24px); overflow-x: auto; }
+  .trigger, .tool { min-width: 44px; min-height: 44px; }
+  .palette { margin: 0 auto 8px; }
+  .zoom { display: none; }
 }

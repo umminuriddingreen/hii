@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { Cursor, NoteBlank, Paperclip, PencilSimple, Shapes, Table, TextT } from '@phosphor-icons/react';
 import { commandShortcutFromEvent, type CommandShortcut } from '@/lib/workspace/command-shortcut';
 import styles from './CanvasToolbar.module.css';
 
@@ -129,10 +130,32 @@ export function CanvasToolbar({
     } finally { setFeatureBusy(false); }
   };
 
-  return <nav className={styles.shell} data-workspace-ui aria-label="Information terminal" onPointerDown={(event) => event.stopPropagation()}>
-    <button className={styles.trigger} type="button" aria-label="Open information terminal" aria-expanded={expanded} aria-controls="hii-information-terminal" onClick={() => setExpanded(!expanded)}>
-      <span>hii</span><kbd aria-hidden="true">{shortcutLabel}</kbd>
-    </button>
+  const quickTools: Array<{ id: CanvasTool; label: string; icon: React.ReactNode }> = [
+    { id: 'select', label: 'Select', icon: <Cursor size={19} /> },
+    { id: 'sticky', label: 'Note', icon: <NoteBlank size={19} /> },
+    { id: 'text', label: 'Text', icon: <TextT size={19} /> },
+    { id: 'shape', label: 'Shape', icon: <Shapes size={19} /> },
+    { id: 'table', label: 'Table', icon: <Table size={19} /> },
+    { id: 'draw', label: 'Draw', icon: <PencilSimple size={19} /> },
+    { id: 'media', label: 'Import', icon: <Paperclip size={19} /> }
+  ];
+
+  return <nav className={styles.shell} data-workspace-ui aria-label="Canvas tools" onPointerDown={(event) => event.stopPropagation()}>
+    <div className={styles.toolbar}>
+      <button className={styles.trigger} type="button" aria-label="Open information terminal" aria-expanded={expanded} aria-controls="hii-information-terminal" onClick={() => setExpanded(!expanded)}>
+        <span>hii</span><kbd aria-hidden="true">{shortcutLabel}</kbd>
+      </button>
+      <i aria-hidden="true" />
+      {quickTools.map((tool) => <button
+        key={tool.id}
+        type="button"
+        className={styles.tool}
+        aria-label={tool.label}
+        aria-pressed={activeTool === tool.id}
+        title={tool.label}
+        onClick={() => onToolChange(tool.id)}
+      >{tool.icon}</button>)}
+    </div>
     {expanded && <section id="hii-information-terminal" className={styles.palette} aria-label="Information terminal">
       {shortcutCapture ? <div className={styles.shortcutCapture}>
         <label htmlFor="hii-command-shortcut">Press a shortcut</label>
@@ -171,5 +194,10 @@ export function CanvasToolbar({
       {message && <p role="status" className={styles.message}>{message}</p>}
       <small>↑↓ choose · Enter run · Esc close</small>
     </section>}
+    <div className={styles.zoom} aria-label="Canvas zoom">
+      <button type="button" aria-label="Zoom out" onClick={onZoomOut}>−</button>
+      <button type="button" aria-label="Fit canvas" onClick={onFitView}>Fit</button>
+      <button type="button" aria-label="Zoom in" onClick={onZoomIn}>+</button>
+    </div>
   </nav>;
 }
