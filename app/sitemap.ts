@@ -3,6 +3,8 @@ import { execFileSync } from 'node:child_process';
 import type { MetadataRoute } from 'next';
 import { PUBLIC_ROUTES, SITE_ORIGIN } from '@/lib/site';
 
+export const dynamic = 'force-static';
+
 /**
  * `lastmod` has to be reproducible: stamping every build with `new Date()`
  * tells crawlers the pages changed when only the build did. Prefer the commit

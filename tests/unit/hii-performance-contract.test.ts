@@ -103,19 +103,22 @@ describe('HII performance contract', () => {
     // would pass trivially against a graph that resolved nothing.
     expect(reachable).toContain('components/workspace/HiiRoot.tsx');
 
-    // Each of these is behind `lazy(() => import(...))`. If someone converts one
-    // back to a static import, it lands in the first chunk and this fails.
+    // Each retained live application is behind `lazy(() => import(...))`. If
+    // someone converts one back to a static import, it lands in the first chunk.
     for (const deferred of [
       'components/workspace/NativeDevBrowser.tsx',
-      'components/workspace/HiiMarketplace.tsx',
-      'components/workspace/MusicPlaylistPanel.tsx',
-      'components/workspace/HiiLinkApp.tsx',
-      'components/workspace/RegisteredApplication.tsx',
-      'components/workspace/WaymarkApp.tsx'
+      'components/workspace/RegisteredApplication.tsx'
     ]) {
       expect(existsSync(resolve(root, deferred))).toBe(true);
       expect(reachable).not.toContain(deferred);
     }
+  });
+
+  it('mounts only viewport-adjacent board objects while preserving selected objects', () => {
+    const rootSource = readFileSync(resolve(root, 'components/workspace/HiiRoot.tsx'), 'utf8');
+    expect(rootSource).toContain('visibleWorkspaceNodeIds(');
+    expect(rootSource).toContain('for (const id of selected) ids.add(id)');
+    expect(rootSource).toContain('{mountedNodes.map((node) => (');
   });
 
   it('renders the workspace on first paint rather than behind an account-sync gate', () => {

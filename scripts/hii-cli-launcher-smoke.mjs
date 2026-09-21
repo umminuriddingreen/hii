@@ -25,6 +25,15 @@ const fakeCargo = path.join(scratch, 'fake-cargo.mjs');
 const buildCount = path.join(scratch, 'build-count.txt');
 const installedLauncher = path.join(scratch, 'bin', 'hii');
 
+function runLauncher(args, options) {
+  const command = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : canonicalLauncher;
+  const commandArgs = process.platform === 'win32' ? [canonicalLauncher.replaceAll('\\', '/'), ...args] : args;
+  const env = process.platform === 'win32' && options?.env
+    ? Object.fromEntries(Object.entries(options.env).map(([key, value]) => [key, typeof value === 'string' && /^[A-Za-z]:\\/.test(value) ? value.replaceAll('\\', '/') : value]))
+    : options?.env;
+  return execFileSync(command, commandArgs, { ...options, env });
+}
+
 try {
   mkdirSync(path.join(fakeRepo, 'cli', 'src'), { recursive: true });
   writeFileSync(path.join(fakeRepo, 'Cargo.toml'), '[workspace]\nmembers = ["cli"]\n');
@@ -64,20 +73,20 @@ chmodSync(binaryPath, 0o755);
     HII_FAKE_BUILD_COUNT: buildCount
   };
 
-  const first = execFileSync(canonicalLauncher, ['health', '--text'], {
+  const first = runLauncher(['health', '--text'], {
     encoding: 'utf8',
     env: environment
   }).trim();
   assert.equal(first, 'fake-hii:health --text');
   assert.equal(readFileSync(buildCount, 'utf8'), '1');
 
-  execFileSync(canonicalLauncher, ['health'], { encoding: 'utf8', env: environment });
+  runLauncher(['health'], { encoding: 'utf8', env: environment });
   assert.equal(readFileSync(buildCount, 'utf8'), '1', 'fresh launcher must not rebuild');
 
   const old = new Date('2020-01-01T00:00:00.000Z');
   utimesSync(fakeBinary, old, old);
   writeFileSync(mainSource, 'fn main() { println!("changed"); }\n');
-  execFileSync(canonicalLauncher, ['space', 'health'], {
+  runLauncher(['space', 'health'], {
     encoding: 'utf8',
     env: environment
   });
@@ -85,7 +94,7 @@ chmodSync(binaryPath, 0o755);
 
   git('add', 'cli/src/main.rs');
   git('commit', '-qm', 'change CLI source');
-  execFileSync(canonicalLauncher, ['space', 'health'], {
+  runLauncher(['space', 'health'], {
     encoding: 'utf8',
     env: environment
   });
@@ -93,17 +102,17 @@ chmodSync(binaryPath, 0o755);
 
   utimesSync(fakeBinary, old, old);
   rmSync(removedSource);
-  execFileSync(canonicalLauncher, ['health'], { encoding: 'utf8', env: environment });
+  runLauncher(['health'], { encoding: 'utf8', env: environment });
   assert.equal(readFileSync(buildCount, 'utf8'), '1', 'source deletion must not trigger startup work');
 
   git('add', 'cli/src/removed.rs');
   git('commit', '-qm', 'remove CLI source');
-  execFileSync(canonicalLauncher, ['health'], { encoding: 'utf8', env: environment });
+  runLauncher(['health'], { encoding: 'utf8', env: environment });
   assert.equal(readFileSync(buildCount, 'utf8'), '1', 'committed deletion must not trigger startup work');
 
   installLauncher({ source: canonicalLauncher, destination: installedLauncher });
   assert.equal(readFileSync(installedLauncher, 'utf8'), readFileSync(canonicalLauncher, 'utf8'));
-  assert.equal(statSync(installedLauncher).mode & 0o111, 0o111);
+  if (process.platform !== 'win32') assert.equal(statSync(installedLauncher).mode & 0o111, 0o111);
   assert.equal(existsSync(installedLauncher), true);
 
   console.log('HII CLI launcher smoke');

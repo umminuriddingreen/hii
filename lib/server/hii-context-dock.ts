@@ -389,9 +389,20 @@ type PdfExtractionResult =
 
 function extractPdf(filePath: string): PdfExtractionResult {
   const workerPath = contextExtractorWorkerPath();
-  const python = process.env.HII_PYTHON || 'python3';
+  let python = process.env.HII_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+  if (!process.env.HII_PYTHON && process.platform === 'win32') {
+    try {
+      python = execFileSync('where.exe', ['python'], { encoding: 'utf8' })
+        .split(/\r?\n/)
+        .map((candidate) => candidate.trim())
+        .find((candidate) => candidate && !candidate.toLowerCase().includes('windowsapps')) || python;
+    } catch {
+      // The normal executable lookup below reports an explicit worker failure.
+    }
+  }
+  const pythonArgs = [workerPath];
   try {
-    const output = execFileSync(python, [workerPath], {
+    const output = execFileSync(python, pythonArgs, {
       encoding: 'utf8',
       input: JSON.stringify({ protocolVersion: 1, operation: 'extract_pdf', path: filePath }),
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -441,7 +452,6 @@ export function contextExtractorWorkerPath(moduleUrl = import.meta.url) {
     return path.resolve(process.env.HII_CONTEXT_EXTRACTOR_WORKER);
   }
   const roots: string[] = [];
-  if (process.env.HII_ROOT) roots.push(path.resolve(process.env.HII_ROOT));
   let ancestor = path.dirname(fileURLToPath(moduleUrl));
   while (true) {
     roots.push(ancestor);
@@ -449,6 +459,7 @@ export function contextExtractorWorkerPath(moduleUrl = import.meta.url) {
     if (parent === ancestor) break;
     ancestor = parent;
   }
+  if (process.env.HII_ROOT) roots.push(path.resolve(process.env.HII_ROOT));
   roots.push(path.resolve(process.cwd()), path.join(os.homedir(), 'hii'));
   for (const root of [...new Set(roots)]) {
     const candidate = path.join(root, 'scripts', 'hii-context-extractor.py');

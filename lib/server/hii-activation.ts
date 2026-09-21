@@ -64,16 +64,25 @@ function credentialPresent(paths: string[]) {
   });
 }
 
+function executableInvocation(command: string, args: string[]) {
+  if (command.endsWith('.js')) return { command: process.execPath, args: [command, ...args] };
+  if (process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(command)) {
+    return { command: process.env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', command, ...args] };
+  }
+  return { command, args };
+}
+
 async function detectBinary(
   id: DetectedAgent['id'],
   command: string,
   versionArgs: string[]
 ): Promise<DetectedAgent> {
   try {
-    const result = await execFileAsync(command, versionArgs, {
+    const invocation = executableInvocation(command, versionArgs);
+    const result = await execFileAsync(invocation.command, invocation.args, {
       timeout: 5_000,
       maxBuffer: 512 * 1024,
-      shell: process.platform === 'win32'
+      windowsHide: true
     });
     return {
       id,
@@ -121,10 +130,11 @@ export async function detectAgents(): Promise<DetectedAgent[]> {
 
   if (ollama.installed) {
     try {
-      const result = await execFileAsync(ollamaCommand, ['list'], {
+      const invocation = executableInvocation(ollamaCommand, ['list']);
+      const result = await execFileAsync(invocation.command, invocation.args, {
         timeout: 5_000,
         maxBuffer: 2 * 1024 * 1024,
-        shell: process.platform === 'win32'
+        windowsHide: true
       });
       const models = result.stdout
         .split(/\r?\n/)

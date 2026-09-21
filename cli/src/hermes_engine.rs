@@ -356,7 +356,7 @@ pub fn run(paths: &AppPaths, mut options: RunOptions) -> Result<Receipt, String>
     );
     if summary.chars().count() > MAX_ENGINE_OUTPUT_CHARS {
         summary = summary.chars().take(MAX_ENGINE_OUTPUT_CHARS).collect();
-        summary.push_str("…");
+        summary.push('…');
     }
     let git_status = tools.git_snapshot();
     let mut artifacts = agent::artifact_inventory(&git_before, &git_status)
@@ -518,6 +518,7 @@ fn present(output: &RunOutput, verbose: bool, receipt: &Receipt, proof: &Path) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draft_receipt(
     run_id: &str,
     started_at: u128,
@@ -700,7 +701,7 @@ impl HermesClient {
     fn stream_events(
         &self,
         run_id: &str,
-        mut on_event: impl FnMut(HermesEvent) -> bool,
+        on_event: impl FnMut(HermesEvent) -> bool,
     ) -> Result<(), String> {
         let response = self.auth(self.http.get(&format!(
             "{}/v1/runs/{}/events",
@@ -708,7 +709,7 @@ impl HermesClient {
             url_component(run_id)?
         )));
         let response = response.call().map_err(format_http_error)?;
-        parse_sse(response.into_reader(), |event| on_event(event))
+        parse_sse(response.into_reader(), on_event)
     }
 
     fn status(&self, run_id: &str) -> Result<HermesStatus, String> {
@@ -768,6 +769,7 @@ struct ManagedHermes {
 }
 
 impl ManagedHermes {
+    #[allow(clippy::too_many_arguments)]
     fn start(
         paths: &AppPaths,
         run_id: &str,

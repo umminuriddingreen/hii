@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { removeTestTreeSync } from './lib/test-temp.mjs';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hii-contextdock-'));
 const projectRoot = path.join(directory, 'approved-project');
@@ -148,8 +149,12 @@ try {
   assert.ok(pdfHit.lineEnd >= pdfHit.lineStart);
 
   const workerPath = path.resolve('scripts/hii-context-extractor.py');
-  const python = execFileSync('which', ['python3'], { encoding: 'utf8' }).trim();
-  const unavailable = JSON.parse(execFileSync(python, [workerPath], {
+  const python = process.env.HII_PYTHON || (process.platform === 'win32'
+    ? execFileSync('where.exe', ['python'], { encoding: 'utf8' }).split(/\r?\n/).map((candidate) => candidate.trim()).find((candidate) => candidate && !candidate.toLowerCase().includes('windowsapps'))
+    : execFileSync('which', ['python3'], { encoding: 'utf8' }).trim());
+  assert.ok(python, 'Python 3 executable not found');
+  const workerArgs = [workerPath];
+  const unavailable = JSON.parse(execFileSync(python, workerArgs, {
     encoding: 'utf8',
     input: JSON.stringify({ protocolVersion: 1, operation: 'extract_pdf', path: path.join(projectRoot, 'reference.pdf') }),
     env: { ...process.env, PATH: '' }
@@ -158,7 +163,7 @@ try {
   assert.equal(unavailable.code, 'pdf_text_extractor_unavailable');
   const malformedPdf = path.join(projectRoot, 'malformed.pdf');
   fs.writeFileSync(malformedPdf, '%PDF-not-valid');
-  const failed = JSON.parse(execFileSync(python, [workerPath], {
+  const failed = JSON.parse(execFileSync(python, workerArgs, {
     encoding: 'utf8',
     input: JSON.stringify({ protocolVersion: 1, operation: 'extract_pdf', path: malformedPdf })
   }));
@@ -166,7 +171,7 @@ try {
   assert.equal(failed.code, 'extractor_failed');
   const imageOnlyPdf = path.join(projectRoot, 'image-only.pdf');
   fs.writeFileSync(imageOnlyPdf, makeTextPdf(['']));
-  const ocrUnavailable = JSON.parse(execFileSync(python, [workerPath], {
+  const ocrUnavailable = JSON.parse(execFileSync(python, workerArgs, {
     encoding: 'utf8',
     input: JSON.stringify({ protocolVersion: 1, operation: 'extract_pdf', path: imageOnlyPdf })
   }));
@@ -272,5 +277,5 @@ try {
   console.log('network:     no network or embeddings used');
 } finally {
   contextDock.resetContextDockDbForTests();
-  fs.rmSync(directory, { recursive: true, force: true });
+  removeTestTreeSync(directory);
 }

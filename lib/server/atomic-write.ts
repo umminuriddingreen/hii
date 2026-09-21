@@ -43,13 +43,14 @@ async function replace(temporary: string, file: string) {
 
 export async function withFileLock<T>(file: string, action: () => Promise<T>): Promise<T> {
   const lockPath = `${file}.lock`;
+  const transient = new Set(['EEXIST', 'EPERM', 'EACCES', 'EBUSY']);
   let handle;
   for (let attempt = 0; attempt < 40; attempt += 1) {
     try {
       handle = await open(lockPath, 'wx');
       break;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if (!transient.has((error as NodeJS.ErrnoException).code ?? '')) throw error;
       const info = await stat(lockPath).catch(() => null);
       if (info && Date.now() - info.mtimeMs > 30_000) {
         await rm(lockPath, { force: true });

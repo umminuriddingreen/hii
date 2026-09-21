@@ -13,7 +13,8 @@ execFileSync(process.execPath, ['--test', path.join(root, 'scripts', 'hii-instan
 function run(...args) {
   return execFileSync(process.execPath, [path.join(root, 'scripts', 'hii-cli.mjs'), ...args], {
     cwd: root,
-    encoding: 'utf8'
+    encoding: 'utf8',
+    env: { ...process.env, HII_ROOT: root }
   });
 }
 

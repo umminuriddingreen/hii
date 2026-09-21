@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { removeTestTreeSync } from './lib/test-temp.mjs';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hii-context-staging-'));
 const workspaceRoot = path.join(directory, 'project');
@@ -82,7 +83,7 @@ try {
   assert.equal(staged.files.length, 1);
   const stagedPath = path.join(workspaceRoot, staged.files[0].relativePath);
   assert.equal(fs.readFileSync(stagedPath, 'utf8'), body.toString('utf8'));
-  assert.equal(fs.statSync(stagedPath).mode & 0o777, 0o400);
+  assert.equal(fs.statSync(stagedPath).mode & 0o222, 0, 'staged context must be non-writable');
 
   const markerPath = path.join(workspaceRoot, staged.directory, '.hii-staging.json');
   const marker = fs.readFileSync(markerPath, 'utf8');
@@ -114,5 +115,5 @@ try {
   console.log('stale guard:  source changes rejected immediately before execution');
   console.log('cleanup:      ownership marker required; only disposable copy removed');
 } finally {
-  fs.rmSync(directory, { recursive: true, force: true });
+  removeTestTreeSync(directory);
 }

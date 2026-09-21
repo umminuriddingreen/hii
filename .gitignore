@@ -52,6 +52,17 @@ life/
 /.venv-mlx/
 /.venv-mlx312/
 src-tauri/tauri.no-updater.json
+src-tauri/check.log
+src-tauri/gen/schemas/*.win-verify.bak
+
+# Generated native, browser, and local verification output.
+**/bin/
+**/obj/
+/.hii-dev-logs/
+/test-results/
+/*.log
+/*.bak
+/nul
 
 # Local bytecode from the isolated CUDA installation/proof scripts.
 /scripts/__pycache__/

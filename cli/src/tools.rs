@@ -805,9 +805,9 @@ impl Toolbelt {
     }
 
     fn ensure_inside(&self, path: PathBuf) -> Result<PathBuf, String> {
-        if path.starts_with(&self.workspace) {
-            Ok(path)
-        } else if self.personal_local && personal_local_path(&path) {
+        if path.starts_with(&self.workspace)
+            || (self.personal_local && personal_local_path(&path))
+        {
             Ok(path)
         } else {
             Err(format!(
@@ -823,6 +823,7 @@ impl Toolbelt {
         let file = OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(false)
             .open(lock_path)
             .map_err(|error| error.to_string())?;
         file.lock_exclusive().map_err(|error| error.to_string())?;

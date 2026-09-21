@@ -666,6 +666,7 @@ struct NativeRuntime {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NativePlatform {
+    #[cfg(any(not(windows), test))]
     WgQuick,
     #[cfg(any(windows, test))]
     WindowsService,
@@ -708,7 +709,9 @@ impl NativeRuntime {
 
 fn native_action_arguments(platform: NativePlatform, up: bool, config: &Path) -> Vec<OsString> {
     match (platform, up) {
+        #[cfg(any(not(windows), test))]
         (NativePlatform::WgQuick, true) => vec!["up".into(), config.as_os_str().into()],
+        #[cfg(any(not(windows), test))]
         (NativePlatform::WgQuick, false) => vec!["down".into(), config.as_os_str().into()],
         #[cfg(any(windows, test))]
         (NativePlatform::WindowsService, true) => {

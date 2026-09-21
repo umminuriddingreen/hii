@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import robots from '../../app/robots';
@@ -148,12 +148,12 @@ describe('public web surface', () => {
     });
   });
 
-  describe('operator surface', () => {
+  describe('operator boundary', () => {
     const worker = read('workers/public-site/src/admin.rs');
 
-    it('is kept out of the index and out of the sitemap', () => {
-      expect(read('app/admin/page.tsx')).toMatch(/robots:\s*\{\s*index:\s*false/);
-      expect([robots().rules].flat()[0].disallow).toContain('/admin');
+    it('ships no public administrator page or sitemap entry', () => {
+      expect(existsSync(path.join(root, 'app/admin/page.tsx'))).toBe(false);
+      expect([robots().rules].flat()[0].disallow).not.toContain('/admin');
       expect(PUBLIC_ROUTES).not.toContain('/admin');
       expect(sitemap().map((entry) => entry.url).join(' ')).not.toContain('/admin');
     });

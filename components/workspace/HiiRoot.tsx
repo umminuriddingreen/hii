@@ -69,13 +69,6 @@ import {
   type CanvasModeId
 } from '@/lib/workspace/canvas-modes';
 import {
-  buildCurationAgentPrompt,
-  createMusicPanelPayload,
-  normalizeMusicPanelPayload,
-  parseCurationProposal,
-  type MusicPanelPayload
-} from '@/lib/workspace/music-playlists';
-import {
   isAssistantShortcut,
   isDirectCanvasTyping,
   isTerminalShortcut,
@@ -87,36 +80,27 @@ import {
   objectConversationTurns,
   type ObjectConversationTurn
 } from '@/lib/workspace/object-conversation';
-import { workspaceNodeTransform3D, type WorkspaceNode } from '@/lib/workspace/types';
+import type { WorkspaceNode } from '@/lib/workspace/types';
 import { applicationSeed } from '@/lib/workspace/application-seed';
 import { UpdateBanner } from './UpdateBanner';
 import { NodeFrame } from './NodeFrame';
 import { ShellTerminal } from './ShellTerminal';
-import { packagePlacementSeed, WAYMARK_PACKAGE, type HiiMarketplacePackage } from '@/lib/marketplace/catalog';
 import { KEY_ZOOM_STEP, cameraKeyIntent, useCamera } from './useCamera';
-import dynamic from 'next/dynamic';
 import { useWorkspace, type WorkspacePersistence } from './useWorkspace';
 import { InkBody } from '@/components/spaces/InkBody';
 import { inkSeedFromPoints } from '@/components/spaces/ink-capture';
 import { isAccountCanvasNode, isAccountCanvasNodeType, isSpaceCanvasNode, isSpaceCanvasNodeType } from '@/components/spaces/space-surface';
 import { trackPointerGesture } from '@/lib/workspace/gestures';
-import { fitWorkspaceViewport } from '@/lib/workspace/viewport';
+import { fitWorkspaceViewport, visibleWorkspaceNodeIds } from '@/lib/workspace/viewport';
 import { canvasManagerFocusNodes, type CanvasManagerBoard } from '@/lib/workspace/canvas-manager';
 import { CanvasManager } from './CanvasManager';
 import type { SearchableWorkspace } from '@/lib/workspace/cross-workspace-search';
-const WorkspaceScene3D = dynamic(() => import('./WorkspaceScene3D').then((m) => m.WorkspaceScene3D), {
-  ssr: false,
-  loading: () => <div className="hii-scene3d-loading">Opening 3D view…</div>
-});
 import { nodesInMarquee, type MarqueeRect } from '@/lib/workspace/selection';
 import { historyShortcut } from '@/lib/workspace/history-shortcut';
 import { mergeAgentResponse } from '@/lib/workspace/agent-stream';
 import { browserCanvasAssetUrl } from '@/lib/web/canvas-assets';
 import { VoiceInputButton } from './VoiceInputButton';
-import { ParametricLayoutPanel, type ParametricLayoutSettings } from './ParametricLayoutPanel';
-import { SiteViewsPanel } from './SiteViewsPanel';
 import { downloadWorkspaceOutput, ExportOutputPanel } from './ExportOutputPanel';
-import { parametricImageLayout } from '@/lib/workspace/parametric-layout';
 import { CanvasToolbar, type CanvasTool } from './CanvasToolbar';
 import { CanvasOasis } from './CanvasOasis';
 import { DEFAULT_WEB_COMMAND_SHORTCUT, commandShortcutLabel, matchesCommandShortcut, readCommandShortcut, saveCommandShortcut } from '@/lib/workspace/command-shortcut';
@@ -127,10 +111,7 @@ import { duplicateWorkspaceNodes, linkWorkspaceNodes } from '@/lib/workspace/sel
 import { alignWorkspaceNodes, distributeWorkspaceNodes, snapWorkspaceRect } from '@/lib/workspace/snap';
 import type { NodeTransformDetail } from './nodeTransform';
 
-const MusicPlaylistPanel = lazy(() => import('./MusicPlaylistPanel').then((module) => ({ default: module.MusicPlaylistPanel })));
 const NativeDevBrowser = lazy(() => import('./NativeDevBrowser').then((module) => ({ default: module.NativeDevBrowser })));
-const HiiMarketplace = lazy(() => import('./HiiMarketplace').then((module) => ({ default: module.HiiMarketplace })));
-const NatirarProjectSurface = lazy(() => import('./NatirarProjectSurface').then((module) => ({ default: module.NatirarProjectSurface })));
 
 const FIRST_RUN_TERMINAL_PREFACE = [
   '\x1b[1;97m ██╗  ██╗██╗██╗',
@@ -148,9 +129,7 @@ const FIRST_RUN_TERMINAL_PREFACE = [
   '',
   '\x1b[90mThis is a real HII terminal. Local shell and file authority stay on this computer.\x1b[0m'
 ].join('\n');
-const HiiLinkApp = lazy(() => import('./HiiLinkApp').then((module) => ({ default: module.HiiLinkApp })));
 const RegisteredApplication = lazy(() => import('./RegisteredApplication').then((module) => ({ default: module.RegisteredApplication })));
-const WaymarkApp = lazy(() => import('./WaymarkApp').then((module) => ({ default: module.WaymarkApp })));
 
 type Point = { x: number; y: number };
 
@@ -258,8 +237,6 @@ const promptSlashCommands = [
   ['/terminal [folder]', 'Create a local terminal'],
   ['/browser [url]', 'Open the native browser'],
   ['/search <query>', 'Search inside the native browser'],
-  ['/marketplace', 'Open apps, skills, and runtimes'],
-  ['/natirar', 'Open the live Natirar project field'],
   ['/feature <request>', 'Save a feature request to your HII board']
 ] as const;
 
@@ -791,8 +768,6 @@ function NodeBody({
   onPayload,
   onResize,
   onAgentSubmit,
-  onInstallPackage,
-  onCurationRequest,
   onBrowserCapture,
   onOpenBrowser,
   onApproveRun,
@@ -805,8 +780,6 @@ function NodeBody({
   onPayload: (patch: Record<string, unknown>) => void;
   onResize?: (size: { w: number; h: number }) => void;
   onAgentSubmit: (intent: string) => void;
-  onInstallPackage: (pkg: HiiMarketplacePackage, destination: string) => void;
-  onCurationRequest: (request: string, payload: MusicPanelPayload) => void;
   onBrowserCapture: (result: InformationCaptureResult) => void;
   onOpenBrowser: (url: string) => void;
   onApproveRun: () => void;
@@ -855,13 +828,13 @@ function NodeBody({
   if (node.type === 'run') return <RunBody node={node} onApprove={onApproveRun} onStop={onStopRun} onOpenProof={onOpenProof} />;
   if (node.type === 'terminal') return <TerminalBody node={node} onPayload={onPayload} onAgentSubmit={onAgentSubmit} />;
   if (node.type === 'intent') return <RequestBody node={node} onPayload={onPayload} onAgentSubmit={onAgentSubmit} />;
-  if (node.type === 'surface' && payload.surface === 'profile-music') {
-    return <DeferredSurface><MusicPlaylistPanel payload={payload} onPayload={onPayload} onRequestCuration={onCurationRequest} /></DeferredSurface>;
+  if (['profile-music', 'hii-marketplace', 'natirar-project', 'waymark-location', 'hii-link'].includes(text(payload.surface))) {
+    return <article className="hii-file-reference" aria-label={`${name} archived object`}>
+      <strong>{name}</strong>
+      <small>Archived HII surface</small>
+      <p>This object remains in your board and exports, but its unfinished interactive surface is no longer loaded.</p>
+    </article>;
   }
-  if (node.type === 'surface' && payload.surface === 'hii-marketplace') return <DeferredSurface><HiiMarketplace onInstall={onInstallPackage} /></DeferredSurface>;
-  if (node.type === 'surface' && payload.surface === 'natirar-project') return <DeferredSurface><NatirarProjectSurface /></DeferredSurface>;
-  if (node.type === 'app' && payload.surface === 'waymark-location') return <DeferredSurface><WaymarkApp destination={text(payload.destination) || 'this canvas'} onPayload={onPayload} /></DeferredSurface>;
-  if (node.type === 'app' && payload.surface === 'hii-link') return <DeferredSurface><HiiLinkApp /></DeferredSurface>;
   if (node.type === 'app') return <DeferredSurface><RegisteredApplication name={name} summary={content || 'Registered HII application'} entryUrl={text(payload.entryUrl) || undefined} /></DeferredSurface>;
   if (node.type === 'html') return <iframe className="hii-html" srcDoc={text(payload.srcdoc)} title={name} sandbox="allow-forms allow-scripts" />;
   if (node.type === 'ink') return <InkBody node={node} />;
@@ -1186,7 +1159,11 @@ export function HiiRoot({
   const runtimeEnabled = !isTouchCanvas || allowLocalRuntime;
   const startupTerminalHandled = useRef(false);
   const save = useRef<() => void>(() => {});
-  const settleCamera = useCallback(() => save.current(), []);
+  const [cameraRevision, setCameraRevision] = useState(0);
+  const settleCamera = useCallback(() => {
+    save.current();
+    setCameraRevision((revision) => revision + 1);
+  }, []);
   const camera = useCamera(settleCamera);
   const workspace = useWorkspace(camera.getViewport, undefined, persistence);
   useEffect(() => {
@@ -1212,34 +1189,7 @@ export function HiiRoot({
   const [commandShortcut, setCommandShortcut] = useState(DEFAULT_WEB_COMMAND_SHORTCUT);
   useEffect(() => setCommandShortcut(readCommandShortcut()), []);
   const [canvasManagerOpen, setCanvasManagerOpen] = useState(false);
-  const [parametricLayoutOpen, setParametricLayoutOpen] = useState(false);
-  const [siteViewsOpen, setSiteViewsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
-  /**
-   * Which projection of the workspace is on screen.
-   *
-   * A projection, not a document: both views read `workspace.nodes` and write
-   * through the same patch path, so switching never migrates or copies state.
-   */
-  const [projection, setProjection] = useState<'2d' | '3d'>(() => {
-    if (typeof window === 'undefined') return '2d';
-    return new URLSearchParams(window.location.search).get('view') === '3d' ? '3d' : '2d';
-  });
-
-  /**
-   * Keep the projection in the URL.
-   *
-   * A view someone can link to is a view someone can send you, and it costs one
-   * `replaceState` — no history entry, because switching projection is not
-   * navigation and should not need two Backs to undo.
-   */
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const url = new URL(window.location.href);
-    if (projection === '3d') url.searchParams.set('view', '3d');
-    else url.searchParams.delete('view');
-    if (url.toString() !== window.location.href) window.history.replaceState(null, '', url);
-  }, [projection]);
   const [toolMessage, setToolMessage] = useState('');
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [dropActive, setDropActive] = useState(false);
@@ -1254,7 +1204,6 @@ export function HiiRoot({
   const cameraInput = useRef<HTMLInputElement | null>(null);
   const photosInput = useRef<HTMLInputElement | null>(null);
   useEffect(() => () => { if (textTapTimer.current) clearTimeout(textTapTimer.current); }, []);
-  const [devFixtureState, setDevFixtureState] = useState<'normal' | 'minimized' | 'maximized'>('normal');
   const mouse = useRef<Point>({ x: 400, y: 280 });
   const activeRun = useRef<string | null>(null);
   const activeObjectives = useRef(new Map<string, string>());
@@ -1386,7 +1335,6 @@ export function HiiRoot({
       setPrompt((current) => current ? { ...current, response: error instanceof Error ? error.message : 'HII could not approve this context.', status: 'failed' } : current);
     }
   }, [workspace.flush]);
-  const curationRun = useRef<{ runId: string; nodeId: string; request: string; text: string } | null>(null);
   const workspaceRef = useRef(workspace);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const applicationCatalog = useRef(new Map<string, HiiApplicationManifest>());
@@ -1395,17 +1343,6 @@ export function HiiRoot({
   const handledCanvasImportRequest = useRef<string | null>(null);
   workspaceRef.current = workspace;
   save.current = workspace.scheduleSave;
-  const devFixtureNode = useMemo(() => {
-    const seed = packagePlacementSeed(WAYMARK_PACKAGE, 'HII development board');
-    const node = makeNode(seed, 96, 84, 2_147_480_000);
-    node.id = 'hii-dev-board-waymark';
-    const viewport = typeof window === 'undefined' ? { width: 1440, height: 960 } : { width: window.innerWidth, height: window.innerHeight };
-    node.w = devFixtureState === 'maximized' ? Math.max(900, viewport.width - 192) : 1080;
-    node.h = devFixtureState === 'maximized' ? Math.max(620, viewport.height - 168) : 720;
-    node.payload = { ...node.payload, windowState: devFixtureState };
-    return node;
-  }, [devFixtureState]);
-
   useEffect(() => { window.localStorage.setItem('hii.canvas.mode.v1', mode); }, [mode]);
 
   useEffect(() => {
@@ -1595,6 +1532,18 @@ export function HiiRoot({
         ),
     [isAccount, isSpace, spaceId, workspace.nodes]
   );
+  const mountedNodes = useMemo(() => {
+    const viewport = camera.viewportRef.current;
+    const ids = visibleWorkspaceNodeIds(
+      visibleNodes,
+      camera.getViewport(),
+      { width: viewport?.clientWidth || 0, height: viewport?.clientHeight || 0 },
+      1
+    );
+    if (!ids) return visibleNodes;
+    for (const id of selected) ids.add(id);
+    return visibleNodes.filter((node) => ids.has(node.id));
+  }, [cameraRevision, selected, visibleNodes]);
   const oasisSpaces = useMemo(() => visibleNodes.filter((node) => node.type === 'frame').map((node) => ({
     id: node.id,
     title: titleFor(node),
@@ -1620,21 +1569,6 @@ export function HiiRoot({
       setToolMessage('Canvas view reset.');
     }
   }, [camera, visibleNodes]);
-
-  const layoutImages = useCallback((settings: ParametricLayoutSettings) => {
-    const selectedImages = visibleNodes.filter((node) => node.type === 'image' && selected.includes(node.id));
-    const images = selectedImages.length ? selectedImages : visibleNodes.filter((node) => node.type === 'image');
-    const center = camera.toWorld(window.innerWidth / 2, window.innerHeight / 2);
-    const placements = parametricImageLayout(images, { ...settings, origin: center });
-    placements.forEach(({ id, ...patch }) => {
-      const node = workspace.nodes.find((entry) => entry.id === id);
-      if (node) workspace.patchNode(id, { ...patch, payload: { ...node.payload, parametricLayout: settings.layout, parametricScale: settings.scale, parametricSpacing: settings.spacing } });
-    });
-    setSelected(placements.map((placement) => placement.id));
-    setParametricLayoutOpen(false);
-    setToolMessage(`Arranged ${placements.length} image${placements.length === 1 ? '' : 's'} as ${settings.layout}.`);
-    window.setTimeout(fitCanvas, 40);
-  }, [camera, fitCanvas, selected, visibleNodes, workspace]);
 
   const focusNodes = useCallback((nodes: WorkspaceNode[], label: string) => {
     const viewport = camera.viewportRef.current;
@@ -1977,70 +1911,6 @@ export function HiiRoot({
     setToolMessage(`Receipt path copied · ${receiptPath}`);
   }, []);
 
-  const openMusicPanel = useCallback((at: Point) => {
-    const existing = workspace.nodes.find((node) => node.type === 'surface' && node.payload.surface === 'profile-music');
-    if (existing) {
-      setSelected([existing.id]);
-      workspace.bringToFront(existing.id);
-      return existing.id;
-    }
-    const seed: NodeSeed = {
-      type: 'surface',
-      w: 800,
-      h: 740,
-      object: {
-        kind: 'interface',
-        owner: 'hii',
-        status: 'ready',
-        source: 'HII profile music v1',
-        capabilityId: 'hii.profile.music-playlists',
-        audit: [{ ts: new Date().toISOString(), actor: 'human', action: 'opened profile music surface' }]
-      },
-      payload: createMusicPanelPayload()
-    };
-    return spawnSeeds([seed], at)[0];
-  }, [spawnSeeds, workspace]);
-
-  const openMarketplace = useCallback((at: Point) => {
-    const existing = workspace.nodes.find((node) => node.type === 'surface' && node.payload.surface === 'hii-marketplace');
-    if (existing) {
-      setSelected([existing.id]);
-      workspace.bringToFront(existing.id);
-      return existing.id;
-    }
-    return spawnSeeds([{
-      type: 'surface',
-      w: 980,
-      h: 690,
-      object: {
-        kind: 'interface', owner: 'hii', status: 'ready', source: 'HII community marketplace',
-        capabilityId: 'hii.marketplace.browse',
-        audit: [{ ts: new Date().toISOString(), actor: 'human', action: 'opened the HII community marketplace' }]
-      },
-      payload: { surface: 'hii-marketplace', title: 'HII community market' }
-    }], at)[0];
-  }, [spawnSeeds, workspace]);
-
-  const openNatirarProject = useCallback((at: Point) => {
-    const existing = workspace.nodes.find((node) => node.type === 'surface' && node.payload.surface === 'natirar-project');
-    if (existing) {
-      setSelected([existing.id]);
-      workspace.bringToFront(existing.id);
-      return existing.id;
-    }
-    return spawnSeeds([{
-      type: 'surface', w: 1180, h: 760,
-      object: { kind: 'interface', owner: 'hii', status: 'ready', source: 'Local Natirar project manifest', capabilityId: 'hii.natirar.project', audit: [{ ts: new Date().toISOString(), actor: 'human', action: 'opened the Natirar project field' }] },
-      payload: { surface: 'natirar-project', title: 'Natirar project field' }
-    }], at)[0];
-  }, [spawnSeeds, workspace]);
-
-  const installPackage = useCallback((pkg: HiiMarketplacePackage, destination: string) => {
-    const placement = packagePlacementSeed(pkg, destination);
-    const at = camera.toWorld(window.innerWidth / 2, window.innerHeight / 2);
-    return spawnSeeds([placement], { x: at.x - 540, y: at.y - 360 })[0];
-  }, [camera, spawnSeeds]);
-
   const windowAction = useCallback((node: WorkspaceNode, action: 'minimize' | 'maximize' | 'restore') => {
     if (node.type !== 'app' && node.type !== 'terminal') return;
     const prior = node.payload.restoreBounds && typeof node.payload.restoreBounds === 'object'
@@ -2073,23 +1943,6 @@ export function HiiRoot({
     });
   }, [camera, workspace]);
 
-  const tileApps = useCallback(() => {
-    const apps = workspace.nodes.filter((node) => node.type === 'app' && node.payload.windowState !== 'minimized');
-    if (!apps.length) return;
-    const columns = Math.ceil(Math.sqrt(apps.length));
-    const rows = Math.ceil(apps.length / columns);
-    const topLeft = camera.toWorld(18, 58);
-    const bottomRight = camera.toWorld(window.innerWidth - 18, window.innerHeight - 18);
-    const gap = 16 / camera.cam.current.z;
-    const width = (bottomRight.x - topLeft.x - gap * (columns - 1)) / columns;
-    const height = (bottomRight.y - topLeft.y - gap * (rows - 1)) / rows;
-    apps.forEach((node, index) => workspace.patchNode(node.id, {
-      x: topLeft.x + (index % columns) * (width + gap),
-      y: topLeft.y + Math.floor(index / columns) * (height + gap), w: width, h: height,
-      payload: { ...node.payload, windowState: 'tiled', restoreBounds: { x: node.x, y: node.y, w: node.w, h: node.h } }
-    }));
-  }, [camera, workspace]);
-
   const openDevBrowser = useCallback((at: Point, requestedUrl?: string) => {
     const seed = renderedBrowserSeed(requestedUrl || 'https://developer.mozilla.org');
     if (!seed) return '';
@@ -2104,25 +1957,6 @@ export function HiiRoot({
     setPromptVisible(false);
     setToolMessage(`Opened web results for “${query}”.`);
   }, [camera, openDevBrowser]);
-
-  const requestCuration = useCallback(async (nodeId: string, request: string, payload: MusicPanelPayload) => {
-    setPrompt({ anchor: mouse.current, initialValue: '', response: 'Preparing a curation proposal…', status: 'running' });
-    setPromptVisible(true);
-    try {
-      await startWithContext({
-        intent: buildCurationAgentPrompt(request, payload),
-        mode: 'plan',
-        contextNodeIds: [nodeId]
-      }, (result) => {
-        activeRun.current = result.runId;
-        curationRun.current = { runId: result.runId, nodeId, request, text: '' };
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'HII could not start the curation agent.';
-      workspaceRef.current.patchNode(nodeId, { payload: { ...payload, curationError: `${message} Nothing changed.` } });
-      setPrompt((current) => current ? { ...current, response: message, status: 'failed' } : current);
-    }
-  }, [startWithContext]);
 
   const submit = useCallback(async (intent: string, anchor: Point, objectId?: string, conversationId?: string) => {
     const presentation = presentationRequest(intent, selected.length);
@@ -2152,21 +1986,6 @@ export function HiiRoot({
         }
         ensureWorkspaceTerminal('canvas', terminalSeed);
         setPrompt(null);
-        setPromptVisible(false);
-        return;
-      }
-      if (canMutateCanvas(mode) && /^(?:\/music|\/playlist|music|open (?:music|playlists?))$/i.test(intent)) {
-        openMusicPanel(at);
-        setPromptVisible(false);
-        return;
-      }
-      if (canMutateCanvas(mode) && /^(?:\/marketplace|\/market|marketplace|open (?:the )?market(?:place)?)$/i.test(intent)) {
-        openMarketplace(at);
-        setPromptVisible(false);
-        return;
-      }
-      if (canMutateCanvas(mode) && /^(?:\/natirar|natirar|open (?:the )?natirar project)$/i.test(intent)) {
-        openNatirarProject(at);
         setPromptVisible(false);
         return;
       }
@@ -2254,7 +2073,7 @@ export function HiiRoot({
     } catch (error) {
       setPrompt((current) => current ? { ...current, response: error instanceof Error ? error.message : 'HII could not start the model.', status: 'failed' } : current);
     }
-  }, [camera, ensureWorkspaceTerminal, mode, openDevBrowser, openMarketplace, openMusicPanel, openNatirarProject, searchWeb, selected, spawnInformation, startWithContext]);
+  }, [camera, ensureWorkspaceTerminal, mode, openDevBrowser, searchWeb, selected, spawnInformation, startWithContext]);
 
   useEffect(() => {
     if (!runtimeEnabled) return;
@@ -2303,25 +2122,12 @@ export function HiiRoot({
         if (['completed', 'failed', 'cancelled'].includes(event.status)) activeObjectives.current.delete(event.runId);
         return;
       }
-      const curation = curationRun.current?.runId === event.runId ? curationRun.current : null;
       const conversation = activeConversation.current?.runId === event.runId ? activeConversation.current : null;
       if (conversation && event.text) {
         conversation.assistantText += `${conversation.assistantText ? '\n' : ''}${event.text}`;
       }
-      if (curation && event.text) curation.text += `${curation.text ? '\n' : ''}${event.text}`;
       setPrompt((current) => {
         if (!current || current.status !== 'running') return current;
-        if (curation) {
-          return {
-            ...current,
-            response: event.status === 'failed'
-              ? 'HII could not prepare the proposal. Nothing changed.'
-              : event.status === 'completed'
-                ? 'Curation proposal ready in the music panel.'
-                : 'Preparing a curation proposal…',
-            status: event.status === 'failed' ? 'failed' : event.status === 'completed' ? 'completed' : 'running'
-          };
-        }
         const response = mergeAgentResponse(current.response, event);
         return {
           ...current,
@@ -2329,23 +2135,6 @@ export function HiiRoot({
           status: event.status === 'failed' ? 'failed' : event.status === 'completed' ? 'completed' : 'running'
         };
       });
-      if (curation && (event.status === 'completed' || event.status === 'failed' || event.status === 'cancelled')) {
-        const node = workspaceRef.current.nodes.find((entry) => entry.id === curation.nodeId);
-        if (node) {
-          const panel = normalizeMusicPanelPayload(node.payload);
-          if (event.status === 'completed') {
-            try {
-              const proposal = parseCurationProposal(curation.text, curation.request, panel);
-              workspaceRef.current.patchNode(node.id, { payload: { ...panel, proposal, curationError: undefined } });
-            } catch (error) {
-              workspaceRef.current.patchNode(node.id, { payload: { ...panel, curationError: error instanceof Error ? error.message : 'Invalid proposal. Nothing changed.' } });
-            }
-          } else {
-            workspaceRef.current.patchNode(node.id, { payload: { ...panel, curationError: 'The curation run did not complete. Nothing changed.' } });
-          }
-        }
-        curationRun.current = null;
-      }
       if (conversation && (event.status === 'completed' || event.status === 'failed' || event.status === 'cancelled')) {
         const node = workspaceRef.current.nodes.find((entry) => entry.id === conversation.nodeId);
         if (node) {
@@ -2690,44 +2479,6 @@ export function HiiRoot({
     if (action === 'connect') { setActiveTool('connector'); setConnectorStartId(selected.length === 1 ? selected[0] : null); setToolMessage('Choose the next object to connect.'); return; }
   }, [selected]);
 
-  const projectionToggle = runtimeEnabled && persistentChrome ? (
-    <nav className="hii-projection-toggle" aria-label="Workspace projection" data-workspace-ui onPointerDown={(event) => event.stopPropagation()}>
-      <button
-        type="button"
-        aria-pressed={projection === '2d'}
-        onClick={() => setProjection('2d')}
-      >2D</button>
-      <button
-        type="button"
-        aria-pressed={projection === '3d'}
-        onClick={() => setProjection('3d')}
-      >3D</button>
-    </nav>
-  ) : null;
-
-  if (projection === '3d') {
-    return (
-      <main className="hii-canvas" data-surface={surface} data-projection="3d" aria-label="HII canvas, 3D view">
-        {projectionToggle}
-        <WorkspaceScene3D
-          nodes={workspace.nodes}
-          selectedIds={selected}
-          onSelect={setSelected}
-          onMove={(id, position) => {
-            const node = workspace.nodes.find((item) => item.id === id);
-            if (!node) return;
-            const transform = workspaceNodeTransform3D(node);
-            workspace.patchNode(id, {
-              x: position.x,
-              y: position.y,
-              transform: { ...transform, position }
-            });
-          }}
-        />
-      </main>
-    );
-  }
-
   return (
     <main
       ref={camera.viewportRef}
@@ -2897,8 +2648,6 @@ export function HiiRoot({
         onOpenScenes={openPresentationPanel} onExport={() => setExportOpen(true)}
         onOpenTerminal={() => ensureWorkspaceTerminal('docked')} onSearch={openSearchPanel} onOpenActivity={openActivityPanel}
         onOpenRemote={() => { onRequestDevice?.(selectedNodes); setToolMessage('Opened HII Remote.'); }}
-        onOpenSiteViews={() => setSiteViewsOpen(true)}
-        onOpenParameters={visibleNodes.some((node) => node.type === 'image') ? () => setParametricLayoutOpen(true) : undefined}
         onRequestFeature={runtimeEnabled ? requestFeature : undefined}
         onStartWork={runtimeEnabled ? startFromCommand : undefined}
         selectionLabels={selectedNodes.map(titleFor)}
@@ -2950,22 +2699,6 @@ export function HiiRoot({
         onPointerDown={(event) => event.stopPropagation()}
         onClick={() => setExportOpen(true)}
       >export</button>}
-      {parametricLayoutOpen && <ParametricLayoutPanel
-        count={(visibleNodes.some((node) => node.type === 'image' && selected.includes(node.id))
-          ? visibleNodes.filter((node) => node.type === 'image' && selected.includes(node.id))
-          : visibleNodes.filter((node) => node.type === 'image')).length}
-        onApply={layoutImages}
-        onClose={() => setParametricLayoutOpen(false)}
-      />}
-      {siteViewsOpen && <SiteViewsPanel
-        onOpen={(url) => {
-          const center = camera.toWorld(window.innerWidth / 2, window.innerHeight / 2);
-          const offset = workspace.nodes.filter((node) => node.type === 'browser').length * 28;
-          const id = openDevBrowser({ x: center.x - 380 + offset, y: center.y - 270 + offset }, url);
-          if (id) { setSelected([id]); setToolMessage('Placed website view on the canvas.'); }
-        }}
-        onClose={() => setSiteViewsOpen(false)}
-      />}
       {exportOpen && selected.length === 1 && (() => {
         const node = workspace.nodes.find((entry) => entry.id === selected[0]);
         if (!node) return null;
@@ -2981,35 +2714,18 @@ export function HiiRoot({
           setToolMessage('Prepared the selected output for saving.');
         }} />;
       })()}
-      {projectionToggle}
       {isAccount && canvasFeedback && <div className="hii-canvas-feedback" role="status" aria-live="polite">{canvasFeedback}</div>}
-      {runtimeEnabled && persistentChrome && workspace.nodes.some((node) => node.type === 'app') && <div className="hii-app-dock" onPointerDown={(event) => event.stopPropagation()}>
-        <button onClick={tileApps}>Tile apps</button>
-        {workspace.nodes.filter((node) => node.type === 'app').map((node) => <button key={node.id} data-active={selected.includes(node.id) || undefined} onClick={() => {
-          if (node.payload.windowState === 'minimized') workspace.patchNode(node.id, { payload: { ...node.payload, windowState: 'normal' } });
-          setSelected([node.id]); workspace.bringToFront(node.id);
-        }}>{titleFor(node)}</button>)}
-      </div>}
-      {runtimeEnabled && process.env.NEXT_PUBLIC_HII_DEV_BOARD === 'waymark' && (
-        <section className="hii-dev-board-direct" data-window-state={devFixtureState} style={{ width: devFixtureNode.w, height: devFixtureNode.h }}>
-          <div className="hii-app-window-controls" aria-label="Waymark window controls">
-            <button aria-label="Minimize Waymark" onClick={() => setDevFixtureState('minimized')}>−</button>
-            <button aria-label={devFixtureState === 'maximized' ? 'Restore Waymark' : 'Maximize Waymark'} onClick={() => setDevFixtureState(devFixtureState === 'maximized' ? 'normal' : 'maximized')}>{devFixtureState === 'maximized' ? '↙' : '↗'}</button>
-          </div>
-          {devFixtureState !== 'minimized' && <DeferredSurface><WaymarkApp destination="HII development board" onPayload={() => undefined} /></DeferredSurface>}
-        </section>
-      )}
       <div ref={camera.worldRef} className="hii-world">
         <svg className="hii-canvas-connectors" aria-label="Canvas connectors">
           {(workspace.document.links || []).map((link) => {
-            const from = visibleNodes.find((node) => node.id === link.fromId);
-            const to = visibleNodes.find((node) => node.id === link.toId);
+            const from = mountedNodes.find((node) => node.id === link.fromId);
+            const to = mountedNodes.find((node) => node.id === link.toId);
             if (!from || !to) return null;
             return <line key={link.id} x1={from.x + from.w / 2} y1={from.y + from.h / 2} x2={to.x + to.w / 2} y2={to.y + to.h / 2} markerEnd="url(#hii-arrow)" />;
           })}
           <defs><marker id="hii-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" /></marker></defs>
         </svg>
-        {visibleNodes.map((node) => (
+        {mountedNodes.map((node) => (
           <NodeFrame
             key={node.id}
             node={node}
@@ -3051,8 +2767,6 @@ export function HiiRoot({
               onPayload={(patch) => workspace.patchNode(node.id, { payload: { ...node.payload, ...patch } })}
               onResize={(size) => workspace.patchNode(node.id, size)}
               onAgentSubmit={(intent) => void startObjectiveAgent(node.id, intent)}
-              onInstallPackage={installPackage}
-              onCurationRequest={(request, payload) => void requestCuration(node.id, request, payload)}
               onBrowserCapture={(result) => spawnInformation(capturedInformationSeeds(result), { x: node.x + node.w + 40, y: node.y })}
               onOpenBrowser={(url) => openDevBrowser({ x: node.x + node.w + 40, y: node.y }, url)}
               onApproveRun={() => void startObjectiveAgent(node.id, runIntent(node))}

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { removeTestTree } from './lib/test-temp.mjs';
 
 const directory = await mkdtemp(path.join(os.tmpdir(), 'hii-window-state-'));
 process.env.HII_RUNTIME_DIR = directory;
@@ -70,5 +71,5 @@ try {
     checks: ['sqlite persistence', 'audit history', 'cursor pagination', 'scroll restore', 'revision conflict', 'close filtering']
   }, null, 2));
 } finally {
-  await rm(directory, { recursive: true, force: true });
+  await removeTestTree(directory);
 }

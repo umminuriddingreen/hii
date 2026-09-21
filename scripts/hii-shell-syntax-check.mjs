@@ -12,6 +12,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 const scripts = process.argv.slice(2);
 if (!scripts.length) {
@@ -26,7 +27,8 @@ if (probe.error || probe.status !== 0) {
 }
 
 for (const script of scripts) {
-  const check = spawnSync('bash', ['-n', script], { stdio: 'inherit' });
+  const source = readFileSync(script, 'utf8').replace(/\r\n?/g, '\n');
+  const check = spawnSync('bash', ['-n'], { input: source, stdio: ['pipe', 'inherit', 'inherit'] });
   if (check.status !== 0) process.exit(check.status ?? 1);
 }
 console.log(`hii shell syntax ok: ${scripts.join(' ')}`);

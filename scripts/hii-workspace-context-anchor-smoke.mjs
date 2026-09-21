@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { removeTestTreeSync } from './lib/test-temp.mjs';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hii-context-anchor-'));
 const workspaceRoot = path.join(directory, 'project');
@@ -139,7 +140,7 @@ try {
   for (const file of staged.files) {
     const stagedPath = path.join(workspaceRoot, file.relativePath);
     assert.equal(fs.existsSync(stagedPath), true);
-    assert.equal(fs.statSync(stagedPath).mode & 0o777, 0o400);
+    assert.equal(fs.statSync(stagedPath).mode & 0o222, 0, 'staged context must be non-writable');
   }
 
   const cleaned = stagingModule.cleanupWorkspaceRunContext({
@@ -158,5 +159,5 @@ try {
   console.log('execution:    focus instructions and read-only staged copies agree');
   console.log('cleanup:      disposable copies removed; HII source assets preserved');
 } finally {
-  fs.rmSync(directory, { recursive: true, force: true });
+  removeTestTreeSync(directory);
 }

@@ -16,4 +16,4 @@ export const SITE_TITLE = 'HII — Human Information Interface';
 export const SITE_TAGLINE = 'A human information interface for working with agents.';
 
 /** Public routes that are safe to advertise to crawlers. */
-export const PUBLIC_ROUTES = ['/', '/docs', '/download', '/store', '/site-analysis', '/privacy'] as const;
+export const PUBLIC_ROUTES = ['/', '/docs', '/download', '/privacy'] as const;

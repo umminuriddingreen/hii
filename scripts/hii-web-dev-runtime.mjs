@@ -5,10 +5,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { attachPtyGateway, isLocalRequest } from '../server/pty-gateway.mjs';
 
-const repo = path.resolve(process.cwd());
+const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const port = Number(process.env.HII_WEB_DEV_RUNTIME_PORT || 3043);
 const runs = new Map();
 const canvasModes = new Set(['build', 'plan', 'browse', 'see', 'show']);

@@ -159,10 +159,10 @@ fn object_id(kind: &str, id: &str) -> String {
 }
 
 fn identity(path: &Path) -> Result<String, String> {
-    let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
+        let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
         Ok(format!("unix:{}:{}", metadata.dev(), metadata.ino()))
     }
     #[cfg(not(unix))]

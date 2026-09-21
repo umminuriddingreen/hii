@@ -3231,7 +3231,7 @@ impl Conversation {
         }
         self.goal = session_goal(&raw);
         self.plan_mode = session_plan_mode(&raw);
-        self.authority = session_authority(&raw).unwrap_or_else(|| {
+        self.authority = session_authority(&raw).unwrap_or({
             if cfg!(target_os = "macos") {
                 Authority::PersonalLocal
             } else {
@@ -3820,6 +3820,7 @@ impl Conversation {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn fail_backend_run(
         &mut self,
         run: Option<RunStore>,
@@ -5644,11 +5645,11 @@ mod tests {
         let strong = "mlx-community/Qwen3.5-35B-A3B-4bit".to_string();
         let installed = vec![small.clone(), strong.clone()];
         assert_eq!(
-            super::adaptive_model_choice(&small, &[strong.clone()], &installed, None),
+            super::adaptive_model_choice(&small, std::slice::from_ref(&strong), &installed, None),
             strong
         );
         assert_eq!(
-            super::adaptive_model_choice(&small, &[small.clone()], &installed, Some(&strong)),
+            super::adaptive_model_choice(&small, std::slice::from_ref(&small), &installed, Some(&strong)),
             strong
         );
         assert_eq!(

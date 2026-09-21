@@ -4,6 +4,7 @@ import { SITE_TAGLINE } from '@/lib/site';
 export const alt = 'HII — Human Information Interface';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
+export const dynamic = 'force-static';
 
 /**
  * The share card is the public surface rendered at card scale: white field,

@@ -167,6 +167,7 @@ fn handle_line(
 
 /// Route a JSON-RPC request to its method handler, gating all tool calls at the
 /// authority envelope and any active per-client ACL.
+#[allow(clippy::too_many_arguments)]
 fn dispatch(
     request: &Request,
     id: Value,

@@ -265,8 +265,9 @@ mod tests {
             .decode(command.split_whitespace().last().unwrap())
             .unwrap();
         let words: Vec<u16> = bytes
-            .chunks_exact(2)
-            .map(|x| u16::from_le_bytes([x[0], x[1]]))
+            .as_chunks::<2>().0
+            .iter()
+            .map(|x| u16::from_le_bytes(*x))
             .collect();
         let script = String::from_utf16(&words).unwrap();
         assert!(script.contains("'a''b' '$(Get-Content secret)'"));

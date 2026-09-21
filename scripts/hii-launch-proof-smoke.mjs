@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { removeTestTree } from './lib/test-temp.mjs';
 
 const runtime = await mkdtemp(path.join(os.tmpdir(), 'hii-launch-proof-smoke-'));
 process.env.HII_RUNTIME_DIR = runtime;
@@ -89,5 +90,5 @@ try {
   console.log('selection:    current operator workspace remains selected');
   console.log('safety:       existing launch workspace cannot be replaced');
 } finally {
-  await rm(runtime, { recursive: true, force: true });
+  await removeTestTree(runtime);
 }

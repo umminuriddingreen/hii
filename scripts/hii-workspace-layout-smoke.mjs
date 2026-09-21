@@ -31,7 +31,7 @@ const repeated = findOpenWorkspacePosition(
 assert.deepEqual(repeated, { x: 1352, y: 0 });
 
 const workspaceSource = await readFile(new URL('../components/workspace/HiiRoot.tsx', import.meta.url), 'utf8');
-assert.match(workspaceSource, /setSelected\(\[node\.id\]\); workspace\.bringToFront\(node\.id\)/);
+assert.match(workspaceSource, /onSelect=\{\(event\) => \{[\s\S]*?workspace\.bringToFront\(node\.id\);/);
 assert.match(workspaceSource, /const spawnSeeds = useCallback[\s\S]*workspace\.takeZ\(\)/);
 assert.match(workspaceSource, /const spawnInformation = useCallback[\s\S]*column \* 430[\s\S]*row \* 300/);
 

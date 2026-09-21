@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { removeTestTreeSync } from './lib/test-temp.mjs';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hii-spatial-run-'));
 const workspaceRoot = path.join(directory, 'project');
@@ -279,5 +280,5 @@ console.log('artifact:     receipt-listed text + bounded image + sandboxed site 
   console.log('network:      remote-read warning + local-only manifest verified');
   console.log('capability:   verified receipt -> idempotent review draft verified');
 } finally {
-  fs.rmSync(directory, { recursive: true, force: true });
+  removeTestTreeSync(directory);
 }

@@ -55,6 +55,7 @@ impl ContextBudget {
         })
     }
 
+    #[allow(dead_code)]
     pub fn validate(self, messages: &[Message]) -> Result<(), String> {
         self.validate_count(messages, None)
     }
@@ -79,6 +80,7 @@ impl ContextBudget {
 
     /// Persist first; the caller must record the checkpoint event before swapping
     /// its live messages. Full historical text is redacted and images are omitted.
+    #[allow(dead_code)]
     pub fn checkpoint(
         self,
         runtime: &Path,
@@ -99,6 +101,7 @@ impl ContextBudget {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn checkpoint_with_counter(
         self,
         runtime: &Path,

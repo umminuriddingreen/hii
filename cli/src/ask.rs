@@ -244,6 +244,7 @@ pub fn run(
     result
 }
 
+#[allow(clippy::too_many_arguments)]
 fn ask_receipt(
     store: &RunStore,
     prompt: &str,

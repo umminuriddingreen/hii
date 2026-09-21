@@ -191,6 +191,17 @@ const CAPABILITY_JOBS = path.join(RUNTIME, "capability-jobs.jsonl");
 const CLAUDE_BIN = process.env.HII_CLAUDE_BIN || (process.platform === "win32" ? "claude" : "/opt/homebrew/bin/claude");
 const HII_BIN = process.env.HII_WORKSPACE_RUNNER_BIN || (process.platform === "win32" ? "hii" : path.join(os.homedir(), "bin", "hii"));
 
+function executableInvocation(binary, args) {
+  if (/\.(?:mjs|js)$/i.test(binary)) return { binary: process.execPath, args: [binary, ...args] };
+  if (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(binary)) {
+    return { binary: process.env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", binary, ...args] };
+  }
+  if (process.platform === "win32" && /\.ps1$/i.test(binary)) {
+    return { binary: "pwsh.exe", args: ["-NoLogo", "-NoProfile", "-File", binary, ...args] };
+  }
+  return { binary, args };
+}
+
 function cleanSessionName(value) {
   return String(value || "")
     .toLowerCase()
@@ -517,7 +528,8 @@ function executeWorkspaceIntent(intent) {
   }
   const args = ["--cwd", workspaceRoot, "--model", model, "--max-steps", String(maxSteps), "run", String(intent.goal).slice(0, 16000)];
   const normalizedIntent = { ...intent, workspaceRoot, model, maxSteps, contextStaging };
-  const child = execFile(HII_BIN, args, {
+  const invocation = executableInvocation(HII_BIN, args);
+  const child = execFile(invocation.binary, invocation.args, {
     cwd: workspaceRoot,
     timeout: 30 * 60 * 1000,
     maxBuffer: 2 * 1024 * 1024,

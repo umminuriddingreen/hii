@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { removeTestTreeSync } from './lib/test-temp.mjs';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hii-activation-'));
 const projectRoot = path.join(directory, 'approved-project');
@@ -13,20 +14,24 @@ process.env.HII_RUNTIME_DIR = runtimeRoot;
 fs.writeFileSync(path.join(projectRoot, 'README.md'), '# Activation smoke\nLocal founder-beta orientation.\n');
 fs.writeFileSync(path.join(projectRoot, 'src', 'index.ts'), 'export const activationSmoke = true;\n');
 
-function stubBinary(name, body) {
-  const file = path.join(directory, name);
-  fs.writeFileSync(file, `#!/bin/sh\n${body}\n`);
+function stubBinary(name, version, list = '') {
+  const windows = process.platform === 'win32';
+  const file = path.join(directory, `${name}${windows ? '.js' : ''}`);
+  const body = windows
+    ? `console.log(process.argv[2] === 'list' ? ${JSON.stringify(list)} : ${JSON.stringify(version)});\n`
+    : `#!/bin/sh\nif [ "$1" = "list" ]; then printf ${JSON.stringify(`${list}\n`)}; else echo ${JSON.stringify(version)}; fi\n`;
+  fs.writeFileSync(file, body);
   fs.chmodSync(file, 0o755);
   return file;
 }
 
-process.env.HII_CODEX_BIN = stubBinary('codex', 'echo "codex-cli smoke"');
-process.env.HII_CLAUDE_BIN = stubBinary('claude', 'echo "claude smoke"');
+process.env.HII_CODEX_BIN = stubBinary('codex', 'codex-cli smoke');
+process.env.HII_CLAUDE_BIN = stubBinary('claude', 'claude smoke');
 process.env.HII_CODEX_AUTH_PATH = path.join(directory, 'codex-auth.json');
 process.env.HII_CLAUDE_AUTH_PATH = path.join(directory, 'claude-auth.json');
 fs.writeFileSync(process.env.HII_CODEX_AUTH_PATH, '{"signedIn":true}\n');
 fs.writeFileSync(process.env.HII_CLAUDE_AUTH_PATH, '{"signedIn":true}\n');
-process.env.HII_OLLAMA_BIN = stubBinary('ollama', '[ "$1" = "list" ] && printf "NAME ID SIZE MODIFIED\\nqwen-smoke:latest abc 1GB now\\n" || echo "ollama smoke"');
+process.env.HII_OLLAMA_BIN = stubBinary('ollama', 'ollama smoke', 'NAME ID SIZE MODIFIED\nqwen-smoke:latest abc 1GB now');
 
 const contextDock = await import('../lib/server/hii-context-dock.ts');
 const activation = await import('../lib/server/hii-activation.ts');
@@ -120,5 +125,5 @@ try {
   console.log('network:      no network used');
 } finally {
   contextDock.resetContextDockDbForTests();
-  fs.rmSync(directory, { recursive: true, force: true });
+  removeTestTreeSync(directory);
 }

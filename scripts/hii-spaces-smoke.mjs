@@ -10,11 +10,12 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { removeTestTree } from './lib/test-temp.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runtimeDir = await mkdtemp(path.join(os.tmpdir(), 'hii-spaces-smoke-'));
@@ -32,7 +33,7 @@ function inFreshProcess(source) {
   return JSON.parse(result.stdout.trim().split('\n').at(-1));
 }
 
-const store = `${repo}/lib/server/space-store.ts`;
+const store = pathToFileURL(path.join(repo, 'lib', 'server', 'space-store.ts')).href;
 
 try {
   const created = inFreshProcess(`
@@ -83,5 +84,5 @@ try {
 
   console.log('hii spaces smoke: space identity survives a process restart.');
 } finally {
-  await rm(runtimeDir, { recursive: true, force: true });
+  await removeTestTree(runtimeDir);
 }
