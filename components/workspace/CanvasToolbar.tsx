@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Cursor, NoteBlank, Paperclip, PencilSimple, Shapes, Table, TextT } from '@phosphor-icons/react';
+import { ControlButton, ControlDivider, ControlIsland } from '@/components/ui/ControlIsland';
 import { commandShortcutFromEvent, type CommandShortcut } from '@/lib/workspace/command-shortcut';
 import styles from './CanvasToolbar.module.css';
 
@@ -141,21 +142,19 @@ export function CanvasToolbar({
   ];
 
   return <nav className={styles.shell} data-workspace-ui aria-label="Canvas tools" onPointerDown={(event) => event.stopPropagation()}>
-    <div className={styles.toolbar}>
-      <button className={styles.trigger} type="button" aria-label="Open information terminal" aria-expanded={expanded} aria-controls="hii-information-terminal" onClick={() => setExpanded(!expanded)}>
+    <ControlIsland className={styles.toolbar}>
+      <ControlButton className={styles.trigger} label="Open information terminal" aria-expanded={expanded} aria-controls="hii-information-terminal" onClick={() => setExpanded(!expanded)}>
         <span>hii</span><kbd aria-hidden="true">{shortcutLabel}</kbd>
-      </button>
-      <i aria-hidden="true" />
-      {quickTools.map((tool) => <button
+      </ControlButton>
+      <ControlDivider />
+      {quickTools.map((tool) => <ControlButton
         key={tool.id}
-        type="button"
         className={styles.tool}
-        aria-label={tool.label}
+        label={tool.label}
         aria-pressed={activeTool === tool.id}
-        title={tool.label}
         onClick={() => onToolChange(tool.id)}
-      >{tool.icon}</button>)}
-    </div>
+      >{tool.icon}</ControlButton>)}
+    </ControlIsland>
     {expanded && <section id="hii-information-terminal" className={styles.palette} aria-label="Information terminal">
       {shortcutCapture ? <div className={styles.shortcutCapture}>
         <label htmlFor="hii-command-shortcut">Press a shortcut</label>
@@ -194,10 +193,10 @@ export function CanvasToolbar({
       {message && <p role="status" className={styles.message}>{message}</p>}
       <small>↑↓ choose · Enter run · Esc close</small>
     </section>}
-    <div className={styles.zoom} aria-label="Canvas zoom">
-      <button type="button" aria-label="Zoom out" onClick={onZoomOut}>−</button>
-      <button type="button" aria-label="Fit canvas" onClick={onFitView}>Fit</button>
-      <button type="button" aria-label="Zoom in" onClick={onZoomIn}>+</button>
-    </div>
+    <ControlIsland compact className={styles.zoom} aria-label="Canvas zoom">
+      <ControlButton compact label="Zoom out" onClick={onZoomOut}>−</ControlButton>
+      <ControlButton compact label="Fit canvas" className={styles.fitButton} onClick={onFitView}>Fit</ControlButton>
+      <ControlButton compact label="Zoom in" onClick={onZoomIn}>+</ControlButton>
+    </ControlIsland>
   </nav>;
 }
