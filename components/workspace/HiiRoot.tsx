@@ -2554,8 +2554,22 @@ export function HiiRoot({
 
   const selectionAction = useCallback((action: CanvasSelectionAction) => {
     if (action === 'format' || action === 'inspect') { setInspectorOpen(true); return; }
+    if (action === 'export') { setExportOpen(true); return; }
     if (action === 'connect') { setActiveTool('connector'); setConnectorStartId(selected.length === 1 ? selected[0] : null); setToolMessage('Choose the next object to connect.'); return; }
   }, [selected]);
+
+  const selectionBarAnchor = useMemo(() => {
+    if (!selectedNodes.length || typeof window === 'undefined') return undefined;
+    const left = Math.min(...selectedNodes.map((node) => node.x));
+    const top = Math.min(...selectedNodes.map((node) => node.y));
+    const right = Math.max(...selectedNodes.map((node) => node.x + node.w));
+    const bottom = Math.max(...selectedNodes.map((node) => node.y + node.h));
+    const view = camera.cam.current;
+    const x = Math.min(window.innerWidth - 170, Math.max(170, view.x + ((left + right) / 2) * view.z));
+    const above = view.y + top * view.z;
+    const y = above > 82 ? above : Math.min(window.innerHeight - 90, view.y + bottom * view.z + 64);
+    return { x, y };
+  }, [camera.cam, cameraRevision, selectedNodes]);
 
   return (
     <main
@@ -2744,7 +2758,15 @@ export function HiiRoot({
         onFocus={focusOasisTarget}
         onFit={fitCanvas}
       />}
-      <CanvasSelectionBar selectionCount={selected.length} canConnect={selected.length <= 2} onAction={selectionAction} />
+      <CanvasSelectionBar
+        selectionCount={selected.length}
+        selectionType={selectedNodes[0]?.type}
+        foreground={canvasObjectState(selectedNodes[0] || ({ payload: {} } as WorkspaceNode)).appearance?.foreground}
+        fontSize={canvasObjectState(selectedNodes[0] || ({ payload: {} } as WorkspaceNode)).appearance?.fontSize}
+        canConnect={selected.length <= 2}
+        anchor={selectionBarAnchor}
+        onAction={selectionAction}
+      />
       {inspectorOpen && selectedNodes.length > 0 && <CanvasObjectInspector
         title={selectedNodes.length === 1 ? titleFor(selectedNodes[0]) : 'Multiple selection'} typeLabel={selectedNodes[0]?.type || 'objects'} selectionCount={selectedNodes.length}
         locked={selectedNodes.every((node) => canvasObjectState(node).locked)}
@@ -2770,13 +2792,6 @@ export function HiiRoot({
         onFocusNode={focusCanvasNode}
         onClose={closeCanvasManager}
       />}
-      {selected.length === 1 && !exportOpen && <button
-        type="button"
-        className="hii-export-trigger"
-        data-workspace-ui
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={() => setExportOpen(true)}
-      >export</button>}
       {exportOpen && selected.length === 1 && (() => {
         const node = workspace.nodes.find((entry) => entry.id === selected[0]);
         if (!node) return null;

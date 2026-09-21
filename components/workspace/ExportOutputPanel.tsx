@@ -1,6 +1,7 @@
 'use client';
 
 import type { WorkspaceNode } from '@/lib/workspace/types';
+import { Copy, DownloadSimple, X } from '@phosphor-icons/react';
 
 function safeName(node: WorkspaceNode) {
   const raw = String(node.payload.name || node.payload.title || node.type || 'hii-output');
@@ -28,9 +29,11 @@ export function ExportOutputPanel({ node, onCanvas, onDownload, onClose }: {
   onClose: () => void;
 }) {
   return <aside className="hii-export-panel" data-workspace-ui aria-label="Export selected output" onPointerDown={(event) => event.stopPropagation()}>
-    <header><div><small>selected output</small><strong>{String(node.payload.name || node.payload.title || node.type)}</strong></div><button type="button" aria-label="Close export" onClick={onClose}>×</button></header>
-    <button type="button" onClick={onCanvas}>duplicate on canvas</button>
-    <button type="button" onClick={onDownload}>save to a folder</button>
-    <small>Canvas keeps the object editable. Folder export creates a portable text or HII JSON file.</small>
+    <header><div><small>Export</small><strong>{String(node.payload.name || node.payload.title || node.type)}</strong></div><button type="button" aria-label="Close export" onClick={onClose}><X size={18} /></button></header>
+    <div className="hii-export-actions">
+      <button type="button" onClick={onCanvas}><Copy size={18} /><span>Duplicate</span><small>Editable copy</small></button>
+      <button type="button" onClick={onDownload}><DownloadSimple size={18} /><span>Download</span><small>Portable file</small></button>
+    </div>
+    <p>The original stays on this canvas.</p>
   </aside>;
 }

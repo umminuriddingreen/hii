@@ -16,6 +16,34 @@ import styles from './DesktopHiiAccess.module.css';
 import { listLocalWorkspaces, readLocalWorkspace, selectLocalWorkspace, type LocalWorkspaceInventory } from '@/lib/desktop/local-workspaces';
 
 type LinkedIdentity = { handle: string; deviceName: string };
+type ThemeMode = 'system' | 'light' | 'dark';
+
+function applyTheme(mode: ThemeMode) {
+  const resolved = mode === 'system'
+    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    : mode;
+  window.localStorage.setItem('hii.theme.v1', mode);
+  document.documentElement.dataset.theme = resolved;
+  document.documentElement.style.colorScheme = resolved;
+}
+
+function WorkspacePreview({ workspace }: { workspace?: SearchableWorkspace }) {
+  const nodes = workspace?.nodes.filter((node) => node.type !== 'frame').slice(0, 28) ?? [];
+  if (!nodes.length) return <span className={styles.previewEmpty}>Empty</span>;
+  const left = Math.min(...nodes.map((node) => node.x));
+  const top = Math.min(...nodes.map((node) => node.y));
+  const right = Math.max(...nodes.map((node) => node.x + node.w));
+  const bottom = Math.max(...nodes.map((node) => node.y + node.h));
+  const width = Math.max(1, right - left);
+  const height = Math.max(1, bottom - top);
+  return <span className={styles.preview} aria-hidden="true">{nodes.map((node) => {
+    const image = node.type === 'image' && typeof node.payload.url === 'string' ? node.payload.url : '';
+    return <span key={node.id} className={styles.previewTile} data-kind={node.type} style={{
+      left: `${((node.x - left) / width) * 100}%`, top: `${((node.y - top) / height) * 100}%`,
+      width: `${Math.max(3, (node.w / width) * 100)}%`, height: `${Math.max(3, (node.h / height) * 100)}%`
+    }}>{image ? <img src={image} alt="" /> : null}</span>;
+  })}</span>;
+}
 
 /**
  * A first guess at what to call this machine in the account's device list.
@@ -54,6 +82,19 @@ export function DesktopHiiAccess() {
   const [localBoards, setLocalBoards] = useState<LocalWorkspaceInventory | null>(null);
   const [localEpoch, setLocalEpoch] = useState(0);
   const [searchFocusNodeId, setSearchFocusNodeId] = useState<string | null>(null);
+  const [galleryWorkspaces, setGalleryWorkspaces] = useState<SearchableWorkspace[]>([]);
+  const [theme, setTheme] = useState<ThemeMode>('system');
+  useEffect(() => {
+    const stored = window.localStorage.getItem('hii.theme.v1');
+    const initial: ThemeMode = stored === 'light' || stored === 'dark' ? stored : 'system';
+    setTheme(initial);
+    applyTheme(initial);
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const syncSystem = () => { if ((window.localStorage.getItem('hii.theme.v1') ?? 'system') === 'system') applyTheme('system'); };
+    media.addEventListener('change', syncSystem);
+    return () => media.removeEventListener('change', syncSystem);
+  }, []);
+  const chooseTheme = (next: ThemeMode) => { setTheme(next); applyTheme(next); };
   const searchWorkspaces = useCallback(async (): Promise<SearchableWorkspace[]> => {
     const documents: SearchableWorkspace[] = [];
     const local = await listLocalWorkspaces();
@@ -69,6 +110,13 @@ export function DesktopHiiAccess() {
     }));
     return [...documents, ...accountDocuments];
   }, [workspaces]);
+  useEffect(() => {
+    if (!workspaceOpen) return;
+    let cancelled = false;
+    void searchWorkspaces().then((documents) => { if (!cancelled) setGalleryWorkspaces(documents); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [searchWorkspaces, workspaceOpen]);
+  const previewFor = useCallback((id: string) => galleryWorkspaces.find((workspace) => workspace.id === id), [galleryWorkspaces]);
   const focusSearchResult = useCallback(async (workspaceId: string, nodeId: string) => {
     if (unsaved) { setMessage('Save or retry the current canvas before changing workspaces.'); return; }
     setSearchFocusNodeId(nodeId);
@@ -209,14 +257,17 @@ export function DesktopHiiAccess() {
       <header><strong>Workspaces</strong><kbd>Ctrl / Cmd 1</kbd></header>
       <nav aria-label="Available workspaces">
         <button type="button" disabled={busy || unsaved} data-active={active === 'local' || undefined} onClick={() => void selectWorkspace('local')}>
+          <WorkspacePreview workspace={previewFor(`local:${localBoards?.selectedWorkspaceId ?? 'default'}`)} />
           <span>this device</span><small>local canvas</small>
         </button>
         {localBoards?.workspaces.map(board => <button type="button" key={`local:${board.id}`} disabled={busy || unsaved || board.unreadable}
           data-active={active === 'local' && localBoards.selectedWorkspaceId === board.id || undefined}
           onClick={() => void openLocalBoard(board.id)}>
+          <WorkspacePreview workspace={previewFor(`local:${board.id}`)} />
           <span>{board.id}</span><small>{board.unreadable ? 'needs recovery · preserved' : `${board.objects ?? 0} objects · on this device`}</small>
         </button>)}
         {workspaces.map((workspace) => <button type="button" disabled={busy || unsaved} key={workspace.id} data-active={active === workspace.id || undefined} onClick={() => void selectWorkspace(workspace.id)}>
+          <WorkspacePreview workspace={previewFor(workspace.id)} />
           <span>{workspace.name}</span><small>{workspace.role} · mirrored with web</small>
         </button>)}
       </nav>
@@ -224,7 +275,7 @@ export function DesktopHiiAccess() {
       <p role="status">{message}</p>
     </aside> : null}
     {accountOpen ? <aside className={styles.panel} data-workspace-ui aria-label="HII account synchronization">
-      <button type="button" title="Close account" aria-label="Close account" onClick={() => setAccountOpen(false)}><X size={18} /></button>
+      <header><strong>HII</strong><button type="button" title="Close account" aria-label="Close account" onClick={() => setAccountOpen(false)}><X size={17} /></button></header>
       {linked ? <>
         <dl>
           <div><dt>account</dt><dd>{identity?.handle}</dd></div>
@@ -246,6 +297,12 @@ export function DesktopHiiAccess() {
           <button disabled={busy || unsaved || !code.trim()}>{busy ? 'linking…' : 'link this app'}</button>
         </form>
       </>}
+      <section className={styles.appearance} aria-label="Appearance">
+        <span>Appearance</span>
+        <div role="radiogroup" aria-label="Color theme">
+          {(['system', 'light', 'dark'] as const).map((mode) => <button key={mode} type="button" role="radio" aria-checked={theme === mode} onClick={() => chooseTheme(mode)}>{mode}</button>)}
+        </div>
+      </section>
       <p role="status">{message}</p>
     </aside> : null}
   </div>;
