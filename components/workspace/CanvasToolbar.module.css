@@ -1,37 +1,40 @@
 .shell {
   position: absolute;
   z-index: 120;
-  top: 16px;
+  top: 14px;
   left: 50%;
   transform: translateX(-50%);
-  width: min(420px, calc(100vw - 24px));
+  width: min(520px, calc(100vw - 24px));
   color: #111;
-  font: 12px/1.35 var(--font-mono, ui-monospace, monospace);
+  font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
 }
 .trigger {
-  display: flex;
+  display: grid;
   align-items: center;
-  justify-content: space-between;
-  gap: 22px;
-  min-width: 76px;
-  min-height: 34px;
+  justify-content: center;
+  min-width: 40px;
+  min-height: 40px;
   margin: 0 auto;
-  padding: 0 10px;
-  border: 1px solid #d8d8d8;
-  border-radius: 6px;
-  background: #fff;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .72);
   color: inherit;
   font: inherit;
+  font-weight: 600;
   cursor: pointer;
+  backdrop-filter: blur(16px);
 }
-.trigger kbd, .results kbd { color: #777; font: 10px/1 var(--font-mono, ui-monospace, monospace); }
+.trigger:hover, .trigger:focus-visible, .trigger[aria-expanded='true'] { background: #111; color: #fff; }
+.trigger kbd { display: none; }
+.results kbd { color: #777; font: 10px/1 var(--font-mono, ui-monospace, monospace); }
 .palette {
   display: grid;
-  margin-top: 8px;
-  border: 1px solid #ccc;
-  border-radius: 8px;
+  margin-top: 10px;
+  border: 1px solid rgba(0, 0, 0, .1);
+  border-radius: 14px;
   background: #fff;
-  box-shadow: 0 14px 40px #0002;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .12);
   overflow: hidden;
 }
 .selection { display: flex; align-items: center; gap: 6px; min-height: 38px; padding: 7px 12px; overflow: hidden; border-bottom: 1px solid #e8e8e5; color: #777; font: 10px/1.2 var(--font-mono, ui-monospace, monospace); }
@@ -82,6 +85,6 @@
 .trigger:focus-visible, .palette button:focus-visible, .palette input:focus-visible { outline: 2px solid #111; outline-offset: 2px; }
 @media (max-width: 760px), (pointer: coarse) {
   .shell { top: auto; bottom: max(12px, env(safe-area-inset-bottom)); }
-  .trigger { min-width: 88px; min-height: 44px; }
+  .trigger { min-width: 44px; min-height: 44px; }
   .palette { margin-top: 0; margin-bottom: 8px; }
 }

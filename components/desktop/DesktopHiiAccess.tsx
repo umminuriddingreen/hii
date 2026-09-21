@@ -202,7 +202,7 @@ export function DesktopHiiAccess() {
     </div>
     <nav className={styles.accountControls} data-workspace-ui aria-label="Canvas account">
       <button type="button" title="Workspaces" aria-label="Workspaces" aria-expanded={workspaceOpen} onClick={() => setWorkspaceOpen((value) => !value)}><SidebarSimple size={19} /></button>
-      <button type="button" title="HII account" aria-expanded={accountOpen} onClick={() => setAccountOpen((value) => !value)}><UserCircle size={19} /><span>{identity?.handle ?? 'HII account'}</span></button>
+      <button type="button" title={identity?.handle ?? 'HII account'} aria-label={identity?.handle ? `HII account: ${identity.handle}` : 'HII account'} aria-expanded={accountOpen} onClick={() => setAccountOpen((value) => !value)}><UserCircle size={19} /></button>
     </nav>
     {workspaceOpen ? <aside className={styles.workspacePanel} data-workspace-ui aria-label="Workspaces">
       <header><strong>Workspaces</strong><kbd>Ctrl / Cmd 1</kbd></header>

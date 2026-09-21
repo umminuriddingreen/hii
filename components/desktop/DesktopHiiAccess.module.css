@@ -1,9 +1,11 @@
 .shell { position: fixed; inset: 0; background: #fff; color: #111; }
 .surface { position: absolute; inset: 0; }
-.accountControls { position: absolute; top: 14px; left: 16px; z-index: 2147483601; display: flex; gap: 4px; max-width: calc(100vw - 235px); padding: 3px; border: 1px solid #dedede; border-radius: 6px; background: #f6f6f6; }
-.accountControls button { display: flex; align-items: center; gap: 6px; min-width: 32px; min-height: 30px; padding: 4px 8px; border: 0; background: transparent; color: #333; font: 12px/1.3 'Segoe UI', sans-serif; cursor: pointer; }
+.accountControls { position: absolute; top: 14px; left: 16px; z-index: 2147483601; display: flex; gap: 2px; padding: 2px; border: 0; border-radius: 999px; background: rgba(255,255,255,.72); backdrop-filter: blur(16px); }
+.accountControls button { display: grid; width: 36px; height: 36px; place-items: center; padding: 0; border: 0; border-radius: 999px; background: transparent; color: #555; cursor: pointer; }
+.accountControls button:hover,
+.accountControls button:focus-visible,
+.accountControls button[aria-expanded='true'] { background: #111; color: #fff; outline: 0; }
 .accountControls span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.accountControls button:focus-visible { outline: 2px solid #187c69; }
 .workspacePanel button:disabled { opacity: .5; cursor: wait; }
 .loading { display: grid; min-height: 100vh; place-items: center; font: 12px/1.4 ui-monospace, Menlo, monospace; }
 .header { position: fixed; z-index: 2147483600; top: 14px; right: 16px; left: 16px; display: flex; align-items: center; justify-content: space-between; pointer-events: none; font: 11px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }

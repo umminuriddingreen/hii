@@ -131,7 +131,7 @@ export function CanvasToolbar({
 
   return <nav className={styles.shell} data-workspace-ui aria-label="Information terminal" onPointerDown={(event) => event.stopPropagation()}>
     <button className={styles.trigger} type="button" aria-label="Open information terminal" aria-expanded={expanded} aria-controls="hii-information-terminal" onClick={() => setExpanded(!expanded)}>
-      <span>hii</span><kbd>{shortcutLabel}</kbd>
+      <span>hii</span><kbd aria-hidden="true">{shortcutLabel}</kbd>
     </button>
     {expanded && <section id="hii-information-terminal" className={styles.palette} aria-label="Information terminal">
       {shortcutCapture ? <div className={styles.shortcutCapture}>
