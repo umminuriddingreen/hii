@@ -251,7 +251,9 @@ test('Funnel commands use exact routes and exact teardown, never reset', () => {
   assert.equal(routeOwnedBy(status, 443, 9999), false);
 });
 
-test('public-test sandbox retains host PATH but removes secrets and denies deletion', async (context) => {
+test('public-test sandbox retains host PATH but removes secrets and denies deletion', {
+  skip: process.platform !== 'darwin' && 'sandbox-exec policy is macOS-only'
+}, async (context) => {
   const root = await temporary();
   context.after(() => fs.rm(root, { recursive: true, force: true }));
   const layout = await ensureSessionLayout(root, '20260730120000-abcdefabcdefabcdefabcdef');
@@ -475,12 +477,6 @@ test('Three.js import-map fixture renders a canvas and captures a screenshot in 
   const layout = await ensureSessionLayout(root, '20260730120000-aabbccddeeff001122334455');
   const fixture = path.join(repository, 'tests', 'fixtures', 'remote-test-three', 'public');
   await fs.cp(fixture, layout.publicDir, { recursive: true });
-  const vendor = path.join(layout.publicDir, 'vendor');
-  await fs.mkdir(vendor, { recursive: true });
-  await Promise.all([
-    fs.copyFile(path.join(repository, 'public', 'vendor', 'three.module.js'), path.join(vendor, 'three.module.js')),
-    fs.copyFile(path.join(repository, 'public', 'vendor', 'three.core.js'), path.join(vendor, 'three.core.js'))
-  ]);
   const result = await verifyArtifact({
     publicDir: layout.publicDir,
     relativePath: 'index.html',

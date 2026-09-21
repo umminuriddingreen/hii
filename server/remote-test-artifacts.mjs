@@ -7,10 +7,16 @@ import { WebSocket } from 'ws';
 import { contentType, resolvePublicArtifact } from './remote-test-core.mjs';
 
 const CHROME_CANDIDATES = [
+  process.env.CHROME_BIN,
+  process.platform === 'win32' && path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+  process.platform === 'win32' && path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+  process.platform === 'win32' && path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/Applications/Chromium.app/Contents/MacOS/Chromium',
-  '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser'
-];
+  '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+  process.platform === 'linux' && '/usr/bin/google-chrome',
+  process.platform === 'linux' && '/usr/bin/chromium'
+].filter(Boolean);
 
 function cleanDiagnostic(value) {
   return String(value ?? '')
@@ -93,6 +99,43 @@ async function serveForVerification(publicDir) {
   return server;
 }
 
+async function availableLoopbackPort() {
+  const server = http.createServer();
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const port = server.address().port;
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+async function devtoolsEndpoint(port, child, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  let exitCode = null;
+  child.once('exit', (code) => { exitCode = code; });
+  while (Date.now() < deadline) {
+    try {
+      const payload = await new Promise((resolve, reject) => {
+        const request = http.get(`http://127.0.0.1:${port}/json/version`, (response) => {
+          let body = '';
+          response.setEncoding('utf8');
+          response.on('data', (chunk) => { body += chunk; });
+          response.on('end', () => response.statusCode === 200 ? resolve(body) : reject(new Error(`HTTP ${response.statusCode}`)));
+        });
+        request.setTimeout(500, () => request.destroy(new Error('timeout')));
+        request.once('error', reject);
+      });
+      const endpoint = JSON.parse(payload).webSocketDebuggerUrl;
+      if (endpoint) return endpoint;
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(exitCode === null
+    ? 'Chrome DevTools endpoint timeout'
+    : `Chrome exited before verification (${exitCode})`);
+}
+
 async function stopChrome(child) {
   if (child.exitCode !== null || child.signalCode !== null) return;
   child.kill('SIGTERM');
@@ -110,6 +153,7 @@ async function stopChrome(child) {
 
 async function verifyWithChrome(chrome, url, screenshot) {
   const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hii-remote-chrome-'));
+  const debuggingPort = await availableLoopbackPort();
   const child = spawn(chrome, [
     '--headless=new',
     '--disable-background-networking',
@@ -118,25 +162,13 @@ async function verifyWithChrome(chrome, url, screenshot) {
     '--disable-default-apps',
     '--disable-sync',
     '--no-first-run',
-    '--remote-debugging-port=0',
+    `--remote-debugging-port=${debuggingPort}`,
     `--user-data-dir=${userDataDir}`,
     'about:blank'
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
   let endpoint;
   try {
-    endpoint = await new Promise((resolve, reject) => {
-      let stderr = '';
-      const timeout = setTimeout(() => reject(new Error('Chrome DevTools endpoint timeout')), 10_000);
-      child.stderr.on('data', (chunk) => {
-        stderr += chunk.toString('utf8');
-        const match = stderr.match(/DevTools listening on (ws:\/\/[^\s]+)/);
-        if (match) {
-          clearTimeout(timeout);
-          resolve(match[1]);
-        }
-      });
-      child.once('exit', (code) => reject(new Error(`Chrome exited before verification (${code})`)));
-    });
+    endpoint = await devtoolsEndpoint(debuggingPort, child);
     const browserWs = new WebSocket(endpoint);
     await new Promise((resolve, reject) => {
       browserWs.once('open', resolve);
@@ -210,6 +242,8 @@ async function verifyWithChrome(chrome, url, screenshot) {
     const dom = evaluated.result?.value ?? {};
     const capture = await call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
     await fs.writeFile(screenshot, Buffer.from(capture.data, 'base64'), { mode: 0o600 });
+    browserWs.send(JSON.stringify({ id: nextId++, method: 'Browser.close' }));
+    await new Promise((resolve) => setTimeout(resolve, 100));
     browserWs.close();
     return {
       ok: failures.size === 0 && dom.childCount > 0 && dom.visible > 0,

@@ -55,7 +55,7 @@ describe('packaged CLI closure', () => {
     // release path. Staging therefore runs from the before-dev/before-build
     // commands rather than only from the packaging script.
     const build = await read('scripts', 'hii-tauri-build.mjs');
-    expect(build.indexOf('stageCli(')).toBeLessThan(build.indexOf('spawnSync(tauri'));
+    expect(build.indexOf('stageCli(')).toBeLessThan(build.indexOf('spawnSync(process.execPath'));
 
     const config = JSON.parse(await read('src-tauri', 'tauri.conf.json'));
     const scripts = JSON.parse(await read('package.json')).scripts;
