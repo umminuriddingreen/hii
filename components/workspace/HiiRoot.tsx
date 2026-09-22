@@ -38,6 +38,7 @@ import {
   listenAgentEvents,
   readAgentHome,
   requestFeature,
+  buildHiiFeature,
   runtimeSpaceId,
   startAgent,
   stopTerminalSession,
@@ -1158,6 +1159,8 @@ export function HiiRoot({
   const isAccount = surface === 'account';
   const isTouchCanvas = isSpace || isAccount;
   const runtimeEnabled = !isTouchCanvas || allowLocalRuntime;
+  const [desktopRuntime, setDesktopRuntime] = useState(false);
+  useEffect(() => { setDesktopRuntime('__TAURI_INTERNALS__' in window); }, []);
   const startupTerminalHandled = useRef(false);
   const save = useRef<() => void>(() => {});
   const [cameraRevision, setCameraRevision] = useState(0);
@@ -2760,7 +2763,7 @@ export function HiiRoot({
         onOpenScenes={openPresentationPanel} onExport={() => setExportOpen(true)}
         onOpenTerminal={() => ensureWorkspaceTerminal('docked')} onSearch={openSearchPanel} onOpenActivity={openActivityPanel}
         onOpenRemote={() => { onRequestDevice?.(selectedNodes); setToolMessage('Opened HII Remote.'); }}
-        onRequestFeature={runtimeEnabled ? requestFeature : undefined}
+        onRequestFeature={runtimeEnabled && desktopRuntime ? buildHiiFeature : undefined}
         onCaptureText={(value) => {
           const [id] = spawnCenteredSeed(canvasTextSeed(value.slice(0, 100_000)));
           if (id) { setSelected([id]); setFocusNodeId(null); }

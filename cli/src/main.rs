@@ -74,6 +74,7 @@ mod tool_artifacts;
 mod tools;
 mod tui;
 mod usefulness;
+mod update;
 mod vpn;
 mod web_cmd;
 
@@ -193,6 +194,12 @@ enum DoctorCommand {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    #[command(about = "Inspect HII updates, build features, and sync Codex knowledge")]
+    #[command(hide = true)]
+    Update {
+        #[command(subcommand)]
+        action: update::UpdateCommand,
+    },
     #[command(hide = true, about = "Show CLI build and executable provenance")]
     Version {
         #[arg(long, help = "Emit build provenance as JSON")]
@@ -2075,6 +2082,10 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         );
     }
     match cli.command {
+        Some(Commands::Update { action }) => {
+            update::execute(action)?;
+            Ok(ExitCode::SUCCESS)
+        }
         Some(Commands::Version { json }) => {
             let executable = env::current_exe().map_err(|error| error.to_string())?;
             let commit = option_env!("HII_BUILD_COMMIT");

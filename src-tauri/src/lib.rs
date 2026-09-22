@@ -662,11 +662,29 @@ fn feature_request_add(app: tauri::AppHandle, title: String) -> Result<String, S
         .to_string())
 }
 
+#[tauri::command]
+fn update_status(app: tauri::AppHandle) -> Result<Value, String> {
+    hii_json(&app, &["update", "status"])
+}
+
+#[tauri::command]
+fn update_sync(app: tauri::AppHandle) -> Result<Value, String> {
+    hii_json(&app, &["update", "sync"])
+}
+
+#[tauri::command]
+fn update_feature(app: tauri::AppHandle, request: String) -> Result<Value, String> {
+    if request.trim().chars().count() < 8 || request.chars().count() > 2000 {
+        return Err("Describe the feature in 8 to 2000 characters.".into());
+    }
+    hii_json(&app, &["update", "feature", request.trim()])
+}
+
 fn hii_json(app: &tauri::AppHandle, arguments: &[&str]) -> Result<Value, String> {
     let output = Command::new(hii_binary(app)?)
         .args(arguments)
         .output()
-        .map_err(|error| format!("HII could not run its application registry: {error}"))?;
+        .map_err(|error| format!("HII could not run its CLI command: {error}"))?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
@@ -951,6 +969,9 @@ pub fn run() {
             account_sync::account_workspace_selection_get,
             account_sync::account_workspace_selection_set,
             feature_request_add,
+            update_status,
+            update_sync,
+            update_feature,
             workspace_asset_store,
             information_capture,
             information_find,

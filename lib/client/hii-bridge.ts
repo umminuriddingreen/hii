@@ -761,6 +761,33 @@ export async function requestFeature(title: string): Promise<string> {
   return invoke<string>('feature_request_add', { title });
 }
 
+export async function buildHiiFeature(request: string): Promise<string> {
+  if (!isTauri()) throw new Error('Feature builds run in the HII desktop app.');
+  const { invoke } = await import('@tauri-apps/api/core');
+  const run = await invoke<{ id: string; branch: string; worktree: string }>('update_feature', { request });
+  return `Codex started the HII feature in ${run.branch}. Run ${run.id.slice(0, 8)} has its own clean worktree.`;
+}
+
+export type HiiUpdateStatus = {
+  source: { path: string; commit: string; branch: string; dirty: boolean; changedFiles: number } | null;
+  codexSync?: { tracked: number; syncedAt: string };
+  featureRunCount: number;
+  featureRuns: Array<{ id: string; request: string; branch: string; status: string; createdAt: string }>;
+  appUpdate: string;
+};
+
+export async function hiiUpdateStatus(): Promise<HiiUpdateStatus> {
+  if (!isTauri()) throw new Error('Local HII update status is available in the desktop app.');
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke('update_status');
+}
+
+export async function syncCodexKnowledge(): Promise<{ changed: number; tracked: number; syncedAt: string }> {
+  if (!isTauri()) throw new Error('Local Codex sync is available in the desktop app.');
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke('update_sync');
+}
+
 export async function listApplications(): Promise<HiiApplicationManifest[]> {
   if (!isTauri()) return [];
   const { invoke } = await import('@tauri-apps/api/core');

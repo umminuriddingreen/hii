@@ -41,6 +41,7 @@
     "hii:registry:scan": "node scripts/hii-registry-scan.mjs",
     "hii:registry:doctor": "node scripts/hii-registry-doctor.mjs",
     "hii:registry:export": "node scripts/hii-registry-export.mjs",
+    "hii:codex-sync-schedule:check": "node --test scripts/hii-codex-sync-schedule.test.mjs",
     "hii:links:cache": "node scripts/hii-link-cache.mjs",
     "hii:admin-agent:plan": "node aii/scripts/hii-admin-agent-plan.mjs",
     "hii:sdk:check": "node scripts/hii-sdk-contract-smoke.mjs",

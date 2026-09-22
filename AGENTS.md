@@ -18,6 +18,21 @@ This repo is an active multi-agent worktree. Codex, Claude, HII workers, and the
 
 ## Mission
 
+HII is a self-organizing system managed by agents and curated by the user. It is
+the glue among the user's software, projects, creative disciplines, devices,
+and own network, not a replacement operating system. Agents should be able to
+operate the HII app end to end through the CLI-owned authority and shared
+objects: inspect, act, verify, recover, and show receipts. Remove needless
+manual handoffs for reversible local work. The user sets direction and judges
+results in ordinary language; agents translate that direction into bounded
+implementation and tests without requiring the user to know developer syntax.
+
+When HII improves itself, create an isolated source worktree, preserve every
+other checkout (including dirty worktrees), run checks, and keep source changes,
+installed CLI releases, signed app updates, and live site deployments distinct.
+Codex skills and memory may be reconciled into local HII memory with source
+references; do not silently publish or account-sync that private context.
+
 HII is one user-owned inference surface for systems and data across all of the
 user's devices and networks, backed by a local-first control plane for verified
 work.

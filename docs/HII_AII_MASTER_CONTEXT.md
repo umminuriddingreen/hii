@@ -99,6 +99,14 @@ spatial: a local-first, user-owned environment that lets people work directly
 with durable information, tools, projects, and artifacts while models help
 perceive, connect, transform, and act within explicit authority.
 
+HII is for people whose creative work spans disciplines, applications, and
+machines. It is the connective layer across their local software and own
+network, not a replacement operating system. Agents organize and operate that
+layer; the person curates its direction, expression, and final results. HII
+should let an agent control HII's own surfaces through the same CLI-owned
+objects and authority that the person sees, with visible state and proof rather
+than repeated manual handoffs.
+
 HII turns intent into verified work across information, tools, files, machines,
 memory, and reusable capabilities. It is an information-model interface first:
 pages, files, images, people, claims, questions, relationships, jobs, and

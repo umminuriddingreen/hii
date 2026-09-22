@@ -182,6 +182,7 @@ pub const ROUTES: &[Route] = &[
     ),
     delegated("check", Core, Build, "typecheck: the inner fix loop"),
     delegated("ship", Core, Build, "validate and commit locally"),
+    native("update", Extended, Build, "build HII features and sync Codex knowledge"),
     native(
         "proof",
         Core,

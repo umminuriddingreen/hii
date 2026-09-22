@@ -30,9 +30,14 @@ export function stageCli({ rebuild = true } = {}) {
   const built = path.join(root, 'target', 'release', binary);
 
   if (rebuild || !existsSync(built)) {
+    const commit = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' });
+    if (commit.status !== 0 || !/^[0-9a-f]{40}$/.test(commit.stdout.trim())) {
+      throw new Error('Unable to identify the source commit for the bundled HII CLI');
+    }
     const build = spawnSync('cargo', ['build', '--release', '-p', 'hii-cli'], {
       cwd: root,
-      stdio: 'inherit'
+      stdio: 'inherit',
+      env: { ...process.env, HII_BUILD_COMMIT: commit.stdout.trim() }
     });
     if (build.error) throw new Error(`Unable to start the HII CLI build: ${build.error.message}`);
     if (build.status !== 0) process.exit(build.status ?? 1);

@@ -94,7 +94,7 @@ export function CanvasToolbar({
     if (capabilities.remote) add('HII Remote', 'computer device model', onOpenRemote);
     add('Site views', 'website browser portfolio', onOpenSiteViews);
     add('Image parameters', 'layout arrange images', onOpenParameters);
-    if (onRequestFeature) add('Request a feature', 'feedback idea suggestion board', () => setFeatureDraft(''));
+    if (onRequestFeature) add('Build a HII feature', 'agent update feature build', () => setFeatureDraft(''));
     if (onShortcutChange) add('Set command shortcut', 'keyboard hotkey', () => setShortcutCapture(true));
     return items;
   }, [capabilities.activity, capabilities.export, capabilities.nativeTerminal, capabilities.remote, capabilities.scenes, capabilities.search, onExport, onFitView, onOpenActivity, onOpenParameters, onOpenRemote, onOpenScenes, onOpenSiteViews, onOpenTerminal, onRequestFeature, onSearch, onShortcutChange, onToolChange, onZoomIn, onZoomOut]);
@@ -106,7 +106,7 @@ export function CanvasToolbar({
   const commandOffset = Number(showCapture);
   const resultCount = visible.length + commandOffset + Number(showStartWork);
   const run = (action: () => void, label: string) => {
-    if (label === 'Request a feature' || label === 'Set command shortcut') { action(); setQuery(''); return; }
+    if (label === 'Build a HII feature' || label === 'Set command shortcut') { action(); setQuery(''); return; }
     action();
     setExpanded(false);
   };
@@ -123,7 +123,7 @@ export function CanvasToolbar({
   };
   const saveFeature = async () => {
     const title = featureDraft?.trim() || '';
-    if (!onRequestFeature || title.length < 2 || featureBusy) return;
+    if (!onRequestFeature || title.length < 8 || featureBusy) return;
     setFeatureBusy(true);
     setMessage('');
     try {
@@ -131,7 +131,7 @@ export function CanvasToolbar({
       setFeatureDraft(null);
       setQuery('');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not save the feature request.');
+      setMessage(error instanceof Error ? error.message : 'Could not start the feature build.');
     } finally { setFeatureBusy(false); }
   };
 
@@ -193,9 +193,9 @@ export function CanvasToolbar({
         </div>
         {workUnavailableReason && workIntent && <p className={styles.unavailable} role="status">{workUnavailableReason}</p>}
       </> : <form onSubmit={(event) => { event.preventDefault(); void saveFeature(); }}>
-        <label htmlFor="hii-feature-request">Request a feature</label>
+        <label htmlFor="hii-feature-request">Build a HII feature</label>
         <input id="hii-feature-request" ref={input} value={featureDraft} maxLength={240} placeholder="What should HII do?" onChange={(event) => setFeatureDraft(event.target.value)} onKeyDown={(event) => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); setFeatureDraft(null); } }} />
-        <div className={styles.formActions}><button type="button" onClick={() => setFeatureDraft(null)}>Back</button><button type="submit" disabled={featureBusy || featureDraft.trim().length < 2}>{featureBusy ? 'Saving…' : 'Save to board'}</button></div>
+        <div className={styles.formActions}><button type="button" onClick={() => setFeatureDraft(null)}>Back</button><button type="submit" disabled={featureBusy || featureDraft.trim().length < 8}>{featureBusy ? 'Starting…' : 'Start agent'}</button></div>
       </form>}
       {message && <p role="status" className={styles.message}>{message}</p>}
       <small>Local companion · context is shared only through HII access</small>
