@@ -2,6 +2,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DesktopHiiAccess } from '@/components/desktop/DesktopHiiAccess';
+import { useUpdateStatusAccess } from '@/components/workspace/UpdateBanner';
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 const api = vi.hoisted(() => ({ status: vi.fn(), list: vi.fn(), selection: vi.fn(), save: vi.fn() }));
@@ -17,7 +18,10 @@ vi.mock('@/lib/desktop/account-sync', () => ({
 vi.mock('@/lib/desktop/account-selection', async (original) => ({
   ...await original<object>(), readAccountWorkspaceSelection: api.selection, saveAccountWorkspaceSelection: api.save
 }));
-vi.mock('@/components/workspace/HiiRoot', () => ({ HiiRoot: ({ spaceId }: { spaceId: string }) => <div data-testid="canvas">{spaceId || 'local'}</div> }));
+vi.mock('@/components/workspace/HiiRoot', () => ({ HiiRoot: ({ spaceId, persistentChrome }: { spaceId: string; persistentChrome: boolean }) => {
+  const updateStatus = useUpdateStatusAccess();
+  return <div data-testid="canvas" data-persistent-chrome={String(persistentChrome)} data-update-command={String(Boolean(updateStatus?.openUpdateStatus))}>{spaceId || 'local'}</div>;
+} }));
 vi.mock('@/components/desktop/chat/LocalChatSurface', () => ({ LocalChatSurface: () => <div>Chat</div> }));
 
 describe('desktop account access', () => {
@@ -42,6 +46,8 @@ describe('desktop account access', () => {
   it('restores the account canvas and exposes account controls', async () => {
     await render();
     expect(container.querySelector('[data-testid="canvas"]')?.textContent).toBe('canvas-a');
+    expect(container.querySelector('[data-testid="canvas"]')?.getAttribute('data-persistent-chrome')).toBe('false');
+    expect(container.querySelector('[data-testid="canvas"]')?.getAttribute('data-update-command')).toBe('true');
     const account = container.querySelector<HTMLButtonElement>('button[aria-label^="HII account"]')!;
     await act(async () => account.click());
     expect(container.querySelector('[aria-label="HII account synchronization"]')?.textContent).toContain('Ummi');

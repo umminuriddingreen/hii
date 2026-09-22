@@ -1,11 +1,29 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { checkForUpdate, installUpdate, type UpdateState } from '@/lib/client/hii-updates';
 import { hiiUpdateStatus, syncCodexKnowledge, type HiiUpdateStatus } from '@/lib/client/hii-bridge';
 
+type UpdateStatusAccess = { openUpdateStatus: () => void };
+const UpdateStatusContext = createContext<UpdateStatusAccess | null>(null);
+type UpdateStatusHandle = { current: (() => void) | null };
+const UpdateStatusRegistrationContext = createContext<UpdateStatusHandle | null>(null);
+
+export function useUpdateStatusAccess() {
+  return useContext(UpdateStatusContext);
+}
+
+export function UpdateStatusProvider({ children }: { children: ReactNode }) {
+  const handle = useRef<UpdateStatusHandle>({ current: null });
+  const access = useRef<UpdateStatusAccess>({ openUpdateStatus: () => handle.current.current?.() });
+  return <UpdateStatusContext.Provider value={access.current}>
+    <UpdateStatusRegistrationContext.Provider value={handle.current}>{children}</UpdateStatusRegistrationContext.Provider>
+  </UpdateStatusContext.Provider>;
+}
+
 /** Source work and signed app releases have separate lifecycles. */
-export function UpdateBanner() {
+export function UpdateBanner({ children }: { children?: ReactNode }) {
+  const updateStatusHandle = useContext(UpdateStatusRegistrationContext);
   const [desktop, setDesktop] = useState(false);
   const [state, setState] = useState<UpdateState>({ status: 'idle' });
   const [releaseDismissed, setReleaseDismissed] = useState(false);
@@ -58,6 +76,14 @@ export function UpdateBanner() {
     catch (error) { setSourceError(error instanceof Error ? error.message : 'Source status unavailable'); }
   };
 
+  const openUpdateStatus = () => {
+    if (expanded) return;
+    if (!desktop) { setDesktop(true); setExpanded(true); setSourceError('Checking source…'); void hiiUpdateStatus().then(setSource).catch((error) => setSourceError(error instanceof Error ? error.message : 'Source status unavailable')); return; }
+    void inspect();
+  };
+
+  if (updateStatusHandle) updateStatusHandle.current = openUpdateStatus;
+
   const syncNow = async () => {
     if (syncBusy) return;
     setSyncBusy(true);
@@ -70,9 +96,10 @@ export function UpdateBanner() {
     } finally { setSyncBusy(false); }
   };
 
-  if (!desktop) return null;
+  if (!desktop) return children ?? null;
 
-  return (
+  return <>
+    {children}
     <aside className="hii-update-banner" data-workspace-ui role="status" onPointerDown={(event) => event.stopPropagation()}>
       <button type="button" onClick={() => void inspect()} aria-expanded={expanded}>Update HII</button>
       {expanded && <span>
@@ -90,5 +117,5 @@ export function UpdateBanner() {
       {state.status === 'ready' && <span>HII {state.version} is ready. Restarting…</span>}
       {expanded && <button type="button" disabled={syncBusy} onClick={() => void syncNow()}>{syncBusy ? 'Syncing…' : 'Sync Codex now'}</button>}
     </aside>
-  );
+  </>;
 }

@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { HiiRoot } from '@/components/workspace/HiiRoot';
-import { UpdateBanner } from '@/components/workspace/UpdateBanner';
+import { UpdateBanner, UpdateStatusProvider } from '@/components/workspace/UpdateBanner';
 import type { SearchableWorkspace } from '@/lib/workspace/cross-workspace-search';
 import { UserCircle, SidebarSimple, X } from '@phosphor-icons/react';
 import { readAccountWorkspaceSelection, resolveAccountWorkspaceSelection, saveAccountWorkspaceSelection } from '@/lib/desktop/account-selection';
@@ -234,7 +234,7 @@ export function DesktopHiiAccess() {
     }
   };
 
-  return <div className={styles.shell} data-workspace-open={workspaceOpen || undefined}>
+  return <UpdateStatusProvider><div className={styles.shell} data-workspace-open={workspaceOpen || undefined}>
     <UpdateBanner />
     <div className={styles.surface}>
     {ready && canvasAvailable ? <HiiRoot
@@ -308,5 +308,5 @@ export function DesktopHiiAccess() {
       </section>
       <p role="status">{message}</p>
     </aside> : null}
-  </div>;
+  </div></UpdateStatusProvider>;
 }

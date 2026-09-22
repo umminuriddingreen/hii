@@ -108,6 +108,7 @@ import { CanvasOasis } from './CanvasOasis';
 import { DEFAULT_WEB_COMMAND_SHORTCUT, commandShortcutLabel, matchesCommandShortcut, readCommandShortcut, saveCommandShortcut } from '@/lib/workspace/command-shortcut';
 import { CanvasSelectionBar, type CanvasSelectionAction } from './CanvasSelectionBar';
 import { CanvasObjectInspector } from './CanvasObjectInspector';
+import { useUpdateStatusAccess } from './UpdateBanner';
 import { canvasObjectPayload, canvasObjectState, type CanvasShapeKind } from '@/lib/workspace/canvas-objects';
 import { duplicateWorkspaceNodes, linkWorkspaceNodes } from '@/lib/workspace/selection';
 import { alignWorkspaceNodes, distributeWorkspaceNodes, snapWorkspaceRect } from '@/lib/workspace/snap';
@@ -1158,6 +1159,7 @@ export function HiiRoot({
   const isSpace = surface === 'space';
   const isAccount = surface === 'account';
   const isTouchCanvas = isSpace || isAccount;
+  const updateStatusAccess = useUpdateStatusAccess();
   const runtimeEnabled = !isTouchCanvas || allowLocalRuntime;
   const [desktopRuntime, setDesktopRuntime] = useState(false);
   useEffect(() => { setDesktopRuntime('__TAURI_INTERNALS__' in window); }, []);
@@ -2760,7 +2762,14 @@ export function HiiRoot({
         onOpenScenes={openPresentationPanel} onExport={() => setExportOpen(true)}
         onOpenTerminal={() => ensureWorkspaceTerminal('docked')} onSearch={openSearchPanel} onOpenActivity={openActivityPanel}
         onOpenRemote={() => { onRequestDevice?.(selectedNodes); setToolMessage('Opened HII Remote.'); }}
-        onUpdateStatus={persistentChrome ? () => { document.querySelector<HTMLButtonElement>('.hii-update-banner button')?.click(); } : undefined}
+        onUpdateStatus={updateStatusAccess?.openUpdateStatus}
+        selectionActions={selected.length ? [
+          { label: 'Format selection', action: 'format' },
+          { label: 'Inspect selection', action: 'inspect' },
+          { label: 'Export selection', action: 'export' },
+          { label: 'Connect selection', action: 'connect', disabled: selected.length > 2 }
+        ] : undefined}
+        onSelectionAction={selectionAction}
         onRequestFeature={desktopRuntime ? buildHiiFeature : undefined}
         onCaptureText={(value) => {
           const [id] = spawnCenteredSeed(canvasTextSeed(value.slice(0, 100_000)));

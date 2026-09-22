@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Cursor, NoteBlank, Paperclip, PencilSimple, Shapes, Table, TextT } from '@phosphor-icons/react';
 import { ControlButton, ControlDivider, ControlIsland } from '@/components/ui/ControlIsland';
 import { commandShortcutFromEvent, type CommandShortcut } from '@/lib/workspace/command-shortcut';
+import type { CanvasSelectionAction } from './CanvasSelectionBar';
 import styles from './CanvasToolbar.module.css';
 
 export type CanvasTool = 'select' | 'text' | 'sticky' | 'shape' | 'connector' | 'table' | 'draw' | 'media';
@@ -16,6 +17,8 @@ export type CanvasToolbarCapabilities = {
   activity?: boolean;
   remote?: boolean;
 };
+
+export type CanvasToolbarSelectionAction = { label: string; action: CanvasSelectionAction; disabled?: boolean };
 
 export type CanvasToolbarProps = {
   activeTool: CanvasTool;
@@ -36,6 +39,8 @@ export type CanvasToolbarProps = {
   onOpenSiteViews?: () => void;
   onOpenParameters?: () => void;
   onUpdateStatus?: () => void;
+  selectionActions?: CanvasToolbarSelectionAction[];
+  onSelectionAction?: (action: CanvasSelectionAction) => void;
   onRequestFeature?: (title: string) => Promise<string>;
   onCaptureText?: (text: string) => void;
   onStartWork?: (intent: string) => void;
@@ -61,6 +66,7 @@ export function CanvasToolbar({
   onZoomIn, onZoomOut, onFitView, onOpenScenes, onExport, onOpenTerminal,
   onSearch, onOpenActivity, onOpenRemote, onOpenSiteViews, onOpenParameters,
   onUpdateStatus,
+  selectionActions = [], onSelectionAction,
   onRequestFeature, onCaptureText, onStartWork, selectionLabels = [], workUnavailableReason, shortcutLabel = '⌘K', onShortcutChange
 }: CanvasToolbarProps) {
   const [localOpen, setLocalOpen] = useState(false);
@@ -94,13 +100,17 @@ export function CanvasToolbar({
     if (capabilities.search) add('Search', 'find', onSearch);
     if (capabilities.activity) add('Activity', 'runs receipts', onOpenActivity);
     if (capabilities.remote) add('HII Remote', 'computer device model', onOpenRemote);
+    for (const item of selectionActions) {
+      if (item.disabled || !onSelectionAction) continue;
+      add(item.label, `selected object ${item.action}`, () => onSelectionAction(item.action));
+    }
     add('Site views', 'website browser portfolio', onOpenSiteViews);
     add('Image parameters', 'layout arrange images', onOpenParameters);
     if (onUpdateStatus) add('HII update and source status', 'update app release source status sync', onUpdateStatus, '');
     if (onRequestFeature) add('Build a HII feature', 'agent update feature build', () => setFeatureDraft(''));
     if (onShortcutChange) add('Set command shortcut', 'keyboard hotkey', () => setShortcutCapture(true));
     return items;
-  }, [capabilities.activity, capabilities.export, capabilities.nativeTerminal, capabilities.remote, capabilities.scenes, capabilities.search, onExport, onFitView, onOpenActivity, onOpenParameters, onOpenRemote, onOpenScenes, onOpenSiteViews, onOpenTerminal, onRequestFeature, onSearch, onShortcutChange, onToolChange, onUpdateStatus, onZoomIn, onZoomOut]);
+  }, [capabilities.activity, capabilities.export, capabilities.nativeTerminal, capabilities.remote, capabilities.scenes, capabilities.search, onExport, onFitView, onOpenActivity, onOpenParameters, onOpenRemote, onOpenScenes, onOpenSiteViews, onOpenTerminal, onRequestFeature, onSearch, onShortcutChange, onToolChange, onUpdateStatus, onZoomIn, onZoomOut, onSelectionAction, selectionActions]);
   const visible = commands.filter((command) => `${command.label} ${command.keywords} ${command.shortcut}`.toLowerCase().includes(query.trim().toLowerCase()));
   const workIntent = query.trim();
   const exactCommand = visible.some((command) => command.label.toLowerCase() === workIntent.toLowerCase());

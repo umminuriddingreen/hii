@@ -66,6 +66,28 @@ describe('shared canvas controls', () => {
     expect(updateStatus).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps selection actions reachable and invokable from the command palette', () => {
+    const onSelectionAction = vi.fn();
+    renderToolbar({
+      selectionActions: [
+        { label: 'Format selection', action: 'format' },
+        { label: 'Inspect selection', action: 'inspect' },
+        { label: 'Export selection', action: 'export' },
+        { label: 'Connect selection', action: 'connect', disabled: true }
+      ],
+      onSelectionAction
+    });
+    openCommands();
+    for (const [label, action] of [['Format selection', 'format'], ['Inspect selection', 'inspect'], ['Export selection', 'export']] as const) {
+      const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((button) => button.textContent?.includes(label));
+      expect(option).toBeDefined();
+      act(() => option!.click());
+      expect(onSelectionAction).toHaveBeenLastCalledWith(action);
+      openCommands();
+    }
+    expect(container.textContent).not.toContain('Connect selection');
+  });
+
   it('stages an unmatched work intent for review without running it', () => {
     const startWork = vi.fn();
     renderToolbar({ onStartWork: startWork });
