@@ -828,6 +828,8 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             "routedModel": model,
             "servedModel": model,
             "routingReason": model_source,
+            "orchestrator": "hii-rust",
+            "actionProtocol": if ollama.provider() == ModelProvider::Ollama { "hii-action-json" } else { "openai-tools-v1" },
             "contextBudget": {
                 "capacity": context_budget.context_tokens,
                 "outputReserved": context_budget.output_tokens,
@@ -1972,7 +1974,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
             budget: options.budgets.max_tokens,
         }),
         engine: Some(EngineRecord {
-            id: "native".into(),
+            id: "hii-rust".into(),
             version: Some(env!("CARGO_PKG_VERSION").into()),
             commit: option_env!("HII_BUILD_COMMIT").map(str::to_string),
             run_id: None,
@@ -2205,9 +2207,9 @@ Workspace:{workspace}
 Loop: intent -> context -> bounded work -> verify -> receipt. No plan narration.
 Habits: inspect real files, preserve unclear work, patch narrowly, repair failed checks.
 Proof: one flat {{"type":"verify","command":"npm test"}} or http; shell/read/list/search never count.
-JSON only; no native tool tags. T:{tool_names}. F:path,query,command,content,old,new,replace_all,offset,limit,url.
+Call native HII functions; if unavailable emit one JSON action. T:{tool_names}. F:path,query,command,content,old,new,replace_all,offset,limit,url.
 For 2-4 independent read-only observations, use {{"type":"batch","calls":[{{"id":"a","type":"read","path":"file"}},{{"id":"b","type":"search","query":"term"}}]}}. Mutations remain serial.
-Coordinate local agents with {{"type":"agent_send","arguments":{{"to":"codex","task":"specific task","message":"concise handoff","workspace":"/absolute/path","contextRefs":["source reference"]}}}} when the task calls for a handoff.
+Handoff: agent_send arguments to,task,message; optional workspace,receipt,contextRefs.
 Write: {{"type":"write","path":"relative-file.md","content":"complete file text"}}; file text only.
 Finish: {{"type":"final","summary":"result","verification":["checks run"],"next":null}}
 Read AGENTS.md. Stay in workspace. Never claim unrun proof."#,
@@ -2481,7 +2483,7 @@ fn draft_receipt(
         skill_draft_ref: None,
         token_usage: None,
         engine: Some(EngineRecord {
-            id: "native".into(),
+            id: "hii-rust".into(),
             version: Some(env!("CARGO_PKG_VERSION").into()),
             commit: option_env!("HII_BUILD_COMMIT").map(str::to_string),
             run_id: None,
@@ -2728,7 +2730,9 @@ fn schema_was_rejected(error: &str) -> bool {
     (error.contains("400") || error.contains("422") || error.contains("unsupported"))
         && (error.contains("response_format")
             || error.contains("json_schema")
-            || error.contains("schema"))
+            || error.contains("schema")
+            || error.contains("tool_choice")
+            || error.contains("tools"))
 }
 
 /// What had to be adjusted before a raw model response parsed as an action.

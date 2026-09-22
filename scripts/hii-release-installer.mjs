@@ -19,6 +19,8 @@ const MARKER_FILE = 'current.bin';
 const HISTORY_FILE = 'install-history.jsonl';
 const RELEASE_MANIFEST_FILE = 'release.json';
 const LAUNCHER_BACKUP_ROOT = 'launcher-backups';
+const RESOURCE_DIR = 'resources';
+const RESOURCE_PATHS = ['aii', 'config', 'scripts', 'browser/dist', 'AGENTS.md', 'package.json'];
 
 const LAUNCHER_TEMPLATE_SHELL = [
   '#!/usr/bin/env bash',
@@ -444,21 +446,21 @@ function powerShellLiteral(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
-function makeLauncher(platform, markerFile, sourceRoot) {
+function makeLauncher(platform, markerFile, resourceRoot) {
   return platform === 'win32'
     ? LAUNCHER_TEMPLATE_POWERSHELL
         .replace('{{MARKER_FILE}}', markerFile)
-        .replace('{{SOURCE_ROOT}}', powerShellLiteral(sourceRoot))
+        .replace('{{SOURCE_ROOT}}', powerShellLiteral(resourceRoot))
     : LAUNCHER_TEMPLATE_SHELL
         .replace('{{MARKER_FILE}}', markerFile)
-        .replace('{{SOURCE_ROOT}}', shellLiteral(sourceRoot));
+        .replace('{{SOURCE_ROOT}}', shellLiteral(resourceRoot));
 }
 
-function buildBinary(sourceRoot, sourceCargo) {
+function buildBinary(sourceRoot, sourceCargo, commit) {
   const cargo = process.env.HII_CARGO_BIN || 'cargo';
-  runCommand(cargo, ['build', '--manifest-path', sourceCargo, '--package', 'hii-cli', '--release'], {
+  runCommand(cargo, ['build', '--locked', '--manifest-path', sourceCargo, '--package', 'hii-cli', '--release'], {
     cwd: sourceRoot,
-    env: process.env
+    env: { ...process.env, HII_BUILD_COMMIT: commit }
   });
   const sourceBinary = sourceBinaryPath(sourceRoot);
   if (!existsSync(sourceBinary)) {
@@ -503,10 +505,11 @@ function main() {
   const commit = sourceMarker.commit;
   const releaseDir = path.join(defaults.releaseRoot, commit);
   const releaseBinary = path.join(releaseDir, BINARY_NAME);
+  const resourceRoot = path.join(releaseDir, RESOURCE_DIR);
   const releaseManifestPath = path.join(releaseDir, RELEASE_MANIFEST_FILE);
   const currentMarker = readMarker(defaults.markerFile);
   const alreadyCurrent = currentMarker === releaseBinary;
-  const shouldBuild = !existsSync(releaseBinary) || !existsSync(releaseManifestPath);
+  const shouldBuild = !existsSync(releaseBinary) || !existsSync(releaseManifestPath) || !existsSync(resourceRoot);
   let buildPerformed = false;
 
   if (options.dryRun) {
@@ -520,6 +523,7 @@ function main() {
       sourceCommitVerified: sourceMarker.verified,
       releaseRoot: defaults.releaseRoot,
       releaseDir,
+      resourceRoot,
       launcherPath: defaults.launcherPath,
       markerPath: defaults.markerFile,
       wouldRunBuild: shouldBuild,
@@ -535,12 +539,19 @@ function main() {
   const previousHistory = existsSync(defaults.historyFile) ? readFileSync(defaults.historyFile, 'utf8') : null;
 
   if (shouldBuild) {
-    buildBinary(sourceRoot, sourceCargo);
+    buildBinary(sourceRoot, sourceCargo, commit);
     buildPerformed = true;
     mkdirSync(releaseDir, { recursive: true });
     cpSync(sourceBinaryPath(sourceRoot), releaseBinary);
     if (platform !== 'win32') {
       chmodSync(releaseBinary, 0o755);
+    }
+    rmSync(resourceRoot, { recursive: true, force: true });
+    mkdirSync(resourceRoot, { recursive: true });
+    for (const relative of RESOURCE_PATHS) {
+      const source = path.join(sourceRoot, relative);
+      if (!existsSync(source)) continue;
+      cpSync(source, path.join(resourceRoot, relative), { recursive: true });
     }
   }
 
@@ -554,20 +565,22 @@ function main() {
     : null;
 
   const releaseManifest = {
-    schema: 'hii-release-v1',
+    schema: 'hii-release-v2',
     commit,
     sourceRoot,
     sourceCommitVerified: sourceMarker.verified,
     createdAt: new Date().toISOString(),
     releaseBinary,
     releaseRoot: defaults.releaseRoot,
+    resourceRoot,
+    resourcePaths: RESOURCE_PATHS.filter(relative => existsSync(path.join(resourceRoot, relative))),
     binarySha256: sha256(releaseBinary),
     platform,
     sourceCommitShort: commitShort,
     previousCurrent: previousMarker
   };
 
-  const launcherBody = makeLauncher(platform, defaults.markerFile, sourceRoot);
+  const launcherBody = makeLauncher(platform, defaults.markerFile, resourceRoot);
   const launcherMode = platform === 'win32' ? undefined : 0o755;
   const previousLauncherPath = existsSync(defaults.launcherPath) ? path.resolve(defaults.launcherPath) : null;
   const launcherNeedsUpdate = previousLauncher !== launcherBody;
@@ -619,6 +632,7 @@ function main() {
       releaseRoot: defaults.releaseRoot,
       releaseDir,
       releaseBinary,
+      resourceRoot,
       launcherPath: defaults.launcherPath,
       markerPath: defaults.markerFile,
       historyPath: defaults.historyFile,

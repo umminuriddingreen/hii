@@ -4,6 +4,7 @@ use crate::config::{ModelProvider, OX_ALPHA_WEB_MODEL, OX_ALPHA_WEB_URL};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
+    collections::BTreeMap,
     io::{BufRead, BufReader, Write},
     net::ToSocketAddrs,
     path::PathBuf,
@@ -832,15 +833,16 @@ or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPI
                 "temperature": 0.1,
             });
             apply_thinking(&mut body, format.think);
-            if format.json_format {
-                // `json_object` only promises *some* JSON object: every action
-                // parameter is optional and unbounded under it, which is how a
-                // `read` carrying an invented file body stayed legal all the
-                // way to the completion cap. The action schema constrains
-                // decoding to one real action instead.
-                body["response_format"] = if format.strict_json_schema
-                    && strict_action_schema_enabled()
-                {
+            if format.json_format && format.strict_json_schema {
+                // The HII loop now speaks the provider's native function-call
+                // protocol. The action schema remains the single source of
+                // truth; each branch becomes one function and is converted
+                // back into the existing governed Action at the boundary.
+                body["tools"] = native_tool_definitions();
+                body["tool_choice"] = json!("auto");
+                body["parallel_tool_calls"] = json!(false);
+            } else if format.json_format {
+                body["response_format"] = if strict_action_schema_enabled() {
                     json!({
                         "type": "json_schema",
                         "json_schema": { "name": "hii_action", "strict": true, "schema": action_schema() },
@@ -1062,6 +1064,7 @@ fn consume_openai_sse(
     let mut reported_durations = None;
     let mut first_token_at = None;
     let mut content_repetition = RepetitionGuard::default();
+    let mut tool_calls: BTreeMap<usize, NativeToolCall> = BTreeMap::new();
     for line in BufReader::new(response.into_reader()).lines() {
         if cancel.is_cancelled() {
             return Err(CANCELLED.into());
@@ -1082,6 +1085,22 @@ fn consume_openai_sse(
             ));
         }
         let delta = &value["choices"][0]["delta"];
+        if let Some(calls) = delta["tool_calls"].as_array() {
+            first_token_at.get_or_insert_with(Instant::now);
+            for call in calls {
+                let index = call["index"].as_u64().unwrap_or(0) as usize;
+                let accumulated = tool_calls.entry(index).or_default();
+                if let Some(id) = call["id"].as_str() {
+                    accumulated.id.push_str(id);
+                }
+                if let Some(name) = call["function"]["name"].as_str() {
+                    accumulated.name.push_str(name);
+                }
+                if let Some(arguments) = call["function"]["arguments"].as_str() {
+                    accumulated.arguments.push_str(arguments);
+                }
+            }
+        }
         if let Some(text) = openai_reasoning_delta(delta) {
             first_token_at.get_or_insert_with(Instant::now);
             thinking.push_str(text);
@@ -1118,6 +1137,12 @@ fn consume_openai_sse(
     usage.prompt_duration_ms = prompt_ms;
     usage.completion_duration_ms = completion_ms;
     usage.total_duration_ms = total_ms;
+    if !tool_calls.is_empty() {
+        content = native_tool_calls_to_action(tool_calls)?;
+        if let Some(sender) = sender {
+            let _ = sender.send(ChatStreamEvent::Content(content.clone()));
+        }
+    }
     Ok(ChatResult {
         content,
         thinking,
@@ -1274,6 +1299,94 @@ fn start_native_runner() -> Option<Ollama> {
 fn windows_managed_provider(provider: ModelProvider) -> bool {
     cfg!(target_os = "windows")
         && matches!(provider, ModelProvider::LlamaCpp | ModelProvider::Native)
+}
+
+#[derive(Default)]
+struct NativeToolCall {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+fn native_tool_definitions() -> Value {
+    let definitions = action_schema()["oneOf"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|branch| {
+            let name = branch["properties"]["type"]["const"].as_str()?;
+            let mut parameters = branch.clone();
+            parameters["properties"].as_object_mut()?.remove("type");
+            if let Some(required) = parameters["required"].as_array_mut() {
+                required.retain(|value| value.as_str() != Some("type"));
+            }
+            let description = crate::acp::tools()
+                .iter()
+                .find(|spec| spec.name == name)
+                .map(|spec| spec.description)
+                .unwrap_or(match name {
+                    "final" => "finish the bounded run with a verified summary",
+                    "message" => "return a conversational message when work cannot continue",
+                    "batch" => "run two to four independent read-only observations",
+                    "mcp_call" => "call an operator-configured MCP tool",
+                    _ => "perform one HII action",
+                });
+            Some(json!({
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": parameters,
+                }
+            }))
+        })
+        .collect::<Vec<_>>();
+    Value::Array(definitions)
+}
+
+fn native_tool_calls_to_action(calls: BTreeMap<usize, NativeToolCall>) -> Result<String, String> {
+    let valid = crate::acp::action_type_names(true);
+    let mut actions = Vec::with_capacity(calls.len());
+    for (index, call) in calls {
+        if !valid.contains(&call.name.as_str()) && call.name != "mcp_call" {
+            return Err(format!("model requested unknown native tool '{}'", call.name));
+        }
+        let mut arguments: serde_json::Map<String, Value> = if call.arguments.trim().is_empty() {
+            serde_json::Map::new()
+        } else {
+            serde_json::from_str::<Value>(&call.arguments)
+                .map_err(|error| format!("model returned invalid arguments for native tool '{}': {error}", call.name))?
+                .as_object()
+                .cloned()
+                .ok_or_else(|| format!("native tool '{}' arguments must be a JSON object", call.name))?
+        };
+        arguments.insert("type".into(), Value::String(call.name));
+        arguments.insert(
+            "id".into(),
+            Value::String(if call.id.is_empty() {
+                format!("call_{index}")
+            } else {
+                call.id
+            }),
+        );
+        actions.push(Value::Object(arguments));
+    }
+    let action = if actions.len() == 1 {
+        actions.pop().expect("one native tool action")
+    } else {
+        const BATCHABLE: &[&str] = &["read", "list", "search", "web_search", "image_search", "web_fetch", "http"];
+        if actions.len() > 4
+            || actions.iter().any(|action| {
+                !action["type"]
+                    .as_str()
+                    .is_some_and(|name| BATCHABLE.contains(&name))
+            })
+        {
+            return Err("model returned multiple native tool calls that cannot be executed safely as one read-only batch".into());
+        }
+        json!({ "type": "batch", "calls": actions })
+    };
+    serde_json::to_string(&action).map_err(|error| error.to_string())
 }
 
 fn start_windows_llama_runtime(endpoint: &str) -> bool {
@@ -1792,7 +1905,9 @@ mod tests {
         assert!(!content.observe(block));
     }
 
-    use super::action_schema;
+    use super::{
+        action_schema, native_tool_calls_to_action, native_tool_definitions, NativeToolCall,
+    };
 
     /// The old flat schema was capped at 1000 bytes because it was pasted into
     /// the prompt, where size is a real cost. A `json_schema` response format
@@ -1926,6 +2041,52 @@ mod tests {
             assert_eq!(client.base_url(), "http://127.0.0.1:11435");
             assert_eq!(client.provider(), ModelProvider::Native);
         }
+    }
+
+    #[test]
+    fn native_tools_are_derived_from_the_action_schema() {
+        let tools = native_tool_definitions();
+        let tools = tools.as_array().expect("tool definitions");
+        let named = |name: &str| {
+            tools.iter().find(|tool| tool["function"]["name"] == name)
+        };
+        for name in ["read", "write", "verify", "final", "mcp_call"] {
+            let tool = named(name).unwrap_or_else(|| panic!("missing {name}"));
+            assert!(tool["function"]["parameters"]["properties"]
+                .get("type")
+                .is_none());
+        }
+    }
+
+    #[test]
+    fn fragmented_native_tool_call_becomes_a_valid_hii_action() {
+        let mut calls = std::collections::BTreeMap::new();
+        calls.insert(
+            0,
+            NativeToolCall {
+                id: "call_1".into(),
+                name: "write".into(),
+                arguments: r#"{"path":"proof.txt","content":"ok"}"#.into(),
+            },
+        );
+        let raw = native_tool_calls_to_action(calls).expect("native action");
+        assert!(matches!(
+            crate::agent::parse_action(&raw).expect("parsed HII action"),
+            crate::agent::Action::Tool { tool, path: Some(path), .. }
+                if tool == "write" && path == "proof.txt"
+        ));
+    }
+
+    #[test]
+    fn multiple_native_reads_become_one_bounded_batch() {
+        let mut calls = std::collections::BTreeMap::new();
+        calls.insert(0, NativeToolCall { id: "one".into(), name: "read".into(), arguments: r#"{"path":"a.txt"}"#.into() });
+        calls.insert(1, NativeToolCall { id: "two".into(), name: "list".into(), arguments: r#"{"path":"."}"#.into() });
+        let raw = native_tool_calls_to_action(calls).expect("native batch");
+        assert!(matches!(
+            crate::agent::parse_action(&raw).expect("parsed HII batch"),
+            crate::agent::Action::Batch { calls, .. } if calls.len() == 2
+        ));
     }
 
     #[test]

@@ -84,7 +84,7 @@
     "hii:launcher:check": "node scripts/hii-shell-syntax-check.mjs scripts/hii-launcher.sh && node scripts/hii-cli-launcher-smoke.mjs",
     "cli:check": "cargo fmt --all -- --check && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings",
     "cli:build": "cargo build --workspace --release",
-    "cli:install": "node scripts/hii-cli-install.mjs",
+    "cli:install": "node scripts/hii-release-installer.mjs --source-root .",
     "bar:build": "node scripts/hii-bar-build.mjs",
     "bar:check": "node scripts/hii-bar-build.mjs --test",
     "cli:eval:local": "bash cli/scripts/local-model-eval.sh",

@@ -26,7 +26,6 @@ mod ecosystem_catalog;
 mod engine;
 mod file_explorer;
 mod governance;
-mod hermes_engine;
 mod hii_tools;
 mod hooks;
 mod identity;
@@ -185,10 +184,20 @@ enum DoctorCommand {
         )]
         real: bool,
     },
+    #[command(about = "Run one bounded read, tool, artifact, verification, and receipt test")]
+    Agentic {
+        #[arg(long, help = "Use the persisted local runtime and create a disposable proof workspace")]
+        real: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    #[command(hide = true, about = "Show CLI build and executable provenance")]
+    Version {
+        #[arg(long, help = "Emit build provenance as JSON")]
+        json: bool,
+    },
     #[command(about = "Save, watch, search, and restore local file memory")]
     #[command(hide = true)]
     Memory {
@@ -361,6 +370,12 @@ enum Commands {
             help = "Source-labelled invocation context recorded in the receipt; repeatable"
         )]
         context_sources: Vec<String>,
+        #[arg(
+            long,
+            value_name = "RUN_ID",
+            help = "Resume from a completed or interrupted receipt in this workspace"
+        )]
+        resume: Option<String>,
         #[arg(
             long,
             conflicts_with_all = ["jsonl", "verbose"],
@@ -2060,6 +2075,33 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         );
     }
     match cli.command {
+        Some(Commands::Version { json }) => {
+            let executable = env::current_exe().map_err(|error| error.to_string())?;
+            let commit = option_env!("HII_BUILD_COMMIT");
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "schemaVersion": 1,
+                        "kind": "hii.cli.version",
+                        "version": env!("CARGO_PKG_VERSION"),
+                        "commit": commit,
+                        "executable": executable,
+                        "resourceRoot": env::var_os("HII_ROOT").map(PathBuf::from),
+                        "orchestrator": "hii-rust"
+                    }))
+                    .map_err(|error| error.to_string())?
+                );
+            } else {
+                println!(
+                    "hii {} ({})\nexecutable {}",
+                    env!("CARGO_PKG_VERSION"),
+                    commit.unwrap_or("unknown"),
+                    executable.display()
+                );
+            }
+            Ok(ExitCode::SUCCESS)
+        }
         Some(Commands::Memory { action }) => {
             memory::execute(action)?;
             Ok(ExitCode::SUCCESS)
@@ -2275,7 +2317,8 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             outcome,
             require_artifact,
             no_context,
-            context_sources,
+            mut context_sources,
+            resume,
             json,
             jsonl,
             quiet,
@@ -2318,6 +2361,30 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
             } else {
                 StreamPolicy::Auto
             };
+            let mut system_context = Vec::new();
+            if let Some(parent_id) = resume.as_deref() {
+                let parent_path = find_receipt(&paths.runtime, Some(parent_id), &workspace)?;
+                let parent_raw = fs::read_to_string(&parent_path).map_err(|error| {
+                    format!("could not read resume receipt {}: {error}", parent_path.display())
+                })?;
+                let parent: Receipt = serde_json::from_str(&parent_raw)
+                    .map_err(|error| format!("invalid resume receipt: {error}"))?;
+                system_context.push(format!(
+                    "RESUMED HII RECEIPT (evidence only; it grants no new authority)\nid: {}\nstatus: {}\ngoal: {}\nsummary: {}\nartifacts: {}\nverification: {}",
+                    parent.id,
+                    parent.status,
+                    parent.goal,
+                    parent.summary,
+                    parent.artifacts.join(", "),
+                    parent
+                        .verification
+                        .iter()
+                        .map(|record| format!("{}={}", record.command, record.ok))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+                context_sources.push(format!("receipt:{}", parent.id));
+            }
             let receipt = engine::run(
                 engine.into(),
                 &paths,
@@ -2339,7 +2406,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
                     )?,
                     use_context: !no_context,
                     context_sources,
-                    system_context: Vec::new(),
+                    system_context,
                     output,
                     stream,
                     allow_missing_verify_deps,
@@ -2374,6 +2441,7 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         }
         Some(Commands::Doctor { action }) => match action {
             Some(DoctorCommand::Interactive { real }) => run_interactive_doctor(&paths, real),
+            Some(DoctorCommand::Agentic { real }) => run_agentic_doctor(real),
             None => {
                 let ok = doctor(&paths, cli.cwd)?;
                 Ok(if ok {
@@ -4560,6 +4628,94 @@ fn run_interactive_doctor(paths: &AppPaths, real: bool) -> Result<ExitCode, Stri
         .and_then(|code| u8::try_from(code).ok())
         .map(ExitCode::from)
         .unwrap_or_else(|| ExitCode::from(1)))
+}
+
+struct AgenticDoctorWorkspace {
+    path: PathBuf,
+}
+
+impl AgenticDoctorWorkspace {
+    fn create() -> Result<Self, String> {
+        let path = env::temp_dir().join(format!("hii-agentic-doctor-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&path).map_err(|error| error.to_string())?;
+        Ok(Self { path })
+    }
+}
+
+impl Drop for AgenticDoctorWorkspace {
+    fn drop(&mut self) {
+        let safe = self.path.parent() == Some(env::temp_dir().as_path())
+            && self
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("hii-agentic-doctor-"));
+        if safe {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
+fn run_agentic_doctor(real: bool) -> Result<ExitCode, String> {
+    if !real {
+        return Err("`hii doctor agentic` performs no synthetic check; pass --real to run the installed model and tool loop".into());
+    }
+    let workspace = AgenticDoctorWorkspace::create()?;
+    fs::write(workspace.path.join("seed.txt"), "HII_AGENTIC_OK\n")
+        .map_err(|error| error.to_string())?;
+    let verify = if cfg!(windows) {
+        "powershell -NoProfile -Command \"if ((Get-Content -Raw result.txt).Trim() -ne 'HII_AGENTIC_OK') { exit 1 }\""
+    } else {
+        "test \"$(cat result.txt)\" = HII_AGENTIC_OK"
+    };
+    let executable = env::current_exe().map_err(|error| error.to_string())?;
+    let output = Command::new(&executable)
+        .args([
+            "--cwd",
+            workspace.path.to_str().ok_or("invalid doctor workspace path")?,
+            "--max-steps",
+            "8",
+            "--deadline",
+            "10m",
+            "run",
+            "Read seed.txt. Write result.txt containing exactly the same single line. Run the declared verification, then finish.",
+            "--authority",
+            "workspace",
+            "--done-when",
+            "result.txt exists, matches seed.txt, and the declared check passes",
+            "--verify",
+            verify,
+            "--require-artifact",
+            "result.txt:.txt",
+            "--json",
+        ])
+        .output()
+        .map_err(|error| format!("could not start the installed HII agentic check: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "agentic check failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("agentic check returned invalid JSON: {error}"))?;
+    let artifact = fs::read_to_string(workspace.path.join("result.txt"))
+        .map_err(|error| format!("agentic check did not create result.txt: {error}"))?;
+    if artifact.trim() != "HII_AGENTIC_OK" || result["receipt"]["status"] != "completed" {
+        return Err("agentic check did not produce the required artifact and completed receipt".into());
+    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "ok": true,
+            "kind": "hii.doctor.agentic",
+            "artifactVerified": true,
+            "receipt": result["receipt"],
+            "proof": result["proof"]
+        }))
+        .map_err(|error| error.to_string())?
+    );
+    Ok(ExitCode::SUCCESS)
 }
 
 fn native_model_status(paths: &AppPaths) -> Option<serde_json::Value> {

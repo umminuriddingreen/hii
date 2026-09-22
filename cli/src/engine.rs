@@ -4,7 +4,6 @@
 use crate::{
     agent::{self, RunOptions},
     config::AppPaths,
-    hermes_engine,
     receipt::Receipt,
 };
 
@@ -33,7 +32,7 @@ struct NativeEngine;
 
 impl AgentEngine for NativeEngine {
     fn id(&self) -> &'static str {
-        "native"
+        "hii-rust"
     }
 
     fn capabilities(&self) -> EngineCapabilities {
@@ -50,31 +49,12 @@ impl AgentEngine for NativeEngine {
     }
 }
 
-struct HermesEngine;
-
-impl AgentEngine for HermesEngine {
-    fn id(&self) -> &'static str {
-        "hermes"
-    }
-
-    fn capabilities(&self) -> EngineCapabilities {
-        EngineCapabilities {
-            structured_events: true,
-            cancellation: true,
-            session_continuity: true,
-            hii_governed_tools: true,
-        }
-    }
-
-    fn run(&self, paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
-        hermes_engine::run(paths, options)
-    }
-}
-
 pub fn run(kind: EngineKind, paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let engine: &dyn AgentEngine = match kind {
-        EngineKind::Native => &NativeEngine,
-        EngineKind::Hermes => &HermesEngine,
+        // `hermes` remains a one-release compatibility spelling. Its valuable
+        // orchestration behavior is now implemented by the Rust core; HII no
+        // longer launches a second Python agent runtime.
+        EngineKind::Native | EngineKind::Hermes => &NativeEngine,
     };
     let capabilities = engine.capabilities();
     debug_assert!(capabilities.structured_events);
@@ -91,9 +71,16 @@ mod tests {
 
     #[test]
     fn engines_declare_the_hii_tool_boundary() {
-        for engine in [&NativeEngine as &dyn AgentEngine, &HermesEngine] {
-            assert!(engine.capabilities().hii_governed_tools, "{}", engine.id());
-            assert!(engine.capabilities().structured_events, "{}", engine.id());
-        }
+        let engine = &NativeEngine as &dyn AgentEngine;
+        assert!(engine.capabilities().hii_governed_tools, "{}", engine.id());
+        assert!(engine.capabilities().structured_events, "{}", engine.id());
+    }
+
+    #[test]
+    fn hermes_compatibility_alias_uses_the_rust_core() {
+        let selected: &dyn AgentEngine = match EngineKind::Hermes {
+            EngineKind::Native | EngineKind::Hermes => &NativeEngine,
+        };
+        assert_eq!(selected.id(), "hii-rust");
     }
 }

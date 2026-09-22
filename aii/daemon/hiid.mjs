@@ -1208,9 +1208,10 @@ async function printModelRuntimeStatus() {
   const status = modelRuntimeStatus();
   const preference = safeReadJson(MODEL_PREFERENCE, {});
   const hosted = hostedModelCatalog().find((entry) => entry.provider === preference.provider);
+  const preferredModel = preference.selectedModel || preference.model;
   status.selection = preference.provider ? {
     provider: preference.provider,
-    model: preference.model || null,
+    model: preferredModel || null,
     endpoint: hosted?.endpoint || MODEL_RUNTIME_URL,
     externalTransmission: Boolean(hosted?.externalTransmission)
   } : {
@@ -1296,7 +1297,7 @@ function resolveHostedModelSelection(value) {
 }
 
 function saveModelPreference(provider, model) {
-  writeJson(MODEL_PREFERENCE, { provider, model });
+  writeJson(MODEL_PREFERENCE, { schemaVersion: 2, provider, routingMode: "pinned", selectedModel: model });
   return MODEL_PREFERENCE;
 }
 
@@ -1601,6 +1602,26 @@ async function useModel(args) {
     throw new Error(`${model} is not installed; run: hii model install ${model}`);
   }
   if (HOST_PLATFORM.nodePlatform === "win32" && await modelEndpointReady()) {
+    const status = await nvidiaStatus({ root: ROOT, runtimeRoot: RUNTIME, model });
+    const advertised = status.observedModelIds || status.health?.models?.map((entry) => entry.id) || [];
+    const alreadySelected = advertised.includes(model)
+      || (status.ownership === "hii" && status.selection?.model?.id === model && advertised.includes("explicit"));
+    if (alreadySelected) {
+      // Reuse the healthy endpoint, but still route the selection through the
+      // runtime manager so inference.json and the observed canonical ID become
+      // the same authority. Merely updating model.json leaves the Rust agent on
+      // the previous model even though `hii model use` reports success.
+      await nvidiaStart({ root: ROOT, runtimeRoot: RUNTIME, model });
+    } else {
+      if (status.ownership !== "hii") {
+        throw new Error(`[ERR_EXTERNAL_MODEL_OWNERSHIP] ${MODEL_RUNTIME_URL} is serving ${advertised.join(", ") || "an unknown model"}; HII will not replace an external runtime`);
+      }
+      const stopped = await nvidiaStop({ root: ROOT, runtimeRoot: RUNTIME });
+      if (!stopped.stopped && stopped.state !== "stopping") throw new Error(stopped.reason || "HII could not stop the active model runtime");
+      await waitForModelRuntimeStopped();
+      await nvidiaStart({ root: ROOT, runtimeRoot: RUNTIME, model });
+      await waitForModelRuntime();
+    }
     const preference = saveModelPreference("llama.cpp", model);
     const pi = syncPiModel(model, true);
     console.log(JSON.stringify({

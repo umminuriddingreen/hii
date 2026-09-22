@@ -155,6 +155,10 @@ synthesis, and code that ships.
 
 - Use `hii health --text` and `hii caps show` as compatibility-safe agent
   entrypoints.
+- The operator may keep terminal windows minimized. When a run completes or
+  genuinely needs an operator response, send a source-attributed `hii notify
+  send` event and leave the terminal session waiting; do not rely on terminal
+  focus as the attention mechanism.
 - For CLI work, run `cargo build` and `cargo test` from `cli/`.
 - Use `npm run build` for app validation.
 - Web changes are not done until they are live. After any change that alters

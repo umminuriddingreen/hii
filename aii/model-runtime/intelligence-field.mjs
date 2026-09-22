@@ -221,6 +221,7 @@ export async function inspectIntelligenceField({ root, runtimeRoot, platform, ar
   const manifest = readJson(path.join(root, "config", "native-model-profiles.json"), {});
   const runtime = readJson(path.join(runtimeRoot, "model-runtime", "status.json"), {});
   const preference = readJson(path.join(runtimeRoot, "config", "model.json"), {});
+  preference.model ||= preference.selectedModel;
   const benchmarks = readJson(path.join(runtimeRoot, "model-runtime", "benchmarks.json"), { results: {} }).results || {};
   const lease = readJson(path.join(runtimeRoot, "daemon", "nvidia-task.json"), null);
   const systems = readJson(path.join(runtimeRoot, "systems.json"), { systems: [] }).systems || [];

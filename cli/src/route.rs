@@ -208,6 +208,12 @@ pub const ROUTES: &[Route] = &[
         "show the local workspace-agent state",
     ),
     native(
+        "version",
+        Extended,
+        Infra,
+        "show CLI build and executable provenance",
+    ),
+    native(
         "doctor",
         Core,
         Infra,

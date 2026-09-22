@@ -42,7 +42,8 @@ try {
   await test("dry run does not write configuration or launch", async () => { const report = await nvidiaStart({ ...base, fetch: unavailable, dryRun: true, inventory: { gpus, models, backends: { "native-cuda": { available: true } } } }); assert.equal(report.dryRun, true); assert(!fs.existsSync(path.join(runtimeRoot, "config/inference.json"))); });
   await test("external runtime adopted without engine launch or ownership claim", async () => {
     const report = await nvidiaStart({ ...base, fetch: async () => new Response(JSON.stringify({ data: [{ id: "existing-model" }] })), run() { throw new Error("must not launch or inspect unrelated processes"); } });
-    assert.equal(report.ownership, "external"); assert.equal(report.reused, true); assert.equal(JSON.parse(fs.readFileSync(path.join(runtimeRoot, "config/inference.json"))).model, "existing-model");
+    assert.equal(report.ownership, "external"); assert.equal(report.reused, true); assert.equal(JSON.parse(fs.readFileSync(path.join(runtimeRoot, "config/inference.json"))).selectedModel, "existing-model");
+    assert.equal(JSON.parse(fs.readFileSync(path.join(runtimeRoot, "config/inference.json"))).schemaVersion, 2);
     assert.equal(JSON.parse(fs.readFileSync(path.join(runtimeRoot, "config/inference.json"))).contextTokens, null);
   });
   await test("preference updates atomically preserve a rollback snapshot", async () => {

@@ -153,8 +153,13 @@ pub struct AppPaths {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct UserModelPreference {
+    #[serde(default)]
+    pub schema_version: Option<u8>,
     pub provider: Option<String>,
+    #[serde(rename = "selectedModel", alias = "model")]
     pub model: String,
+    #[serde(default, rename = "routingMode")]
+    pub routing_mode: Option<String>,
 }
 
 impl AppPaths {
@@ -203,9 +208,32 @@ impl AppPaths {
     }
 
     pub fn user_model_preference(&self) -> Result<Option<UserModelPreference>, String> {
+        // Local inference has one authority: inference.json. model.json remains
+        // only as the hosted-provider selection record during migration.
+        if let Some(config) = inference_config_at(&self.runtime) {
+            let local = config
+                .provider
+                .as_deref()
+                .is_none_or(|provider| matches!(provider, "native" | "llama.cpp" | "rapid-mlx" | "ollama" | "lmstudio"));
+            if local {
+                return Ok(Some(UserModelPreference {
+                    schema_version: config.schema_version,
+                    provider: config.provider.or_else(|| {
+                        Some(if cfg!(target_os = "windows") {
+                            "llama.cpp".into()
+                        } else {
+                            "native".into()
+                        })
+                    }),
+                    model: config.model,
+                    routing_mode: config.routing_mode,
+                }));
+            }
+        }
         let path = self.runtime.join("config/model.json");
         if !path.exists() {
-            return Ok(inference_config().map(|config| UserModelPreference {
+            return Ok(inference_config_at(&self.runtime).map(|config| UserModelPreference {
+                schema_version: config.schema_version,
                 provider: config.provider.or_else(|| {
                     Some(if cfg!(target_os = "windows") {
                         "llama.cpp".into()
@@ -214,6 +242,7 @@ impl AppPaths {
                     })
                 }),
                 model: config.model,
+                routing_mode: config.routing_mode,
             }));
         }
         let raw = fs::read_to_string(path).map_err(|error| error.to_string())?;
@@ -234,8 +263,10 @@ impl AppPaths {
         let path = self.runtime.join("config/model.json");
         ensure_parent(&path)?;
         let preference = UserModelPreference {
+            schema_version: Some(2),
             provider: Some(provider.id().into()),
             model: model.trim().to_string(),
+            routing_mode: Some("pinned".into()),
         };
         let raw = serde_json::to_string_pretty(&preference).map_err(|error| error.to_string())?;
         fs::write(&path, format!("{raw}\n")).map_err(|error| error.to_string())?;
@@ -248,9 +279,14 @@ impl AppPaths {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InferenceConfig {
+    #[serde(default)]
+    pub schema_version: Option<u8>,
     pub provider: Option<String>,
     pub endpoint: String,
+    #[serde(rename = "selectedModel", alias = "model")]
     pub model: String,
+    #[serde(default, rename = "routingMode")]
+    pub routing_mode: Option<String>,
     pub api_key_file: Option<PathBuf>,
     pub context_tokens: Option<usize>,
     pub backend: Option<String>,
@@ -259,6 +295,10 @@ pub struct InferenceConfig {
 
 pub fn inference_config() -> Option<InferenceConfig> {
     let root = hii_core::runtime_root().ok()?;
+    inference_config_at(&root)
+}
+
+fn inference_config_at(root: &Path) -> Option<InferenceConfig> {
     let config: InferenceConfig = crate::store::read_json(&root.join("config/inference.json"))?;
     let url = url::Url::parse(&config.endpoint).ok()?;
     if !matches!(url.scheme(), "http" | "https")

@@ -49,7 +49,8 @@ function settings(options = {}) {
   return { ...options, root, env, runtimeRoot, manifest, endpoint, platform,
     backend: options.backend || env.HII_NVIDIA_BACKEND || (manifest.nvidia?.backends.includes(preference.backend) ? preference.backend : null) || manifest.nvidia?.defaultBackend || "native-cuda",
     profile: options.profile || env.HII_NVIDIA_PROFILE || preference.profile || "adaptive",
-    model: options.model || env.HII_MODEL || preference.model || null,
+    model: options.model || env.HII_MODEL || preference.selectedModel || preference.model || null,
+    routingMode: options.routingMode || preference.routingMode || "pinned",
     apiKeyFile: options.apiKeyFile || env.HII_MODEL_API_KEY_FILE || preference.apiKeyFile || null,
     modelsConfig,
     run: options.run || runDefault, fetch: options.fetch || globalThis.fetch,
@@ -200,7 +201,22 @@ function linuxIdentity(s, record) {
   const suffix = stat.stdout.slice(stat.stdout.lastIndexOf(")") + 2).trim().split(/\s+/);
   return suffix[19] ? { pid: record.linuxPid, startTicks: suffix[19], bootId: boot.stdout.trim(), distro: record.distro } : null;
 }
-function ownedIdentity(s, record) { return record?.backend?.startsWith("wsl-") ? sameIdentity(record.linuxIdentity, linuxIdentity(s, record)) : sameIdentity(record?.identity, processIdentity(s, record?.pid)); }
+function sameWindowsIdentity(a, b) {
+  if (!a || !b || Number(a.id) !== Number(b.id) || !a.started || a.started !== b.started) return false;
+  // Win32_Process may withhold ExecutablePath from a non-elevated caller. PID
+  // plus the process creation timestamp still identifies the process
+  // generation; compare the executable as an additional check when both calls
+  // can see it.
+  if (a.executable && b.executable) {
+    return path.resolve(a.executable).toLowerCase() === path.resolve(b.executable).toLowerCase();
+  }
+  return true;
+}
+function ownedIdentity(s, record) {
+  if (record?.backend?.startsWith("wsl-")) return sameIdentity(record.linuxIdentity, linuxIdentity(s, record));
+  const current = processIdentity(s, record?.pid);
+  return s.platform === "win32" ? sameWindowsIdentity(record?.identity, current) : sameIdentity(record?.identity, current);
+}
 const sameIdentity = (a, b) => Boolean(a && b && JSON.stringify(a) === JSON.stringify(b));
 function saveState(s, value) { fs.mkdirSync(path.dirname(s.stateFile), { recursive: true }); const temporary = `${s.stateFile}.${process.pid}.tmp`; fs.writeFileSync(temporary, JSON.stringify(value, null, 2), { mode: 0o600 }); fs.renameSync(temporary, s.stateFile); }
 function recordTransition(s, transition) { fs.mkdirSync(path.dirname(s.stateFile), { recursive: true }); fs.appendFileSync(path.join(path.dirname(s.stateFile), "nvidia-transitions.jsonl"), `${JSON.stringify({ schemaVersion: 1, occurredAt: new Date().toISOString(), ...transition })}\n`, { mode: 0o600 }); }
@@ -208,10 +224,12 @@ function savePreference(s, value) {
   const file = path.join(s.runtimeRoot, "config", "inference.json");
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const previous = readJson(file, {});
-  const contextTokens = value.contextTokens || (previous.endpoint === s.endpoint && previous.model === value.model ? previous.contextTokens : null) || null;
+  const previousModel = previous.selectedModel || previous.model;
+  const contextTokens = value.contextTokens || (previous.endpoint === s.endpoint && previousModel === value.model ? previous.contextTokens : null) || null;
   if (contextTokens !== null && (!Number.isInteger(contextTokens) || contextTokens < 512 || contextTokens > 262144)) throw new Error("Context must be between 512 and 262144 tokens");
   const provider = s.platform === "win32" ? "llama.cpp" : "native";
-  const next = JSON.stringify({ ...previous, schemaVersion: 1, provider, endpoint: s.endpoint, model: value.model, apiKeyFile: s.apiKeyFile, modelsConfig: s.modelsConfig, contextTokens, backend: value.backend, profile: s.profile, effectiveProfile: value.profile || null }, null, 2);
+  const { model: _legacyModel, ...preserved } = previous;
+  const next = JSON.stringify({ ...preserved, schemaVersion: 2, provider, endpoint: s.endpoint, routingMode: value.routingMode || s.routingMode || "pinned", selectedModel: value.model, apiKeyFile: s.apiKeyFile, modelsConfig: s.modelsConfig, contextTokens, backend: value.backend, profile: s.profile, effectiveProfile: value.profile || null }, null, 2);
   if (fs.existsSync(file) && fs.readFileSync(file, "utf8") === next) return;
   const stamp = `${Date.now()}.${process.pid}`;
   const temporary = `${file}.${stamp}.tmp`;
@@ -232,7 +250,15 @@ export async function nvidiaStatus(options = {}) {
     if (measured.status === 0) gpus = parseGpuCsv(measured.stdout);
   } catch {}
   const resourceAdvice = nvidiaResourceAdvice(gpus, s.manifest.nvidia?.headroomMiB || 1536);
-  return { schemaVersion: 1, kind: "hii.model.status", endpoint: s.endpoint, backend: owned ? record.backend : health.reachable ? "external-unknown" : s.backend, state: health.ready ? "ready" : owned ? "starting" : health.reachable ? "unavailable" : "stopped", ownership: owned ? "hii" : health.reachable ? "external" : "none", pid: owned ? record.pid : null, selection: owned ? { profile: record.selection?.profile, model: { id: record.selection?.model?.id }, gpu: record.selection?.gpu, reason: record.selection?.reason } : null, contextTokens: owned ? record.contextTokens : null, capabilities: { inference: health.ready, managedStop: owned, automaticSwitching: false }, health, resources: { gpus, perProcessMemory: "unknown" }, resourceAdvice };
+  const registry = readNvidiaModels(s.modelsConfig);
+  const recordedModel = record?.selection?.model;
+  const canonicalRecordedId = recordedModel?.id === "explicit"
+    ? registry.find((model) => path.resolve(model.path).toLowerCase() === path.resolve(recordedModel.path || "").toLowerCase())?.id || null
+    : recordedModel?.id || null;
+  const selectedModelId = s.model && health.models?.some((model) => model.id === s.model)
+    ? s.model
+    : canonicalRecordedId;
+  return { schemaVersion: 2, kind: "hii.model.status", endpoint: s.endpoint, backend: owned ? record.backend : health.reachable ? "external-unknown" : s.backend, state: health.ready ? "ready" : owned ? "starting" : health.reachable ? "unavailable" : "stopped", ownership: owned ? "hii" : health.reachable ? "external" : "none", pid: owned ? record.pid : null, selection: owned ? { profile: record.selection?.profile, model: { id: selectedModelId }, gpu: record.selection?.gpu, reason: record.selection?.reason } : null, observedModelIds: health.models?.map((model) => model.id) || [], contextTokens: owned ? record.contextTokens : null, capabilities: { inference: health.ready, managedStop: owned, automaticSwitching: false }, health, resources: { gpus, perProcessMemory: "unknown" }, resourceAdvice };
 }
 
 export function nvidiaResourceAdvice(gpus, headroomMiB = 1536) {
@@ -249,7 +275,10 @@ export async function nvidiaStart(options = {}) {
   if (existing.ownership !== "none") {
     if (!s.dryRun && existing.health.ready) {
       const model = s.model || existing.selection?.model?.id || existing.health.models[0]?.id;
-      if (s.model && !existing.health.models.some((m) => m.id === s.model)) throw new Error("Requested model is not advertised by the existing endpoint; it was not changed");
+      const canonicalAliasMatch = existing.ownership === "hii"
+        && existing.selection?.model?.id === s.model
+        && existing.health.models.some((m) => m.id === "explicit");
+      if (s.model && !existing.health.models.some((m) => m.id === s.model) && !canonicalAliasMatch) throw new Error("Requested model is not advertised by the existing endpoint; it was not changed");
       savePreference(s, { model, contextTokens: Number(s.contextTokens) || existing.contextTokens, backend: existing.ownership === "hii" ? existing.backend : "external", profile: existing.selection?.profile });
     }
     return { ...existing, reused: true, reason: "Existing runtime preserved; no model or service was changed" };
@@ -262,12 +291,16 @@ export async function nvidiaStart(options = {}) {
   let requested = s.profile;
   if (s.model) {
     const known = models.find((m) => m.id === s.model);
-    if (known) models = [{ ...known, id: "explicit" }];
-    else if (fs.existsSync(s.model)) models = [{ id: "explicit", path: path.resolve(s.model), installed: true, sizeBytes: fs.statSync(s.model).size }];
+    if (known) models = [known];
+    else if (fs.existsSync(s.model)) {
+      const absolute = path.resolve(s.model);
+      const id = path.basename(absolute, path.extname(absolute)).replace(/[^A-Za-z0-9._-]+/g, "-");
+      models = [{ id, path: absolute, installed: true, sizeBytes: fs.statSync(absolute).size }];
+    }
     else throw new Error("Requested model is not installed; no download was attempted");
     requested = requested === "adaptive" ? "fast" : requested;
   }
-  const effective = s.model ? { ...config, profiles: Object.fromEntries(Object.entries(config.profiles).map(([k, v]) => [k, { ...v, modelAliases: ["explicit"] }])) } : config;
+  const effective = s.model ? { ...config, profiles: Object.fromEntries(Object.entries(config.profiles).map(([k, v]) => [k, { ...v, modelAliases: [models[0].id] }])) } : config;
   const selection = selectNvidiaProfile({ requested, config: effective, gpus: inventory.gpus, models, gpu: s.gpu || 0, current: readJson(s.stateFile) });
   const plan = buildNvidiaLaunchPlan({ ...s, selection });
   if (s.dryRun) return { ...plan, dryRun: true, backendAvailable: inventory.backends[s.backend]?.available === true };
