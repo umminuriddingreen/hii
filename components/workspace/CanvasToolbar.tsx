@@ -35,6 +35,7 @@ export type CanvasToolbarProps = {
   onOpenRemote?: () => void;
   onOpenSiteViews?: () => void;
   onOpenParameters?: () => void;
+  onUpdateStatus?: () => void;
   onRequestFeature?: (title: string) => Promise<string>;
   onCaptureText?: (text: string) => void;
   onStartWork?: (intent: string) => void;
@@ -59,6 +60,7 @@ export function CanvasToolbar({
   activeTool, capabilities = {}, open, disabled = false, onOpenChange, onToolChange,
   onZoomIn, onZoomOut, onFitView, onOpenScenes, onExport, onOpenTerminal,
   onSearch, onOpenActivity, onOpenRemote, onOpenSiteViews, onOpenParameters,
+  onUpdateStatus,
   onRequestFeature, onCaptureText, onStartWork, selectionLabels = [], workUnavailableReason, shortcutLabel = '⌘K', onShortcutChange
 }: CanvasToolbarProps) {
   const [localOpen, setLocalOpen] = useState(false);
@@ -94,10 +96,11 @@ export function CanvasToolbar({
     if (capabilities.remote) add('HII Remote', 'computer device model', onOpenRemote);
     add('Site views', 'website browser portfolio', onOpenSiteViews);
     add('Image parameters', 'layout arrange images', onOpenParameters);
+    if (onUpdateStatus) add('HII update and source status', 'update app release source status sync', onUpdateStatus, '');
     if (onRequestFeature) add('Build a HII feature', 'agent update feature build', () => setFeatureDraft(''));
     if (onShortcutChange) add('Set command shortcut', 'keyboard hotkey', () => setShortcutCapture(true));
     return items;
-  }, [capabilities.activity, capabilities.export, capabilities.nativeTerminal, capabilities.remote, capabilities.scenes, capabilities.search, onExport, onFitView, onOpenActivity, onOpenParameters, onOpenRemote, onOpenScenes, onOpenSiteViews, onOpenTerminal, onRequestFeature, onSearch, onShortcutChange, onToolChange, onZoomIn, onZoomOut]);
+  }, [capabilities.activity, capabilities.export, capabilities.nativeTerminal, capabilities.remote, capabilities.scenes, capabilities.search, onExport, onFitView, onOpenActivity, onOpenParameters, onOpenRemote, onOpenScenes, onOpenSiteViews, onOpenTerminal, onRequestFeature, onSearch, onShortcutChange, onToolChange, onUpdateStatus, onZoomIn, onZoomOut]);
   const visible = commands.filter((command) => `${command.label} ${command.keywords} ${command.shortcut}`.toLowerCase().includes(query.trim().toLowerCase()));
   const workIntent = query.trim();
   const exactCommand = visible.some((command) => command.label.toLowerCase() === workIntent.toLowerCase());

@@ -107,6 +107,24 @@ should let an agent control HII's own surfaces through the same CLI-owned
 objects and authority that the person sees, with visible state and proof rather
 than repeated manual handoffs.
 
+**Founder clarification, 2026-09-22:** HII is a local personal context engine.
+Its canvas visually organizes files, things found on the internet, and media
+across file types. Rich previews help the person inspect and compare them;
+opening an item in its native software should be easy. Custom software made
+with an agent can use context the person selects in HII, through the same
+durable objects and authority as the canvas. The person curates context and
+direction while agents connect, organize, and build around it. Desktop input
+should be keyboard-first, honoring Mac and Windows conventions; mobile input
+must respect touch and accessibility while exposing the same underlying work.
+
+For implementation, the foreground agent orchestrates, integrates, and
+validates; bounded code work should go to Luna or another local or low-cost
+model chosen by the user when it can perform the task. Keep model identity and
+capability claims grounded in observed runtime state. If no suitable local
+model can do the work, explain the constraint and handle it in the foreground
+or ask the user how to proceed. The foreground agent remains responsible for
+integration, validation, and external actions.
+
 HII turns intent into verified work across information, tools, files, machines,
 memory, and reusable capabilities. It is an information-model interface first:
 pages, files, images, people, claims, questions, relationships, jobs, and

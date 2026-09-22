@@ -76,6 +76,9 @@
 .formActions button[type='submit'] { background: var(--ink); color: var(--field); }
 .formActions button:disabled { opacity: .45; cursor: default; }
 .trigger:focus-visible, .palette button:focus-visible, .palette input:focus-visible { outline: 2px solid var(--selection); outline-offset: 1px; }
+@media (min-width: 761px) and (pointer: fine) {
+  .toolbar, .zoom { display: none; }
+}
 @media (max-width: 760px), (pointer: coarse) {
   .shell { top: auto; bottom: max(12px, env(safe-area-inset-bottom)); }
   .toolbar { max-width: calc(100vw - 24px); overflow-x: auto; }

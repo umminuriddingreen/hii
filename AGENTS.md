@@ -16,6 +16,18 @@ override the current product decision.
 
 This repo is an active multi-agent worktree. Codex, Claude, HII workers, and the user may all be editing or generating artifacts at the same time.
 
+## Agent Work Routing
+
+- The foreground agent owns direction, orchestration, integration, validation,
+  and any external action. It should route bounded code changes to Luna or
+  another local or low-cost model the user has chosen when that model can do
+  the work.
+- Keep model identity and capability claims tied to observed runtime state.
+  When no suitable local model can perform the task, explain the constraint
+  and handle the bounded work in the foreground or ask the user how to proceed.
+- The delegated model returns scoped edits and evidence; the foreground agent
+  reviews and integrates them and remains responsible for the final proof.
+
 ## Mission
 
 HII is a self-organizing system managed by agents and curated by the user. It is
@@ -26,6 +38,12 @@ objects: inspect, act, verify, recover, and show receipts. Remove needless
 manual handoffs for reversible local work. The user sets direction and judges
 results in ordinary language; agents translate that direction into bounded
 implementation and tests without requiring the user to know developer syntax.
+Treat HII as a local personal context engine: the canvas organizes filesystem
+items, web finds, and multimedia together, with useful previews and easy
+opening in their native tools. Agent-built software should consume context the
+user selects through HII's shared objects and authority. Respect platform
+input conventions: keyboard-first on Mac and Windows, direct touch interaction
+on mobile, and the same underlying actions on every surface.
 
 When HII improves itself, create an isolated source worktree, preserve every
 other checkout (including dirty worktrees), run checks, and keep source changes,

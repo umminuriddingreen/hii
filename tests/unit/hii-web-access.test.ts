@@ -112,7 +112,8 @@ describe('HII web access gate', () => {
     expect(canvas).toContain('<CanvasToolbar');
     expect(canvas).toContain('remote: !runtimeEnabled');
     const toolbar = readFileSync('components/workspace/CanvasToolbar.tsx', 'utf8');
-    expect(toolbar).toContain('aria-label="Information terminal"');
+    expect(toolbar).toContain('aria-label="Canvas tools"');
+    expect(toolbar).toContain('aria-label="HII local companion"');
     expect(toolbar).toContain("id: 'sticky', keywords: 'sticky'");
     expect(toolbar).toContain("id: 'connector', keywords: 'line link'");
     expect(toolbar).toContain("label: 'Table', shortcut: 'B', id: 'table'");

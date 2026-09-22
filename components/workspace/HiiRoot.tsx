@@ -2303,6 +2303,13 @@ export function HiiRoot({
         setToolMessage('Commands closed.');
         return;
       }
+      if (!inField(event.target) && !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && event.key === '?') {
+        event.preventDefault();
+        setCanvasCommandsOpen((open) => !open);
+        setWebSearchOpen(false);
+        setPromptVisible(false);
+        return;
+      }
       if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         setCanvasCommandsOpen((open) => !open);
@@ -2323,11 +2330,6 @@ export function HiiRoot({
         setWebSearchOpen(true);
         setPromptVisible(false);
         setCanvasManagerOpen(false);
-        return;
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key === '?') {
-        event.preventDefault();
-        setCanvasCommandsOpen((open) => !open);
         return;
       }
       if (inField(event.target)) return;
@@ -2421,11 +2423,6 @@ export function HiiRoot({
           }
           setToolMessage(`Moved ${selected.length} object${selected.length === 1 ? '' : 's'} ${step} point${step === 1 ? '' : 's'}.`);
         }
-        return;
-      }
-      if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && event.key === '?') {
-        event.preventDefault();
-        setCanvasCommandsOpen((open) => !open);
         return;
       }
       if (event.key === 'Tab' && event.shiftKey) {
@@ -2763,6 +2760,7 @@ export function HiiRoot({
         onOpenScenes={openPresentationPanel} onExport={() => setExportOpen(true)}
         onOpenTerminal={() => ensureWorkspaceTerminal('docked')} onSearch={openSearchPanel} onOpenActivity={openActivityPanel}
         onOpenRemote={() => { onRequestDevice?.(selectedNodes); setToolMessage('Opened HII Remote.'); }}
+        onUpdateStatus={persistentChrome ? () => { document.querySelector<HTMLButtonElement>('.hii-update-banner button')?.click(); } : undefined}
         onRequestFeature={desktopRuntime ? buildHiiFeature : undefined}
         onCaptureText={(value) => {
           const [id] = spawnCenteredSeed(canvasTextSeed(value.slice(0, 100_000)));

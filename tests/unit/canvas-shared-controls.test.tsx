@@ -51,6 +51,21 @@ describe('shared canvas controls', () => {
     expect(terminal).toHaveBeenCalledTimes(1);
   });
 
+  it('exposes update and source status as a searchable keyboard command', () => {
+    const updateStatus = vi.fn();
+    renderToolbar({ onUpdateStatus: updateStatus });
+    openCommands();
+    const input = container.querySelector('[aria-label="Save to HII or search commands"]') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, 'update');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.textContent).toContain('HII update and source status');
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')][0].click());
+    expect(updateStatus).toHaveBeenCalledTimes(1);
+  });
+
   it('stages an unmatched work intent for review without running it', () => {
     const startWork = vi.fn();
     renderToolbar({ onStartWork: startWork });
@@ -104,7 +119,7 @@ describe('shared canvas controls', () => {
     const request = vi.fn().mockResolvedValue('added 12345678  Better canvas');
     renderToolbar({ onRequestFeature: request });
     openCommands();
-    act(() => [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((button) => button.textContent?.includes('Request a feature'))!.click());
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((button) => button.textContent?.includes('Build a HII feature'))!.click());
     const input = container.querySelector('#hii-feature-request') as HTMLInputElement;
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
