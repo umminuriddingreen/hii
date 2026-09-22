@@ -20,7 +20,15 @@ const HISTORY_FILE = 'install-history.jsonl';
 const RELEASE_MANIFEST_FILE = 'release.json';
 const LAUNCHER_BACKUP_ROOT = 'launcher-backups';
 const RESOURCE_DIR = 'resources';
-const RESOURCE_PATHS = ['aii', 'config', 'scripts', 'browser/dist', 'AGENTS.md', 'package.json'];
+const RESOURCE_PATHS = [
+  'aii',
+  'config',
+  'scripts',
+  'browser/dist',
+  'docs/HII_FEATURE_REGISTRY.yaml',
+  'AGENTS.md',
+  'package.json'
+];
 const NATIVE_RUNNER_RELATIVE = 'target/release/hii-native-runner';
 
 const LAUNCHER_TEMPLATE_SHELL = [
