@@ -2752,7 +2752,7 @@ export function HiiRoot({
         <span>{workspace.syncError ? (workspace.hasUnsavedChanges ? 'Canvas not saved. Keep HII open.' : 'Canvas synchronization unavailable.') : 'Saving canvas...'}</span>
         {workspace.syncError && <button type="button" onClick={workspace.retrySave}>Retry save</button>}
       </div>}
-      {runtimeEnabled && persistentChrome && <UpdateBanner />}
+      {persistentChrome && <UpdateBanner />}
       <CanvasToolbar
         activeTool={activeTool}
         open={canvasCommandsOpen}
@@ -2763,7 +2763,7 @@ export function HiiRoot({
         onOpenScenes={openPresentationPanel} onExport={() => setExportOpen(true)}
         onOpenTerminal={() => ensureWorkspaceTerminal('docked')} onSearch={openSearchPanel} onOpenActivity={openActivityPanel}
         onOpenRemote={() => { onRequestDevice?.(selectedNodes); setToolMessage('Opened HII Remote.'); }}
-        onRequestFeature={runtimeEnabled && desktopRuntime ? buildHiiFeature : undefined}
+        onRequestFeature={desktopRuntime ? buildHiiFeature : undefined}
         onCaptureText={(value) => {
           const [id] = spawnCenteredSeed(canvasTextSeed(value.slice(0, 100_000)));
           if (id) { setSelected([id]); setFocusNodeId(null); }
