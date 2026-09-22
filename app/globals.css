@@ -1067,9 +1067,11 @@ p.release-facts { display: block; }
 .hii-update-banner { position: fixed; right: 16px; bottom: 16px; z-index: 2147483100; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(127, 127, 127, .28); background: var(--field); color: var(--ink); font-size: 13px; box-shadow: 0 8px 28px rgba(0, 0, 0, .18); }
 .hii-update-banner button { border: 1px solid rgba(127, 127, 127, .35); border-radius: 7px; padding: 5px 10px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .hii-update-banner button:hover { border-color: currentColor; }
+.hii-update-banner-command { display: none; }
 .hii-update-banner .hii-update-dismiss { border-color: transparent; opacity: .65; }
 .hii-update-banner span { overflow-wrap: anywhere; }
 @media (max-width: 700px) { .hii-update-banner { left: 12px; right: 12px; bottom: 12px; flex-wrap: wrap; max-height: 45vh; overflow-y: auto; } }
+@media (pointer: coarse) { .hii-update-banner[data-has-update-command] .hii-update-banner-command { display: inline-flex; } }
 
 /* Projection toggle: the 2D and 3D views of one workspace. */
 /*

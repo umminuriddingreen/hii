@@ -18,11 +18,15 @@ vi.mock('@/lib/desktop/account-sync', () => ({
 vi.mock('@/lib/desktop/account-selection', async (original) => ({
   ...await original<object>(), readAccountWorkspaceSelection: api.selection, saveAccountWorkspaceSelection: api.save
 }));
-vi.mock('@/components/workspace/HiiRoot', () => ({ HiiRoot: ({ spaceId, persistentChrome }: { spaceId: string; persistentChrome: boolean }) => {
+vi.mock('@/components/workspace/HiiRoot', () => ({ HiiRoot: ({ spaceId, persistentChrome, surface }: { spaceId: string; persistentChrome: boolean; surface: string }) => {
   const updateStatus = useUpdateStatusAccess();
-  return <div data-testid="canvas" data-persistent-chrome={String(persistentChrome)} data-update-command={String(Boolean(updateStatus?.openUpdateStatus))}>{spaceId || 'local'}</div>;
+  return <div data-testid="canvas" data-update-banner-owner={persistentChrome ? 'root' : undefined} data-surface={surface} data-persistent-chrome={String(persistentChrome)} data-update-command={String(Boolean(updateStatus?.openUpdateStatus))}>{spaceId || 'local'}</div>;
 } }));
 vi.mock('@/components/desktop/chat/LocalChatSurface', () => ({ LocalChatSurface: () => <div>Chat</div> }));
+vi.mock('@/components/workspace/UpdateBanner', async (original) => {
+  const actual = await original<typeof import('@/components/workspace/UpdateBanner')>();
+  return { ...actual, UpdateBanner: () => <aside data-testid="update-banner" /> };
+});
 
 describe('desktop account access', () => {
   let container: HTMLDivElement;
@@ -48,6 +52,7 @@ describe('desktop account access', () => {
     expect(container.querySelector('[data-testid="canvas"]')?.textContent).toBe('canvas-a');
     expect(container.querySelector('[data-testid="canvas"]')?.getAttribute('data-persistent-chrome')).toBe('false');
     expect(container.querySelector('[data-testid="canvas"]')?.getAttribute('data-update-command')).toBe('true');
+    expect(container.querySelectorAll('[data-testid="update-banner"]')).toHaveLength(1);
     const account = container.querySelector<HTMLButtonElement>('button[aria-label^="HII account"]')!;
     await act(async () => account.click());
     expect(container.querySelector('[aria-label="HII account synchronization"]')?.textContent).toContain('Ummi');

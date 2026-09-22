@@ -48,6 +48,7 @@ export type CanvasToolbarProps = {
   workUnavailableReason?: string;
   shortcutLabel?: string;
   onShortcutChange?: (shortcut: CommandShortcut) => void;
+  hideDesktopChrome?: boolean;
 };
 
 const toolCommands: Array<{ label: string; shortcut: string; id: CanvasTool; keywords: string }> = [
@@ -67,7 +68,8 @@ export function CanvasToolbar({
   onSearch, onOpenActivity, onOpenRemote, onOpenSiteViews, onOpenParameters,
   onUpdateStatus,
   selectionActions = [], onSelectionAction,
-  onRequestFeature, onCaptureText, onStartWork, selectionLabels = [], workUnavailableReason, shortcutLabel = '⌘K', onShortcutChange
+  onRequestFeature, onCaptureText, onStartWork, selectionLabels = [], workUnavailableReason, shortcutLabel = '⌘K', onShortcutChange,
+  hideDesktopChrome = false
 }: CanvasToolbarProps) {
   const [localOpen, setLocalOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -158,7 +160,7 @@ export function CanvasToolbar({
     { id: 'media', label: 'Import', icon: <Paperclip size={19} /> }
   ];
 
-  return <nav className={styles.shell} data-workspace-ui aria-label="Canvas tools" onPointerDown={(event) => event.stopPropagation()}>
+  return <nav className={styles.shell} data-workspace-ui data-hide-desktop-chrome={hideDesktopChrome || undefined} aria-label="Canvas tools" onPointerDown={(event) => event.stopPropagation()}>
     <ControlIsland className={styles.toolbar}>
       <ControlButton className={styles.trigger} label="Open HII companion" aria-expanded={expanded} aria-controls="hii-information-terminal" onClick={() => setExpanded(!expanded)}>
         <span>hii</span><kbd aria-hidden="true">{shortcutLabel}</kbd>

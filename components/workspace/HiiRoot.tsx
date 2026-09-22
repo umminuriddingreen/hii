@@ -84,7 +84,7 @@ import {
 } from '@/lib/workspace/object-conversation';
 import type { WorkspaceNode } from '@/lib/workspace/types';
 import { applicationSeed } from '@/lib/workspace/application-seed';
-import { UpdateBanner } from './UpdateBanner';
+import { UpdateBanner, UpdateStatusProvider } from './UpdateBanner';
 import { NodeFrame } from './NodeFrame';
 import { ShellTerminal } from './ShellTerminal';
 import { KEY_ZOOM_STEP, cameraKeyIntent, useCamera } from './useCamera';
@@ -1111,7 +1111,38 @@ function Prompt({
   );
 }
 
-export function HiiRoot({
+type HiiRootProps = {
+  surface?: 'workspace' | 'space' | 'account';
+  spaceId?: string;
+  creatorId?: string;
+  persistence?: WorkspacePersistence;
+  allowPhoto?: boolean;
+  persistentChrome?: boolean;
+  allowLocalRuntime?: boolean;
+  openTerminalOnReady?: boolean;
+  onTerminalReady?: () => void;
+  onUnsavedChanges?: (unsaved: boolean) => void;
+  onShareNode?: (node: WorkspaceNode) => void;
+  onRequestDevice?: (selection: WorkspaceNode[]) => void;
+  onSelectionChange?: (selection: WorkspaceNode[]) => void;
+  fileSeeder?: (files: File[]) => Promise<NodeSeed[]>;
+  canvasImportRequest?: CanvasImportRequest | null;
+  projectionRequest?: WorkspaceProjectionRequest | null;
+  searchWorkspaces?: () => Promise<SearchableWorkspace[]>;
+  searchWorkspaceId?: string;
+  onFocusExternalNode?: (workspaceId: string, nodeId: string) => void;
+  searchFocusNodeId?: string | null;
+  canvasManagerRequest?: number;
+};
+
+export function HiiRoot(props: HiiRootProps) {
+  if (props.persistentChrome !== false || !props.surface || props.surface === 'workspace') {
+    return <UpdateStatusProvider><HiiRootContent {...props} /></UpdateStatusProvider>;
+  }
+  return <HiiRootContent {...props} />;
+}
+
+function HiiRootContent({
   surface = 'workspace',
   spaceId = '',
   creatorId = 'guest:pending',
@@ -2593,7 +2624,7 @@ export function HiiRoot({
     return { x, y };
   }, [camera.cam, cameraRevision, selectedNodes]);
 
-  return (
+  const content = (
     <main
       ref={camera.viewportRef}
       className="hii-canvas"
@@ -2763,6 +2794,7 @@ export function HiiRoot({
         onOpenTerminal={() => ensureWorkspaceTerminal('docked')} onSearch={openSearchPanel} onOpenActivity={openActivityPanel}
         onOpenRemote={() => { onRequestDevice?.(selectedNodes); setToolMessage('Opened HII Remote.'); }}
         onUpdateStatus={updateStatusAccess?.openUpdateStatus}
+        hideDesktopChrome={desktopRuntime}
         selectionActions={selected.length ? [
           { label: 'Format selection', action: 'format' },
           { label: 'Inspect selection', action: 'inspect' },
@@ -3015,4 +3047,6 @@ export function HiiRoot({
       /></>}
     </main>
   );
+
+  return content;
 }

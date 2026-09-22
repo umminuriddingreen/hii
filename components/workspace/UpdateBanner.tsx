@@ -16,6 +16,8 @@ export function useUpdateStatusAccess() {
 export function UpdateStatusProvider({ children }: { children: ReactNode }) {
   const handle = useRef<UpdateStatusHandle>({ current: null });
   const access = useRef<UpdateStatusAccess>({ openUpdateStatus: () => handle.current.current?.() });
+  const registration = useContext(UpdateStatusRegistrationContext);
+  if (registration) return <>{children}</>;
   return <UpdateStatusContext.Provider value={access.current}>
     <UpdateStatusRegistrationContext.Provider value={handle.current}>{children}</UpdateStatusRegistrationContext.Provider>
   </UpdateStatusContext.Provider>;
@@ -24,6 +26,7 @@ export function UpdateStatusProvider({ children }: { children: ReactNode }) {
 /** Source work and signed app releases have separate lifecycles. */
 export function UpdateBanner({ children }: { children?: ReactNode }) {
   const updateStatusHandle = useContext(UpdateStatusRegistrationContext);
+  const updateStatusAccess = useContext(UpdateStatusContext);
   const [desktop, setDesktop] = useState(false);
   const [state, setState] = useState<UpdateState>({ status: 'idle' });
   const [releaseDismissed, setReleaseDismissed] = useState(false);
@@ -78,8 +81,9 @@ export function UpdateBanner({ children }: { children?: ReactNode }) {
 
   const openUpdateStatus = () => {
     if (expanded) return;
-    if (!desktop) { setDesktop(true); setExpanded(true); setSourceError('Checking source…'); void hiiUpdateStatus().then(setSource).catch((error) => setSourceError(error instanceof Error ? error.message : 'Source status unavailable')); return; }
-    void inspect();
+    setExpanded(true);
+    setSourceError('Checking source…');
+    void hiiUpdateStatus().then(setSource).catch((error) => setSourceError(error instanceof Error ? error.message : 'Source status unavailable'));
   };
 
   if (updateStatusHandle) updateStatusHandle.current = openUpdateStatus;
@@ -96,12 +100,12 @@ export function UpdateBanner({ children }: { children?: ReactNode }) {
     } finally { setSyncBusy(false); }
   };
 
-  if (!desktop) return children ?? null;
+  if (!desktop && !updateStatusHandle) return children ?? null;
 
   return <>
     {children}
-    <aside className="hii-update-banner" data-workspace-ui role="status" onPointerDown={(event) => event.stopPropagation()}>
-      <button type="button" onClick={() => void inspect()} aria-expanded={expanded}>Update HII</button>
+    <aside className="hii-update-banner" data-workspace-ui data-has-update-command={updateStatusAccess ? '' : undefined} role="status" onPointerDown={(event) => event.stopPropagation()}>
+      <button type="button" className={updateStatusAccess ? 'hii-update-banner-command' : undefined} onClick={() => void inspect()} aria-expanded={expanded}>Update HII</button>
       {expanded && <span>
         {source ? `${source.source ? `Source ${source.source.commit.slice(0, 8)} · ${source.source.dirty ? `${source.source.changedFiles} changed files` : 'clean'}` : 'Source checkout unavailable'} · ${source.featureRunCount} feature runs` : sourceError || 'Checking source…'}
         {source?.featureRuns.length ? ` · Latest: ${[...source.featureRuns].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0].status}` : ''}
