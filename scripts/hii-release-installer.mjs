@@ -21,6 +21,7 @@ const RELEASE_MANIFEST_FILE = 'release.json';
 const LAUNCHER_BACKUP_ROOT = 'launcher-backups';
 const RESOURCE_DIR = 'resources';
 const RESOURCE_PATHS = ['aii', 'config', 'scripts', 'browser/dist', 'AGENTS.md', 'package.json'];
+const NATIVE_RUNNER_RELATIVE = 'target/release/hii-native-runner';
 
 const LAUNCHER_TEMPLATE_SHELL = [
   '#!/usr/bin/env bash',
@@ -456,15 +457,20 @@ function makeLauncher(platform, markerFile, resourceRoot) {
         .replace('{{SOURCE_ROOT}}', shellLiteral(resourceRoot));
 }
 
-function buildBinary(sourceRoot, sourceCargo, commit) {
+function buildBinary(sourceRoot, sourceCargo, commit, includeNativeRunner = false) {
   const cargo = process.env.HII_CARGO_BIN || 'cargo';
-  runCommand(cargo, ['build', '--locked', '--manifest-path', sourceCargo, '--package', 'hii-cli', '--release'], {
+  const packages = ['--package', 'hii-cli'];
+  if (includeNativeRunner) packages.push('--package', 'hii-native-runner');
+  runCommand(cargo, ['build', '--locked', '--manifest-path', sourceCargo, ...packages, '--release'], {
     cwd: sourceRoot,
     env: { ...process.env, HII_BUILD_COMMIT: commit }
   });
   const sourceBinary = sourceBinaryPath(sourceRoot);
   if (!existsSync(sourceBinary)) {
     throw new Error(`CLI binary missing after build: ${sourceBinary}`);
+  }
+  if (includeNativeRunner && !existsSync(path.join(sourceRoot, NATIVE_RUNNER_RELATIVE))) {
+    throw new Error(`native runner binary missing after build: ${path.join(sourceRoot, NATIVE_RUNNER_RELATIVE)}`);
   }
   return sourceBinary;
 }
@@ -506,10 +512,15 @@ function main() {
   const releaseDir = path.join(defaults.releaseRoot, commit);
   const releaseBinary = path.join(releaseDir, BINARY_NAME);
   const resourceRoot = path.join(releaseDir, RESOURCE_DIR);
+  const includeNativeRunner = platform === 'darwin' && existsSync(path.join(sourceRoot, 'native-runner', 'Cargo.toml'));
+  const releaseNativeRunner = path.join(resourceRoot, NATIVE_RUNNER_RELATIVE);
   const releaseManifestPath = path.join(releaseDir, RELEASE_MANIFEST_FILE);
   const currentMarker = readMarker(defaults.markerFile);
   const alreadyCurrent = currentMarker === releaseBinary;
-  const shouldBuild = !existsSync(releaseBinary) || !existsSync(releaseManifestPath) || !existsSync(resourceRoot);
+  const shouldBuild = !existsSync(releaseBinary)
+    || !existsSync(releaseManifestPath)
+    || !existsSync(resourceRoot)
+    || (includeNativeRunner && !existsSync(releaseNativeRunner));
   let buildPerformed = false;
 
   if (options.dryRun) {
@@ -539,7 +550,7 @@ function main() {
   const previousHistory = existsSync(defaults.historyFile) ? readFileSync(defaults.historyFile, 'utf8') : null;
 
   if (shouldBuild) {
-    buildBinary(sourceRoot, sourceCargo, commit);
+    buildBinary(sourceRoot, sourceCargo, commit, includeNativeRunner);
     buildPerformed = true;
     mkdirSync(releaseDir, { recursive: true });
     cpSync(sourceBinaryPath(sourceRoot), releaseBinary);
@@ -552,6 +563,11 @@ function main() {
       const source = path.join(sourceRoot, relative);
       if (!existsSync(source)) continue;
       cpSync(source, path.join(resourceRoot, relative), { recursive: true });
+    }
+    if (includeNativeRunner) {
+      mkdirSync(path.dirname(releaseNativeRunner), { recursive: true });
+      cpSync(path.join(sourceRoot, NATIVE_RUNNER_RELATIVE), releaseNativeRunner);
+      chmodSync(releaseNativeRunner, 0o755);
     }
   }
 
@@ -573,7 +589,11 @@ function main() {
     releaseBinary,
     releaseRoot: defaults.releaseRoot,
     resourceRoot,
-    resourcePaths: RESOURCE_PATHS.filter(relative => existsSync(path.join(resourceRoot, relative))),
+    resourcePaths: [
+      ...RESOURCE_PATHS.filter(relative => existsSync(path.join(resourceRoot, relative))),
+      ...(existsSync(releaseNativeRunner) ? [NATIVE_RUNNER_RELATIVE] : [])
+    ],
+    nativeRunner: existsSync(releaseNativeRunner) ? releaseNativeRunner : null,
     binarySha256: sha256(releaseBinary),
     platform,
     sourceCommitShort: commitShort,
