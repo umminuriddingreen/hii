@@ -114,6 +114,11 @@ export async function syncBrowserCapture(payload) {
     title: payload.source.title || payload.source.url,
     content: payload.content?.text || payload.capture?.selectedText || payload.capture?.note || "",
     capturedAt: payload.capturedAt,
+    occurredAt: payload.capture?.occurredAt || payload.capturedAt,
+    sourceKind: payload.capture?.sourceKind || "explicit-capture",
+    domain: payload.capture?.domain || "",
+    metrics: payload.capture?.metrics || {},
+    search: payload.capture?.search || null,
     browser: payload.capture.browserName || "Chromium",
   };
   const id = b64(randomBytes(32));
@@ -178,6 +183,12 @@ function accountNode(payload, result, document) {
       tags: Array.isArray(payload.capture?.tags) ? payload.capture.tags.slice(0, 20) : [],
       captureId: payload.captureId,
       capturedAt: createdAt,
+      occurredAt: payload.capture?.occurredAt || createdAt,
+      sourceKind: payload.capture?.sourceKind || "explicit-capture",
+      domain: String(payload.capture?.domain || "").slice(0, 253),
+      metrics: payload.capture?.metrics || {},
+      searchProvider: String(payload.capture?.search?.provider || "").slice(0, 80),
+      searchQuery: String(payload.capture?.search?.query || "").slice(0, 500),
       receiptId: result?.receiptId || "",
     },
   };

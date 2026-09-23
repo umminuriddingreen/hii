@@ -67,6 +67,31 @@ describe('web capture contract', () => {
     });
   });
 
+  it('keeps structured activity metrics bounded and separate from ingest time', () => {
+    const capture = normalizeWebCapture({
+      ...baseCapture(),
+      capturedAt: '2026-09-21T17:00:00Z',
+      capture: {
+        method: 'extension-page-index',
+        tags: ['history'],
+        occurredAt: '2026-09-20T12:00:00Z',
+        sourceKind: 'history',
+        domain: 'example.com',
+        metrics: { visitCount: 3, typedCount: 1, contentChars: 900 },
+        search: { provider: 'Google', query: 'spatial agents' }
+      }
+    });
+    expect(capture.capturedAt).toBe('2026-09-21T17:00:00.000Z');
+    expect(capture.capture).toMatchObject({
+      occurredAt: '2026-09-20T12:00:00.000Z',
+      sourceKind: 'history',
+      domain: 'example.com',
+      metrics: { visitCount: 3, typedCount: 1, contentChars: 900 },
+      search: { provider: 'Google', query: 'spatial agents' }
+    });
+    expect(Object.hasOwn(capture.capture, 'location')).toBe(false);
+  });
+
   it.each(['chrome://extensions', 'file:///tmp/private.html', 'javascript:alert(1)', 'not a url'])(
     'rejects unsupported source URL %s',
     (url) => {

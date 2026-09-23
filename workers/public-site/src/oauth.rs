@@ -12,7 +12,8 @@ use wasm_bindgen::JsValue;
 use worker::{D1Database, Method, Request, Response, Result};
 
 pub const MCP_RESOURCE: &str = "https://humaninformationinterface.com/mcp";
-const READ_SCOPE: &str = "hii.context.read";
+pub const READ_SCOPE: &str = "hii.context.read";
+pub const ACTION_SCOPE: &str = "hii.actions.write";
 const CODE_TTL_MS: i64 = 5 * 60 * 1000;
 const ACCESS_TTL_MS: i64 = 60 * 60 * 1000;
 const REFRESH_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
@@ -52,6 +53,15 @@ struct RegisterInput {
 
 pub struct OAuthIdentity {
     pub account_id: String,
+    scopes: String,
+}
+
+impl OAuthIdentity {
+    pub fn has_scope(&self, expected: &str) -> bool {
+        self.scopes
+            .split_whitespace()
+            .any(|scope| scope == expected)
+    }
 }
 
 pub fn is_oauth_path(path: &str) -> bool {
@@ -74,7 +84,7 @@ pub async fn handle(request: &mut Request, db: &D1Database) -> Result<Response> 
             json!({
                 "resource": MCP_RESOURCE,
                 "authorization_servers": [RP_ORIGIN],
-                "scopes_supported": [READ_SCOPE],
+                "scopes_supported": [READ_SCOPE, ACTION_SCOPE],
                 "bearer_methods_supported": ["header"]
             }),
         ),
@@ -90,7 +100,7 @@ pub async fn handle(request: &mut Request, db: &D1Database) -> Result<Response> 
                 "grant_types_supported": ["authorization_code", "refresh_token"],
                 "token_endpoint_auth_methods_supported": ["none"],
                 "code_challenge_methods_supported": ["S256"],
-                "scopes_supported": [READ_SCOPE]
+                "scopes_supported": [READ_SCOPE, ACTION_SCOPE]
             }),
         ),
         (Method::Post, "/oauth/register") => register_client(request, db).await,
@@ -165,11 +175,33 @@ async fn authorize_get(request: &Request, db: &D1Database) -> Result<Response> {
         )?;
         return Ok(response);
     };
+    let writes = params
+        .scope
+        .split_whitespace()
+        .any(|scope| scope == ACTION_SCOPE);
+    let access_copy = if writes {
+        "ChatGPT can read your authorized HII spaces, add notes, and queue governed objectives for a linked HII device. Every action remains visible on the canvas and is recorded in HII."
+    } else {
+        "ChatGPT can read titles, text, links, and source metadata from HII spaces you authorize."
+    };
+    let boundary_copy = if writes {
+        "Cannot directly access your terminal, local files, passwords, cookies, browser sessions, or private HII database. Device work runs through the installed HII agent and its local approval and receipt policy."
+    } else {
+        "Cannot read your Mac files, local HII database, terminal, passwords, cookies, or browser history."
+    };
+    let button_copy = if writes {
+        "Allow HII control"
+    } else {
+        "Allow read-only access"
+    };
     let form = format!(
-        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ChatGPT to HII</title><style>:root{{color-scheme:light dark}}*{{box-sizing:border-box}}body{{margin:0;background:#f7f7f5;color:#171716;font:15px ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{width:min(520px,calc(100% - 32px));margin:12vh auto;background:#fff;border:1px solid #deded9;border-radius:20px;padding:28px;box-shadow:0 18px 60px #00000010}}small{{color:#686863}}h1{{font-size:24px;letter-spacing:-.03em;margin:12px 0}}p{{line-height:1.5}}.scope{{padding:14px;border:1px solid #e6e6e1;border-radius:12px;background:#fafaf8}}button{{width:100%;border:0;border-radius:999px;background:#171716;color:#fff;padding:12px 16px;font-weight:650;cursor:pointer}}a{{display:block;text-align:center;margin-top:14px;color:inherit}}@media(prefers-color-scheme:dark){{body{{background:#111;color:#ecece8}}main{{background:#1c1c1a;border-color:#333}}.scope{{background:#242421;border-color:#383835}}small{{color:#aaa}}button{{background:#ecece8;color:#171716}}}}</style></head><body><main><small>HII / connected app</small><h1>Connect ChatGPT</h1><p>Signed in as <strong>{}</strong>. ChatGPT is requesting read-only access to the notes and objects in your HII account workspaces.</p><p class="scope"><strong>Can read:</strong> titles, text, links, and source metadata from workspaces you can access.<br><strong>Cannot read:</strong> your Mac files, local HII database, terminal, passwords, or browser history.</p><form method="post" action="/oauth/authorize">{}<input type="hidden" name="csrf" value="{}"><button type="submit">Allow read-only access</button></form><a href="{}">Cancel</a></main></body></html>"#,
+        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ChatGPT to HII</title><style>:root{{color-scheme:light dark}}*{{box-sizing:border-box}}body{{margin:0;background:#f7f7f5;color:#171716;font:15px ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{width:min(520px,calc(100% - 32px));margin:12vh auto;background:#fff;border:1px solid #deded9;border-radius:20px;padding:28px;box-shadow:0 18px 60px #00000010}}small{{color:#686863}}h1{{font-size:24px;letter-spacing:-.03em;margin:12px 0}}p{{line-height:1.5}}.scope{{padding:14px;border:1px solid #e6e6e1;border-radius:12px;background:#fafaf8}}button{{width:100%;border:0;border-radius:999px;background:#171716;color:#fff;padding:12px 16px;font-weight:650;cursor:pointer}}a{{display:block;text-align:center;margin-top:14px;color:inherit}}@media(prefers-color-scheme:dark){{body{{background:#111;color:#ecece8}}main{{background:#1c1c1a;border-color:#333}}.scope{{background:#242421;border-color:#383835}}small{{color:#aaa}}button{{background:#ecece8;color:#171716}}}}</style></head><body><main><small>HII / connected app</small><h1>Connect ChatGPT</h1><p>Signed in as <strong>{}</strong>.</p><p class="scope"><strong>Access:</strong> {}<br><br><strong>Boundary:</strong> {}</p><form method="post" action="/oauth/authorize">{}<input type="hidden" name="csrf" value="{}"><button type="submit">{}</button></form><a href="{}">Cancel</a></main></body></html>"#,
         html_escape(&session.handle),
+        access_copy,
+        boundary_copy,
         hidden_inputs(&params),
         html_escape(&session.csrf_token),
+        button_copy,
         html_escape(&oauth_redirect_error_url(&params, "access_denied"))
     );
     let mut response = Response::ok(form)?;
@@ -440,12 +472,13 @@ pub async fn bearer_identity(request: &Request, db: &D1Database) -> Result<Optio
         .filter(|r| r.scopes.split_whitespace().any(|scope| scope == READ_SCOPE))
         .map(|r| OAuthIdentity {
             account_id: r.account_id,
+            scopes: r.scopes,
         }))
 }
 
 pub fn auth_challenge() -> Result<Response> {
     let mut response = json_response(401, json!({"error":"authentication_required"}))?;
-    response.headers_mut().set("WWW-Authenticate", &format!("Bearer error=\"invalid_token\", resource_metadata=\"{RP_ORIGIN}/.well-known/oauth-protected-resource\", scope=\"{READ_SCOPE}\""))?;
+    response.headers_mut().set("WWW-Authenticate", &format!("Bearer error=\"invalid_token\", resource_metadata=\"{RP_ORIGIN}/.well-known/oauth-protected-resource\", scope=\"{READ_SCOPE} {ACTION_SCOPE}\""))?;
     Ok(response)
 }
 
@@ -511,7 +544,7 @@ async fn validate_authorize(db: &D1Database, p: &AuthParams) -> Result<bool> {
         || p.code_challenge.len() != 43
         || p.resource != MCP_RESOURCE
         || p.scope.is_empty()
-        || !p.scope.split_whitespace().all(|scope| scope == READ_SCOPE)
+        || !valid_scope_set(&p.scope)
         || !valid_redirect(&p.redirect_uri)
         || p.client_id.is_empty()
     {
@@ -523,6 +556,13 @@ async fn validate_authorize(db: &D1Database, p: &AuthParams) -> Result<bool> {
         .and_then(|r| serde_json::from_str::<Vec<String>>(&r.redirect_uris_json).ok())
         .is_some_and(|uris| uris.iter().any(|uri| uri == &p.redirect_uri));
     Ok(allowed)
+}
+
+fn valid_scope_set(value: &str) -> bool {
+    value.split_whitespace().any(|scope| scope == READ_SCOPE)
+        && value
+            .split_whitespace()
+            .all(|scope| matches!(scope, READ_SCOPE | ACTION_SCOPE))
 }
 
 fn valid_redirect(value: &str) -> bool {
@@ -665,5 +705,13 @@ mod tests {
             oauth_redirect_error_url(&params, "access_denied"),
             "https://chatgpt.com/connector/oauth/callback?source=hii&error=access_denied&state=space%20and%2Fslash"
         );
+    }
+
+    #[test]
+    fn oauth_scopes_are_incremental_and_bounded() {
+        assert!(valid_scope_set(READ_SCOPE));
+        assert!(valid_scope_set(&format!("{READ_SCOPE} {ACTION_SCOPE}")));
+        assert!(!valid_scope_set(ACTION_SCOPE));
+        assert!(!valid_scope_set(&format!("{READ_SCOPE} hii.full")));
     }
 }

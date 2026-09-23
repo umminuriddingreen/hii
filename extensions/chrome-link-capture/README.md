@@ -35,6 +35,12 @@ sign-in/payment pages. Page extraction removes forms and editable controls.
 Imported library data is local-only and is never bulk-shared to an HII account.
 The popup's one-page account handoff remains a separate explicit action.
 
+HII keeps the browser event time separate from the time a record was imported.
+It stores bounded source kind, domain, visit count, typed count, content size,
+and allowlisted committed-search metadata for local graphs. It never adds
+physical location automatically; location means HII Space and canvas position
+unless the user explicitly saves a place label.
+
 The extension sends a bounded `hii.web.capture` message to the pinned native
 host. The host calls the canonical `hii info ingest-web` path. The optional,
 default-off account handoff is a separate native-message flag; the extension

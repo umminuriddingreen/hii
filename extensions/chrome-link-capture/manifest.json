@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Save to HII",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Save explicit captures and optionally import approved browser context into your private local HII workspace.",
   "permissions": ["activeTab", "contextMenus", "nativeMessaging"],
   "optional_permissions": ["bookmarks", "history", "tabs", "scripting"],

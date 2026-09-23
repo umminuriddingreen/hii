@@ -79,6 +79,26 @@ function metadataLines(metadata) {
     .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(" / ") : value}`);
 }
 
+const SEARCH_PROVIDERS = [
+  { host: "google.com", provider: "Google", key: "q" },
+  { host: "bing.com", provider: "Bing", key: "q" },
+  { host: "duckduckgo.com", provider: "DuckDuckGo", key: "q" },
+  { host: "search.brave.com", provider: "Brave Search", key: "q" },
+  { host: "kagi.com", provider: "Kagi", key: "q" },
+  { host: "search.yahoo.com", provider: "Yahoo", key: "p" }
+];
+
+export function committedSearchFromUrl(value) {
+  const decision = inspectImportUrl(value);
+  if (!decision.allowed) return undefined;
+  const url = new URL(decision.url);
+  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  const match = SEARCH_PROVIDERS.find((entry) => host === entry.host);
+  if (!match) return undefined;
+  const query = url.searchParams.get(match.key)?.replace(/\s+/g, " ").trim().slice(0, 500);
+  return query ? { provider: match.provider, query } : undefined;
+}
+
 export async function buildLibraryCapture({
   category,
   url,
@@ -91,7 +111,7 @@ export async function buildLibraryCapture({
   const decision = inspectImportUrl(url);
   if (!decision.allowed) return { excluded: decision.reason };
   const parsedItemTime = Number.isFinite(itemTimestamp) ? new Date(itemTimestamp) : null;
-  const capturedAt = parsedItemTime && Number.isFinite(parsedItemTime.getTime())
+  const occurredAt = parsedItemTime && Number.isFinite(parsedItemTime.getTime())
     ? parsedItemTime.toISOString()
     : observedAt;
   const normalizedTitle = cleanText(title, 500) || decision.url;
@@ -106,7 +126,7 @@ export async function buildLibraryCapture({
     category,
     url: decision.url,
     title: normalizedTitle,
-    capturedAt,
+    occurredAt,
     metadata,
     text: normalizedText
   };
@@ -118,7 +138,15 @@ export async function buildLibraryCapture({
       contentText: body,
       browserName: "Chrome",
       tags: ["browser", "browser-library", category],
-      capturedAt,
+      capturedAt: observedAt,
+      occurredAt,
+      sourceKind: category,
+      metrics: {
+        visitCount: metadata.visitCount,
+        typedCount: metadata.typedCount,
+        contentChars: normalizedText.length
+      },
+      search: committedSearchFromUrl(decision.url),
       captureId: await deterministicCaptureId(category, identity)
     })
   };

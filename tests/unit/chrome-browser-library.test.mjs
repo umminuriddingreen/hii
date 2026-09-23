@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildLibraryCapture,
+  committedSearchFromUrl,
   chunks,
   flattenBookmarks,
   inspectImportUrl
@@ -45,15 +46,27 @@ describe("HII Companion browser library", () => {
     };
     const first = await buildLibraryCapture(input);
     const repeated = await buildLibraryCapture({ ...input, observedAt: "2026-09-21T17:00:00.000Z" });
-    expect(repeated).toEqual(first);
+    expect(repeated.payload.captureId).toBe(first.payload.captureId);
     expect(first.payload.captureId).toMatch(/^browser-library-history-[a-f0-9]{40}$/);
     expect(first.payload.capture).toMatchObject({
       method: "extension-page-index",
+      sourceKind: "history",
+      occurredAt: "2026-09-20T12:00:00.000Z",
+      metrics: { visitCount: 3, contentChars: 0 },
       tags: ["browser", "browser-library", "history"]
     });
     expect(first.payload.authority).toEqual({ client: "chrome-extension", localOnly: true });
-    expect(first.payload.capturedAt).toBe("2026-09-20T12:00:00.000Z");
+    expect(first.payload.capturedAt).toBe("2026-09-21T16:00:00.000Z");
     expect(first.payload.source.url).toBe("https://example.com/article");
+  });
+
+  it("extracts only committed searches from allowlisted search-result URLs", () => {
+    expect(committedSearchFromUrl("https://www.google.com/search?q=spatial+agents")).toEqual({
+      provider: "Google",
+      query: "spatial agents"
+    });
+    expect(committedSearchFromUrl("https://example.com/?q=private")).toBeUndefined();
+    expect(committedSearchFromUrl("https://accounts.google.com/signin?q=private")).toBeUndefined();
   });
 
   it("bounds native-host batches", () => {

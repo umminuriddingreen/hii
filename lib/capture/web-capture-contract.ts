@@ -29,6 +29,15 @@ export interface HiiWebReferenceCapture {
     method: HiiWebCaptureMethod;
     browserName?: string;
     browserTabId?: number;
+    occurredAt?: string;
+    sourceKind?: string;
+    domain?: string;
+    metrics?: {
+      visitCount?: number;
+      typedCount?: number;
+      contentChars?: number;
+    };
+    search?: { provider: string; query: string };
     selectedText?: string;
     note?: string;
     tags: string[];
@@ -93,10 +102,39 @@ function sourceUrl(value: unknown, field: string): string {
   return parsed.href;
 }
 
-function timestamp(value: unknown, now: () => Date): string {
+function timestamp(value: unknown, now: () => Date, field = 'capturedAt'): string {
   const date = value === undefined ? now() : typeof value === 'string' ? new Date(value) : null;
-  if (!date || !Number.isFinite(date.getTime())) invalid('capturedAt must be a valid timestamp.');
+  if (!date || !Number.isFinite(date.getTime())) invalid(`${field} must be a valid timestamp.`);
   return date.toISOString();
+}
+
+function boundedInteger(value: unknown, field: string, max: number): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > max) {
+    invalid(`${field} must be a bounded non-negative integer.`);
+  }
+  return value;
+}
+
+function normalizeMetrics(value: unknown) {
+  if (value === undefined) return undefined;
+  const raw = record(value, 'capture.metrics');
+  const metrics = {
+    visitCount: boundedInteger(raw.visitCount, 'capture.metrics.visitCount', 10_000_000),
+    typedCount: boundedInteger(raw.typedCount, 'capture.metrics.typedCount', 10_000_000),
+    contentChars: boundedInteger(raw.contentChars, 'capture.metrics.contentChars', 1_000_000)
+  };
+  const entries = Object.entries(metrics).filter(([, item]) => item !== undefined);
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+function normalizeSearch(value: unknown) {
+  if (value === undefined) return undefined;
+  const raw = record(value, 'capture.search');
+  const provider = optionalString(raw.provider, 'capture.search.provider')?.slice(0, 80);
+  const query = optionalString(raw.query, 'capture.search.query')?.slice(0, 500);
+  if (!provider || !query) invalid('capture.search requires provider and query.');
+  return { provider, query };
 }
 
 function normalizeTags(value: unknown): string[] {
@@ -149,6 +187,13 @@ export function normalizeWebCapture(
     invalid('capture.browserTabId must be a non-negative integer.');
   }
   const content = raw.content === undefined ? undefined : record(raw.content, 'content');
+  const occurredAt = capture.occurredAt === undefined
+    ? undefined
+    : timestamp(capture.occurredAt, options.now ?? (() => new Date()), 'capture.occurredAt');
+  const sourceKind = optionalString(capture.sourceKind, 'capture.sourceKind')?.slice(0, 80);
+  const domain = optionalString(capture.domain, 'capture.domain')?.slice(0, 253);
+  const metrics = normalizeMetrics(capture.metrics);
+  const search = normalizeSearch(capture.search);
 
   return {
     schemaVersion: HII_WEB_CAPTURE_SCHEMA_VERSION,
@@ -164,6 +209,11 @@ export function normalizeWebCapture(
       method: capture.method as HiiWebCaptureMethod,
       ...(browserName === undefined ? {} : { browserName }),
       ...(browserTabId === undefined ? {} : { browserTabId }),
+      ...(occurredAt === undefined ? {} : { occurredAt }),
+      ...(sourceKind === undefined ? {} : { sourceKind }),
+      ...(domain === undefined ? {} : { domain }),
+      ...(metrics === undefined ? {} : { metrics }),
+      ...(search === undefined ? {} : { search }),
       ...(selectedText === undefined ? {} : { selectedText }),
       ...(note === undefined ? {} : { note }),
       tags: normalizeTags(capture.tags),

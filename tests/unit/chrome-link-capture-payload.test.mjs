@@ -27,6 +27,7 @@ describe("Save to HII capture payload", () => {
       },
       capture: {
         method: "extension-action",
+        domain: "example.com",
         tags: ["browser", "research"],
         note: "Use this in the brief"
       },
@@ -70,6 +71,28 @@ describe("Save to HII capture payload", () => {
     expect(payload.capture.method).toBe("extension-action");
     expect(payload.capture.browserName).toBe("Helium");
     expect(payload.capture.browserTabId).toBe(42);
+    expect(payload.capture.metrics).toEqual({ contentChars: 17 });
     expect(payload.authority.localOnly).toBe(true);
+  });
+
+  it("separates browser event time from ingest time and keeps metrics bounded", () => {
+    const payload = buildWebCapture({
+      ...fixed,
+      url: "https://www.google.com/search?q=spatial+agents",
+      method: "extension-page-index",
+      occurredAt: "2026-09-11T18:30:00Z",
+      sourceKind: "history",
+      metrics: { visitCount: 8, typedCount: 2, contentChars: -1, ignored: 9 },
+      search: { provider: "Google", query: "spatial agents" }
+    });
+    expect(payload.capturedAt).toBe(fixed.capturedAt);
+    expect(payload.capture).toMatchObject({
+      occurredAt: "2026-09-11T18:30:00.000Z",
+      sourceKind: "history",
+      domain: "www.google.com",
+      metrics: { visitCount: 8, typedCount: 2 },
+      search: { provider: "Google", query: "spatial agents" }
+    });
+    expect(Object.hasOwn(payload.capture, "location")).toBe(false);
   });
 });

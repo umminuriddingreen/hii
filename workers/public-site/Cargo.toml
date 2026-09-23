@@ -11,6 +11,7 @@ crate-type = ["cdylib"]
 [dependencies]
 base64 = "0.22.1"
 getrandom = { version = "0.4.2", features = ["wasm_js"] }
+js-sys = "0.3.84"
 passkey-rp = "=0.1.0"
 p256 = { version = "0.13.2", default-features = false, features = ["ecdsa"] }
 serde = { version = "1.0.228", features = ["derive"] }
