@@ -1483,6 +1483,7 @@ function HiiRootContent({
   const addTextAt = useCallback((at: Point) => {
     const [id] = spawnSeeds([canvasTextSeed()], camera.toWorld(at.x, at.y));
     setFocusNodeId(id ?? null);
+    setActiveDocumentId(id ?? null);
   }, [camera, spawnSeeds]);
   const queueTextAt = useCallback((at: Point) => {
     if (textTapTimer.current) clearTimeout(textTapTimer.current);
@@ -1708,7 +1709,12 @@ function HiiRootContent({
     if (tool === 'table') seed = { ...seedFor('note', { name: 'Table', canvasKind: 'table', table: { headerRow: true, rows: [['Heading', 'Heading'], ['Cell', 'Cell'], ['Cell', 'Cell']] } }), w: 420, h: 220 };
     if (!seed) return false;
     const [id] = spawnSeeds([seed], at);
-    if (id) { setSelected([id]); setFocusNodeId(tool === 'text' || tool === 'sticky' ? id : null); }
+    if (id) {
+      setSelected([id]);
+      const editImmediately = tool === 'text' || tool === 'sticky';
+      setFocusNodeId(editImmediately ? id : null);
+      setActiveDocumentId(editImmediately ? id : null);
+    }
     setActiveTool('select');
     return true;
   }, [spawnSeeds]);
@@ -2365,6 +2371,14 @@ function HiiRootContent({
         setCanvasManagerOpen(false);
         return;
       }
+      if (event.key === 'Escape' && activeDocumentId) {
+        event.preventDefault();
+        (document.activeElement as HTMLElement | null)?.blur?.();
+        setActiveDocumentId(null);
+        setFocusNodeId(null);
+        setToolMessage('Editing finished.');
+        return;
+      }
       if (inField(event.target)) return;
       if (isAccount && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'u') {
         event.preventDefault();
@@ -2513,6 +2527,7 @@ function HiiRootContent({
         const at = camera.toWorld(mouse.current.x, mouse.current.y);
         const [id] = spawnSeeds([canvasTextSeed(event.key)], at);
         setFocusNodeId(id ?? null);
+        setActiveDocumentId(id ?? null);
         setPromptVisible(false);
       }
     };
@@ -2550,12 +2565,12 @@ function HiiRootContent({
     addEventListener('pointermove', pointermove);
     addEventListener('paste', paste);
     return () => { removeEventListener('keydown', keydown); removeEventListener('pointermove', pointermove); removeEventListener('paste', paste); };
-  }, [allowPhoto, camera, canvasCommandsOpen, canvasManagerOpen, commandShortcut, chooseCanvasTool, deleteSelection, drawing, ensureWorkspaceTerminal, fitCanvas, importFiles, isAccount, isSpace, isTouchCanvas, mode, onRequestDevice, openCanvasManager, openDevBrowser, promptVisible, runtimeEnabled, selected, spawnCenteredSeed, spawnInformation, spawnSeeds, toggleDrawing, webSearchOpen, workspace, workspaceTerminal]);
+  }, [activeDocumentId, allowPhoto, camera, canvasCommandsOpen, canvasManagerOpen, commandShortcut, chooseCanvasTool, deleteSelection, drawing, ensureWorkspaceTerminal, fitCanvas, importFiles, isAccount, isSpace, isTouchCanvas, mode, onRequestDevice, openCanvasManager, openDevBrowser, promptVisible, runtimeEnabled, selected, spawnCenteredSeed, spawnInformation, spawnSeeds, toggleDrawing, webSearchOpen, workspace, workspaceTerminal]);
 
   const canvasFeedback = toolMessage || (drawing
     ? 'Drawing on · drag anywhere · Esc to stop.'
     : selected.length
-      ? `${selected.length} selected · drag to move · option-drag to resize · Delete to remove.`
+      ? `${selected.length} selected · drag to move${selected.length === 1 ? ' · drag handles to resize · double-click to edit' : ''} · Delete to remove.`
       : '');
 
   const openAssistantPanel = useCallback((initialValue = '') => {
@@ -2890,6 +2905,8 @@ function HiiRootContent({
             key={node.id}
             node={node}
             selected={selected.includes(node.id)}
+            transformable={selected.length === 1 && selected[0] === node.id}
+            editableContent={node.type === 'note' || node.type === 'canvas-text' || node.type === 'document' || canvasObjectPayload(node)?.canvasKind === 'table'}
             title={titleFor(node)}
             getZoom={() => camera.cam.current.z}
             onSelect={(event) => {
@@ -2903,15 +2920,19 @@ function HiiRootContent({
                 return;
               }
               if (activeDocumentId !== node.id) setActiveDocumentId(null);
-              setSelected((ids) => event.shiftKey
+              const additive = event.shiftKey || event.metaKey || event.ctrlKey;
+              setSelected((ids) => additive
                 ? ids.includes(node.id) ? ids.filter((id) => id !== node.id) : [...ids, node.id]
-                : [node.id]);
+                : ids.includes(node.id) && ids.length > 1 ? ids : [node.id]);
               setToolMessage('');
-              workspace.bringToFront(node.id);
+              // Additive presses only change the selection. A following drag
+              // moves the settled selection, avoiding the old shift-drag race.
+              return !additive;
             }}
             contentActive={activeDocumentId === node.id}
-            onActivateContent={() => setActiveDocumentId(node.id)}
+            onActivateContent={() => { setActiveDocumentId(node.id); setFocusNodeId(node.id); }}
             onCommit={(patch) => workspace.patchNode(node.id, patch)}
+            onTransformStart={() => workspace.bringToFront(node.id)}
             onTransformPreview={transformPreview}
             onTransformCommit={transformCommit}
             onWindowAction={(action) => windowAction(node, action)}

@@ -11,8 +11,8 @@ describe('workspace direct manipulation contract', () => {
     expect(canvas).toContain('event.shiftKey');
     expect(canvas).toContain('nodesInMarquee(visibleNodes, rect)');
     expect(canvas).toContain('className="hii-selection-marquee"');
-    expect(css).toContain('.hii-node[data-node-type="canvas-text"]:not([data-selected="true"]) .hii-node-editor { pointer-events: none; }');
-    expect(frame).toContain("if (node.type === 'document')");
+    expect(css).toContain('.hii-node[data-editable-content="true"]:not([data-content-active="true"]) .hii-node-body { pointer-events: none; }');
+    expect(frame).toContain('if (editableContent)');
     expect(frame).toContain('onActivateContent?.()');
     expect(canvas).toContain('contentActive={activeDocumentId === node.id}');
   });
@@ -30,5 +30,8 @@ describe('workspace direct manipulation contract', () => {
     expect(frame).toContain('if (onTransformCommit) onTransformCommit(finalDetail)');
     expect(frame).toContain('data-locked={locked || undefined}');
     expect(frame).toContain('selected && locked');
+    expect(frame).toContain('Math.hypot(current.clientX - startX, current.clientY - startY) < 4');
+    expect(canvas).toContain('transformable={selected.length === 1 && selected[0] === node.id}');
+    expect(canvas).toContain('return !additive');
   });
 });

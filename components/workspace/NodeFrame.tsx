@@ -16,9 +16,11 @@ import styles from './NodeFrame.module.css';
 type NodeFrameProps = {
   node: WorkspaceNode;
   selected: boolean;
+  transformable?: boolean;
+  editableContent?: boolean;
   title: string;
   getZoom: () => number;
-  onSelect: (event: React.PointerEvent) => void;
+  onSelect: (event: React.PointerEvent) => boolean | void;
   onCommit: (patch: Partial<WorkspaceNode>) => void;
   onTransformStart?: (detail: NodeTransformDetail) => void;
   onTransformPreview?: (detail: NodeTransformDetail) => Partial<NodeTransformRect> | void;
@@ -35,7 +37,7 @@ type NodeFrameProps = {
 
 const INTERACTIVE = 'button,input,textarea,select,iframe,video,audio,embed,a,[contenteditable],.xterm';
 
-export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, onTransformStart, onTransformPreview, onTransformCommit, onWindowAction, onErase, onShare, touchControls, chromeless, contentActive, onActivateContent, children }: NodeFrameProps) {
+export function NodeFrame({ node, selected, transformable = selected, editableContent = false, title, getZoom, onSelect, onCommit, onTransformStart, onTransformPreview, onTransformCommit, onWindowAction, onErase, onShare, touchControls, chromeless, contentActive, onActivateContent, children }: NodeFrameProps) {
   const frame = useRef<HTMLDivElement | null>(null);
   const windowed = node.type === 'app' || node.type === 'terminal';
   const locked = isNodeLocked(node);
@@ -43,12 +45,12 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, 
 
   const beginGesture = (event: React.PointerEvent, kind: NodeTransformKind = 'move', handle?: NodeResizeHandle) => {
     if (event.button !== 0) return;
-    onSelect(event);
+    const canTransform = onSelect(event) !== false;
     if ((event.target as Element).closest(INTERACTIVE)) {
       event.stopPropagation();
       return;
     }
-    if (locked) {
+    if (locked || !canTransform) {
       event.stopPropagation();
       return;
     }
@@ -58,7 +60,7 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, 
     const startY = event.clientY;
     const origin: NodeTransformRect = { x: node.x, y: node.y, w: node.w, h: node.h, rotation: node.rotation };
     let next = { ...origin };
-    const transformKind: NodeTransformKind = kind === 'move' && event.altKey ? 'resize' : kind;
+    const transformKind: NodeTransformKind = kind;
     const resizeHandle = handle || 'se';
     const detail = (current: PointerEvent | React.PointerEvent): NodeTransformDetail => ({
       nodeId: node.id,
@@ -74,9 +76,14 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, 
         ctrlKey: current.ctrlKey
       }
     });
-    onTransformStart?.(detail(event));
+    let started = false;
     const move = (current: PointerEvent) => {
       if (current.pointerId !== event.pointerId) return;
+      if (!started && Math.hypot(current.clientX - startX, current.clientY - startY) < 4) return;
+      if (!started) {
+        started = true;
+        onTransformStart?.(detail(current));
+      }
       const zoom = getZoom();
       const deltaX = (current.clientX - startX) / zoom;
       const deltaY = (current.clientY - startY) / zoom;
@@ -103,6 +110,7 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, 
       removeEventListener('pointermove', move);
       removeEventListener('pointerup', up);
       removeEventListener('pointercancel', up);
+      if (!started) return;
       const finalDetail = detail(current);
       if (onTransformCommit) onTransformCommit(finalDetail);
       else if (transformKind === 'resize') onCommit({ x: next.x, y: next.y, w: next.w, h: next.h });
@@ -124,8 +132,10 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, 
       data-node-type={node.type}
       data-in-scene={Boolean(node.frameId) || undefined}
       data-selected={selected}
+      data-transformable={transformable || undefined}
       data-chromeless={chromeless || undefined}
       data-content-active={contentActive || undefined}
+      data-editable-content={editableContent || undefined}
       data-locked={locked || undefined}
       data-window-state={windowed ? windowState : undefined}
       onPointerDown={pointerDown}
@@ -137,7 +147,7 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, 
           onWindowAction?.(windowState === 'maximized' ? 'restore' : 'maximize');
           return;
         }
-        if (node.type === 'document') {
+        if (editableContent) {
           onActivateContent?.();
           return;
         }
@@ -197,7 +207,7 @@ export function NodeFrame({ node, selected, title, getZoom, onSelect, onCommit, 
         <button aria-label={windowState === 'maximized' ? `Restore ${title}` : `Maximize ${title}`} title={windowState === 'maximized' ? 'Restore' : 'Maximize'} onClick={() => onWindowAction?.(windowState === 'maximized' ? 'restore' : 'maximize')}>{windowState === 'maximized' ? '↙' : '↗'}</button>
       </div>}
       <div className="hii-node-body">{children}</div>
-      {selected && !windowed && !locked && <div className={`hii-node-transform-handles ${styles.handles}`} data-workspace-ui aria-label={`${title} transform handles`}>
+      {transformable && !windowed && !locked && <div className={`hii-node-transform-handles ${styles.handles}`} data-workspace-ui aria-label={`${title} transform handles`}>
         {(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const).map((handle) => (
           <button
             key={handle}

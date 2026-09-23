@@ -335,7 +335,9 @@ button, input, textarea { font: inherit; }
 .hii-node-copy { width: 100%; height: 100%; margin: 0; padding: 16px; overflow: auto; white-space: pre-wrap; font-size: 14px; line-height: 1.55; }
 .hii-node-copy[data-mono="true"] { font-family: "SF Mono", ui-monospace, monospace; font-size: 12px; }
 .hii-node-editor { width: 100%; height: 100%; resize: none; border: 0; background: transparent; color: inherit; padding: 16px; outline: 0; line-height: 1.55; }
-.hii-node[data-node-type="canvas-text"]:not([data-selected="true"]) .hii-node-editor { pointer-events: none; }
+.hii-node[data-editable-content="true"]:not([data-content-active="true"]) .hii-node-body { pointer-events: none; }
+.hii-node[data-editable-content="true"][data-content-active="true"] { cursor: text; }
+.hii-node[data-selected="true"]:not([data-transformable="true"]) { outline-style: dashed; }
 .hii-node-editor::placeholder { color: currentColor; opacity: .38; }
 .hii-canvas[data-surface="account"] .hii-node[data-node-type="note"] { border-color: var(--line); border-radius: 8px; background: var(--soft); box-shadow: none; }
 .hii-canvas[data-drop-active]::after { content: ''; position: absolute; inset: 8px; border: 2px dashed currentColor; border-radius: 12px; opacity: .35; pointer-events: none; z-index: 2147483000; }
