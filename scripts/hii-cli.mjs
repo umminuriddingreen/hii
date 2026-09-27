@@ -2696,8 +2696,8 @@ function cmdProof(args = []) {
 }
 
 async function cmdAgents(args = []) {
-  if (args[0] === "workspace") { const {runWorkspaceCommand}=await import("../aii/agents/workspace.mjs"); console.log(JSON.stringify(await runWorkspaceCommand(args.slice(1)),null,2)); return; }
-  if (["sync","sessions","session","runs","events"].includes(args[0])) {
+  if (args[0] === "workspace") { const {runWorkspaceCommand}=await import("../aii/agents/workspace.mjs"); await runWorkspaceCommand(args.slice(1)); return; }
+  if (["sync","sessions","session","runs","events","stop"].includes(args[0])) {
     const {registryCommand}=await import("../aii/agents/registry.mjs");
     console.log(JSON.stringify(await registryCommand(args),null,2)); return;
   }
