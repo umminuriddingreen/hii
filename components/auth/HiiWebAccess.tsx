@@ -439,6 +439,7 @@ export function HiiWebAccess() {
     if (!mode) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = authRef.current;
+    if (!dialog) return;
     const controls = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href]') ?? []);
     (dialog?.querySelector<HTMLElement>('input') ?? controls()[0])?.focus();
     const keydown = (event: KeyboardEvent) => {
@@ -799,7 +800,7 @@ export function HiiWebAccess() {
     setAgentContextNodes([]);
   };
 
-  if (ready && session.authenticated && !browserOnly && !productSite) {
+  if (ready && session.authenticated && (personalAccess || session.source === 'local') && !browserOnly && !productSite) {
     const accountName = session.handle ?? 'account';
     if (!canvasAccountReady || !canvasPersistence || (accountSync && (!activeWorkspace || workspaceBusy && !workspaces.length))) {
       return (
@@ -1009,62 +1010,31 @@ export function HiiWebAccess() {
     );
   }
 
-  // Signing in keeps this browser-only document mounted. Account workspaces
-  // are separate documents, opened explicitly; login never uploads this one.
   return (
-    <div className={styles.canvasShell}>
-      <HiiRoot
-        key="guest"
-        surface="account"
-        spaceId=""
-        creatorId="human:guest"
-        persistence={guestPersistence}
-        onUnsavedChanges={setCanvasUnsaved}
-        allowPhoto
-        allowLocalRuntime={session.source === 'local'}
-        persistentChrome={false}
-        canvasManagerRequest={canvasManagerRequest}
-      />
-      <HiiCanvasFrame accountName={session.authenticated ? session.handle ?? 'account' : 'hii'} workspaces={[]} activeWorkspaceId="" onAccount={() => setAccountOpen((value) => !value)} onFindObjects={() => setCanvasManagerRequest((value) => value + 1)} />
-      <header className={styles.canvasHeader} data-workspace-ui aria-label="HII account access">
-        <nav aria-label="HII account actions">
-          <button
-            type="button"
-            aria-expanded={accountOpen}
-            aria-controls="hii-web-account"
-            onClick={() => setAccountOpen((value) => !value)}
-          >
-            {session.authenticated ? session.handle ?? 'account' : 'hii'}
+    <main className={styles.signInPage} id="hii-main">
+      <nav className={styles.signInLinks} aria-label="About HII">
+        <a href="/?site=1">about</a>
+        <a href="https://umminurididngreen.com/">umminurididngreen.com ↗</a>
+      </nav>
+      <section className={styles.signInCenter} aria-label="HII sign in">
+        <h1>hii</h1>
+        <form onSubmit={submit}>
+          {mode === 'signup' ? <label>name
+            <input type="text" name="handle" autoComplete="username" value={handle}
+              onChange={(event) => setHandle(event.target.value)} minLength={3} maxLength={48}
+              pattern="[-A-Za-z0-9._]+" required />
+          </label> : null}
+          <button type="submit" disabled={busy || (mode === 'signup' && handle.trim().length < 3)}>
+            {busy ? 'working…' : mode === 'signup' ? 'create account with passkey' : 'sign in with passkey'}
           </button>
-        </nav>
-      </header>
-      {accountOpen ? (
-        <aside id="hii-web-account" className={styles.accountPanel} data-workspace-ui aria-label="HII account">
-          <dl>
-            <div><dt>profile</dt><dd>{session.authenticated ? session.handle ?? 'account' : 'not signed in'}</dd></div>
-            <div><dt>sign-in</dt><dd>passkey</dd></div>
-            <div><dt>workspace</dt><dd>stored on this browser</dd></div>
-            <div><dt>computer</dt><dd>connected only when you allow it</dd></div>
-          </dl>
-          {session.authenticated ? <>
-            <button type="button" onClick={() => switchCanvas(false)}>open account workspace</button>
-            <button type="button" onClick={signOut} disabled={busy}>log out</button>
-          </> : <>
-            <button type="button" onClick={() => { chooseMode('login'); setAccountOpen(false); }}>log in</button>
-            <button type="button" onClick={() => { chooseMode('signup'); setAccountOpen(false); }}>create your HII</button>
-          </>}
-          <small>This canvas stays in this browser. Account workspaces are separate; signing in does not upload or synchronize this canvas.</small>
-          <p role="status" aria-live="polite">{workspaceMessage || deviceMessage}</p>
-          <nav className={styles.platformLinks} aria-label="Open HII on a computer">
-            <a href="/?site=1">what HII is</a>
-            <a href="/download#mac">HII for Mac</a>
-            <a href="/download#windows">HII for Windows</a>
-            <a href="/docs">documentation</a>
-          </nav>
-        </aside>
-      ) : null}
-      {authDialog}
-    </div>
+        </form>
+        {message ? <p role="status">{message}</p> : null}
+        <button className={styles.signInSecondary} type="button" onClick={() => chooseMode(mode === 'signup' ? 'login' : 'signup')}>
+          {mode === 'signup' ? 'back to sign in' : 'create account'}
+        </button>
+        {session.authenticated ? <p>signed in as {session.handle} · <button className={styles.signInSecondary} onClick={signOut} disabled={busy}>sign out</button></p> : null}
+      </section>
+    </main>
   );
 }
 

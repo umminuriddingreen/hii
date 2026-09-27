@@ -629,3 +629,19 @@
 .comfyPanel label { display: grid; gap: 6px; margin: 0 0 12px; }
 .comfyPanel textarea { min-height: 120px; resize: vertical; padding: 10px; border: 1px solid #ccc; background: #fff; color: #111; font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
 .comfyPanel p { min-height: 1.4em; margin-bottom: 0; }
+
+.signInPage { min-height: 100dvh; background: #fff; color: #171717; display: grid; place-items: center; padding: 80px 24px; }
+.signInLinks { position: absolute; top: 24px; right: 28px; display: flex; gap: 24px; font-size: 12pt; }
+.signInLinks a { color: inherit; text-decoration: none; }
+.signInLinks a:hover { text-decoration: underline; }
+.signInCenter { width: min(100%, 280px); text-align: center; }
+.signInCenter h1 { font-size: 32px; font-weight: 400; letter-spacing: -.06em; margin: 0 0 32px; }
+.signInCenter form { display: grid; gap: 16px; }
+.signInCenter label { display: grid; gap: 8px; text-align: left; font-size: 13px; }
+.signInCenter input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; background: #fff; color: #171717; }
+.signInCenter form button { padding: 12px 16px; border: 1px solid #ddd; border-radius: 6px; background: #fff; color: #171717; cursor: pointer; }
+.signInCenter button:disabled { opacity: .5; cursor: wait; }
+.signInSecondary { border: 0; background: transparent; color: #777; font-size: 13px; cursor: pointer; padding: 0; }
+.signInCenter > .signInSecondary { margin-top: 18px; }
+.signInCenter p { font-size: 13px; color: #777; margin-top: 20px; }
+@media (max-width: 480px) { .signInLinks { top: 20px; right: 20px; left: 20px; justify-content: flex-end; gap: 16px; font-size: 12pt; } }
