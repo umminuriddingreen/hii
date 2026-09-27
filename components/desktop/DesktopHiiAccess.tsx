@@ -247,7 +247,7 @@ export function DesktopHiiAccess() {
 
   // Identity comes from the authenticated native account endpoint.
   if (ready && linked && identity?.handle === 'ummi' && !showCanvas) {
-    return <UpdateStatusProvider><div style={{height:'100dvh',background:'var(--bg)'}}>
+    return <UpdateStatusProvider><div style={{height:'100dvh',background:'var(--field)'}}>
       <UpdateBanner />
       <iframe ref={chatFrame} src="http://127.0.0.1:4188/?embedded=1" title="Personal HII" style={{width:'100%',height:'100%',border:0}} />
       <button type="button" onClick={() => setShowCanvas(true)} style={{position:'fixed',top:12,left:16,zIndex:100,padding:'7px 12px',border:'1px solid var(--line)',borderRadius:8,background:'var(--panel)',color:'var(--ink)'}}>Canvas</button>
