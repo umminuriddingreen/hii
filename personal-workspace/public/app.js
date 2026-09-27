@@ -1,6 +1,8 @@
+import {installThemeToggle} from './theme.mjs';
 import {privateFetch as fetch} from './transport.js';
 import {projectChatObjects} from './objects.mjs';
 import {mergeWorkspace} from './workspace-merge.mjs';
+installThemeToggle(document.getElementById('theme-toggle'));
 const $=id=>document.getElementById(id);let devices=[],files=[],controller=null,uploading=0,history=[];
 let workspaceBase={chats:[]},workspaceRevision=0,workspaceReady=false,workspaceConflict=false,workspaceTimer=null,workspaceSaving=false,workspacePending=false;let chats=[],activeId,agentMode=true,sessions=[],readOnlySession=null;
 const newChat=()=>({id:crypto.randomUUID(),name:'New chat',messages:[],events:[],state:'Ready',notes:'',children:[],draft:''});

@@ -69,7 +69,9 @@ export function DesktopHiiAccess() {
   const chatFrame = useRef<HTMLIFrameElement>(null);
   useEffect(() => {
     const receive = (event: MessageEvent) => {
-      if (event.origin === 'http://127.0.0.1:4188' && event.source === chatFrame.current?.contentWindow && event.data?.type === 'hii-personal-canvas') setShowCanvas(true);
+      if (event.origin !== 'http://127.0.0.1:4188' || event.source !== chatFrame.current?.contentWindow) return;
+      if (event.data?.type === 'hii-personal-canvas') setShowCanvas(true);
+      if (event.data?.type === 'hii-personal-theme' && (event.data.theme === 'light' || event.data.theme === 'dark')) applyTheme(event.data.theme);
     };
     window.addEventListener('message', receive);
     return () => window.removeEventListener('message', receive);
@@ -245,10 +247,10 @@ export function DesktopHiiAccess() {
 
   // Identity comes from the authenticated native account endpoint.
   if (ready && linked && identity?.handle === 'ummi' && !showCanvas) {
-    return <UpdateStatusProvider><div style={{height:'100dvh',background:'#000'}}>
+    return <UpdateStatusProvider><div style={{height:'100dvh',background:'var(--bg)'}}>
       <UpdateBanner />
       <iframe ref={chatFrame} src="http://127.0.0.1:4188/?embedded=1" title="Personal HII" style={{width:'100%',height:'100%',border:0}} />
-      <button type="button" onClick={() => setShowCanvas(true)} style={{position:'fixed',top:12,left:16,zIndex:100,padding:'7px 12px',border:'1px solid #333',borderRadius:8,background:'#111',color:'#ddd'}}>Canvas</button>
+      <button type="button" onClick={() => setShowCanvas(true)} style={{position:'fixed',top:12,left:16,zIndex:100,padding:'7px 12px',border:'1px solid var(--line)',borderRadius:8,background:'var(--panel)',color:'var(--ink)'}}>Canvas</button>
     </div></UpdateStatusProvider>;
   }
 

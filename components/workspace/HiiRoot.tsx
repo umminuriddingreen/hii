@@ -1,5 +1,6 @@
 'use client';
 
+import { CanvasThemeToggle } from './CanvasThemeToggle';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle,
@@ -2798,6 +2799,7 @@ function HiiRootContent({
         {workspace.syncError && <button type="button" onClick={workspace.retrySave}>Retry save</button>}
       </div>}
       {persistentChrome && <UpdateBanner />}
+      <CanvasThemeToggle />
       <CanvasToolbar
         activeTool={activeTool}
         open={canvasCommandsOpen}
