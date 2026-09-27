@@ -2104,6 +2104,7 @@ async function cmdModelRuntime(args) {
     if (process.platform !== "win32" && !currentDaemonPid()) startDaemon();
     await startModelRuntime(args.slice(1));
   }
+  else if (sub === "intake") { const {runIntakeCommand} = await import("../model-runtime/intake.mjs"); await runIntakeCommand(args.slice(1)); }
   else if (sub === "stop") stopModelRuntime();
   else if (sub === "status") await printModelRuntimeStatus();
   else if (sub === "doctor") doctorModelRuntime();
