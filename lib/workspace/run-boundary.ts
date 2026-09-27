@@ -44,8 +44,8 @@ export function workspaceRunBoundaryManifest(input: {
     readScope: !workspaceRoot
       ? 'Choose a specific project folder before HII can resolve the run boundary.'
       : context.length
-      ? `${context.length} selected canvas object${context.length === 1 ? '' : 's'} ${context.length === 1 ? 'guides' : 'guide'} the run. AII may inspect other non-secret files inside ${workspaceRoot} when the intent requires them.`
-      : `No canvas object is attached. AII may inspect non-secret files inside ${workspaceRoot} when the intent requires them.`,
+      ? `${context.length} selected canvas object${context.length === 1 ? '' : 's'} ${context.length === 1 ? 'guides' : 'guide'} the run. HII may inspect other non-secret files inside ${workspaceRoot} when the intent requires them.`
+      : `No canvas object is attached. HII may inspect non-secret files inside ${workspaceRoot} when the intent requires them.`,
     writeScope: workspaceRoot || 'No project folder selected',
     externalScope: 'No publish, push, message, spend, upload, or secret export',
     secretPolicy: 'Secret files and credential values remain blocked even inside the workspace boundary.'

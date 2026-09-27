@@ -61,7 +61,7 @@ function governedObject(kind: 'source' | 'intent' | 'run' | 'artifact' | 'receip
   const status: SpatialObjectStatus = kind === 'intent' ? 'approved' : kind === 'source' ? 'ready' : 'completed';
   return {
     kind,
-    owner: kind === 'intent' || kind === 'source' ? 'human' : 'aii',
+    owner: kind === 'intent' || kind === 'source' ? 'human' : 'runtime',
     status,
     source,
     capabilityId: kind === 'source' ? undefined : 'hii.agent.workspace_run',
@@ -178,7 +178,7 @@ export function buildLaunchProofWorkspace(run: CompletedLaunchRun, options: { wo
     object: {
       ...baseRunSeed.object,
       kind: 'run' as const,
-      owner: 'aii',
+      owner: 'runtime',
       status: 'completed' as const,
       source: 'HII spatial managed agent run',
       capabilityId: 'hii.agent.workspace_run',

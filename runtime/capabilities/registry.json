@@ -65,7 +65,7 @@
   {
     "id": "hii.agent.workspace_run",
     "name": "Run Bounded Local Workspace Agent",
-    "owner": "aii",
+    "owner": "hii.runtime",
     "runtime": "local-cli",
     "summary": "Run a bounded agent goal from the CLI or spatial workspace with explicit human intent, live user-facing output, durable evidence, and an inspectable receipt.",
     "inputs": [
@@ -214,7 +214,7 @@
       "hii instances list",
       "hii feed",
       "hii codex run",
-      "aii/daemon/hiid.mjs",
+      "runtime/daemon/hiid.mjs",
       "lib/workspace/daemon-health.ts",
       "tests/unit/daemon-health.test.ts",
       "/api/daemon",
@@ -418,7 +418,7 @@
   {
     "id": "hii.skills.grow",
     "name": "Grow Verified Skill Registry",
-    "owner": "aii",
+    "owner": "hii.runtime",
     "runtime": "local-cli",
     "summary": "Capture agent-action receipts, turn repeatable verified work into reviewed skills, and export portable local skill packages.",
     "inputs": [
@@ -450,7 +450,7 @@
       "hii skill report",
       "hii skill register",
       "hii skill doctor",
-      "aii/skills/registry.mjs",
+      "runtime/skills/registry.mjs",
       "~/.hii/skills/actions.jsonl",
       "~/.hii/skills/registry.json",
       "~/.hii/skills/registered"
@@ -1096,7 +1096,7 @@
   {
     "id": "hii.knowledge.workspace",
     "name": "HII Local Knowledge Workspace",
-    "owner": "aii",
+    "owner": "hii.runtime",
     "runtime": "next-route",
     "summary": "Merge complete approved vaults into canonical local HII knowledge, then create, connect, search, version, graph, system-map, verify, roll back, and export it portably.",
     "inputs": [
@@ -1186,9 +1186,9 @@
   {
     "id": "hii.config.read",
     "name": "Read HII Surface Config",
-    "owner": "aii",
+    "owner": "hii.runtime",
     "runtime": "local-process",
-    "summary": "Read the AII-owned HII surface configuration (~/.hii/config.json) that decides which surfaces are enabled and their defaults. Written only by AII via `hiid config set`.",
+    "summary": "Read the HII-owned HII surface configuration (~/.hii/config.json) that decides which surfaces are enabled and their defaults. Written only by HII via `hiid config set`.",
     "inputs": [
       "local read request"
     ],
@@ -1205,7 +1205,7 @@
     "evidence": [
       "app/api/config/route.ts",
       "lib/server/hii-config.ts",
-      "aii/daemon/hiid.mjs"
+      "runtime/daemon/hiid.mjs"
     ],
     "status": "ready",
     "trustLevel": "first-party"
@@ -1213,9 +1213,9 @@
   {
     "id": "hii.config.control",
     "name": "Control HII Surface Config",
-    "owner": "aii",
+    "owner": "hii.runtime",
     "runtime": "next-route",
-    "summary": "Enable or pause a known HII surface and choose the default home surface through AII-owned hiid configuration authority.",
+    "summary": "Enable or pause a known HII surface and choose the default home surface through HII-owned hiid configuration authority.",
     "inputs": [
       "known HII surface id",
       "toggle or home action"
@@ -1238,7 +1238,7 @@
       "components/workspace/CommandBar.tsx",
       "app/api/config/route.ts",
       "lib/server/hii-daemon.ts",
-      "aii/daemon/hiid.mjs"
+      "runtime/daemon/hiid.mjs"
     ],
     "status": "ready",
     "trustLevel": "first-party"
@@ -1246,7 +1246,7 @@
   {
     "id": "hii.skills.start",
     "name": "Start Registered HII Skill",
-    "owner": "aii",
+    "owner": "hii.runtime",
     "runtime": "next-route",
     "summary": "Start any operator-reviewed registered HII skill as a bounded hiid-managed Codex run with the skill bundle as its execution contract.",
     "inputs": [
@@ -1279,45 +1279,96 @@
   {
     "id": "hii.skills.conversation_draft",
     "name": "Learn Draft Skills From Verified Conversations",
-    "owner": "aii",
+    "owner": "hii.runtime",
     "runtime": "local-cli",
     "summary": "Conservatively turn a verified conversational workspace workflow and active HII session context into an automatically updated draft skill for operator review.",
-    "inputs": ["conversation context", "verified run receipt", "active HII sessions"],
-    "outputs": ["agent-action receipt", "draft SKILL.md", "draft manifest"],
-    "permissions": ["local-only model analysis", "verified receipts only", "draft creation only", "registration and execution remain operator-reviewed"],
+    "inputs": [
+      "conversation context",
+      "verified run receipt",
+      "active HII sessions"
+    ],
+    "outputs": [
+      "agent-action receipt",
+      "draft SKILL.md",
+      "draft manifest"
+    ],
+    "permissions": [
+      "local-only model analysis",
+      "verified receipts only",
+      "draft creation only",
+      "registration and execution remain operator-reviewed"
+    ],
     "visibility": "local",
-    "costModel": {"type": "free"},
-    "evidence": ["cli/src/skills.rs", "~/.hii/skills/proposed", "~/.hii/skills/action-receipts.jsonl"],
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "cli/src/skills.rs",
+      "~/.hii/skills/proposed",
+      "~/.hii/skills/action-receipts.jsonl"
+    ],
     "status": "ready",
     "trustLevel": "operator-reviewed"
   },
   {
     "id": "hii.schedule.local_cron",
     "name": "Schedule Local HII Work",
-    "owner": "aii",
+    "owner": "hii.runtime",
     "runtime": "local-cli",
     "summary": "Create local cron schedules that queue bounded tasks through the HII daemon supervisor with append-only schedule events.",
-    "inputs": ["five-field cron expression", "bounded task"],
-    "outputs": ["local schedule", "managed Codex run", "schedule event log"],
-    "permissions": ["local crontab dispatcher", "HII supervisor only", "no external publication"],
+    "inputs": [
+      "five-field cron expression",
+      "bounded task"
+    ],
+    "outputs": [
+      "local schedule",
+      "managed Codex run",
+      "schedule event log"
+    ],
+    "permissions": [
+      "local crontab dispatcher",
+      "HII supervisor only",
+      "no external publication"
+    ],
     "visibility": "local",
-    "costModel": {"type": "free"},
-    "evidence": ["cli/src/schedule.rs", "~/.hii/schedules"],
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "cli/src/schedule.rs",
+      "~/.hii/schedules"
+    ],
     "status": "partial",
     "trustLevel": "first-party"
   },
   {
     "id": "hii.calendar.apple",
     "name": "Read and Sync Apple Calendar",
-    "owner": "aii",
+    "owner": "hii.runtime",
     "runtime": "local-cli",
     "summary": "Read upcoming Apple Calendar events and, only from explicit CLI commands, create events or sync the next occurrence of active HII schedules.",
-    "inputs": ["date and optional time", "event title", "explicit sync command"],
-    "outputs": ["local Calendar event", "calendar sync event receipt"],
-    "permissions": ["local Calendar Automation access", "read by default", "explicit command required for writes"],
+    "inputs": [
+      "date and optional time",
+      "event title",
+      "explicit sync command"
+    ],
+    "outputs": [
+      "local Calendar event",
+      "calendar sync event receipt"
+    ],
+    "permissions": [
+      "local Calendar Automation access",
+      "read by default",
+      "explicit command required for writes"
+    ],
     "visibility": "local",
-    "costModel": {"type": "free"},
-    "evidence": ["cli/src/schedule.rs", "~/.hii/schedules/events.jsonl"],
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "cli/src/schedule.rs",
+      "~/.hii/schedules/events.jsonl"
+    ],
     "status": "partial",
     "trustLevel": "operator-reviewed"
   },
@@ -1327,12 +1378,26 @@
     "owner": "hii",
     "runtime": "local-cli",
     "summary": "Show a fast CPU, memory, storage, HII runtime, and Ollama snapshot or open btop inside the conversational terminal.",
-    "inputs": ["local monitor request"],
-    "outputs": ["resource snapshot", "interactive btop view"],
-    "permissions": ["read local process and filesystem usage", "no process mutation"],
+    "inputs": [
+      "local monitor request"
+    ],
+    "outputs": [
+      "resource snapshot",
+      "interactive btop view"
+    ],
+    "permissions": [
+      "read local process and filesystem usage",
+      "no process mutation"
+    ],
     "visibility": "local",
-    "costModel": {"type": "free"},
-    "evidence": ["cli/src/system_monitor.rs", "/top", "/resources"],
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "cli/src/system_monitor.rs",
+      "/top",
+      "/resources"
+    ],
     "status": "ready",
     "trustLevel": "first-party"
   },
@@ -1342,12 +1407,31 @@
     "owner": "hii",
     "runtime": "next-route",
     "summary": "Keep meaningful HII state persistently available at the top of the Mac, accept intent through the existing governed run path, and open Browser, Create, or Workspace without creating another agent runtime.",
-    "inputs": ["human intent", "local ecosystem events", "active HII run state"],
-    "outputs": ["bounded HII run", "ambient status projection", "mode navigation"],
-    "permissions": ["local HII origin only", "existing hii run authority", "no independent task store", "no external transmission without existing review"],
+    "inputs": [
+      "human intent",
+      "local ecosystem events",
+      "active HII run state"
+    ],
+    "outputs": [
+      "bounded HII run",
+      "ambient status projection",
+      "mode navigation"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "existing hii run authority",
+      "no independent task store",
+      "no external transmission without existing review"
+    ],
     "visibility": "local",
-    "costModel": {"type": "free"},
-    "evidence": ["src/lib/components/NotchSurface.svelte", "src-tauri/src/lib.rs", "~/.hii/ecosystem/events.jsonl"],
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "src/lib/components/NotchSurface.svelte",
+      "src-tauri/src/lib.rs",
+      "~/.hii/ecosystem/events.jsonl"
+    ],
     "status": "ready",
     "trustLevel": "first-party"
   },
@@ -1400,12 +1484,32 @@
     "owner": "hii",
     "runtime": "next-route",
     "summary": "Browse through a temporary local Chromium session and turn an HTTP(S) page or explicit selection into a project-scoped local capture with provenance and a SHA-256 content hash.",
-    "inputs": ["HTTP(S) URL", "page text", "explicit browser selection", "project id"],
-    "outputs": ["local hii.capture record", "source hash", "Create handoff"],
-    "permissions": ["local HII origin only", "HTTP(S) navigation only", "capture stays local", "model delivery requires separate review"],
+    "inputs": [
+      "HTTP(S) URL",
+      "page text",
+      "explicit browser selection",
+      "project id"
+    ],
+    "outputs": [
+      "local hii.capture record",
+      "source hash",
+      "Create handoff"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "HTTP(S) navigation only",
+      "capture stays local",
+      "model delivery requires separate review"
+    ],
     "visibility": "local",
-    "costModel": {"type": "free"},
-    "evidence": ["src/routes/(app)/browser/+page.svelte", "lib/server/hii-chromium.ts", "lib/server/hii-ecosystem.ts"],
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "src/routes/(app)/browser/+page.svelte",
+      "lib/server/hii-chromium.ts",
+      "lib/server/hii-ecosystem.ts"
+    ],
     "status": "ready",
     "trustLevel": "first-party"
   },
@@ -1415,13 +1519,49 @@
     "owner": "hii",
     "runtime": "next-route",
     "summary": "Version source-linked visual workflow graphs, require review of the exact revision, queue the ComfyUI API prompt through a local-only adapter, and retain output references as proof.",
-    "inputs": ["Browser capture", "workflow graph", "ComfyUI API prompt", "explicit revision approval"],
-    "outputs": ["append-only workflow revision", "ComfyUI prompt id", "run events", "verified output references"],
-    "permissions": ["local HII origin only", "local ComfyUI endpoint only", "explicit approval before queue", "no automatic publication or upload"],
+    "inputs": [
+      "Browser capture",
+      "workflow graph",
+      "ComfyUI API prompt",
+      "explicit revision approval"
+    ],
+    "outputs": [
+      "append-only workflow revision",
+      "ComfyUI prompt id",
+      "run events",
+      "verified output references"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "local ComfyUI endpoint only",
+      "explicit approval before queue",
+      "no automatic publication or upload"
+    ],
     "visibility": "local",
-    "costModel": {"type": "local-compute"},
-    "evidence": ["src/routes/(app)/create/+page.svelte", "lib/server/hii-comfy.ts", "app/api/ecosystem/route.ts"],
+    "costModel": {
+      "type": "local-compute"
+    },
+    "evidence": [
+      "src/routes/(app)/create/+page.svelte",
+      "lib/server/hii-comfy.ts",
+      "app/api/ecosystem/route.ts"
+    ],
     "status": "ready",
     "trustLevel": "operator-reviewed"
+  },
+  {
+    "id": "hii.image.generate",
+    "name": "Generate image",
+    "summary": "Generate images with installed ComfyUI models and retain artifact hashes in HII",
+    "owner": "hii.runtime",
+    "runtime": "local-cli",
+    "status": "partial",
+    "permissions": [
+      "submit image prompt to user-owned ComfyUI",
+      "save generated images in HII"
+    ],
+    "evidence": [
+      "runtime/image-generation/comfy.mjs"
+    ]
   }
 ]

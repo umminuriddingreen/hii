@@ -49,7 +49,7 @@ export async function createLaunchProofWorkspace(options = {}) {
     throw new Error(`Workspace "${workspaceId}" already exists. HII will not overwrite it.`);
   }
   if (!(await daemonReady(baseUrl))) {
-    throw new Error(`AII is not ready at ${baseUrl}. Start it explicitly before creating the launch proof.`);
+    throw new Error(`HII is not ready at ${baseUrl}. Start it explicitly before creating the launch proof.`);
   }
 
   const sourceIds = [randomUUID(), randomUUID(), randomUUID()];

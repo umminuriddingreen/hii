@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = process.env.HII_ROOT
   ? path.resolve(process.env.HII_ROOT)
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const REGISTRY = path.join(ROOT, "aii", "capabilities", "registry.json");
+const REGISTRY = path.join(ROOT, "runtime", "capabilities", "registry.json");
 const JOBS = path.join(ROOT, ".hii", "capability-jobs.jsonl");
 const CAPABILITY_READER = path.join(ROOT, "lib", "capabilities", "index.ts");
 const CLI = path.join(ROOT, "scripts", "hii-cli.mjs");

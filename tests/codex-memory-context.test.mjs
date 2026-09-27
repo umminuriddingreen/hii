@@ -7,7 +7,7 @@ import {
   buildCodexMemoryPack,
   codexExecInvocation,
   estimateTokens
-} from '../aii/daemon/codex-memory.mjs';
+} from '../runtime/daemon/codex-memory.mjs';
 
 const temporary = [];
 

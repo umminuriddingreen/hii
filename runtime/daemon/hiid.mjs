@@ -68,7 +68,7 @@ const WINDOWS_MODEL_PRESETS = process.env.HII_WINDOWS_MODEL_PRESETS
       : WINDOWS_MANAGED_MODEL_PRESETS);
 const CONTEXT_DB = path.join(RUNTIME, "hii.db");
 const OWNED_PATTERNS = [
-  `${ROOT}/aii/daemon/hiid.mjs`,
+  `${ROOT}/runtime/daemon/hiid.mjs`,
   `${ROOT}/server.mjs`,
   `${ROOT}/node_modules/.bin/next`,
   "codex exec"
@@ -76,15 +76,15 @@ const OWNED_PATTERNS = [
 
 const activeRuns = new Map();
 const activeWorkspaceRuns = new Map();
-// AII owns the capability registry (aii/capabilities/registry.json) and
+// HII owns the capability registry (runtime/capabilities/registry.json) and
 // publishes it to the shared runtime substrate; HII reads the published copy.
-const CAPABILITY_SOURCE = path.join(ROOT, "aii", "capabilities", "registry.json");
+const CAPABILITY_SOURCE = path.join(ROOT, "runtime", "capabilities", "registry.json");
 const CAPABILITY_PUBLISHED = path.join(RUNTIME, "capabilities.json");
 let publishedCapabilityMtime = 0;
 
 // HII surface configuration — the configuration-authority side of
-// docs/aii-hii-boundary.md. AII owns ~/.hii/config.json; HII surfaces read it
-// and render accordingly. `hiid config set` is how AII (or the operator)
+// docs/aii-hii-boundary.md. HII owns ~/.hii/config.json; HII surfaces read it
+// and render accordingly. `hiid config set` is how HII (or the operator)
 // reshapes HII without touching HII code.
 const HII_CONFIG = path.join(RUNTIME, "config.json");
 const LEGACY_SPATIAL_KEY = ["can", "vas"].join("");
@@ -92,7 +92,7 @@ const LEGACY_SPATIAL_KEY = ["can", "vas"].join("");
 const DEFAULT_CONFIG = {
   version: 2,
   updatedAt: null,
-  updatedBy: "aii.hiid",
+  updatedBy: "hii.runtime",
   defaults: { homepage: "workspace" },
   surfaces: {
     workspace: { enabled: true },
@@ -134,7 +134,7 @@ function ensureConfig() {
   const config = exists ? safeReadJson(HII_CONFIG, { ...DEFAULT_CONFIG }) : { ...DEFAULT_CONFIG };
   const changed = migrateConfig(config);
   if (exists && !changed) return;
-  writeJson(HII_CONFIG, { ...config, updatedAt: now(), updatedBy: "aii.hiid" });
+  writeJson(HII_CONFIG, { ...config, updatedAt: now(), updatedBy: "hii.runtime" });
   event("config.initialized", {
     actor: "hii.daemon",
     target: HII_CONFIG,
@@ -174,7 +174,7 @@ function cmdConfig(args) {
     }
     cursor[keys[keys.length - 1]] = value;
     config.updatedAt = now();
-    config.updatedBy = "aii.hiid";
+    config.updatedBy = "hii.runtime";
     writeJson(HII_CONFIG, config);
     event("config.updated", {
       actor: "hii.daemon",
@@ -268,7 +268,7 @@ function reportSpawnJob(intent, { status, output, startedAt }) {
         id: randomUUID(),
         jobId: intent.id,
         capabilityId: "hii.agent.spawn",
-        actor: "aii.hiid",
+        actor: "hii.runtime",
         type: "approval",
         summary: `hiid executed spawn intent (preset ${intent.preset}).`,
         createdAt: ts
@@ -386,9 +386,9 @@ function reportWorkspaceJob(intent, { status, output, startedAt, receiptMatch = 
     ledger: [
       ...(previous?.ledger || []),
       {
-        id: randomUUID(), jobId: intent.id, capabilityId: "hii.agent.workspace_run", actor: "aii.hiid",
+        id: randomUUID(), jobId: intent.id, capabilityId: "hii.agent.workspace_run", actor: "hii.runtime",
         type: status === "completed" ? "proof" : "reconciliation",
-        summary: status === "running" ? "AII started the approved bounded run." : `AII recorded workspace run as ${status}.`,
+        summary: status === "running" ? "HII started the approved bounded run." : `HII recorded workspace run as ${status}.`,
         createdAt: ts
       }
     ],
@@ -489,9 +489,9 @@ function executeWorkspaceIntent(intent) {
   const maxSteps = Math.max(1, Math.min(24, Number(intent.maxSteps) || 8));
   const model = String(intent.model || "").trim();
   if (!model) {
-    const output = "AII rejected a workspace run without an approved installed model.";
+    const output = "HII rejected a workspace run without an approved installed model.";
     reportWorkspaceJob(intent, { status: "failed", output, startedAt });
-    event("workspace.run.failed", { actor: "aii.hiid", target: intent.id, status: "failed", text: output });
+    event("workspace.run.failed", { actor: "hii.runtime", target: intent.id, status: "failed", text: output });
     return;
   }
   let workspaceRoot;
@@ -500,18 +500,18 @@ function executeWorkspaceIntent(intent) {
   } catch (error) {
     const output = error instanceof Error ? error.message : String(error);
     reportWorkspaceJob(intent, { status: "failed", output, startedAt });
-    event("workspace.run.failed", { actor: "aii.hiid", target: intent.id, status: "failed", text: output });
+    event("workspace.run.failed", { actor: "hii.runtime", target: intent.id, status: "failed", text: output });
     return;
   }
   const latest = latestCapabilityJob(intent.id);
   if (latest?.metadata?.cancelRequestedAt) {
     reportWorkspaceJob({ ...intent, workspaceRoot }, {
       status: "cancelled",
-      output: "AII honoured cancellation before execution started.",
+      output: "HII honoured cancellation before execution started.",
       startedAt
     });
     event("workspace.run.cancelled", {
-      actor: "aii.hiid", target: intent.id, status: "cancelled",
+      actor: "hii.runtime", target: intent.id, status: "cancelled",
       text: "Cancelled before bounded workspace execution started."
     });
     return;
@@ -528,8 +528,8 @@ function executeWorkspaceIntent(intent) {
     const output = error instanceof Error ? error.message : String(error);
     reportWorkspaceJob({ ...intent, workspaceRoot }, { status: "failed", output, startedAt });
     event("workspace.run.failed", {
-      actor: "aii.hiid", target: intent.id, status: "failed",
-      text: "AII rejected local asset staging before bounded execution."
+      actor: "hii.runtime", target: intent.id, status: "failed",
+      text: "HII rejected local asset staging before bounded execution."
     });
     return;
   }
@@ -570,8 +570,8 @@ function executeWorkspaceIntent(intent) {
       reportWorkspaceJob(terminalIntent, {
         status: "cancelled",
         output: cleanedStaging.cleanupStatus === "removed" || cleanedStaging.cleanupStatus === "not-required"
-          ? "AII stopped the bounded run and removed its disposable context copy."
-          : `AII stopped the bounded run, but context cleanup needs attention: ${cleanedStaging.cleanupError || cleanedStaging.cleanupStatus}`,
+          ? "HII stopped the bounded run and removed its disposable context copy."
+          : `HII stopped the bounded run, but context cleanup needs attention: ${cleanedStaging.cleanupError || cleanedStaging.cleanupStatus}`,
         startedAt
       });
       return;
@@ -596,19 +596,19 @@ function executeWorkspaceIntent(intent) {
       completion
     });
     event(`workspace.run.${status}`, {
-      actor: "aii.hiid", target: intent.id, status,
+      actor: "hii.runtime", target: intent.id, status,
       text: receiptMatch?.receipt?.summary || output || `Workspace run ${status}`
     });
   });
   activeWorkspaceRuns.set(intent.id, { child, intent: normalizedIntent, startedAt });
   reportWorkspaceJob(normalizedIntent, {
     status: "running",
-    output: "AII started the approved bounded workspace run.",
+    output: "HII started the approved bounded workspace run.",
     startedAt,
     pid: child.pid
   });
   event("workspace.run.started", {
-    actor: "aii.hiid", target: intent.id, status: "running", pid: child.pid,
+    actor: "hii.runtime", target: intent.id, status: "running", pid: child.pid,
     text: `Started approved bounded workspace run ${intent.id}.`
   });
 }
@@ -666,12 +666,12 @@ function cancelWorkspaceIntent(intent) {
   reportWorkspaceJob(runIntent, {
     status: "cancelled",
     output: stopped
-      ? "AII stopped the bounded workspace run at the operator's request."
-      : "AII cancelled the queued or no-longer-running workspace run.",
+      ? "HII stopped the bounded workspace run at the operator's request."
+      : "HII cancelled the queued or no-longer-running workspace run.",
     startedAt
   });
   event("workspace.run.cancelled", {
-    actor: "aii.hiid", target: intent.id, status: "cancelled",
+    actor: "hii.runtime", target: intent.id, status: "cancelled",
     text: stopped
       ? "Stopped bounded local execution and recorded cancellation."
       : "Recorded cancellation; no owned local process remained."
@@ -708,7 +708,7 @@ function reconcileWorkspaceRuns() {
       reportWorkspaceJob({ ...terminalIntent, contextStaging: cleanedStaging }, {
         status: job.status,
         output: ["removed", "not-required"].includes(cleanedStaging.cleanupStatus)
-          ? "AII reconciled and removed the terminal run's disposable context copy."
+          ? "HII reconciled and removed the terminal run's disposable context copy."
           : `Terminal run context cleanup needs attention: ${cleanedStaging.cleanupError || cleanedStaging.cleanupStatus}`,
         startedAt: String(job.metadata?.startedAt || job.createdAt || now())
       });
@@ -741,18 +741,18 @@ function reconcileWorkspaceRuns() {
     reportWorkspaceJob({ ...intent, contextStaging: cleanedStaging }, {
       status,
       output: verified && cleanupPassed
-        ? "AII recovered a verified receipt after an interrupted daemon lifecycle."
+        ? "HII recovered a verified receipt after an interrupted daemon lifecycle."
         : status === "cancelled"
-          ? "AII reconciled the interrupted run as cancelled."
+          ? "HII reconciled the interrupted run as cancelled."
           : !cleanupPassed
-            ? `AII could not safely remove the interrupted run context: ${cleanedStaging.cleanupError || cleanedStaging.cleanupStatus}`
-          : `AII found no owned process and no satisfied receipt after daemon interruption. ${completion.reasons.join(" ")}`.trim(),
+            ? `HII could not safely remove the interrupted run context: ${cleanedStaging.cleanupError || cleanedStaging.cleanupStatus}`
+          : `HII found no owned process and no satisfied receipt after daemon interruption. ${completion.reasons.join(" ")}`.trim(),
       startedAt,
       receiptMatch,
       completion
     });
     event(`workspace.run.${status}`, {
-      actor: "aii.hiid", target: job.id, status,
+      actor: "hii.runtime", target: job.id, status,
       text: status === "completed"
         ? "Recovered verified workspace receipt after daemon interruption."
         : `Reconciled interrupted workspace run as ${status}.`
@@ -859,7 +859,7 @@ function publishCapabilities() {
     actor: "hii.daemon",
     target: CAPABILITY_PUBLISHED,
     status: "ok",
-    text: `Published ${registry.length} capabilities from AII registry`
+    text: `Published ${registry.length} capabilities from HII registry`
   });
 }
 
@@ -2133,7 +2133,7 @@ function runningDaemonPids() {
       const pid = Number(parts[1]);
       const command = parts.slice(10).join(" ");
       if (pid === process.pid) return null;
-      if (!command.includes(`${ROOT}/aii/daemon/hiid.mjs run`)) return null;
+      if (!command.includes(`${ROOT}/runtime/daemon/hiid.mjs run`)) return null;
       return pid;
     })
     .filter(Boolean);
@@ -2703,12 +2703,12 @@ process.on("SIGTERM", () => {
       reportWorkspaceJob({ ...execution.intent, contextStaging: cleanedStaging }, {
         status: "cancelled",
         output: ["removed", "not-required"].includes(cleanedStaging.cleanupStatus)
-          ? "AII stopped the bounded workspace run and removed its disposable context copy during daemon shutdown."
-          : `AII stopped the bounded run, but context cleanup needs attention: ${cleanedStaging.cleanupError || cleanedStaging.cleanupStatus}`,
+          ? "HII stopped the bounded workspace run and removed its disposable context copy during daemon shutdown."
+          : `HII stopped the bounded run, but context cleanup needs attention: ${cleanedStaging.cleanupError || cleanedStaging.cleanupStatus}`,
         startedAt: execution.startedAt
       });
       event("workspace.run.cancelled", {
-        actor: "aii.hiid", target: id, status: "cancelled",
+        actor: "hii.runtime", target: id, status: "cancelled",
         text: "Cancelled bounded workspace execution during daemon shutdown."
       });
     }

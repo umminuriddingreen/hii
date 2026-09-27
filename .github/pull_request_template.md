@@ -13,8 +13,8 @@
 
 <!-- See NOTICE. Check every tier this PR touches. -->
 
-- [ ] Core — BSL 1.1 (`aii/`, `cli/`, `native-runner/`, `src-tauri/`, `src/`, `app/`, `lib/`, `server/`, `scripts/`)
-- [ ] Protocol / open — Apache-2.0 (`protocol/`, `extensions/`, `skills/`, `aii/skills/`)
+- [ ] Core — BSL 1.1 (`runtime/`, `cli/`, `native-runner/`, `src-tauri/`, `src/`, `app/`, `lib/`, `server/`, `scripts/`)
+- [ ] Protocol / open — Apache-2.0 (`protocol/`, `extensions/`, `skills/`, `runtime/skills/`)
 - [ ] Does not touch `external/` (third-party code — patches go upstream)
 
 ## Contributor License Agreement

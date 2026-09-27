@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { registerSkillProposal } from '../../aii/skills/registry.mjs';
+import { registerSkillProposal } from '../../runtime/skills/registry.mjs';
 import {
   compareSkillReplays,
   latestSkillExecutionEvents,
@@ -244,7 +244,7 @@ export async function startRegisteredHiiSkill(input: {
 
   try {
     const result = await controlHiiDaemon('codex.run', { prompt });
-    if (!result.runId) throw new Error('AII did not return a managed replay run id.');
+    if (!result.runId) throw new Error('HII did not return a managed replay run id.');
     const queued: SkillExecutionEvent = {
       ...starting,
       daemonRunId: result.runId,

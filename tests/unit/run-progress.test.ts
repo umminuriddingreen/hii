@@ -50,9 +50,9 @@ describe('governed workspace run progress', () => {
     const rawFailure = '[2026-07-30T13:57:17.727Z] Command failed: hii run';
     expect(terminalRunMessage('failed')).not.toContain(rawFailure);
     expect(terminalRunMessage('failed')).toBe(
-      'AII recorded this bounded run as failed. Inspect its evidence for the final execution output.'
+      'HII recorded this bounded run as failed. Inspect its evidence for the final execution output.'
     );
-    expect(terminalRunMessage('cancelled')).toBe('AII stopped this bounded run. Its approval is closed.');
+    expect(terminalRunMessage('cancelled')).toBe('HII stopped this bounded run. Its approval is closed.');
     expect(workspaceRunEvidence({ logs: [rawFailure] }, null).logs).toEqual([rawFailure]);
   });
 });

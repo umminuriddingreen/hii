@@ -15,7 +15,7 @@ fs.mkdirSync(assetRoot, { recursive: true });
 process.env.HII_RUNTIME_DIR = runtimeRoot;
 
 const contextModule = await import('../lib/server/hii-workspace-run-context.ts');
-const stagingModule = await import('../aii/daemon/workspace-run-staging.mjs');
+const stagingModule = await import('../runtime/daemon/workspace-run-staging.mjs');
 const pendingContextModule = await import('../lib/workspace/pending-context.ts');
 
 function addAsset(name, anchor) {

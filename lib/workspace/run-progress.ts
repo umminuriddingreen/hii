@@ -42,8 +42,8 @@ const terminalStatuses = new Set(['completed', 'failed', 'cancelled']);
 
 export function terminalRunMessage(status?: string) {
   return status === 'cancelled'
-    ? 'AII stopped this bounded run. Its approval is closed.'
-    : 'AII recorded this bounded run as failed. Inspect its evidence for the final execution output.';
+    ? 'HII stopped this bounded run. Its approval is closed.'
+    : 'HII recorded this bounded run as failed. Inspect its evidence for the final execution output.';
 }
 
 function count(value: unknown) {
@@ -131,7 +131,7 @@ export function workspaceRunProgress(input: {
     },
     {
       id: 'queue',
-      label: 'Accepted by AII',
+      label: 'Accepted by HII',
       detail: status === 'queued' ? 'Waiting for bounded local execution to start.' : 'The approved intent entered the governed runner.',
       state: queueState
     },

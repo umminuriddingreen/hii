@@ -8,7 +8,7 @@ high-signal.
 
 **Email ug7@njit.edu.** Do not open a public issue for anything exploitable.
 
-Include what you can: affected component (`aii/daemon`, `cli/`, `server/`, a web
+Include what you can: affected component (`runtime/daemon`, `cli/`, `server/`, a web
 surface), version or commit, reproduction steps, and impact. If GitHub Security
 Advisories are enabled on this repository, private advisory reports are also fine.
 

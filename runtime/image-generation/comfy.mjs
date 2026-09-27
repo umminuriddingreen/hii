@@ -1,0 +1,43 @@
+import {mkdir,readFile,writeFile} from 'node:fs/promises';
+import {homedir} from 'node:os';
+import path from 'node:path';
+import {randomUUID,createHash} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
+import {registry} from '../agents/registry.mjs';
+const base=(process.env.HII_COMFY_URL||'http://127.0.0.1:4191').replace(/\/$/,'');
+const store=path.join(process.env.HII_RUNTIME_DIR||path.join(homedir(),'.hii'),'image-generation');
+async function api(route,options={}){const r=await fetch(base+route,{...options,signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error(`ComfyUI ${route}: HTTP ${r.status}`);return r;}
+export function graph({prompt,model='z_image_turbo_bf16.safetensors',seed=0,width=768,height=768},available){
+ if(typeof prompt!=='string'||!prompt.trim()||prompt.length>12000)throw Error('Enter an image prompt under 12,000 characters');
+ if(!Number.isSafeInteger(seed)||seed<0)throw Error('Invalid seed');
+ for(const n of [width,height])if(!Number.isInteger(n)||n<256||n>1536||n%64)throw Error('Image dimensions must be multiples of 64 between 256 and 1536');
+ if(!available.includes(model))throw Error('Choose an installed ComfyUI image model');
+ const common={'4':{class_type:'CLIPTextEncode',inputs:{clip:['3',0],text:prompt}},'5':{class_type:'ConditioningZeroOut',inputs:{conditioning:['4',0]}},'6':{class_type:'EmptySD3LatentImage',inputs:{width,height,batch_size:1}},'7':{class_type:'KSampler',inputs:{model:['2',0],positive:['4',0],negative:['5',0],latent_image:['6',0],seed,steps:8,cfg:1,sampler_name:'res_multistep',scheduler:'simple',denoise:1}},'9':{class_type:'VAEDecode',inputs:{samples:['7',0],vae:['8',0]}},'10':{class_type:'SaveImage',inputs:{images:['9',0],filename_prefix:'HII'}}};
+ if(model==='z_image_turbo_bf16.safetensors')return {...common,'1':{class_type:'UNETLoader',inputs:{unet_name:model,weight_dtype:'default'}},'2':{class_type:'ModelSamplingAuraFlow',inputs:{model:['1',0],shift:3}},'3':{class_type:'CLIPLoader',inputs:{clip_name:'qwen_3_4b.safetensors',type:'lumina2',device:'default'}},'8':{class_type:'VAELoader',inputs:{vae_name:'ae.safetensors'}}};
+ return {...common,'2':{class_type:'CheckpointLoaderSimple',inputs:{ckpt_name:model}},'3':{class_type:'CLIPSetLastLayer',inputs:{clip:['2',1],stop_at_clip_layer:-1}},'6':{class_type:'EmptyLatentImage',inputs:{width,height,batch_size:1}},'7':{...common['7'],inputs:{...common['7'].inputs,steps:20,cfg:7,sampler_name:'euler',model:['2',0]}},'9':{class_type:'VAEDecode',inputs:{samples:['7',0],vae:['2',2]}}};
+}
+export async function status(){try{const info=await(await api('/object_info')).json();const choices=(node,key)=>info[node]?.input?.required?.[key]?.[0]||[];const models=choices('CheckpointLoaderSimple','ckpt_name').filter(name=>!/(audio|3d|video|wan)/i.test(name));if(choices('UNETLoader','unet_name').includes('z_image_turbo_bf16.safetensors')&&choices('CLIPLoader','clip_name').includes('qwen_3_4b.safetensors')&&choices('VAELoader','vae_name').includes('ae.safetensors'))models.unshift('z_image_turbo_bf16.safetensors');return {online:true,models};}catch(e){return {online:false,models:[],error:e.message};}}
+function jobPath(id){if(!/^[a-f0-9-]{36}$/.test(id))throw Error('Invalid image run');return path.join(store,id+'.json');}
+export async function queue(input){const ready=await status();if(!ready.online)throw Error('ComfyUI is offline');const seed=input.seed??Math.floor(Math.random()*2**32);const workflow=graph({...input,model:input.model||ready.models[0],seed},ready.models);await prepareGpu();const result=await(await api('/prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:workflow,client_id:randomUUID()})})).json();if(!result.prompt_id)throw Error(JSON.stringify(result.error||result.node_errors||'Workflow rejected'));const record={id:result.prompt_id,kind:'hii.image-generation',provider:'comfyui',state:'queued',prompt:input.prompt,model:input.model||ready.models[0],seed,createdAt:new Date().toISOString()};await mkdir(store,{recursive:true,mode:0o700});await writeFile(jobPath(record.id),JSON.stringify(record),{mode:0o600});await registry.recordRun({id:record.id,goal:record.prompt,model:record.model,source:'HII Image',workspace:store,status:'queued',startedAt:record.createdAt,receiptPath:jobPath(record.id)});return record;}
+async function resolveJob(id){const file=jobPath(id),record=JSON.parse(await readFile(file,'utf8'));if(['completed','failed','cancelled'].includes(record.state))return record;const history=(await(await api('/history/'+id)).json())[id];if(!history)return record;if(history.status?.status_str==='error'){record.state='failed';record.error='ComfyUI workflow failed';}else{const images=Object.values(history.outputs||{}).flatMap(o=>o.images||[]);if(!images.length)return record;record.outputs=[];for(const [i,img] of images.entries()){const params=new URLSearchParams({...img,type:img.type||'output'});const bytes=Buffer.from(await(await api('/view?'+params)).arrayBuffer());const filename=id+'-'+i+'.png';await writeFile(path.join(store,filename),bytes,{mode:0o600});record.outputs.push({filename,sha256:createHash('sha256').update(bytes).digest('hex'),url:'/api/images/output/'+filename});}record.state='completed';record.completedAt=new Date().toISOString();record.proof={kind:'artifact',verified:true,outputs:record.outputs.map(({filename,sha256})=>({filename,sha256}))};}await writeFile(file,JSON.stringify(record,null,2),{mode:0o600});await registry.recordRun({id:record.id,status:record.state,finishedAt:new Date().toISOString(),receiptPath:file});if(record.state==='completed')await api('/free',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({unload_models:true,free_memory:true})}).catch(()=>{});return record;}
+export async function output(filename){if(!/^[a-f0-9-]{36}-\d+\.png$/.test(filename))throw Error('Invalid image artifact');return readFile(path.join(store,filename));}
+if(process.argv[1]===fileURLToPath(import.meta.url)){try{const [cmd,...args]=process.argv.slice(2);const result=cmd==='status'?await status():cmd==='generate'?await queue({prompt:args.join(' ')}):cmd==='job'?await job(args[0]):{usage:'hii image status | generate <prompt> | job <id>'};console.log(JSON.stringify(result,null,2));}catch(e){console.error(e.message);process.exitCode=1;}}
+
+async function prepareGpu(){
+ const endpoint=process.env.HII_PC_URL||'http://127.0.0.1:4189';
+ let models;try{const r=await fetch(endpoint+'/v1/models',{signal:AbortSignal.timeout(3000)});if(!r.ok)return;models=(await r.json()).data||[];}catch{return;}
+ const loaded=models.filter(m=>m.status?.value==='loaded');if(!loaded.length)return;
+ const slots=await fetch(endpoint+'/slots',{signal:AbortSignal.timeout(3000)});if(!slots.ok)throw Error('Cannot verify PC model is idle. Stop its inference before image generation.');
+ const active=await slots.json();if(!Array.isArray(active)||active.some(s=>s.is_processing))throw Error('PC inference is busy. Wait for the current response before generating an image.');
+ for(const model of loaded){const r=await fetch(endpoint+'/models/unload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:model.id}),signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('Could not release PC inference memory for image generation');}
+}
+
+export async function stop(id){
+ const file=jobPath(id),record=JSON.parse(await readFile(file,'utf8'));if(['completed','failed','cancelled'].includes(record.state))return record;
+ const q=await(await api('/queue')).json();const running=(q.queue_running||[]).some(item=>item[1]===id);
+ if(running)await api('/interrupt',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+ else await api('/queue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({delete:[id]})});
+ record.state='cancelled';record.finishedAt=new Date().toISOString();await writeFile(file,JSON.stringify(record,null,2),{mode:0o600});await registry.recordRun({id,status:'cancelled',finishedAt:record.finishedAt,receiptPath:file});return record;
+}
+
+export async function job(id){try{return await resolveJob(id);}catch(e){if(e.name==='TimeoutError'||e.name==='AbortError'||/fetch failed|timeout/i.test(e.message)){const record=JSON.parse(await readFile(jobPath(id),'utf8'));return {...record,notice:'Waiting for ComfyUI connection'};}throw e;}}

@@ -211,7 +211,7 @@ function cleanSessionName(value: string) {
 
 // Per docs/aii-hii-boundary.md, HII no longer executes agent spawns. The
 // surface validates and appends an intent to ~/.hii/daemon/intents.jsonl;
-// hiid (AII) picks it up within its 3s tick, runs the claude CLI, and updates
+// hiid (HII) picks it up within its 3s tick, runs the claude CLI, and updates
 // the capability job record (same id, last-write-wins in the jobs ledger).
 export async function spawnClaudeAgent(request: SpawnRequest) {
   const preset = ['observer', 'shipper', 'rhino-demo', 'custom'].includes(request.preset)
@@ -243,7 +243,7 @@ export async function spawnClaudeAgent(request: SpawnRequest) {
     id: intent.id,
     name,
     preset,
-    command: 'intent → aii/daemon/hiid.mjs',
+    command: 'intent → runtime/daemon/hiid.mjs',
     output: 'spawn intent queued — hiid executes within a few seconds',
     startedAt: requestedAt
   };

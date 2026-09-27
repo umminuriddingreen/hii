@@ -53,7 +53,7 @@ describe('workspace managed chat presentation', () => {
   });
 
   it('translates runner states into human-facing labels', () => {
-    expect(workspaceChatStatusLabel('queued')).toBe('Accepted by AII');
+    expect(workspaceChatStatusLabel('queued')).toBe('Accepted by HII');
     expect(workspaceChatStatusLabel('running')).toBe('Working locally');
     expect(workspaceChatStatusLabel('completed')).toBe('Run complete');
     expect(workspaceChatStatusLabel('failed')).toBe('Needs attention');

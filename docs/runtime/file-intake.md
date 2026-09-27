@@ -18,4 +18,4 @@ The Python extractor supports UTF-8 text/code, CSV, JSON, PDF, DOCX, PPTX, XLSX,
 
 Retrieval scores 1,200-character chunks against the current question. Only up to two relevant excerpts per file enter the main request, up to four files and 6,000 aggregate characters. With no matching terms the first chunks are used; this is lexical retrieval, not a claim of whole-document understanding. Recent conversation text is separately capped at 24,000 characters. Attachment excerpts are marked as untrusted source data.
 
-Verification: `node --test aii/model-runtime/intake.test.mjs`, `python3 -m py_compile aii/model-runtime/extract.py`, and live image/document intake through the CLI and local page.
+Verification: `node --test runtime/model-runtime/intake.test.mjs`, `python3 -m py_compile runtime/model-runtime/extract.py`, and live image/document intake through the CLI and local page.

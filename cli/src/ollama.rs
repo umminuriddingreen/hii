@@ -1396,7 +1396,7 @@ fn start_windows_llama_runtime(endpoint: &str) -> bool {
     let Ok(paths) = crate::config::AppPaths::discover() else {
         return false;
     };
-    let script = paths.repo.join("aii/daemon/hiid.mjs");
+    let script = paths.repo.join("runtime/daemon/hiid.mjs");
     if !script.is_file() {
         return false;
     }

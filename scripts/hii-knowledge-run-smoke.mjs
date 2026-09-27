@@ -73,7 +73,7 @@ try {
   console.log('HII knowledge run smoke');
   console.log('status:      ok');
   console.log('approval:    explicit preview gate verified');
-  console.log('handoff:     AII workspace.run intent verified');
+  console.log('handoff:     HII workspace.run intent verified');
   console.log('lineage:     task -> run -> proof + receipt verified');
   console.log('idempotency: repeat sync creates no duplicate objects');
 } finally {
