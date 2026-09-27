@@ -2695,7 +2695,12 @@ function cmdProof(args = []) {
   console.log("\nCompletion is a claim; proof is the receipt.\n");
 }
 
-function cmdAgents(args = []) {
+async function cmdAgents(args = []) {
+  if (args[0] === "workspace") { const {runWorkspaceCommand}=await import("../aii/agents/workspace.mjs"); console.log(JSON.stringify(await runWorkspaceCommand(args.slice(1)),null,2)); return; }
+  if (["sync","sessions","session","runs","events"].includes(args[0])) {
+    const {registryCommand}=await import("../aii/agents/registry.mjs");
+    console.log(JSON.stringify(await registryCommand(args),null,2)); return;
+  }
   const sub = args.find((arg) => !arg.startsWith("-")) || "status";
   if (["send", "inbox", "ack", "thread"].includes(sub)) {
     console.log(JSON.stringify(mailboxCommand(args), null, 2));
@@ -3211,7 +3216,7 @@ switch (cmd) {
     break;
   case "sdk": cmdSdk(rest); break;
   case "home": cmdHome(rest); break;
-  case "agents": cmdAgents(rest); break;
+  case "agents": await cmdAgents(rest); break;
   case "context": cmdContext(rest); break;
   case "agent-context": cmdContext(rest); break;
   case "probe": cmdProbe(rest); break;
