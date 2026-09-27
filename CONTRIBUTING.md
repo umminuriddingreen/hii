@@ -11,8 +11,8 @@ dual-tiered, and it is not negotiable per-PR:
 
 | Tier | Where | License |
 | --- | --- | --- |
-| Core runtime, CLI, surfaces | `aii/`, `cli/`, `native-runner/`, `src-tauri/`, `src/`, `app/`, `lib/`, `server/`, `scripts/` | Business Source License 1.1 → Apache-2.0 on the Change Date |
-| Protocol, schemas, skills, extensions | `protocol/`, `extensions/hii-stream-mcp/`, `skills/`, `aii/skills/` | Apache-2.0 |
+| Core runtime, CLI, surfaces | `runtime/`, `cli/`, `native-runner/`, `src-tauri/`, `src/`, `app/`, `lib/`, `server/`, `scripts/` | Business Source License 1.1 → Apache-2.0 on the Change Date |
+| Protocol, schemas, skills, extensions | `protocol/`, `extensions/hii-stream-mcp/`, `skills/`, `runtime/skills/` | Apache-2.0 |
 | Vendored third parties | `external/` | upstream terms — **do not patch here; send it upstream** |
 
 Full map in [`NOTICE`](NOTICE). If a change spans tiers, say so in the PR.

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { workspaceRunCompletion } from '@/lib/server/workspace-run-completion';
 
 const root = resolve(__dirname, '../..');
-const daemon = readFileSync(resolve(root, 'aii/daemon/hiid.mjs'), 'utf8');
+const daemon = readFileSync(resolve(root, 'runtime/daemon/hiid.mjs'), 'utf8');
 
 function receipt(overrides: Record<string, unknown> = {}) {
   return {

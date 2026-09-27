@@ -372,5 +372,5 @@ full CI run and the installed command exercise the same source.
 Port existing command families in this order: deterministic local reads,
 append-only local writes, managed runtime commands, then networked commands.
 Remove a Node delegation only after golden output, alias, JSON-schema, and exit
-code parity tests pass. The Node daemon `aii/daemon/hiid.mjs` is a separate AII
+code parity tests pass. The Node daemon `runtime/daemon/hiid.mjs` is a separate AII
 execution authority and must not be rewritten as part of CLI dispatch work.

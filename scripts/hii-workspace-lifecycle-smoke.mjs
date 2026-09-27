@@ -11,7 +11,7 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hii-workspace-lifecycle
 const runtime = path.join(directory, 'runtime');
 const workspaceRoot = path.join(directory, 'project');
 const runner = path.join(directory, 'bounded-runner.mjs');
-const daemon = path.resolve('aii/daemon/hiid.mjs');
+const daemon = path.resolve('runtime/daemon/hiid.mjs');
 fs.mkdirSync(workspaceRoot, { recursive: true });
 fs.mkdirSync(runtime, { recursive: true });
 const assetRoot = path.join(runtime, 'workspace', 'assets');
@@ -34,7 +34,7 @@ process.env.HII_DISABLE_BACKGROUND_TICKS = '1';
 
 const runs = await import('../lib/server/hii-workspace-runs.ts');
 const jobs = await import('../lib/capabilities/local-store.ts');
-const staging = await import('../aii/daemon/workspace-run-staging.mjs');
+const staging = await import('../runtime/daemon/workspace-run-staging.mjs');
 
 function latestJob(id) {
   try {
@@ -91,7 +91,7 @@ try {
   const queued = await runs.queueApprovedWorkspaceRun({
     id: 'lifecycle-cancel-demo',
     projectId: 'lifecycle-smoke',
-    goal: 'Wait safely until the operator asks AII to stop.',
+    goal: 'Wait safely until the operator asks HII to stop.',
     workspaceRoot,
     model: 'qwen3.6:35b-mlx',
     maxSteps: 3,
@@ -106,7 +106,7 @@ try {
       const job = latestJob('lifecycle-cancel-demo');
       return job?.status === 'running' && Number(job.metadata?.pid) > 0 ? job : null;
     },
-    'AII did not start the bounded runner.'
+    'HII did not start the bounded runner.'
   );
   const runnerPid = Number(running.metadata.pid);
   assert.equal(alive(runnerPid), true);
@@ -123,7 +123,7 @@ try {
     () => latestJob('lifecycle-cancel-demo')?.status === 'cancelled'
       ? latestJob('lifecycle-cancel-demo')
       : null,
-    'AII did not record the workspace cancellation.'
+    'HII did not record the workspace cancellation.'
   );
   assert.equal(cancelled.logs.some((entry) => /stopped|cancelled/i.test(entry)), true);
   await waitFor(() => !alive(runnerPid), 'The owned bounded runner process remained alive.');
@@ -131,7 +131,7 @@ try {
     () => latestJob('lifecycle-cancel-demo')?.metadata?.contextStaging?.cleanupStatus === 'removed'
       ? latestJob('lifecycle-cancel-demo')
       : null,
-    'AII did not remove the cancelled run context copy.'
+    'HII did not remove the cancelled run context copy.'
   );
   assert.equal(cleaned.status, 'cancelled');
   assert.equal(fs.existsSync(stagedPath), false);
@@ -184,7 +184,7 @@ try {
     () => latestJob('lifecycle-interrupted-demo')?.status === 'failed'
       ? latestJob('lifecycle-interrupted-demo')
       : null,
-    'AII did not reconcile the interrupted workspace run.'
+    'HII did not reconcile the interrupted workspace run.'
   );
   assert.match(reconciled.logs.at(-1), /no owned process and no satisfied receipt/i);
   assert.equal(reconciled.metadata.contextStaging.cleanupStatus, 'removed');
@@ -198,7 +198,7 @@ try {
 
   console.log('HII workspace lifecycle smoke');
   console.log('status:       ok');
-  console.log('ownership:    AII persisted and stopped the owned runner PID');
+  console.log('ownership:    HII persisted and stopped the owned runner PID');
   console.log('cancellation: append-only request -> terminal cancelled verified');
   console.log('race:         late runner callback did not overwrite cancellation');
   console.log('staging:      selected local asset copied read-only then cleaned on cancellation');

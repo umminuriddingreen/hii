@@ -7,7 +7,7 @@ import path from "node:path";
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "hii-skills-"));
 process.env.HII_RUNTIME_DIR = temporary;
 
-const { reportAgentAction, runSkillCommand, skillRegistryPaths } = await import("../aii/skills/registry.mjs");
+const { reportAgentAction, runSkillCommand, skillRegistryPaths } = await import("../runtime/skills/registry.mjs");
 
 function capture(fn) {
   const original = console.log;

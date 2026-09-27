@@ -134,7 +134,7 @@ brief section that defines them.
 | `lib/landing.ts` | REMOVE/IGNORE | musician landing template, zero importers, references a `/landing` route that does not exist | Dead | Leave; do not extend | — | — |
 | Duplicate canvas prototypes | REMOVE/IGNORE | `archive/…/prototypes/react-canvas/` mirrors `components/workspace/` | Confusion risk | Leave archived; never edit | — | — |
 | Naming collisions | NEEDS REFACTOR | "space" = AeroSpace workspace; "presence" = operator continuity | Ambiguity in every future conversation | Adopt the vocabulary in arch §7; docs first, no symbol churn now | — | **P0 (docs)** |
-| `aii/` migration debt | REMOVE/IGNORE for this project | ADR 004 names it | — | Out of scope | — | — |
+| `runtime/` migration debt | REMOVE/IGNORE for this project | ADR 004 names it | — | Out of scope | — | — |
 
 ---
 

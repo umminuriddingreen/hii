@@ -7,7 +7,7 @@ import path from 'node:path';
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'hii-skill-replay-'));
 process.env.HII_RUNTIME_DIR = path.join(temporary, 'runtime');
 
-const registry = await import('../aii/skills/registry.mjs');
+const registry = await import('../runtime/skills/registry.mjs');
 const replay = await import('../lib/skills/replay.ts');
 
 try {

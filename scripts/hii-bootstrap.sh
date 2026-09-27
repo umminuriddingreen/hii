@@ -10,7 +10,7 @@ RUNTIME_DIR="${HOME}/.hii"
 PLIST_PATH="${HOME}/Library/LaunchAgents/com.ummi.hii.hiid.plist"
 EMBEDDED_ROOT="${APP_PATH}/Contents/Resources/hii-app"
 NODE_PATH="${EMBEDDED_ROOT}/bin/node"
-HIID_PATH="${EMBEDDED_ROOT}/server/aii/daemon/hiid.mjs"
+HIID_PATH="${EMBEDDED_ROOT}/server/runtime/daemon/hiid.mjs"
 LABEL="com.ummi.hii.hiid"
 
 usage() {

@@ -84,25 +84,25 @@ HII — Human Information Interface
 |   |   +-- records ready, working, attention and offline state
 |   |   +-- accepts bounded run intents
 |   |   +-- streams redacted events and logs
-|   |   `-- source: aii/daemon/hiid.mjs
+|   |   `-- source: runtime/daemon/hiid.mjs
 |   |
 |   +-- Capability registry
 |   |   +-- declares what HII/AII can do
 |   |   +-- records owner, runtime, visibility and trust level
 |   |   +-- publishes a runtime copy for HII to render
-|   |   `-- source: aii/capabilities
+|   |   `-- source: runtime/capabilities
 |   |
 |   +-- Skill growth
 |   |   +-- verified action receipt
 |   |   +-- repeatable-work draft
 |   |   +-- operator review
 |   |   +-- registered reusable skill
-|   |   `-- source: aii/skills and ~/.hii/skills
+|   |   `-- source: runtime/skills and ~/.hii/skills
 |   |
 |   +-- Policy and planning
 |   |   +-- authority and approval decisions
 |   |   +-- consent-gated admin proposals
-|   |   `-- source: aii/admin-agent
+|   |   `-- source: runtime/admin-agent
 |   |
 |   `-- AII Workstation                                  [PARTIAL]
 |       `-- separate control surface for coding-agent operations
@@ -267,7 +267,7 @@ Tools
 | What should an agent inspect first? | `hii context --json` |
 | What is the likely next path? | `hii og status` |
 | Where is the visible application? | `src/routes`, `src/lib`, `src-tauri` |
-| Where is agent coordination? | `aii/` |
+| Where is agent coordination? | `runtime/` |
 | Where is the direct agent engine? | `cli/` |
 | Where is durable local state? | `~/.hii` |
 | Where is a CLI run’s evidence? | `~/.hii/runs/cli/<run-id>/` |

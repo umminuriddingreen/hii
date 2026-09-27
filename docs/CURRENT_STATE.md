@@ -71,7 +71,7 @@ curl https://www.humaninformationinterface.com/  -> 200, SvelteKit build (see se
 ├── fabric/                 Cross-device capture: Rust protocol + Windows receiver + Swift capture.
 ├── browser/                TypeScript governed browser worker.
 ├── server/                 Standalone Node servers (remote-test gateway, pty gateway).
-├── aii/                    Legacy daemon/admin-agent. ADR 004 declares this migration debt.
+├── runtime/                    Legacy daemon/admin-agent. ADR 004 declares this migration debt.
 ├── apps/openai-hii/        Separate Express app.
 ├── scripts/                67 files. Smoke tests, installers, dev runtime, packaging.
 ├── tests/unit/             94 test files, 26 of them quarantined in vitest.config.ts.
@@ -556,7 +556,7 @@ job name, all per item 1.
 
 ### 7. Migration debt named by ADR 004
 
-`aii/` (daemon, admin-agent, codex, skills, capabilities) — ADR 004 says this
+`runtime/` (daemon, admin-agent, codex, skills, capabilities) — ADR 004 says this
 should live behind CLI-owned modules. `components/SurfaceDisabled.tsx` still
 instructs users to run `hiid config set …`.
 

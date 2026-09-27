@@ -27,14 +27,14 @@ export type HiiDocEntry = {
 
 export const hiiDocsCatalog: HiiDocEntry[] = [
   { slug:'overview', title:'HII overview', description:'Product definition, coordinates, development, and verification.', section:'Start here', source:'README.md', status:'canonical' },
-  { slug:'master-context', title:'HII / AII master context', description:'Founder thesis, system boundary, product scope, and definition of done.', section:'Start here', source:'docs/HII_AII_MASTER_CONTEXT.md', status:'canonical' },
+  { slug:'master-context', title:'HII / HII master context', description:'Founder thesis, system boundary, product scope, and definition of done.', section:'Start here', source:'docs/HII_AII_MASTER_CONTEXT.md', status:'canonical' },
   { slug:'user-owned-network', title:'User-owned network', description:'Compounding interaction, social objects, identity, communication, commerce, and aligned economics.', section:'Start here', source:'docs/HII_USER_OWNED_NETWORK.md', status:'canonical' },
   { slug:'launch', title:'Launch and monetization', description:'Founder-beta offer, activation event, economics, and launch gates.', section:'Start here', source:'docs/LAUNCH_AND_MONETIZATION.md', status:'current' },
   { slug:'install', title:'Install HII on Mac', description:'Signed application and local bootstrap instructions.', section:'Use HII', source:'docs/INSTALL.md', status:'release-gated' },
   { slug:'agent-access', title:'Agent access', description:'The safe, canonical way for agents to inspect and operate HII.', section:'Use HII', source:'docs/agent-access.md', status:'current' },
   { slug:'rust-cli', title:'HII command line', description:'Conversational and bounded local workflows through the HII CLI.', section:'Use HII', source:'docs/rust-cli.md', status:'current' },
   { slug:'activation-api', title:'Activation API', description:'Frozen local endpoint contract for the founder-beta activation loop.', section:'Build HII', source:'docs/activation-api-contract.md', status:'current' },
-  { slug:'hii-aii-boundary', title:'HII / AII boundary', description:'Ownership, dependency direction, and runtime-state contract.', section:'Build HII', source:'docs/aii-hii-boundary.md', status:'canonical' },
+  { slug:'hii-aii-boundary', title:'HII / HII boundary', description:'Ownership, dependency direction, and runtime-state contract.', section:'Build HII', source:'docs/aii-hii-boundary.md', status:'canonical' },
   { slug:'sdk-contracts', title:'SDK contracts', description:'Capabilities, jobs, quotes, ledger entries, and proof artifacts.', section:'Build HII', source:'docs/hii-sdk-contracts.md', status:'current' },
   { slug:'codex-integration', title:'Codex integration', description:'Supported app-server integration and HII-owned lifecycle.', section:'Build HII', source:'docs/codex-app-server-integration.md', status:'reference' },
   { slug:'authentication', title:'Account providers', description:'Supabase, email, Google, and Apple authentication configuration.', section:'Operate HII', source:'docs/auth-providers.md', status:'reference' },

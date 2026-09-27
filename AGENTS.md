@@ -109,8 +109,8 @@ Selected object + text/voice intent -> bounded capability -> visible result -> p
   agent contract. The friendly terminal and canvas are primary human interfaces
   to the same objects; the terminal is not developer-only or a chat transcript.
 - Do not introduce or revive AII as a separate product, brand, app, repo,
-  daemon family, or planning track. Existing `aii/` code is legacy/internal HII
-  runtime code until it is migrated behind CLI-owned modules and commands.
+  daemon family, or planning track. The unified `runtime/` directory contains HII internal modules behind
+  CLI-owned commands, registry, authority, and receipts.
 - Web, Tauri, Notch, Browser, Create, and spatial workspace surfaces are
   projections over CLI-owned HII state. They should not become the source of
   truth until the CLI loop is boringly reliable.

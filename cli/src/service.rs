@@ -401,7 +401,11 @@ fn offer_from_entry(entries: &[Entry], entry: Entry) -> Option<ServiceOffer> {
 fn provider_ref(entry: &Entry) -> String {
     match (entry.source, entry.category.trim()) {
         ("capability", "") => "hii.runtime".into(),
-        ("capability", owner) if owner.eq_ignore_ascii_case("aii") || owner == "hii-core-loop" => {
+        ("capability", owner)
+            if owner.eq_ignore_ascii_case("aii")
+                || owner == "hii-core-loop"
+                || owner == "hii.runtime" =>
+        {
             "hii.runtime".into()
         }
         ("capability", owner) => format!("hii.capability:{owner}"),
@@ -549,7 +553,7 @@ mod tests {
         fs::create_dir_all(&paths.runtime).unwrap();
         fs::write(
             paths.runtime.join("capabilities.json"),
-            r#"[{"id":"hii.agent.workspace_run","name":"Workspace run","summary":"Fulfill bounded local work","owner":"aii","permissions":["write selected workspace"],"runtime":"local-cli","status":"ready","evidence":["saved HII receipt"]}]"#,
+            r#"[{"id":"hii.agent.workspace_run","name":"Workspace run","summary":"Fulfill bounded local work","owner":"hii.runtime","permissions":["write selected workspace"],"runtime":"local-cli","status":"ready","evidence":["saved HII receipt"]}]"#,
         )
         .unwrap();
     }

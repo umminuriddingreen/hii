@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-// Thin read client per docs/aii-hii-boundary.md: AII (hiid) owns
+// Thin read client per docs/aii-hii-boundary.md: HII (hiid) owns
 // ~/.hii/config.json and mutates it via `hiid config set`; HII surfaces only
 // read it and render accordingly. Defaults here mirror hiid's DEFAULT_CONFIG
 // so surfaces behave sanely before the daemon has ever run.

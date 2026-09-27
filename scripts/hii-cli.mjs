@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import url from "node:url";
-import { runSkillCommand } from "../aii/skills/registry.mjs";
+import { runSkillCommand } from "../runtime/skills/registry.mjs";
 import { observeInstances } from "./lib/instance-observation.mjs";
 import { buildInventory, renderDocs, renderHelp } from "./hii-inventory.mjs";
 import { archiveCommand } from "./hii-conversation-archive.mjs";
@@ -22,8 +22,8 @@ const ROOT = process.env.HII_ROOT
 const RUNTIME = process.env.HII_RUNTIME_DIR || path.join(os.homedir(), ".hii");
 const BRIDGE_DIR = path.join(RUNTIME, "bridge", "messages");
 const BRIDGE_LOG = path.join(RUNTIME, "bridge", "codex.jsonl");
-const CAPABILITY_REGISTRY = path.join(ROOT, "aii", "capabilities", "registry.json");
-const CAPABILITY_PACKS = path.join(ROOT, "aii", "capabilities", "packs.json");
+const CAPABILITY_REGISTRY = path.join(ROOT, "runtime", "capabilities", "registry.json");
+const CAPABILITY_PACKS = path.join(ROOT, "runtime", "capabilities", "packs.json");
 const LOCAL_CAPABILITY_JOBS = path.join(ROOT, ".hii", "capability-jobs.jsonl");
 const CLAUDE_JOBS_DIR = path.join(os.homedir(), ".claude", "jobs");
 const OG_EVENTS = path.join(RUNTIME, "og", "events.jsonl");
@@ -51,7 +51,7 @@ const SLASH_REGISTRY = path.join(RUNTIME, "cli", "slash-commands.json");
 const DAEMON_STATUS = path.join(RUNTIME, "daemon", "status.json");
 const DAEMON_INSTANCES = path.join(RUNTIME, "daemon", "instances.json");
 const CLI_RUNS = path.join(RUNTIME, "runs", "cli");
-const HIID = path.join(ROOT, "aii", "daemon", "hiid.mjs");
+const HIID = path.join(ROOT, "runtime", "daemon", "hiid.mjs");
 const HII_TUI = path.join(ROOT, "scripts", "hii-tui.mjs");
 const CODEX_APP_SERVER_PROBE = path.join(ROOT, "scripts", "hii-codex-app-server-probe.mjs");
 const CODEX_SCHEMA_PIN = path.join(ROOT, "scripts", "hii-codex-schema-pin.mjs");
@@ -2695,7 +2695,12 @@ function cmdProof(args = []) {
   console.log("\nCompletion is a claim; proof is the receipt.\n");
 }
 
-function cmdAgents(args = []) {
+async function cmdAgents(args = []) {
+  if (args[0] === "workspace") { const {runWorkspaceCommand}=await import("../runtime/agents/workspace.mjs"); await runWorkspaceCommand(args.slice(1)); return; }
+  if (["sync","sessions","session","runs","events","stop"].includes(args[0])) {
+    const {registryCommand}=await import("../runtime/agents/registry.mjs");
+    console.log(JSON.stringify(await registryCommand(args),null,2)); return;
+  }
   const sub = args.find((arg) => !arg.startsWith("-")) || "status";
   if (["send", "inbox", "ack", "thread"].includes(sub)) {
     console.log(JSON.stringify(mailboxCommand(args), null, 2));
@@ -3211,7 +3216,7 @@ switch (cmd) {
     break;
   case "sdk": cmdSdk(rest); break;
   case "home": cmdHome(rest); break;
-  case "agents": cmdAgents(rest); break;
+  case "agents": await cmdAgents(rest); break;
   case "context": cmdContext(rest); break;
   case "agent-context": cmdContext(rest); break;
   case "probe": cmdProbe(rest); break;
@@ -3230,6 +3235,9 @@ switch (cmd) {
   case "feed": cmdFeed(rest); break;
   case "platform":
     nodeScript(HIID, ["model-runtime", "platform", ...rest]);
+    break;
+  case "image":
+    nodeScript(path.join(ROOT, "runtime", "image-generation", "comfy.mjs"), rest);
     break;
   case "model":
     if (rest.includes("--help") || rest.includes("-h")) cmdHelp("model");

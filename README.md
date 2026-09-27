@@ -191,7 +191,7 @@ HII CLI/runtime → records governed state → ~/.hii
 HII views       ← read and present that state
 ```
 
-Existing `aii/` paths are internal migration debt, not a second product or a
+Existing `runtime/` paths are internal migration debt, not a second product or a
 forward architecture. New surfaces must reuse HII state and proof rather than
 create another daemon, database, workspace, or agent control plane.
 
@@ -315,7 +315,7 @@ fabric/                cross-device foundations; not an end-to-end fabric yet
 lib/                   workspace, context, knowledge, and client adapters
 scripts/               local development, smoke, packaging, and release gates
 docs/                  product context, decisions, evidence, business, and historical plans
-aii/                   temporary internal migration debt
+runtime/                   temporary internal migration debt
 ```
 
 Historical plans and prototypes may describe more than the active product. Use

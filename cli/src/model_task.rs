@@ -60,7 +60,7 @@ impl ModelTask {
     fn command(&self, action: &str) -> Command {
         let mut command = Command::new("node");
         command
-            .arg(self.paths.repo.join("aii/daemon/hiid.mjs"))
+            .arg(self.paths.repo.join("runtime/daemon/hiid.mjs"))
             .args([
                 "model-runtime",
                 action,
