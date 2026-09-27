@@ -155,6 +155,26 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
     let method = request.method();
     let db = env.d1("IDENTITY")?;
 
+    // The owner sees the personal interface at the canonical homepage.
+    // Explicit deep links and ?view=canvas keep existing HII views reachable.
+    if path == "/"
+        && url.query().is_none()
+        && let Some(token) = cookie(request, SESSION_COOKIE)?
+        && let Some(session) = active_session(&db, &token).await?
+        && personal::owner(env, &session.account_id)
+    {
+        let asset = Request::new(&format!("{RP_ORIGIN}/personal/"), method)?;
+        let response = env.assets("ASSETS")?.fetch_request(asset).await?;
+        let headers = Headers::new();
+        for (name, value) in response.headers().entries() {
+            headers.append(&name, &value)?;
+        }
+        headers.set("Cache-Control", "private, no-store")?;
+        headers.set("X-Robots-Tag", "noindex, nofollow")?;
+        let (builder, body) = response.into_parts();
+        return secure(builder.with_headers(headers).body(body));
+    }
+
     if path == "/api/personal/host" {
         if request.headers().get("origin")?.is_some() || !personal::host_authorized(env, request) {
             return secure_no_store(api_error(401, "authentication_required")?);

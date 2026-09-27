@@ -102,7 +102,9 @@
     "stage:cli": "node scripts/hii-stage-cli.mjs",
     "build:tauri:dmg": "node scripts/hii-tauri-build.mjs --bundles dmg",
     "build:tauri:release": "node scripts/hii-tauri-build.mjs --bundles app,dmg",
-    "worker:check": "cargo fmt --manifest-path workers/public-site/Cargo.toml -- --check && cargo test --manifest-path workers/public-site/Cargo.toml && cargo clippy --manifest-path workers/public-site/Cargo.toml --all-targets -- -D warnings"
+    "worker:check": "cargo fmt --manifest-path workers/public-site/Cargo.toml -- --check && cargo test --manifest-path workers/public-site/Cargo.toml && cargo clippy --manifest-path workers/public-site/Cargo.toml --all-targets -- -D warnings",
+    "personal:start": "node personal-workspace/server.mjs",
+    "personal:check": "node --test personal-workspace/*.test.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",

@@ -23,6 +23,7 @@ async function connect(){
  try{return await connecting;}finally{connecting=null;}
 }
 export async function privateFetch(path,options={}){
+ if(['localhost','127.0.0.1','[::1]'].includes(location.hostname))return globalThis.fetch(path,options);
  if(!path.startsWith('/api/'))return globalThis.fetch(path,options);
  const ws=await connect();if(options.signal?.aborted)throw new DOMException('Aborted','AbortError');
  const id=crypto.randomUUID();
@@ -45,3 +46,7 @@ export async function privateFetch(path,options={}){
 const images=new Map();
 async function hydrate(img){const src=img.getAttribute('src');if(!src?.startsWith('/api/')||img.dataset.loading===src)return;img.dataset.loading=src;try{if(!images.has(src))images.set(src,privateFetch(src).then(async r=>{if(!r.ok)throw Error('Image unavailable');return URL.createObjectURL(await r.blob());}).catch(e=>{images.delete(src);throw e;}));const url=await images.get(src);img.src=url;if(img.parentElement?.tagName==='A')img.parentElement.href=url;}catch{img.alt='Image unavailable. Reconnect your Mac.';}}
 new MutationObserver(()=>document.querySelectorAll('img[src^="/api/"]').forEach(hydrate)).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['src']});
+
+const back=document.querySelector('.workspace-return');
+if(back)back.href='/?view=canvas';
+if(back&&window.parent!==window)back.addEventListener('click',e=>{e.preventDefault();window.parent.postMessage({type:'hii-personal-canvas'},'*');});

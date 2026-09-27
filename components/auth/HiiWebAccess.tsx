@@ -358,7 +358,10 @@ export function HiiWebAccess() {
     setPersonalAccess(false);
     if (session.authenticated && session.source !== 'local') {
       fetch('/api/personal/access', { cache: 'no-store' }).then(r => {
-        if (active) setPersonalAccess(r.ok);
+        if (active) {
+          setPersonalAccess(r.ok);
+          if (r.ok && !window.location.search) window.location.replace('/');
+        }
       }).catch(() => {});
     }
     return () => { active = false; };

@@ -197,3 +197,13 @@ summary { width: fit-content; padding: 6px 0; }
 
 .workspace-return { color: #999; font-size: 12px; text-decoration: none; align-self: flex-end; padding: 4px 0; }
 .workspace-return:hover { color: #fff; }
+
+/* One composer and one compact row of secondary controls. */
+#form { align-items: center; padding: 12px 0; }
+#prompt { min-height: 52px; padding: 8px 0; }
+.composer-meta { display: flex; align-items: center; justify-content: space-between; color: #858585; font-size: 11px; }
+.composer-meta button { padding: 4px 0; font-size: 11px; color: #aaa; }
+#status:empty { display: none; }
+#status { margin-top: 5px; min-height: 0; }
+#stop { width: 34px; height: 34px; overflow: hidden; font-size: 0; border: 1px solid #555; border-radius: 50%; }
+#stop::after { content: ''; display: block; width: 10px; height: 10px; background: #eee; margin: auto; border-radius: 2px; }

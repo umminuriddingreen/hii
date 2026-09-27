@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { HiiRoot } from '@/components/workspace/HiiRoot';
 import { UpdateBanner, UpdateStatusProvider } from '@/components/workspace/UpdateBanner';
 import type { SearchableWorkspace } from '@/lib/workspace/cross-workspace-search';
@@ -65,6 +65,15 @@ function detectDeviceName() {
 
 export function DesktopHiiAccess() {
   const [ready, setReady] = useState(false);
+  const [showCanvas, setShowCanvas] = useState(false);
+  const chatFrame = useRef<HTMLIFrameElement>(null);
+  useEffect(() => {
+    const receive = (event: MessageEvent) => {
+      if (event.origin === 'http://127.0.0.1:4188' && event.source === chatFrame.current?.contentWindow && event.data?.type === 'hii-personal-canvas') setShowCanvas(true);
+    };
+    window.addEventListener('message', receive);
+    return () => window.removeEventListener('message', receive);
+  }, []);
   const [linked, setLinked] = useState(false);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -234,6 +243,15 @@ export function DesktopHiiAccess() {
     }
   };
 
+  // Identity comes from the authenticated native account endpoint.
+  if (ready && linked && identity?.handle === 'ummi' && !showCanvas) {
+    return <UpdateStatusProvider><div style={{height:'100dvh',background:'#000'}}>
+      <UpdateBanner />
+      <iframe ref={chatFrame} src="http://127.0.0.1:4188/?embedded=1" title="Personal HII" style={{width:'100%',height:'100%',border:0}} />
+      <button type="button" onClick={() => setShowCanvas(true)} style={{position:'fixed',top:12,left:16,zIndex:100,padding:'7px 12px',border:'1px solid #333',borderRadius:8,background:'#111',color:'#ddd'}}>Canvas</button>
+    </div></UpdateStatusProvider>;
+  }
+
   return <UpdateStatusProvider><div className={styles.shell} data-workspace-open={workspaceOpen || undefined}>
     <UpdateBanner />
     <div className={styles.surface}>
@@ -251,6 +269,7 @@ export function DesktopHiiAccess() {
     /> : <div className={styles.loading} role="status">{ready ? 'Your account canvas could not be opened.' : 'Opening HII...'}</div>}
     </div>
     <nav className={styles.accountControls} data-workspace-ui aria-label="Canvas account">
+      {linked && identity?.handle === 'ummi' && <button type="button" onClick={() => setShowCanvas(false)} aria-label="Open personal chat">Chat</button>}
       <button type="button" title="Workspaces" aria-label="Workspaces" aria-expanded={workspaceOpen} onClick={() => setWorkspaceOpen((value) => !value)}><SidebarSimple size={19} /></button>
       <span className={styles.boardTitle}>{active === 'local' ? (localBoards?.selectedWorkspaceId ?? 'This device') : (workspaces.find((workspace) => workspace.id === active)?.name ?? 'HII')}</span>
       <button type="button" title={identity?.handle ?? 'HII account'} aria-label={identity?.handle ? `HII account: ${identity.handle}` : 'HII account'} aria-expanded={accountOpen} onClick={() => setAccountOpen((value) => !value)}><UserCircle size={19} /></button>

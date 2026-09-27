@@ -1,6 +1,6 @@
 # Private personal workspace
 
-`/personal/` is the plain chat projection of HII's CLI-owned local agent workspace.
+The signed-in owner homepage and `/personal/` are the plain chat projection of HII's CLI-owned local agent workspace.
 Only the account ID in `HII_PERSONAL_ACCOUNT_ID` can load the page, assets, access
 endpoint or viewer socket. The account handle is not trusted as authorization.
 The public HII canvas offers its owner a Personal chat link after a server check.
@@ -39,3 +39,11 @@ existing CLI workspace, preserving placement. They are the basis for a future
 
 Private assets are generated from `personal-workspace/public` by prebuild.
 No private user data or credentials belong in this directory.
+
+## Canonical app
+
+Run `npm run personal:start` from the HII checkout. The loopback service and its
+agent adapter live here; chats remain in the same CLI-owned workspace storage.
+The desktop linked to `ummi` opens this service inside its main window. Canvas
+remains reachable from the chat view. The website serves the same interface at
+`/` for the authorized owner; `/?view=canvas` opens the spatial workspace.
