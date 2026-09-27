@@ -47,3 +47,20 @@ agent adapter live here; chats remain in the same CLI-owned workspace storage.
 The desktop linked to `ummi` opens this service inside its main window. Canvas
 remains reachable from the chat view. The website serves the same interface at
 `/` for the authorized owner; `/?view=canvas` opens the spatial workspace.
+
+## Continuous messages
+
+Send stays available while an agent turn runs. Follow-ups enter the existing
+agent-chat queue and run in acceptance order; they do not interrupt a running
+tool. Stop cancels the selected chat's active and queued turns. Other chats keep
+their own drafts, responses, and cancellation state.
+
+The same behavior is available through `hii agents chat send CHAT_ID TASK`.
+Accepted turn IDs, text, and status are recorded locally under
+`~/.hii/agents/chat-loops`. Reopening the page reconciles recorded answers.
+Disconnect and service restart do not automatically replay work: interrupted
+turns remain inspectable through `hii agents chat show CHAT_ID`.
+
+The executor processes one turn at a time, with at most 16 pending turns per
+chat. Existing request time limits still apply. This implementation imports
+selective Hermes interaction ideas, not the Hermes runtime; see ADR 006.
