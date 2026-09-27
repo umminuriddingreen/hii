@@ -80,12 +80,14 @@ const sha256 = createHash('sha256').update(bytes).digest('hex');
 let signature = '';
 const privateKey = process.env.TAURI_SIGNING_PRIVATE_KEY;
 if (privateKey) {
-  const signArgs = ['tauri', 'signer', 'sign', '--private-key', privateKey];
+  const signArgs = ['tauri', 'signer', 'sign', fs.existsSync(privateKey) ? '--private-key-path' : '--private-key', privateKey];
   if (process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD !== undefined) {
     signArgs.push('--password', process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD);
   }
   signArgs.push(zipPath);
-  run('npx', signArgs);
+  const signEnv = { ...process.env };
+  delete signEnv.TAURI_SIGNING_PRIVATE_KEY;
+  run('npx', signArgs, { env: signEnv });
   const sigPath = `${zipPath}.sig`;
   const tauriSignature = fs.readFileSync(sigPath, 'utf8').trim();
   // Tauri's signer base64-wraps the complete minisign signature file. HII's
