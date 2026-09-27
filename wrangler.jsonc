@@ -3,7 +3,9 @@
   "name": "hii",
   "main": "workers/public-site/build/worker/shim.mjs",
   "compatibility_date": "2026-08-04",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "build": {
     "command": "sh scripts/build-public-worker.sh"
   },
@@ -19,7 +21,9 @@
     "enabled": true
   },
   "triggers": {
-    "crons": ["*/5 * * * *"]
+    "crons": [
+      "*/5 * * * *"
+    ]
   },
   "ratelimits": [
     {
@@ -42,13 +46,25 @@
       {
         "name": "REMOTE_ROOM",
         "class_name": "RemoteRoom"
+      },
+      {
+        "name": "PERSONAL_ROOM",
+        "class_name": "PersonalRoom"
       }
     ]
   },
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["RemoteRoom"]
+      "new_sqlite_classes": [
+        "RemoteRoom"
+      ]
+    },
+    {
+      "tag": "v2-personal",
+      "new_sqlite_classes": [
+        "PersonalRoom"
+      ]
     }
   ],
   "d1_databases": [

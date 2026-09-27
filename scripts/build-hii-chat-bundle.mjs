@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Generates the public, checksum-addressed HII Chat link bundle.
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 
@@ -26,3 +26,6 @@ for (const [name, source] of Object.entries(sources)) {
 const bundleHash = createHash('sha256').update(JSON.stringify(files)).digest('hex');
 const version = `1.${BigInt(`0x${bundleHash.slice(0, 15)}`).toString()}`;
 writeFileSync(resolve(root, 'public/hii-chat/manifest.json'), `${JSON.stringify({ schemaVersion: 1, version, files }, null, 2)}\n`);
+
+// Source is private at the Worker gate; no chat data is included in assets.
+cpSync(resolve(root, "personal-workspace/public"), resolve(root, "public/personal"), { recursive: true });

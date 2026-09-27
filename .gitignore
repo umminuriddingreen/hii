@@ -67,3 +67,7 @@ src-tauri/gen/schemas/*.win-verify.bak
 
 # Local bytecode from the isolated CUDA installation/proof scripts.
 /scripts/__pycache__/
+
+# Private workspace generated assets and local test credentials
+/public/personal/
+.dev.vars

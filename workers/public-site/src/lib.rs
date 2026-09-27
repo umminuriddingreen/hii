@@ -7,6 +7,7 @@ mod device;
 mod feed;
 mod mcp;
 mod oauth;
+mod personal;
 mod remote;
 mod search;
 mod site_records;
@@ -153,6 +154,48 @@ async fn handle_request(request: &mut Request, env: &Env) -> Result<Response> {
     let path = url.path().to_owned();
     let method = request.method();
     let db = env.d1("IDENTITY")?;
+
+    if path == "/api/personal/host" {
+        if request.headers().get("origin")?.is_some() || !personal::host_authorized(env, request) {
+            return secure_no_store(api_error(401, "authentication_required")?);
+        }
+        return personal::socket(request, env).await;
+    }
+    if path == "/personal" || path.starts_with("/personal/") || path.starts_with("/api/personal/") {
+        let Some(token) = cookie(request, SESSION_COOKIE)? else {
+            return secure_no_store(api_error(401, "authentication_required")?);
+        };
+        let Some(session) = active_session(&db, &token).await? else {
+            return secure_no_store(api_error(401, "authentication_required")?);
+        };
+        if !personal::owner(env, &session.account_id) {
+            return secure_no_store(api_error(404, "not_found")?);
+        }
+        if path == "/api/personal/socket" {
+            if !origin_allowed(request)? {
+                return secure_no_store(api_error(403, "cross_origin_denied")?);
+            }
+            return personal::socket(request, env).await;
+        }
+        if path == "/api/personal/access" {
+            return secure_no_store(json_response(200, json!({"allowed":true}))?);
+        }
+        if path.starts_with("/api/") {
+            return secure_no_store(api_error(404, "not_found")?);
+        }
+        let response = env
+            .assets("ASSETS")?
+            .fetch_request(request.clone()?)
+            .await?;
+        let headers = Headers::new();
+        for (name, value) in response.headers().entries() {
+            headers.append(&name, &value)?;
+        }
+        headers.set("Cache-Control", "private, no-store")?;
+        headers.set("X-Robots-Tag", "noindex, nofollow")?;
+        let (builder, body) = response.into_parts();
+        return secure(builder.with_headers(headers).body(body));
+    }
 
     if oauth::is_oauth_path(&path) {
         let (action, daily_limit) = if path == "/oauth/register" {

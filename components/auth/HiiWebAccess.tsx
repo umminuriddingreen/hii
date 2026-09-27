@@ -352,6 +352,18 @@ export function HiiWebAccess() {
   const [oauthReturn, setOAuthReturn] = useState('');
   const authRef = useRef<HTMLElement | null>(null);
   const [session, setSession] = useState<Session>({ authenticated: false });
+  const [personalAccess, setPersonalAccess] = useState(false);
+  useEffect(() => {
+    let active = true;
+    setPersonalAccess(false);
+    if (session.authenticated && session.source !== 'local') {
+      fetch('/api/personal/access', { cache: 'no-store' }).then(r => {
+        if (active) setPersonalAccess(r.ok);
+      }).catch(() => {});
+    }
+    return () => { active = false; };
+  }, [session.authenticated, session.accountId, session.source]);
+
   const [browserOnly, setBrowserOnly] = useState(false);
   const [handle, setHandle] = useState('');
   const [message, setMessage] = useState('');
@@ -804,6 +816,7 @@ export function HiiWebAccess() {
     }
     return (
       <div className={styles.canvasShell}>
+        {personalAccess && <a href="/personal/" data-workspace-ui style={{position:'absolute',right:20,top:18,zIndex:110,padding:'8px 14px',borderRadius:12,background:'var(--panel, #fff)',color:'var(--ink, #222)',fontSize:13,textDecoration:'none'}}>Personal chat</a>}
         <HiiRoot
           key={`${canvasAccountId}:${canvasSpaceId}`}
           surface="account"
