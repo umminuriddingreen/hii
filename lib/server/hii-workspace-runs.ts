@@ -181,7 +181,7 @@ export async function queueApprovedWorkspaceRun(input: {
     contextStaging: {
       required: contextPreview.summary.stagedLocalAssets > 0,
       policy: contextPreview.summary.stagedLocalAssets
-        ? 'AII reverifies each selected managed asset, makes a read-only per-run copy inside the approved root, and removes only that disposable copy after terminal state.'
+        ? 'HII reverifies each selected managed asset, makes a read-only per-run copy inside the approved root, and removes only that disposable copy after terminal state.'
         : 'No per-run local asset staging is required.'
     }
   };
@@ -264,7 +264,7 @@ export async function requestWorkspaceRunCancellation(input: { id?: unknown; req
         capabilityId,
         actor: 'operator',
         type: 'reconciliation',
-        summary: 'Requested that AII stop the bounded local workspace run.',
+        summary: 'Requested that HII stop the bounded local workspace run.',
         createdAt: now
       }
     ],

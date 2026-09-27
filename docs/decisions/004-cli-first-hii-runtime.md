@@ -15,7 +15,7 @@ the spatial integrated surface—not the terminal—as the primary human-facing
 product experience; it does not change this runtime ownership decision.
 
 AII is no longer a separate product, brand, app, repo, or planning track.
-Useful code that currently lives under `aii/` is internal HII runtime code and
+Useful code that currently lives under `runtime/` is internal HII runtime code and
 should be migrated behind CLI-owned modules, commands, receipts, and proof
 contracts. The name may remain temporarily in paths only as migration debt.
 
@@ -43,11 +43,11 @@ finishes concrete external tasks, additional surfaces are decoration.
 - New HII capabilities start as CLI commands or CLI-backed internal modules.
 - Web and desktop views render or call CLI-owned state and contracts; they do
   not define new authority.
-- The old `aii/workstation` app is not a forward product path. Mine it only for
+- The old `runtime/workstation` app is not a forward product path. Mine it only for
   reusable implementation ideas, then archive or remove it when equivalent CLI
   commands exist.
-- `aii/daemon/hiid.mjs`, `aii/skills`, `aii/capabilities`, `aii/admin-agent`,
-  and `aii/model-runtime` should be treated as HII runtime migration targets.
+- `runtime/daemon/hiid.mjs`, `runtime/skills`, `runtime/capabilities`, `runtime/admin-agent`,
+  and `runtime/model-runtime` should be treated as HII runtime migration targets.
 - Do not create another daemon, workstation, registry, memory store, or agent
   control plane outside HII CLI ownership.
 - Stop expanding product surfaces until the CLI loop from intent to context to
@@ -59,12 +59,12 @@ finishes concrete external tasks, additional surfaces are decoration.
 ## Migration Order
 
 1. Freeze product language around CLI-first HII and remove user-facing AII copy.
-2. Inventory `aii/` modules by live dependency and runtime value.
+2. Inventory `runtime/` modules by live dependency and runtime value.
 3. Move useful runtime contracts behind `hii agent`, `hii caps`, `hii skills`,
    `hii proof`, `hii context`, and `hii work` commands.
-4. Replace `aii/*` imports in scripts and server code with HII runtime module
+4. Replace `runtime/*` imports in scripts and server code with HII runtime module
    paths or CLI invocations.
-5. Archive `aii/workstation` after its Apple-context and worktree ideas are
+5. Archive `runtime/workstation` after its Apple-context and worktree ideas are
    either migrated or explicitly rejected.
 6. Only then consider web/desktop cleanup.
 

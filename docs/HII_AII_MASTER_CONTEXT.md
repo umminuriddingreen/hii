@@ -11,8 +11,7 @@ performed. It prevents product drift, architecture drift, scope explosion, and
 truth fragmentation.
 
 **Current override, 2026-08-11:** ADR 004 makes HII CLI-first. AII is no
-longer a separate product, brand, app, repo, or planning track. Existing `aii/`
-paths are internal HII runtime migration debt until moved behind CLI-owned
+longer a separate product, brand, app, repo, or planning track. The former AII modules are consolidated in `runtime/` behind HII-owned
 modules and commands.
 
 The cleanup is not primarily a rename. HII must first make one boring, fast,
@@ -637,8 +636,8 @@ strategically aligned modules. They must consume the same HII CLI/runtime
 context, policy, proof, memory, and capability substrate rather than create
 competing systems.
 
-`aii/workstation` is not a forward surface. Archive it or mine it for useful
-runtime ideas only. Useful `aii/*` pieces belong behind `hii agent`, `hii caps`,
+`runtime/workstation` is not a forward surface. Archive it or mine it for useful
+runtime ideas only. Useful `runtime/*` pieces belong behind `hii agent`, `hii caps`,
 `hii skills`, `hii proof`, `hii context`, and `hii work`, with receipts as the
 completion boundary.
 

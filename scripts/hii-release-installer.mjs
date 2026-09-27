@@ -21,7 +21,7 @@ const RELEASE_MANIFEST_FILE = 'release.json';
 const LAUNCHER_BACKUP_ROOT = 'launcher-backups';
 const RESOURCE_DIR = 'resources';
 const RESOURCE_PATHS = [
-  'aii',
+  'runtime',
   'config',
   'scripts',
   'browser/dist',

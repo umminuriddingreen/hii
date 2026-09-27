@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { routeModelTask, scoreModelNode } from "../../aii/model-runtime/pressure-router.mjs";
+import { routeModelTask, scoreModelNode } from "../../runtime/model-runtime/pressure-router.mjs";
 
 const mac = { id: "mac-mlx", runtime: "mlx", locality: "local", health: "ready", capabilities: ["tools"], models: ["qwen"], tokensPerSecond: 22, maxConcurrency: 1, resources: { freeMiB: 20_000, requiredMiB: 17_000 } };
 const pc = { id: "pc-llama", runtime: "llama.cpp", locality: "peer", health: "ready", capabilities: ["tools", "vision"], models: ["qwen"], tokensPerSecond: 33, maxConcurrency: 1, resources: { freeMiB: 16_000, requiredMiB: 14_000 } };

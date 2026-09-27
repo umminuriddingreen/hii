@@ -270,7 +270,7 @@ try {
   console.log('status:       ok');
   console.log('approval:     explicit local boundary verified');
   console.log('models:       installed-only discovery and rejection verified');
-  console.log('handoff:      selected canvas context -> AII workspace.run verified');
+  console.log('handoff:      selected canvas context -> HII workspace.run verified');
   console.log('receipt:      completed job -> structured receipt verified');
   console.log('focus:        concise lifecycle -> evidence -> raw log hierarchy verified');
 console.log('artifact:     receipt-listed text + bounded image + sandboxed site preview verified');

@@ -28,7 +28,7 @@ being lifted here incrementally. Until a definition is moved into this
 directory, treat its in-tree location as canonical:
 
 - Capability types — `lib/capabilities/types.ts`
-- Capability registry + packs — `aii/capabilities/registry.json`, `aii/capabilities/packs.json`
+- Capability registry + packs — `runtime/capabilities/registry.json`, `runtime/capabilities/packs.json`
 - SDK contracts — `docs/hii-sdk-contracts.md`
 - Boundary between HII and AII — `docs/aii-hii-boundary.md`
 

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseGpuCsv, selectNvidiaProfile, buildNvidiaLaunchPlan, nvidiaOptions, nvidiaDoctor, nvidiaStart, nvidiaStop, nvidiaStatus, nvidiaBench, assessNvidiaBenchmark, nvidiaResourceAdvice, nvidiaPrepareTask, nvidiaFinishTask } from "../aii/model-runtime/nvidia.mjs";
+import { parseGpuCsv, selectNvidiaProfile, buildNvidiaLaunchPlan, nvidiaOptions, nvidiaDoctor, nvidiaStart, nvidiaStop, nvidiaStatus, nvidiaBench, assessNvidiaBenchmark, nvidiaResourceAdvice, nvidiaPrepareTask, nvidiaFinishTask } from "../runtime/model-runtime/nvidia.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "config/native-model-profiles.json"), "utf8"));

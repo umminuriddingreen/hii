@@ -37,7 +37,7 @@ export function workspaceChatPresentation(
 }
 
 export function workspaceChatStatusLabel(status?: string) {
-  if (status === 'queued') return 'Accepted by AII';
+  if (status === 'queued') return 'Accepted by HII';
   if (status === 'running') return 'Working locally';
   if (status === 'completed') return 'Run complete';
   if (status === 'failed') return 'Needs attention';

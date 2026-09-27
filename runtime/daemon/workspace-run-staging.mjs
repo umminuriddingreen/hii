@@ -66,7 +66,7 @@ export function stageWorkspaceRunContext(input) {
   const fingerprint = String(input.contextPreview?.fingerprint || "");
   const previewRunId = cleanId(input.contextPreview?.runId);
   if (!intentId || previewRunId !== intentId || !/^[a-f0-9]{64}$/.test(fingerprint)) {
-    throw new Error("AII rejected a local asset staging request without a matching reviewed run manifest.");
+    throw new Error("HII rejected a local asset staging request without a matching reviewed run manifest.");
   }
   const workspaceRoot = fs.realpathSync(String(input.workspaceRoot || ""));
   const runtimeRoot = String(input.runtimeRoot || path.join(os.homedir(), ".hii"));
@@ -103,7 +103,7 @@ export function stageWorkspaceRunContext(input) {
       || existingMarker.intentId !== intentId
       || existingMarker.fingerprint !== fingerprint
     ) {
-      throw new Error(`AII will not reuse an unowned staging directory at ${directoryRelativePath}.`, {
+      throw new Error(`HII will not reuse an unowned staging directory at ${directoryRelativePath}.`, {
         cause: error
       });
     }
@@ -114,11 +114,11 @@ export function stageWorkspaceRunContext(input) {
     for (const item of items) {
       const source = fs.realpathSync(String(item.source || ""));
       if (!inside(managedAssets, source)) {
-        throw new Error("AII rejected a staged source outside HII-managed asset storage.");
+        throw new Error("HII rejected a staged source outside HII-managed asset storage.");
       }
       const details = fs.statSync(source);
       if (!details.isFile() || details.size > MAX_ASSET_BYTES) {
-        throw new Error("AII rejected a staged source that is not a bounded regular file.");
+        throw new Error("HII rejected a staged source that is not a bounded regular file.");
       }
       const expectedSha256 = String(item.sha256 || "");
       if (!/^[a-f0-9]{64}$/.test(expectedSha256) || sha256File(source) !== expectedSha256) {
@@ -130,11 +130,11 @@ export function stageWorkspaceRunContext(input) {
         !relativePath.startsWith(expectedPrefix)
         || !path.basename(relativePath).startsWith(expectedSha256)
       ) {
-        throw new Error("AII rejected a staged destination outside the reviewed per-run path.");
+        throw new Error("HII rejected a staged destination outside the reviewed per-run path.");
       }
       const destination = path.resolve(workspaceRoot, relativePath);
       if (!inside(directory, destination)) {
-        throw new Error("AII rejected a staged destination outside its owned run directory.");
+        throw new Error("HII rejected a staged destination outside its owned run directory.");
       }
       try {
         fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
@@ -143,7 +143,7 @@ export function stageWorkspaceRunContext(input) {
       }
       fs.chmodSync(destination, 0o400);
       if (sha256File(destination) !== expectedSha256) {
-        throw new Error("AII failed to verify the disposable staged copy.");
+        throw new Error("HII failed to verify the disposable staged copy.");
       }
       files.push({
         source,
@@ -171,7 +171,7 @@ export function stageWorkspaceRunContext(input) {
     directory: directoryRelativePath,
     preparedAt: new Date().toISOString(),
     files,
-    cleanupPolicy: "AII removes only this marked disposable copy after terminal state; the immutable HII-managed source remains."
+    cleanupPolicy: "HII removes only this marked disposable copy after terminal state; the immutable HII-managed source remains."
   };
 }
 

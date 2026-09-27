@@ -32,7 +32,7 @@ assert.deepEqual(
   workspaceChatPresentation('user', 'OpenAI Codex v1 is part of my question.'),
   { text: 'OpenAI Codex v1 is part of my question.', raw: null, legacyTranscript: false }
 );
-assert.equal(workspaceChatStatusLabel('queued'), 'Accepted by AII');
+assert.equal(workspaceChatStatusLabel('queued'), 'Accepted by HII');
 assert.equal(workspaceChatStatusLabel('running'), 'Working locally');
 assert.equal(workspaceChatStatusLabel('completed'), 'Run complete');
 assert.equal(workspaceChatStatusLabel('failed'), 'Needs attention');
@@ -41,5 +41,5 @@ console.log('HII workspace managed chat smoke');
 console.log('status:       ok');
 console.log('presentation: readable assistant response remains primary');
 console.log('evidence:     legacy raw transcript remains available for explicit inspection');
-console.log('states:       AII run lifecycle uses human-facing labels');
+console.log('states:       HII run lifecycle uses human-facing labels');
 console.log('persistence:  stored human and assistant message text is not rewritten');

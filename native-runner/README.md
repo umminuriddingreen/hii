@@ -9,7 +9,7 @@ not either engine directly. The HII layer owns:
 - model storage rooted at `~/.hii/models`, never Ollama's private blob layout;
 - an atomic runtime manifest with source, revision, license/integrity state;
 - an HII metrics discovery endpoint at `/v1/hii/metrics`;
-- lifecycle ownership through `aii/daemon/hiid.mjs`.
+- lifecycle ownership through `runtime/daemon/hiid.mjs`.
 
 The engine's OpenAI-compatible loopback surface provides `/health`,
 `/v1/models`, and streaming `/v1/chat/completions`. Keeping integration at this

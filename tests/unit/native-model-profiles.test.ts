@@ -3,9 +3,9 @@ import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
 
-import { resolveModelSelectionEntry, selectConsumerModelProfile } from "../../aii/model-runtime/profiles.mjs";
-import { buildNvidiaLaunchPlan } from "../../aii/model-runtime/nvidia.mjs";
-import { detectModelPlatform, supportsPlatform } from "../../aii/model-runtime/platform.mjs";
+import { resolveModelSelectionEntry, selectConsumerModelProfile } from "../../runtime/model-runtime/profiles.mjs";
+import { buildNvidiaLaunchPlan } from "../../runtime/model-runtime/nvidia.mjs";
+import { detectModelPlatform, supportsPlatform } from "../../runtime/model-runtime/platform.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const profiles = path.join(root, "config", "native-model-profiles.json");
@@ -140,7 +140,7 @@ describe("native consumer model profiles", () => {
 
 describe("HII model management CLI", () => {
   it("uses the current Hugging Face model-list contract", () => {
-    const source = fs.readFileSync(path.join(root, "aii", "daemon", "hiid.mjs"), "utf8");
+    const source = fs.readFileSync(path.join(root, "runtime", "daemon", "hiid.mjs"), "utf8");
     const search = source.slice(source.indexOf("function searchModels"), source.indexOf("function installModel"));
     expect(search).toContain('"models", "list", "--search"');
     expect(search).not.toContain('"--human-readable"');

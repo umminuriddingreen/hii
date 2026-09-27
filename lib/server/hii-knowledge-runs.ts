@@ -37,7 +37,7 @@ export function prepareKnowledgeRun(input: { id?: unknown; projectId?: unknown; 
     title: `Run · ${source.title}`,
     summary: `Bounded local execution proposal. Goal: ${goal}`,
     status: 'proposed',
-    owner: 'aii',
+    owner: 'runtime',
     provenance: source.provenance
   });
   createKnowledgeRelation({
@@ -135,7 +135,7 @@ export async function syncKnowledgeRun(input: { runId?: unknown }) {
           title: artifact.label,
           summary: artifact.summary || artifact.path || artifact.href || 'Capability proof artifact.',
           status: job.status === 'completed' ? 'accepted' : 'blocked',
-          owner: 'aii',
+          owner: 'runtime',
           externalRef
         });
         createKnowledgeRelation({ projectId: run.projectId, fromId: run.id, toId: proof.id, kind: 'produces', status: 'accepted' });
@@ -150,7 +150,7 @@ export async function syncKnowledgeRun(input: { runId?: unknown }) {
         title: `${job.status === 'completed' ? 'Completed' : 'Stopped'} · ${run.title}`,
         summary: job.logs.at(-1) || `${capabilityId} ${job.status}.`,
         status: job.status === 'completed' ? 'accepted' : 'blocked',
-        owner: 'aii',
+        owner: 'runtime',
         externalRef: receiptRef
       });
       createKnowledgeRelation({ projectId: run.projectId, fromId: receipt.id, toId: run.id, kind: 'derived_from', status: 'accepted' });

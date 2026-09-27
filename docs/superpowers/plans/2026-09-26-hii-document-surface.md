@@ -80,7 +80,7 @@
 
 ### Task 5: Attachments become document objects
 
-**Files:** modify `aii/model-runtime/intake.mjs`, `lib/documents/blocksuite-workspace.ts`, `lib/documents/context-pack.ts`; create `components/workspace/documents/HiiAttachment.tsx`; test `tests/unit/document-attachment-context.test.ts` and the existing intake suite.
+**Files:** modify `runtime/model-runtime/intake.mjs`, `lib/documents/blocksuite-workspace.ts`, `lib/documents/context-pack.ts`; create `components/workspace/documents/HiiAttachment.tsx`; test `tests/unit/document-attachment-context.test.ts` and the existing intake suite.
 
 - [ ] Test a large PDF or code source appears as an HII file reference, not an embedded base64/text dump, and model packets stay within both documented budgets.
 - [ ] Connect upload, normalized preview, extraction warnings, and bounded retrieval to document attachment blocks; preserve original filenames and source hashes.

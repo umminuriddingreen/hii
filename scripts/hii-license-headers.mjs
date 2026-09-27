@@ -22,7 +22,7 @@ const APACHE = 'Apache-2.0';
 
 /** Entrypoints only. Add a file here when it becomes a boundary someone reads first. */
 const targets = [
-  ['aii/daemon/hiid.mjs', BSL],
+  ['runtime/daemon/hiid.mjs', BSL],
   ['cli/src/main.rs', BSL],
   ['native-runner/src/main.rs', BSL],
   ['src-tauri/src/main.rs', BSL],

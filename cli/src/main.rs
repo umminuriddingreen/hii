@@ -4730,7 +4730,7 @@ fn run_agentic_doctor(real: bool) -> Result<ExitCode, String> {
 }
 
 fn native_model_status(paths: &AppPaths) -> Option<serde_json::Value> {
-    let script = paths.repo.join("aii/daemon/hiid.mjs");
+    let script = paths.repo.join("runtime/daemon/hiid.mjs");
     if !script.is_file() {
         return None;
     }

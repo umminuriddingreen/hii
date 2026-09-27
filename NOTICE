@@ -24,12 +24,12 @@ Open the interfaces. Control the implementation.
 Business Source License 1.1  →  Apache-2.0 on the Change Date
   Full text: ./LICENSE
 
-    aii/daemon/            HII daemon (hiid)
-    aii/admin-agent/       administrative agent runtime
-    aii/model-runtime/     model routing and execution
-    aii/capabilities/      capability registry implementation
-    aii/codex/             Codex substrate integration
-    aii/workstation/       AII workstation control plane
+    runtime/daemon/            HII daemon (hiid)
+    runtime/admin-agent/       administrative agent runtime
+    runtime/model-runtime/     model routing and execution
+    runtime/capabilities/      capability registry implementation
+    runtime/codex/             Codex substrate integration
+    runtime/workstation/       AII workstation control plane
     cli/                   hii command-line interface (Rust)
     native-runner/         native execution runner (Rust)
     src-tauri/             desktop shell (Tauri)
@@ -48,7 +48,7 @@ Apache License, Version 2.0
     fabric/protocol/           machine-fabric wire protocol and schemas
     extensions/hii-stream-mcp/ MCP extension
     skills/                    skill definitions
-    aii/skills/                skill definitions
+    runtime/skills/                skill definitions
 
   The Apache-2.0 tier is the integration surface, and it is meant to be
   genuinely open. Anyone — Codex, Claude, Hermes, local models, third-party

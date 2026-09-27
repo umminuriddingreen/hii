@@ -150,7 +150,7 @@ export function seedFor(type: WorkspaceNodeType, payload: Record<string, unknown
       ...defaultSize[type],
       object: {
         kind: 'run',
-        owner: 'aii',
+        owner: 'runtime',
         status: 'waiting_approval',
         source: 'HII spatial managed agent run',
         capabilityId: 'hii.agent.workspace_run',

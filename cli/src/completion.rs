@@ -765,7 +765,7 @@ mod tests {
         let verification = vec![VerificationRecord {
             command: "cd /Users/ummi/hii && npx svelte-check --tsconfig tsconfig.json".into(),
             ok: true,
-            output: "svelte-check found 0 errors and 0 warnings\nError while loading config at /Users/ummi/hii/aii/workstation/vite.config.ts".into(),
+            output: "svelte-check found 0 errors and 0 warnings\nError while loading config at /Users/ummi/hii/runtime/workstation/vite.config.ts".into(),
         }];
         let requirements = file_outcome(&["notified.txt"]);
         let assessment = assess(input(&dir, Some(&requirements), &[], &verification, &[]));

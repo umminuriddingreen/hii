@@ -10,7 +10,7 @@ pub struct AgentManager {
 impl AgentManager {
     pub fn new(paths: &AppPaths) -> Self {
         Self {
-            hiid: paths.repo.join("aii/daemon/hiid.mjs"),
+            hiid: paths.repo.join("runtime/daemon/hiid.mjs"),
             repo: paths.repo.clone(),
         }
     }

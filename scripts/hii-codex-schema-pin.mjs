@@ -13,7 +13,7 @@ const version = versionText.match(/(\d+\.\d+\.\d+(?:[-+][\w.-]+)?)/)?.[1];
 if (!version) throw new Error(`Could not parse Codex version from: ${versionText}`);
 
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "hii-codex-schema-"));
-const destination = path.join(root, "aii", "codex", "schema", version);
+const destination = path.join(root, "runtime", "codex", "schema", version);
 try {
   execFileSync(codex, ["app-server", "generate-json-schema", "--out", temporary], { stdio: "inherit" });
   fs.mkdirSync(destination, { recursive: true });

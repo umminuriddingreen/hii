@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 
 const ROOT = path.join(os.homedir(), "hii");
 const RUNTIME = process.env.HII_RUNTIME_DIR || path.join(os.homedir(), ".hii");
-const HIID = path.join(ROOT, "aii", "daemon", "hiid.mjs");
+const HIID = path.join(ROOT, "runtime", "daemon", "hiid.mjs");
 const RUNS = path.join(RUNTIME, "daemon", "runs");
 const BOARD = path.join(RUNTIME, "board", "tasks.jsonl");
 const JOBS = path.join(ROOT, ".hii", "capability-jobs.jsonl");

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { buildIntelligenceField, planIntelligenceField } from "../../aii/model-runtime/intelligence-field.mjs";
+import { buildIntelligenceField, planIntelligenceField } from "../../runtime/model-runtime/intelligence-field.mjs";
 
 const manifest = {
   hostedTransmission: "explicit-only",

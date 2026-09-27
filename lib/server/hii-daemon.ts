@@ -16,7 +16,7 @@ const home = homeDirectory();
 const hiiRootCandidates = [process.env.HII_ROOT, process.cwd(), path.join(home, 'hii')].filter(
   (candidate): candidate is string => Boolean(candidate)
 );
-const hiiRoot = hiiRootCandidates.find((candidate) => existsSync(path.join(candidate, 'aii', 'daemon', 'hiid.mjs'))) ?? hiiRootCandidates[0] ?? process.cwd();
+const hiiRoot = hiiRootCandidates.find((candidate) => existsSync(path.join(candidate, 'runtime', 'daemon', 'hiid.mjs'))) ?? hiiRootCandidates[0] ?? process.cwd();
 const runtime = runtimeRoot();
 const daemonDir = path.join(runtime, 'daemon');
 const runsDir = path.join(daemonDir, 'runs');
@@ -24,7 +24,7 @@ const statusPath = path.join(daemonDir, 'status.json');
 const instancesPath = path.join(daemonDir, 'instances.json');
 const eventsPath = path.join(daemonDir, 'events.jsonl');
 const daemonLogPath = path.join(daemonDir, 'daemon.log');
-const hiidScript = path.join(hiiRoot, 'aii', 'daemon', 'hiid.mjs');
+const hiidScript = path.join(hiiRoot, 'runtime', 'daemon', 'hiid.mjs');
 
 function nodeRuntime() {
   const candidates = [

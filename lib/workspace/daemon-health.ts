@@ -61,15 +61,15 @@ export function summarizeHiiDaemonHealth(input: {
     .filter((event) => event.type === 'daemon.error' && timestamp(event.ts) !== null)
     .sort((a, b) => (timestamp(b.ts) || 0) - (timestamp(a.ts) || 0))
     .find((event) => now - (timestamp(event.ts) || 0) <= 60_000);
-  const recentError = recentErrorEvent ? String(recentErrorEvent.text || 'AII reported a runtime error.') : null;
+  const recentError = recentErrorEvent ? String(recentErrorEvent.text || 'HII reported a runtime error.') : null;
 
   if (!input.alive) {
     return {
       state: 'offline',
-      label: 'AII offline',
-      summary: 'Approved local runs cannot start until AII is available.',
+      label: 'HII offline',
+      summary: 'Approved local runs cannot start until HII is available.',
       recoveryAction: 'start',
-      recoveryLabel: 'Start AII',
+      recoveryLabel: 'Start HII',
       heartbeatAgeSeconds,
       activeRuns: 0,
       queuedRuns,
@@ -82,10 +82,10 @@ export function summarizeHiiDaemonHealth(input: {
   if (heartbeatAgeSeconds === null || heartbeatAgeSeconds > 15 || recentError) {
     return {
       state: 'attention',
-      label: 'AII needs attention',
-      summary: recentError || `AII's heartbeat is ${heartbeatAgeSeconds ?? 'unknown'} seconds old.`,
+      label: 'HII needs attention',
+      summary: recentError || `HII's heartbeat is ${heartbeatAgeSeconds ?? 'unknown'} seconds old.`,
       recoveryAction: 'restart',
-      recoveryLabel: 'Restart AII',
+      recoveryLabel: 'Restart HII',
       heartbeatAgeSeconds,
       activeRuns,
       queuedRuns,
@@ -98,7 +98,7 @@ export function summarizeHiiDaemonHealth(input: {
   if (activeRuns > 0 || queuedRuns > 0) {
     return {
       state: 'busy',
-      label: 'AII working',
+      label: 'HII working',
       summary: `${activeRuns} approved run${activeRuns === 1 ? '' : 's'} active · ${queuedRuns} queued.`,
       recoveryAction: null,
       recoveryLabel: null,
@@ -113,7 +113,7 @@ export function summarizeHiiDaemonHealth(input: {
 
   return {
     state: 'ready',
-    label: 'AII ready',
+    label: 'HII ready',
     summary: 'Ready for approved local work.',
     recoveryAction: null,
     recoveryLabel: null,

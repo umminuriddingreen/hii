@@ -16,11 +16,11 @@ const readyInput = {
   now
 };
 
-describe('operator-meaningful AII health', () => {
+describe('operator-meaningful HII health', () => {
   it('does not mistake observed processes or historical runs for active agents', () => {
     const health = summarizeHiiDaemonHealth(readyInput);
     expect(health.state).toBe('ready');
-    expect(health.label).toBe('AII ready');
+    expect(health.label).toBe('HII ready');
     expect(health.activeRuns).toBe(0);
     expect(health.ownedServices).toBe(1);
     expect(health.observedProcesses).toBe(31);
@@ -33,7 +33,7 @@ describe('operator-meaningful AII health', () => {
       workspaceJobs: [{ status: 'queued' }]
     });
     expect(health.state).toBe('busy');
-    expect(health.label).toBe('AII working');
+    expect(health.label).toBe('HII working');
     expect(health.recoveryAction).toBeNull();
   });
 
@@ -53,10 +53,10 @@ describe('operator-meaningful AII health', () => {
     expect(failed.summary).toContain('intent loop failed');
   });
 
-  it('offers start when AII is offline', () => {
+  it('offers start when HII is offline', () => {
     const health = summarizeHiiDaemonHealth({ ...readyInput, alive: false });
     expect(health.state).toBe('offline');
-    expect(health.label).toBe('AII offline');
+    expect(health.label).toBe('HII offline');
     expect(health.recoveryAction).toBe('start');
   });
 });

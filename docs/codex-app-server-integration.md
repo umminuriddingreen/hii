@@ -34,7 +34,7 @@ hii codex schema pin
 ```
 
 This stores the bundled v2 JSON Schema and a SHA-256 manifest under
-`aii/codex/schema/<codex-version>/`.
+`runtime/codex/schema/<codex-version>/`.
 
 Read threads without starting or mutating a session:
 

@@ -246,7 +246,7 @@ export async function previewWorkspaceRunContext(input: {
         access: 'remote-reference',
         provenance: 'selected remote source reference',
         network: 'read-only-web',
-        warning: 'The reference is not cached in this context pack. AII may need a governed outbound read to retrieve it.'
+        warning: 'The reference is not cached in this context pack. HII may need a governed outbound read to retrieve it.'
       });
       continue;
     }
@@ -307,7 +307,7 @@ export async function previewWorkspaceRunContext(input: {
           byteSize: details.size,
           modifiedAt: details.mtime.toISOString(),
           stagedRelativePath: stagedAssetRelativePath(runId, sha256, resolved),
-          notice: 'AII will reverify this asset, copy it inside the approved workspace only for this run, and remove that disposable copy after the run reaches a terminal state.'
+          notice: 'HII will reverify this asset, copy it inside the approved workspace only for this run, and remove that disposable copy after the run reaches a terminal state.'
         });
         continue;
       }
