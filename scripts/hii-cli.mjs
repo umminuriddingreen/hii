@@ -2696,6 +2696,7 @@ function cmdProof(args = []) {
 }
 
 async function cmdAgents(args = []) {
+  if (args[0] === "chat") { const {chatCommand}=await import("../runtime/agents/chat-command.mjs"); await chatCommand(args.slice(1)); return; }
   if (args[0] === "workspace") { const {runWorkspaceCommand}=await import("../runtime/agents/workspace.mjs"); await runWorkspaceCommand(args.slice(1)); return; }
   if (["sync","sessions","session","runs","events","stop"].includes(args[0])) {
     const {registryCommand}=await import("../runtime/agents/registry.mjs");
