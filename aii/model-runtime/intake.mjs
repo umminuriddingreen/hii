@@ -19,8 +19,13 @@ export async function runtime(){
  if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname)||u.protocol!=='http:')throw Error('HII file intake requires a local HII runtime');
  const res=await fetch(endpoint+'/v1/models',{signal:AbortSignal.timeout(5000)});
  if(!res.ok)throw Error('HII model runtime is unavailable');
- const data=await res.json();const models=(data.data||[]).map(m=>m.id);
- if(!models.length)throw Error('HII has no loaded model');
+ const data=await res.json();
+ const healthResponse=await fetch(endpoint+'/health',{signal:AbortSignal.timeout(5000)});
+ if(!healthResponse.ok)throw Error('HII runtime health is unavailable');
+ const health=await healthResponse.json();
+ const loaded=health.loaded_model||health.loadedModel;
+ if(typeof loaded!=='string'||!(data.data||[]).some(m=>m.id===loaded))throw Error('HII has no verified loaded model');
+ const models=[loaded];
  return {id:'hii',name:'HII · Mac',online:true,models,endpoint};
 }
 export function imageKind(bytes){

@@ -1,6 +1,6 @@
 # HII local file intake
 
-HII owns model selection and document intake. Surfaces call the installed HII runtime module; they do not keep their own provider catalogs. The native runtime's live `/v1/models` response is the loaded-model authority. Hosted and remote model routes are excluded from file intake.
+HII owns model selection and document intake. Surfaces call the installed HII runtime module; they do not keep their own provider catalogs. The native runtime's live `/health` loaded model, checked against `/v1/models`, is the loaded-model authority. Catalog entries alone are not loaded-model proof. Hosted and remote model routes are excluded from file intake.
 
 CLI contract:
 
