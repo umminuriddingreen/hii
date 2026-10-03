@@ -30,7 +30,9 @@ describe('workspace direct manipulation contract', () => {
     expect(frame).toContain('if (onTransformCommit) onTransformCommit(finalDetail)');
     expect(frame).toContain('data-locked={locked || undefined}');
     expect(frame).toContain('selected && locked');
-    expect(frame).toContain('Math.hypot(current.clientX - startX, current.clientY - startY) < 4');
+    expect(frame).toContain('trackPointerGesture(event.nativeEvent, {');
+    expect(frame).toContain('moveThreshold: 4');
+    expect(frame).toContain('if (!started && Math.hypot(screenDelta.dx, screenDelta.dy) < 4) return;');
     expect(canvas).toContain('transformable={selected.length === 1 && selected[0] === node.id}');
     expect(canvas).toContain('return !additive');
   });

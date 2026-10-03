@@ -20,7 +20,7 @@ export type GestureHandlers = {
   /** Called at most once per animation frame while the pointer moves. */
   onMove?(delta: GestureDelta, event: PointerEvent): void;
   /** Called once when the gesture finishes normally. `moved` is false for a click. */
-  onEnd?(delta: GestureDelta, moved: boolean): void;
+  onEnd?(delta: GestureDelta, moved: boolean, event: PointerEvent): void;
   /** Called instead of `onEnd` when the gesture is interrupted. */
   onCancel?(): void;
 };
@@ -46,6 +46,8 @@ export type GestureOptions = GestureHandlers & {
   /** Frame scheduler. Defaults to `requestAnimationFrame`. Injectable for tests. */
   schedule?(callback: () => void): number;
   cancelSchedule?(handle: number): void;
+  /** Screen-space distance required before `onEnd` reports a drag. Defaults to 2px. */
+  moveThreshold?: number;
 };
 
 const defaultSchedule = (callback: () => void) =>
@@ -102,7 +104,11 @@ export function trackPointerGesture(event: PointerEvent, options: GestureOptions
     const pointerEvent = raw as PointerEvent;
     if (!active || pointerEvent.pointerId !== pointerId) return;
     delta = { dx: pointerEvent.clientX - startX, dy: pointerEvent.clientY - startY };
-    if (!moved && Math.abs(delta.dx) + Math.abs(delta.dy) >= GESTURE_MOVE_THRESHOLD) moved = true;
+    const threshold = options.moveThreshold ?? GESTURE_MOVE_THRESHOLD;
+    const distance = options.moveThreshold === undefined
+      ? Math.abs(delta.dx) + Math.abs(delta.dy)
+      : Math.hypot(delta.dx, delta.dy);
+    if (!moved && distance >= threshold) moved = true;
     pending = pointerEvent;
     if (frame === null) frame = schedule(flush);
   }
@@ -138,7 +144,7 @@ export function trackPointerGesture(event: PointerEvent, options: GestureOptions
     const finalDelta = delta;
     const finalMoved = moved;
     teardown();
-    options.onEnd?.(finalDelta, finalMoved);
+    options.onEnd?.(finalDelta, finalMoved, pointerEvent);
   }
 
   function onAbort() {

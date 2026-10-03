@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowClockwise, ArrowLeft, ArrowRight, Check, DownloadSimple, DotsThree, MagnifyingGlass } from '@phosphor-icons/react';
 import { captureInformation, type InformationCaptureResult } from '@/lib/client/hii-bridge';
 import { browserNavigationTarget, browserTargetKind, localBrowserSearchTarget, normalizedBrowserUrl } from '@/lib/workspace/browser-target';
+import { createNativeBrowserBoundsSync } from '@/lib/workspace/native-browser-bounds';
 
 type Props = {
   nodeId: string;
@@ -45,36 +46,37 @@ export function NativeDevBrowser({ nodeId, initialUrl, startEmpty = false, docke
   const [omniboxIndex, setOmniboxIndex] = useState(0);
   const viewport = useRef<HTMLDivElement | null>(null);
   const webview = useRef<import('@tauri-apps/api/webview').Webview | null>(null);
-  const lastBounds = useRef('');
-  const boundsInFlight = useRef(false);
   const label = `hii-browser-${nodeId.replace(/[^a-zA-Z0-9-]/g, '-')}`;
   const omniboxId = `${label}-options`;
-
-  const syncBounds = useCallback(async () => {
-    if (!webview.current || !viewport.current || boundsInFlight.current) return;
-    const rect = viewport.current.getBoundingClientRect();
-    if (rect.width < 2 || rect.height < 2) return;
-    const bounds = [rect.left, rect.top, rect.width, rect.height].map((value) => Math.round(value)).join(':');
-    if (bounds === lastBounds.current) return;
-    boundsInFlight.current = true;
-    try {
-      const { LogicalPosition, LogicalSize } = await import('@tauri-apps/api/dpi');
-      const current = webview.current;
-      if (!current) return;
-      await Promise.all([
-        current.setPosition(new LogicalPosition(rect.left, rect.top)),
-        current.setSize(new LogicalSize(rect.width, rect.height))
-      ]);
-      lastBounds.current = bounds;
-    } finally {
-      boundsInFlight.current = false;
-    }
-  }, []);
 
   useEffect(() => {
     if (!isTauri() || !viewport.current) { setStatus('ready'); return; }
     let disposed = false;
-    let timer = 0;
+    let resizeObserver: ResizeObserver | undefined;
+    let mutationObserver: MutationObserver | undefined;
+    const boundsSync = createNativeBrowserBoundsSync({
+      read: () => {
+        const rect = viewport.current?.getBoundingClientRect();
+        return rect ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height } : null;
+      },
+      applyPosition: async (bounds) => {
+        const current = webview.current;
+        if (!current) return;
+        const { LogicalPosition } = await import('@tauri-apps/api/dpi');
+        if (webview.current === current) await current.setPosition(new LogicalPosition(bounds.x, bounds.y));
+      },
+      applySize: async (bounds) => {
+        const current = webview.current;
+        if (!current) return;
+        const { LogicalSize } = await import('@tauri-apps/api/dpi');
+        if (webview.current === current) await current.setSize(new LogicalSize(bounds.width, bounds.height));
+      },
+      requestFrame: (callback) => window.requestAnimationFrame(callback),
+      cancelFrame: (frame) => window.cancelAnimationFrame(frame),
+      onError: () => { if (!disposed) setStatus('error'); }
+    });
+    const syncBounds = boundsSync.schedule;
+    const invalidateBounds = () => syncBounds();
     void (async () => {
       const [{ Webview }, { getCurrentWindow }] = await Promise.all([
         import('@tauri-apps/api/webview'),
@@ -91,25 +93,35 @@ export function NativeDevBrowser({ nodeId, initialUrl, startEmpty = false, docke
         height: rect.height
       });
       webview.current = next;
-      lastBounds.current = existing ? '' : [rect.left, rect.top, rect.width, rect.height].map((value) => Math.round(value)).join(':');
+      boundsSync.reset();
       if (existing) await existing.show();
       else {
-        await next.once('tauri://created', () => setStatus('ready'));
-        await next.once('tauri://error', () => setStatus('error'));
+        await next.once('tauri://created', () => { if (!disposed) setStatus('ready'); });
+        await next.once('tauri://error', () => { if (!disposed) setStatus('error'); });
       }
-      timer = window.setInterval(() => void syncBounds(), 120);
-    })().catch(() => setStatus('error'));
+      if (disposed || !viewport.current) return;
+      resizeObserver = new ResizeObserver(invalidateBounds);
+      resizeObserver.observe(viewport.current);
+      mutationObserver = new MutationObserver(invalidateBounds);
+      for (let element: Element | null = viewport.current; element; element = element.parentElement) {
+        mutationObserver.observe(element, { attributes: true, attributeFilter: ['class', 'style'] });
+      }
+      window.addEventListener('resize', invalidateBounds);
+      syncBounds();
+    })().catch(() => { if (!disposed) setStatus('error'); });
     return () => {
       disposed = true;
-      window.clearInterval(timer);
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+      window.removeEventListener('resize', invalidateBounds);
+      boundsSync.dispose();
       const current = webview.current;
       webview.current = null;
-      lastBounds.current = '';
-      if (current) void current.close();
+      if (current) void current.close().catch(() => undefined);
     };
   // The webview belongs to this durable node for its full mounted lifetime.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [label, syncBounds]);
+  }, [label]);
 
   const targetKind = useMemo(() => browserTargetKind(url), [url]);
   const activeSearchQuery = useMemo(() => searchQuery(url), [url]);

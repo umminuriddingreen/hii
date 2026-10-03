@@ -11,6 +11,7 @@ import {
   type NodeTransformKind,
   type NodeTransformRect
 } from './nodeTransform';
+import { trackPointerGesture, scaleGestureDelta } from '@/lib/workspace/gestures';
 import styles from './NodeFrame.module.css';
 
 type NodeFrameProps = {
@@ -56,12 +57,11 @@ export function NodeFrame({ node, selected, transformable = selected, editableCo
     }
     event.stopPropagation();
     event.preventDefault();
-    const startX = event.clientX;
-    const startY = event.clientY;
     const origin: NodeTransformRect = { x: node.x, y: node.y, w: node.w, h: node.h, rotation: node.rotation };
     let next = { ...origin };
     const transformKind: NodeTransformKind = kind;
     const resizeHandle = handle || 'se';
+    let started = false;
     const detail = (current: PointerEvent | React.PointerEvent): NodeTransformDetail => ({
       nodeId: node.id,
       kind: transformKind,
@@ -76,50 +76,52 @@ export function NodeFrame({ node, selected, transformable = selected, editableCo
         ctrlKey: current.ctrlKey
       }
     });
-    let started = false;
-    const move = (current: PointerEvent) => {
-      if (current.pointerId !== event.pointerId) return;
-      if (!started && Math.hypot(current.clientX - startX, current.clientY - startY) < 4) return;
-      if (!started) {
-        started = true;
-        onTransformStart?.(detail(current));
+    trackPointerGesture(event.nativeEvent, {
+      moveThreshold: 4,
+      onMove: (screenDelta, current) => {
+        if (!started && Math.hypot(screenDelta.dx, screenDelta.dy) < 4) return;
+        if (!started) {
+          started = true;
+          onTransformStart?.(detail(current));
+        }
+        const { dx: deltaX, dy: deltaY } = scaleGestureDelta(screenDelta, getZoom());
+        if (transformKind === 'resize') {
+          next = resizeNodeRect(origin, resizeHandle, deltaX, deltaY);
+        } else if (transformKind === 'rotate') {
+          next = { ...origin, rotation: rotationFromPointer(origin, {
+            x: origin.x + origin.w / 2 + deltaX,
+            y: origin.y - 28 + deltaY
+          }, current.shiftKey) };
+        } else {
+          next.x = origin.x + deltaX;
+          next.y = origin.y + deltaY;
+        }
+        const override = onTransformPreview?.(detail(current));
+        if (override) next = { ...next, ...override };
+        if (frame.current) {
+          frame.current.style.transform = workspaceNodeTransform(next);
+          frame.current.style.width = `${next.w}px`;
+          frame.current.style.height = `${next.h}px`;
+        }
+      },
+      onEnd: (_delta, moved, current) => {
+        if (!moved) return;
+        const finalDetail = detail(current);
+        if (onTransformCommit) onTransformCommit(finalDetail);
+        else if (transformKind === 'resize') onCommit({ x: next.x, y: next.y, w: next.w, h: next.h });
+        else if (transformKind === 'rotate') onCommit({ rotation: next.rotation });
+        else onCommit({ x: next.x, y: next.y });
+      },
+      onCancel: () => {
+        // A cancelled preview never became document state; restore the rendered
+        // node too, since preview styles are applied directly for responsiveness.
+        if (frame.current) {
+          frame.current.style.transform = workspaceNodeTransform(origin);
+          frame.current.style.width = `${origin.w}px`;
+          frame.current.style.height = `${origin.h}px`;
+        }
       }
-      const zoom = getZoom();
-      const deltaX = (current.clientX - startX) / zoom;
-      const deltaY = (current.clientY - startY) / zoom;
-      if (transformKind === 'resize') {
-        next = resizeNodeRect(origin, resizeHandle, deltaX, deltaY);
-      } else if (transformKind === 'rotate') {
-        next = { ...origin, rotation: rotationFromPointer(origin, {
-          x: origin.x + origin.w / 2 + (current.clientX - startX) / zoom,
-          y: origin.y - 28 + (current.clientY - startY) / zoom
-        }, current.shiftKey) };
-      } else {
-        next.x = origin.x + (current.clientX - startX) / zoom;
-        next.y = origin.y + (current.clientY - startY) / zoom;
-      }
-      const override = onTransformPreview?.(detail(current));
-      if (override) next = { ...next, ...override };
-      if (frame.current) {
-        frame.current.style.transform = workspaceNodeTransform(next);
-        frame.current.style.width = `${next.w}px`;
-        frame.current.style.height = `${next.h}px`;
-      }
-    };
-    const up = (current: PointerEvent) => {
-      removeEventListener('pointermove', move);
-      removeEventListener('pointerup', up);
-      removeEventListener('pointercancel', up);
-      if (!started) return;
-      const finalDetail = detail(current);
-      if (onTransformCommit) onTransformCommit(finalDetail);
-      else if (transformKind === 'resize') onCommit({ x: next.x, y: next.y, w: next.w, h: next.h });
-      else if (transformKind === 'rotate') onCommit({ rotation: next.rotation });
-      else onCommit({ x: next.x, y: next.y });
-    };
-    addEventListener('pointermove', move);
-    addEventListener('pointerup', up);
-    addEventListener('pointercancel', up);
+    });
   };
 
   const pointerDown = (event: React.PointerEvent) => beginGesture(event);

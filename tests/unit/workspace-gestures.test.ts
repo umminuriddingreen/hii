@@ -74,7 +74,7 @@ describe('workspace pointer gestures', () => {
     target.emit('pointerup', pointer(37, 19));
 
     expect(onMove).toHaveBeenLastCalledWith({ dx: 37, dy: 19 }, expect.anything());
-    expect(onEnd).toHaveBeenCalledWith({ dx: 37, dy: 19 }, true);
+    expect(onEnd).toHaveBeenCalledWith({ dx: 37, dy: 19 }, true, expect.anything());
   });
 
   it('reports a click as an unmoved gesture so it does not write to the document', () => {
@@ -85,7 +85,28 @@ describe('workspace pointer gestures', () => {
     target.emit('pointermove', pointer(1, 0)); // below the drag threshold
     target.emit('pointerup', pointer(1, 0));
 
-    expect(onEnd).toHaveBeenCalledWith({ dx: 1, dy: 0 }, false);
+    expect(onEnd).toHaveBeenCalledWith({ dx: 1, dy: 0 }, false, expect.anything());
+  });
+
+  it('keeps NodeFrame-style drags below 4px from starting and uses Euclidean distance', () => {
+    const target = fakeTarget();
+    const frames = manualFrames();
+    const onMove = vi.fn();
+    const onEnd = vi.fn();
+
+    trackPointerGesture(pointer(0, 0) as never, { target, onMove, onEnd, moveThreshold: 4, ...frames });
+    target.emit('pointermove', pointer(2.8, 2.8));
+    frames.flush();
+    expect(onMove).toHaveBeenCalledTimes(1); // preview can update, but remains a click
+    target.emit('pointerup', pointer(2.8, 2.8));
+    expect(onEnd).toHaveBeenCalledWith({ dx: 2.8, dy: 2.8 }, false, expect.anything());
+
+    const target2 = fakeTarget();
+    const onEnd2 = vi.fn();
+    trackPointerGesture(pointer(0, 0) as never, { target: target2, onEnd: onEnd2, moveThreshold: 4, ...manualFrames() });
+    target2.emit('pointermove', pointer(4, 0));
+    target2.emit('pointerup', pointer(4, 0));
+    expect(onEnd2).toHaveBeenCalledWith({ dx: 4, dy: 0 }, true, expect.anything());
   });
 
   it.each(['pointercancel', 'lostpointercapture', 'blur'])(
