@@ -18,6 +18,7 @@ mod completion;
 mod config;
 mod context;
 mod context_budget;
+mod codex_ui;
 mod contract;
 mod conversation;
 mod declaration;

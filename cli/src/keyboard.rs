@@ -180,7 +180,7 @@ impl LiveInput {
                 .map_or(crate::tui::prompt_frame(0), |(_, row)| row.to_string()),
         )
         .map_err(|e| format!("failed to redraw active composer: {e}"))?;
-        let tail = visible.chars().count().saturating_sub(column);
+        let tail = crate::codex_ui::display_width(&visible).saturating_sub(column);
         if tail > 0 {
             write!(out, "\x1b[{tail}D")
                 .map_err(|e| format!("failed to restore active composer cursor: {e}"))?;
@@ -580,7 +580,7 @@ fn redraw(
     write!(out, "\x1b[{rows_below_input}A\r")
         .map_err(|e| format!("failed to restore composer row: {e}"))?;
     // ANSI paint sequences in `prompt` occupy bytes but no terminal columns.
-    // The visible input prefix is always "  │ ", which is four columns.
+    // The visible input prefix is always "  › ", which is four columns.
     let column = 4 + column;
     if column > 0 {
         write!(out, "\x1b[{column}C")

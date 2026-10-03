@@ -309,7 +309,7 @@ pub(crate) fn composer_width() -> usize {
     let real = crossterm::terminal::size()
         .map(|(columns, _)| usize::from(columns))
         .unwrap_or(80);
-    real.min(terminal_width()).saturating_sub(5).max(8)
+    real.min(terminal_width()).saturating_sub(5)
 }
 
 /// Render the slice of the composer buffer that fits on one row, plus the
@@ -332,26 +332,57 @@ pub(crate) fn composer_window(buf: &str, cursor: usize, width: usize) -> (String
             other => other,
         })
         .collect();
-    let cursor_column = buf[..cursor.min(buf.len())].chars().count();
-    if flattened.len() <= width {
+    let cursor_chars = buf[..cursor.min(buf.len())].chars().count();
+    let width_of = |characters: &[char]| {
+        crate::codex_ui::display_width(&characters.iter().collect::<String>())
+    };
+    let cursor_column = width_of(&flattened[..cursor_chars.min(flattened.len())]);
+    if width_of(&flattened) <= width {
         return (flattened.into_iter().collect(), cursor_column);
     }
-    // Scrolled windows keep the cursor on the right edge, which is where it sits
-    // while typing or pasting past the end of the row.
-    let start = cursor_column.saturating_sub(width.saturating_sub(1));
-    let end = (start + width).min(flattened.len());
-    let mut visible: Vec<char> = flattened[start..end].to_vec();
-    if start > 0 {
+    // Find the first character at or after the horizontal scroll position.
+    // Count terminal cells rather than Unicode scalar values so CJK input does
+    // not push the cursor past the visible row.
+    let target_column = cursor_column.saturating_sub(width.saturating_sub(1));
+    let mut start = 0;
+    let mut start_column = 0;
+    while start < flattened.len()
+        && start_column + crate::codex_ui::char_width(flattened[start]) <= target_column
+    {
+        start_column += crate::codex_ui::char_width(flattened[start]);
+        start += 1;
+    }
+    let mut visible = Vec::new();
+    let mut visible_width = 0;
+    for character in flattened.iter().skip(start).copied() {
+        let character_width = crate::codex_ui::char_width(character);
+        if visible_width + character_width > width {
+            break;
+        }
+        visible.push(character);
+        visible_width += character_width;
+    }
+    if start > 0 && !visible.is_empty() {
         visible[0] = '…';
+        visible_width = width_of(&visible);
+    } else if start > 0 {
+        // A one-column viewport cannot fit a wide glyph. Keep a visible
+        // marker and a usable cursor position instead of showing a blank row.
+        return ("…".to_string(), usize::from(cursor_chars > 0));
     }
     // Only mark hidden trailing text when the cursor is not sitting on that
     // last cell — otherwise the ellipsis would hide the character being edited.
-    if end < flattened.len() && cursor_column < end.saturating_sub(1) {
+    let visible_end = start + visible.len();
+    if visible_end < flattened.len()
+        && cursor_column < start_column + visible_width.saturating_sub(1)
+    {
         if let Some(last) = visible.last_mut() {
             *last = '…';
         }
     }
-    (visible.into_iter().collect(), cursor_column - start)
+    let visible_cursor_chars = cursor_chars.saturating_sub(start).min(visible.len());
+    let visible_cursor = width_of(&visible[..visible_cursor_chars]);
+    (visible.into_iter().collect(), visible_cursor.min(width))
 }
 
 fn short_path(path: &Path) -> String {
@@ -474,7 +505,25 @@ pub fn prompt_frame(_frame: usize) -> String {
 }
 
 pub fn prompt_footer() -> String {
-    String::new()
+    let help = "Enter send  ·  ↑/↓ history/menu  ·  / commands";
+    let width = crossterm::terminal::size()
+        .map(|(columns, _)| usize::from(columns))
+        .unwrap_or(80)
+        .saturating_sub(1);
+    if width < 46 {
+        return String::new();
+    }
+    let mut fitted = String::new();
+    let mut fitted_width = 0;
+    for character in help.chars() {
+        let character_width = crate::codex_ui::char_width(character);
+        if fitted_width + character_width > width {
+            break;
+        }
+        fitted.push(character);
+        fitted_width += character_width;
+    }
+    paint(&fitted, &[DIM, palette().muted])
 }
 
 fn public_command(command: &str) -> bool {
@@ -997,13 +1046,36 @@ mod tests {
     }
 
     #[test]
+    fn composer_window_scrolls_cjk_by_terminal_cells() {
+        let line = "界界界abcd";
+        let (visible, column) = composer_window(line, line.len(), 6);
+        assert!(crate::codex_ui::display_width(&visible) <= 6);
+        assert!(visible.starts_with('…'));
+        assert_eq!(column, crate::codex_ui::display_width(&visible));
+
+        let line = "e\u{301}界界z";
+        let (visible, column) = composer_window(line, line.len(), 4);
+        assert!(crate::codex_ui::display_width(&visible) <= 4);
+        assert_eq!(column, crate::codex_ui::display_width(&visible));
+    }
+
+    #[test]
+    fn composer_window_keeps_cursor_inside_a_one_column_cjk_viewport() {
+        let (visible, column) = composer_window("界", "界".len(), 1);
+        assert_eq!(visible, "…");
+        assert_eq!(column, 1);
+    }
+
+    #[test]
     fn prompt_is_a_minimal_codex_style_input_line() {
         assert!(!prompt_frame(0).trim().is_empty());
         assert_eq!(prompt_frame(0), prompt_frame(99));
         assert!(prompt_frame(0).contains('›'));
         assert!(!prompt_frame(0).contains("INTENT"));
         assert!(!prompt_frame(0).contains('╭'));
-        assert!(super::prompt_footer().is_empty());
+        assert!(super::prompt_footer().contains("Enter send"));
+        assert!(super::prompt_footer().contains("history/menu"));
+        assert!(super::prompt_footer().contains("/ commands"));
     }
 
     #[test]
