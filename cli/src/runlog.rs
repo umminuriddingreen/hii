@@ -48,7 +48,6 @@ pub enum StreamPolicy {
 /// Incremental model output. Deltas are presentation-only.
 #[derive(Clone, Debug)]
 pub enum Delta {
-    Thinking(String),
     Content(String),
 }
 
@@ -284,7 +283,7 @@ impl Presenter for HumanPresenter {
             return;
         }
         match delta {
-            Delta::Thinking(text) | Delta::Content(text) => {
+            Delta::Content(text) => {
                 print!("{text}");
                 let _ = io::stdout().flush();
             }
@@ -318,7 +317,6 @@ impl Presenter for JsonlPresenter {
 
     fn delta(&mut self, delta: &Delta) {
         let (channel, text) = match delta {
-            Delta::Thinking(text) => ("thinking", text),
             Delta::Content(text) => ("content", text),
         };
         Self::write(jsonl_envelope(

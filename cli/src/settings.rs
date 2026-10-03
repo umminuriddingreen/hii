@@ -23,7 +23,7 @@ impl Default for CliSettings {
 }
 
 fn default_view() -> String {
-    "conversation".into()
+    "stream".into()
 }
 fn default_inline_images() -> String {
     "auto".into()
@@ -43,7 +43,7 @@ pub fn load(runtime: &Path) -> CliSettings {
 pub fn describe(runtime: &Path) -> String {
     let value = load(runtime);
     format!(
-        "CLI SETTINGS\nconversation-view  {}\ninline-images       {}\n\nChange: /settings conversation-view conversation|stream|flow|activity\n        /settings inline-images auto|on|off",
+        "CLI SETTINGS\noutput              continuous stream (legacy view: {})\ninline-images       {}\n\nChange: /settings inline-images auto|on|off\nLegacy conversation-view values all use the continuous stream.",
         value.conversation_view, value.inline_images
     )
 }

@@ -6,51 +6,10 @@
 
 use std::{
     env, fs,
-    io::{self, IsTerminal, Write},
+    io::{self, IsTerminal},
     path::{Path, PathBuf},
-    sync::{atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering}, Arc},
-    thread,
-    time::{Duration, Instant},
+    sync::atomic::{AtomicU8, AtomicUsize, Ordering},
 };
-
-/// One disappearing status line while a synchronous tool is running.
-pub struct TransientStatus {
-    stop: Arc<AtomicBool>,
-    worker: Option<thread::JoinHandle<()>>,
-}
-
-impl TransientStatus {
-    pub fn start(label: &str) -> Option<Self> {
-        if !io::stdout().is_terminal() { return None; }
-        let label = label.to_string();
-        let stop = Arc::new(AtomicBool::new(false));
-        let worker_stop = stop.clone();
-        let worker = thread::spawn(move || {
-            let started = Instant::now();
-            let mut frame = 0usize;
-            while !worker_stop.load(Ordering::Relaxed) {
-                let glyph = if env::var("HII_MOTION").as_deref() == Ok("off") { "*" }
-                    else { ["|", "/", "-", "\\"][frame % 4] };
-                let line = format!("  {glyph} HII  {label}  {}s", started.elapsed().as_secs());
-                let clipped = crate::text::clip(&line, terminal_width());
-                print!("\r\x1b[2K{}", paint(&clipped, &[palette().primary]));
-                let _ = io::stdout().flush();
-                frame = frame.wrapping_add(1);
-                thread::sleep(Duration::from_millis(180));
-            }
-        });
-        Some(Self { stop, worker: Some(worker) })
-    }
-}
-
-impl Drop for TransientStatus {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(worker) = self.worker.take() { let _ = worker.join(); }
-        print!("\r\x1b[2K");
-        let _ = io::stdout().flush();
-    }
-}
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
@@ -209,7 +168,12 @@ impl Theme {
     }
 }
 
-const THEMES: [Theme; 4] = [Theme::Heritage, Theme::Midnight, Theme::Mono, Theme::Cyberpunk];
+const THEMES: [Theme; 4] = [
+    Theme::Heritage,
+    Theme::Midnight,
+    Theme::Mono,
+    Theme::Cyberpunk,
+];
 
 fn active_theme() -> Theme {
     match ACTIVE_THEME.load(Ordering::Relaxed) {
@@ -715,36 +679,7 @@ pub fn tool_output(output: &str) {
     if output.trim().is_empty() {
         return;
     }
-    println!("{}", paint("  TOOL OUTPUT", &[BOLD, palette().secondary]));
     println!("{output}");
-}
-
-pub fn model_activity(frame: usize, phase: &str, detail: Option<&str>) -> String {
-    const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
-    let phase = match phase {
-        "thinking" => "Thinking",
-        "reviewing" => "Reviewing",
-        "side chat" => "Considering",
-        "compacting" => "Compacting",
-        "learning" => "Learning",
-        other => other,
-    };
-    let detail = detail
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| {
-            format!(
-                "  {}",
-                crate::text::clip_line(value, terminal_width().saturating_sub(24))
-            )
-        })
-        .unwrap_or_default();
-    format!(
-        "  {}  {}{}",
-        paint(if std::env::var("HII_MOTION").as_deref() == Ok("off") { "*" } else { FRAMES[frame % FRAMES.len()] }, &[BOLD, palette().primary]),
-        paint(phase, &[BOLD]),
-        paint(&detail, &[DIM, palette().muted])
-    )
 }
 
 fn activity_line(line: &str) {
@@ -956,9 +891,9 @@ pub fn error(message: &str) {
 mod tests {
     use super::{
         active_run_frame, active_run_progress_frame, clear_activity_sequence, command_matches,
-        command_menu, composer_window, model_activity, overview, prompt_frame, short_path,
-        terminal_safe_text, terminal_width, theme_choices, tool_result_frame, tool_start_frame,
-        user_turn_frame, welcome_frame, workspace_state, ActiveRunView, Theme,
+        command_menu, composer_window, overview, prompt_frame, short_path, terminal_safe_text,
+        theme_choices, tool_result_frame, tool_start_frame, user_turn_frame, welcome_frame,
+        workspace_state, ActiveRunView, Theme,
     };
     use std::path::Path;
 
@@ -1087,16 +1022,6 @@ mod tests {
         assert!(!rendered.contains("What do you want"));
         assert!(!rendered.contains("Type naturally"));
         assert_eq!(rendered.lines().count(), 4);
-    }
-
-    #[test]
-    fn model_activity_has_motion_phase_and_bounded_detail() {
-        let first = model_activity(0, "thinking", Some(&"detail ".repeat(80)));
-        let second = model_activity(1, "thinking", None);
-        assert!(first.contains("Thinking"));
-        assert!(first.contains("detail"));
-        assert_ne!(first, second);
-        assert!(first.chars().count() <= terminal_width() + 10);
     }
 
     #[test]

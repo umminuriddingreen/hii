@@ -168,37 +168,6 @@ impl LiveInput {
             .map_err(|e| format!("failed to flush model stream: {e}"))
     }
 
-    /// Replace the single transient activity row above the live composer.
-    /// Keeping this to one row lets the final response erase it cleanly.
-    pub fn replace_stream_line(&mut self, line: &str) -> Result<()> {
-        // Once reply bytes are durable, this row is no longer transient.
-        // Repainting activity here would erase the last response line when a
-        // JSON final action continues after its `summary` field.
-        if self.has_committed_output {
-            return Ok(());
-        }
-        let mut out = io::stdout();
-        write!(out, "\r\x1b[2K{line}")
-            .map_err(|e| format!("failed to update model activity: {e}"))?;
-        out.flush()
-            .map_err(|e| format!("failed to flush model activity: {e}"))
-    }
-
-    /// Paint one transient inference strip below the live composer while the
-    /// provider stream continues above it. Relative movement remains reliable
-    /// when output inserts rows at the bottom of the viewport.
-    pub fn replace_status_line(&mut self, line: &str) -> Result<()> {
-        let mut out = io::stdout();
-        write!(out, "\r\x1b[2B\x1b[2K{line}\x1b[2A\r")
-            .map_err(|e| format!("failed to update inference status: {e}"))?;
-        if self.stream_column > 0 {
-            write!(out, "\x1b[{}C", self.stream_column)
-                .map_err(|e| format!("failed to restore model stream cursor: {e}"))?;
-        }
-        out.flush()
-            .map_err(|e| format!("failed to flush inference status: {e}"))
-    }
-
     fn redraw_composer(&self) -> Result<()> {
         let mut out = io::stdout();
         let (visible, column) =

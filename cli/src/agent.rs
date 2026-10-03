@@ -2236,7 +2236,7 @@ fn stream_model_json(
     crate::context_budget::ContextBudget::for_model(model)
         .validate_count(messages, ollama.count_input_tokens(model, messages))?;
     let ModelStreamPolicy {
-        step,
+        step: _,
         think,
         relaxed_json,
     } = policy;
@@ -2270,7 +2270,6 @@ fn stream_model_json(
     // reaches a piped run exactly the way it reaches a terminal.
     let streaming = journal.streaming();
     let human = matches!(journal.mode(), OutputMode::Human { .. });
-    let mut thinking_started = false;
     let mut content_started = false;
     let mut reasoning_chars = 0usize;
     let call_started = Instant::now();
@@ -2295,28 +2294,17 @@ fn stream_model_json(
                     cancel.cancel(CancelReason::Client);
                     return Err(ADAPTIVE_REASONING_BUDGET_RETRY.into());
                 }
-                if streaming && human && !thinking_started {
-                    println!("\n  THINKING · step {step}");
-                    print!("  ");
-                    thinking_started = true;
-                }
                 last_delta = Some(Instant::now());
-                journal.delta(Delta::Thinking(indent_for(human, delta)));
+                // Keep reasoning accounting for adaptive retry decisions, but
+                // never send private reasoning to a presenter or JSONL stream.
             }
             Ok(ChatStreamEvent::Content(delta)) => {
-                if streaming && human && !content_started {
-                    if thinking_started {
-                        println!();
-                    }
-                    println!("\n  MODEL · step {step}");
-                    print!("  ");
-                    content_started = true;
-                }
+                content_started |= !delta.is_empty();
                 last_delta = Some(Instant::now());
-                journal.delta(Delta::Content(indent_for(human, delta)));
+                journal.delta(Delta::Content(delta));
             }
             Ok(ChatStreamEvent::Done(result)) => {
-                if streaming && human && (thinking_started || content_started) {
+                if streaming && human && content_started {
                     println!("\n");
                     let _ = io::stdout().flush();
                 }
@@ -2504,15 +2492,6 @@ fn cancellation_message(cancel: &Cancel) -> String {
             kind.label()
         ),
         None => "Run cancelled.".into(),
-    }
-}
-
-/// Terminal output is indented under a step header; machine streams stay raw.
-fn indent_for(human: bool, delta: String) -> String {
-    if human {
-        delta.replace('\n', "\n  ")
-    } else {
-        delta
     }
 }
 

@@ -70,7 +70,11 @@ enum ThinkingMode {
 }
 
 fn streams_readable_reply(mode: ThinkingMode) -> bool {
-    matches!(mode, ThinkingMode::Stream)
+    // All configured views now use the same append-only transcript. The view
+    // setting remains accepted for compatibility, but never changes what the
+    // operator can observe while a persistent session is working.
+    let _ = mode;
+    true
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,7 +113,10 @@ const ADAPTIVE_REASONING_MAX_CHARS: usize = 4_096;
 const ADAPTIVE_REASONING_MAX_TIME: Duration = Duration::from_secs(12);
 
 fn clean_final_output(message: &str, raw_streamed: bool, projected: &str) -> String {
-    if raw_streamed {
+    if raw_streamed
+        && !projected.trim_end().is_empty()
+        && projected.trim_end().ends_with(message.trim_end())
+    {
         String::new()
     } else if let Some(remaining) = message.trim_end().strip_prefix(projected) {
         remaining.trim().to_string()
@@ -197,15 +204,6 @@ fn partial_json_string_field(raw: &str, key: &str) -> Option<String> {
         }
     }
     Some(decoded)
-}
-
-fn activity_excerpt(value: &str) -> String {
-    let compact = redact_text(value)
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    let length = compact.chars().count();
-    compact.chars().skip(length.saturating_sub(120)).collect()
 }
 
 impl SessionUsage {
@@ -915,16 +913,16 @@ impl Conversation {
                     self.store.event("batch.started", json!({
                         "step": step, "calls": calls.iter().map(|call| &call.id).collect::<Vec<_>>()
                     }))?;
-                    let progress = matches!(self.thinking_mode, ThinkingMode::Conversation)
-                        .then(|| {
-                            crate::tui::TransientStatus::start(&format!(
-                                "Checking {} sources",
-                                calls.len()
-                            ))
-                        })
-                        .flatten();
+                    self.show_tool_start(
+                        step,
+                        "batch",
+                        &calls
+                            .iter()
+                            .map(|call| call.id.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    );
                     let results = crate::agent::execute_read_batch(&self.tools, &calls);
-                    drop(progress);
                     let mut feedback = Vec::new();
                     for (id, result) in results {
                         let result = crate::tool_artifacts::bound_result(
@@ -939,6 +937,9 @@ impl Conversation {
                         if let Some(run) = &run {
                             run.event("tool.result", data)?;
                         }
+                        self.show_tool_start(step, &format!("batch:{id}"), "");
+                        self.show_tool_result(result.ok, false);
+                        crate::tui::tool_output(&output);
                         feedback.push(format!(
                             "[{id} {}] {output}",
                             if result.ok { "ok" } else { "error" }
@@ -1092,9 +1093,6 @@ impl Conversation {
                         continue;
                     }
                     self.show_tool_start(step, &label, target);
-                    let progress = matches!(self.thinking_mode, ThinkingMode::Conversation)
-                        .then(|| crate::tui::TransientStatus::start("Using a connected tool"))
-                        .flatten();
                     let pre_hooks = self.hooks.fire(
                         HookEvent::PreTool,
                         Some(&label),
@@ -1147,7 +1145,6 @@ impl Conversation {
                         verification.clear();
                         observations.clear();
                     }
-                    drop(progress);
                     self.show_tool_result(ok, false);
                     if self.shows_tool_output() {
                         crate::tui::tool_output(&safe_output);
@@ -1247,15 +1244,6 @@ impl Conversation {
                         url.as_deref(),
                     );
                     self.show_tool_start(step, &tool, &target);
-                    let progress = matches!(self.thinking_mode, ThinkingMode::Conversation)
-                        .then(|| {
-                            crate::tui::TransientStatus::start(if tool_is_observation(&tool) {
-                                "Checking"
-                            } else {
-                                "Acting"
-                            })
-                        })
-                        .flatten();
                     let observation = tool_is_observation(&tool);
                     let observation_key = observation.then(|| {
                         observation_signature(
@@ -1570,7 +1558,6 @@ impl Conversation {
                             observations.insert(key);
                         }
                     }
-                    drop(progress);
                     self.show_tool_result(result.ok, result.verification || shell_evidence);
                     if self.shows_tool_output() {
                         crate::tui::tool_output(&safe_output);
@@ -1913,9 +1900,9 @@ impl Conversation {
             ReasoningMode::Off => "off",
             ReasoningMode::Deep => "deep",
         };
-        let thinking = "raw";
+        let output = "continuous stream";
         format!(
-            "{} messages · {} characters\n{}\n{}\n{}\nAttachments: {} pending · {}\nMCP: {} cached tool(s)\nMode: {}\nReasoning: {} · thinking display: {}\nAuthority: {}\nTheme: {}\nKeymap: {}\nGoal: {}\nLearning draft: {}",
+            "{} messages · {} characters\n{}\n{}\n{}\nAttachments: {} pending · {}\nMCP: {} cached tool(s)\nMode: {}\nReasoning: {} · output: {}\nAuthority: {}\nTheme: {}\nKeymap: {}\nGoal: {}\nLearning draft: {}",
             self.messages.len().saturating_sub(1),
             self.context_chars(),
             self.model,
@@ -1926,7 +1913,7 @@ impl Conversation {
             self.mcp_clients.tool_count(),
             mode,
             reasoning,
-            thinking,
+            output,
             self.authority.label(),
             crate::tui::theme_name(),
             self.keymap.profile_name(),
@@ -2562,56 +2549,39 @@ impl Conversation {
         skills::list(&self.paths)
     }
 
-    /// Do tool call and result lines belong on screen?
-    ///
-    /// Flow shows objective language only — unless nothing has projected one,
-    /// in which case the tool lines are all there is to show.
+    /// Tool calls and results always belong in the continuous transcript.
     fn shows_tool_lines(&self) -> bool {
-        io::stdout().is_terminal()
-            && !matches!(self.thinking_mode, ThinkingMode::Conversation)
-            && (!matches!(self.thinking_mode, ThinkingMode::Flow) || self.flow_blind)
+        true
     }
 
-    /// Does raw tool output belong on screen? Stream view only.
+    /// Tool text is part of the same durable transcript in every view.
     fn shows_tool_output(&self) -> bool {
-        io::stdout().is_terminal() && matches!(self.thinking_mode, ThinkingMode::Raw)
+        true
     }
 
     fn show_tool_start(&self, step: usize, tool: &str, target: &str) {
         if !self.shows_tool_lines() {
             return;
         }
-        if matches!(self.thinking_mode, ThinkingMode::Stream | ThinkingMode::Raw) {
-            crate::tui::stream_tool_start(step, tool, target);
-        } else {
-            crate::tui::tool_start(step, tool, target);
-        }
+        crate::tui::stream_tool_start(step, tool, target);
     }
 
     fn show_tool_result(&self, ok: bool, verification: bool) {
         if !self.shows_tool_lines() {
             return;
         }
-        if matches!(self.thinking_mode, ThinkingMode::Stream | ThinkingMode::Raw) {
-            crate::tui::stream_tool_result(ok, verification);
-        } else {
-            crate::tui::tool_result(ok, verification);
-        }
+        crate::tui::stream_tool_result(ok, verification);
     }
 
-    /// Does the objective frame belong on screen? Everything but Stream.
+    /// Legacy objective frames no longer replace transcript rows.
     fn shows_flow(&self) -> bool {
-        io::stdout().is_terminal()
-            && matches!(
-                self.thinking_mode,
-                ThinkingMode::Flow | ThinkingMode::Activity
-            )
+        false
     }
 
     fn thinking_mode_for(requested: &str) -> Option<ThinkingMode> {
         match requested {
             "conversation" | "chat" | "off" => Some(ThinkingMode::Conversation),
-            // `compact` remains the objective-only flow projection.
+            // Historical view names remain accepted for compatibility.
             "flow" | "compact" => Some(ThinkingMode::Flow),
             "activity" => Some(ThinkingMode::Activity),
             "stream" => Some(ThinkingMode::Stream),
@@ -2628,20 +2598,7 @@ impl Conversation {
             ));
         };
         self.thinking_mode = mode;
-        Ok(match mode {
-            ThinkingMode::Conversation => {
-                "Conversation view is active — only replies and questions are shown. Work and proof remain available through `/thinking activity`, `/raw on`, and `/proof`."
-            }
-            ThinkingMode::Flow => {
-                "Flow view is active — objective projection only. Use `/raw on` for the direct model and tool stream."
-            }
-            ThinkingMode::Activity => {
-                "Activity view is active. Progress remains objective-relative."
-            }
-            ThinkingMode::Stream => "Stream view is active: readable replies, tool calls, results, and receipts are appended progressively. Use `/raw on` for protocol diagnostics.",
-            ThinkingMode::Raw => "Raw diagnostics are active: provider reasoning and protocol bytes are shown directly. Use `/raw off` for the readable stream.",
-        }
-        .into())
+        Ok("Continuous output is active: model responses, tool calls, and tool results append to the same session.".into())
     }
 
     /// Resolve the durable project and objective thread for this turn.
@@ -3213,12 +3170,7 @@ impl Conversation {
                 "flow.restored",
                 serde_json::to_value(&flow).map_err(|error| error.to_string())?,
             )?;
-            if io::stdout().is_terminal()
-                && matches!(
-                    self.thinking_mode,
-                    ThinkingMode::Flow | ThinkingMode::Activity
-                )
-            {
+            if self.shows_flow() {
                 let direction = flow
                     .direction
                     .iter()
@@ -3549,44 +3501,26 @@ impl Conversation {
         phase: &str,
         model: String,
         receiver: mpsc::Receiver<ChatStreamEvent>,
-        show_content: bool,
+        _show_content: bool,
         bounded_reasoning: bool,
     ) -> Result<ChatResult, String> {
         let started = Instant::now();
-        let mut reasoning_started = false;
         let mut live_input = crate::keyboard::LiveInput::enter(self.keymap.clone())?;
         let interactive = io::stdout().is_terminal();
-        let raw_activity = matches!(self.thinking_mode, ThinkingMode::Raw);
-        // Conversation is the clean human view: retain the live composer and
-        // transient status, then render the complete reply once. Progressive
-        // bytes remain available explicitly in Stream view.
         let stream_activity = streams_readable_reply(self.thinking_mode);
-        let compact_activity = false;
         let mut content_started = false;
         let mut reasoning_chars = 0usize;
-        let mut activity_frame = 0usize;
-        let mut thinking_excerpt = String::new();
         let mut live_reply = LiveReplyProjection::default();
         let mut visible_chars = 0usize;
-        let mut inference_view = crate::inference_view::MiniInference::new("");
         self.store.event(
             "assistant.stream.started",
             json!({ "model": model, "phase": phase }),
         )?;
-        if interactive && (raw_activity || stream_activity) {
+        if interactive {
             // The provider stream is the interface. Remove transient routing
             // and activity rows before the first delta, then write only bytes
             // the model emitted—no MODEL/THINKING/OUTPUT wrappers.
             crate::tui::finish_activity();
-        }
-        if interactive && !raw_activity {
-            if let Some(input) = live_input.as_mut() {
-                input.replace_status_line(&inference_view.next_frame(
-                    phase,
-                    started.elapsed(),
-                    crate::tui::terminal_width(),
-                ))?;
-            }
         }
         loop {
             if let Some(input) = live_input.as_mut() {
@@ -3598,9 +3532,7 @@ impl Conversation {
                                 self.cancel.cancel(CancelReason::Client);
                                 return Err(OPERATOR_EXITED.into());
                             }
-                            if !matches!(self.thinking_mode, ThinkingMode::Raw) {
-                                crate::tui::steering(&value);
-                            }
+                            crate::tui::steering(&value);
                             self.store.event(
                                 "flow.steered",
                                 json!({"content":redact_text(&value),"phase":phase}),
@@ -3663,28 +3595,11 @@ impl Conversation {
                         self.cancel.cancel(CancelReason::Client);
                         return Err(REASONING_BUDGET_RETRY.into());
                     }
-                    if compact_activity {
-                        thinking_excerpt.push_str(&delta);
-                        thinking_excerpt = activity_excerpt(&thinking_excerpt);
-                        if let Some(input) = live_input.as_mut() {
-                            input.replace_stream_line(&crate::tui::model_activity(
-                                activity_frame,
-                                phase,
-                                Some(&thinking_excerpt),
-                            ))?;
-                        }
-                    } else if interactive && raw_activity {
-                        reasoning_started = true;
-                        if let Some(input) = live_input.as_mut() {
-                            input.write_stream(&delta)?;
-                        } else {
-                            print!("{delta}");
-                            let _ = io::stdout().flush();
-                        }
-                    }
+                    // Reasoning still counts toward the bounded retry policy
+                    // above, but is never exposed in the human transcript.
                 }
                 Ok(ChatStreamEvent::Content(delta)) => {
-                    let visible_delta = if stream_activity && show_content {
+                    let visible_delta = if stream_activity {
                         live_reply.push(&delta)
                     } else {
                         String::new()
@@ -3702,59 +3617,30 @@ impl Conversation {
                             }),
                         )?;
                     }
-                    if interactive && show_content {
+                    if !delta.is_empty() {
                         content_started = true;
-                        inference_view.observe_delta(&delta);
+                        // Show model protocol and prose exactly as emitted,
+                        // including phases that are internal to tool routing.
+                        // The final assembled reply is then suppressed to avoid
+                        // printing the same bytes a second time.
+                        self.last_reply_streamed = true;
                         if let Some(input) = live_input.as_mut() {
-                            input.replace_status_line(&inference_view.next_frame(
-                                phase,
-                                started.elapsed(),
-                                crate::tui::terminal_width(),
-                            ))?;
-                        }
-                        if stream_activity && !visible_delta.is_empty() {
-                            if let Some(input) = live_input.as_mut() {
-                                input.write_stream(&visible_delta)?;
-                            } else {
-                                print!("{visible_delta}");
-                                let _ = io::stdout().flush();
-                            }
-                        } else if raw_activity {
-                            // Stream means stream: preserve every provider byte,
-                            // including JSON tool actions, so the operator can
-                            // see exactly why the next tool call occurs.
-                            self.last_reply_streamed = true;
-                            if let Some(input) = live_input.as_mut() {
-                                input.write_stream(&delta)?;
-                            } else {
-                                print!("{delta}");
-                                let _ = io::stdout().flush();
-                            }
-                        } else if let Some(input) = live_input.as_mut() {
-                            let detail = if phase == "thinking" {
-                                "Preparing the next action"
-                            } else {
-                                "Composing the response"
-                            };
-                            input.replace_stream_line(&crate::tui::model_activity(
-                                activity_frame,
-                                phase,
-                                Some(detail),
-                            ))?;
+                            input.write_stream(&delta)?;
                         } else {
-                            let _ = delta;
+                            print!("{delta}");
+                            let _ = io::stdout().flush();
                         }
                     }
                 }
                 Ok(ChatStreamEvent::Done(result)) => {
+                    if let Some(input) = live_input.as_mut() {
+                        input.finish_stream();
+                    } else if content_started {
+                        println!();
+                    } else if interactive {
+                        print!("\x1b[2K\r");
+                    }
                     if interactive {
-                        if let Some(input) = live_input.as_mut() {
-                            input.finish_stream();
-                        } else if reasoning_started || content_started {
-                            println!();
-                        } else {
-                            print!("\x1b[2K\r");
-                        }
                         let _ = io::stdout().flush();
                     }
                     let result = result?;
@@ -3802,18 +3688,7 @@ impl Conversation {
                     }
                     return Ok(result);
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if interactive {
-                        activity_frame = activity_frame.wrapping_add(1);
-                        if let Some(input) = live_input.as_mut() {
-                            input.replace_status_line(&inference_view.next_frame(
-                                phase,
-                                started.elapsed(),
-                                crate::tui::terminal_width(),
-                            ))?;
-                        }
-                    }
-                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     if interactive {
                         print!("\x1b[2K\r");
@@ -5124,13 +4999,12 @@ mod tests {
     }
 
     use super::{
-        activity_excerpt, advisor_suggestion, authority_decision, clean_final_output,
-        conversation_prompt, mode_choices, model_event_kind, needs_verification,
-        observation_signature, plain_message, plan_tool_allowed, project_visible_reply,
-        public_test_sensitive_shell, render_permissions, resumable_messages, session_authority,
-        session_flow, session_goal, session_plan_mode, session_title,
-        shell_command_is_observation_only, shell_command_is_preview, shell_command_is_read_only,
-        side_context, streams_readable_reply, tool_is_observation,
+        advisor_suggestion, authority_decision, clean_final_output, conversation_prompt,
+        mode_choices, model_event_kind, needs_verification, observation_signature, plain_message,
+        plan_tool_allowed, project_visible_reply, public_test_sensitive_shell, render_permissions,
+        resumable_messages, session_authority, session_flow, session_goal, session_plan_mode,
+        session_title, shell_command_is_observation_only, shell_command_is_preview,
+        shell_command_is_read_only, side_context, streams_readable_reply, tool_is_observation,
         verification_required_message, Conversation, ReasoningMode, ThinkingMode, REASONING_MODES,
         THINKING_MODES,
     };
@@ -5140,7 +5014,10 @@ mod tests {
 
     #[test]
     fn final_output_does_not_repeat_streamed_content_or_append_workspace_noise() {
-        assert_eq!(clean_final_output("Hello, Ummi.\n", true, ""), "");
+        assert_eq!(
+            clean_final_output("Hello, Ummi.\n", true, "Hello, Ummi."),
+            ""
+        );
         assert_eq!(
             clean_final_output("Hello, Ummi.\n", false, "Hello, Ummi."),
             ""
@@ -5156,10 +5033,24 @@ mod tests {
     }
 
     #[test]
-    fn conversation_view_waits_for_one_clean_final_reply() {
-        assert!(!streams_readable_reply(ThinkingMode::Conversation));
+    fn streamed_tool_protocol_does_not_hide_a_synthesized_stop_notice() {
+        assert_eq!(
+            clean_final_output("Step ceiling reached", true, ""),
+            "Step ceiling reached"
+        );
+        assert_eq!(
+            clean_final_output("Step ceiling reached", true, "Earlier model response"),
+            "Step ceiling reached"
+        );
+    }
+
+    #[test]
+    fn every_configured_view_uses_the_continuous_stream() {
+        assert!(streams_readable_reply(ThinkingMode::Conversation));
         assert!(streams_readable_reply(ThinkingMode::Stream));
-        assert!(!streams_readable_reply(ThinkingMode::Raw));
+        assert!(streams_readable_reply(ThinkingMode::Flow));
+        assert!(streams_readable_reply(ThinkingMode::Activity));
+        assert!(streams_readable_reply(ThinkingMode::Raw));
     }
 
     #[test]
@@ -5201,17 +5092,6 @@ mod tests {
             model_event_kind(broken, &parse_action(broken)),
             "model.protocol_error"
         );
-    }
-
-    #[test]
-    fn compact_activity_excerpt_is_redacted_single_line_and_bounded() {
-        let excerpt = activity_excerpt(&format!(
-            "first line\nsecond line sk-test-{}",
-            "x".repeat(180)
-        ));
-        assert!(!excerpt.contains('\n'));
-        assert!(!excerpt.contains("sk-test"));
-        assert!(excerpt.chars().count() <= 120);
     }
 
     #[test]
@@ -5661,7 +5541,12 @@ mod tests {
             strong
         );
         assert_eq!(
-            super::adaptive_model_choice(&small, std::slice::from_ref(&small), &installed, Some(&strong)),
+            super::adaptive_model_choice(
+                &small,
+                std::slice::from_ref(&small),
+                &installed,
+                Some(&strong)
+            ),
             strong
         );
         assert_eq!(
