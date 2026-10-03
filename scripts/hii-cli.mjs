@@ -620,17 +620,28 @@ function cleanModelOutput(value) {
 
 function gitSnapshot() {
   try {
-    const branch = execFileSync("git", ["-C", ROOT, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).trim();
-    const status = execFileSync("git", ["-C", ROOT, "status", "--short"], { encoding: "utf8" })
+    const options = { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] };
+    const branch = execFileSync("git", ["-C", ROOT, "rev-parse", "--abbrev-ref", "HEAD"], options).trim();
+    const status = execFileSync("git", ["-C", ROOT, "status", "--short"], options)
       .split("\n")
       .filter(Boolean)
       .map(redactText);
-    const recent = execFileSync("git", ["-C", ROOT, "log", "--oneline", "-5"], { encoding: "utf8" })
+    const recent = execFileSync("git", ["-C", ROOT, "log", "--oneline", "-5"], options)
       .split("\n")
       .filter(Boolean);
-    return { branch, status, worktree: classifyGitStatus(status), recent };
+    return { available: true, branch, status, worktree: classifyGitStatus(status), recent };
   } catch {
-    return { branch: "unknown", status: [], worktree: classifyGitStatus([]), recent: [] };
+    return {
+      available: false,
+      branch: "unknown",
+      status: [],
+      worktree: {
+        ...classifyGitStatus([]),
+        clean: null,
+        counts: { total: null, staged: null, modified: null, deleted: null, renamed: null, untracked: null, conflicted: null }
+      },
+      recent: []
+    };
   }
 }
 
@@ -706,9 +717,9 @@ function activeStatePayload(context) {
   const latestEventAt = eventPointers.map((pointer) => pointer.updatedAt).filter(Boolean).sort().at(-1) || null;
   const domains = [
     {
-      id: "workspace", state: context.git.worktree.clean ? "idle" : "active", visibility: "observed",
-      source: "git status", updatedAt: observedAt,
-      basis: context.git.worktree.clean ? "No uncommitted files." : `${context.git.worktree.counts.total} uncommitted file change(s).`,
+      id: "workspace", state: context.git.available ? (context.git.worktree.clean ? "idle" : "active") : "unknown", visibility: context.git.available ? "observed" : "unavailable",
+      source: "git status", updatedAt: context.git.available ? observedAt : null,
+      basis: context.git.available ? (context.git.worktree.clean ? "No uncommitted files." : `${context.git.worktree.counts.total} uncommitted file change(s).`) : "Git source status is unavailable for this directory.",
       counts: context.git.worktree.counts
     },
     {
@@ -1352,7 +1363,7 @@ function cmdStatus() {
   console.log("HII — Human Information Interface status\n");
   console.log(`repo:    ${ROOT}`);
   try {
-    const branch = execFileSync("git", ["-C", ROOT, "rev-parse", "--abbrev-ref", "HEAD"]).toString().trim();
+    const branch = execFileSync("git", ["-C", ROOT, "rev-parse", "--abbrev-ref", "HEAD"], { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
     console.log(`git:     ${branch}`);
   } catch { console.log("git:     unavailable"); }
   console.log("\nenv:");
@@ -1538,6 +1549,7 @@ function agentHomePayload() {
     workspace: {
       branch: context.git.branch,
       clean: context.git.worktree.clean,
+      gitAvailable: context.git.available,
       changes: context.git.worktree.counts,
       files: context.git.worktree.files.slice(0, 8)
     },
@@ -1578,7 +1590,8 @@ function agentHomeBriefPayload(payload = agentHomePayload()) {
     repo: payload.identity.repo,
     branch: payload.workspace.branch,
     clean: payload.workspace.clean,
-    changes: payload.workspace.changes.total,
+    gitAvailable: payload.workspace.gitAvailable,
+    changes: payload.workspace.gitAvailable ? payload.workspace.changes.total : null,
     openTasks: payload.work.board.open,
     activeJobs: payload.work.activeJobs.length,
     pendingHandoffs: payload.work.handoffs.pending,
@@ -1609,7 +1622,7 @@ function cmdHome(args) {
   console.log("HII Home\n");
   console.log(`repo:    ${payload.identity.repo}`);
   console.log(`runtime: ${payload.identity.runtime}`);
-  console.log(`git:     ${payload.workspace.branch}${payload.workspace.clean ? " (clean)" : ` (${payload.workspace.changes.total} changes)`}`);
+  console.log(`git:     ${payload.workspace.gitAvailable ? `${payload.workspace.branch}${payload.workspace.clean ? " (clean)" : ` (${payload.workspace.changes.total} changes)`}` : "unavailable (source status unknown)"}`);
   console.log(`work:    ${payload.work.board.open} open tasks · ${payload.work.activeJobs.length} active jobs`);
   if (payload.work.handoffs.pending) console.log(`handoffs: ${payload.work.handoffs.pending} pending · hii agents inbox --for ${process.env.HII_AGENT_ID || 'hii'}`);
   console.log(`context: profile=${payload.context.profile.exists ? "ready" : "missing"} · ${payload.context.schedules.active} schedules · knowledge=${payload.context.knowledge.exists ? "ready" : "missing"} · ${payload.context.skills.hii.indexed} HII skills`);
@@ -1630,8 +1643,8 @@ function cmdContext(args) {
   console.log("HII Agent Context\n");
   console.log(`repo:    ${payload.identity.repo}`);
   console.log(`runtime: ${payload.identity.runtime}`);
-  console.log(`git:     ${payload.git.branch}${payload.git.status.length ? ` (${payload.git.status.length} dirty)` : " (clean)"}`);
-  console.log(`probe:   staged=${payload.git.worktree.counts.staged} modified=${payload.git.worktree.counts.modified} deleted=${payload.git.worktree.counts.deleted} untracked=${payload.git.worktree.counts.untracked}`);
+  console.log(`git:     ${payload.git.available ? `${payload.git.branch}${payload.git.status.length ? ` (${payload.git.status.length} dirty)` : " (clean)"}` : "unavailable (source status unknown)"}`);
+  if (payload.git.available) console.log(`probe:   staged=${payload.git.worktree.counts.staged} modified=${payload.git.worktree.counts.modified} deleted=${payload.git.worktree.counts.deleted} untracked=${payload.git.worktree.counts.untracked}`);
   console.log(`caps:    ${payload.capabilities.length}`);
   console.log(`jobs:    ${payload.localState.recentJobs.length}`);
   console.log("\nBest commands:");
@@ -1656,8 +1669,8 @@ function cmdProbe(args) {
   }
   console.log("HII Worktree Probe\n");
   console.log(`repo:    ${ROOT}`);
-  console.log(`git:     ${git.branch}${git.worktree.clean ? " (clean)" : ` (${git.worktree.counts.total} dirty)`}`);
-  console.log(`counts:  staged=${git.worktree.counts.staged} modified=${git.worktree.counts.modified} deleted=${git.worktree.counts.deleted} untracked=${git.worktree.counts.untracked} conflicted=${git.worktree.counts.conflicted}`);
+  console.log(`git:     ${git.available ? `${git.branch}${git.worktree.clean ? " (clean)" : ` (${git.worktree.counts.total} dirty)`}` : "unavailable (source status unknown)"}`);
+  if (git.available) console.log(`counts:  staged=${git.worktree.counts.staged} modified=${git.worktree.counts.modified} deleted=${git.worktree.counts.deleted} untracked=${git.worktree.counts.untracked} conflicted=${git.worktree.counts.conflicted}`);
   if (git.worktree.files.length) {
     console.log("\nFiles:");
     for (const file of git.worktree.files) console.log(`  ${file.raw}`);
@@ -2557,8 +2570,9 @@ function compactJob(job) {
   };
 }
 
-function compactWorktree(worktree) {
+function compactWorktree(worktree, available = true) {
   return {
+    available,
     clean: worktree.clean,
     counts: worktree.counts,
     files: Array.isArray(worktree.files)
@@ -2581,7 +2595,7 @@ function cmdNow(args = []) {
       generatedAt: new Date().toISOString(),
       repo: ROOT,
       runtime: RUNTIME,
-      git: full ? snapshot.git.worktree : compactWorktree(snapshot.git.worktree),
+      git: full ? { ...snapshot.git.worktree, available: snapshot.git.available } : compactWorktree(snapshot.git.worktree, snapshot.git.available),
       tasks: full ? snapshot.tasks : snapshot.tasks.slice(0, 12).map(compactTask),
       activeJobs: full ? snapshot.running : snapshot.running.map(compactJob),
       recentVerifiedJobs: full
@@ -2595,7 +2609,7 @@ function cmdNow(args = []) {
   console.log(`\n${GLYPH.mark}  HII  /  HUMAN INFORMATION INTERFACE`);
   console.log("   intent → bounded work → proof → receipt");
   line();
-  console.log(`${snapshot.git.worktree.clean ? GLYPH.ready : GLYPH.warning}  WORKSPACE  ${snapshot.git.branch}  ${snapshot.git.worktree.clean ? "clean" : `${snapshot.git.worktree.counts.total} changes need review`}`);
+  console.log(`${snapshot.git.worktree.clean ? GLYPH.ready : GLYPH.warning}  WORKSPACE  ${snapshot.git.branch}  ${snapshot.git.worktree.clean === null ? "source status unknown" : snapshot.git.worktree.clean ? "clean" : `${snapshot.git.worktree.counts.total} changes need review`}`);
   console.log(`${snapshot.running.length ? GLYPH.active : GLYPH.waiting}  AGENTS     ${snapshot.running.length ? `${snapshot.running.length} active` : "no active bounded work"}  ·  ${snapshot.verified.length} verified receipts`);
   console.log(`${GLYPH.proof}  PROOF      ${snapshot.jobs.length ? `${snapshot.jobs.length} recent job receipts` : "none yet"}`);
   line(" NOW ");
