@@ -1,0 +1,16 @@
+default_job = "check"
+
+[jobs.check]
+command = ["cargo", "check", "-p", "hii-cli", "--color", "always"]
+need_stdout = false
+watch = ["cli/src", "crates", "fabric/protocol"]
+
+[jobs.test]
+command = ["cargo", "test", "-p", "hii-cli", "--color", "always"]
+need_stdout = true
+watch = ["cli/src", "cli/tests", "crates", "fabric/protocol"]
+
+[jobs.clippy]
+command = ["cargo", "clippy", "-p", "hii-cli", "--all-targets", "--color", "always"]
+need_stdout = false
+watch = ["cli/src", "crates", "fabric/protocol"]

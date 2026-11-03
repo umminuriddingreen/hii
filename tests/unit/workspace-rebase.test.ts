@@ -1,0 +1,126 @@
+import { describe, expect, it } from 'vitest';
+import { rebaseWorkspaceDoc, reconcileWorkspaceSave } from '../../lib/workspace/rebase';
+import type { WorkspaceDoc, WorkspaceNode } from '../../lib/workspace/types';
+
+const node = (id: string, updatedAt: string, extra: Partial<WorkspaceNode> = {}): WorkspaceNode => ({
+  id,
+  type: 'note',
+  x: 0,
+  y: 0,
+  w: 200,
+  h: 150,
+  z: 1,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt,
+  payload: {},
+  ...extra
+} as WorkspaceNode);
+
+const doc = (revision: number, nodes: WorkspaceNode[], overrides: Partial<WorkspaceDoc> = {}): WorkspaceDoc => ({
+  version: 1,
+  revision,
+  updatedAt: '2026-01-01T00:00:00.000Z',
+  viewport: { x: 0, y: 0, zoom: 1 },
+  nextZ: 10,
+  nodes,
+  ...overrides
+} as WorkspaceDoc);
+
+const ids = (result: WorkspaceDoc) => result.nodes.map((n) => n.id).sort();
+
+describe('workspace save-conflict rebase', () => {
+  it('mirrors independent desktop geometry and browser content without data loss', () => {
+    const initial = node('shared', '2026-01-01T00:00:00.000Z', { payload: { content: 'original', label: 'keep' } });
+    const base = doc(1, [initial]);
+    const desktop = doc(1, [{ ...initial, x: 200, updatedAt: '2026-01-01T00:02:00.000Z' }]);
+    const browser = doc(2, [{ ...initial, payload: { content: 'edited on web', label: 'keep' }, updatedAt: '2026-01-01T00:01:00.000Z' }]);
+    const merged = rebaseWorkspaceDoc(desktop, browser, base);
+    expect(merged.nodes[0].x).toBe(200);
+    expect(merged.nodes[0].payload.content).toBe('edited on web');
+    expect(rebaseWorkspaceDoc(browser, desktop, base).nodes).toEqual(merged.nodes);
+  });
+  it('does not let a completed save erase text typed while it was in flight', () => {
+    const submitted = doc(4, [node('note', '2026-01-01T00:01:00.000Z', { payload: { content: 'h' } })]);
+    const saved = doc(5, [node('note', '2026-01-01T00:01:00.000Z', { payload: { content: 'h' } })]);
+    const local = doc(4, [node('note', '2026-01-01T00:02:00.000Z', { payload: { content: 'hello' } })]);
+
+    const reconciled = reconcileWorkspaceSave(local, saved, submitted, true);
+
+    expect(reconciled.revision).toBe(5);
+    expect(reconciled.nodes[0].payload.content).toBe('hello');
+  });
+
+  it('accepts the saved document when no newer local typing exists', () => {
+    const submitted = doc(4, [node('note', '2026-01-01T00:01:00.000Z', { payload: { content: 'hello' } })]);
+    const saved = doc(5, [node('note', '2026-01-01T00:01:00.000Z', { payload: { content: 'hello' } })]);
+    expect(reconcileWorkspaceSave(submitted, saved, submitted, false)).toBe(saved);
+  });
+
+  it('keeps both sides work when two clients add different nodes', () => {
+    const base = doc(4, [node('shared', '2026-01-01T00:00:00.000Z')]);
+    const local = doc(4, [node('shared', '2026-01-01T00:00:00.000Z'), node('mine', '2026-01-01T00:05:00.000Z')]);
+    const remote = doc(5, [node('shared', '2026-01-01T00:00:00.000Z'), node('theirs', '2026-01-01T00:04:00.000Z')]);
+
+    expect(ids(rebaseWorkspaceDoc(local, remote, base))).toEqual(['mine', 'shared', 'theirs']);
+  });
+
+  it('adopts the newer edit when both clients changed the same node', () => {
+    const base = doc(4, [node('a', '2026-01-01T00:00:00.000Z')]);
+    const local = doc(4, [node('a', '2026-01-01T00:01:00.000Z', { x: 100 })]);
+    const remote = doc(5, [node('a', '2026-01-01T00:02:00.000Z', { x: 900 })]);
+
+    expect(rebaseWorkspaceDoc(local, remote, base).nodes[0].x).toBe(900);
+    // ...and the other way round.
+    const localWins = rebaseWorkspaceDoc(
+      doc(4, [node('a', '2026-01-01T00:03:00.000Z', { x: 100 })]),
+      remote,
+      base
+    );
+    expect(localWins.nodes[0].x).toBe(100);
+  });
+
+  it('honours a local delete rather than resurrecting the node from the server', () => {
+    const base = doc(4, [node('a', '2026-01-01T00:00:00.000Z'), node('b', '2026-01-01T00:00:00.000Z')]);
+    const local = doc(4, [node('a', '2026-01-01T00:00:00.000Z')]);
+    const remote = doc(5, [node('a', '2026-01-01T00:00:00.000Z'), node('b', '2026-01-01T00:00:00.000Z')]);
+
+    expect(ids(rebaseWorkspaceDoc(local, remote, base))).toEqual(['a']);
+  });
+
+  it('honours a remote delete of a node this client never touched', () => {
+    const base = doc(4, [node('a', '2026-01-01T00:00:00.000Z'), node('b', '2026-01-01T00:00:00.000Z')]);
+    const local = doc(4, [node('a', '2026-01-01T00:00:00.000Z'), node('b', '2026-01-01T00:00:00.000Z')]);
+    const remote = doc(5, [node('a', '2026-01-01T00:00:00.000Z')]);
+
+    expect(ids(rebaseWorkspaceDoc(local, remote, base))).toEqual(['a']);
+  });
+
+  it('resurrects a remotely deleted node when this client has edited it since', () => {
+    // Losing an edit the user just made is worse than keeping a node someone
+    // else deleted, so an edit wins over a delete.
+    const base = doc(4, [node('a', '2026-01-01T00:00:00.000Z'), node('b', '2026-01-01T00:00:00.000Z')]);
+    const local = doc(4, [node('a', '2026-01-01T00:00:00.000Z'), node('b', '2026-01-01T00:09:00.000Z', { x: 42 })]);
+    const remote = doc(5, [node('a', '2026-01-01T00:00:00.000Z')]);
+
+    const merged = rebaseWorkspaceDoc(local, remote, base);
+    expect(ids(merged)).toEqual(['a', 'b']);
+    expect(merged.nodes.find((n) => n.id === 'b')?.x).toBe(42);
+  });
+
+  it('adopts the server revision so the retried save is accepted', () => {
+    const merged = rebaseWorkspaceDoc(doc(4, []), doc(9, []), doc(4, []));
+    expect(merged.revision).toBe(9);
+  });
+
+  it('never merges the camera, which belongs to this client alone', () => {
+    const local = doc(4, [], { viewport: { x: -500, y: -300, zoom: 1.75 } });
+    const remote = doc(5, [], { viewport: { x: 0, y: 0, zoom: 0.2 } });
+
+    expect(rebaseWorkspaceDoc(local, remote, doc(4, [])).viewport).toEqual({ x: -500, y: -300, zoom: 1.75 });
+  });
+
+  it('keeps z-ordering monotonic across both sides so new nodes land on top', () => {
+    const merged = rebaseWorkspaceDoc(doc(4, [], { nextZ: 12 }), doc(5, [], { nextZ: 30 }), doc(4, []));
+    expect(merged.nextZ).toBe(30);
+  });
+});

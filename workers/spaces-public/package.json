@@ -1,0 +1,16 @@
+{
+  "name": "@hii/spaces-public",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "types": "wrangler types --config wrangler.jsonc worker-configuration.d.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "build": "wrangler deploy --dry-run --config wrangler.jsonc --outdir dist",
+    "build:production": "wrangler deploy --dry-run --config wrangler.production.jsonc --outdir dist"
+  },
+  "devDependencies": {
+    "wrangler": "4.124.0"
+  }
+}

@@ -1,0 +1,2590 @@
+use crate::attachments::ImagePayload;
+use crate::budget::Cancel;
+use crate::config::{ModelProvider, OX_ALPHA_WEB_MODEL, OX_ALPHA_WEB_URL};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::{
+    collections::BTreeMap,
+    io::{BufRead, BufReader, Write},
+    net::ToSocketAddrs,
+    path::PathBuf,
+    process::{Command, Stdio},
+    sync::{mpsc, Arc, Mutex},
+    time::{Duration, Instant},
+};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Message {
+    pub role: String,
+    pub content: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
+    #[serde(skip)]
+    pub image_mime_types: Vec<String>,
+}
+
+impl Message {
+    pub fn system(content: impl Into<String>) -> Self {
+        Self {
+            role: "system".into(),
+            content: content.into(),
+            images: Vec::new(),
+            image_mime_types: Vec::new(),
+        }
+    }
+
+    pub fn user(content: impl Into<String>) -> Self {
+        Self {
+            role: "user".into(),
+            content: content.into(),
+            images: Vec::new(),
+            image_mime_types: Vec::new(),
+        }
+    }
+
+    pub fn assistant(content: impl Into<String>) -> Self {
+        Self {
+            role: "assistant".into(),
+            content: content.into(),
+            images: Vec::new(),
+            image_mime_types: Vec::new(),
+        }
+    }
+
+    pub fn user_with_images(content: impl Into<String>, images: Vec<ImagePayload>) -> Self {
+        Self {
+            role: "user".into(),
+            content: content.into(),
+            images: images.iter().map(|image| image.base64.clone()).collect(),
+            image_mime_types: images.into_iter().map(|image| image.mime_type).collect(),
+        }
+    }
+}
+
+/// Collapse HII's independently governed system contexts into the single
+/// leading system message required by OpenAI-compatible local servers.
+fn provider_messages(messages: &[Message]) -> Vec<Message> {
+    let system = messages
+        .iter()
+        .filter(|message| message.role == "system")
+        .map(|message| message.content.trim())
+        .filter(|content| !content.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let mut normalized = Vec::with_capacity(messages.len());
+    if !system.is_empty() {
+        normalized.push(Message::system(system));
+    }
+    normalized.extend(
+        messages
+            .iter()
+            .filter(|message| message.role != "system")
+            .cloned(),
+    );
+    normalized
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ResponseMessage {
+    #[serde(default)]
+    content: String,
+    #[serde(default)]
+    thinking: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatResponse {
+    message: ResponseMessage,
+    #[serde(default)]
+    prompt_eval_count: u64,
+    #[serde(default)]
+    eval_count: u64,
+    #[serde(default)]
+    prompt_eval_duration: u64,
+    #[serde(default)]
+    eval_duration: u64,
+    #[serde(default)]
+    total_duration: u64,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ChatUsage {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub prompt_duration_ms: u64,
+    pub completion_duration_ms: u64,
+    pub total_duration_ms: u64,
+}
+
+impl ChatUsage {
+    pub fn tokens_per_second(&self) -> f64 {
+        if self.completion_duration_ms == 0 {
+            0.0
+        } else {
+            self.completion_tokens as f64 / (self.completion_duration_ms as f64 / 1_000.0)
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ChatResult {
+    pub content: String,
+    pub thinking: String,
+    pub usage: ChatUsage,
+}
+
+/// Sent when a generation is abandoned rather than failing on its own.
+pub const CANCELLED: &str = "generation cancelled";
+
+#[derive(Debug)]
+pub enum ChatStreamEvent {
+    Thinking(String),
+    Content(String),
+    Done(Result<ChatResult, String>),
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ChatStreamFormat {
+    json_format: bool,
+    strict_json_schema: bool,
+    think: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct TagsResponse {
+    #[serde(default)]
+    models: Vec<ModelTag>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelTag {
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RunningModelsResponse {
+    #[serde(default)]
+    models: Vec<RunningModel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RunningModel {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    model: String,
+}
+
+/// OpenAI-compatible `/v1/models` listing used by LM Studio and HII.
+#[derive(Debug, Deserialize)]
+struct OpenAiModels {
+    #[serde(default)]
+    data: Vec<OpenAiModel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiModel {
+    id: String,
+}
+
+#[derive(Clone)]
+pub struct Ollama {
+    base_url: String,
+    provider: ModelProvider,
+    explicit_route: bool,
+    agent: ureq::Agent,
+    model_api_key: Result<Option<String>, String>,
+    backend: Option<crate::backends::Backend>,
+    backend_headers: Result<std::collections::BTreeMap<String, String>, String>,
+    token_counts: Arc<Mutex<TokenCountCache>>,
+}
+
+#[derive(Default)]
+struct TokenCountCache {
+    unavailable: std::collections::HashMap<String, Instant>,
+    entries: std::collections::VecDeque<(String, [u8; 32], usize)>,
+}
+
+impl Ollama {
+    /// Construct an explicitly selected endpoint without consulting inherited
+    /// provider or credential environment variables.
+    pub fn for_engine(base_url: String, provider: ModelProvider) -> Self {
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(2))
+            .timeout_read(Duration::from_secs(600))
+            .timeout_write(Duration::from_secs(30))
+            .build();
+        Self {
+            base_url,
+            provider,
+            explicit_route: true,
+            agent,
+            model_api_key: Ok(None),
+            backend: None,
+            backend_headers: Ok(Default::default()),
+            token_counts: Arc::new(Mutex::new(TokenCountCache::default())),
+        }
+    }
+
+    pub fn new(base_url: String) -> Self {
+        let provider = ModelProvider::discover(&base_url);
+        let model_api_key = load_model_api_key_for_endpoint(&base_url);
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(2))
+            .timeout_read(Duration::from_secs(600))
+            .timeout_write(Duration::from_secs(30))
+            .build();
+        Self {
+            base_url,
+            provider,
+            explicit_route: false,
+            agent,
+            model_api_key,
+            backend: crate::backends::active().ok().flatten().filter(|backend| {
+                backend.endpoint.trim_end_matches('/')
+                    == crate::config::AppPaths::model_url().trim_end_matches('/')
+            }),
+            backend_headers: crate::backends::active()
+                .ok()
+                .flatten()
+                .filter(|backend| {
+                    backend.endpoint.trim_end_matches('/')
+                        == crate::config::AppPaths::model_url().trim_end_matches('/')
+                })
+                .map(|backend| crate::backends::resolved_headers(&backend))
+                .unwrap_or(Ok(Default::default())),
+            token_counts: Arc::new(Mutex::new(TokenCountCache::default())),
+        }
+    }
+
+    /// Construct a named OpenAI-compatible backend without changing selection.
+    pub fn for_backend(name: &str) -> Result<Self, String> {
+        let backend = crate::backends::get(name)?;
+        let headers = crate::backends::resolved_headers(&backend)?;
+        let mut value = Self::for_engine(backend.endpoint.clone(), ModelProvider::OpenAI);
+        value.backend_headers = Ok(headers);
+        value.backend = Some(backend);
+        Ok(value)
+    }
+
+    fn authorize(&self, request: ureq::Request) -> Result<ureq::Request, String> {
+        let request = match &self.model_api_key {
+            Ok(Some(key)) => Ok(request.set("Authorization", &format!("Bearer {key}"))),
+            Ok(None) => Ok(request),
+            Err(error) => Err(error.clone()),
+        }?;
+        let headers = self.backend_headers.as_ref().map_err(Clone::clone)?;
+        Ok(headers
+            .iter()
+            .fold(request, |request, (key, value)| request.set(key, value)))
+    }
+
+    /// Choose the lowest-friction local runtime. An explicit model URL always
+    /// wins; otherwise a ready HII endpoint wins over Ollama.
+    pub fn discover() -> Self {
+        if std::env::var_os("HII_MODEL_URL").is_some()
+            || std::env::var_os("HII_OLLAMA_URL").is_some()
+            || std::env::var_os("HII_RAPID_MLX_URL").is_some()
+            || std::env::var_os("HII_MODEL_PROVIDER").is_some()
+        {
+            return Self::new(crate::config::AppPaths::model_url());
+        }
+        if let Ok(Some(backend)) = crate::backends::active() {
+            if let Ok(mut client) = Self::for_backend(&backend.name) {
+                client.explicit_route = true;
+                return client;
+            }
+        }
+        if let Ok(Some((endpoint, provider))) = active_inference_route() {
+            return Self::for_engine(endpoint, provider);
+        }
+        // The managed inference manifest describes the runtime HII actually
+        // owns now. Prefer it over an older compatibility-provider preference
+        // so a stale saved llama.cpp port cannot add a failed probe before
+        // every call or hide an adaptive task-boundary selection.
+        if let Some(config) = crate::config::inference_config() {
+            return Self::new(config.endpoint);
+        }
+        if let Some(provider) = crate::config::AppPaths::discover()
+            .ok()
+            .and_then(|paths| paths.user_model_preference().ok().flatten())
+            .and_then(|preference| preference.provider)
+        {
+            if provider == ModelProvider::OxAlphaWeb.id() {
+                return Self::new(OX_ALPHA_WEB_URL.to_string());
+            }
+            if provider == ModelProvider::LlamaCpp.id() {
+                return Self::new("http://127.0.0.1:6127".to_string());
+            }
+        }
+        Self::for_mode("auto")
+    }
+
+    pub fn for_mode(_mode: &str) -> Self {
+        Self::new(crate::config::AppPaths::model_url())
+    }
+
+    pub fn provider_label(&self) -> &'static str {
+        self.provider.label()
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    pub fn provider(&self) -> ModelProvider {
+        self.provider
+    }
+
+    pub fn model_for_purpose(&self, purpose: &str) -> String {
+        let fallback = if purpose == "review" {
+            self.provider.default_review_model()
+        } else {
+            self.provider.default_model()
+        };
+        self.backend
+            .as_ref()
+            .map(|b| crate::backends::model_for_purpose(b, purpose, fallback))
+            .unwrap_or_else(|| fallback.to_string())
+    }
+
+    /// Produce a small historical summary through the already selected local
+    /// provider and exact active model. This separate request uses short network
+    /// timeouts, a bounded response, and no redirects so it cannot route a local
+    /// summary to a remote endpoint through redirection.
+    pub fn local_summary(&self, model: &str, messages: &[Message]) -> Result<String, String> {
+        if self.provider == ModelProvider::OxAlphaWeb {
+            return Err("semantic summaries require the active local model".into());
+        }
+        let endpoint = url::Url::parse(&self.base_url)
+            .map_err(|_| "semantic summary endpoint is invalid".to_string())?;
+        let local_host = match endpoint.host() {
+            Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            None => false,
+        };
+        if !matches!(endpoint.scheme(), "http" | "https") || !local_host {
+            return Err("semantic summaries require a loopback model endpoint".into());
+        }
+        let agent = ureq::AgentBuilder::new()
+            .timeout(Duration::from_secs(20))
+            .timeout_connect(Duration::from_secs(2))
+            .timeout_read(Duration::from_secs(20))
+            .timeout_write(Duration::from_secs(5))
+            .redirects(0)
+            .build();
+        let (path, body) = if self.provider == ModelProvider::Ollama {
+            (
+                "/api/chat",
+                json!({
+                    "model": model,
+                    "messages": provider_messages(messages),
+                    "stream": false,
+                    "think": false,
+                    "options": { "temperature": 0.1, "num_predict": 768 }
+                }),
+            )
+        } else {
+            (
+                "/v1/chat/completions",
+                json!({
+                    "model": model,
+                    "messages": openai_messages(&provider_messages(messages)),
+                    "stream": false,
+                    "max_tokens": 768,
+                    "temperature": 0.1,
+                    "enable_thinking": false
+                }),
+            )
+        };
+        let response = self
+            .authorize(agent.post(&format!("{}{}", self.base_url.trim_end_matches('/'), path)))?
+            .send_json(body)
+            .map_err(format_ureq)?;
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        response
+            .into_reader()
+            .take(64 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("cannot read semantic summary response: {error}"))?;
+        if bytes.len() > 64 * 1024 {
+            return Err("semantic summary response exceeded 64 KiB".into());
+        }
+        let value: Value = serde_json::from_slice(&bytes)
+            .map_err(|error| format!("invalid semantic summary response: {error}"))?;
+        let content = if self.provider == ModelProvider::Ollama {
+            value["message"]["content"].as_str()
+        } else {
+            value["choices"][0]["message"]["content"].as_str()
+        }
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+        if content.is_empty() {
+            Err("local model returned an empty semantic summary".into())
+        } else {
+            Ok(content)
+        }
+    }
+
+    /// Count the provider's rendered text prompt without generating tokens.
+    /// Unsupported providers/images use the caller's explicit conservative
+    /// estimate. Probe failures are cached per model so optional capability
+    /// discovery cannot add repeated network delays to each agent step.
+    pub fn count_input_tokens(&self, model: &str, messages: &[Message]) -> Option<usize> {
+        use sha2::{Digest, Sha256};
+        if !matches!(
+            self.provider,
+            ModelProvider::Native | ModelProvider::LmStudio | ModelProvider::LlamaCpp
+        ) || messages.iter().any(|message| !message.images.is_empty())
+        {
+            return None;
+        }
+        let body = json!({"model": model, "messages": provider_messages(messages), "add_generation_prompt": true});
+        let key: [u8; 32] = Sha256::digest(serde_json::to_vec(&body).ok()?).into();
+        {
+            let cache = self.token_counts.lock().ok()?;
+            if cache
+                .unavailable
+                .get(model)
+                .is_some_and(|time| time.elapsed() < Duration::from_secs(300))
+            {
+                return None;
+            }
+            if let Some((_, _, count)) = cache
+                .entries
+                .iter()
+                .find(|(cached_model, cached_key, _)| cached_model == model && *cached_key == key)
+            {
+                return Some(*count);
+            }
+        }
+        let result = (|| -> Option<usize> {
+            // No redirect can carry this request or bearer credential away from
+            // the exact configured inference endpoint.
+            let agent = ureq::AgentBuilder::new()
+                .redirects(0)
+                .timeout(Duration::from_secs(2))
+                .build();
+            let base = self.base_url.trim_end_matches('/');
+            let rendered: Value = self
+                .authorize(agent.post(&format!("{base}/apply-template")))
+                .ok()?
+                .send_json(body)
+                .ok()?
+                .into_json()
+                .ok()?;
+            let prompt = rendered.get("prompt")?.as_str()?;
+            let tokens: Value = self.authorize(agent.post(&format!("{base}/tokenize"))).ok()?
+                .send_json(json!({"model": model,"content":prompt,"add_special":true,"parse_special":true,"with_pieces":false}))
+                .ok()?.into_json().ok()?;
+            let count = tokens.get("tokens")?.as_array()?.len();
+            (count > 0).then_some(count)
+        })();
+        if let Ok(mut cache) = self.token_counts.lock() {
+            match result {
+                Some(count) => {
+                    cache.unavailable.remove(model);
+                    cache.entries.push_back((model.to_string(), key, count));
+                    while cache.entries.len() > 8 {
+                        cache.entries.pop_front();
+                    }
+                }
+                None => {
+                    cache.unavailable.insert(model.to_string(), Instant::now());
+                }
+            }
+        }
+        result
+    }
+
+    /// Bring a local provider up when none is listening yet, preferring HII's
+    /// own native runner so inference stays inside a runtime HII owns. The
+    /// native runner is only started when its weights were already acquired —
+    /// model download stays an explicit operator action. Ollama remains an
+    /// explicit compatibility provider, never an automatic runtime dependency.
+    /// An explicitly pinned model URL is never second-guessed.
+    pub fn ensure_reachable(self) -> Result<Self, String> {
+        if self.provider == ModelProvider::OxAlphaWeb {
+            ox_alpha_browser_adapter()?;
+            return Ok(self);
+        }
+        if self.explicit_route {
+            if endpoint_ready(&self.base_url) {
+                return Ok(self);
+            }
+            return Err(self.unreachable_error());
+        }
+        if !environment_pinned_model_url() {
+            if let Err(error) = active_inference_route() {
+                return Err(format!("saved active inference route is invalid ({error}); HII will not fall back to another runtime"));
+            }
+        }
+        if endpoint_ready(&self.base_url) {
+            return Ok(self);
+        }
+        if pinned_model_url() {
+            return Err(self.unreachable_error());
+        }
+        if windows_managed_provider(self.provider) && start_windows_llama_runtime(&self.base_url) {
+            return Ok(self);
+        }
+        if let Some(native) = start_native_runner() {
+            return Ok(native);
+        }
+        Err(self.unreachable_error())
+    }
+
+    fn unreachable_error(&self) -> String {
+        format!(
+            "cannot reach {} at {}. Bring up HII's own runtime with \
+`hii-native-runner serve` (acquire weights first: `hii runner model start --model <id>`), \
+or explicitly pin a compatibility provider with HII_MODEL_URL=<url> (or HII_RAPID_MLX_URL=<url>).",
+            self.provider_label(),
+            self.base_url
+        )
+    }
+
+    pub fn models(&self) -> Result<Vec<String>, String> {
+        // Model catalogs are read-only discovery. Keep their deadline short so
+        // a stalled provider cannot hold startup or a picker open for the much
+        // longer generation timeout configured on `self.agent`.
+        let catalog_agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(1))
+            .timeout_read(Duration::from_secs(2))
+            .timeout_write(Duration::from_secs(2))
+            .build();
+        match self.provider {
+            ModelProvider::Ollama => {
+                let response: TagsResponse = self
+                    .authorize(catalog_agent.get(&format!("{}/api/tags", self.base_url)))?
+                    .call()
+                    .map_err(format_ureq)?
+                    .into_json()
+                    .map_err(|error| catalog_json_error("invalid Ollama model response", error))?;
+                Ok(response
+                    .models
+                    .into_iter()
+                    .map(|model| model.name)
+                    .collect())
+            }
+            ModelProvider::LmStudio
+            | ModelProvider::LlamaCpp
+            | ModelProvider::Native
+            | ModelProvider::RapidMlx
+            | ModelProvider::OpenAI => {
+                let response: OpenAiModels = self
+                    .authorize(
+                        catalog_agent.get(&crate::backends::api_url(&self.base_url, "/models")),
+                    )?
+                    .call()
+                    .map_err(format_ureq)?
+                    .into_json()
+                    .map_err(|error| catalog_json_error("invalid model listing", error))?;
+                Ok(response.data.into_iter().map(|model| model.id).collect())
+            }
+            ModelProvider::OxAlphaWeb => {
+                ox_alpha_browser_adapter()?;
+                Ok(vec![OX_ALPHA_WEB_MODEL.to_string()])
+            }
+        }
+    }
+
+    /// Return models that the provider explicitly reports as loaded now.
+    ///
+    /// Ollama exposes this distinction at `/api/ps`. OpenAI-compatible local
+    /// runtimes only expose a model catalog, so `None` means "not observable"
+    /// rather than "nothing loaded". The short timeout keeps status surfaces
+    /// from hanging behind a stalled local provider.
+    pub fn running_models(&self) -> Result<Option<Vec<String>>, String> {
+        if self.provider == ModelProvider::Native {
+            let agent = ureq::AgentBuilder::new()
+                .timeout_connect(Duration::from_secs(1))
+                .timeout_read(Duration::from_secs(2))
+                .build();
+            let response: Value = self
+                .authorize(agent.get(&format!("{}/health", self.base_url)))?
+                .call()
+                .map_err(format_ureq)?
+                .into_json()
+                .map_err(|error| format!("invalid native runner health response: {error}"))?;
+            return Ok(Some(
+                response
+                    .get("loaded_model")
+                    .and_then(Value::as_str)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_string)
+                    .into_iter()
+                    .collect(),
+            ));
+        }
+        if self.provider != ModelProvider::Ollama {
+            return Ok(None);
+        }
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(1))
+            .timeout_read(Duration::from_secs(2))
+            .timeout_write(Duration::from_secs(2))
+            .build();
+        let response = agent.get(&format!("{}/api/ps", self.base_url));
+        let response: RunningModelsResponse = self
+            .authorize(response)?
+            .call()
+            .map_err(format_ureq)?
+            .into_json()
+            .map_err(|error| format!("invalid Ollama running-model response: {error}"))?;
+        Ok(Some(
+            response
+                .models
+                .into_iter()
+                .filter_map(|model| {
+                    let name = if model.name.trim().is_empty() {
+                        model.model
+                    } else {
+                        model.name
+                    };
+                    (!name.trim().is_empty()).then_some(name)
+                })
+                .collect(),
+        ))
+    }
+
+    pub fn model_supports_vision(&self, model: &str) -> Result<Option<bool>, String> {
+        if self.provider != ModelProvider::Ollama {
+            return Ok(None);
+        }
+        let value: Value = self
+            .authorize(self.agent.post(&format!("{}/api/show", self.base_url)))?
+            .send_json(json!({ "model": model }))
+            .map_err(format_ureq)?
+            .into_json()
+            .map_err(|error| format!("invalid Ollama model details: {error}"))?;
+        Ok(Some(value["capabilities"].as_array().is_some_and(
+            |items| items.iter().any(|item| item.as_str() == Some("vision")),
+        )))
+    }
+
+    pub fn chat_text(&self, model: &str, messages: &[Message]) -> Result<String, String> {
+        Ok(self.chat_text_with_usage(model, messages)?.content)
+    }
+
+    pub fn chat_text_with_usage(
+        &self,
+        model: &str,
+        messages: &[Message],
+    ) -> Result<ChatResult, String> {
+        self.chat(model, messages, None)
+    }
+
+    fn chat(
+        &self,
+        model: &str,
+        messages: &[Message],
+        format: Option<Value>,
+    ) -> Result<ChatResult, String> {
+        let model = self
+            .backend
+            .as_ref()
+            .map(|b| crate::backends::resolve_model(b, model))
+            .unwrap_or_else(|| model.to_string());
+        let model = model.as_str();
+        let messages = provider_messages(messages);
+        let result = match self.provider {
+            ModelProvider::Ollama => self.chat_ollama(model, &messages, format),
+            ModelProvider::LmStudio
+            | ModelProvider::LlamaCpp
+            | ModelProvider::Native
+            | ModelProvider::RapidMlx
+            | ModelProvider::OpenAI => self.chat_openai(model, &messages, format),
+            ModelProvider::OxAlphaWeb => self.chat_website(model, &messages),
+        };
+        match &result {
+            Ok(chat) => log_llm_request(model, self.provider, &chat.usage),
+            Err(error) => log_llm_failure(model, self.provider, error),
+        }
+        result
+    }
+
+    fn chat_ollama(
+        &self,
+        model: &str,
+        messages: &[Message],
+        format: Option<Value>,
+    ) -> Result<ChatResult, String> {
+        let mut body = json!({
+            "model": model,
+            "messages": messages,
+            "stream": false,
+            "think": false,
+            "keep_alive": "10m",
+            "options": {
+                "temperature": 0.1,
+                "num_ctx": crate::context_budget::ContextBudget::for_model(model).context_tokens,
+                "num_predict": crate::context_budget::ContextBudget::for_model(model).output_tokens,
+                "repeat_penalty": 1.1,
+                "repeat_last_n": 256
+            }
+        });
+        if let Some(format) = format {
+            body["format"] = format;
+        }
+        let response: ChatResponse = self
+            .authorize(self.agent.post(&format!("{}/api/chat", self.base_url)))?
+            .send_json(body)
+            .map_err(format_ureq)?
+            .into_json()
+            .map_err(|error| format!("invalid Ollama chat response: {error}"))?;
+        Ok(ChatResult {
+            content: response.message.content,
+            thinking: response.message.thinking,
+            usage: ChatUsage {
+                prompt_tokens: response.prompt_eval_count,
+                completion_tokens: response.eval_count,
+                prompt_duration_ms: response.prompt_eval_duration / 1_000_000,
+                completion_duration_ms: response.eval_duration / 1_000_000,
+                total_duration_ms: response.total_duration / 1_000_000,
+            },
+        })
+    }
+
+    /// OpenAI-compatible chat (`/v1/chat/completions`), used for LM Studio and
+    /// HII. A requested JSON schema maps to `response_format:
+    /// json_object` since not all backends honor a full schema constraint.
+    fn chat_openai(
+        &self,
+        model: &str,
+        messages: &[Message],
+        format: Option<Value>,
+    ) -> Result<ChatResult, String> {
+        let mut body = json!({
+            "model": model,
+            "messages": openai_messages(messages),
+            "stream": false,
+            "max_tokens": crate::context_budget::ContextBudget::for_model(model).output_tokens,
+            "temperature": 0.1,
+        });
+        if let Some(backend) = &self.backend {
+            crate::backends::apply_request_defaults(backend, &mut body);
+        }
+        // The blocking path is the structured/JSON path; it mirrors the Ollama
+        // branch's `"think": false` and asks for an answer directly.
+        apply_thinking(&mut body, false);
+        if format.is_some() {
+            body["response_format"] = json!({ "type": "json_object" });
+        }
+        let started = Instant::now();
+        let value: Value = self
+            .authorize(self.agent.post(&crate::backends::api_url(
+                &self.base_url,
+                "/chat/completions",
+            )))?
+            .send_json(body)
+            .map_err(format_ureq)?
+            .into_json()
+            .map_err(|error| format!("invalid chat response: {error}"))?;
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        let message = &value["choices"][0]["message"];
+        let content = message["content"].as_str().unwrap_or_default().to_string();
+        // Reasoning arrives under a provider-specific key on the message, the
+        // same set the streaming path already handles.
+        let thinking = openai_reasoning_delta(message)
+            .unwrap_or_default()
+            .to_string();
+        // Prefer what the backend reports; otherwise time the call here. Without
+        // a first-token signal the whole call counts as completion time.
+        let (prompt_duration_ms, completion_duration_ms, total_duration_ms) =
+            openai_reported_durations(&value["usage"]).unwrap_or((0, elapsed_ms, elapsed_ms));
+        let usage = ChatUsage {
+            prompt_tokens: value["usage"]["prompt_tokens"].as_u64().unwrap_or(0),
+            completion_tokens: value["usage"]["completion_tokens"].as_u64().unwrap_or(0),
+            prompt_duration_ms,
+            completion_duration_ms,
+            total_duration_ms,
+        };
+        Ok(ChatResult {
+            content,
+            thinking,
+            usage,
+        })
+    }
+
+    /// Ox Alpha is controlled through the rendered website DOM in HII's
+    /// headless Chromium worker. HII supplies its bounded action protocol in
+    /// the prompt and remains the only tool executor.
+    fn chat_website(&self, model: &str, messages: &[Message]) -> Result<ChatResult, String> {
+        run_ox_alpha_browser(model, messages, &Cancel::new(), None)
+    }
+
+    /// Stream an Ollama response so provider-supplied thinking can be rendered
+    /// without inserting it into the next model request.
+    /// Stream a completion.
+    ///
+    /// `cancel` is checked once per received chunk so a run can abandon a
+    /// generation in progress. The agent-level read timeout cannot do this: it
+    /// resets on every chunk, so a model emitting one token per second holds the
+    /// socket open indefinitely while satisfying it.
+    pub fn chat_with_stream(
+        &self,
+        model: &str,
+        messages: &[Message],
+        json_format: bool,
+        think: bool,
+        cancel: &Cancel,
+        sender: mpsc::Sender<ChatStreamEvent>,
+    ) {
+        self.chat_with_stream_format(
+            model,
+            messages,
+            ChatStreamFormat {
+                json_format,
+                strict_json_schema: true,
+                think,
+            },
+            cancel,
+            sender,
+        );
+    }
+
+    /// Retry a structured action request without a provider-side grammar.
+    /// Some local backends reject both schema and broad JSON constraints before
+    /// returning any tokens; HII still validates the action with its own parser.
+    pub fn chat_with_stream_unconstrained(
+        &self,
+        model: &str,
+        messages: &[Message],
+        think: bool,
+        cancel: &Cancel,
+        sender: mpsc::Sender<ChatStreamEvent>,
+    ) {
+        self.chat_with_stream_format(
+            model,
+            messages,
+            ChatStreamFormat {
+                json_format: false,
+                strict_json_schema: false,
+                think,
+            },
+            cancel,
+            sender,
+        );
+    }
+
+    fn chat_with_stream_format(
+        &self,
+        model: &str,
+        messages: &[Message],
+        format: ChatStreamFormat,
+        cancel: &Cancel,
+        sender: mpsc::Sender<ChatStreamEvent>,
+    ) {
+        let resolved_model = self
+            .backend
+            .as_ref()
+            .map(|b| crate::backends::resolve_model(b, model))
+            .unwrap_or_else(|| model.to_string());
+        let model = resolved_model.as_str();
+        if self.provider == ModelProvider::OxAlphaWeb {
+            let result = run_ox_alpha_browser(model, messages, cancel, Some(&sender));
+            match &result {
+                Ok(result) => log_llm_request(model, self.provider, &result.usage),
+                Err(error) => log_llm_failure(model, self.provider, error),
+            }
+            let _ = sender.send(ChatStreamEvent::Done(result));
+            return;
+        }
+        if self.provider != ModelProvider::Ollama {
+            self.chat_openai_with_stream(model, messages, format, cancel, sender);
+            return;
+        }
+
+        let mut body = json!({
+            "model": model,
+            "messages": messages,
+            "stream": true,
+            "think": format.think,
+            "keep_alive": "10m",
+            "options": {
+                "temperature": 0.1,
+                "num_ctx": crate::context_budget::ContextBudget::for_model(model).context_tokens,
+                "num_predict": crate::context_budget::ContextBudget::for_model(model).output_tokens,
+                "repeat_penalty": 1.1,
+                "repeat_last_n": 256
+            }
+        });
+        if format.json_format {
+            body["format"] = if format.strict_json_schema {
+                action_schema()
+            } else {
+                json!("json")
+            };
+        }
+        let response = match self
+            .authorize(self.agent.post(&format!("{}/api/chat", self.base_url)))
+            .and_then(|request| request.send_json(body).map_err(format_ureq))
+        {
+            Ok(response) => response,
+            Err(error) => {
+                log_llm_failure(model, self.provider, &error);
+                let _ = sender.send(ChatStreamEvent::Done(Err(error)));
+                return;
+            }
+        };
+
+        let mut content = String::new();
+        let mut thinking = String::new();
+        let mut usage = ChatUsage::default();
+        // Models commonly rehearse a structured action in private thinking before
+        // emitting the same JSON publicly. Keep the channels independent so that
+        // one valid action is not counted as another thinking-loop repetition.
+        let mut thinking_repetition = RepetitionGuard::default();
+        let mut content_repetition = RepetitionGuard::default();
+        for line in BufReader::new(response.into_reader()).lines() {
+            if cancel.is_cancelled() {
+                log_llm_failure(model, self.provider, CANCELLED);
+                let _ = sender.send(ChatStreamEvent::Done(Err(CANCELLED.into())));
+                return;
+            }
+            let line = match line {
+                Ok(line) => line,
+                Err(error) => {
+                    let error = format!("failed to read Ollama stream: {error}");
+                    log_llm_failure(model, self.provider, &error);
+                    let _ = sender.send(ChatStreamEvent::Done(Err(error)));
+                    return;
+                }
+            };
+            let chunk: ChatResponse = match serde_json::from_str(&line) {
+                Ok(chunk) => chunk,
+                Err(error) => {
+                    let error = format!("invalid Ollama stream response: {error}");
+                    log_llm_failure(model, self.provider, &error);
+                    let _ = sender.send(ChatStreamEvent::Done(Err(error)));
+                    return;
+                }
+            };
+            if !chunk.message.thinking.is_empty() {
+                thinking.push_str(&chunk.message.thinking);
+                if thinking_repetition.observe(&chunk.message.thinking) {
+                    log_llm_failure(model, self.provider, "model loop detected in thinking");
+                    let _ = sender.send(ChatStreamEvent::Done(Err(
+                        "MODEL LOOP DETECTED — the current generation repeated the same substantial block three times. The session is preserved; revise or retry the request."
+                            .into(),
+                    )));
+                    return;
+                }
+                let _ = sender.send(ChatStreamEvent::Thinking(chunk.message.thinking));
+            }
+            if !chunk.message.content.is_empty() {
+                if content_repetition.observe(&chunk.message.content) {
+                    log_llm_failure(model, self.provider, "model loop detected in content");
+                    let _ = sender.send(ChatStreamEvent::Done(Err(
+                        "MODEL LOOP DETECTED — the current generation repeated the same substantial block three times. The session is preserved; revise or retry the request."
+                            .into(),
+                    )));
+                    return;
+                }
+                let _ = sender.send(ChatStreamEvent::Content(chunk.message.content.clone()));
+            }
+            content.push_str(&chunk.message.content);
+            usage = ChatUsage {
+                prompt_tokens: chunk.prompt_eval_count,
+                completion_tokens: chunk.eval_count,
+                prompt_duration_ms: chunk.prompt_eval_duration / 1_000_000,
+                completion_duration_ms: chunk.eval_duration / 1_000_000,
+                total_duration_ms: chunk.total_duration / 1_000_000,
+            };
+        }
+        let result = ChatResult {
+            content,
+            thinking,
+            usage,
+        };
+        log_llm_request(model, self.provider, &result.usage);
+        let _ = sender.send(ChatStreamEvent::Done(Ok(result)));
+    }
+
+    fn chat_openai_with_stream(
+        &self,
+        model: &str,
+        messages: &[Message],
+        format: ChatStreamFormat,
+        cancel: &Cancel,
+        sender: mpsc::Sender<ChatStreamEvent>,
+    ) {
+        let started = Instant::now();
+        let request = {
+            let mut body = json!({
+                "model": self.backend.as_ref().map(|b| crate::backends::resolve_model(b, model)).unwrap_or_else(|| model.to_string()),
+                "messages": openai_messages(messages),
+                "stream": true,
+                "stream_options": { "include_usage": true },
+                "max_tokens": crate::context_budget::ContextBudget::for_model(model).output_tokens,
+                "temperature": 0.1,
+            });
+            if let Some(backend) = &self.backend {
+                crate::backends::apply_request_defaults(backend, &mut body);
+            }
+            apply_thinking(&mut body, format.think);
+            if format.json_format && format.strict_json_schema {
+                // The HII loop now speaks the provider's native function-call
+                // protocol. The action schema remains the single source of
+                // truth; each branch becomes one function and is converted
+                // back into the existing governed Action at the boundary.
+                body["tools"] = native_tool_definitions();
+                body["tool_choice"] = json!("auto");
+                body["parallel_tool_calls"] = json!(false);
+            } else if format.json_format {
+                body["response_format"] = if strict_action_schema_enabled() {
+                    json!({
+                        "type": "json_schema",
+                        "json_schema": { "name": "hii_action", "strict": true, "schema": action_schema() },
+                    })
+                } else {
+                    json!({ "type": "json_object" })
+                };
+            }
+            self.authorize(self.agent.post(&crate::backends::api_url(
+                &self.base_url,
+                "/chat/completions",
+            )))
+            .and_then(|request| request.send_json(body).map_err(format_ureq))
+        };
+        let response = match request {
+            Ok(response) => response,
+            Err(error) => {
+                log_llm_failure(model, self.provider, &error);
+                let _ = sender.send(ChatStreamEvent::Done(Err(error)));
+                return;
+            }
+        };
+        let result = consume_openai_sse(response, started, cancel, Some(&sender));
+        match &result {
+            Ok(result) => log_llm_request(model, self.provider, &result.usage),
+            Err(error) => log_llm_failure(model, self.provider, error),
+        }
+        let _ = sender.send(ChatStreamEvent::Done(result));
+    }
+}
+
+fn load_model_api_key_for_endpoint(endpoint: &str) -> Result<Option<String>, String> {
+    let explicit_key = std::env::var("HII_MODEL_API_KEY").ok();
+    let key_file = std::env::var_os("HII_MODEL_API_KEY_FILE")
+        .map(PathBuf::from)
+        .or_else(|| {
+            if explicit_key.is_some() {
+                return None;
+            }
+            crate::config::inference_config()
+                .filter(|config| {
+                    config.endpoint.trim_end_matches('/') == endpoint.trim_end_matches('/')
+                })
+                .and_then(|config| config.api_key_file)
+        })
+        .or_else(|| {
+            if explicit_key.is_some()
+                || ModelProvider::discover(endpoint) != ModelProvider::LlamaCpp
+            {
+                return None;
+            }
+            crate::config::AppPaths::discover()
+                .ok()
+                .map(|paths| paths.runtime.join("network/model-rail/api-key"))
+        });
+    load_model_api_key(key_file, explicit_key)
+}
+
+fn load_model_api_key(
+    key_file: Option<PathBuf>,
+    fallback: Option<String>,
+) -> Result<Option<String>, String> {
+    let raw = if let Some(path) = key_file {
+        std::fs::read_to_string(&path).map_err(|error| {
+            format!(
+                "failed to read HII_MODEL_API_KEY_FILE at {}: {error}",
+                path.display()
+            )
+        })?
+    } else if let Some(value) = fallback {
+        value
+    } else {
+        return Ok(None);
+    };
+    let key = raw.trim();
+    if key.is_empty() {
+        return Err("model API credential is empty".to_string());
+    }
+    if key.contains(['\r', '\n']) {
+        return Err("model API credential must be a single line".to_string());
+    }
+    Ok(Some(key.to_string()))
+}
+
+fn ox_alpha_browser_adapter() -> Result<PathBuf, String> {
+    let path = std::env::var_os("HII_OXALPHA_BROWSER_ADAPTER")
+        .map(PathBuf::from)
+        .or_else(|| {
+            crate::config::AppPaths::discover()
+                .ok()
+                .map(|paths| paths.repo.join("browser/dist/src/oxalpha-main.js"))
+        })
+        .ok_or_else(|| {
+            "Ox Alpha requires HII's Chromium worker; set HII_ROOT to a HII checkout".to_string()
+        })?;
+    if !path.is_file() {
+        return Err(format!(
+            "Ox Alpha browser adapter is missing at {}; run `npm --prefix browser run build`",
+            path.display()
+        ));
+    }
+    Ok(path)
+}
+
+fn ox_alpha_browser_prompt(messages: &[Message]) -> String {
+    let mut prompt = String::from(
+        "This conversation is being relayed by HII through the Ox Alpha website UI. HII owns and executes every tool. Follow the HII runtime instructions below exactly and return its flat JSON action protocol when a tool is needed.\n",
+    );
+    for message in messages {
+        prompt.push('\n');
+        prompt.push_str(&message.role.to_ascii_uppercase());
+        prompt.push_str(":\n");
+        prompt.push_str(&message.content);
+        prompt.push('\n');
+    }
+    prompt
+}
+
+fn run_ox_alpha_browser(
+    model: &str,
+    messages: &[Message],
+    cancel: &Cancel,
+    sender: Option<&mpsc::Sender<ChatStreamEvent>>,
+) -> Result<ChatResult, String> {
+    let adapter = ox_alpha_browser_adapter()?;
+    let started = Instant::now();
+    let mut child = Command::new("node")
+        .arg(&adapter)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|error| format!("could not start HII Chromium for Ox Alpha: {error}"))?;
+    let request = json!({
+        "model": model,
+        "prompt": ox_alpha_browser_prompt(messages),
+    });
+    let mut input = child
+        .stdin
+        .take()
+        .ok_or_else(|| "Ox Alpha browser adapter stdin is unavailable".to_string())?;
+    serde_json::to_writer(&mut input, &request)
+        .map_err(|error| format!("could not encode Ox Alpha browser request: {error}"))?;
+    input
+        .flush()
+        .map_err(|error| format!("could not send Ox Alpha browser request: {error}"))?;
+    drop(input);
+
+    let output = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Ox Alpha browser adapter stdout is unavailable".to_string())?;
+    let mut content = String::new();
+    let mut first_token_at = None;
+    let mut done = false;
+    for line in BufReader::new(output).lines() {
+        if cancel.is_cancelled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(CANCELLED.into());
+        }
+        let line = line.map_err(|error| format!("failed to read Ox Alpha DOM stream: {error}"))?;
+        let event: Value = serde_json::from_str(&line)
+            .map_err(|error| format!("invalid Ox Alpha DOM stream event: {error}"))?;
+        match event["type"].as_str() {
+            Some("delta") => {
+                let delta = event["content"].as_str().unwrap_or_default();
+                if !delta.is_empty() {
+                    first_token_at.get_or_insert_with(Instant::now);
+                    content.push_str(delta);
+                    if let Some(sender) = sender {
+                        let _ = sender.send(ChatStreamEvent::Content(delta.to_string()));
+                    }
+                }
+            }
+            Some("done") => done = true,
+            Some("error") => {
+                let _ = child.wait();
+                return Err(format!(
+                    "Ox Alpha browser failed: {}",
+                    event["message"].as_str().unwrap_or("unknown DOM error")
+                ));
+            }
+            _ => {}
+        }
+    }
+    let status = child
+        .wait()
+        .map_err(|error| format!("could not finish Ox Alpha browser adapter: {error}"))?;
+    if !status.success() || !done || content.trim().is_empty() {
+        return Err("Ox Alpha browser closed before a complete rendered response".into());
+    }
+    let total_duration_ms = started.elapsed().as_millis() as u64;
+    let prompt_duration_ms = first_token_at
+        .map(|at| at.duration_since(started).as_millis() as u64)
+        .unwrap_or(total_duration_ms);
+    Ok(ChatResult {
+        content: content.clone(),
+        thinking: String::new(),
+        usage: ChatUsage {
+            prompt_tokens: ox_alpha_browser_prompt(messages).chars().count() as u64 / 4,
+            completion_tokens: content.chars().count() as u64 / 4,
+            prompt_duration_ms,
+            completion_duration_ms: total_duration_ms.saturating_sub(prompt_duration_ms),
+            total_duration_ms,
+        },
+    })
+}
+
+fn consume_openai_sse(
+    response: ureq::Response,
+    started: Instant,
+    cancel: &Cancel,
+    sender: Option<&mpsc::Sender<ChatStreamEvent>>,
+) -> Result<ChatResult, String> {
+    let mut content = String::new();
+    let mut thinking = String::new();
+    let mut usage = ChatUsage::default();
+    let mut reported_durations = None;
+    let mut first_token_at = None;
+    let mut content_repetition = RepetitionGuard::default();
+    let mut tool_calls: BTreeMap<usize, NativeToolCall> = BTreeMap::new();
+    for line in BufReader::new(response.into_reader()).lines() {
+        if cancel.is_cancelled() {
+            return Err(CANCELLED.into());
+        }
+        let line = line.map_err(|error| format!("failed to read model stream: {error}"))?;
+        let Some(data) = line.strip_prefix("data:").map(str::trim) else {
+            continue;
+        };
+        if data == "[DONE]" {
+            break;
+        }
+        let value: Value = serde_json::from_str(data)
+            .map_err(|error| format!("invalid model stream response: {error}"))?;
+        if let Some(error) = value.get("error") {
+            return Err(format!(
+                "model stream error: {}",
+                provider_error_message(error)
+            ));
+        }
+        let delta = &value["choices"][0]["delta"];
+        if let Some(calls) = delta["tool_calls"].as_array() {
+            first_token_at.get_or_insert_with(Instant::now);
+            for call in calls {
+                let index = call["index"].as_u64().unwrap_or(0) as usize;
+                let accumulated = tool_calls.entry(index).or_default();
+                if let Some(id) = call["id"].as_str() {
+                    accumulated.id.push_str(id);
+                }
+                if let Some(name) = call["function"]["name"].as_str() {
+                    accumulated.name.push_str(name);
+                }
+                if let Some(arguments) = call["function"]["arguments"].as_str() {
+                    accumulated.arguments.push_str(arguments);
+                }
+            }
+        }
+        if let Some(text) = openai_reasoning_delta(delta) {
+            first_token_at.get_or_insert_with(Instant::now);
+            thinking.push_str(text);
+            if let Some(sender) = sender {
+                let _ = sender.send(ChatStreamEvent::Thinking(text.to_string()));
+            }
+        }
+        if let Some(text) = delta["content"].as_str().filter(|text| !text.is_empty()) {
+            first_token_at.get_or_insert_with(Instant::now);
+            if content_repetition.observe(text) {
+                return Err(
+                    "MODEL LOOP DETECTED — the current generation repeated the same substantial block three times. The session is preserved; revise or retry the request."
+                        .into(),
+                );
+            }
+            content.push_str(text);
+            if let Some(sender) = sender {
+                let _ = sender.send(ChatStreamEvent::Content(text.to_string()));
+            }
+        }
+        if let Some(value) = value.get("usage") {
+            usage.prompt_tokens = value["prompt_tokens"].as_u64().unwrap_or(0);
+            usage.completion_tokens = value["completion_tokens"].as_u64().unwrap_or(0);
+            reported_durations = reported_durations.or_else(|| openai_reported_durations(value));
+        }
+    }
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    let (prompt_ms, completion_ms, total_ms) = reported_durations.unwrap_or_else(|| {
+        let prompt_ms = first_token_at
+            .map(|at: Instant| at.duration_since(started).as_millis() as u64)
+            .unwrap_or(0);
+        (prompt_ms, elapsed_ms.saturating_sub(prompt_ms), elapsed_ms)
+    });
+    usage.prompt_duration_ms = prompt_ms;
+    usage.completion_duration_ms = completion_ms;
+    usage.total_duration_ms = total_ms;
+    if !tool_calls.is_empty() {
+        content = native_tool_calls_to_action(tool_calls)?;
+        if let Some(sender) = sender {
+            let _ = sender.send(ChatStreamEvent::Content(content.clone()));
+        }
+    }
+    Ok(ChatResult {
+        content,
+        thinking,
+        usage,
+    })
+}
+
+fn provider_error_message(value: &Value) -> String {
+    value
+        .get("message")
+        .or_else(|| value.get("error"))
+        .and_then(Value::as_str)
+        .or_else(|| value.as_str())
+        .unwrap_or("unknown provider error")
+        .to_string()
+}
+
+fn active_inference_route() -> Result<Option<(String, ModelProvider)>, String> {
+    let Ok(paths) = crate::config::AppPaths::discover() else {
+        return Ok(None);
+    };
+    let path = paths.runtime.join("config/active-inference.json");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = std::fs::read_to_string(&path)
+        .map_err(|error| format!("could not read saved active inference route: {error}"))?;
+    parse_active_inference_route(&raw).map(Some)
+}
+
+fn parse_active_inference_route(raw: &str) -> Result<(String, ModelProvider), String> {
+    let value: Value = serde_json::from_str(raw)
+        .map_err(|error| format!("saved active inference route is invalid JSON: {error}"))?;
+    let endpoint = value["endpoint"]
+        .as_str()
+        .ok_or_else(|| "saved active inference route has no endpoint".to_string())?;
+    let url = url::Url::parse(endpoint)
+        .map_err(|error| format!("saved active inference endpoint is invalid: {error}"))?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err("saved active inference endpoint must be an http(s) base URL without credentials, query, or fragment".into());
+    }
+    let protocol = value["protocol"]
+        .as_str()
+        .ok_or_else(|| "saved active inference route has no protocol".to_string())?;
+    let provider = match value["provider"].as_str() {
+        Some("native") => ModelProvider::Native,
+        Some("llama.cpp") => ModelProvider::LlamaCpp,
+        Some("lmstudio") => ModelProvider::LmStudio,
+        Some("ollama") => ModelProvider::Ollama,
+        None if protocol == "ollama" => ModelProvider::Ollama,
+        None if protocol == "openai" => ModelProvider::LmStudio,
+        _ => return Err("saved active inference route has an unsupported provider".into()),
+    };
+    if !matches!(protocol, "openai" | "ollama")
+        || (protocol == "ollama") != (provider == ModelProvider::Ollama)
+    {
+        return Err("saved active inference provider and protocol do not agree".into());
+    }
+    Ok((endpoint.trim_end_matches('/').to_string(), provider))
+}
+
+fn pinned_model_url() -> bool {
+    std::env::var_os("HII_MODEL_URL").is_some()
+        || std::env::var_os("HII_OLLAMA_URL").is_some()
+        || std::env::var_os("HII_RAPID_MLX_URL").is_some()
+        || crate::config::inference_config().is_some()
+}
+
+fn environment_pinned_model_url() -> bool {
+    std::env::var_os("HII_MODEL_URL").is_some()
+        || std::env::var_os("HII_OLLAMA_URL").is_some()
+        || std::env::var_os("HII_RAPID_MLX_URL").is_some()
+        || std::env::var_os("HII_MODEL_PROVIDER").is_some()
+}
+
+/// Wait for the native runner while showing the operator that startup is
+/// happening. A first run has to fetch weights, so the wait is long and silence
+/// would read as a hang; the runner's own log tail is the progress report.
+fn wait_ready_verbose(
+    base_url: &str,
+    timeout: Duration,
+    log: &std::path::Path,
+    child: &mut std::process::Child,
+) -> bool {
+    use std::io::{IsTerminal, Write};
+
+    let show = std::io::stderr().is_terminal();
+    let started = std::time::Instant::now();
+    let frames = ['|', '/', '-', '\\'];
+    let mut tick = 0usize;
+    while started.elapsed() < timeout {
+        if endpoint_ready(base_url) {
+            if show {
+                eprint!("\r\x1b[2K");
+                let _ = std::io::stderr().flush();
+            }
+            return true;
+        }
+        // A runner that has already exited will never listen; report what it
+        // said rather than spending the whole timeout waiting on a dead process.
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            if show {
+                eprint!("\r\x1b[2K");
+                let _ = std::io::stderr().flush();
+            }
+            eprintln!("hii: HII exited during startup — {}", log_tail(log));
+            eprintln!("hii: full startup log at {}", log.display());
+            return false;
+        }
+        if show {
+            let detail = log_tail(log);
+            eprint!(
+                "\r\x1b[2K{} starting HII ({}s){}",
+                frames[tick % frames.len()],
+                started.elapsed().as_secs(),
+                if detail.is_empty() {
+                    String::new()
+                } else {
+                    format!(" — {detail}")
+                }
+            );
+            let _ = std::io::stderr().flush();
+        }
+        tick += 1;
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    if show {
+        eprint!("\r\x1b[2K");
+        let _ = std::io::stderr().flush();
+    }
+    false
+}
+
+/// Last non-empty log line, trimmed to one terminal line's worth of detail.
+fn log_tail(log: &std::path::Path) -> String {
+    let Ok(text) = std::fs::read_to_string(log) else {
+        return String::new();
+    };
+    let line = text
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default();
+    line.chars()
+        .rev()
+        .take(96)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
+}
+
+/// Return the model only when a completed native-runner manifest proves that a
+/// prior explicit acquisition loaded it successfully. `pending-load` is written
+/// before Hugging Face access begins, so accepting it here would turn bare
+/// `hii` startup into implicit model acquisition.
+fn acquired_native_model(manifest: &Value) -> Option<String> {
+    let integrity = manifest.get("integrity")?.as_str()?.trim();
+    if integrity.is_empty() || integrity == "pending-load" {
+        return None;
+    }
+    let model = manifest.get("model")?.as_str()?.trim();
+    (!model.is_empty()).then(|| model.to_string())
+}
+
+/// Start HII only when weights were acquired explicitly beforehand.
+/// Missing, malformed, or pending manifests fail closed without spawning the
+/// runner, network access, or a model download.
+fn start_native_runner() -> Option<Ollama> {
+    let native_url = "http://127.0.0.1:11435";
+    let paths = crate::config::AppPaths::discover().ok()?;
+    let model_home = paths.runtime.join("models");
+    let binary = paths.repo.join("target/release/hii-native-runner");
+    if !binary.is_file() {
+        return None;
+    }
+    let manifest: Value = std::fs::read(model_home.join("runtime-manifest.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())?;
+    let model = acquired_native_model(&manifest)?;
+
+    let log = paths.runtime.join("logs/native-runner.log");
+    if let Some(parent) = log.parent() {
+        std::fs::create_dir_all(parent).ok()?;
+    }
+    let mut child = spawn_logged(
+        binary.to_str()?,
+        &[
+            "serve",
+            "--model",
+            &model,
+            "--model-home",
+            model_home.to_str()?,
+        ],
+        &log,
+    )?;
+    wait_ready_verbose(native_url, Duration::from_secs(60), &log, &mut child)
+        .then(|| Ollama::new(native_url.to_string()))
+}
+
+/// Start the HII-owned Windows llama.cpp service from the same platform-aware
+/// runtime manager used by `hii model start`. The manager only uses existing
+/// preset-backed GGUF files and binds its owned service to loopback.
+fn windows_managed_provider(provider: ModelProvider) -> bool {
+    cfg!(target_os = "windows")
+        && matches!(provider, ModelProvider::LlamaCpp | ModelProvider::Native)
+}
+
+#[derive(Default)]
+struct NativeToolCall {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+fn native_tool_definitions() -> Value {
+    let definitions = action_schema()["oneOf"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|branch| {
+            let name = branch["properties"]["type"]["const"].as_str()?;
+            let mut parameters = branch.clone();
+            parameters["properties"].as_object_mut()?.remove("type");
+            if let Some(required) = parameters["required"].as_array_mut() {
+                required.retain(|value| value.as_str() != Some("type"));
+            }
+            let description = crate::acp::tools()
+                .iter()
+                .find(|spec| spec.name == name)
+                .map(|spec| spec.description)
+                .unwrap_or(match name {
+                    "final" => "finish the bounded run with a verified summary",
+                    "message" => "return a conversational message when work cannot continue",
+                    "batch" => "run two to four independent read-only observations",
+                    "mcp_call" => "call an operator-configured MCP tool",
+                    _ => "perform one HII action",
+                });
+            Some(json!({
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": parameters,
+                }
+            }))
+        })
+        .collect::<Vec<_>>();
+    Value::Array(definitions)
+}
+
+fn native_tool_calls_to_action(calls: BTreeMap<usize, NativeToolCall>) -> Result<String, String> {
+    let valid = crate::acp::action_type_names(true);
+    let mut actions = Vec::with_capacity(calls.len());
+    for (index, call) in calls {
+        if !valid.contains(&call.name.as_str()) && call.name != "mcp_call" {
+            return Err(format!(
+                "model requested unknown native tool '{}'",
+                call.name
+            ));
+        }
+        let mut arguments: serde_json::Map<String, Value> = if call.arguments.trim().is_empty() {
+            serde_json::Map::new()
+        } else {
+            serde_json::from_str::<Value>(&call.arguments)
+                .map_err(|error| {
+                    format!(
+                        "model returned invalid arguments for native tool '{}': {error}",
+                        call.name
+                    )
+                })?
+                .as_object()
+                .cloned()
+                .ok_or_else(|| {
+                    format!(
+                        "native tool '{}' arguments must be a JSON object",
+                        call.name
+                    )
+                })?
+        };
+        arguments.insert("type".into(), Value::String(call.name));
+        arguments.insert(
+            "id".into(),
+            Value::String(if call.id.is_empty() {
+                format!("call_{index}")
+            } else if call.id.chars().count() > 24 {
+                // Provider-generated UUIDs exceed HII's bounded action ID
+                // schema. These IDs are internal to this decoded response.
+                format!("call_{index}")
+            } else {
+                call.id
+            }),
+        );
+        actions.push(Value::Object(arguments));
+    }
+    let action = if actions.len() == 1 {
+        actions.pop().expect("one native tool action")
+    } else {
+        const BATCHABLE: &[&str] = &[
+            "read",
+            "list",
+            "search",
+            "web_search",
+            "image_search",
+            "web_fetch",
+            "http",
+        ];
+        if actions.len() > 4
+            || actions.iter().any(|action| {
+                !action["type"]
+                    .as_str()
+                    .is_some_and(|name| BATCHABLE.contains(&name))
+            })
+        {
+            return Err("model returned multiple native tool calls that cannot be executed safely as one read-only batch".into());
+        }
+        json!({ "type": "batch", "calls": actions })
+    };
+    serde_json::to_string(&action).map_err(|error| error.to_string())
+}
+
+fn start_windows_llama_runtime(endpoint: &str) -> bool {
+    if !cfg!(target_os = "windows") {
+        return false;
+    }
+    let Ok(paths) = crate::config::AppPaths::discover() else {
+        return false;
+    };
+    let script = paths.repo.join("runtime/daemon/hiid.mjs");
+    if !script.is_file() {
+        return false;
+    }
+    let status = std::process::Command::new("node")
+        .arg(script)
+        .args([
+            "model-runtime",
+            "start",
+            "--idle-router",
+            "--endpoint",
+            endpoint,
+        ])
+        .current_dir(&paths.repo)
+        .env("HII_ROOT", &paths.repo)
+        .status();
+    if !status.is_ok_and(|status| status.success()) {
+        return false;
+    }
+    let started = std::time::Instant::now();
+    while started.elapsed() < Duration::from_secs(30) {
+        if endpoint_ready(endpoint) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    false
+}
+
+/// Spawn the runner detached from this terminal but with its output kept, so
+/// startup progress and any failure survive for the wait loop and the operator.
+fn spawn_logged(
+    program: &str,
+    args: &[&str],
+    log: &std::path::Path,
+) -> Option<std::process::Child> {
+    let out = std::fs::File::create(log).ok()?;
+    let err = out.try_clone().ok()?;
+    std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::from(out))
+        .stderr(std::process::Stdio::from(err))
+        .spawn()
+        .ok()
+}
+
+fn endpoint_ready(base_url: &str) -> bool {
+    let address = base_url
+        .strip_prefix("http://")
+        .unwrap_or(base_url)
+        .split('/')
+        .next()
+        .unwrap_or(base_url);
+    let Ok(mut addresses) = address.to_socket_addrs() else {
+        return false;
+    };
+    addresses.next().is_some_and(|address| {
+        std::net::TcpStream::connect_timeout(&address, Duration::from_secs(2)).is_ok()
+    })
+}
+
+/// Durations an OpenAI-compatible backend reported itself, in milliseconds.
+/// Ollama-style backends report nanoseconds here; HII and LM Studio
+/// report nothing, which is why callers fall back to client-side wall clock.
+fn openai_reported_durations(usage: &Value) -> Option<(u64, u64, u64)> {
+    let prompt = usage["prompt_eval_duration"].as_u64();
+    let completion = usage["eval_duration"].as_u64();
+    let total = usage["total_duration"].as_u64();
+    if prompt.is_none() && completion.is_none() && total.is_none() {
+        return None;
+    }
+    Some((
+        prompt.unwrap_or(0) / 1_000_000,
+        completion.unwrap_or(0) / 1_000_000,
+        total.unwrap_or(0) / 1_000_000,
+    ))
+}
+
+/// Apply the operator's reasoning setting to an OpenAI-compatible request body.
+///
+/// Ollama has a first-class `"think"` field; the OpenAI wire format has none,
+/// so each server invents its own. HII's runner (mlx-vlm) reads a **top-level**
+/// `enable_thinking` and, failing that, the OpenAI-standard `reasoning_effort`;
+/// it then splits the model's `<think>` block out into `reasoning_content`,
+/// which [`openai_reasoning_delta`] already understands. `chat_template_kwargs`
+/// — the spelling vLLM uses — is silently ignored there: sending it produced
+/// byte-identical output for `true` and `false` against the live 9B runner,
+/// which is exactly how this stayed unnoticed. Send both keys so the setting
+/// lands on either server, and pair them so a backend that honors only one
+/// still agrees with the other.
+fn apply_thinking(body: &mut Value, think: bool) {
+    body["enable_thinking"] = json!(think);
+    body["reasoning_effort"] = json!(if think { "medium" } else { "none" });
+}
+
+fn openai_reasoning_delta(delta: &Value) -> Option<&str> {
+    ["reasoning_content", "reasoning", "thinking"]
+        .into_iter()
+        .find_map(|key| delta[key].as_str().filter(|text| !text.is_empty()))
+}
+
+fn openai_messages(messages: &[Message]) -> Value {
+    // Some OpenAI-compatible chat templates (including Qwen through MLX-VLM)
+    // require exactly one system message and require it to be first. HII keeps
+    // independently managed system contexts internally so they can be replaced
+    // or removed by feature; collapse them only at the provider boundary.
+    let system = messages
+        .iter()
+        .filter(|message| message.role == "system")
+        .map(|message| message.content.trim())
+        .filter(|content| !content.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let ordered = (!system.is_empty())
+        .then(|| json!({ "role": "system", "content": system }))
+        .into_iter()
+        .chain(
+            messages
+                .iter()
+                .filter(|message| message.role != "system")
+                .map(|message| {
+                    if message.images.is_empty() {
+                        return json!({ "role": message.role, "content": message.content });
+                    }
+                    let mut content = vec![json!({ "type": "text", "text": message.content })];
+                    for (index, image) in message.images.iter().enumerate() {
+                        let mime = message
+                            .image_mime_types
+                            .get(index)
+                            .map(String::as_str)
+                            .unwrap_or("image/png");
+                        content.push(json!({
+                            "type": "image_url",
+                            "image_url": { "url": format!("data:{mime};base64,{image}") }
+                        }));
+                    }
+                    json!({ "role": message.role, "content": content })
+                }),
+        )
+        .collect();
+    Value::Array(ordered)
+}
+
+#[derive(Default)]
+struct RepetitionGuard {
+    text: String,
+    last_checked_at: usize,
+}
+
+impl RepetitionGuard {
+    fn observe(&mut self, delta: &str) -> bool {
+        self.text.push_str(delta);
+        if self.text.len().saturating_sub(self.last_checked_at) < 128 {
+            return false;
+        }
+        self.last_checked_at = self.text.len();
+        let words = self
+            .text
+            .split_whitespace()
+            .map(|word| {
+                word.trim_matches(|character: char| !character.is_alphanumeric())
+                    .to_ascii_lowercase()
+            })
+            .filter(|word| !word.is_empty())
+            .collect::<Vec<_>>();
+        const BLOCK_WORDS: usize = 28;
+        if words.len() < BLOCK_WORDS * 3 {
+            return false;
+        }
+        let tail = &words[words.len() - BLOCK_WORDS..];
+        words
+            .windows(BLOCK_WORDS)
+            .filter(|window| *window == tail)
+            .take(3)
+            .count()
+            >= 3
+    }
+}
+
+/// The grammar the model must generate within, from the one place actions are
+/// declared. See [`crate::acp::action_schema`] for why it is per-action rather
+/// than one flat object accepting every property.
+fn action_schema() -> Value {
+    crate::acp::action_schema()
+}
+
+/// Whether to constrain decoding to [`action_schema`] on OpenAI-compatible
+/// backends, rather than asking only for "some JSON object".
+///
+/// Off by default, and deliberately so. The constraint is unambiguously right
+/// about *shape*: it makes a truncated-mid-string action and a `read` carrying
+/// an invented file body impossible, both of which were observed. But measured
+/// against the 9B runner it also changed which action the model *chose* —
+/// toward whichever branch has no required parameters — and a harness that
+/// picks the wrong tool cheaply is not better than one that picks the right
+/// tool expensively. Turning it on is therefore a per-model decision backed by
+/// a measured run, not a default.
+///
+/// `HII_STRICT_ACTION_SCHEMA=1` enables it.
+fn strict_action_schema_enabled() -> bool {
+    matches!(
+        std::env::var("HII_STRICT_ACTION_SCHEMA").as_deref(),
+        Ok("1") | Ok("true") | Ok("on")
+    )
+}
+
+/// Append a compact record of a model call to `~/.hii/traces/llm_requests.jsonl`
+/// (per the HII LLM-tracking rule). Best-effort: logging never fails a run.
+fn log_llm_request(model: &str, provider: ModelProvider, usage: &ChatUsage) {
+    use std::io::Write;
+    let runtime = std::env::var_os("HII_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| crate::config::home_dir().ok().map(|home| home.join(".hii")));
+    let Some(runtime) = runtime else {
+        return;
+    };
+    let dir = runtime.join("traces");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let route = crate::run_context::model_route();
+    let mut entry = json!({
+        "ts": chrono_now(),
+        "source": "hii-cli",
+        "provider": provider.id(),
+        "model": model,
+        "requested_model": route.as_ref().and_then(|route| route.requested.as_deref()).unwrap_or(model),
+        "routed_model": route.as_ref().map(|route| route.routed.as_str()).unwrap_or(model),
+        "served_model": model,
+        "routing_reason": route.as_ref().map(|route| route.reason.as_str()).unwrap_or("selected by HII provider routing"),
+        "status": "completed",
+        "prompt_tokens": usage.prompt_tokens,
+        "completion_tokens": usage.completion_tokens,
+        "total_duration_ms": usage.total_duration_ms,
+        "origin": crate::run_context::origin().label(),
+    });
+    // Without this the trace is unattributable: cost and latency are recorded,
+    // but nothing says which run spent it. Absent outside a run (`hii find`,
+    // `hii proof`), where there is no receipt to point at.
+    if let Some(run_id) = crate::run_context::run_id() {
+        entry["receipt_id"] = json!(run_id);
+    }
+    if let Some(conversation_id) = crate::run_context::conversation_id() {
+        entry["conversation_id"] = json!(conversation_id);
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("llm_requests.jsonl"))
+    {
+        let _ = writeln!(file, "{entry}");
+        let _ = file.sync_data();
+    }
+}
+
+fn log_llm_failure(model: &str, provider: ModelProvider, error: &str) {
+    use std::io::Write;
+    let runtime = std::env::var_os("HII_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| crate::config::home_dir().ok().map(|home| home.join(".hii")));
+    let Some(runtime) = runtime else {
+        return;
+    };
+    let dir = runtime.join("traces");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let route = crate::run_context::model_route();
+    let mut entry = json!({
+        "ts": chrono_now(),
+        "source": "hii-cli",
+        "provider": provider.id(),
+        "model": model,
+        "requested_model": route.as_ref().and_then(|route| route.requested.as_deref()).unwrap_or(model),
+        "routed_model": route.as_ref().map(|route| route.routed.as_str()).unwrap_or(model),
+        "served_model": Value::Null,
+        "routing_reason": route.as_ref().map(|route| route.reason.as_str()).unwrap_or("selected by HII provider routing"),
+        "status": "failed",
+        "error": crate::receipt::redact_text(error),
+        "origin": crate::run_context::origin().label(),
+    });
+    if let Some(run_id) = crate::run_context::run_id() {
+        entry["receipt_id"] = json!(run_id);
+    }
+    if let Some(conversation_id) = crate::run_context::conversation_id() {
+        entry["conversation_id"] = json!(conversation_id);
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("llm_requests.jsonl"))
+    {
+        let _ = writeln!(file, "{entry}");
+        let _ = file.sync_data();
+    }
+}
+
+fn chrono_now() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
+fn catalog_json_error(label: &str, error: std::io::Error) -> String {
+    if matches!(error.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) {
+        format!("{label}: timed out reading response")
+    } else {
+        format!("{label}: {error}")
+    }
+}
+
+fn format_ureq(error: ureq::Error) -> String {
+    match error {
+        ureq::Error::Status(code, response) => {
+            let body = response.into_string().unwrap_or_default();
+            format!("model provider returned HTTP {code}: {}", body.trim())
+        }
+        ureq::Error::Transport(error) => format!("cannot reach local model provider: {error}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{
+        acquired_native_model, apply_thinking, load_model_api_key,
+        openai_messages, parse_active_inference_route,
+        openai_reasoning_delta, openai_reported_durations, ox_alpha_browser_prompt,
+        provider_messages, windows_managed_provider, ChatUsage, Message, Ollama, RepetitionGuard,
+    };
+    use crate::attachments::ImagePayload;
+    use crate::config::ModelProvider;
+
+    #[test]
+    fn saved_active_route_rejects_credentials_and_accepts_openai_base_url() {
+        let valid = r#"{"endpoint":"http://127.0.0.1:4192","protocol":"openai","provider":"llama.cpp"}"#;
+        assert_eq!(parse_active_inference_route(valid).unwrap(), ("http://127.0.0.1:4192".into(), ModelProvider::LlamaCpp));
+        let credentialed = r#"{"endpoint":"http://user:secret@127.0.0.1:4192","protocol":"openai","provider":"llama.cpp"}"#;
+        assert!(parse_active_inference_route(credentialed).is_err());
+    }
+
+    #[test]
+    fn explicit_saved_engine_never_falls_back_when_offline() {
+        let client = Ollama::for_engine("http://127.0.0.1:1".into(), ModelProvider::LmStudio);
+        assert!(client.ensure_reachable().err().unwrap().contains("cannot reach"));
+    }
+
+    fn tokenizer_fixture(
+        responses: Vec<(&'static str, &'static str)>,
+    ) -> (Ollama, std::thread::JoinHandle<Vec<String>>) {
+        use std::io::{BufRead, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let worker = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let mut requests = Vec::new();
+            for (status, body) in responses {
+                let (mut stream, _) = loop {
+                    match listener.accept() {
+                        Ok(connection) => break connection,
+                        Err(error)
+                            if error.kind() == std::io::ErrorKind::WouldBlock
+                                && std::time::Instant::now() < deadline =>
+                        {
+                            std::thread::sleep(std::time::Duration::from_millis(5))
+                        }
+                        Err(error) => panic!("tokenizer fixture accept failed: {error}"),
+                    }
+                };
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+                    .unwrap();
+                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                let mut headers = String::new();
+                let mut content_length = 0;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        content_length = value.trim().parse::<usize>().unwrap();
+                    }
+                    headers.push_str(&line);
+                }
+                let mut bytes = vec![0; content_length];
+                reader.read_exact(&mut bytes).unwrap();
+                requests.push(format!("{headers}\n{}", String::from_utf8(bytes).unwrap()));
+                write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+            requests
+        });
+        let mut client = Ollama::new(format!("http://{address}"));
+        client.provider = ModelProvider::Native;
+        client.model_api_key = Ok(Some("fixture-token".into()));
+        (client, worker)
+    }
+
+    #[test]
+    fn local_summary_uses_same_model_with_small_output_limit_and_rejects_remote() {
+        let (client, worker) = tokenizer_fixture(vec![(
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"summary"}}]}"#,
+        )]);
+        assert_eq!(
+            client
+                .local_summary("active-local-model", &[Message::user("history")])
+                .unwrap(),
+            "summary"
+        );
+        let request = worker.join().unwrap().remove(0);
+        assert!(request.starts_with("POST /v1/chat/completions HTTP/1.1"));
+        let body: serde_json::Value =
+            serde_json::from_str(request.split_once("\n\n").unwrap().1).unwrap();
+        assert_eq!(body["model"], "active-local-model");
+        assert_eq!(body["max_tokens"], 768);
+        assert_eq!(body["stream"], false);
+
+        let remote = Ollama::new("https://example.com".into());
+        assert!(remote
+            .local_summary("active-local-model", &[Message::user("history")])
+            .is_err());
+    }
+
+    #[test]
+    fn tokenizer_counts_rendered_prompt_and_caches_by_model_and_messages() {
+        let (client, worker) = tokenizer_fixture(vec![
+            ("200 OK", r#"{"prompt":"rendered prompt"}"#),
+            ("200 OK", r#"{"tokens":[1,2,3,4,5]}"#),
+        ]);
+        let messages = vec![
+            Message::system("HII instructions"),
+            Message::user("x".repeat(30_000)),
+        ];
+        assert_eq!(
+            client.count_input_tokens("fixture-model", &messages),
+            Some(5)
+        );
+        assert_eq!(
+            client
+                .clone()
+                .count_input_tokens("fixture-model", &messages),
+            Some(5)
+        );
+        let requests = worker.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].starts_with("POST /apply-template "));
+        assert!(requests[1].starts_with("POST /tokenize "));
+        assert!(requests[1].contains("rendered prompt"));
+        assert!(requests
+            .iter()
+            .all(|request| request.contains("Bearer fixture-token")));
+        assert!(requests
+            .iter()
+            .all(|request| request.contains("fixture-model")));
+    }
+
+    #[test]
+    fn managed_llamacpp_uses_rendered_prompt_tokenizer_and_cache() {
+        let (mut client, worker) = tokenizer_fixture(vec![
+            ("200 OK", r#"{"prompt":"managed llama.cpp prompt"}"#),
+            ("200 OK", r#"{"tokens":[1,2,3]}"#),
+        ]);
+        client.provider = ModelProvider::LlamaCpp;
+        let messages = vec![Message::user("count this as tokens")];
+
+        assert_eq!(
+            client.count_input_tokens("managed-model", &messages),
+            Some(3)
+        );
+        assert_eq!(
+            client
+                .clone()
+                .count_input_tokens("managed-model", &messages),
+            Some(3)
+        );
+
+        let requests = worker.join().unwrap();
+        assert_eq!(requests.len(), 2, "cached count should avoid another probe");
+        assert!(requests[0].starts_with("POST /apply-template "));
+        assert!(requests[1].starts_with("POST /tokenize "));
+        assert!(requests[1].contains("managed llama.cpp prompt"));
+    }
+
+    #[test]
+    fn tokenizer_failure_is_cached_and_images_do_not_probe_text_tokenizer() {
+        let (client, worker) = tokenizer_fixture(vec![("404 Not Found", "{}")]);
+        let messages = vec![Message::user("hello")];
+        assert_eq!(client.count_input_tokens("model", &messages), None);
+        assert_eq!(client.count_input_tokens("model", &messages), None);
+        let images = vec![Message::user_with_images(
+            "image",
+            vec![ImagePayload {
+                mime_type: "image/png".into(),
+                base64: "fixture".into(),
+            }],
+        )];
+        assert_eq!(client.count_input_tokens("other-model", &images), None);
+        assert_eq!(worker.join().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn tokenizer_does_not_follow_redirects_with_credentials() {
+        let (client, worker) = tokenizer_fixture(vec![(
+            "302 Found\r\nLocation: http://127.0.0.1:9/tokenize",
+            "{}",
+        )]);
+        assert_eq!(
+            client.count_input_tokens("model", &[Message::user("hello")]),
+            None
+        );
+        assert_eq!(worker.join().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn reported_durations_are_absent_for_backends_that_do_not_time_themselves() {
+        // HII and LM Studio return a usage block with tokens only, which
+        // is why every session since the native default went to zero timings.
+        let usage = serde_json::json!({ "prompt_tokens": 11070, "completion_tokens": 11 });
+        assert_eq!(openai_reported_durations(&usage), None);
+    }
+
+    #[test]
+    fn reported_durations_convert_provider_nanoseconds_to_milliseconds() {
+        let usage = serde_json::json!({
+            "prompt_eval_duration": 2_000_000u64,
+            "eval_duration": 8_000_000u64,
+            "total_duration": 10_000_000u64,
+        });
+        assert_eq!(openai_reported_durations(&usage), Some((2, 8, 10)));
+    }
+
+    #[test]
+    fn reasoning_is_read_from_a_completed_message_not_only_a_stream_delta() {
+        let message =
+            serde_json::json!({ "content": "done", "reasoning_content": "weighing options" });
+        assert_eq!(openai_reasoning_delta(&message), Some("weighing options"));
+        let plain = serde_json::json!({ "content": "done" });
+        assert_eq!(openai_reasoning_delta(&plain), None);
+    }
+
+    #[test]
+    fn wall_clock_timing_makes_throughput_reportable() {
+        // The fallback attributes the untimed call to completion so
+        // tokens_per_second stops reading 0.0 on the native path.
+        let usage = ChatUsage {
+            prompt_tokens: 11_070,
+            completion_tokens: 20,
+            prompt_duration_ms: 0,
+            completion_duration_ms: 2_000,
+            total_duration_ms: 2_000,
+        };
+        assert_eq!(usage.tokens_per_second(), 10.0);
+    }
+
+    #[test]
+    fn detects_three_substantial_repeated_blocks() {
+        let block = "I should stop checking the same file and run one actual verification command before I answer the operator because another read is only observation and cannot prove the changed website works. ";
+        let mut guard = RepetitionGuard::default();
+        assert!(!guard.observe(block));
+        assert!(!guard.observe(block));
+        assert!(guard.observe(block));
+    }
+
+    #[test]
+    fn does_not_treat_short_or_distinct_activity_as_a_loop() {
+        let mut guard = RepetitionGuard::default();
+        assert!(!guard.observe("checking the workspace "));
+        assert!(!guard.observe("running the test "));
+        assert!(!guard.observe("returning the result "));
+    }
+
+    #[test]
+    fn private_rehearsal_does_not_count_against_visible_content() {
+        let block = "I will emit exactly one bounded write action with the supplied local content, then wait for the tool result before running the requested verification action. ";
+        let mut thinking = RepetitionGuard::default();
+        let mut content = RepetitionGuard::default();
+
+        assert!(!thinking.observe(block));
+        assert!(!thinking.observe(block));
+        assert!(!content.observe(block));
+    }
+
+    use super::{
+        action_schema, native_tool_calls_to_action, native_tool_definitions, NativeToolCall,
+    };
+
+    /// The old flat schema was capped at 1000 bytes because it was pasted into
+    /// the prompt, where size is a real cost. A `json_schema` response format
+    /// drives a logits processor instead of prompt text, so the budget that
+    /// matters is per-action precision, not total bytes.
+    #[test]
+    fn the_action_schema_offers_every_action_and_closes_each_one() {
+        let schema = action_schema();
+        let branches = schema["oneOf"].as_array().expect("oneOf branches");
+        let named = |name: &str| {
+            branches
+                .iter()
+                .find(|branch| branch["properties"]["type"]["const"] == name)
+        };
+        for name in ["write", "verify", "read", "final", "message", "mcp_call"] {
+            assert!(named(name).is_some(), "{name} is not offered to the model");
+        }
+        assert!(named("tool").is_none(), "the wrapper spelling is internal");
+
+        // Every branch is closed: this is what makes a hallucinated parameter
+        // ungeneratable rather than merely ignored.
+        for branch in branches {
+            assert_eq!(branch["additionalProperties"], json!(false));
+        }
+        let read = named("read").expect("read branch");
+        assert!(read["properties"].get("path").is_some());
+        assert!(
+            read["properties"].get("content").is_none(),
+            "a read must not be able to carry a file body"
+        );
+    }
+
+    #[test]
+    fn openai_images_use_data_url_content_parts() {
+        let message = Message::user_with_images(
+            "Describe this reference",
+            vec![ImagePayload {
+                mime_type: "image/png".into(),
+                base64: "aW1hZ2U=".into(),
+            }],
+        );
+        let value = openai_messages(&[message]);
+        assert_eq!(value[0]["content"][0]["type"], "text");
+        assert_eq!(value[0]["content"][1]["type"], "image_url");
+        assert_eq!(
+            value[0]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,aW1hZ2U="
+        );
+    }
+
+    #[test]
+    fn openai_messages_merge_all_system_context_at_the_beginning() {
+        let value = openai_messages(&[
+            Message::system("primary identity"),
+            Message::user("hello"),
+            Message::system("context capsule"),
+            Message::system("active authority"),
+        ]);
+        let messages = value.as_array().expect("message array");
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(
+            messages[0]["content"],
+            "primary identity\n\ncontext capsule\n\nactive authority"
+        );
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[1]["content"], "hello");
+    }
+
+    /// The reasoning setting must reach OpenAI-compatible backends on the
+    /// fields they actually read. `chat_template_kwargs` is not one of them:
+    /// against the live mlx-vlm runner it produced byte-identical output for
+    /// both settings, while `enable_thinking` yields a populated
+    /// `reasoning_content` for `true` and none for `false`.
+    #[test]
+    fn the_reasoning_setting_reaches_openai_compatible_backends() {
+        let mut on = json!({ "model": "m" });
+        apply_thinking(&mut on, true);
+        assert_eq!(on["enable_thinking"], json!(true));
+        assert_eq!(on["reasoning_effort"], json!("medium"));
+
+        let mut off = json!({ "model": "m" });
+        apply_thinking(&mut off, false);
+        assert_eq!(off["enable_thinking"], json!(false));
+        assert_eq!(off["reasoning_effort"], json!("none"));
+
+        // The two controls must never disagree: a backend honoring only one of
+        // them still has to land on the operator's setting.
+        for think in [true, false] {
+            let mut body = json!({});
+            apply_thinking(&mut body, think);
+            assert_eq!(
+                body["enable_thinking"].as_bool().expect("enable_thinking"),
+                body["reasoning_effort"] != json!("none")
+            );
+        }
+    }
+
+    #[test]
+    fn every_provider_receives_one_leading_system_message() {
+        let messages = provider_messages(&[
+            Message::system("primary"),
+            Message::user("hello"),
+            Message::system("late authority"),
+        ]);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, "system");
+        assert_eq!(messages[0].content, "primary\n\nlate authority");
+        assert_eq!(messages[1].role, "user");
+    }
+
+    #[test]
+    fn openai_stream_accepts_common_reasoning_delta_names() {
+        for key in ["reasoning_content", "reasoning", "thinking"] {
+            let mut delta = serde_json::Map::new();
+            delta.insert(key.into(), serde_json::Value::String("trace".into()));
+            assert_eq!(
+                openai_reasoning_delta(&serde_json::Value::Object(delta)),
+                Some("trace")
+            );
+        }
+    }
+
+    #[test]
+    fn native_tools_are_derived_from_the_action_schema() {
+        let tools = native_tool_definitions();
+        let tools = tools.as_array().expect("tool definitions");
+        let named = |name: &str| tools.iter().find(|tool| tool["function"]["name"] == name);
+        for name in ["read", "write", "verify", "final", "mcp_call", "delegate"] {
+            let tool = named(name).unwrap_or_else(|| panic!("missing {name}"));
+            assert!(tool["function"]["parameters"]["properties"]
+                .get("type")
+                .is_none());
+        }
+        assert!(
+            named("delegate").unwrap()["function"]["parameters"]["properties"]["arguments"]
+                ["properties"]["requests"]["maxItems"]
+                == 3
+        );
+    }
+
+    #[test]
+    fn native_delegate_tool_call_preserves_bounded_request_arguments() {
+        let mut calls = std::collections::BTreeMap::new();
+        calls.insert(
+            0,
+            NativeToolCall {
+                id: "worker_call".into(),
+                name: "delegate".into(),
+                arguments: r#"{"arguments":{"requests":[{"id":"a","task":"find config"}]}}"#.into(),
+            },
+        );
+        let raw = native_tool_calls_to_action(calls).expect("native delegate action");
+        let action = crate::agent::parse_action(&raw).expect("validated delegate action");
+        assert!(
+            matches!(action, crate::agent::Action::Tool { tool, arguments: Some(_), .. } if tool == "delegate")
+        );
+    }
+
+    #[test]
+    fn fragmented_native_tool_call_becomes_a_valid_hii_action() {
+        let mut calls = std::collections::BTreeMap::new();
+        calls.insert(
+            0,
+            NativeToolCall {
+                id: "call_1".into(),
+                name: "write".into(),
+                arguments: r#"{"path":"proof.txt","content":"ok"}"#.into(),
+            },
+        );
+        let raw = native_tool_calls_to_action(calls).expect("native action");
+        assert!(matches!(
+            crate::agent::parse_action(&raw).expect("parsed HII action"),
+            crate::agent::Action::Tool { tool, path: Some(path), .. }
+                if tool == "write" && path == "proof.txt"
+        ));
+    }
+
+    #[test]
+    fn multiple_native_reads_become_one_bounded_batch() {
+        let mut calls = std::collections::BTreeMap::new();
+        calls.insert(
+            0,
+            NativeToolCall {
+                id: "123e4567-e89b-12d3-a456-426614174000".into(),
+                name: "read".into(),
+                arguments: r#"{"path":"a.txt"}"#.into(),
+            },
+        );
+        calls.insert(
+            1,
+            NativeToolCall {
+                id: "123e4567-e89b-12d3-a456-426614174001".into(),
+                name: "list".into(),
+                arguments: r#"{"path":"."}"#.into(),
+            },
+        );
+        let raw = native_tool_calls_to_action(calls).expect("native batch");
+        assert!(matches!(
+            crate::agent::parse_action(&raw).expect("parsed HII batch"),
+            crate::agent::Action::Batch { calls, .. } if calls.len() == 2
+        ));
+    }
+
+    #[test]
+    fn windows_runtime_recovery_accepts_native_and_llamacpp_labels() {
+        assert_eq!(
+            windows_managed_provider(ModelProvider::Native),
+            cfg!(target_os = "windows")
+        );
+        assert_eq!(
+            windows_managed_provider(ModelProvider::LlamaCpp),
+            cfg!(target_os = "windows")
+        );
+        assert!(!windows_managed_provider(ModelProvider::Ollama));
+    }
+
+    #[test]
+    fn model_api_key_file_wins_over_environment_fallback() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let path = directory.path().join("model-api-key");
+        std::fs::write(&path, "file-token\n").expect("write key fixture");
+
+        assert_eq!(
+            load_model_api_key(Some(path), Some("fallback-token".into())).unwrap(),
+            Some("file-token".into())
+        );
+    }
+
+    #[test]
+    fn configured_model_api_key_file_fails_closed() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let missing = directory.path().join("missing");
+
+        let error = load_model_api_key(Some(missing), Some("fallback-token".into()))
+            .expect_err("a configured file must not fall back");
+        assert!(error.contains("failed to read HII_MODEL_API_KEY_FILE"));
+        assert!(!error.contains("fallback-token"));
+    }
+
+    #[test]
+    fn model_requests_receive_bearer_authorization() {
+        let mut client = Ollama::new("http://127.0.0.1:11435".into());
+        client.model_api_key = Ok(Some("test-token".into()));
+        let request = client
+            .authorize(client.agent.get("http://127.0.0.1:11435/v1/models"))
+            .expect("authorization");
+
+        assert_eq!(request.header("Authorization"), Some("Bearer test-token"));
+    }
+
+    #[test]
+    fn model_catalog_read_timeout_is_short_and_does_not_wait_for_generation_timeout() {
+        use std::io::{Read, Write};
+        use std::time::{Duration, Instant};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_millis(2_500)))
+                .unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request).unwrap();
+            // Send an incomplete body and wait for the client to close on its
+            // read deadline. The provider request must not inherit the
+            // 600-second generation timeout.
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\nConnection: close\r\n\r\n{",
+                )
+                .unwrap();
+            let _ = stream.read(&mut request);
+        });
+
+        let mut client = Ollama::new(format!("http://{address}"));
+        client.provider = ModelProvider::Native;
+        let started = Instant::now();
+        let error = client.models().expect_err("incomplete catalog response");
+        let elapsed = started.elapsed();
+        server.join().unwrap();
+
+        assert!(error.contains("timed out reading response"), "{error}");
+        assert!(
+            elapsed < Duration::from_secs(4),
+            "catalog call took {elapsed:?}"
+        );
+        assert!(
+            elapsed >= Duration::from_secs(1),
+            "fixture did not stall: {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn website_dom_prompt_keeps_hii_instructions_and_conversation_roles() {
+        let prompt = ox_alpha_browser_prompt(&[
+            Message::system("HII tool protocol"),
+            Message::user("inspect"),
+            Message::assistant("working"),
+        ]);
+        assert!(prompt.contains("HII owns and executes every tool"));
+        assert!(prompt.contains("SYSTEM:\nHII tool protocol"));
+        assert!(prompt.contains("USER:\ninspect"));
+        assert!(prompt.contains("ASSISTANT:\nworking"));
+    }
+
+    #[test]
+    fn pending_native_manifest_never_authorizes_startup() {
+        let manifest = serde_json::json!({
+            "model": "Qwen/Qwen3-4B",
+            "integrity": "pending-load"
+        });
+        assert_eq!(acquired_native_model(&manifest), None);
+    }
+
+    #[test]
+    fn completed_native_manifest_authorizes_its_model() {
+        let manifest = serde_json::json!({
+            "model": "Qwen/Qwen3.5-35B-A3B",
+            "integrity": "sha256-inventory-proof"
+        });
+        assert_eq!(
+            acquired_native_model(&manifest).as_deref(),
+            Some("Qwen/Qwen3.5-35B-A3B")
+        );
+    }
+}

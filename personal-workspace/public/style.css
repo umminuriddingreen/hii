@@ -1,0 +1,23 @@
+:root { color-scheme: light; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #202124; background: #fff; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #fff; }
+main { width: min(100% - 32px, 760px); min-height: 100dvh; margin: 0 auto; padding: 8vh 0 28px; display: flex; flex-direction: column; }
+#form { order: 0; }
+#status { order: 1; }
+#messages { order: 2; margin-top: 2rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.message { margin: 0 0 1.5rem; }
+.message.user { color: #45474b; }
+.message.assistant { color: #17191c; }
+.message-label { display: block; margin-bottom: .25rem; color: #87898e; font-size: .78rem; }
+#status { min-height: 1.5em; margin: 0 0 8px; color: #777a80; font-size: .85rem; }
+form { padding: 0; background: #fff; }
+textarea { display: block; width: 100%; min-height: 8rem; max-height: 40vh; resize: vertical; border: 0; border-bottom: 1px solid #ececef; outline: 0; padding: 0 0 12px; color: #202124; background: transparent; font: inherit; }
+textarea:focus { border-bottom-color: #777a80; }
+textarea::placeholder { color: #999ba0; }
+.controls { display: flex; align-items: center; justify-content: flex-end; gap: 10px; color: #898b90; font-size: .76rem; }
+button { border: 0; border-radius: 3px; padding: 4px 8px; color: #fff; background: #25272a; font: inherit; font-size: .82rem; cursor: pointer; }
+button:hover { background: #44464a; }
+button:disabled { opacity: .5; cursor: default; }
+button[hidden] { display: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (max-width: 520px) { main { width: calc(100% - 24px); padding-top: 24px; } .controls span { margin-right: auto; } }

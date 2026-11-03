@@ -1,0 +1,133 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+
+const { makeNode, seedsFromFiles } = await import('../lib/workspace/ingest.ts');
+const { organizeContactSheetReviewSet } = await import('../lib/workspace/contact-sheet-scene.ts');
+const { normalizePerceptualReviews, perceptualCandidatePairs } = await import('../lib/workspace/image-similarity.ts');
+const {
+  contactSheetContextItems,
+  contactSheetItemSeed,
+  contactSheetStackItems,
+  filterContactSheetItems,
+  labelContactSheetItems,
+  stackContactSheetSelection,
+  unstackContactSheetItems
+} = await import('../lib/workspace/contact-sheet.ts');
+
+const stored = [];
+globalThis.fetch = async (_input, init) => {
+  const file = init.body.get('file');
+  stored.push(file.name);
+  return new Response(JSON.stringify({
+    name: file.name,
+    mime: file.type,
+    size: file.size,
+    path: `/tmp/hii-media-proof/${file.name}`,
+    url: `/api/workspace/assets/${file.name}`,
+    sha256: createHash('sha256').update(file.name).digest('hex')
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+};
+
+const seeds = await seedsFromFiles([
+  new File(['same pixels'], 'reference-a.png', { type: 'image/png' }),
+  new File(['same pixels'], 'reference-a-copy.png', { type: 'image/png' }),
+  new File(['pixels-b'], 'reference-b.png', { type: 'image/png' }),
+  new File(['pixels-c'], 'reference-c.png', { type: 'image/png' }),
+  new File(['pixels-d'], 'reference-d.png', { type: 'image/png' }),
+  new File(['notes'], 'brief.txt', { type: 'text/plain' })
+]);
+
+assert.equal(seeds.length, 2);
+const sheet = seeds.find((seed) => seed.payload.adapter === 'contact-sheet');
+const text = seeds.find((seed) => seed.type === 'text');
+assert.ok(sheet);
+assert.ok(text);
+assert.equal(sheet.payload.uniqueCount, 4);
+assert.equal(sheet.payload.duplicateCount, 1);
+assert.deepEqual(sheet.payload.duplicateNames, ['reference-a-copy.png']);
+assert.equal(sheet.payload.items.length, 4);
+assert.equal(sheet.object.kind, 'asset');
+assert.equal(sheet.object.status, 'ready');
+assert.equal(sheet.object.proofRefs.length, 4);
+assert.equal(stored.length, 4);
+const selectedItems = [
+  sheet.payload.items[1],
+  sheet.payload.items[3]
+];
+const itemLabels = labelContactSheetItems({
+  items: sheet.payload.items,
+  labels: sheet.payload.itemLabels,
+  selectedItems,
+  label: 'material palette'
+});
+const contextItems = contactSheetContextItems({
+  nodeId: 'proof-sheet',
+  items: sheet.payload.items,
+  selectedItems,
+  itemLabels,
+  proofRefs: sheet.object.proofRefs
+});
+assert.equal(contextItems.length, 2);
+assert.equal(contextItems[0].title, 'material palette');
+assert.equal(contextItems[0].source, sheet.payload.items[1].path);
+assert.equal(contextItems[0].expectedSha256, sheet.payload.items[1].sha256);
+assert.equal(filterContactSheetItems(sheet.payload.items, itemLabels, 'material').length, 2);
+const stacked = stackContactSheetSelection({
+  items: sheet.payload.items,
+  labels: itemLabels,
+  stacks: sheet.payload.itemStacks,
+  selectedItems,
+  stackId: 'material-stack'
+});
+assert.equal(stacked.created, true);
+assert.equal(stacked.stack.title, 'material palette');
+assert.deepEqual(contactSheetStackItems(sheet.payload.items, stacked.stack), selectedItems);
+assert.deepEqual(unstackContactSheetItems(sheet.payload.items, stacked.stacks, stacked.stack.id), []);
+const promoted = contactSheetItemSeed(sheet.payload.items[1], 'proof-sheet', 'material palette');
+assert.equal(promoted.object.parentId, 'proof-sheet');
+assert.deepEqual(promoted.object.proofRefs, [`sha256:${sheet.payload.items[1].sha256}`]);
+assert.equal(promoted.payload.adapter, 'contact-sheet-item');
+const sheetNode = {
+  ...makeNode({
+    ...sheet,
+    payload: { ...sheet.payload, selectedItems, itemLabels }
+  }, 0, 0, 1),
+  id: 'proof-sheet'
+};
+const reviewScene = organizeContactSheetReviewSet({
+  version: 1,
+  revision: 0,
+  updatedAt: new Date(0).toISOString(),
+  viewport: { x: 0, y: 0, zoom: 1 },
+  nextZ: 1,
+  nodes: [sheetNode]
+}, sheetNode, { sceneId: 'material-scene', now: new Date(0).toISOString() });
+assert.equal(reviewScene.created, true);
+assert.equal(reviewScene.scene.payload.title, 'material palette');
+assert.deepEqual(reviewScene.scene.object.proofRefs, selectedItems.map((item) => `sha256:${item.sha256}`));
+assert.equal(reviewScene.memberIds.length, 2);
+assert.equal(reviewScene.doc.nodes.filter((node) => node.frameId === reviewScene.scene.id).length, 2);
+const nearMatches = perceptualCandidatePairs([
+  { ...sheet.payload.items[0], perceptualHash: '0000000000000000' },
+  { ...sheet.payload.items[1], perceptualHash: '0000000000000001' },
+  { ...sheet.payload.items[2], perceptualHash: 'ffffffffffffffff' }
+], 1);
+assert.equal(nearMatches.length, 1);
+assert.equal(nearMatches[0].distance, 1);
+assert.deepEqual(normalizePerceptualReviews(nearMatches, {
+  [nearMatches[0].id]: 'separate',
+  unknown: 'stacked'
+}), { [nearMatches[0].id]: 'separate' });
+
+console.log('HII workspace media smoke');
+console.log('status:       ok');
+console.log('organization: image batch -> bounded contact sheet verified');
+console.log('dedupe:       exact SHA-256 duplicate omitted before storage');
+console.log('proof:        unique source paths + hashes preserved');
+console.log('focus:        exact labeled thumbnails -> separate hashed run context');
+console.log('classification: selected references -> durable filterable batch label');
+console.log('stacking:     exact references -> compact reversible human-owned stack');
+console.log('similarity:   local dHash pair -> explicit human keep-separate or stack review');
+console.log('scenes:       exact classified review set -> reversible named Scene');
+console.log('promotion:    sheet item -> provenance-linked region-focusable image');
+console.log('mixed batch:  non-image artifact remains directly editable');

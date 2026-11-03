@@ -1,0 +1,60 @@
+#!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Stage the `hii` CLI for native HII clients such as HII Bar.
+ *
+ * HII Bar bundles its CLI so a copied app can run agent work without depending
+ * on a developer checkout or a machine-specific binary path.
+ *
+ * The staged copy lives under Cargo's ignored build output and is copied into
+ * each native client bundle by that client's packaging script.
+ */
+
+import { spawnSync } from 'node:child_process';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const binary = process.platform === 'win32' ? 'hii.exe' : 'hii';
+const staged = path.join(root, 'target', 'hii-cli-resources', binary);
+
+/** Release builds must not ship a stale CLI; dev only needs the file to exist. */
+const release = process.argv.includes('--release') || process.env.NODE_ENV === 'production';
+
+export function stageCli({ rebuild = true } = {}) {
+  const built = path.join(root, 'target', 'release', binary);
+
+  if (rebuild || !existsSync(built)) {
+    const commit = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' });
+    if (commit.status !== 0 || !/^[0-9a-f]{40}$/.test(commit.stdout.trim())) {
+      throw new Error('Unable to identify the source commit for the bundled HII CLI');
+    }
+    const build = spawnSync('cargo', ['build', '--release', '-p', 'hii-cli'], {
+      cwd: root,
+      stdio: 'inherit',
+      env: { ...process.env, HII_BUILD_COMMIT: commit.stdout.trim() }
+    });
+    if (build.error) throw new Error(`Unable to start the HII CLI build: ${build.error.message}`);
+    if (build.status !== 0) process.exit(build.status ?? 1);
+  }
+
+  if (!existsSync(built)) {
+    throw new Error(`HII CLI missing after build: ${path.relative(root, built)}`);
+  }
+
+  const fresh = existsSync(staged) && statSync(staged).mtimeMs >= statSync(built).mtimeMs;
+  if (!fresh) {
+    mkdirSync(path.dirname(staged), { recursive: true });
+    copyFileSync(built, staged);
+    if (process.platform !== 'win32') chmodSync(staged, 0o755);
+  }
+  return staged;
+}
+
+// Dev keeps an existing release binary rather than paying for a cargo build on
+// every `tauri dev`; a release build always recompiles so the bundle is current.
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  console.log(`hii staged CLI for bundling: ${path.relative(root, stageCli({ rebuild: release }))}`);
+}

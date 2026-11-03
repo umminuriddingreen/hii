@@ -1,0 +1,139 @@
+import type { WorkspaceDoc, WorkspaceNode } from './types';
+
+/**
+ * Three-way merge of a local workspace onto a newer server revision.
+ *
+ * A save conflict happens whenever the same workspace file is open twice — a
+ * second tab, the desktop shell alongside the browser, or an agent run writing
+ * results while the user edits. Previously the client simply reported
+ * "Workspace not saved" and every later save failed the same way, so the losing
+ * side had to reload and discard work.
+ *
+ * `base` is the document as of the client's last successful sync. It is what
+ * makes deletions decidable: a node missing from `local` but present in `base`
+ * was deleted here, while a node missing from `base` but present in `remote` was
+ * added over there. Without it the two cases are indistinguishable.
+ *
+ * The viewport is never merged — the camera belongs to this client alone.
+ */
+export function rebaseWorkspaceDoc(
+  local: WorkspaceDoc,
+  remote: WorkspaceDoc,
+  base: WorkspaceDoc
+): WorkspaceDoc {
+  const baseIds = new Set(base.nodes.map((node) => node.id));
+  const localById = new Map(local.nodes.map((node) => [node.id, node]));
+  const remoteById = new Map(remote.nodes.map((node) => [node.id, node]));
+
+  const merged: WorkspaceNode[] = [];
+  const taken = new Set<string>();
+
+  // Remote order first, so nodes another client added keep their relative order.
+  for (const remoteNode of remote.nodes) {
+    const localNode = localById.get(remoteNode.id);
+    if (!localNode) {
+      // Deleted here since the last sync, or added there since. Only a node we
+      // once knew about can have been deleted by us.
+      if (baseIds.has(remoteNode.id)) continue;
+      merged.push(remoteNode);
+      taken.add(remoteNode.id);
+      continue;
+    }
+    const original = base.nodes.find(node => node.id === remoteNode.id);
+    const winner = pickNewer(localNode, remoteNode);
+    merged.push(original ? mergeFields(original, localNode, remoteNode, winner === localNode) as WorkspaceNode : winner);
+    taken.add(remoteNode.id);
+  }
+
+  // Anything local that the server has not seen: our own additions, plus nodes
+  // the other client deleted but we have since edited (an edit resurrects them —
+  // preserving work is the safer failure).
+  for (const localNode of local.nodes) {
+    if (taken.has(localNode.id)) continue;
+    if (baseIds.has(localNode.id) && !remoteById.has(localNode.id)) {
+      const baseNode = base.nodes.find((node) => node.id === localNode.id);
+      if (baseNode && baseNode.updatedAt === localNode.updatedAt) continue; // untouched here, deleted there
+    }
+    merged.push(localNode);
+  }
+
+  return {
+    ...local,
+    revision: remote.revision,
+    updatedAt: new Date().toISOString(),
+    nextZ: Math.max(local.nextZ, remote.nextZ),
+    viewport: local.viewport,
+    nodes: merged,
+    links: mergeLinks(local, remote, base, new Set(merged.map((node) => node.id)))
+  };
+}
+
+/**
+ * Reconcile a completed save without letting its older snapshot erase edits
+ * made while the request was in flight.
+ *
+ * When nothing changed locally, the server response is authoritative. When
+ * typing continued, treat the submitted document as the common base and carry
+ * the newer local text onto the server's advanced revision.
+ */
+export function reconcileWorkspaceSave(
+  local: WorkspaceDoc,
+  saved: WorkspaceDoc,
+  submitted: WorkspaceDoc,
+  changedWhileSaving: boolean
+) {
+  return changedWhileSaving
+    ? rebaseWorkspaceDoc(local, saved, submitted)
+    : saved;
+}
+
+/**
+ * Connectors merge by the same delete-aware rule as nodes, then drop any whose
+ * endpoints did not survive the node merge.
+ */
+function mergeLinks(
+  local: WorkspaceDoc,
+  remote: WorkspaceDoc,
+  base: WorkspaceDoc,
+  survivingNodes: Set<string>
+): WorkspaceDoc['links'] {
+  const baseIds = new Set((base.links ?? []).map((link) => link.id));
+  const localIds = new Set((local.links ?? []).map((link) => link.id));
+  const merged = new Map<string, WorkspaceDoc['links'][number]>();
+
+  for (const link of remote.links ?? []) {
+    // Present at base but gone locally means we deleted it.
+    if (baseIds.has(link.id) && !localIds.has(link.id)) continue;
+    merged.set(link.id, link);
+  }
+  for (const link of local.links ?? []) merged.set(link.id, link);
+
+  return [...merged.values()].filter((link) =>
+    survivingNodes.has(link.fromId) && survivingNodes.has(link.toId));
+}
+
+function pickNewer(local: WorkspaceNode, remote: WorkspaceNode): WorkspaceNode {
+  const localTime = Date.parse(local.updatedAt || '');
+  const remoteTime = Date.parse(remote.updatedAt || '');
+  if (!Number.isFinite(remoteTime)) return local;
+  if (!Number.isFinite(localTime)) return remote;
+  // Ties go to the local edit: this client is the one with a user in front of it.
+  return remoteTime > localTime ? remote : local;
+}
+
+const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+/** Independent text, geometry and metadata edits must not overwrite one another.
+ * Same-field conflicts retain the existing timestamp rule; arrays are atomic. */
+function mergeFields(base: unknown, local: unknown, remote: unknown, preferLocal: boolean): unknown {
+  if (equal(local, base)) return remote;
+  if (equal(remote, base) || equal(local, remote)) return local;
+  if (!record(base) || !record(local) || !record(remote)) return preferLocal ? local : remote;
+  const result: Record<string, unknown> = {};
+  for (const key of new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(remote)])) {
+    const value = mergeFields(base[key], local[key], remote[key], preferLocal);
+    if (value !== undefined) result[key] = value;
+  }
+  return result;
+}

@@ -1,0 +1,14 @@
+{
+  "enabled": false,
+  "zone": "humaninformationinterface.com",
+  "worker": "hii-spaces-public",
+  "routes": [
+    "https://humaninformationinterface.com/spaces",
+    "https://humaninformationinterface.com/spaces/*",
+    "https://humaninformationinterface.com/new",
+    "https://humaninformationinterface.com/new/",
+    "https://humaninformationinterface.com/s/*"
+  ],
+  "fallback": "existing production origin remains authoritative for every other route",
+  "activationRequirement": "owner approval plus verified production application and deployment pipeline"
+}

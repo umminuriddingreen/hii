@@ -1,0 +1,6 @@
+HII Compute
+Copyright 2026 Ummi Nuriddin Green
+
+The code in this package is licensed under the Apache License, Version 2.0.
+This package's license does not relicense the HII CLI, HII native runners,
+model weights, or other components outside this package.

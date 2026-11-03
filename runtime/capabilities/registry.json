@@ -1,0 +1,1439 @@
+[
+  {
+    "id": "hii.terminal.observe",
+    "name": "Observe HII Terminal",
+    "owner": "hii",
+    "runtime": "local-process",
+    "summary": "Read local process and agent-session state for the HII workstation terminal.",
+    "inputs": [
+      "local request host",
+      "stream focus"
+    ],
+    "outputs": [
+      "redacted process snapshot",
+      "agent session list"
+    ],
+    "permissions": [
+      "local-only host unless HII_LOCAL_TERMINAL_ENABLED=1",
+      "read process list",
+      "redact tokens"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "app/api/terminal/stream",
+      "lib/server/hii-terminal.ts"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.agent.spawn",
+    "name": "Spawn Bounded Agent Session",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Launch a whitelisted Claude terminal session preset from the local HII backend.",
+    "inputs": [
+      "preset",
+      "prompt",
+      "session name"
+    ],
+    "outputs": [
+      "spawn receipt",
+      "redacted command output",
+      "local job row"
+    ],
+    "permissions": [
+      "local-only host",
+      "whitelisted presets",
+      "redacted logs"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "quoted",
+      "currency": "credits"
+    },
+    "evidence": [
+      "app/api/terminal/sessions",
+      ".hii/capability-jobs.jsonl"
+    ],
+    "status": "partial",
+    "trustLevel": "operator-reviewed"
+  },
+  {
+    "id": "hii.agent.workspace_run",
+    "name": "Run Bounded Local Workspace Agent",
+    "owner": "hii.runtime",
+    "runtime": "local-cli",
+    "summary": "Run a bounded agent goal from the CLI or spatial workspace with explicit human intent, live user-facing output, durable evidence, and an inspectable receipt.",
+    "inputs": [
+      "goal",
+      "approved workspace root",
+      "model or provider profile",
+      "step limit or managed runtime policy"
+    ],
+    "outputs": [
+      "workspace changes",
+      "live user-facing run output",
+      "full local proof log",
+      "verification records",
+      "local receipt"
+    ],
+    "permissions": [
+      "explicit human-submitted intent",
+      "configured local or hosted agent runtime",
+      "selected workspace only",
+      "no secret-bearing files",
+      "no destructive, publishing, messaging, spending, or irreversible external actions without separate explicit authority"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "cli/src/agent.rs",
+      "cli/src/tools.rs",
+      "src/lib/components/workspace/SpatialRunPane.svelte",
+      "app/api/daemon/runs",
+      "~/.hii/runs/cli"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.og.operational_graph",
+    "name": "OG Operational Graph",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Infer the user's likely next path from local conversation, repo, job, bridge, and capability context.",
+    "inputs": [
+      "conversation turn",
+      "repo state",
+      "capability registry",
+      "job history",
+      "bridge logs",
+      "runtime pointers"
+    ],
+    "outputs": [
+      "operational graph event",
+      "ranked next actions",
+      "capability job receipt"
+    ],
+    "permissions": [
+      "local-only",
+      "redact secret-like values",
+      "append-only runtime files"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii og",
+      "~/.hii/og/events.jsonl",
+      ".hii/capability-jobs.jsonl"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.loop.user_proxy",
+    "name": "User Proxy Plan Loop",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Read local events, notes, jobs, bridge logs, and repo state to propose the next plan while waiting for explicit y/n approval before action.",
+    "inputs": [
+      "OG events",
+      "bridge logs",
+      "loop notes",
+      "recent jobs",
+      "repo state"
+    ],
+    "outputs": [
+      "append-only plan decision",
+      "policy gate",
+      "next command proposal"
+    ],
+    "permissions": [
+      "local-only",
+      "append-only runtime files",
+      "propose without executing",
+      "y/n approval gate"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii loop once",
+      "~/.hii/loop/decisions.jsonl",
+      "~/.hii/loop/notes.jsonl"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.daemon.instances",
+    "name": "HII Daemon Instance Supervisor",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Run hiid as the local-first persistent supervisor with operator-meaningful ready, working, attention, and offline health; managed runs; redacted output; and HII-owned process control.",
+    "inputs": [
+      "daemon command",
+      "managed Codex prompt",
+      "local process snapshot",
+      "runtime event logs"
+    ],
+    "outputs": [
+      "daemon status",
+      "redacted raw stdout and stderr tail",
+      "instance registry",
+      "live feed event",
+      "managed Codex run receipt",
+      "HII Space runtime health and recovery panel",
+      "observed-process count separated from active HII work"
+    ],
+    "permissions": [
+      "local-only",
+      "append-only runtime files",
+      "observe Mac processes",
+      "control HII-owned processes",
+      "reversible local autonomy",
+      "approval required for destructive or external actions",
+      "secrets reference-only"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii daemon start",
+      "hii daemon status",
+      "hii instances list",
+      "hii feed",
+      "hii codex run",
+      "runtime/daemon/hiid.mjs",
+      "lib/workspace/daemon-health.ts",
+      "tests/unit/daemon-health.test.ts",
+      "/api/daemon",
+      "~/.hii/daemon/status.json",
+      "~/.hii/daemon/events.jsonl",
+      "~/.hii/daemon/daemon.log"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.presence.status",
+    "name": "Inspect Grounded HII Presence",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Report HII continuity, current attention, live HII-owned executors, loaded local models, instrumented trace coverage, context sources, authority, and recent proof without claiming consciousness or unobserved host activity.",
+    "inputs": [
+      "current workspace",
+      "local HII runtime state"
+    ],
+    "outputs": [
+      "human-readable presence status",
+      "hii.presence JSON projection"
+    ],
+    "permissions": [
+      "local-only",
+      "read local HII state",
+      "probe configured local model endpoint",
+      "no process mutation",
+      "no external transmission"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii presence status --json",
+      "cli/src/presence.rs"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.space.desktop_control",
+    "name": "Inspect and Control HII Desktop Space",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Inspect AeroSpace health, monitors, workspaces, windows, and apps through HII, then forward only explicit deterministic desktop actions with bounded subprocess timeouts.",
+    "inputs": [
+      "explicit HII Space subcommand",
+      "optional window, workspace, or monitor target"
+    ],
+    "outputs": [
+      "human-readable or JSON health",
+      "bounded desktop snapshot",
+      "explicit action result"
+    ],
+    "permissions": [
+      "local macOS workstation only",
+      "read-only for health, snapshot, and apps",
+      "window or workspace mutation only from an explicit action subcommand",
+      "no implicit app launch",
+      "three-second AeroSpace command timeout"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii space health",
+      "hii space snapshot",
+      "hii space apps",
+      "scripts/hii-space.mjs",
+      "scripts/hii-space-smoke.mjs",
+      "cli/src/legacy.rs"
+    ],
+    "status": "partial",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.board.task_kanban",
+    "name": "Task Kanban Board",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Track human intent and generated work in one append-only local board, require generated proposals to name why and done-when proof before approval, and carry approved cards through bounded HII Space runs to receipt-linked completion.",
+    "inputs": [
+      "task title",
+      "lane",
+      "priority",
+      "owner",
+      "coordinate",
+      "notes",
+      "acceptance criteria",
+      "tags",
+      "origin",
+      "review state",
+      "governed run state"
+    ],
+    "outputs": [
+      "task event log",
+      "kanban board",
+      "agent context task summary",
+      "approval provenance",
+      "deterministic proposal-definition readiness",
+      "run and receipt lineage"
+    ],
+    "permissions": [
+      "local-only",
+      "append local task events",
+      "local browser mutation from localhost"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii board",
+      "/boards",
+      "/api/board/tasks",
+      "~/.hii/board/tasks.jsonl",
+      "tests/unit/board-quality-boundary.test.ts",
+      "tests/unit/board-run.test.ts",
+      "tests/unit/board-run-lifecycle.test.ts"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.money.idea_to_offer",
+    "name": "Idea To Offer Money Loop",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Turn a rough idea into a sellable offer brief, local proof target, price/package, and Codex or Claude handoff prompt using local Ollama models.",
+    "inputs": [
+      "rough idea",
+      "optional local model",
+      "optional handoff target"
+    ],
+    "outputs": [
+      "local offer brief",
+      "idea receipt",
+      "capability job receipt",
+      "handoff prompt"
+    ],
+    "permissions": [
+      "local-only",
+      "append-only runtime files",
+      "redact secret-like values",
+      "no publishing",
+      "no payments",
+      "no outreach",
+      "no agent spawn by default"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii money idea",
+      "~/.hii/money/ideas.jsonl",
+      "~/.hii/money/offers",
+      ".hii/capability-jobs.jsonl"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.pack.export",
+    "name": "Export HII Capability Pack",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Package a compartmentalized manifest for a HII surface or capability set without publishing it externally.",
+    "inputs": [
+      "pack id",
+      "capability registry",
+      "source path inventory"
+    ],
+    "outputs": [
+      "local pack manifest",
+      "file list",
+      "capability list",
+      "verification commands"
+    ],
+    "permissions": [
+      "local-only export",
+      "no push",
+      "no upload",
+      "no secret values"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii pack export",
+      "~/.hii/packs/exports"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.skills.grow",
+    "name": "Grow Verified Skill Registry",
+    "owner": "hii.runtime",
+    "runtime": "local-cli",
+    "summary": "Capture agent-action receipts, turn repeatable verified work into reviewed skills, and export portable local skill packages.",
+    "inputs": [
+      "agent action receipt",
+      "project coordinate",
+      "verification evidence",
+      "risk and side-effect metadata",
+      "operator review"
+    ],
+    "outputs": [
+      "append-only action receipt",
+      "draft skill bundle",
+      "operator-reviewed registered skill",
+      "portable local skill package"
+    ],
+    "permissions": [
+      "local-only runtime writes",
+      "secret-like value redaction",
+      "proof required before registration",
+      "operator review required before registration",
+      "no automatic execution",
+      "no upload, publish, sale, or license grant"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "hii skill report",
+      "hii skill register",
+      "hii skill doctor",
+      "runtime/skills/registry.mjs",
+      "~/.hii/skills/actions.jsonl",
+      "~/.hii/skills/registry.json",
+      "~/.hii/skills/registered"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.registry.scan",
+    "name": "Scan Local Capability Registry",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Inspect machine, agent, provider, model, MCP, and secret-presence metadata without copying raw secrets.",
+    "inputs": [
+      "local filesystem paths",
+      "installed command metadata"
+    ],
+    "outputs": [
+      "normalized registry snapshot"
+    ],
+    "permissions": [
+      "secret-safe metadata only",
+      "no raw token reads"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "npm run hii:registry:scan",
+      "lib/registry/scan.ts"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.registry.doctor",
+    "name": "Doctor Local Capability Registry",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Validate local registry health and report warnings without aborting on optional unavailable tools.",
+    "inputs": [
+      "registry scan result"
+    ],
+    "outputs": [
+      "health summary",
+      "warnings"
+    ],
+    "permissions": [
+      "secret-safe metadata only"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "npm run hii:registry:doctor",
+      "lib/registry/doctor.ts"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.credits.quote",
+    "name": "Quote Capability Job",
+    "owner": "hii",
+    "runtime": "next-route",
+    "summary": "Estimate runtime, token budget, compute reimbursement, and HII fee for a bounded capability job.",
+    "inputs": [
+      "capability id",
+      "task summary",
+      "currency",
+      "max budget"
+    ],
+    "outputs": [
+      "quote",
+      "ledger-ready transcript"
+    ],
+    "permissions": [
+      "quote only",
+      "no execution"
+    ],
+    "visibility": "public",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "app/api/credits/quote",
+      "lib/server/hii-credits.ts"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.rhino.managed_job",
+    "name": "Managed HII Rhino Job",
+    "owner": "hii",
+    "runtime": "trusted-runner",
+    "summary": "Queue a governed Rhino workflow through HII-owned RhinoCode execution with logs, proof artifacts, and ledger receipts.",
+    "inputs": [
+      "workflow",
+      "Rhino task",
+      "budget tier",
+      "authenticated user",
+      "reserved credits"
+    ],
+    "outputs": [
+      "capability job",
+      "runner transcript",
+      "log proof artifact",
+      "ledger receipt"
+    ],
+    "permissions": [
+      "authenticated account",
+      "approved owned runner",
+      "whitelisted HII Rhino handler only",
+      "no arbitrary shell execution"
+    ],
+    "visibility": "authenticated",
+    "costModel": {
+      "type": "quoted",
+      "currency": "usd"
+    },
+    "runnerSupport": {
+      "requiredCapabilityId": "hii.rhino.managed_job",
+      "handler": "hii.rhino.managed_job",
+      "expectedInputs": [
+        "workflow",
+        "prompt",
+        "budget",
+        "quote"
+      ],
+      "expectedOutputs": [
+        "transcript events",
+        "proof_artifacts.log",
+        "final job status"
+      ],
+      "verification": [
+        "hii runner start --once",
+        "hii caps show",
+        "npm run build"
+      ]
+    },
+    "evidence": [
+      "scripts/hii-rhino.mjs",
+      "app/api/runners/jobs/next",
+      "supabase capability_jobs",
+      ".hii/rhino-jobs.jsonl"
+    ],
+    "status": "partial",
+    "trustLevel": "operator-reviewed"
+  },
+  {
+    "id": "hii.rhino.bootstrap_action",
+    "name": "HII Rhino Bootstrap Action",
+    "owner": "hii",
+    "runtime": "next-route",
+    "summary": "Discover RhinoCode, bind a live Rhino document, and validate HII-owned Rhino execution without a second bridge product.",
+    "inputs": [
+      "local Rhino discovery request"
+    ],
+    "outputs": [
+      "RhinoCode path",
+      "live document advertisement"
+    ],
+    "permissions": [
+      "local observation only"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "scripts/hii-rhino.mjs",
+      "RhinoCode.exe list"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.browser.link_capture",
+    "name": "Browser Link Capture",
+    "owner": "hii",
+    "runtime": "chrome-extension",
+    "summary": "Capture active browser tabs and selected page context into the local HII link stream.",
+    "inputs": [
+      "active tab URL",
+      "page title",
+      "optional note",
+      "optional tags"
+    ],
+    "outputs": [
+      "local link post",
+      "append-only JSONL receipt"
+    ],
+    "permissions": [
+      "activeTab",
+      "contextMenus",
+      "storage",
+      "local HII endpoint only"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "extensions/chrome-link-capture",
+      "app/api/links",
+      ".hii/link-posts.jsonl"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.downloader.offline_cache",
+    "name": "Offline Link Cache",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Download captured http/https links into local HTML and text cache files so the feed can work offline.",
+    "inputs": [
+      "link stream JSONL",
+      "http/https page"
+    ],
+    "outputs": [
+      "cached HTML",
+      "readable text",
+      "cache index entry"
+    ],
+    "permissions": [
+      "local filesystem write under .hii",
+      "bounded page fetch",
+      "no secret extraction"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "scripts/hii-link-cache.mjs",
+      ".hii/link-cache",
+      ".hii/link-cache.jsonl"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.ollama.link_interpreter",
+    "name": "Ollama Link Interpreter",
+    "owner": "hii",
+    "runtime": "ollama",
+    "summary": "Summarize cached link text with a local Ollama model for offline recall and future ranking.",
+    "inputs": [
+      "cached page text",
+      "link title",
+      "operator note"
+    ],
+    "outputs": [
+      "local summary",
+      "cache index annotation"
+    ],
+    "permissions": [
+      "local Ollama endpoint",
+      "text capped before inference",
+      "cloud optional not required"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "scripts/hii-link-cache.mjs",
+      "HII_LINKS_OLLAMA_MODEL",
+      "http://127.0.0.1:11434/api/generate"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.exchange.asset_link",
+    "name": "Exchange Asset Link",
+    "owner": "hii",
+    "runtime": "supabase-flow",
+    "summary": "Upload a file, sell access through Stripe Checkout, and issue time-limited R2 downloads after payment.",
+    "inputs": [
+      "seller account",
+      "asset",
+      "license terms",
+      "price"
+    ],
+    "outputs": [
+      "shareable exchange link",
+      "paid order",
+      "presigned download"
+    ],
+    "permissions": [
+      "authenticated seller upload",
+      "Stripe payment verification",
+      "time-limited R2 access"
+    ],
+    "visibility": "public",
+    "costModel": {
+      "type": "stripe-checkout",
+      "currency": "usd"
+    },
+    "evidence": [
+      "app/upload",
+      "app/x/[id]",
+      "app/api/checkout",
+      "app/api/download"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.links.publish_stream",
+    "name": "Public Link Stream Publish",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Publish locally captured link posts (with Ollama summaries) to the public stream at umminuriddingreen.com/stream via a token-gated Pages endpoint backed by Supabase.",
+    "inputs": [
+      "local link posts (.hii/link-posts.jsonl)",
+      "cache summaries",
+      "HII_LINKS_PUBLISH_ENDPOINT",
+      "HII_LINKS_PUBLISH_TOKEN"
+    ],
+    "outputs": [
+      "public link_posts rows",
+      "publish receipts (.hii/link-publish.jsonl)",
+      "umminuriddingreen.com/stream"
+    ],
+    "permissions": [
+      "bearer-token write to /api/links",
+      "public anonymous read"
+    ],
+    "visibility": "public",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "scripts/hii-cli.mjs links publish",
+      "supabase/schema.sql link_posts",
+      "extensions/chrome-link-capture"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.exchange.link_stream_mcp",
+    "name": "Link Stream MCP Server",
+    "owner": "hii",
+    "runtime": "cloudflare-worker",
+    "summary": "Remote MCP server (Streamable HTTP, bearer-token gated) exposing post_link and list_links tools over the public link stream, deployable as the hii-stream-mcp Worker.",
+    "inputs": [
+      "MCP tools/call requests",
+      "LINKS_POST_TOKEN bearer auth"
+    ],
+    "outputs": [
+      "link_posts rows",
+      "public stream reads"
+    ],
+    "permissions": [
+      "bearer-token gate on /mcp",
+      "service-role insert",
+      "anon read"
+    ],
+    "visibility": "public",
+    "costModel": {
+      "type": "free",
+      "currency": "usd"
+    },
+    "evidence": [
+      "extensions/hii-stream-mcp/src/index.ts"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.workspace.creative_canvas",
+    "name": "Create in the HII Spatial Workspace",
+    "owner": "hii",
+    "runtime": "next-route",
+    "summary": "Create with editable text and durable media, review local near-match signals, collapse exact reference sets into reversible human-owned stacks, organize classified sets into provenance-linked Scenes, navigate large canvases through a searchable governed Scene and object outline, inspect source-linked PDF documents, local DXF drawings, and 3D models, bind human-selected pages, regions, layers, time ranges, and views into governed agent runs, keep managed chat readable while preserving raw run evidence, branch verified work, and edit receipt-linked text artifacts beside their source context.",
+    "inputs": [
+      "typed canvas text",
+      "local clipboard or dropped media",
+      "local PDF documents",
+      "local ASCII DXF drawings",
+      "self-contained GLB, GLTF, OBJ, STL, or PLY models",
+      "pointer-based pen or marker strokes",
+      "non-destructive crop insets",
+      "explicit spatial agent intent",
+      "follow-up intent branched from a completed run",
+      "receipt-listed local workspace artifact",
+      "two or more explicitly selected workspace objects",
+      "named scene with explicitly captured object membership",
+      "batch of local reference images",
+      "explicitly selected contact-sheet references and human-authored batch label",
+      "two or more exact classified references for Scene organization"
+    ],
+    "outputs": [
+      "persisted movable workspace nodes",
+      "local workspace media assets",
+      "source-linked PDF document viewers",
+      "interactive DXF pan, zoom, frame, layer, unit, and entity inspection",
+      "interactive orbit, pan, zoom, frame, grid, and wireframe model viewers",
+      "SHA-256 integrity evidence for stored workspace assets",
+      "editable vector ink",
+      "cropped image extraction or PNG download",
+      "governed intent and run objects",
+      "incrementally visible managed agent response",
+      "readable managed chat with explicitly nested legacy run details",
+      "durable run id and full local proof log",
+      "editable receipt-linked text or code artifact",
+      "append-only human artifact-edit receipt",
+      "reversible human-owned scene with exact selected membership",
+      "ordered scene navigation with compact membership summaries",
+      "bounded contact sheets with exact-duplicate counts and source hashes",
+      "durable filterable labels bound to exact reference hashes",
+      "compact reversible human-owned stacks with exact source membership",
+      "bounded local near-match pairs with explicit keep-separate or stack decisions",
+      "idempotent named review-set Scene with parent and SHA-256 lineage"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "write bounded assets under ~/.hii/workspace/assets",
+      "render bounded local WebGL without external model upload",
+      "no automatic external upload or publication",
+      "perceptual image signals are computed locally and never omit a source without review",
+      "explicit Send action before intent reaches the configured agent provider",
+      "local export requires an explicit user click",
+      "artifact edits stay inside the completed run's approved workspace root",
+      "optimistic revision match required before artifact overwrite"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "provider"
+    },
+    "evidence": [
+      "src/routes/+page.svelte",
+      "src/lib/components/workspace/ModelPane.svelte",
+      "src/lib/components/workspace/DocumentPane.svelte",
+      "src/lib/components/workspace/CadPane.svelte",
+      "src/lib/components/workspace/IntentPane.svelte",
+      "src/lib/components/workspace/SpatialRunPane.svelte",
+      "src/lib/components/workspace/ChatPane.svelte",
+      "src/lib/components/workspace/RunArtifactPane.svelte",
+      "lib/workspace/ingest.ts",
+      "lib/workspace/contact-sheet.ts",
+      "lib/workspace/image-similarity.ts",
+      "lib/workspace/contact-sheet-scene.ts",
+      "lib/workspace/organize.ts",
+      "lib/workspace/scenes.ts",
+      "lib/workspace/dxf.ts",
+      "lib/workspace/run-output.ts",
+      "lib/workspace/chat-output.ts",
+      "app/api/workspace/assets",
+      "app/api/workspace/artifacts",
+      "app/api/daemon/runs",
+      "tests/unit/workspace-viewers-contract.test.ts",
+      "tests/unit/workspace-organize.test.ts",
+      "tests/unit/workspace-contact-sheet.test.ts",
+      "tests/unit/workspace-image-similarity.test.ts",
+      "tests/unit/workspace-contact-sheet-scene.test.ts",
+      "tests/unit/chat-output.test.ts",
+      "tests/unit/dxf.test.ts",
+      "scripts/hii-spatial-run-smoke.mjs",
+      "scripts/hii-workspace-scenes-smoke.mjs",
+      "scripts/hii-workspace-chat-smoke.mjs",
+      "scripts/hii-workspace-media-smoke.mjs",
+      "~/.hii/workspace/workspace.json",
+      "npm run build"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.scene.sound-field",
+    "name": "Render Governed Sound Field Object",
+    "owner": "hii",
+    "runtime": "webgl",
+    "summary": "Render measured or explicitly modeled sound-level readings as an interactive, provenance-aware WebGL object in the HII spatial workspace.",
+    "inputs": [
+      "named spatial sound points",
+      "dBA readings or modeled values",
+      "time and scenario metadata",
+      "data provenance"
+    ],
+    "outputs": [
+      "interactive HII sound-field object",
+      "dBA scale and selected-point detail",
+      "persisted workspace object metadata"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "render local WebGL",
+      "write one bounded workspace object through the HII workspace API",
+      "label modeled data visibly",
+      "no microphone capture",
+      "no external publish"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "components/workspace/nodes/SouthBerkeleySoundFieldNode.tsx",
+      "lib/workspace/types.ts",
+      "lib/workspace/ingest.ts",
+      "~/.hii/workspace/workspace.json",
+      "npm run build"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.knowledge.workspace",
+    "name": "HII Local Knowledge Workspace",
+    "owner": "hii.runtime",
+    "runtime": "next-route",
+    "summary": "Merge complete approved vaults into canonical local HII knowledge, then create, connect, search, version, graph, system-map, verify, roll back, and export it portably.",
+    "inputs": [
+      "local note or Markdown import",
+      "approved Obsidian or Markdown vault import",
+      "copied or explicitly linked local asset",
+      "source material for reviewed system exploration",
+      "bounded note mutation",
+      "search query",
+      "daily-note date",
+      "local export request"
+    ],
+    "outputs": [
+      "versioned Markdown note",
+      "folders and nested tags",
+      "wikilinks and backlinks",
+      "FTS5 search results",
+      "knowledge graph",
+      "typed system objects, relations, saved views, and proposal review",
+      "asset hashes, previews, provenance, and availability",
+      "local Markdown or JSON export",
+      "append-only knowledge event"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "read approved source vault without mutation",
+      "read and write canonical bounded knowledge and index state in ~/.hii/hii.db",
+      "revision-hash conflict detection",
+      "secret-like value redaction",
+      "no upload, publish, sync, or external transmission"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "/knowledge",
+      "/api/knowledge",
+      "lib/server/hii-knowledge.ts",
+      "lib/server/hii-vault.ts",
+      "lib/server/hii-knowledge-systems.ts",
+      "scripts/hii-knowledge-smoke.mjs",
+      "~/.hii/hii.db",
+      "~/.hii/knowledge"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.window-state.backend",
+    "name": "Persist Scrollable HII Window State",
+    "owner": "hii",
+    "runtime": "next-route",
+    "summary": "Persist per-window bounds, scroll offsets, workspace viewport, focus, lifecycle state, and revision history for resumable HII windows with cursor-paginated reads.",
+    "inputs": [
+      "stable window and workspace identifiers",
+      "window bounds and lifecycle status",
+      "scroll and spatial viewport offsets",
+      "optional optimistic base revision"
+    ],
+    "outputs": [
+      "restorable window state",
+      "cursor-paginated window collection",
+      "revision conflict response",
+      "local window-state audit history"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "read and write bounded window-state tables in ~/.hii/hii.db",
+      "secret-like value redaction",
+      "no upload, publish, sync, or external transmission"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "/api/workspace/windows",
+      "lib/server/hii-window-state.ts",
+      "scripts/hii-window-state-smoke.mjs",
+      "npm run hii:windows:check",
+      "npm run build"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.config.read",
+    "name": "Read HII Surface Config",
+    "owner": "hii.runtime",
+    "runtime": "local-process",
+    "summary": "Read the HII-owned HII surface configuration (~/.hii/config.json) that decides which surfaces are enabled and their defaults. Written only by HII via `hiid config set`.",
+    "inputs": [
+      "local read request"
+    ],
+    "outputs": [
+      "surface config json"
+    ],
+    "permissions": [
+      "read ~/.hii/config.json"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "app/api/config/route.ts",
+      "lib/server/hii-config.ts",
+      "runtime/daemon/hiid.mjs"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.config.control",
+    "name": "Control HII Surface Config",
+    "owner": "hii.runtime",
+    "runtime": "next-route",
+    "summary": "Enable or pause a known HII surface and choose the default home surface through HII-owned hiid configuration authority.",
+    "inputs": [
+      "known HII surface id",
+      "toggle or home action"
+    ],
+    "outputs": [
+      "updated surface config json",
+      "config.updated daemon event"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "allowlisted surfaces.<id>.enabled or defaults.homepage path only",
+      "write through hiid config set",
+      "no direct config file writes from the HII client"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "components/workspace/CommandBar.tsx",
+      "app/api/config/route.ts",
+      "lib/server/hii-daemon.ts",
+      "runtime/daemon/hiid.mjs"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.skills.start",
+    "name": "Start Registered HII Skill",
+    "owner": "hii.runtime",
+    "runtime": "next-route",
+    "summary": "Start any operator-reviewed registered HII skill as a bounded hiid-managed Codex run with the skill bundle as its execution contract.",
+    "inputs": [
+      "registered HII skill id"
+    ],
+    "outputs": [
+      "queued managed Codex run id",
+      "daemon run log and receipt"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "registered skills only",
+      "operator-reviewed bundle required",
+      "no legacy manifest shell execution",
+      "no push publish spend message delete or irreversible action without separate authority"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "provider"
+    },
+    "evidence": [
+      "components/workspace/CommandBar.tsx",
+      "app/api/skills/route.ts",
+      "lib/server/hii-skills.ts",
+      "/api/daemon/runs"
+    ],
+    "status": "ready",
+    "trustLevel": "operator-reviewed"
+  },
+  {
+    "id": "hii.skills.conversation_draft",
+    "name": "Learn Draft Skills From Verified Conversations",
+    "owner": "hii.runtime",
+    "runtime": "local-cli",
+    "summary": "Conservatively turn a verified conversational workspace workflow and active HII session context into an automatically updated draft skill for operator review.",
+    "inputs": [
+      "conversation context",
+      "verified run receipt",
+      "active HII sessions"
+    ],
+    "outputs": [
+      "agent-action receipt",
+      "draft SKILL.md",
+      "draft manifest"
+    ],
+    "permissions": [
+      "local-only model analysis",
+      "verified receipts only",
+      "draft creation only",
+      "registration and execution remain operator-reviewed"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "cli/src/skills.rs",
+      "~/.hii/skills/proposed",
+      "~/.hii/skills/action-receipts.jsonl"
+    ],
+    "status": "ready",
+    "trustLevel": "operator-reviewed"
+  },
+  {
+    "id": "hii.schedule.local_cron",
+    "name": "Schedule Local HII Work",
+    "owner": "hii.runtime",
+    "runtime": "local-cli",
+    "summary": "Create local cron schedules that queue bounded tasks through the HII daemon supervisor with append-only schedule events.",
+    "inputs": [
+      "five-field cron expression",
+      "bounded task"
+    ],
+    "outputs": [
+      "local schedule",
+      "managed Codex run",
+      "schedule event log"
+    ],
+    "permissions": [
+      "local crontab dispatcher",
+      "HII supervisor only",
+      "no external publication"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "cli/src/schedule.rs",
+      "~/.hii/schedules"
+    ],
+    "status": "partial",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.calendar.apple",
+    "name": "Read and Sync Apple Calendar",
+    "owner": "hii.runtime",
+    "runtime": "local-cli",
+    "summary": "Read upcoming Apple Calendar events and, only from explicit CLI commands, create events or sync the next occurrence of active HII schedules.",
+    "inputs": [
+      "date and optional time",
+      "event title",
+      "explicit sync command"
+    ],
+    "outputs": [
+      "local Calendar event",
+      "calendar sync event receipt"
+    ],
+    "permissions": [
+      "local Calendar Automation access",
+      "read by default",
+      "explicit command required for writes"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "cli/src/schedule.rs",
+      "~/.hii/schedules/events.jsonl"
+    ],
+    "status": "partial",
+    "trustLevel": "operator-reviewed"
+  },
+  {
+    "id": "hii.system.monitor",
+    "name": "Monitor Local System Resources",
+    "owner": "hii",
+    "runtime": "local-cli",
+    "summary": "Show a fast CPU, memory, storage, HII runtime, and Ollama snapshot or open btop inside the conversational terminal.",
+    "inputs": [
+      "local monitor request"
+    ],
+    "outputs": [
+      "resource snapshot",
+      "interactive btop view"
+    ],
+    "permissions": [
+      "read local process and filesystem usage",
+      "no process mutation"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "cli/src/system_monitor.rs",
+      "/top",
+      "/resources"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.notch.ambient",
+    "name": "Use HII Notch",
+    "owner": "hii",
+    "runtime": "next-route",
+    "summary": "Keep meaningful HII state persistently available at the top of the Mac, accept intent through the existing governed run path, and open Browser, Create, or Workspace without creating another agent runtime.",
+    "inputs": [
+      "human intent",
+      "local ecosystem events",
+      "active HII run state"
+    ],
+    "outputs": [
+      "bounded HII run",
+      "ambient status projection",
+      "mode navigation"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "existing hii run authority",
+      "no independent task store",
+      "no external transmission without existing review"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "src/lib/components/NotchSurface.svelte",
+      "src-tauri/src/lib.rs",
+      "~/.hii/ecosystem/events.jsonl"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.voice.interpret",
+    "name": "Interpret Voice and Dictation for HII",
+    "owner": "hii",
+    "runtime": "next-route",
+    "summary": "Interpret spoken or typed commands with context-aware intent routing, persistent voice snapshots, proposal state, and approval-gated action execution through existing HII capabilities.",
+    "inputs": [
+      "spoken transcript",
+      "local context snapshot",
+      "screen and selection context",
+      "proposal and receipt references"
+    ],
+    "outputs": [
+      "interpreted intent",
+      "proposal id",
+      "approval state",
+      "workspace run queue result"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "selection and app/window context as hints",
+      "approval required for risky or irreversible actions",
+      "no direct file or publish side effects before approval"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "src/routes/api/voice/+server.ts",
+      "src/lib/components/NotchSurface.svelte",
+      "lib/server/hii-voice.ts",
+      "lib/server/hii-voice-workspace-context.ts",
+      "lib/server/voice-proposal-ledger.ts",
+      "lib/voice/interpreter.ts",
+      "tests/unit/voice-context-authority.test.ts",
+      "tests/unit/voice-proposal-ledger.test.ts",
+      "~/.hii/voice"
+    ],
+    "status": "partial",
+    "statusNotes": "Interpretation, approval gating and the append-only proposal ledger are verified by unit tests and by exercising /api/voice on a live server. The server resolves supplied selection ids against authoritative Workspace state; it is not fully selection-aware, because the Notch does not yet publish live Workspace selection, so spoken context is only as rich as what a caller supplies and the no-selection state is reported honestly rather than backfilled. Not yet verified: queued execution end-to-end (requires a running local model provider) and microphone capture in the packaged Tauri application.",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.browser.retrieval",
+    "name": "Capture Source-Linked Browser Context",
+    "owner": "hii",
+    "runtime": "next-route",
+    "summary": "Browse through a temporary local Chromium session and turn an HTTP(S) page or explicit selection into a project-scoped local capture with provenance and a SHA-256 content hash.",
+    "inputs": [
+      "HTTP(S) URL",
+      "page text",
+      "explicit browser selection",
+      "project id"
+    ],
+    "outputs": [
+      "local hii.capture record",
+      "source hash",
+      "Create handoff"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "HTTP(S) navigation only",
+      "capture stays local",
+      "model delivery requires separate review"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "free"
+    },
+    "evidence": [
+      "src/routes/(app)/browser/+page.svelte",
+      "lib/server/hii-chromium.ts",
+      "lib/server/hii-ecosystem.ts"
+    ],
+    "status": "ready",
+    "trustLevel": "first-party"
+  },
+  {
+    "id": "hii.create.workflow",
+    "name": "Run Versioned Create Workflows",
+    "owner": "hii",
+    "runtime": "next-route",
+    "summary": "Version source-linked visual workflow graphs, require review of the exact revision, queue the ComfyUI API prompt through a local-only adapter, and retain output references as proof.",
+    "inputs": [
+      "Browser capture",
+      "workflow graph",
+      "ComfyUI API prompt",
+      "explicit revision approval"
+    ],
+    "outputs": [
+      "append-only workflow revision",
+      "ComfyUI prompt id",
+      "run events",
+      "verified output references"
+    ],
+    "permissions": [
+      "local HII origin only",
+      "local ComfyUI endpoint only",
+      "explicit approval before queue",
+      "no automatic publication or upload"
+    ],
+    "visibility": "local",
+    "costModel": {
+      "type": "local-compute"
+    },
+    "evidence": [
+      "src/routes/(app)/create/+page.svelte",
+      "lib/server/hii-comfy.ts",
+      "app/api/ecosystem/route.ts"
+    ],
+    "status": "ready",
+    "trustLevel": "operator-reviewed"
+  },
+  {
+    "id": "hii.image.generate",
+    "name": "Generate image",
+    "summary": "Generate images with installed ComfyUI models and retain artifact hashes in HII",
+    "owner": "hii.runtime",
+    "runtime": "local-cli",
+    "status": "partial",
+    "permissions": [
+      "submit image prompt to user-owned ComfyUI",
+      "save generated images in HII"
+    ],
+    "evidence": [
+      "runtime/image-generation/comfy.mjs"
+    ]
+  }
+]

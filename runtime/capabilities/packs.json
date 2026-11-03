@@ -1,0 +1,242 @@
+[
+  {
+    "id": "hii-core-loop",
+    "name": "HII Core Loop",
+    "summary": "Local user-proxy loop, OG context, y/n plan gate, and agent-readable context.",
+    "capabilities": [
+      "hii.loop.user_proxy",
+      "hii.og.operational_graph",
+      "hii.terminal.observe",
+      "hii.board.task_kanban"
+    ],
+    "routes": [],
+    "commands": [
+      "hii context --json",
+      "hii og status",
+      "hii loop once",
+      "hii loop note",
+      "hii loop decide",
+      "hii board",
+      "hii console"
+    ],
+    "files": [
+      "lib/server/hii-board.ts",
+      "lib/server/hii-agent-context.ts",
+      "scripts/hii-cli.mjs"
+    ],
+    "runtimeFiles": [
+      "~/.hii/og/events.jsonl",
+      "~/.hii/loop/decisions.jsonl",
+      "~/.hii/loop/notes.jsonl",
+      "~/.hii/board/tasks.jsonl"
+    ],
+    "verification": [
+      "node scripts/hii-cli.mjs loop once",
+      "node scripts/hii-cli.mjs loop status",
+      "node scripts/hii-cli.mjs board"
+    ],
+    "shipBoundary": "local-only; exports manifests, never pushes or publishes"
+  },
+  {
+    "id": "hii-knowledge-workspace",
+    "name": "HII Knowledge Workspace",
+    "summary": "Local Markdown knowledge, deterministic links/tags/search, graph navigation, history, lifecycle controls, and receipts on ~/.hii/hii.db.",
+    "capabilities": [
+      "hii.knowledge.workspace"
+    ],
+    "routes": [],
+    "commands": [
+      "hii knowledge",
+      "hii knowledge --open",
+      "hii knowledge check"
+    ],
+    "files": [
+      "lib/server/hii-knowledge.ts",
+      "scripts/hii-knowledge-smoke.mjs"
+    ],
+    "runtimeFiles": [
+      "~/.hii/hii.db knowledge_* tables"
+    ],
+    "verification": [
+      "npm run hii:knowledge:check"
+    ],
+    "shipBoundary": "local-only knowledge state; importing reads user-selected files in the browser; export downloads locally; no sync or publish"
+  },
+  {
+    "id": "hii-terminal",
+    "name": "HII Console",
+    "summary": "Local command center for process observation, agent spawn presets, capability discovery, and recent jobs.",
+    "capabilities": [
+      "hii.terminal.observe",
+      "hii.agent.spawn",
+      "hii.registry.scan",
+      "hii.registry.doctor"
+    ],
+    "routes": [],
+    "commands": [
+      "hii console",
+      "hii terminal",
+      "hii caps show",
+      "hii jobs",
+      "hii doctor"
+    ],
+    "files": [
+      "lib/server/hii-terminal.ts",
+      "lib/capabilities/local-store.ts",
+      "scripts/hii-cli.mjs"
+    ],
+    "runtimeFiles": [
+      "~/hii/.hii/capability-jobs.jsonl",
+      "~/hii/.hii/terminal-spawns.jsonl"
+    ],
+    "verification": [
+      "node scripts/hii-cli.mjs caps show",
+      "node scripts/hii-cli.mjs jobs"
+    ],
+    "shipBoundary": "local workstation only unless explicitly exposed by operator"
+  },
+  {
+    "id": "hii-credits",
+    "name": "HII Credits",
+    "summary": "Quote, reserve, finalize, and ledger bounded capability jobs.",
+    "capabilities": [
+      "hii.credits.quote"
+    ],
+    "routes": [],
+    "commands": [
+      "hii caps show",
+      "hii jobs"
+    ],
+    "files": [
+      "lib/server/credits.ts",
+      "lib/capabilities/types.ts"
+    ],
+    "runtimeFiles": [
+      "Supabase credit_accounts",
+      "Supabase capability_jobs",
+      "Supabase credit_ledger"
+    ],
+    "verification": [],
+    "shipBoundary": "requires configured Stripe and Supabase for durable production billing"
+  },
+  {
+    "id": "hii-rhino",
+    "name": "HII Rhino",
+    "summary": "HII-owned Rhino and Grasshopper execution, trusted job queue, logs, proof artifacts, and receipts.",
+    "capabilities": [
+      "hii.rhino.managed_job",
+      "hii.rhino.bootstrap_action"
+    ],
+    "routes": [],
+    "commands": [
+      "npm run hii:rhino -- status",
+      "npm run hii:rhino -- command <macro>",
+      "npm run hii:rhino -- script <path>",
+      "npm run hii:rhino -- grasshopper <path>",
+      "hii runner init <name>",
+      "hii runner start --once"
+    ],
+    "files": [
+      "lib/server/hii-rhino-jobs.ts",
+      "lib/server/runners.ts",
+      "scripts/hii-rhino.mjs"
+    ],
+    "runnerSupport": {
+      "requiredCapabilityId": "hii.rhino.managed_job",
+      "expectedInputs": [
+        "workflow",
+        "prompt",
+        "budget",
+        "reserved quote"
+      ],
+      "expectedOutputs": [
+        "runner transcript",
+        "proof_artifacts.log",
+        "completed or failed capability_jobs row"
+      ],
+      "proofArtifacts": [
+        "log first; screenshot/model artifacts when available"
+      ],
+      "verificationCommands": [
+        "npm run hii:rhino -- status",
+        "hii runner start --once",
+        "hii caps show",
+        "npm run check"
+      ]
+    },
+    "runtimeFiles": [
+      "Supabase capability_runners",
+      "Supabase capability_jobs runner fields",
+      "~/hii/.hii/rhino-jobs.jsonl"
+    ],
+    "verification": [
+      "npm run hii:rhino -- status",
+      "node scripts/hii-cli.mjs runner start --once",
+      "npm run check"
+    ],
+    "shipBoundary": "owned approved runners only; Rhino execution remains whitelisted and operator-reviewed"
+  },
+  {
+    "id": "hii-exchange-spine",
+    "name": "HII Exchange Spine",
+    "summary": "Upload asset, create priced exchange link, verify payment, and issue time-limited downloads.",
+    "capabilities": [
+      "hii.exchange.asset_link"
+    ],
+    "routes": [],
+    "commands": [
+      "hii health --text",
+      "npm run build"
+    ],
+    "files": [
+      "lib/server/supabase.ts"
+    ],
+    "runtimeFiles": [
+      "Supabase assets/orders/download_events",
+      "Cloudflare R2 object storage",
+      "Stripe checkout/webhook events"
+    ],
+    "verification": [],
+    "shipBoundary": "public exchange flow; requires explicit external services"
+  },
+  {
+    "id": "hii-link-stream",
+    "name": "HII Link Stream",
+    "summary": "Browser capture, local downloader cache, and Ollama interpretation for an offline-first feed.",
+    "capabilities": [
+      "hii.browser.link_capture",
+      "hii.downloader.offline_cache",
+      "hii.ollama.link_interpreter",
+      "hii.links.publish_stream"
+    ],
+    "routes": [],
+    "commands": [
+      "hii links status",
+      "hii links cache",
+      "hii links publish",
+      "npm run hii:links:cache"
+    ],
+    "files": [
+      "lib/server/link-stream.ts",
+      "scripts/hii-link-cache.mjs",
+      "extensions/chrome-link-capture/manifest.json",
+      "extensions/chrome-link-capture/popup.html",
+      "extensions/chrome-link-capture/popup.js",
+      "extensions/chrome-link-capture/background.js",
+      "extensions/chrome-link-capture/options.html",
+      "extensions/chrome-link-capture/options.js"
+    ],
+    "runtimeFiles": [
+      "~/hii/.hii/link-posts.jsonl",
+      "~/hii/.hii/link-cache.jsonl",
+      "~/hii/.hii/link-cache",
+      "~/hii/.hii/link-publish.jsonl"
+    ],
+    "verification": [
+      "node scripts/hii-cli.mjs links status",
+      "node scripts/hii-cli.mjs links publish --dry-run",
+      "npm run hii:links:cache"
+    ],
+    "shipBoundary": "local-first browser extension and cache; external sync or publishing requires a separate approval gate"
+  }
+]

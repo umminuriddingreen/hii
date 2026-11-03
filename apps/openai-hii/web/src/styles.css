@@ -1,0 +1,44 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #eeeae0;
+  background: transparent;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; padding: 12px; }
+.shell {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 22px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 88% -10%, rgba(190,255,87,.16), transparent 38%),
+    linear-gradient(145deg, #171914, #0e100d 68%);
+  box-shadow: 0 20px 55px rgba(0,0,0,.28);
+}
+header, .section-title { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.eyebrow, .section-title span, footer span { margin: 0; color: #befe58; font-size: 11px; font-weight: 750; letter-spacing: .16em; }
+h1 { margin: 4px 0 0; font-size: clamp(28px, 6vw, 48px); line-height: 1; letter-spacing: -.045em; }
+.role { max-width: 540px; margin: 16px 0 22px; color: #aaa99f; line-height: 1.45; }
+.signal { flex: none; padding: 7px 10px; border-radius: 999px; font: 700 11px ui-monospace, monospace; }
+.signal.clean { color: #befe58; background: rgba(190,254,88,.1); }
+.signal.working { color: #ffd36a; background: rgba(255,211,106,.1); }
+.metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.metrics article { padding: 13px; border: 1px solid rgba(255,255,255,.09); border-radius: 14px; background: rgba(255,255,255,.035); }
+.metrics span { display: block; color: #85867e; font-size: 11px; }
+.metrics strong { display: block; margin-top: 5px; overflow: hidden; color: #f5f3eb; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.work { margin-top: 26px; }
+.section-title h2 { margin: 0; font-size: 15px; }
+.section-title span { color: #777a71; }
+.task { padding: 15px 0; border-bottom: 1px solid rgba(255,255,255,.08); }
+.task > div { display: flex; align-items: baseline; gap: 10px; }
+.task h3 { margin: 0; font-size: 14px; font-weight: 610; line-height: 1.35; }
+.task p, .empty { margin: 7px 0 0; overflow: hidden; color: #777a71; font: 11px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.lane { color: #befe58; font: 700 9px ui-monospace, monospace; text-transform: uppercase; }
+footer { display: grid; grid-template-columns: 52px 1fr; gap: 10px; margin-top: 20px; padding: 13px; border-radius: 14px; background: #befe58; color: #151912; }
+footer span { color: #151912; }
+footer p { margin: 0; font-size: 12px; font-weight: 650; line-height: 1.4; }
+@media (max-width: 520px) { body { padding: 0; } .shell { border-radius: 18px; padding: 18px; } .metrics { grid-template-columns: 1fr; } }

@@ -1,0 +1,296 @@
+{
+  "schemaVersion": 2,
+  "objective": "utility-per-wait",
+  "tiersDoc": "Hardware sizing only: how much model this machine can hold. Selected first-match by ascending memoryGiBMax, so the open-ended tier stays last. Task difficulty lives in taskTiers; mixing the two makes an unconditional null match shadow every size.",
+  "tiers": [
+    {
+      "memoryGiBMax": 8,
+      "name": "8gb",
+      "localClass": "3-4B",
+      "model": "Qwen/Qwen3-4B",
+      "quantization": "4",
+      "platforms": ["darwin"],
+      "architectures": ["arm64"],
+      "backend": "mlx"
+    },
+    {
+      "memoryGiBMax": 18,
+      "name": "16gb",
+      "localClass": "8B",
+      "model": "Qwen/Qwen3-8B",
+      "quantization": "4",
+      "platforms": ["darwin"],
+      "architectures": ["arm64"],
+      "backend": "mlx"
+    },
+    {
+      "memoryGiBMax": 36,
+      "name": "24-32gb",
+      "localClass": "14B",
+      "model": "Qwen/Qwen3-14B",
+      "quantization": "4",
+      "platforms": ["darwin"],
+      "architectures": ["arm64"],
+      "backend": "mlx"
+    },
+    {
+      "memoryGiBMax": null,
+      "name": "48gb+",
+      "localClass": "35B MoE / 3B active (HII / MLX default)",
+      "model": "mlx-community/Qwen3.5-35B-A3B-4bit",
+      "quantization": "4",
+      "native_model": "mlx-community/Qwen3.5-35B-A3B-4bit",
+      "backend": "mlx",
+      "platforms": ["darwin"],
+      "architectures": ["arm64"]
+    },
+    {
+      "memoryGiBMax": 24,
+      "name": "windows-16-24gb",
+      "localClass": "9B dense GGUF",
+      "model": "qwen3.5-9b-balanced",
+      "quantization": "Q4_K_M",
+      "backend": "llama.cpp",
+      "platforms": ["win32"],
+      "architectures": ["x64"]
+    },
+    {
+      "memoryGiBMax": null,
+      "name": "windows-32gb+",
+      "localClass": "27B dense GGUF",
+      "model": "qwen3.8-27b-agent",
+      "quantization": "Q3_K_XL",
+      "backend": "llama.cpp",
+      "platforms": ["win32"],
+      "architectures": ["x64"]
+    }
+  ],
+  "taskTiersDoc": "Task difficulty only: how much brain a request deserves. Never keyed by memory. Interactive HII uses local tier 2 for explicit deep work or a failed action when its model is installed; it prefers the already loaded local model otherwise. Tier 3 stays an explicit operator act.",
+  "taskTiers": [
+    {
+      "tier": 0,
+      "name": "tier-0-no-llm",
+      "localClass": "Deterministic (no LLM)",
+      "model": "noop",
+      "description": "Tool routing: grep, search, filesystem metadata, git status, calculations. Never sends a prompt payload to any model."
+    },
+    {
+      "tier": 1,
+      "name": "fast-4b-local",
+      "localClass": "4B Dense — Default Fast Worker",
+      "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+      "quantization": "4",
+      "description": "The default HII MLX worker for low-latency interaction and tool routing."
+    },
+    {
+      "tier": 2,
+      "name": "deliberate-35b-a3b",
+      "localClass": "35B MoE / 3B Active — Strong Local Brain (MLX)",
+      "model": "mlx-community/Qwen3.5-35B-A3B-4bit",
+      "quantization": "4",
+      "description": "Difficult reasoning and long-context work with measured interactive throughput on this Mac. Explicitly selectable through the HII MLX engine.",
+      "provider": "hii-native",
+      "backend": "mlx"
+    },
+    {
+      "tier": 3,
+      "name": "hosted",
+      "localClass": "Cloud — max intelligence",
+      "model": "approved-hosted",
+      "description": "Operator-invoked only, through /codex or /claude. Never entered automatically."
+    }
+  ],
+  "selectionCatalogDoc": "Curated HII choices for explicit operator selection. This catalog recommends but never downloads, starts, switches, or routes a model by itself.",
+  "selectionCatalog": [
+    {
+      "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+      "aliases": ["fast", "4b"],
+      "role": "Small fast local",
+      "bestFor": "Simple requests, tool routing, and minimum memory use",
+      "speed": "fastest",
+      "quality": "everyday",
+      "minimumMemoryGiB": 8,
+      "estimatedDiskGiB": 2.3,
+      "capabilities": ["chat", "tools"],
+      "backend": "mlx",
+      "source": "huggingface",
+      "platforms": ["darwin"],
+      "architectures": ["arm64"]
+    },
+    {
+      "model": "mlx-community/Qwen3.5-9B-MLX-4bit",
+      "aliases": ["balanced", "9b"],
+      "role": "Balanced local",
+      "bestFor": "Stronger everyday reasoning and vision without 27B latency",
+      "speed": "fast",
+      "quality": "strong",
+      "minimumMemoryGiB": 16,
+      "estimatedDiskGiB": 6,
+      "capabilities": ["chat", "tools", "vision"],
+      "backend": "mlx",
+      "source": "huggingface",
+      "platforms": ["darwin"],
+      "architectures": ["arm64"]
+    },
+    {
+      "model": "mlx-community/Qwen3.8-27B-4bit",
+      "aliases": ["dense", "27b", "qwen3.8"],
+      "role": "Dense Mac local",
+      "bestFor": "Deliberate reasoning and vision when dense-model quality matters more than latency",
+      "speed": "moderate",
+      "quality": "deliberate",
+      "minimumMemoryGiB": 32,
+      "estimatedDiskGiB": 16.1,
+      "capabilities": ["chat", "tools", "vision"],
+      "backend": "mlx",
+      "source": "huggingface",
+      "platforms": ["darwin"],
+      "architectures": ["arm64"]
+    },
+    {
+      "model": "mlx-community/Qwen3.5-35B-A3B-4bit",
+      "aliases": ["recommended", "default", "quality", "deliberate", "strongest", "35b", "a3b"],
+      "role": "Measured local default",
+      "bestFor": "Everyday assistance, tool use, hard reasoning, and long-context work",
+      "speed": "fast",
+      "quality": "highest local",
+      "minimumMemoryGiB": 48,
+      "estimatedDiskGiB": 20.4,
+      "capabilities": ["chat", "tools", "vision"],
+      "backend": "mlx",
+      "source": "huggingface",
+      "platforms": ["darwin"],
+      "architectures": ["arm64"]
+    },
+    {
+      "model": "mlx-community/Qwen3.8-27B-4bit",
+      "logicalModel": "qwen3.8-27b-agent",
+      "aliases": ["qwen3.8-27b-agent", "27b-agent", "qwen3.8-27b", "27b"],
+      "role": "Dense agent model",
+      "bestFor": "Complex tool use, application control, and dense multi-step reasoning",
+      "speed": "moderate",
+      "quality": "deliberate",
+      "minimumMemoryGiB": 32,
+      "estimatedDiskGiB": 16,
+      "capabilities": ["chat", "tools", "vision"],
+      "backend": "mlx",
+      "source": "huggingface",
+      "platforms": ["darwin"],
+      "architectures": ["arm64"]
+    },
+    {
+      "model": "qwen3.5-9b-balanced",
+      "aliases": ["fast", "balanced", "9b"],
+      "role": "Fast Windows local",
+      "bestFor": "Everyday requests, vision, and low-latency tool use",
+      "speed": "fastest",
+      "quality": "strong",
+      "minimumMemoryGiB": 16,
+      "estimatedDiskGiB": 5.2,
+      "capabilities": ["chat", "tools", "vision"],
+      "backend": "llama.cpp",
+      "source": "preset",
+      "platforms": ["win32"],
+      "architectures": ["x64"]
+    },
+    {
+      "model": "qwen3.6-35b-a3b-agent",
+      "aliases": ["35b", "a3b"],
+      "role": "Optional Windows candidate",
+      "bestFor": "Explicit benchmark comparisons when this model is installed",
+      "speed": "fast",
+      "quality": "highest utility",
+      "minimumMemoryGiB": 32,
+      "estimatedDiskGiB": 12.7,
+      "capabilities": ["chat", "tools"],
+      "backend": "llama.cpp",
+      "source": "preset",
+      "platforms": ["win32"],
+      "architectures": ["x64"]
+    },
+    {
+      "model": "qwen3.8-27b-agent",
+      "logicalModel": "qwen3.8-27b-agent",
+      "aliases": ["recommended", "default", "deliberate", "quality", "27b-agent", "qwen3.8-27b", "27b"],
+      "role": "Current Windows default",
+      "bestFor": "Everyday assistance, tool use, and dense local reasoning",
+      "speed": "moderate",
+      "quality": "deliberate",
+      "minimumMemoryGiB": 32,
+      "estimatedDiskGiB": 11.2,
+      "capabilities": ["chat", "tools", "vision"],
+      "backend": "llama.cpp",
+      "source": "preset",
+      "platforms": ["win32"],
+      "architectures": ["x64"]
+    }
+  ],
+  "hostedCatalogDoc": "Explicit hosted/browser-backed models. Selecting one records an external-transmission provider preference; HII never routes here automatically.",
+  "hostedCatalog": [
+    {
+      "provider": "ox-alpha-web",
+      "model": "z-ai/glm-5.3-flash",
+      "aliases": ["ox-alpha", "oxalpha", "alpha"],
+      "role": "Ox Alpha website",
+      "bestFor": "Fast hosted reasoning through direct DOM control of the public Ox Alpha chat while HII retains tool authority",
+      "endpoint": "https://oxalpha.com",
+      "externalTransmission": true,
+      "capabilities": ["chat", "reasoning", "hii-tools"]
+    }
+  ],
+  "routing": {
+    "auto": [
+      "mlx-community/Qwen3.5-35B-A3B-4bit",
+      "hii-native"
+    ],
+    "local": [
+      "mlx-community/Qwen3.5-35B-A3B-4bit",
+      "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+      "hii-native"
+    ],
+    "private": [
+      "mlx-community/Qwen3.5-35B-A3B-4bit",
+      "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+      "hii-native"
+    ],
+    "best": [
+      "mlx-community/Qwen3.5-35B-A3B-4bit",
+      "approved-hosted"
+    ],
+    "tiers": {
+      "0": "Deterministic — no LLM, tool routing only",
+      "1": "Qwen3-4B-Instruct-2507-4bit (default low-latency HII MLX worker)",
+      "2": "Qwen3.5-35B-A3B-4bit (measured high-throughput local reasoning model)",
+      "3": "cloud only — when local models fail, task is extremely consequential, or explicitly requested"
+    },
+    "mlxBACKEND": {
+      "tag": "mlx-community/Qwen3.5-35B-A3B-4bit",
+      "engine": "HII MLX-VLM on 127.0.0.1:11435",
+      "status": "hii runner model status"
+    }
+  },
+  "nvidia": {
+    "defaultBackend": "native-cuda",
+    "defaultProfile": "adaptive",
+    "headroomMiB": 1536,
+    "switchCooldownMs": 120000,
+    "backends": ["native-cuda", "wsl-cuda", "wsl-vllm"],
+    "profiles": {
+      "fast": { "modelAliases": ["qwen3.5-9b-balanced"], "contextTokens": 16384, "batchSize": 1024, "microBatchSize": 256, "kvCacheType": "q8_0" },
+      "deep": { "modelAliases": ["qwen3.8-27b-agent"], "contextTokens": 16384, "batchSize": 1024, "microBatchSize": 256, "kvCacheType": "q4_0" },
+      "agent": { "modelAliases": ["qwen3.8-27b-agent"], "contextTokens": 16384, "batchSize": 1024, "microBatchSize": 256, "kvCacheType": "q4_0", "cpuOffload": false },
+      "shared-gpu": { "modelAliases": ["qwen3.5-9b-balanced"], "contextTokens": 8192, "batchSize": 512, "microBatchSize": 128, "kvCacheType": "q4_0" }
+    },
+    "notes": "Candidate profiles, not measured performance claims. GPU capacity is separate from taskTiers. Adaptive selection happens only at explicit start boundaries; active tasks never switch models. Existing external rails are observation-only."
+  },
+  "performanceGate": {
+    "maxWallMs": 120000,
+    "minCompletionTokensPerSecond": 8,
+    "requiresCompletion": true
+  },
+  "hostedTransmission": "explicit-only",
+  "metadata": {
+    "updated": "2026-09-21T05:55:00Z",
+    "reason": "Align Windows defaults and adaptive deep routing with the installed HII-owned Qwen3.8 27B model while retaining uninstalled candidates as explicit catalog choices."
+  }
+}

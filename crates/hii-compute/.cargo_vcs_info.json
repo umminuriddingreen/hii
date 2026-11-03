@@ -1,0 +1,7 @@
+{
+  "git": {
+    "sha1": "bb5f73d73eac8ad770f9d2deb94caee837e284a7",
+    "dirty": true
+  },
+  "path_in_vcs": "crates/hii-compute"
+}
