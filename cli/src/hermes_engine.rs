@@ -41,6 +41,10 @@ const MAX_SECRET_BYTES: u64 = 16 * 1024;
 const MAX_ENGINE_OUTPUT_CHARS: usize = 16_000;
 
 pub fn run(paths: &AppPaths, mut options: RunOptions) -> Result<Receipt, String> {
+    options.model = options
+        .model
+        .take()
+        .filter(|model| agent::model_candidate(Some(model)).is_some());
     if options.goal.trim().is_empty() {
         return Err("goal cannot be empty".into());
     }
@@ -71,6 +75,7 @@ pub fn run(paths: &AppPaths, mut options: RunOptions) -> Result<Receipt, String>
         paths
             .user_model_preference()?
             .map(|preference| preference.model)
+            .filter(|model| agent::model_candidate(Some(model)).is_some())
     } else {
         None
     };
@@ -78,7 +83,10 @@ pub fn run(paths: &AppPaths, mut options: RunOptions) -> Result<Receipt, String>
         "explicit"
     } else if saved_model.is_some() {
         "saved-user"
-    } else if std::env::var_os("HII_MODEL").is_some() {
+    } else if std::env::var("HII_MODEL")
+        .ok()
+        .is_some_and(|model| !model.trim().is_empty())
+    {
         "env"
     } else {
         "provider-default"

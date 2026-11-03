@@ -16,7 +16,9 @@ impl ModelTask {
             return Ok(None);
         };
         if pinned
-            || std::env::var_os("HII_MODEL").is_some()
+            || std::env::var("HII_MODEL")
+                .ok()
+                .is_some_and(|model| !model.trim().is_empty())
             || config.profile.as_deref() != Some("adaptive")
             || !matches!(
                 config.backend.as_deref(),

@@ -541,20 +541,26 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let _model_task = if options.dry_run {
         None
     } else {
-        crate::model_task::ModelTask::acquire(paths, options.model.is_some(), options.review)?
+        crate::model_task::ModelTask::acquire(
+            paths,
+            model_candidate(options.model.as_deref()).is_some(),
+            options.review,
+        )?
     };
     let ollama = Ollama::discover().ensure_reachable()?;
     let models = ollama.models()?;
-    let env_model_present = std::env::var_os("HII_MODEL").is_some();
-    let saved_model = if options.model.is_none() {
+    let env_model = std::env::var("HII_MODEL").ok();
+    let env_model = model_candidate(env_model.as_deref());
+    let requested_explicit = model_candidate(options.model.as_deref());
+    let saved_model = if requested_explicit.is_none() {
         saved_model_for_provider(paths, ollama.provider())?
     } else {
         None
     };
     let (requested_model, model_source) = requested_model_selection(
-        options.model.as_deref(),
+        requested_explicit,
         saved_model.as_deref(),
-        env_model_present,
+        env_model,
     );
     let model = choose_model(requested_model, ollama.provider(), &models)?;
     crate::run_context::set_model_route(requested_model, &model, &model_source);
@@ -2375,18 +2381,22 @@ pub(crate) fn choose_model(
     )
 }
 
+pub(crate) fn model_candidate(value: Option<&str>) -> Option<&str> {
+    value.filter(|value| !value.trim().is_empty())
+}
+
 pub(crate) fn requested_model_selection<'a>(
     explicit: Option<&'a str>,
     saved: Option<&'a str>,
-    env_model_present: bool,
+    env_model: Option<&'a str>,
 ) -> (Option<&'a str>, String) {
-    if let Some(explicit) = explicit {
+    if let Some(explicit) = model_candidate(explicit) {
         return (Some(explicit), "explicit".into());
     }
-    if env_model_present {
+    if model_candidate(env_model).is_some() {
         return (None, "env".into());
     }
-    if let Some(saved) = saved {
+    if let Some(saved) = model_candidate(saved) {
         return (Some(saved), "saved-user".into());
     }
     (None, "provider-default".into())
@@ -2400,7 +2410,9 @@ pub(crate) fn saved_model_for_provider(
         let config: Option<crate::config::InferenceConfig> =
             crate::store::read_json(&paths.runtime.join("config/inference.json"));
         if let Some(config) = config {
-            return Ok(Some(config.model));
+            if model_candidate(Some(&config.model)).is_some() {
+                return Ok(Some(config.model));
+            }
         }
     }
     Ok(paths
@@ -2411,7 +2423,8 @@ pub(crate) fn saved_model_for_provider(
                 .as_deref()
                 .is_none_or(|saved_provider| saved_provider == provider.id())
         })
-        .map(|preference| preference.model))
+        .map(|preference| preference.model)
+        .filter(|model| model_candidate(Some(model)).is_some()))
 }
 
 fn choose_model_with_env(
@@ -2420,11 +2433,11 @@ fn choose_model_with_env(
     provider: ModelProvider,
     installed: &[String],
 ) -> Result<String, String> {
+    let requested = model_candidate(requested);
+    let env_model = model_candidate(env_model);
     let may_recover_stale_environment =
         requested.is_none() && env_model.is_some() && provider == ModelProvider::Native;
-    let explicit = requested
-        .map(str::to_string)
-        .or_else(|| env_model.map(str::to_string));
+    let explicit = requested.map(str::to_string).or_else(|| env_model.map(str::to_string));
     let requested = explicit
         .clone()
         .unwrap_or_else(|| provider.default_model().to_string());
@@ -4373,16 +4386,42 @@ fn model_roles_resolve_across_windows_and_mac_catalogs() {
 #[test]
 fn env_model_preempts_saved_user_preference() {
     assert_eq!(
-        requested_model_selection(Some("flag-model"), Some("saved-model"), true),
+        requested_model_selection(Some("flag-model"), Some("saved-model"), Some("env-model")),
         (Some("flag-model"), "explicit".into())
     );
     assert_eq!(
-        requested_model_selection(None, Some("saved-model"), true),
+        requested_model_selection(None, Some("saved-model"), Some("env-model")),
         (None, "env".into())
     );
     assert_eq!(
-        requested_model_selection(None, Some("saved-model"), false),
+        requested_model_selection(None, Some("saved-model"), None),
         (Some("saved-model"), "saved-user".into())
+    );
+}
+
+#[test]
+fn blank_model_candidates_fall_through_to_saved_or_default() {
+    assert_eq!(
+        requested_model_selection(Some("  \t"), Some(" saved-model "), Some("\n")),
+        (Some(" saved-model "), "saved-user".into())
+    );
+    assert_eq!(
+        requested_model_selection(Some(""), Some(" \t "), Some("  ")),
+        (None, "provider-default".into())
+    );
+    assert_eq!(
+        requested_model_selection(None, Some("saved-model"), Some("env-model")),
+        (None, "env".into())
+    );
+}
+
+#[test]
+fn blank_requested_and_environment_models_choose_provider_default() {
+    let installed = vec![ModelProvider::Native.default_model().to_string()];
+    assert_eq!(
+        choose_model_with_env(Some(" \t "), Some("\n"), ModelProvider::Native, &installed)
+            .unwrap(),
+        ModelProvider::Native.default_model()
     );
 }
 

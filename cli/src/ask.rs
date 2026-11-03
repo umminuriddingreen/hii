@@ -37,6 +37,7 @@ pub fn run(
     requested_workspace: Option<&Path>,
     jsonl: bool,
 ) -> Result<(), String> {
+    let requested_model = agent::model_candidate(requested_model);
     let prompt = prompt.trim();
     if prompt.is_empty() {
         return Err("ask needs a prompt".into());
@@ -85,7 +86,8 @@ pub fn run(
     let result = (|| -> Result<(), String> {
         let ollama = Ollama::discover().ensure_reachable()?;
         let models = ollama.models()?;
-        let env_model_present = std::env::var_os("HII_MODEL").is_some();
+        let env_model = std::env::var("HII_MODEL").ok();
+        let env_model = agent::model_candidate(env_model.as_deref());
         let saved_model = if requested_model.is_none() {
             agent::saved_model_for_provider(paths, ollama.provider())?
         } else {
@@ -94,7 +96,7 @@ pub fn run(
         let (requested, _) = agent::requested_model_selection(
             requested_model,
             saved_model.as_deref(),
-            env_model_present,
+            env_model,
         );
         let model = agent::choose_model(requested, ollama.provider(), &models)?;
         crate::run_context::set_model_route(requested, &model, "ask selection");

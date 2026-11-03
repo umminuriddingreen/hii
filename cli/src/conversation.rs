@@ -1,6 +1,6 @@
 use crate::{
     agent::{
-        choose_model, execute_tool, parse_action_with_repair, requested_model_selection,
+        choose_model, execute_tool, model_candidate, parse_action_with_repair, requested_model_selection,
         saved_model_for_provider, Action, RejectedActionGuard, RepeatedToolFailureGuard,
         MODEL_LOOP_DETECTED_MESSAGE,
     },
@@ -934,6 +934,8 @@ impl Conversation {
         new_session: bool,
         persistent_interactive: bool,
     ) -> Result<Self, String> {
+        let requested_model = requested_model
+            .filter(|model| model_candidate(Some(model)).is_some());
         if let Some(model) = requested_model.as_ref().filter(|model| is_non_chat_model_name(model)) {
             return Err(non_chat_model_message(model));
         }
@@ -947,13 +949,16 @@ impl Conversation {
         let cancel = Cancel::new();
         tools.set_cancellation(cancel.clone());
         let ollama = Ollama::discover().ensure_reachable()?;
-        let env_model_present = std::env::var_os("HII_MODEL").is_some();
+        let env_model = std::env::var("HII_MODEL").ok();
+        let env_model = model_candidate(env_model.as_deref());
+        let env_model_present = env_model.is_some();
         let saved_model = if requested_model.is_none() {
             let active: Option<Value> =
                 crate::store::read_json(&paths.runtime.join("config/active-inference.json"));
             active
                 .filter(|v| v["endpoint"].as_str() == Some(ollama.base_url()))
                 .and_then(|v| v["selectedModel"].as_str().map(str::to_owned))
+                .filter(|model| model_candidate(Some(model)).is_some())
                 .map(Some)
                 .unwrap_or(saved_model_for_provider(&paths, ollama.provider())?)
         } else {
@@ -964,7 +969,7 @@ impl Conversation {
         let (requested, requested_source) = requested_model_selection(
             requested_model.as_deref(),
             saved_model.as_deref(),
-            env_model_present,
+            env_model,
         );
         let requested = match requested {
             Some(model) if is_non_chat_model_name(model) && requested_source == "explicit" => {
@@ -973,11 +978,9 @@ impl Conversation {
             Some(model) if is_non_chat_model_name(model) => None,
             requested => requested,
         };
-        if env_model_present {
-            if let Ok(model) = std::env::var("HII_MODEL") {
-                if is_non_chat_model_name(&model) {
-                    return Err(non_chat_model_message(&model));
-                }
+        if let Some(model) = env_model {
+            if is_non_chat_model_name(model) {
+                return Err(non_chat_model_message(model));
             }
         }
         // Nothing was asked for and the default is not installed: an operator

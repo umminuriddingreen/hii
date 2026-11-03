@@ -71,6 +71,7 @@ const LAUNCHER_TEMPLATE_POWERSHELL = [
   ')',
   '',
   '$ErrorActionPreference = \'Stop\'',
+  'if ([string]::IsNullOrWhiteSpace($env:HII_MODEL)) { Remove-Item Env:HII_MODEL -ErrorAction SilentlyContinue }',
   '',
   '$markerFile = if ($env:HII_CLI_RELEASE_MARKER) { $env:HII_CLI_RELEASE_MARKER } else { "{{MARKER_FILE}}" }',
   '$sourceRoot = {{SOURCE_ROOT}}',

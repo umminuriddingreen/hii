@@ -372,10 +372,13 @@ fn is_loopback_endpoint(endpoint: &str) -> bool {
 fn choose_local_model(paths: &AppPaths, ollama: &Ollama) -> Result<String, String> {
     let models = ollama.models()?;
     let saved_model = agent::saved_model_for_provider(paths, ollama.provider())?;
+    let env_model = std::env::var("HII_MODEL")
+        .ok()
+        .and_then(|model| agent::model_candidate(Some(&model)).map(str::to_owned));
     let (requested, _) = agent::requested_model_selection(
         None,
         saved_model.as_deref(),
-        std::env::var_os("HII_MODEL").is_some(),
+        env_model.as_deref(),
     );
     agent::choose_model(requested, ollama.provider(), &models)
 }
