@@ -3054,6 +3054,10 @@ impl Conversation {
         )
     }
 
+    pub fn preview(&self, path: &str) -> Result<String, String> {
+        self.attachments.preview(path)
+    }
+
     pub fn attach(&mut self, path: &str) -> Result<String, String> {
         let result = self.attachments.add(path)?;
         let inline = self
@@ -4408,7 +4412,7 @@ impl Conversation {
 
     /// Tool calls and results always belong in the continuous transcript.
     fn shows_tool_lines(&self) -> bool {
-        !crate::tui::raw_activity_mode()
+        true
     }
 
     /// Tool text is part of the same durable transcript in every view.

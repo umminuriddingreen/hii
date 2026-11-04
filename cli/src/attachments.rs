@@ -51,6 +51,12 @@ impl AttachmentQueue {
         }
     }
 
+    pub fn preview(&self, path: &str) -> Result<String, String> {
+        let (absolute, display) = self.resolve(path)?;
+        let width = crossterm::terminal::size().map(|(w, _)| usize::from(w).saturating_sub(1)).unwrap_or(80);
+        Ok(format!("{}\n{}", display.display(), crate::file_preview::render(&absolute, 24, width)?))
+    }
+
     pub fn add(&mut self, raw_path: &str) -> Result<String, String> {
         if self.items.len() >= MAX_ATTACHMENTS {
             return Err(format!("attachment limit reached ({MAX_ATTACHMENTS})"));

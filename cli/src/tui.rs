@@ -562,6 +562,7 @@ impl SlashCommandCatalog {
         // command handlers in main.rs. The public-test surface is intentionally
         // narrower than the owner harness.
         let mut entries = [
+            ("/preview", "/preview ", "Preview an image, PDF, or text file", true, true),
             ("/permissions", "/permissions", "Inspect execution permissions", false, false),
             ("/help", "/help", "Show command help", false, true),
             ("/workspace", "/workspace", "Open live work, files, and proof", false, false),

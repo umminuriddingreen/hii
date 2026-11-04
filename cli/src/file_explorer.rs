@@ -1,7 +1,7 @@
 use std::{
     cmp::Ordering,
     fs,
-    io::{self, IsTerminal, Read, Write},
+    io::{self, IsTerminal, Write},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -74,6 +74,7 @@ struct BrowserState {
     entries: Vec<Entry>,
     selected: usize,
     scroll: usize,
+    preview_cache: std::cell::RefCell<Option<(PathBuf, usize, usize, Vec<String>)>>,
 }
 
 impl BrowserState {
@@ -86,6 +87,7 @@ impl BrowserState {
             entries,
             selected: 0,
             scroll: 0,
+            preview_cache: std::cell::RefCell::new(None),
         })
     }
 
@@ -229,7 +231,12 @@ impl BrowserState {
                 })
                 .collect());
         }
-        preview_file(&entry.path, height, width)
+        if let Some((path, h, w, lines)) = self.preview_cache.borrow().as_ref() {
+            if path == &entry.path && *h == height && *w == width { return Ok(lines.clone()); }
+        }
+        let lines = preview_file(&entry.path, height, width)?;
+        *self.preview_cache.borrow_mut() = Some((entry.path.clone(), height, width, lines.clone()));
+        Ok(lines)
     }
 
     fn move_selection(&mut self, delta: isize) {
@@ -360,21 +367,8 @@ fn pad(value: &str, width: usize) -> String {
 }
 
 fn preview_file(path: &Path, height: usize, width: usize) -> Result<Vec<String>> {
-    const PREVIEW_BYTES: u64 = 16 * 1024;
-    let mut bytes = Vec::new();
-    fs::File::open(path)
-        .map_err(|error| error.to_string())?
-        .take(PREVIEW_BYTES)
-        .read_to_end(&mut bytes)
-        .map_err(|error| error.to_string())?;
-    let Ok(text) = std::str::from_utf8(&bytes) else {
-        return Ok(vec!["  binary file".into()]);
-    };
-    Ok(text
-        .lines()
-        .take(height)
-        .map(|line| crate::text::clip(line, width))
-        .collect())
+    Ok(crate::file_preview::render(path, height, width)
+        .unwrap_or_else(|error| error).lines().map(str::to_owned).collect())
 }
 
 #[cfg(test)]

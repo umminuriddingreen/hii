@@ -349,7 +349,7 @@ impl LiveInput {
         }
         let safe = message
             .chars()
-            .map(|c| if c.is_control() { '�' } else { c })
+            .map(|c| if c.is_control() && !matches!(c, '\n' | '\t' | '\r') { '�' } else { c })
             .collect::<String>();
         self.stream_column = 0;
         write_stream_delta(
@@ -1739,6 +1739,16 @@ mod tests {
             self.flushes += 1;
             Ok(())
         }
+    }
+
+    #[test]
+    fn streaming_preserves_indentation_across_chunks() {
+        let mut out = Vec::new();
+        let mut column = 0;
+        for chunk in ["```rust\nfn main() {\n", "    ", "println!(\"hi\");\n", "}\n```"] {
+            write_stream_delta(&mut out, chunk, &mut column, 80, false).unwrap();
+        }
+        assert_eq!(String::from_utf8(out).unwrap(), "```rust\r\nfn main() {\r\n    println!(\"hi\");\r\n}\r\n```");
     }
 
     #[test]

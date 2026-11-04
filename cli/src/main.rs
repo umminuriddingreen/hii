@@ -87,6 +87,7 @@ mod system_search;
 #[cfg(feature = "preview")]
 mod system_monitor;
 mod terminal_image;
+mod file_preview;
 mod text;
 mod timeline;
 mod tips;
@@ -4559,6 +4560,7 @@ fn dispatch_input(
         Some(SlashCommand::Overview) => Ok(conversation.overview()),
         Some(SlashCommand::Status) => Ok(conversation.status()),
         Some(SlashCommand::Attach(path)) => conversation.attach(&path),
+        Some(SlashCommand::Preview(path)) => conversation.preview(&path),
         Some(SlashCommand::Attachments) => Ok(conversation.attachments()),
         Some(SlashCommand::Detach(requested)) => conversation.detach(requested.as_deref()),
         Some(SlashCommand::Goal(goal)) => conversation.goal(goal.as_deref()),
@@ -4766,6 +4768,7 @@ enum SlashCommand {
     Tips(Option<String>),
     Status,
     Attach(String),
+    Preview(String),
     Attachments,
     Detach(Option<String>),
     Goal(Option<String>),
@@ -4863,6 +4866,7 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         },
         "/overview" if argument.is_none() => SlashCommand::Overview,
         "/status" if argument.is_none() => SlashCommand::Status,
+        "/preview" if argument.is_some() => SlashCommand::Preview(rest.to_string()),
         "/attach" if argument.is_some() => SlashCommand::Attach(rest.to_string()),
         "/attachments" if argument.is_none() => SlashCommand::Attachments,
         "/detach" => SlashCommand::Detach(argument),
@@ -4988,7 +4992,7 @@ fn slash_help() -> String {
     )
     .replace(
         "/status                       show session, workspace, model, and usage\n",
-        "/overview                     render the contextual state map\n/status                       show session, workspace, model, and usage\n/attach <path>                add workspace text/image context\n/attachments                  show pending context and size\n/detach [number|all]          remove pending context\n",
+        "/overview                     render the contextual state map\n/status                       show session, workspace, model, and usage\n/attach <path>                add workspace text/image context\n/preview <path>              preview image, PDF, or text locally\n/attachments                  show pending context and size\n/detach [number|all]          remove pending context\n",
     )
     .replace(
         "/theme [dark|light]          switch the terminal theme\n",
@@ -5005,7 +5009,7 @@ fn slash_help_compact() -> String {
 }
 
 fn public_test_slash_help() -> String {
-    "/help                         show commands\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/tips [next]                  choose the next useful action\n/status                       show isolated session, workspace, model, and usage\n/attach <path>                add workspace text/image context\n/attachments                  show pending context and size\n/detach [number|all]          remove pending context\n/theme [dark|light]          switch the terminal theme\n/keymap [default|vim]          inspect or switch keyboard profile\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw display\n/reasoning [mode]             auto | off | deep model effort\n/raw [on|off]                 legacy alias for continuous output\n/model [name]                 list or switch available models\n/proof [run-id]               inspect isolated execution proof\n/undo                         drop the last exchange\n/exit                         leave HII\n\nAttachments must already exist inside this disposable workspace. Installed Mac tools are available to HII inside it. Direct shell input and deletion are unavailable."
+    "/help                         show commands\n/compact                      summarize and shrink this conversation\n/clear | /new                 start with fresh context\n/tips [next]                  choose the next useful action\n/status                       show isolated session, workspace, model, and usage\n/attach <path>                add workspace text/image context\n/preview <path>              preview image, PDF, or text locally\n/attachments                  show pending context and size\n/detach [number|all]          remove pending context\n/theme [dark|light]          switch the terminal theme\n/keymap [default|vim]          inspect or switch keyboard profile\n/usage                        show tokens, speed, time, and context\n/thinking [mode]              off | compact | raw display\n/reasoning [mode]             auto | off | deep model effort\n/raw [on|off]                 legacy alias for continuous output\n/model [name]                 list or switch available models\n/proof [run-id]               inspect isolated execution proof\n/undo                         drop the last exchange\n/exit                         leave HII\n\nAttachments must already exist inside this disposable workspace. Installed Mac tools are available to HII inside it. Direct shell input and deletion are unavailable."
         .replace(
             "/thinking [mode]              off | compact | raw display\n/reasoning [mode]             auto | off | deep model effort\n/raw [on|off]                 legacy alias for continuous output\n",
             "/thinking [mode]              conversation | flow | activity | diagnostics\n/reasoning [mode]             auto | off | deep model effort\n/raw [on|off]                 toggle diagnostics\n",
