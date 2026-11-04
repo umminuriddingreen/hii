@@ -94,7 +94,7 @@ These are *not* verified gross margins. At very low prices, the fixed $0.30 card
 
 ### Technical boundary
 
-\`\`\`text
+```text
 Canonical local HII records/files
   -> backup selection + incremental signed manifest + client-side encrypted chunks
   -> HII Cloud gateway [authenticated owner + paid entitlement + atomic quota reservation]
@@ -104,7 +104,7 @@ Canonical local HII records/files
   -> verified restore [fetch + hash + decrypt locally + restore canonical records]
 
 Free users -> local disk or their own backup provider; no HII-hosted private bytes.
-\`\`\`
+```
 
 All encryption and key derivation occur on the client. Metadata exposure should be explicitly documented (account, retained-byte totals, timestamps, chunk sizes and counts may still be visible). Explore owner-managed recovery keys and per-device encrypted key wrapping; never silently escrow private keys.
 
