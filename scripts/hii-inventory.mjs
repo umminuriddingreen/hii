@@ -38,7 +38,13 @@ function installedAppPath() {
 
 function featureRegistry() {
   const source = path.join(root, 'docs', 'HII_FEATURE_REGISTRY.yaml');
-  const raw = fs.readFileSync(source, 'utf8');
+  let raw;
+  try { raw = fs.readFileSync(source, 'utf8'); }
+  catch (error) {
+    // CLI-only source releases omit the optional product documentation.
+    if (error.code === 'ENOENT') return { source, entries: [] };
+    throw error;
+  }
   const entries = [];
   for (const line of raw.split('\n')) {
     const match = line.match(/^\s*- \{ id: ([^,]+), name: ([^,]+), classification: ([^,]+), product: ([^,]+), status: ([^ }]+)/);

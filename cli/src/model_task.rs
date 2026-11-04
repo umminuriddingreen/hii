@@ -12,6 +12,11 @@ pub struct ModelTask {
 
 impl ModelTask {
     pub fn acquire(paths: &AppPaths, pinned: bool, deep: bool) -> Result<Option<Self>, String> {
+        // An explicitly selected external runtime never acquires, switches,
+        // or starts the managed native engine left in inference.json.
+        if crate::backends::selected()?.is_some() {
+            return Ok(None);
+        }
         let Some(config) = crate::config::inference_config() else {
             return Ok(None);
         };

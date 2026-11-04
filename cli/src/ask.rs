@@ -89,7 +89,7 @@ pub fn run(
         let env_model = std::env::var("HII_MODEL").ok();
         let env_model = agent::model_candidate(env_model.as_deref());
         let saved_model = if requested_model.is_none() {
-            agent::saved_model_for_provider(paths, ollama.provider())?
+            ollama.saved_model(paths)?
         } else {
             None
         };

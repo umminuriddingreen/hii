@@ -240,6 +240,11 @@ enum SetupCommand {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    #[command(about = "Add, select, and inspect inference runtimes")]
+    Backend {
+        #[command(subcommand)]
+        action: backends::BackendCommand,
+    },
     #[command(about = "Contribute native HII GPU inference and submit network jobs")]
     Compute {
         #[command(subcommand)]
@@ -2420,6 +2425,10 @@ fn execute(cli: Cli, paths: AppPaths) -> Result<ExitCode, String> {
         }
         Some(Commands::Memory { action }) => {
             memory::execute(action)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Commands::Backend { action }) => {
+            backends::execute(action)?;
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Library { action }) => {
@@ -7710,6 +7719,13 @@ fn fail(error: impl std::fmt::Display) -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn runtime_backend_cli_routes_without_becoming_a_goal() {
+        use clap::Parser;
+        assert!(super::Cli::try_parse_from(["hii", "backend", "add", "splash", "--url", "http://localhost:1111", "--default-model", "model-id"]).is_ok());
+        assert!(super::Cli::try_parse_from(["hii", "backend", "use", "splash"]).is_ok());
+        assert!(super::route::has_native_surface("backend"));
+    }
     #[test]
     fn legacy_input_authority_labels_do_not_gate_actions() {
         use crate::{contract::Authority, input_authority_allows, parse_slash_command};

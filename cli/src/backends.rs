@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Named OpenAI-compatible inference backends.
+//! Named inference backends, independent of the server engine.
 //!
 //! The registry is reference-only: header values may be literal non-secret
 //! values or `env:NAME` / `file:/path` references. Inspect output redacts all
 //! header values, and credentials are resolved only for an outbound request.
 
+use clap::Subcommand;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::{collections::BTreeMap, fs, path::PathBuf};
@@ -12,11 +13,13 @@ use std::{collections::BTreeMap, fs, path::PathBuf};
 const REGISTRY: &str = "config/openai-backends.json";
 const ACTIVE: &str = "config/active-openai-backend";
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Backend {
     pub name: String,
     pub endpoint: String,
+    #[serde(default = "default_protocol")]
+    pub protocol: String,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
@@ -30,6 +33,25 @@ pub struct Backend {
     /// Header values can be plain strings or credential references.
     #[serde(default)]
     pub headers: BTreeMap<String, String>,
+}
+
+fn default_protocol() -> String {
+    "openai".into()
+}
+
+impl Default for Backend {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            endpoint: String::new(),
+            protocol: default_protocol(),
+            model: None,
+            review_model: None,
+            models: BTreeMap::new(),
+            defaults: Map::new(),
+            headers: BTreeMap::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -56,7 +78,10 @@ fn save_registry(registry: &Registry) -> Result<(), String> {
     crate::store::write_json_private_atomic(&path, registry)
 }
 
-fn validate(backend: &Backend) -> Result<(), String> {
+pub(crate) fn validate(backend: &Backend) -> Result<(), String> {
+    if !matches!(backend.protocol.as_str(), "openai" | "ollama") {
+        return Err("backend protocol must be openai or ollama".into());
+    }
     if backend.name.trim().is_empty() || backend.name.chars().any(char::is_control) {
         return Err("backend name must be non-empty and contain no control characters".into());
     }
@@ -227,7 +252,10 @@ pub fn resolve_model(backend: &Backend, requested: &str) -> String {
 
 pub fn model_for_purpose(backend: &Backend, purpose: &str, fallback: &str) -> String {
     if purpose == "review" {
-        backend.review_model.clone()
+        backend
+            .review_model
+            .clone()
+            .or_else(|| backend.model.clone())
     } else {
         backend.model.clone()
     }
@@ -238,6 +266,9 @@ pub fn model_for_purpose(backend: &Backend, purpose: &str, fallback: &str) -> St
 pub fn test(name: &str) -> Result<Vec<String>, String> {
     let backend = get(name)?;
     validate(&backend)?;
+    if backend.protocol == "ollama" {
+        return crate::ollama::Ollama::for_backend(name)?.models();
+    }
     let agent = ureq::AgentBuilder::new()
         .redirects(0)
         .timeout_connect(std::time::Duration::from_secs(2))
@@ -278,6 +309,7 @@ pub fn splash_preset() -> Backend {
     Backend {
         name: "splash".into(),
         endpoint: "http://127.0.0.1:8000".into(),
+        protocol: default_protocol(),
         model: None,
         review_model: None,
         models: BTreeMap::new(),
@@ -286,9 +318,108 @@ pub fn splash_preset() -> Backend {
     }
 }
 
+#[derive(Subcommand, Debug)]
+pub enum BackendCommand {
+    /// List configured runtimes and the saved selection (no network requests).
+    List,
+    /// Register a runtime; this does not start or select it.
+    Add {
+        name: String,
+        #[arg(long, value_name = "URL")]
+        url: String,
+        #[arg(long, default_value = "openai", value_parser = ["openai", "ollama"])]
+        protocol: String,
+        #[arg(long = "default-model", value_name = "MODEL")]
+        model: Option<String>,
+        /// Import defaults, aliases, and credential references from a JSON file.
+        #[arg(long, value_name = "JSON_FILE")]
+        config: Option<PathBuf>,
+    },
+    /// Select a saved runtime for subsequent chat and agent sessions.
+    Use { name: String },
+    /// Print one runtime with redacted credentials.
+    Inspect { name: String },
+    /// Fetch a model catalog; this does not prove inference works.
+    Test { name: String },
+    /// Remove a saved reference; leaves its server and models intact.
+    Remove { name: String },
+}
+
+pub fn execute(command: BackendCommand) -> Result<(), String> {
+    let value = match command {
+        BackendCommand::List => serde_json::json!({
+            "selected": selected()?,
+            "backends": list()?.iter().map(redacted).collect::<Vec<_>>()
+        }),
+        BackendCommand::Add {
+            name,
+            url,
+            protocol,
+            model,
+            config,
+        } => {
+            let mut backend: Backend = if let Some(path) = config {
+                serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?)
+                    .map_err(|error| format!("invalid backend configuration: {error}"))?
+            } else {
+                Backend {
+                    protocol,
+                    ..Backend::default()
+                }
+            };
+            backend.name = name;
+            backend.endpoint = url;
+            if model.is_some() {
+                backend.model = model;
+            }
+            add(backend.clone())?;
+            redacted(&backend)
+        }
+        BackendCommand::Use { name } => {
+            select(&name)?;
+            serde_json::json!({"selected": name, "appliesTo": "new sessions", "environmentOverrides": ["HII_MODEL_URL", "HII_MODEL_PROVIDER", "HII_MODEL"]})
+        }
+        BackendCommand::Inspect { name } => redacted(&get(&name)?),
+        BackendCommand::Test { name } => {
+            serde_json::json!({"backend": name, "advertisedModels": test(&name)?, "inferenceVerified": false})
+        }
+        BackendCommand::Remove { name } => {
+            remove(&name)?;
+            serde_json::json!({"removedReference": name})
+        }
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_backend_protocols_preserve_legacy_and_support_ollama() {
+        let legacy: Backend =
+            serde_json::from_str(r#"{"name":"splash","endpoint":"http://localhost:1111"}"#)
+                .unwrap();
+        assert_eq!(serde_json::to_value(legacy).unwrap()["protocol"], "openai");
+        let ollama: Backend = serde_json::from_str(
+            r#"{"name":"ollama","endpoint":"http://localhost:11434","protocol":"ollama"}"#,
+        )
+        .unwrap();
+        assert_eq!(serde_json::to_value(ollama).unwrap()["protocol"], "ollama");
+    }
+
+    #[test]
+    fn runtime_backend_rejects_unsupported_protocols() {
+        let backend: Backend = serde_json::from_str(
+            r#"{"name":"bad","endpoint":"http://localhost:8000","protocol":"unsupported"}"#,
+        )
+        .unwrap();
+        assert!(validate(&backend).is_err());
+    }
 
     #[test]
     fn credential_values_are_redacted_and_references_are_not_resolved_for_inspect() {

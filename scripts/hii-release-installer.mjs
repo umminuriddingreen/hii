@@ -371,7 +371,17 @@ function sha256(filePath) {
 }
 
 function sourceBinaryPath(sourceRoot) {
-  return path.join(sourceRoot, 'target', 'release', BINARY_NAME);
+  return path.join(sourceTargetDirectory(sourceRoot), 'release', BINARY_NAME);
+}
+
+function sourceTargetDirectory(sourceRoot) {
+  return process.env.CARGO_TARGET_DIR
+    ? path.resolve(sourceRoot, process.env.CARGO_TARGET_DIR)
+    : path.join(sourceRoot, 'target');
+}
+
+function sourceNativeRunnerPath(sourceRoot) {
+  return path.join(sourceTargetDirectory(sourceRoot), 'release', 'hii-native-runner');
 }
 
 function launcherBackupDir(launcherPath) {
@@ -478,8 +488,8 @@ function buildBinary(sourceRoot, sourceCargo, commit, includeNativeRunner = fals
   if (!existsSync(sourceBinary)) {
     throw new Error(`CLI binary missing after build: ${sourceBinary}`);
   }
-  if (includeNativeRunner && !existsSync(path.join(sourceRoot, NATIVE_RUNNER_RELATIVE))) {
-    throw new Error(`native runner binary missing after build: ${path.join(sourceRoot, NATIVE_RUNNER_RELATIVE)}`);
+  if (includeNativeRunner && !existsSync(sourceNativeRunnerPath(sourceRoot))) {
+    throw new Error(`native runner binary missing after build: ${sourceNativeRunnerPath(sourceRoot)}`);
   }
   return sourceBinary;
 }
@@ -575,7 +585,7 @@ function main() {
     }
     if (includeNativeRunner) {
       mkdirSync(path.dirname(releaseNativeRunner), { recursive: true });
-      cpSync(path.join(sourceRoot, NATIVE_RUNNER_RELATIVE), releaseNativeRunner);
+      cpSync(sourceNativeRunnerPath(sourceRoot), releaseNativeRunner);
       chmodSync(releaseNativeRunner, 0o755);
     }
   }

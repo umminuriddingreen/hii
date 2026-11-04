@@ -1,7 +1,7 @@
 use crate::{
     agent::{
         choose_model, execute_tool, model_candidate, parse_action_with_repair, requested_model_selection,
-        saved_model_for_provider, Action, RejectedActionGuard, RepeatedToolFailureGuard,
+        Action, RejectedActionGuard, RepeatedToolFailureGuard,
         MODEL_LOOP_DETECTED_MESSAGE,
     },
     attachments::AttachmentQueue,
@@ -955,12 +955,16 @@ impl Conversation {
         let saved_model = if requested_model.is_none() {
             let active: Option<Value> =
                 crate::store::read_json(&paths.runtime.join("config/active-inference.json"));
-            active
-                .filter(|v| v["endpoint"].as_str() == Some(ollama.base_url()))
-                .and_then(|v| v["selectedModel"].as_str().map(str::to_owned))
-                .filter(|model| model_candidate(Some(model)).is_some())
-                .map(Some)
-                .unwrap_or(saved_model_for_provider(&paths, ollama.provider())?)
+            if ollama.has_named_backend() {
+                ollama.saved_model(&paths)?
+            } else {
+                active
+                    .filter(|v| v["endpoint"].as_str() == Some(ollama.base_url()))
+                    .and_then(|v| v["selectedModel"].as_str().map(str::to_owned))
+                    .filter(|model| model_candidate(Some(model)).is_some())
+                    .map(Some)
+                    .unwrap_or(ollama.saved_model(&paths)?)
+            }
         } else {
             None
         };

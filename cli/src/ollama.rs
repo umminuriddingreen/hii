@@ -257,11 +257,17 @@ impl Ollama {
         }
     }
 
-    /// Construct a named OpenAI-compatible backend without changing selection.
+    /// Construct a named runtime using its configured wire protocol.
     pub fn for_backend(name: &str) -> Result<Self, String> {
         let backend = crate::backends::get(name)?;
+        crate::backends::validate(&backend)?;
         let headers = crate::backends::resolved_headers(&backend)?;
-        let mut value = Self::for_engine(backend.endpoint.clone(), ModelProvider::OpenAI);
+        let provider = match backend.protocol.as_str() {
+            "openai" => ModelProvider::OpenAI,
+            "ollama" => ModelProvider::Ollama,
+            _ => return Err("backend protocol must be openai or ollama".into()),
+        };
+        let mut value = Self::for_engine(backend.endpoint.clone(), provider);
         value.backend_headers = Ok(headers);
         value.backend = Some(backend);
         Ok(value)
@@ -289,11 +295,13 @@ impl Ollama {
         {
             return Self::new(crate::config::AppPaths::model_url());
         }
-        if let Ok(Some(backend)) = crate::backends::active() {
-            if let Ok(mut client) = Self::for_backend(&backend.name) {
-                client.explicit_route = true;
-                return client;
-            }
+        match crate::backends::active() {
+            Ok(Some(backend)) => match Self::for_backend(&backend.name) {
+                Ok(client) => return client,
+                Err(error) => return Self::invalid_backend(error),
+            },
+            Err(error) => return Self::invalid_backend(error),
+            Ok(None) => {}
         }
         if let Ok(Some((endpoint, provider))) = active_inference_route() {
             return Self::for_engine(endpoint, provider);
@@ -318,6 +326,28 @@ impl Ollama {
             }
         }
         Self::for_mode("auto")
+    }
+
+    fn invalid_backend(error: String) -> Self {
+        let mut client = Self::for_engine("http://127.0.0.1:0".into(), ModelProvider::OpenAI);
+        client.backend_headers = Err(error);
+        client
+    }
+
+    /// A named runtime owns its model choice. Never borrow a model from the
+    /// previous runtime just because it uses the same wire protocol.
+    pub fn saved_model(&self, paths: &crate::config::AppPaths) -> Result<Option<String>, String> {
+        if let Some(backend) = &self.backend {
+            return Ok(backend
+                .model
+                .as_deref()
+                .map(|model| crate::backends::resolve_model(backend, model)));
+        }
+        crate::agent::saved_model_for_provider(paths, self.provider)
+    }
+
+    pub fn has_named_backend(&self) -> bool {
+        self.backend.is_some()
     }
 
     pub fn for_mode(_mode: &str) -> Self {
@@ -507,6 +537,7 @@ impl Ollama {
     /// explicit compatibility provider, never an automatic runtime dependency.
     /// An explicitly pinned model URL is never second-guessed.
     pub fn ensure_reachable(self) -> Result<Self, String> {
+        self.backend_headers.as_ref().map_err(Clone::clone)?;
         if self.provider == ModelProvider::OxAlphaWeb {
             ox_alpha_browser_adapter()?;
             return Ok(self);
@@ -1388,12 +1419,11 @@ fn parse_active_inference_route(raw: &str) -> Result<(String, ModelProvider), St
         .as_str()
         .ok_or_else(|| "saved active inference route has no protocol".to_string())?;
     let provider = match value["provider"].as_str() {
-        Some("native") => ModelProvider::Native,
-        Some("llama.cpp") => ModelProvider::LlamaCpp,
-        Some("lmstudio") => ModelProvider::LmStudio,
-        Some("ollama") => ModelProvider::Ollama,
+        Some(name) => ModelProvider::from_env_value(name)
+            .filter(|provider| *provider != ModelProvider::OxAlphaWeb)
+            .ok_or_else(|| "saved active inference route has an unsupported provider".to_string())?,
         None if protocol == "ollama" => ModelProvider::Ollama,
-        None if protocol == "openai" => ModelProvider::LmStudio,
+        None if protocol == "openai" => ModelProvider::OpenAI,
         _ => return Err("saved active inference route has an unsupported provider".into()),
     };
     if !matches!(protocol, "openai" | "ollama")
@@ -1720,13 +1750,14 @@ fn spawn_logged(
 }
 
 fn endpoint_ready(base_url: &str) -> bool {
-    let address = base_url
-        .strip_prefix("http://")
-        .unwrap_or(base_url)
-        .split('/')
-        .next()
-        .unwrap_or(base_url);
-    let Ok(mut addresses) = address.to_socket_addrs() else {
+    let Ok(url) = url::Url::parse(base_url) else {
+        return false;
+    };
+    let (Some(host), Some(port)) = (url.host_str(), url.port_or_known_default()) else {
+        return false;
+    };
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    let Ok(mut addresses) = (host, port).to_socket_addrs() else {
         return false;
     };
     addresses.next().is_some_and(|address| {
@@ -2011,6 +2042,27 @@ mod tests {
         assert_eq!(parse_active_inference_route(valid).unwrap(), ("http://127.0.0.1:4192".into(), ModelProvider::LlamaCpp));
         let credentialed = r#"{"endpoint":"http://user:secret@127.0.0.1:4192","protocol":"openai","provider":"llama.cpp"}"#;
         assert!(parse_active_inference_route(credentialed).is_err());
+    }
+
+    #[test]
+    fn runtime_backend_saved_splash_route_uses_generic_adapter() {
+        let route = r#"{"endpoint":"http://127.0.0.1:1111/v1","provider":"splash","protocol":"openai"}"#;
+        assert_eq!(parse_active_inference_route(route).unwrap().1, ModelProvider::OpenAI);
+        let route = r#"{"endpoint":"http://127.0.0.1:1111/v1","protocol":"openai"}"#;
+        assert_eq!(parse_active_inference_route(route).unwrap().1, ModelProvider::OpenAI);
+    }
+
+    #[test]
+    fn runtime_backend_model_does_not_leak_from_previous_engine() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = crate::config::AppPaths { repo: directory.path().into(), runtime: directory.path().into() };
+        std::fs::create_dir_all(directory.path().join("config")).unwrap();
+        std::fs::write(directory.path().join("config/inference.json"), r#"{"provider":"openai","endpoint":"http://localhost:1111","selectedModel":"old-model"}"#).unwrap();
+        let mut client = Ollama::for_engine("http://localhost:1111".into(), ModelProvider::OpenAI);
+        client.backend = Some(crate::backends::Backend { model: Some("splash-model".into()), ..Default::default() });
+        assert_eq!(client.saved_model(&paths).unwrap().as_deref(), Some("splash-model"));
+        client.backend.as_mut().unwrap().model = None;
+        assert_eq!(client.saved_model(&paths).unwrap(), None);
     }
 
     #[test]

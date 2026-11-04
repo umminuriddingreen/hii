@@ -268,6 +268,7 @@ pub const ROUTES: &[Route] = &[
         Infra,
         "detect OS, architecture, model format, and runtime",
     ),
+    native("backend", Core, Infra, "add, select, and inspect inference runtimes"),
     delegated("model", Core, Infra, "fully manage the HII model backend"),
     delegated("image", Core, Tools, "generate images with installed ComfyUI models"),
     delegated("rhino", Core, Tools, "control Rhino and Grasshopper through HII"),

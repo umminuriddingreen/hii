@@ -54,10 +54,8 @@ pub fn runtime_identity_context(provider: ModelProvider, model: &str, endpoint: 
 }
 
 impl ModelProvider {
-    /// Resolve the provider from `HII_MODEL_PROVIDER`, else infer from the URL.
-    /// `HII_MODEL_PROVIDER` supports explicit overrides (`native`, `lmstudio`,
-    /// `rapid-mlx`, etc.); otherwise infer from standard ports and fall back to
-    /// Ollama compatibility.
+    /// Explicit protocol configuration wins. Preserve known legacy ports;
+    /// arbitrary endpoints use the portable OpenAI-compatible protocol.
     pub fn discover(url: &str) -> Self {
         if let Some(provider) = env::var("HII_MODEL_PROVIDER")
             .ok()
@@ -72,7 +70,10 @@ impl ModelProvider {
                 return provider;
             }
         }
-        if env::var("HII_RAPID_MLX_URL").is_ok() {
+        if env::var("HII_RAPID_MLX_URL")
+            .ok()
+            .is_some_and(|endpoint| endpoint.trim_end_matches('/') == url.trim_end_matches('/'))
+        {
             ModelProvider::RapidMlx
         } else if url.contains("oxalpha.com") {
             ModelProvider::OxAlphaWeb
@@ -82,21 +83,22 @@ impl ModelProvider {
             ModelProvider::LlamaCpp
         } else if url.contains(":1234") {
             ModelProvider::LmStudio
-        } else {
+        } else if url::Url::parse(url).ok().and_then(|url| url.port()) == Some(11434) {
             ModelProvider::Ollama
+        } else {
+            ModelProvider::OpenAI
         }
     }
 
-    fn from_env_value(value: &str) -> Option<Self> {
+    pub(crate) fn from_env_value(value: &str) -> Option<Self> {
         match value.to_ascii_lowercase().as_str() {
             "lmstudio" | "lm-studio" | "lm_studio" => Some(ModelProvider::LmStudio),
             "llama.cpp" | "llamacpp" | "llama-cpp" | "llama_cpp" => Some(ModelProvider::LlamaCpp),
             "hii" | "native" | "hii-native" | "hii_native" => Some(ModelProvider::Native),
-            "vllm" => Some(ModelProvider::Native),
             "ollama" => Some(ModelProvider::Ollama),
             "rapid-mlx" | "rapidmlx" | "rapid_mlx" | "rapid" => Some(ModelProvider::RapidMlx),
-            "openai" | "openai-compatible" | "openai_compatible" | "openaicompat"
-            | "custom" => Some(ModelProvider::OpenAI),
+            "openai" | "openai-compatible" | "openai_compatible" | "openaicompat" | "custom"
+            | "splash" | "vllm" | "mlx" => Some(ModelProvider::OpenAI),
             "ox-alpha-web" | "oxalpha-web" | "oxalpha" | "ox-alpha" => {
                 Some(ModelProvider::OxAlphaWeb)
             }
@@ -219,21 +221,26 @@ impl AppPaths {
         // only as the hosted-provider selection record during migration.
         if let Some(config) = inference_config_at(&self.runtime) {
             let local = config.provider.as_deref().is_none_or(|provider| {
-                matches!(
-                    provider,
-                    "native" | "llama.cpp" | "rapid-mlx" | "ollama" | "lmstudio" | "openai"
-                )
+                ModelProvider::from_env_value(provider)
+                    .is_some_and(|provider| provider != ModelProvider::OxAlphaWeb)
             });
             if local {
                 return Ok(Some(UserModelPreference {
                     schema_version: config.schema_version,
-                    provider: config.provider.or_else(|| {
-                        Some(if cfg!(target_os = "windows") {
-                            "llama.cpp".into()
-                        } else {
-                            "native".into()
+                    provider: config
+                        .provider
+                        .map(|provider| {
+                            ModelProvider::from_env_value(&provider)
+                                .map(|value| value.id().to_string())
+                                .unwrap_or(provider)
                         })
-                    }),
+                        .or_else(|| {
+                            Some(if cfg!(target_os = "windows") {
+                                "llama.cpp".into()
+                            } else {
+                                "native".into()
+                            })
+                        }),
                     model: config.model,
                     routing_mode: config.routing_mode,
                 }));
@@ -271,6 +278,25 @@ impl AppPaths {
         provider: ModelProvider,
         model: &str,
     ) -> Result<PathBuf, String> {
+        let environment_override = [
+            "HII_MODEL_URL",
+            "HII_MODEL_PROVIDER",
+            "HII_RAPID_MLX_URL",
+            "HII_OLLAMA_URL",
+        ]
+        .iter()
+        .any(|key| env::var_os(key).is_some());
+        if !environment_override {
+            if let Some(mut backend) = crate::backends::active()?.filter(|backend| {
+                (backend.protocol == "ollama" && provider == ModelProvider::Ollama)
+                    || (backend.protocol == "openai" && provider == ModelProvider::OpenAI)
+            }) {
+                let name = backend.name.clone();
+                backend.model = Some(model.trim().to_string());
+                crate::backends::edit(&name, backend)?;
+                return Ok(self.runtime.join("config/openai-backends.json"));
+            }
+        }
         let path = self.runtime.join("config/model.json");
         ensure_parent(&path)?;
         let preference = UserModelPreference {
@@ -358,7 +384,41 @@ mod tests {
     #[test]
     fn platform_endpoint_fallbacks_are_explicit() {
         assert_eq!(super::default_model_endpoint(true), "http://127.0.0.1:6127");
-        assert_eq!(super::default_model_endpoint(false), "http://127.0.0.1:11435");
+        assert_eq!(
+            super::default_model_endpoint(false),
+            "http://127.0.0.1:11435"
+        );
+    }
+
+    #[test]
+    fn runtime_backend_aliases_use_the_openai_protocol() {
+        for name in ["splash", "vllm", "mlx", "openai-compatible"] {
+            assert_eq!(
+                ModelProvider::from_env_value(name),
+                Some(ModelProvider::OpenAI)
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_backend_custom_ports_default_to_openai() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous_provider = env::var_os("HII_MODEL_PROVIDER");
+        let previous_rapid = env::var_os("HII_RAPID_MLX_URL");
+        env::remove_var("HII_MODEL_PROVIDER");
+        env::remove_var("HII_RAPID_MLX_URL");
+        let custom = ModelProvider::discover("http://127.0.0.1:1111/v1");
+        let ollama = ModelProvider::discover("http://127.0.0.1:11434");
+        match previous_provider {
+            Some(v) => env::set_var("HII_MODEL_PROVIDER", v),
+            None => env::remove_var("HII_MODEL_PROVIDER"),
+        }
+        match previous_rapid {
+            Some(v) => env::set_var("HII_RAPID_MLX_URL", v),
+            None => env::remove_var("HII_RAPID_MLX_URL"),
+        }
+        assert_eq!(custom, ModelProvider::OpenAI);
+        assert_eq!(ollama, ModelProvider::Ollama);
     }
 
     #[test]

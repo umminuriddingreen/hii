@@ -129,6 +129,7 @@ try {
 
   const env = {
     ...process.env,
+    CARGO_TARGET_DIR: path.join(scratch, 'cargo-target'),
     HII_RELEASE_ROOT: releaseRoot,
     HII_HOME: path.join(scratch, 'home')
   };
@@ -147,6 +148,8 @@ try {
   assert.equal(first.ok, true);
   assert.equal(first.action, 'installed');
   assert.equal(first.buildPerformed, true);
+  assert.equal(existsSync(path.join(env.CARGO_TARGET_DIR, 'release', isWin ? 'hii.exe' : 'hii')), true,
+    'installer must read binaries from Cargo\'s configured target directory');
   assert.equal(first.smoke.ok, true);
   assert.equal(first.launcherBackup !== null, true);
   assert.equal(existsSync(first.launcherBackup), true, 'launcher backup should be created');

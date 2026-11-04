@@ -553,7 +553,7 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let env_model = model_candidate(env_model.as_deref());
     let requested_explicit = model_candidate(options.model.as_deref());
     let saved_model = if requested_explicit.is_none() {
-        saved_model_for_provider(paths, ollama.provider())?
+        ollama.saved_model(paths)?
     } else {
         None
     };
@@ -565,8 +565,9 @@ pub fn run(paths: &AppPaths, options: RunOptions) -> Result<Receipt, String> {
     let model = choose_model(requested_model, ollama.provider(), &models)?;
     crate::run_context::set_model_route(requested_model, &model, &model_source);
     let review_model = if options.review {
+        let backend_review = ollama.has_named_backend().then(|| ollama.model_for_purpose("review"));
         Some(choose_review_model(
-            options.review_model.as_deref(),
+            options.review_model.as_deref().or(backend_review.as_deref()),
             ollama.provider(),
             &models,
         )?)
