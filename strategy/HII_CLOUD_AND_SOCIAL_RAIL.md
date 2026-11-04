@@ -3,7 +3,7 @@
 Status: product proposal; no billing products, prices, or social agent permissions are launched by this document.
 Date: 2026-11-04
 Owner: HII
-Decision intent: keep personal/local computing free; offer paid managed backup/storage, and build opt-in human–agent social infrastructure without monetizing private data or attention.
+Decision intent: operate with no fixed infrastructure spend before customers pay; keep personal/local computing free; sell optional managed encrypted backup capacity at a defensible markup; maintain a free, opt-in human–agent social rail without monetizing private data or attention.
 
 ## Thesis
 
@@ -13,11 +13,11 @@ HII Social is the distribution and communication layer: people and their agents 
 
 ## Principles — nonnegotiable
 
-1. Local-first authority; user-readable local memory remains available offline and after cancellation.
+1. Local-first authority; user-readable local memory remains available offline and after cancellation. No HII-hosted backup storage is included in the free tier: unlimited local memory, self-managed backups, and bring-your-own storage are free; operator-hosted bytes are provisioned only against a funded entitlement.
 2. Private cloud backups are encrypted on the client. The storage service must not receive plaintext or client decryption keys. Verify key custody and recovery end-to-end before marketing as zero-knowledge.
 3. No advertising, behavioral targeting, sale of personal data, paid ranking, pay-to-reach, or engagement-based manipulation.
 4. Unlimited local storage and local export. Support user-controlled backup destinations (e.g., S3-compatible or local drive) where practical. Hosted HII Cloud is optional.
-5. Clear, predictable quotas based on *retained encrypted bytes*, not "AI memories," conversation count, agent count, or amount of knowledge.
+5. Clear, predictable quotas based on *retained encrypted bytes*, not "AI memories," conversation count, agent count, or amount of knowledge. Do not incur fixed cloud infrastructure commitments ahead of payment, but distinguish this design goal from an absolute guarantee of zero cash risk; disputes, billing timing, tax, abuse, and recovery can produce liabilities.
 6. Social visibility is explicit per object (private, friends, followers, public, unlisted, local). Content visibility, location visibility, and online presence must be independently controlled. No location by default.
 7. Agents act under bounded, revocable delegation. Being a friend or follower does not confer access to someone's private memory, files, tools, or compute.
 8. Inbound external agent content is untrusted data. No message can silently become a tool instruction, new memory authority, or executable grant.
@@ -33,7 +33,7 @@ HII Social is the distribution and communication layer: people and their agents 
 - `fabric/identity/`: identity and scoped grants foundation, requiring production-grade WebAuthn integration.
 - `fabric/relay/`: explicitly non-authoritative ciphertext mailbox/rendezvous foundation; no production listener or complete encrypted social messaging.
 - `lib/server/hii-memory-workspace.ts` and core memory: typed memory objects, provenance, versions, local-first state.
-- `package.json` includes Stripe SDK but not evidence of a complete managed-subscription billing/entitlement integration.
+- `package.json` includes Stripe SDK but not evidence of a complete managed-subscription billing/entitlement integration. Existing Cloudflare R2 bucket coupling in `workers/public-site/src/library.rs` requires a storage adapter to use Backblaze B2; do not pretend it is already swappable.
 - Do not introduce an alternate persistent memory database for billing or for social posts.
 
 ## Product A — HII Cloud
@@ -45,39 +45,66 @@ HII Social is the distribution and communication layer: people and their agents 
 - Restore verification (hash/integrity, decrypt locally, compare revision), tested recovery, and export to a user-owned destination.
 - Optional encrypted sharing of selected assets is separate from backups and needs explicit content-scoped grants.
 
-### Proposed tiers for testing, not committed pricing
+### Proposed tiers — revised for zero fixed cloud commitment, not final prices
 
-| Tier | Price | HII-hosted backup/storage quota | Included |
+HII Local: **$0 forever, 0 GB of HII-hosted backup**. No upsell needed to use memory, agents, on-device compute, local export, local self-backup, or a user-owned storage destination. Do not silently give every account an HII-hosted storage quota; unmonetized accounts multiply cost and abuse exposure.
+
+Hypothetical US monthly HII-hosted backup subscriptions for testing, *before taxes and any extra fees*:
+
+| Tier | Monthly price | HII-hosted encrypted capacity | What customer buys |
 | --- | ---: | ---: | --- |
-| Local | Free | Suggested 1 GiB trial/standing allowance, subject to economics | Unlimited local memory/storage, local backup/export, HII Social, bring-your-own storage target |
-| Backup | $4/month | 50 GB | Automatic encrypted backup, restore and version retention |
-| Archive | $9/month | 250 GB | Same guarantees, larger retained media/history |
-| Studio | $25/month | 1 TB | Same guarantees, higher capacity for creative projects |
+| Local / Bring Your Own Storage | $0 | 0 GB | Unlimited device-local use and manual/self-managed backup |
+| HII Backup | $1.79 | 100 GB | Managed encrypted incremental backup and recovery |
+| HII Archive | $3.99 | 250 GB | Same product with room for media and history |
+| HII Creator | $6.99 | 500 GB | Same product with more creative asset capacity |
 
-Avoid charging for "agent messages" or "AI memories." Use fixed plans initially rather than surprise per-GB overage. On quota exhaustion, block new remote backup writes with a clear explanation; do not block local work. Do not immediately erase data on cancellation. Offer a disclosed grace period, download/restore/export, then a disclosed retention/deletion process.
+Do not launch a 1–5 TB Google-matching plan on commodity per-GB storage economics without verifying margins at *full utilization*. HII's lower monthly price is not a claim to provide the same storage allowance or Google Gemini features. The differentiation is client-encrypted project/memory backup, independence of the model/provider, local inference, and private recovery.
 
-Prices are hypotheses. Validate actual retained GB/user, churn, snapshot frequency, upload counts, payment fees, support load, and restoration cost before launch.
+No surprise overage or autonomous upgrades. When hosted quota is exhausted, pause *new backup uploads* (not on-device work). Keep a clear paid grace period, export and recovery options, and a disclosed storage-deletion timetable if a subscription ends or fails. Existing backup bytes still incur cost after cancellation until safely expired.
 
-### Illustrative unit economics (not actual HII margins)
+### Competitive benchmark and unit economics (verified 2026-11-04)
 
-Cloudflare R2 Standard lists $0.015/GB-month, no egress fee, and metered Class A/B operations (as of October 2026). At the full storage quota this implies storage rent alone of approximately: 50 GB = $0.75/month, 250 GB = $3.75/month, 1 TB = $15.00/month (decimal GB). These are *not* all-in costs: exclude operations, database, CPU, logs, security, payment fees, customer support, refunds, and tax.
+Google One (US): Basic **100 GB $1.99/mo**, Google AI Plus **2 TB $9.99/mo**, Google AI Pro **5 TB $19.99/mo**. These bundles include other Google services and, for AI tiers, Gemini features; HII cannot promise equivalent hosted inference or equivalent $/GB. Official: https://one.google.com/about/plans?hl=en_US
 
-Stripe lists 2.9% + $0.30 per successful US card charge, plus 0.7% of Billing volume under its pay-as-you-go Billing plan; actual fees depend on plan/payment method and should be modeled before release.
+Storage options:
+- Backblaze B2 pay-as-you-go starts **$6.95/TB-month**, first **10 GB free**, most API transactions free, first 3x average storage in monthly egress included; additional egress can incur fees. Use an S3-compatible provider adapter and verify actual pricing, transfer route, and API limitations. https://www.backblaze.com/cloud-storage/pricing
+- Cloudflare R2 Standard is **$0.015/GB-month** plus operations, with 10 GB/month and specified operations included in its free tier. At a fully utilized 2 TB, storage alone can cost ~$30/month, exceeding Google's $9.99/2 TB bundle. The current implementation already uses R2, but its price makes large cheap plans unattractive. https://developers.cloudflare.com/r2/pricing/
+- Stripe US domestic card payments **2.9% + $0.30** per successful transaction with no fixed standard setup/monthly fee. Stripe Billing pay-as-you-go is **an additional 0.7% of billing volume**, subject to the selected product and fee terms. https://stripe.com/pricing and https://stripe.com/billing/pricing
 
-Sources:
-- https://developers.cloudflare.com/r2/pricing/
-- https://stripe.com/billing/pricing
+Illustrative *maximum-capacity* economics using $6.95/TB-month B2, 1 TB = 1000 GB, and the indicated card + Billing fees:
+
+| Plan | Revenue | Storage | Card + Billing fees | Remainder *before* infrastructure, egress overage, customer support, taxes, disputes and refunds |
+| --- | ---: | ---: | ---: | ---: |
+| 100 GB | $1.79 | $0.70 | ~$0.36 | ~$0.73 |
+| 250 GB | $3.99 | $1.74 | ~$0.44 | ~$1.81 |
+| 500 GB | $6.99 | $3.48 | ~$0.55 | ~$2.96 |
+
+These are *not* verified gross margins. At very low prices, the fixed $0.30 card fee and support risk matter. Charge for the quota via a fixed monthly plan; avoid an apparent discount that relies on most users never filling their purchased quota. Use cumulative retained bytes, not logical deduplicated objects, to meter only what the provider actually stores, with consistent encrypted chunk reuse.
+
+### Zero-fixed-cost operating design
+
+1. **Free product never provisions paid cloud capacity.** The social rail uses existing free-tier infrastructure or direct user-owned connectivity, with hard abuse/rate limits; as free traffic grows it can create costs and must be budgeted separately.
+2. **Payment first:** collect a successful, confirmed payment and verify the provider webhook *before* enabling any paid HII-hosted upload entitlement. A checkout redirect or unsigned client flag never grants bytes. Prefer hosted checkout + provider portal, not a self-hosted payment stack.
+3. **Provision on demand:** one metered object-storage account/bucket and per-account object prefixes; create/commit encrypted chunks only after entitlement. Avoid per-account infrastructure with fixed minimum fees.
+4. **Storage provider abstraction:** retain the existing R2 gateway as an adapter; implement B2 S3-compatible adapter and compare real data-plane operations/cost. Do not migrate user data without verifying hash, manifest, restoration, and encryption compatibility.
+5. **Spending safety:** per-account hard byte ceilings, concurrent quota reservations, global free-tier and operational caps, upload size/count/rate limits, budget alerts, abuse detection without reading private content, and cleanup of uncommitted multipart uploads.
+6. **Finance timing:** storage is billed after use; Stripe payouts can be delayed, payments disputed/refunded, and tax/support/security costs can arise. Therefore zero *fixed baseline spend* is a launch constraint, not a promise of mathematically zero upfront cash exposure or zero downside.
+7. **Cancellation:** stop new hosted writes after the stated grace period, retain data only for the clearly announced window, permit restores/exports while entitled, and delete as policy requires. Users must always retain local storage access. If payment is reversed, do not erase backups instantaneously.
+8. **Cloud feature scope:** do not bundle unlimited cloud inference or expensive Gemini-equivalent hosted capabilities with $1–7 backup subscriptions. Model inference runs on the user's hardware or separately chosen provider; HII's native retrieval and agent interfaces are free.
 
 ### Technical boundary
 
-```text
+\`\`\`text
 Canonical local HII records/files
-    -> backup selection + incremental manifest + encrypted deduplicated chunks
-    -> HII Cloud upload gateway [identity + entitlement + atomic quota reservation]
-    -> private ciphertext R2 objects
-    -> signed account manifest / encrypted revision metadata
-    -> recovery client [retrieve + integrity check + decrypt locally + restore]
-```
+  -> backup selection + incremental signed manifest + client-side encrypted chunks
+  -> HII Cloud gateway [authenticated owner + paid entitlement + atomic quota reservation]
+  -> storage adapter [R2 existing / B2 candidate; meter actual retained ciphertext]
+  -> private provider-managed ciphertext objects
+  -> account manifests and authenticated revision history
+  -> verified restore [fetch + hash + decrypt locally + restore canonical records]
+
+Free users -> local disk or their own backup provider; no HII-hosted private bytes.
+\`\`\`
 
 All encryption and key derivation occur on the client. Metadata exposure should be explicitly documented (account, retained-byte totals, timestamps, chunk sizes and counts may still be visible). Explore owner-managed recovery keys and per-device encrypted key wrapping; never silently escrow private keys.
 
@@ -85,7 +112,7 @@ All encryption and key derivation occur on the client. Metadata exposure should 
 
 - Stripe Checkout for signup, Customer Portal for plan/cancellation, verified idempotent webhooks.
 - Add account subscription and entitlement tables to the public-site account DB. Suggested concepts: `billing_customers`, `billing_subscriptions`, `storage_entitlements`, `storage_usage_events`. Provider event IDs unique and webhook processing replay-safe.
-- Apply new entitlement in `workers/public-site/src/library.rs` by replacing the hard-coded 1 GiB threshold with account-scoped server-authoritative quota. Preserve atomic reservation and concurrency safety during simultaneous uploads.
+- Apply new entitlement in `workers/public-site/src/library.rs` by replacing the hard-coded 1 GiB threshold with account-scoped server-authoritative quota. Free accounts have zero hosted bytes. Preserve atomic reservation and concurrency safety during simultaneous uploads.
 - Storage usage = retained encrypted chunk bytes plus reserved in-flight chunks; manifest retention, stale uploads, and GC must be included in consistency and billing logic. Billing provider *never* authorizes reading private backup bytes.
 - No upload authorization based solely on client-reported plan or quota. Payment failure changes only hosted upload/retention policy, never local memory availability.
 - Tests: signed webhook, duplicate/reordered events, payment delayed/failed, upgrade/downgrade, concurrent quota reservation, GC accounting, cross-account isolation, restore of historical revisions, cancel-and-export, missing recovery key, access revocation.
@@ -147,10 +174,10 @@ Keep feed, canvas, chat, and CLI coherent without forcing all content into a fee
 
 ## Execution sequence
 
-### Phase 0 — refine primitives and measure
+### Phase 0 — no fixed spend; refine primitives and measure
 - Instrument local storage composition (text vs media, unique bytes vs versions, backup candidate bytes) with on-device aggregate metrics; no private content telemetry by default.
 - Verify existing ciphertext upload and restore contracts; assess crypto key custody/recovery and cross-device restore.
-- Document pricing hypotheses and expected fully-loaded COGS. Test that local/bring-your-own backups work without paying HII.
+- Document pricing hypotheses and expected fully-loaded COGS. Test that local/bring-your-own backups work without paying HII. Remove free account cloud upload entitlement and demonstrate a zero-hosted-bytes path. Compare B2 and R2 with real restore and egress load before choosing.
 
 ### Phase 1 — Cloud reliability, before charging
 - Snapshot manifest, incremental encrypted chunks, local encryption/decryption, retention and restore tests.
@@ -158,7 +185,7 @@ Keep feed, canvas, chat, and CLI coherent without forcing all content into a fee
 - Demonstrate recovery to a clean device without the original HII installation (using owner-supplied recovery credentials).
 
 ### Phase 2 — Billing launch
-- Integrate Stripe Checkout + portal + signed idempotent webhooks + entitlement projection.
+- Integrate Stripe Checkout + portal + signed idempotent webhooks + entitlement projection. Issue storage quota only on verified, settled subscription payment, not on checkout redirect.
 - Replace 1 GiB hard-coded quota with a versioned per-account entitlement.
 - Offer paid tiers only after E2E restore and billing-failure tests pass.
 - Display encrypted bytes stored, available quota, last verified backup, and next billing date.
@@ -186,10 +213,10 @@ Keep feed, canvas, chat, and CLI coherent without forcing all content into a fee
 
 ## Open decisions (not blockers to documentation)
 
-- Whether free managed backup starts with 1 GiB or is limited to a time-boxed trial.
+- Free managed HII-hosted backup is **not** part of the launch plan; decide only whether a later subsidized trial makes economic sense.
 - Key recovery model and cross-device transfer; independent security review.
-- Paid tier amounts, retention duration, regional data residency, and consumer-facing subscription terms.
+- Confirm actual paid tier pricing/capacity, provider economics, retention, regional data residency, and consumer-facing subscription terms. Zero fixed infrastructure cost does not eliminate chargeback, liquidity, tax, and abuse risks.
 - Direct messaging architecture, moderation staffing, and eligibility for public social discovery.
 - Whether AT Protocol interop is warranted before first-party social functionality reaches product-market fit.
 
-**Implementation rule:** do not build a second memory system, do not give the billing service decryption rights, and do not let social sharing inherit private-memory read permission.
+**Implementation rule:** do not build a second memory system, do not give the billing service decryption rights, and do not let social sharing inherit private-memory read permission. The first billing milestone is a no-hosted-storage free account plus payment-gated hard quotas, not additional free cloud capacity.
