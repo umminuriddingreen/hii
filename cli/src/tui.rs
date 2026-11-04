@@ -34,10 +34,8 @@ const DIM: &str = "\x1b[2m";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 enum Theme {
-    Heritage = 0,
-    Midnight = 1,
-    Mono = 2,
-    Cyberpunk = 3,
+    Dark = 0,
+    Light = 1,
 }
 
 struct Palette {
@@ -48,20 +46,6 @@ struct Palette {
     muted: &'static str,
 }
 
-const HERITAGE: Palette = Palette {
-    primary: "\x1b[38;5;220m",
-    secondary: "\x1b[38;5;141m",
-    warning: "\x1b[38;5;215m",
-    error: "\x1b[38;5;203m",
-    muted: "\x1b[38;5;250m",
-};
-const MIDNIGHT: Palette = Palette {
-    primary: "\x1b[38;5;44m",
-    secondary: "\x1b[38;5;75m",
-    warning: "\x1b[38;5;215m",
-    error: "\x1b[38;5;203m",
-    muted: "\x1b[38;5;245m",
-};
 const MONO: Palette = Palette {
     primary: "\x1b[38;5;255m",
     secondary: "\x1b[38;5;252m",
@@ -69,15 +53,15 @@ const MONO: Palette = Palette {
     error: "\x1b[38;5;255m",
     muted: "\x1b[38;5;245m",
 };
-const CYBERPUNK: Palette = Palette {
-    primary: "\x1b[38;5;199m",
-    secondary: "\x1b[38;5;51m",
-    warning: "\x1b[38;5;226m",
-    error: "\x1b[38;5;203m",
-    muted: "\x1b[38;5;250m",
+const LIGHT: Palette = Palette {
+    primary: "\x1b[38;5;16m",
+    secondary: "\x1b[38;5;238m",
+    warning: "\x1b[38;5;238m",
+    error: "\x1b[38;5;16m",
+    muted: "\x1b[38;5;244m",
 };
 
-static ACTIVE_THEME: AtomicU8 = AtomicU8::new(Theme::Heritage as u8);
+static ACTIVE_THEME: AtomicU8 = AtomicU8::new(Theme::Dark as u8);
 static ACTIVITY_ROWS: AtomicUsize = AtomicUsize::new(0);
 static PROMPT_CONTEXT: Mutex<String> = Mutex::new(String::new());
 static ACTIVITY_STAGE: AtomicU8 = AtomicU8::new(0);
@@ -134,48 +118,35 @@ pub fn set_prompt_context(workspace: &Path, model: &str) {
 impl Theme {
     fn parse(value: &str) -> Result<Self, String> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "heritage" | "default" => Ok(Theme::Heritage),
-            "midnight" => Ok(Theme::Midnight),
-            "mono" | "monochrome" => Ok(Theme::Mono),
-            "cyberpunk" => Ok(Theme::Cyberpunk),
+            "dark" | "default" | "heritage" | "midnight" | "mono" | "monochrome" | "cyberpunk" => Ok(Theme::Dark),
+            "light" => Ok(Theme::Light),
             other => Err(format!(
-                "unknown theme '{other}'; use heritage | midnight | mono | cyberpunk"
+                "unknown theme '{other}'; use dark | light"
             )),
         }
     }
 
     fn name(self) -> &'static str {
         match self {
-            Theme::Heritage => "heritage",
-            Theme::Midnight => "midnight",
-            Theme::Mono => "mono",
-            Theme::Cyberpunk => "cyberpunk",
+            Theme::Dark => "dark",
+            Theme::Light => "light",
         }
     }
 
     fn description(self) -> &'static str {
         match self {
-            Theme::Heritage => "HII signature · warm gold, violet, and signal green.",
-            Theme::Midnight => "Cool cyan and blue for low-light terminals.",
-            Theme::Mono => "High-clarity monochrome for constrained terminals.",
-            Theme::Cyberpunk => "Electric magenta and cyan with a restrained signal accent.",
+            Theme::Dark => "White text on black; quiet monochrome terminal palette.",
+            Theme::Light => "Dark text for light terminal backgrounds.",
         }
     }
 }
 
-const THEMES: [Theme; 4] = [
-    Theme::Heritage,
-    Theme::Midnight,
-    Theme::Mono,
-    Theme::Cyberpunk,
-];
+const THEMES: [Theme; 2] = [Theme::Dark, Theme::Light];
 
 fn active_theme() -> Theme {
     match ACTIVE_THEME.load(Ordering::Relaxed) {
-        1 => Theme::Midnight,
-        2 => Theme::Mono,
-        3 => Theme::Cyberpunk,
-        _ => Theme::Heritage,
+        1 => Theme::Light,
+        _ => Theme::Dark,
     }
 }
 
@@ -185,10 +156,8 @@ pub fn theme_name() -> &'static str {
 
 fn palette() -> &'static Palette {
     match active_theme() {
-        Theme::Heritage => &HERITAGE,
-        Theme::Midnight => &MIDNIGHT,
-        Theme::Mono => &MONO,
-        Theme::Cyberpunk => &CYBERPUNK,
+        Theme::Dark => &MONO,
+        Theme::Light => &LIGHT,
     }
 }
 
@@ -264,7 +233,12 @@ fn paint(text: &str, codes: &[&str]) -> String {
     if !color_enabled() {
         return text.to_string();
     }
-    format!("{}{text}{RESET}", codes.concat())
+    let background = if active_theme() == Theme::Light {
+        "\x1b[48;5;255m\x1b[38;5;16m"
+    } else {
+        "\x1b[48;5;16m\x1b[38;5;255m"
+    };
+    format!("{background}{}{text}{RESET}", codes.concat())
 }
 
 pub(crate) fn style_bold(text: &str) -> String {
@@ -482,17 +456,13 @@ pub fn welcome(workspace: &Path, provider: &str, model: &str, greeting: &str, pu
 
 fn composer_hints() -> String {
     format!(
-        "{}\n{}\n{}",
+        "{}\n{}",
         paint(
-            "Idle  Type naturally · / commands · ? local search",
+            "Idle  Type naturally · / commands",
             &[DIM, palette().muted]
         ),
         paint(
-            "      Enter runs · Tab selects · ← workspace on empty input",
-            &[DIM, palette().muted]
-        ),
-        paint(
-            "Working  Enter steers · Tab queues · Esc stops",
+            "Enter runs · Tab selects · ← workspace on empty input\nWorking  Enter steers · Tab queues · Esc stops",
             &[DIM, palette().muted]
         ),
     )
@@ -505,11 +475,17 @@ pub(crate) fn welcome_frame(
     greeting: &str,
     _public_test: bool,
 ) -> String {
-    let brand = format!(
-        "{}  {}",
-        paint("HII", &[BOLD, palette().primary]),
-        paint("HUMAN INFORMATION INTERFACE", &[DIM, palette().muted])
-    );
+    let width = terminal_width();
+    let brand = if width < 64 {
+        paint("HII  /  HUMAN INFORMATION INTERFACE", &[BOLD, palette().primary])
+    } else {
+        format!(
+            "{}  {}",
+            paint("HII", &[BOLD, palette().primary]),
+            paint("HUMAN INFORMATION INTERFACE", &[DIM, palette().muted])
+        )
+    };
+    let mark = paint(" [HII]---< intent / context / action / proof >", &[DIM, palette().muted]);
     let location = paint(
         &format!(
             "{}  ·  started with {}  ·  {}",
@@ -520,11 +496,18 @@ pub(crate) fn welcome_frame(
         &[DIM, palette().muted],
     );
     let greeting = paint(greeting, &[palette().secondary]);
-    format!("{brand}\n{location}\n\n{greeting}")
+    format!("{brand}\n{mark}\n{location}\n\n{greeting}")
 }
 
 pub fn prompt_frame(_frame: usize) -> String {
-    "› ".to_string()
+    "  > ".to_string()
+}
+
+pub fn live_prompt_frame(frame: usize) -> String {
+    if env::var_os("HII_REDUCED_MOTION").is_some() {
+        return "  > ".to_string();
+    }
+    format!(" [{}] ", [".  ", ".. ", "...", " ..", "  .", "   "][frame % 6])
 }
 
 pub fn prompt_footer() -> String {
@@ -532,12 +515,12 @@ pub fn prompt_footer() -> String {
         .lock()
         .map(|value| value.clone())
         .unwrap_or_default();
+    let stage = activity_stage();
     let footer = if context.is_empty() {
-        "HII · Enter send · Tab queue · Esc stop".to_string()
+        format!("{stage} · Enter run · Tab queue · Esc stop")
     } else {
         format!(
-            "{context} · {} · Enter send · Tab queue · Esc stop",
-            activity_stage()
+            "{context} · {stage} · Enter run · Tab queue · Esc stop"
         )
     };
     let width = crossterm::terminal::size()
@@ -579,6 +562,7 @@ impl SlashCommandCatalog {
         // command handlers in main.rs. The public-test surface is intentionally
         // narrower than the owner harness.
         let mut entries = [
+            ("/permissions", "/permissions", "Inspect execution permissions", false, false),
             ("/help", "/help", "Show command help", false, true),
             ("/workspace", "/workspace", "Open live work, files, and proof", false, false),
             ("/tips", "/tips", "Show quick interaction tips", false, true),
@@ -1658,17 +1642,17 @@ mod tests {
 
     #[test]
     fn theme_choices_offer_every_theme_and_mark_the_active_one() {
-        let choices = theme_choices(Theme::Midnight);
+        let choices = theme_choices(Theme::Light);
         let names: Vec<_> = choices.iter().map(|choice| choice.value.as_str()).collect();
-        assert_eq!(names, vec!["heritage", "midnight", "mono", "cyberpunk"]);
+        assert_eq!(names, vec!["dark", "light"]);
         let current: Vec<_> = choices
             .iter()
             .filter(|choice| choice.current)
             .map(|choice| choice.value.as_str())
             .collect();
-        assert_eq!(current, vec!["midnight"]);
+        assert_eq!(current, vec!["light"]);
         assert!(choices[1].detail.ends_with("· current"));
-        assert!(choices[0].detail.contains("warm gold"));
+        assert!(choices[0].detail.contains("monochrome"));
     }
 
     #[test]
@@ -1773,10 +1757,10 @@ mod tests {
     #[test]
     fn prompt_is_a_minimal_codex_style_input_line() {
         assert!(!prompt_frame(0).trim().is_empty());
-        assert_eq!(prompt_frame(0), prompt_frame(99));
-        assert_eq!(prompt_frame(0), "› ");
+        assert!(prompt_frame(0).starts_with("  "));
+        assert_eq!(crate::codex_ui::display_width(&prompt_frame(0)), 4);
         assert!(!prompt_frame(0).contains('\n'));
-        assert!(prompt_footer().contains("Enter send"));
+        assert!(prompt_footer().contains("Enter run"));
     }
 
     #[test]
@@ -1806,7 +1790,7 @@ mod tests {
         assert!(rendered.contains("Welcome back"));
         assert!(!rendered.contains("What do you want"));
         assert!(!rendered.contains("Type naturally"));
-        assert_eq!(rendered.lines().count(), 4);
+        assert_eq!(rendered.lines().count(), 5);
     }
 
     #[test]
@@ -2004,10 +1988,9 @@ mod tests {
 
     #[test]
     fn theme_names_are_stable_and_reject_unknown_values() {
-        assert_eq!(Theme::parse("default").unwrap(), Theme::Heritage);
-        assert_eq!(Theme::parse("midnight").unwrap().name(), "midnight");
-        assert_eq!(Theme::parse("monochrome").unwrap(), Theme::Mono);
-        assert_eq!(Theme::parse("cyberpunk").unwrap(), Theme::Cyberpunk);
+        assert_eq!(Theme::parse("default").unwrap(), Theme::Dark);
+        assert_eq!(Theme::parse("light").unwrap(), Theme::Light);
+        assert_eq!(Theme::parse("monochrome").unwrap(), Theme::Dark);
         assert!(Theme::parse("neon-chaos").is_err());
     }
 }

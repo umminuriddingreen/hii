@@ -114,6 +114,8 @@ pub struct LiveInput {
     menu_rows: usize,
     menu_dismissed: bool,
     menu_selection_explicit: bool,
+    animation_at: Instant,
+    animation_frame: usize,
 }
 
 impl LiveInput {
@@ -142,12 +144,22 @@ impl LiveInput {
             menu_rows: 0,
             menu_dismissed: false,
             menu_selection_explicit: false,
+            animation_at: Instant::now(),
+            animation_frame: 0,
         };
         input.draw_composer()?;
         Ok(Some(input))
     }
 
     pub fn poll(&mut self) -> Result<Option<InputEvent>> {
+        if self.composer_visible && !self.stream_has_output
+            && self.animation_at.elapsed() >= Duration::from_millis(160)
+            && std::env::var_os("HII_REDUCED_MOTION").is_none()
+        {
+            self.animation_frame = self.animation_frame.wrapping_add(1);
+            self.animation_at = Instant::now();
+            self.draw_composer()?;
+        }
         let Some(event) = self.reader.read_event(Duration::ZERO)? else {
             return Ok(None);
         };
@@ -364,7 +376,7 @@ impl LiveInput {
         let mut out = io::stdout().lock();
         redraw_to(
             &mut out,
-            "› ",
+            &crate::tui::live_prompt_frame(self.animation_frame),
             &self.buf,
             self.cursor,
             self.menu_selected,
